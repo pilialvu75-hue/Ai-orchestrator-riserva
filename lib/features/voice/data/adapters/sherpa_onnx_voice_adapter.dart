@@ -101,11 +101,11 @@ class SherpaOnnxVoiceAdapter implements VoiceAsrAdapter, VoiceTtsAdapter {
   Future<void> speak(String text) async {
     if (text.trim().isEmpty) return;
     if (!_initialized && !await initialize()) return;
-    _isSpeaking = true;
     try {
       await _methodChannel.invokeMethod<void>('speakTts', <String, dynamic>{
         'text': text,
       });
+      _isSpeaking = true;
     } on MissingPluginException {
       _isSpeaking = false;
     } on PlatformException catch (e) {

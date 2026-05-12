@@ -226,7 +226,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "startAsr", "stopAsr", "speakTts", "stopTts" -> {
                     result.error(
-                        "SHERPA_NOT_CONFIGURED",
+                        "SHERPA_NOT_IMPLEMENTED",
                         "Sherpa-ONNX native module is not configured in this build.",
                         null
                     )

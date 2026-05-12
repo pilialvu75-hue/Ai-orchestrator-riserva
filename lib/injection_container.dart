@@ -208,6 +208,8 @@ Future<void> initDependencies({
       fallbackAsr: sl<DeviceSpeechToTextAdapter>(),
       primaryTts: sl<SherpaOnnxVoiceAdapter>(),
       fallbackTts: sl<DeviceFlutterTtsAdapter>(),
+      sharedAsrAdapter: false,
+      sharedTtsAdapter: false,
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );

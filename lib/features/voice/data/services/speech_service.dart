@@ -15,18 +15,24 @@ class SpeechService {
     required VoiceAsrAdapter fallbackAsr,
     required VoiceTtsAdapter primaryTts,
     required VoiceTtsAdapter fallbackTts,
+    bool sharedAsrAdapter = false,
+    bool sharedTtsAdapter = false,
     VoiceTextNormalizer normalizer = const VoiceTextNormalizer(),
   })  : _primaryAsr = primaryAsr,
         _fallbackAsr = fallbackAsr,
         _primaryTts = primaryTts,
         _fallbackTts = fallbackTts,
-        _normalizer = normalizer;
+        _normalizer = normalizer,
+        _sharedAsrAdapter = sharedAsrAdapter,
+        _sharedTtsAdapter = sharedTtsAdapter;
 
   final VoiceAsrAdapter _primaryAsr;
   final VoiceAsrAdapter _fallbackAsr;
   final VoiceTtsAdapter _primaryTts;
   final VoiceTtsAdapter _fallbackTts;
   final VoiceTextNormalizer _normalizer;
+  final bool _sharedAsrAdapter;
+  final bool _sharedTtsAdapter;
 
   VoiceAsrAdapter? _activeAsr;
   VoiceTtsAdapter? _activeTts;
@@ -41,15 +47,23 @@ class SpeechService {
     }
 
     final sherpaAsrReady = await _primaryAsr.initialize();
-    _activeAsr = sherpaAsrReady ? _primaryAsr : _fallbackAsr;
-    if (!sherpaAsrReady) {
-      await _activeAsr!.initialize();
+    if (sherpaAsrReady) {
+      _activeAsr = _primaryAsr;
+    } else {
+      final fallbackAsrReady = await _fallbackAsr.initialize();
+      if (fallbackAsrReady) {
+        _activeAsr = _fallbackAsr;
+      }
     }
 
     final sherpaTtsReady = await _primaryTts.initialize();
-    _activeTts = sherpaTtsReady ? _primaryTts : _fallbackTts;
-    if (!sherpaTtsReady) {
-      await _activeTts!.initialize();
+    if (sherpaTtsReady) {
+      _activeTts = _primaryTts;
+    } else {
+      final fallbackTtsReady = await _fallbackTts.initialize();
+      if (fallbackTtsReady) {
+        _activeTts = _fallbackTts;
+      }
     }
 
     _initialized = _activeAsr != null && _activeTts != null;
@@ -100,11 +114,11 @@ class SpeechService {
 
   Future<void> dispose() async {
     await _primaryAsr.dispose();
-    if (!identical(_primaryAsr, _fallbackAsr)) {
+    if (!_sharedAsrAdapter) {
       await _fallbackAsr.dispose();
     }
     await _primaryTts.dispose();
-    if (!identical(_primaryTts, _fallbackTts)) {
+    if (!_sharedTtsAdapter) {
       await _fallbackTts.dispose();
     }
   }

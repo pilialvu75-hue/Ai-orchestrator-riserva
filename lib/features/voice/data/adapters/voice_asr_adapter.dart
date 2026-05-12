@@ -1,3 +1,5 @@
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+
 abstract class VoiceAsrAdapter {
   Future<bool> initialize();
 
@@ -5,7 +7,7 @@ abstract class VoiceAsrAdapter {
 
   Future<void> startListening({
     required void Function(String text, bool isFinal) onResult,
-    String localeId,
+    String localeId = AppConstants.sttDefaultLocaleId,
   });
 
   Future<void> stopListening();
