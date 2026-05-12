@@ -46,6 +46,7 @@ class DatabaseHelper {
     ''');
     await _createChatHistoryTable(db);
     await _createUserPreferencesTable(db);
+    await _createDocumentChunksTable(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -66,6 +67,9 @@ class DatabaseHelper {
           ADD COLUMN ${AppConstants.colAttachments} TEXT DEFAULT '[]'
         ''');
       }
+    }
+    if (oldVersion < 4) {
+      await _createDocumentChunksTable(db);
     }
   }
 
@@ -93,6 +97,29 @@ class DatabaseHelper {
         ${AppConstants.colPrefKey}   TEXT PRIMARY KEY,
         ${AppConstants.colPrefValue} TEXT NOT NULL DEFAULT ''
       )
+    ''');
+  }
+
+  Future<void> _createDocumentChunksTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableDocumentChunks} (
+        ${AppConstants.colId}           TEXT    PRIMARY KEY,
+        ${AppConstants.colDocumentId}   TEXT    NOT NULL,
+        ${AppConstants.colDocumentPath} TEXT    NOT NULL,
+        ${AppConstants.colDocumentTitle} TEXT   NOT NULL DEFAULT '',
+        ${AppConstants.colChunkIndex}   INTEGER NOT NULL,
+        ${AppConstants.colChunkText}    TEXT    NOT NULL DEFAULT '',
+        ${AppConstants.colVectorJson}   TEXT    NOT NULL DEFAULT '[]',
+        ${AppConstants.colTimestamp}    INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_document_chunks_document
+      ON ${AppConstants.tableDocumentChunks} (${AppConstants.colDocumentId}, ${AppConstants.colChunkIndex})
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_document_chunks_path
+      ON ${AppConstants.tableDocumentChunks} (${AppConstants.colDocumentPath})
     ''');
   }
 
@@ -204,6 +231,44 @@ class DatabaseHelper {
       AppConstants.tableChatHistory,
       where: '${AppConstants.colSessionId} = ?',
       whereArgs: [sessionId],
+    );
+  }
+
+  // ── document_chunks CRUD ─────────────────────────────────────────────────────
+
+  Future<void> insertDocumentChunk(Map<String, dynamic> row) async {
+    final db = await database;
+    await db.insert(
+      AppConstants.tableDocumentChunks,
+      row,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> clearDocumentChunksByDocumentId(String documentId) async {
+    final db = await database;
+    await db.delete(
+      AppConstants.tableDocumentChunks,
+      where: '${AppConstants.colDocumentId} = ?',
+      whereArgs: [documentId],
+    );
+  }
+
+  Future<void> clearDocumentChunksByPath(String documentPath) async {
+    final db = await database;
+    await db.delete(
+      AppConstants.tableDocumentChunks,
+      where: '${AppConstants.colDocumentPath} = ?',
+      whereArgs: [documentPath],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getAllDocumentChunks({int? limit}) async {
+    final db = await database;
+    return db.query(
+      AppConstants.tableDocumentChunks,
+      orderBy: '${AppConstants.colTimestamp} DESC',
+      limit: limit,
     );
   }
 
