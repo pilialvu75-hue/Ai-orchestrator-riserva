@@ -1,0 +1,23 @@
+{
+  "gemma_2b": {
+    "version": "1.0.0"
+  },
+  "phi4_mini": {
+    "version": "1.0.0"
+  },
+  "llama_1b": {
+    "version": "1.0.0"
+  },
+  "deepseek_r1_1_5b": {
+    "version": "1.0.0"
+  },
+  "qwen3_1_7b": {
+    "version": "1.0.0"
+  },
+  "gemma_2_2b_it": {
+    "version": "1.0.0"
+  },
+  "deepseek_r1_7b": {
+    "version": "1.0.0"
+  }
+}

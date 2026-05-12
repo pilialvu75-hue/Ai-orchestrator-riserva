@@ -1,0 +1,150 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Ensure llama.cpp submodule
+        run: |
+          if [ ! -f third_party/llama.cpp/CMakeLists.txt ]; then
+            git submodule update --init --recursive
+          fi
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.2'
+          channel: stable
+          cache: true
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          local-cache: true
+
+      - name: Create Android signing config
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release-keystore.jks
+
+            {
+              echo "storeFile=release-keystore.jks"
+              echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+              echo "keyAlias=$ANDROID_KEY_ALIAS"
+              echo "keyPassword=$ANDROID_KEY_PASSWORD"
+            } > android/key.properties
+
+            echo "Release signing configured"
+          else
+            echo "Secrets missing -> fallback debug signing"
+          fi
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          VERSION_CODE=$(git tag | grep '^v1\.0\.' | sed 's/v1\.0\.//' | sort -n | tail -1)
+
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=1
+          else
+            VERSION_CODE=$((VERSION_CODE + 1))
+          fi
+
+          VERSION_NAME="1.0.$VERSION_CODE"
+
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Build debug APK
+        run: flutter build apk --debug --build-name=${{ steps.version.outputs.version_name }} --build-number=${{ steps.version.outputs.version_code }}
+      - name: Verify native libraries
+        run: |
+          unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep 'lib/arm64-v8a/libllama_bridge.so'
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+
+          cp build/app/outputs/flutter-apk/app-debug.apk \
+             release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Orchestrator-Core-${{ steps.version.outputs.tag }}
+          path: release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          {
+            echo "## AI-Orchestrator-Core"
+            echo
+            echo "### Included fixes"
+            echo
+            echo "- Fixed GGUF picker"
+            echo "- Improved llama.cpp runtime stability"
+            echo "- Increased inference timeout"
+            echo "- Improved DeepSeek compatibility"
+            echo "- Improved local model loading"
+            echo "- Fixed Android signing pipeline"
+            echo
+            echo "### Commit history"
+            echo
+            git log --pretty=format:'- %s (%h)' -n 20
+          } > RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AI-Orchestrator-Core ${{ steps.version.outputs.version_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk

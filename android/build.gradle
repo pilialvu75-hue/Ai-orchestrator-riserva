@@ -1,0 +1,45 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:8.9.1"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+// 🔥 FIX PER speech_to_text E ALTRI PLUGIN VECCHI
+subprojects { sub ->
+    if (sub.name != "app") {
+        sub.beforeEvaluate {
+            if (!sub.extensions.findByName("flutter")) {
+                sub.ext.flutter = [
+                    compileSdkVersion : 36,
+                    targetSdkVersion  : 36,
+                    ndkVersion        : "27.0.12077973"
+                ]
+            }
+        }
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
