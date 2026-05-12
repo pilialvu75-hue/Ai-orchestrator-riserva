@@ -53,6 +53,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(SUPPORTED_ANDROID_ABIS arm64-v8a x86_64)
+option(AI_ANDROID_ENABLE_MLC "Enable MLC-LLM JNI bridge integration" ON)
 
 if(ANDROID AND DEFINED ANDROID_ABI AND NOT ANDROID_ABI IN_LIST SUPPORTED_ANDROID_ABIS)
     message(FATAL_ERROR
@@ -102,10 +103,63 @@ target_compile_options(llama_bridge PRIVATE
     -DNDEBUG
 )
 
+# ── MLC JNI bridge (Android runtime hook) ─────────────────────────────────────
+add_library(mlc_native_bridge SHARED mlc_jni_bridge.cpp)
+target_link_libraries(mlc_native_bridge PRIVATE
+    log
+    android
+    dl
+)
+
+set(MLC_LLM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/mlc-llm")
+set(AI_MLC_BACKEND_NAME "fallback-llama")
+if(AI_ANDROID_ENABLE_MLC AND EXISTS "${MLC_LLM_DIR}")
+    find_library(VULKAN_LIB vulkan)
+    find_library(OPENCL_LIB OpenCL)
+
+    if(VULKAN_LIB)
+        # Prefer Vulkan when both backends are available because it is the
+        # primary mobile GPU path targeted by the Android MLC integration.
+        target_link_libraries(mlc_native_bridge PRIVATE ${VULKAN_LIB})
+        set(AI_MLC_BACKEND_NAME "vulkan")
+    elseif(OPENCL_LIB)
+        target_link_libraries(mlc_native_bridge PRIVATE ${OPENCL_LIB})
+        set(AI_MLC_BACKEND_NAME "opencl")
+    else()
+        set(AI_MLC_BACKEND_NAME "cpu")
+    endif()
+
+    target_compile_definitions(mlc_native_bridge PRIVATE
+        AI_ENABLE_MLC_RUNTIME=1
+    )
+    if(EXISTS "${MLC_LLM_DIR}/include")
+        target_include_directories(mlc_native_bridge PRIVATE
+            "${MLC_LLM_DIR}/include"
+        )
+    endif()
+else()
+    target_compile_definitions(mlc_native_bridge PRIVATE
+        AI_ENABLE_MLC_RUNTIME=0
+    )
+endif()
+
+target_compile_definitions(mlc_native_bridge PRIVATE
+    AI_MLC_BACKEND_NAME="${AI_MLC_BACKEND_NAME}"
+)
+
+target_compile_options(mlc_native_bridge PRIVATE
+    -O3
+    -DNDEBUG
+)
+
 # Strip debug symbols from the release build to reduce APK size.
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_custom_command(TARGET llama_bridge POST_BUILD
         COMMAND ${CMAKE_STRIP} --strip-unneeded
                 $<TARGET_FILE:llama_bridge>
+    )
+    add_custom_command(TARGET mlc_native_bridge POST_BUILD
+        COMMAND ${CMAKE_STRIP} --strip-unneeded
+                $<TARGET_FILE:mlc_native_bridge>
     )
 endif()

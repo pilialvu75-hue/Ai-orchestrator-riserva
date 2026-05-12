@@ -27,6 +27,13 @@ if (keystorePropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty("flutter.versionCode") ?: "1"
 def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
+def mlcRuntimePresent = rootProject.file("../third_party/mlc-llm").exists()
+def safeFlutterVersionCode
+try {
+    safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
+} catch (NumberFormatException ignored) {
+    safeFlutterVersionCode = 1
+}
 
 android {
     namespace "com.aiorchestrator"
@@ -46,8 +53,9 @@ android {
         applicationId "com.aiorchestrator"
         minSdk 24
         targetSdk 36
-        versionCode flutterVersionCode.toInteger()
+        versionCode safeFlutterVersionCode
         versionName flutterVersionName
+        buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", mlcRuntimePresent ? "true" : "false"
 
         ndk {
             abiFilters "arm64-v8a", "x86_64"
@@ -56,6 +64,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++17 -O3 -fno-finite-math-only -DNDEBUG"
+                arguments "-DAI_ANDROID_ENABLE_MLC=ON"
             }
         }
     }
@@ -90,6 +99,12 @@ android {
             signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
         }
     }
 }
