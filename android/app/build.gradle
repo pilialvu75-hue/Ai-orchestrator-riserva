@@ -28,7 +28,7 @@ try {
 android {
     namespace "com.aiorchestrator"
     compileSdk 34
-    ndkVersion "26.3.11579264"
+    ndkVersion "26.1.10909125"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
