@@ -47,9 +47,15 @@ class RuntimeBootstrap {
 
   Future<void> _runWarmupChecks() async {
     await Future.wait<void>([
-      di.sl<DatabaseHelper>().database.then((_) {}),
-      di.sl<AiRuntimeSettingsService>().loadRuntimeMode().then((_) {}),
-      di.sl<LocalAiRepository>().getSelectedModel().then((_) {}),
+      _critical('database', () => di.sl<DatabaseHelper>().database.then((_) {})),
+      _critical(
+        'runtime_mode',
+        () => di.sl<AiRuntimeSettingsService>().loadRuntimeMode().then((_) {}),
+      ),
+      _critical(
+        'model_checks',
+        () => di.sl<LocalAiRepository>().getSelectedModel().then((_) {}),
+      ),
     ]);
 
     // Optional preload checks should never crash startup.
@@ -65,6 +71,14 @@ class RuntimeBootstrap {
     } catch (error, stackTrace) {
       debugPrint('[BOOTSTRAP] Warmup check failed ($label): $error');
       debugPrint('$stackTrace');
+    }
+  }
+
+  Future<void> _critical(String label, Future<void> Function() task) async {
+    try {
+      await task();
+    } catch (error) {
+      throw StateError('Critical startup check failed ($label): $error');
     }
   }
 }
