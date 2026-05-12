@@ -57,7 +57,7 @@ Feature modules that implement Clean Architecture slices:
 | `local_ai/` | GGUF model download, selection, offline inference UI |
 | `projects/` | Project memory persistence |
 | `onboarding/` | First-run setup, model registry update check |
-| `voice/` | Speech-to-text and text-to-speech |
+| `voice/` | Modular multimodal voice pipeline (ASR adapters, text normalization, TTS adapters) |
 | `multimodal/` | Image capture and processing |
 | `settings/` | User preference management |
 | `automation/` | Task automation flows |
@@ -146,6 +146,23 @@ RuntimeProvider (core/runtime/)
           ├── AndroidExecutor (native/runtime/android/)
           └── WindowsExecutor (native/runtime/windows/)
 ```
+
+### Voice Providers
+
+```
+SpeechService (features/voice/data/services/)
+    ├── VoiceAsrAdapter (contract)
+    │     ├── SherpaOnnxVoiceAdapter (offline ONNX, method/event channel)
+    │     └── DeviceSpeechToTextAdapter (fallback)
+    ├── VoiceTextNormalizer (text normalization layer)
+    └── VoiceTtsAdapter (contract)
+          ├── SherpaOnnxVoiceAdapter (offline ONNX, method channel)
+          └── DeviceFlutterTtsAdapter (fallback)
+```
+
+Voice remains isolated from `core/orchestrator` and `core/runtime/inference`: it only
+feeds normalized text into existing orchestration flows and consumes final assistant
+text for playback.
 
 ---
 

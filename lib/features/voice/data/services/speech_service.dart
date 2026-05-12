@@ -1,103 +1,111 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/features/voice/data/adapters/voice_asr_adapter.dart';
+import 'package:ai_orchestrator/features/voice/data/adapters/voice_tts_adapter.dart';
+import 'package:ai_orchestrator/features/voice/data/normalization/voice_text_normalizer.dart';
 
-/// Service that wraps [SpeechToText] and [FlutterTts] to provide a unified
-/// voice-interaction interface for the AI Orchestrator.
+/// Modular voice pipeline facade:
+/// mic -> ASR -> text normalization -> orchestrator input
+/// and orchestrator output -> TTS -> speaker.
 class SpeechService {
-  SpeechService({SpeechToText? stt, FlutterTts? tts})
-      : _stt = stt ?? SpeechToText(),
-        _tts = tts ?? FlutterTts();
+  SpeechService({
+    required VoiceAsrAdapter primaryAsr,
+    required VoiceAsrAdapter fallbackAsr,
+    required VoiceTtsAdapter primaryTts,
+    required VoiceTtsAdapter fallbackTts,
+    VoiceTextNormalizer normalizer = const VoiceTextNormalizer(),
+  })  : _primaryAsr = primaryAsr,
+        _fallbackAsr = fallbackAsr,
+        _primaryTts = primaryTts,
+        _fallbackTts = fallbackTts,
+        _normalizer = normalizer;
 
-  final SpeechToText _stt;
-  final FlutterTts _tts;
+  final VoiceAsrAdapter _primaryAsr;
+  final VoiceAsrAdapter _fallbackAsr;
+  final VoiceTtsAdapter _primaryTts;
+  final VoiceTtsAdapter _fallbackTts;
+  final VoiceTextNormalizer _normalizer;
 
-  bool _sttInitialised = false;
-  bool _isSpeaking = false;
+  VoiceAsrAdapter? _activeAsr;
+  VoiceTtsAdapter? _activeTts;
+  bool _initialized = false;
 
-  // ── Initialisation ──────────────────────────────────────────────────────────
-
-  /// Requests microphone permission and initialises the STT engine.
-  ///
-  /// Returns `true` on success.
   Future<bool> initialise() async {
+    if (_initialized) return true;
+
     if (!kIsWeb) {
       final status = await Permission.microphone.request();
       if (status.isDenied || status.isPermanentlyDenied) return false;
     }
 
-    _sttInitialised = await _stt.initialize(
-      onError: (e) => debugPrint('STT error: $e'),
-    );
+    final sherpaAsrReady = await _primaryAsr.initialize();
+    _activeAsr = sherpaAsrReady ? _primaryAsr : _fallbackAsr;
+    if (!sherpaAsrReady) {
+      await _activeAsr!.initialize();
+    }
 
-    await _tts.setLanguage(AppConstants.ttsDefaultLocale);
-    await _tts.setSpeechRate(AppConstants.ttsSpeechRate);
-    await _tts.setVolume(AppConstants.ttsVolume);
-    await _tts.setPitch(AppConstants.ttsPitch);
-    _tts.setCompletionHandler(() => _isSpeaking = false);
+    final sherpaTtsReady = await _primaryTts.initialize();
+    _activeTts = sherpaTtsReady ? _primaryTts : _fallbackTts;
+    if (!sherpaTtsReady) {
+      await _activeTts!.initialize();
+    }
 
-    return _sttInitialised;
+    _initialized = _activeAsr != null && _activeTts != null;
+    return _initialized;
   }
 
-  // ── Speech-to-Text ──────────────────────────────────────────────────────────
+  bool get isListening => _activeAsr?.isListening ?? false;
 
-  /// Whether STT is currently listening.
-  bool get isListening => _stt.isListening;
+  bool get isSpeaking => _activeTts?.isSpeaking ?? false;
 
-  /// Starts listening and calls [onResult] with each recognised partial /
-  /// final transcription.
   Future<void> startListening({
     required void Function(String text, bool isFinal) onResult,
     String localeId = AppConstants.sttDefaultLocaleId,
   }) async {
-    if (!_sttInitialised) {
+    if (!_initialized) {
       final ok = await initialise();
       if (!ok) return;
     }
 
-    await _stt.listen(
-      onResult: (SpeechRecognitionResult result) {
-        onResult(result.recognizedWords, result.finalResult);
-      },
+    await _activeAsr?.startListening(
       localeId: localeId,
-      listenOptions: SpeechListenOptions(
-        partialResults: true,
-        listenMode: ListenMode.confirmation,
-      ),
+      onResult: (text, isFinal) {
+        final normalized = _normalizer.normalizeAsr(text);
+        if (normalized.isNotEmpty) {
+          onResult(normalized, isFinal);
+        }
+      },
     );
   }
 
-  /// Stops the current STT listening session.
   Future<void> stopListening() async {
-    await _stt.stop();
+    await _activeAsr?.stopListening();
   }
 
-  // ── Text-to-Speech ──────────────────────────────────────────────────────────
-
-  /// Speaks [text] aloud using the device TTS engine.
   Future<void> speak(String text) async {
-    await _tts.stop();
-    _isSpeaking = true;
-    await _tts.speak(text);
+    if (!_initialized) {
+      final ok = await initialise();
+      if (!ok) return;
+    }
+    final normalized = _normalizer.normalizeForTts(text);
+    if (normalized.isEmpty) return;
+    await _activeTts?.speak(normalized);
   }
 
-  /// Stops any ongoing speech synthesis.
   Future<void> stopSpeaking() async {
-    await _tts.stop();
-    _isSpeaking = false;
+    await _activeTts?.stopSpeaking();
   }
-
-  /// Returns true if TTS is currently speaking.
-  bool get isSpeaking => _isSpeaking;
-
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   Future<void> dispose() async {
-    await _stt.cancel();
-    await _tts.stop();
+    await _primaryAsr.dispose();
+    if (!identical(_primaryAsr, _fallbackAsr)) {
+      await _fallbackAsr.dispose();
+    }
+    await _primaryTts.dispose();
+    if (!identical(_primaryTts, _fallbackTts)) {
+      await _fallbackTts.dispose();
+    }
   }
 }

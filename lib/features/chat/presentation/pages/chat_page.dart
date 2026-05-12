@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
@@ -13,6 +15,7 @@ import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart'
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
+import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
@@ -278,6 +281,19 @@ class _ChatBody extends StatelessWidget {
                   : null,
             ),
           );
+        }
+
+        if (state is ChatLoaded && state.messages.isNotEmpty) {
+          final latest = state.messages.last;
+          final isRecent = DateTime.now()
+                  .difference(DateTime.fromMillisecondsSinceEpoch(latest.timestamp))
+                  .inSeconds <
+              10;
+          if (isRecent &&
+              latest.role == 'assistant' &&
+              latest.content.trim().isNotEmpty) {
+            unawaited(di.sl<SpeechService>().speak(latest.content));
+          }
         }
       },
       builder: (context, state) {

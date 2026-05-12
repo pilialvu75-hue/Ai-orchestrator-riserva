@@ -176,4 +176,8 @@ class AppConstants {
   static const double ttsPitch = 1.0;
   static const String ttsDefaultLocale = 'en-US';
   static const String sttDefaultLocaleId = 'en_US';
+  static const String sherpaVoiceMethodChannel =
+      'com.aiorchestrator/sherpa_onnx_voice';
+  static const String sherpaAsrEventChannel =
+      'com.aiorchestrator/sherpa_onnx_asr_events';
 }
