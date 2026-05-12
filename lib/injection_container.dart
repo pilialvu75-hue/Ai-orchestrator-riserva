@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
+import 'package:ai_orchestrator/core/plugins/plugin_registry.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -36,6 +37,8 @@ import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages
 import 'package:ai_orchestrator/features/chat/domain/usecases/prune_chat_history.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/send_chat_message.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_bloc.dart';
+import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
+import 'package:ai_orchestrator/features/document_intelligence/offline_document_intelligence_plugin.dart';
 import 'package:ai_orchestrator/features/local_ai/data/repositories/local_ai_repository_impl.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
@@ -94,9 +97,24 @@ Future<void> initDependencies({
 
   // ── Core ──────────────────────────────────────────────────────────────────
   sl.registerSingleton<DatabaseHelper>(DatabaseHelper.instance);
+  sl.registerLazySingleton<LocalDocumentIndexService>(
+    () => LocalDocumentIndexService(databaseHelper: sl<DatabaseHelper>()),
+  );
   sl.registerLazySingleton<AndroidIntentHandler>(() => AndroidIntentHandler());
   sl.registerLazySingleton<BixbyHandler>(() => const BixbyHandler());
   sl.registerLazySingleton<CacheManager>(() => const CacheManager());
+  sl.registerLazySingleton<OfflineDocumentIntelligencePlugin>(
+    () => OfflineDocumentIntelligencePlugin(
+      indexService: sl<LocalDocumentIndexService>(),
+    ),
+  );
+
+  if (PluginRegistry.instance.get(OfflineDocumentIntelligencePlugin.pluginId) ==
+      null) {
+    await PluginRegistry.instance.register(
+      sl<OfflineDocumentIntelligencePlugin>(),
+    );
+  }
   sl.registerLazySingleton<VersionComparator>(() => const VersionComparator());
   sl.registerLazySingleton<UpdateChecker>(
     () => UpdateChecker(

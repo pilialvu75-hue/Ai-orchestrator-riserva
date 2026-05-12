@@ -4,12 +4,13 @@ class AppConstants {
 
   // ── Database ────────────────────────────────────────────────────────────────
   static const String databaseName = 'ai_orchestrator.db';
-  static const int databaseVersion = 3;
+  static const int databaseVersion = 4;
 
   // ── Tables ──────────────────────────────────────────────────────────────────
   static const String tableProjectMemory = 'project_memory';
   static const String tableChatHistory = 'chat_history';
   static const String tableUserPreferences = 'user_preferences';
+  static const String tableDocumentChunks = 'document_chunks';
 
   // ── project_memory columns ──────────────────────────────────────────────────
   static const String colId = 'id';
@@ -28,6 +29,14 @@ class AppConstants {
   // ── user_preferences columns ─────────────────────────────────────────────────
   static const String colPrefKey = 'pref_key';
   static const String colPrefValue = 'pref_value';
+
+  // ── document_chunks columns ──────────────────────────────────────────────────
+  static const String colDocumentId = 'document_id';
+  static const String colDocumentPath = 'document_path';
+  static const String colDocumentTitle = 'document_title';
+  static const String colChunkIndex = 'chunk_index';
+  static const String colChunkText = 'chunk_text';
+  static const String colVectorJson = 'vector_json';
 
   // ── Preference keys ──────────────────────────────────────────────────────────
   static const String prefActiveProvider = 'active_ai_provider';

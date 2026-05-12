@@ -87,12 +87,13 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION_CODE=$(git tag | grep '^v1\.0\.' | sed 's/v1\.0\.//' | sort -n | tail -1)
+          VERSIONCODE=${VERSIONCODE:-1}
+          LATEST_TAG_CODE=$(git tag | grep '^v1\.0\.' | sed 's/v1\.0\.//' | sort -n | tail -1 || true)
 
-          if [ -z "$VERSION_CODE" ]; then
-            VERSION_CODE=1
+          if [ -n "$LATEST_TAG_CODE" ]; then
+            VERSION_CODE=$((LATEST_TAG_CODE + 1))
           else
-            VERSION_CODE=$((VERSION_CODE + 1))
+            VERSION_CODE=$VERSIONCODE
           fi
 
           VERSION_NAME="1.0.$VERSION_CODE"

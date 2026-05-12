@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
+import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
@@ -333,9 +334,9 @@ class _ChatBodyState extends State<_ChatBody> {
           );
         }
 
-        final messages = state is ChatLoaded
+        final List<ChatMessage> messages = state is ChatLoaded
             ? state.messages
-            : (state is ChatSending ? state.messages : const []);
+            : (state is ChatSending ? state.messages : const <ChatMessage>[]);
         final isLoading = state is ChatSending;
 
         return Column(
@@ -357,14 +358,9 @@ class _ChatBodyState extends State<_ChatBody> {
                     ),
                     child: messages.isEmpty
                         ? _buildEmptyState(context)
-                        : ListView.builder(
+                        : _HighPerformanceChatList(
                             controller: widget.scrollController,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            itemCount: messages.length,
-                            itemBuilder: (_, i) => _AnimatedBubble(
-                              key: ValueKey(messages[i].id),
-                              child: ChatBubble(message: messages[i]),
-                            ),
+                            messages: messages,
                           ),
                   ),
                   Positioned(
@@ -447,6 +443,41 @@ class _ChatBodyState extends State<_ChatBody> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HighPerformanceChatList extends StatelessWidget {
+  const _HighPerformanceChatList({
+    required this.controller,
+    required this.messages,
+  });
+
+  final ScrollController controller;
+  final List<ChatMessage> messages;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.custom(
+      controller: controller,
+      cacheExtent: 1200,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      childrenDelegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final message = messages[index];
+          return RepaintBoundary(
+            child: _AnimatedBubble(
+              key: ValueKey(message.id),
+              child: ChatBubble(message: message),
+            ),
+          );
+        },
+        childCount: messages.length,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: true,
+        addSemanticIndexes: false,
       ),
     );
   }

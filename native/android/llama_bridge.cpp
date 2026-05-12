@@ -164,6 +164,8 @@ struct GenArgs {
     int32_t     max_tokens;
     float       temperature;
     uint64_t    epoch;   // generation epoch; used to gate state updates
+    llama_model* model;
+    llama_context* ctx;
 };
 
 static void generation_thread(GenArgs args) {
@@ -174,7 +176,7 @@ static void generation_thread(GenArgs args) {
 
     try {
     // Obtain the vocabulary from the model (modern API).
-    const llama_vocab* vocab = llama_model_get_vocab(g_model);
+    const llama_vocab* vocab = llama_model_get_vocab(args.model);
     if (!vocab) {
         LOGE("[THREAD] vocabulary is null — aborting");
         set_error("Vocabulary unavailable");
@@ -186,7 +188,7 @@ static void generation_thread(GenArgs args) {
     LOGI("[THREAD] vocabulary obtained ok");
 
     // Tokenise the prompt.
-    const int n_ctx = llama_n_ctx(g_ctx);
+    const int n_ctx = llama_n_ctx(args.ctx);
     LOGI("[THREAD] tokenization start: prompt_chars=%zu n_ctx=%d",
          args.prompt.size(), n_ctx);
     std::vector<llama_token> tokens(n_ctx);
@@ -223,7 +225,7 @@ static void generation_thread(GenArgs args) {
     // Prefill: decode the prompt batch.
     // Clear memory (KV cache) before starting a new generation.
     LOGI("[THREAD] clearing KV cache");
-    llama_memory_clear(llama_get_memory(g_ctx), /*data=*/true);
+    llama_memory_clear(llama_get_memory(args.ctx), /*data=*/true);
 
     llama_batch batch = llama_batch_init(
         static_cast<int32_t>(tokens.size()),
@@ -250,7 +252,7 @@ static void generation_thread(GenArgs args) {
     batch.n_tokens = static_cast<int32_t>(tokens.size());
 
     LOGI("[THREAD] starting prefill decode for %d prompt tokens", n_tokens);
-    const int prefill_decode_status = llama_decode(g_ctx, batch);
+    const int prefill_decode_status = llama_decode(args.ctx, batch);
     LOGI("[THREAD] prefill decode status: %d", prefill_decode_status);
     if (prefill_decode_status != 0) {
         llama_batch_free(batch);
@@ -360,7 +362,7 @@ static void generation_thread(GenArgs args) {
         }
 
         // Sample next token.
-        llama_token new_tok = llama_sampler_sample(sampler, g_ctx, -1);
+        llama_token new_tok = llama_sampler_sample(sampler, args.ctx, -1);
         if (new_tok < 0) {
             LOGE("[THREAD] invalid token sampled: %d at iteration=%d",
                  static_cast<int>(new_tok), static_cast<int>(iteration));
@@ -462,7 +464,7 @@ static void generation_thread(GenArgs args) {
         step.logits  [0]    = 1;
         step.n_tokens       = 1;
 
-        const int decode_status = llama_decode(g_ctx, step);
+        const int decode_status = llama_decode(args.ctx, step);
         LOGI("[THREAD] step decode status=%d token_id=%d pos=%d",
              decode_status, static_cast<int>(new_tok), static_cast<int>(n_cur));
         if (decode_status != 0) {
@@ -625,7 +627,14 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
          prompt ? std::strlen(prompt) : static_cast<size_t>(0),
          max_tokens, capped_max_tokens,
          static_cast<double>(temperature));
-    GenArgs args{prompt ? prompt : "", capped_max_tokens, temperature, new_epoch};
+    GenArgs args{
+        prompt ? prompt : "",
+        capped_max_tokens,
+        temperature,
+        new_epoch,
+        g_model,
+        g_ctx
+    };
 
     try {
         g_gen_thread = std::thread(generation_thread, std::move(args));
