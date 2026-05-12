@@ -45,6 +45,7 @@
 #include <android/log.h>
 #include <atomic>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <mutex>
 #include <condition_variable>
@@ -69,8 +70,17 @@ static std::string    g_last_error;
 
 static constexpr size_t kRingCapacity = 256;
 
+// Each token entry carries the epoch of the generation that produced it.
+// llb_poll_token discards entries whose epoch does not match the current
+// g_gen_epoch, preventing stale tokens from a previous (cancelled or timed-out)
+// generation from contaminating the next inference run.
+struct RingEntry {
+    std::string piece;
+    uint64_t    epoch;
+};
+
 struct TokenRing {
-    std::queue<std::string> items;
+    std::queue<RingEntry> items;
     std::mutex mtx;
     std::condition_variable cv;
 };
@@ -82,8 +92,14 @@ static TokenRing g_ring;
 //   1  done (EOS / max_tokens)
 //   2  cancelled
 //  -1  error
-static std::atomic<int>  g_gen_state{0};
-static std::atomic<bool> g_cancel_flag{false};
+static std::atomic<int>      g_gen_state{0};
+static std::atomic<bool>     g_cancel_flag{false};
+
+// Monotonically-increasing generation epoch.  Incremented on every
+// llb_start_gen() call.  Generation threads embed their epoch in every ring
+// push and in every g_gen_state update so that stale threads cannot corrupt
+// a subsequent inference run.
+static std::atomic<uint64_t> g_gen_epoch{0};
 
 // Set to true once the generation thread exits (or was never started).
 // Used for a non-blocking "is the thread done?" check without calling join().
@@ -107,16 +123,38 @@ static void set_error(const char* msg) {
     LOGE("[AI] runtime error: %s", g_last_error.c_str());
 }
 
-static void push_token(const std::string& piece) {
+// Push a token piece into the ring buffer tagged with the calling generation's
+// epoch so that llb_poll_token can discard stale entries.
+static void push_token(const std::string& piece, uint64_t epoch) {
     {
         std::unique_lock<std::mutex> lock(g_ring.mtx);
         // Drop oldest token if ring is exactly full to avoid unbounded memory use.
         while (g_ring.items.size() == kRingCapacity) {
             g_ring.items.pop();
         }
-        g_ring.items.push(piece);
+        g_ring.items.push({piece, epoch});
     }
     g_ring.cv.notify_one();
+}
+
+// ── Epoch-safe generation-state helpers ───────────────────────────────────────
+//
+// A stale generation thread (one that has been superseded by a newer
+// llb_start_gen() call but has not yet been joined/detached) must not
+// overwrite g_gen_state with its own terminal status.  These helpers gate
+// every state write on a current-epoch check so that only the active thread
+// can transition the shared state machine.
+
+static void gen_update_state(int new_state, uint64_t my_epoch) {
+    if (g_gen_epoch.load(std::memory_order_relaxed) == my_epoch) {
+        g_gen_state.store(new_state, std::memory_order_release);
+    }
+}
+
+static void gen_mark_finished(uint64_t my_epoch) {
+    if (g_gen_epoch.load(std::memory_order_relaxed) == my_epoch) {
+        g_gen_finished.store(true, std::memory_order_release);
+    }
 }
 
 // ── Generation thread ─────────────────────────────────────────────────────────
@@ -125,11 +163,14 @@ struct GenArgs {
     std::string prompt;
     int32_t     max_tokens;
     float       temperature;
+    uint64_t    epoch;   // generation epoch; used to gate state updates
 };
 
 static void generation_thread(GenArgs args) {
+    // Capture the generation epoch for all state-update guards in this thread.
+    const uint64_t my_epoch = args.epoch;
     // ── Diagnostics: thread start ────────────────────────────────────────────
-    LOGI("[THREAD] generation thread started");
+    LOGI("[THREAD] generation thread started (epoch=%" PRIu64 ")", my_epoch);
 
     try {
     // Obtain the vocabulary from the model (modern API).
@@ -137,8 +178,8 @@ static void generation_thread(GenArgs args) {
     if (!vocab) {
         LOGE("[THREAD] vocabulary is null — aborting");
         set_error("Vocabulary unavailable");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (vocab null)");
         return;
     }
@@ -163,16 +204,16 @@ static void generation_thread(GenArgs args) {
     if (n_tokens < 0) {
         LOGE("[THREAD] tokenisation failed (error %d)", n_tokens);
         set_error("Tokenisation failed");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (tokenise error)");
         return;
     }
     if (n_tokens == 0) {
         LOGE("[THREAD] tokenisation returned zero tokens");
         set_error("Tokenisation returned zero tokens");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (zero tokens)");
         return;
     }
@@ -192,8 +233,8 @@ static void generation_thread(GenArgs args) {
     if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
         LOGE("[THREAD] OOM: prefill batch allocation failed");
         set_error("Out of memory while allocating prefill batch");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (OOM prefill batch)");
         return;
     }
@@ -215,8 +256,8 @@ static void generation_thread(GenArgs args) {
         llama_batch_free(batch);
         LOGE("[THREAD] prefill decode failed with status %d", prefill_decode_status);
         set_error("Decode failed during prompt prefill");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (prefill decode error)");
         return;
     }
@@ -226,8 +267,8 @@ static void generation_thread(GenArgs args) {
     // Check cancel before entering the generation loop.
     if (g_cancel_flag.load()) {
         LOGI("[THREAD] cancelled before generation loop");
-        g_gen_state.store(2);
-        g_gen_finished.store(true);
+        gen_update_state(2, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (pre-loop cancel)");
         return;
     }
@@ -239,8 +280,8 @@ static void generation_thread(GenArgs args) {
     if (!sampler) {
         LOGE("[THREAD] OOM: sampler chain allocation failed");
         set_error("Out of memory while creating sampler");
-        g_gen_state.store(-1);
-        g_gen_finished.store(true);
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
         LOGI("[THREAD] generation thread exited (OOM sampler)");
         return;
     }
@@ -293,8 +334,8 @@ static void generation_thread(GenArgs args) {
                  static_cast<long long>(elapsed_ms), kGenerationTimeoutMillis);
             set_error("Generation timeout");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (generation timeout)");
             return;
         }
@@ -303,8 +344,8 @@ static void generation_thread(GenArgs args) {
                  static_cast<long long>(since_last_token_ms), kNoTokenStallMillis);
             set_error("Local model stalled during inference.");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (stall timeout)");
             return;
         }
@@ -312,8 +353,8 @@ static void generation_thread(GenArgs args) {
             LOGI("[THREAD] cancel flag set — stopping generation loop at iteration=%d",
                  static_cast<int>(iteration));
             llama_sampler_free(sampler);
-            g_gen_state.store(2);  // cancelled
-            g_gen_finished.store(true);
+            gen_update_state(2, my_epoch);  // cancelled
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (cancelled)");
             return;
         }
@@ -325,8 +366,8 @@ static void generation_thread(GenArgs args) {
                  static_cast<int>(new_tok), static_cast<int>(iteration));
             set_error("Invalid generated token");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (invalid sample)");
             return;
         }
@@ -341,8 +382,8 @@ static void generation_thread(GenArgs args) {
                      static_cast<int>(new_tok), repeated_token_count);
                 set_error("Repeated token loop detected");
                 llama_sampler_free(sampler);
-                g_gen_state.store(-1);
-                g_gen_finished.store(true);
+                gen_update_state(-1, my_epoch);
+                gen_mark_finished(my_epoch);
                 LOGI("[THREAD] generation thread exited (repeated token loop)");
                 return;
             }
@@ -372,7 +413,7 @@ static void generation_thread(GenArgs args) {
             LOGI("[THREAD] decoded token_id=%d text=\"%s\" len=%d total_decoded=%d",
                  static_cast<int>(new_tok), piece_buf,
                  static_cast<int>(piece_len), n_decode + 1);
-            push_token(std::string(piece_buf, piece_len));
+            push_token(std::string(piece_buf, piece_len), my_epoch);
             last_token_time = std::chrono::steady_clock::now();
             empty_token_count = 0;
         } else if (piece_len < 0) {
@@ -380,8 +421,8 @@ static void generation_thread(GenArgs args) {
                  static_cast<int>(new_tok));
             set_error("Invalid generated token piece");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (piece conversion error)");
             return;
         } else {
@@ -395,8 +436,8 @@ static void generation_thread(GenArgs args) {
                 LOGE("[THREAD] empty-token limit reached (%d) — aborting", kEmptyTokenLimit);
                 set_error("Empty token loop detected");
                 llama_sampler_free(sampler);
-                g_gen_state.store(-1);
-                g_gen_finished.store(true);
+                gen_update_state(-1, my_epoch);
+                gen_mark_finished(my_epoch);
                 LOGI("[THREAD] generation thread exited (empty token loop)");
                 return;
             }
@@ -409,8 +450,8 @@ static void generation_thread(GenArgs args) {
                  static_cast<int>(iteration));
             set_error("Out of memory while allocating decode batch");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (OOM step batch)");
             return;
         }
@@ -430,8 +471,8 @@ static void generation_thread(GenArgs args) {
                  decode_status, n_decode);
             set_error("Decode failed during token generation");
             llama_sampler_free(sampler);
-            g_gen_state.store(-1);
-            g_gen_finished.store(true);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
             LOGI("[THREAD] generation thread exited (step decode error)");
             return;
         }
@@ -448,22 +489,22 @@ static void generation_thread(GenArgs args) {
     }
     LOGI("[AI] inference completed");
     llama_sampler_free(sampler);
-    g_gen_state.store(1);  // done
+    gen_update_state(1, my_epoch);  // done
     } catch (const std::bad_alloc&) {
         LOGE("[THREAD] std::bad_alloc in generation thread");
         set_error("Out of memory during generation");
-        g_gen_state.store(-1);
+        gen_update_state(-1, my_epoch);
     } catch (const std::exception& e) {
         LOGE("[THREAD] unhandled exception: %s", e.what());
         set_error(e.what());
-        g_gen_state.store(-1);
+        gen_update_state(-1, my_epoch);
     } catch (...) {
         LOGE("[THREAD] unhandled unknown exception");
         set_error("Unhandled generation exception");
-        g_gen_state.store(-1);
+        gen_update_state(-1, my_epoch);
     }
 
-    g_gen_finished.store(true);
+    gen_mark_finished(my_epoch);
     LOGI("[THREAD] generation thread exited (end of function)");
 }
 
@@ -563,6 +604,10 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
     }
 
     // Clear ring buffer and reset state.
+    // Increment g_gen_epoch BEFORE resetting g_gen_state so that any stale
+    // generation thread racing here sees the new epoch and stops updating
+    // the shared state machine (see gen_update_state / gen_mark_finished).
+    const uint64_t new_epoch = ++g_gen_epoch;
     {
         std::unique_lock<std::mutex> lock(g_ring.mtx);
         while (!g_ring.items.empty()) g_ring.items.pop();
@@ -575,11 +620,12 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
     const int32_t capped_max_tokens = std::min(max_tokens, kMaxGeneratedTokens);
     LOGI("[AI] starting inference...");
     LOGI("[AI] streaming callback active");
-    LOGI("[START_GEN] prompt_chars=%zu requested_max=%d capped_max=%d temp=%.3f",
+    LOGI("[START_GEN] epoch=%" PRIu64 " prompt_chars=%zu requested_max=%d capped_max=%d temp=%.3f",
+         new_epoch,
          prompt ? std::strlen(prompt) : static_cast<size_t>(0),
          max_tokens, capped_max_tokens,
          static_cast<double>(temperature));
-    GenArgs args{prompt ? prompt : "", capped_max_tokens, temperature};
+    GenArgs args{prompt ? prompt : "", capped_max_tokens, temperature, new_epoch};
 
     try {
         g_gen_thread = std::thread(generation_thread, std::move(args));
@@ -590,7 +636,7 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
         return -3;
     }
 
-    LOGI("[START_GEN] generation thread spawned");
+    LOGI("[START_GEN] generation thread spawned (epoch=%" PRIu64 ")", new_epoch);
     return 0;
 }
 
@@ -600,22 +646,37 @@ int32_t llb_poll_token(char* buf, int32_t buf_size) {
         return -1;
     }
 
-    // Try to pop a token from the ring buffer without blocking.
-    {
-        std::unique_lock<std::mutex> lock(g_ring.mtx);
-        if (!g_ring.items.empty()) {
-            const std::string& piece = g_ring.items.front();
-            int32_t copy_len = static_cast<int32_t>(
-                std::min(piece.size(), static_cast<size_t>(buf_size - 1)));
-            std::memcpy(buf, piece.data(), copy_len);
-            buf[copy_len] = '\0';
-            g_ring.items.pop();
-            return 1;  // token available
-        }
+    // Acquire the ring mutex and hold it through the generation-state check.
+    //
+    // This closes the EOS-token race: without the combined lock, the sequence
+    //   [Dart] ring empty? yes → [Gen] push_token(last) → [Gen] state=1 → [Dart] state==1 → return 2
+    // would cause the last token to be lost.  By holding the lock through the
+    // state read we guarantee:
+    //   • If the gen thread is mid-push_token it is blocked; we see state < 1
+    //     and return 0 so the next poll retrieves the token.
+    //   • If state == 1 while we hold the lock, all tokens that could ever be
+    //     pushed have already been pushed (push_token needs the same lock), so
+    //     an empty ring + state==1 correctly means "done, no more tokens".
+    std::unique_lock<std::mutex> lock(g_ring.mtx);
+
+    // Discard any stale entries from previous generation epochs.
+    const uint64_t cur_epoch = g_gen_epoch.load(std::memory_order_relaxed);
+    while (!g_ring.items.empty() && g_ring.items.front().epoch != cur_epoch) {
+        g_ring.items.pop();
     }
 
-    // No buffered token — check generation state.
-    int state = g_gen_state.load();
+    if (!g_ring.items.empty()) {
+        const RingEntry& entry = g_ring.items.front();
+        int32_t copy_len = static_cast<int32_t>(
+            std::min(entry.piece.size(), static_cast<size_t>(buf_size - 1)));
+        std::memcpy(buf, entry.piece.data(), copy_len);
+        buf[copy_len] = '\0';
+        g_ring.items.pop();
+        return 1;  // token available
+    }
+
+    // Ring is empty — check generation state while still holding the ring lock.
+    int state = g_gen_state.load(std::memory_order_acquire);
     if (state == 1) return 2;   // done
     if (state == 2) return -99; // cancelled
     if (state == -1) return -1; // error
@@ -667,7 +728,13 @@ void llb_free_model(void) {
         );
         cleanup.detach();
 
-        g_cancel_flag.store(false);
+        // NOTE: g_cancel_flag is intentionally NOT cleared here.
+        // The old gen thread must see cancel=true and exit cleanly.
+        // The next llb_start_gen() call will clear g_cancel_flag (line
+        // `g_cancel_flag.store(false)` in llb_start_gen) AFTER it increments
+        // g_gen_epoch, ensuring the new gen thread starts with a clean state.
+        // Any state updates the old thread tries to make after that point will
+        // be suppressed by the epoch check in gen_update_state / gen_mark_finished.
         LOGI("[AI] llb_free_model: cleanup delegated to background thread");
         return;
     }
