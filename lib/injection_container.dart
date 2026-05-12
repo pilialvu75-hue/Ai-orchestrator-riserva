@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
+import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/plugins/plugin_registry.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
@@ -37,6 +38,8 @@ import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages
 import 'package:ai_orchestrator/features/chat/domain/usecases/prune_chat_history.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/send_chat_message.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_bloc.dart';
+import 'package:ai_orchestrator/features/coding_assistant/coding_assistant_agent_impl.dart';
+import 'package:ai_orchestrator/features/coding_assistant/sequential_planning_strategy.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
 import 'package:ai_orchestrator/features/document_intelligence/offline_document_intelligence_plugin.dart';
 import 'package:ai_orchestrator/features/local_ai/data/repositories/local_ai_repository_impl.dart';
@@ -240,6 +243,20 @@ Future<void> initDependencies({
   sl.registerLazySingleton<IntentAnalyzer>(() => const IntentAnalyzer());
   sl.registerLazySingleton<ExecutionEngine>(() => createExecutor());
 
+  // ── Planning engine (TaskWeaver-inspired) ─────────────────────────────────
+  sl.registerLazySingleton<PlannerService>(
+    () => PlannerService(inferenceService: sl<InferenceService>()),
+  );
+  sl.registerLazySingleton<SequentialPlanningStrategy>(
+    () => SequentialPlanningStrategy(plannerService: sl<PlannerService>()),
+  );
+  sl.registerLazySingleton<CodingAssistantAgentImpl>(
+    () => CodingAssistantAgentImpl(
+      plannerService: sl<PlannerService>(),
+      inferenceService: sl<InferenceService>(),
+    ),
+  );
+
   // ── Repositories ───────────────────────────────────────────────────────────
   sl.registerLazySingleton<AiRepository>(
     () => AiRepositoryImpl(
@@ -283,6 +300,7 @@ Future<void> initDependencies({
       intentAnalyzer: sl<IntentAnalyzer>(),
       executor: sl<ExecutionEngine>(),
       inferenceService: sl<InferenceService>(),
+      plannerService: sl<PlannerService>(),
     ),
   );
   sl.registerLazySingleton<ChatRepository>(
