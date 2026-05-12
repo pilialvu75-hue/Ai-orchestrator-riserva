@@ -37,7 +37,7 @@ try {
 
 android {
     namespace "com.aiorchestrator"
-    compileSdk 36
+    compileSdk 35
     ndkVersion "27.0.12077973"
 
     compileOptions {
@@ -49,10 +49,14 @@ android {
         jvmTarget = "17"
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "com.aiorchestrator"
         minSdk 24
-        targetSdk 36
+        targetSdk 35
         versionCode safeFlutterVersionCode
         versionName flutterVersionName
         buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", mlcRuntimePresent ? "true" : "false"
