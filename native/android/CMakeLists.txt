@@ -114,7 +114,6 @@ target_link_libraries(mlc_native_bridge PRIVATE
 set(MLC_LLM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/mlc-llm")
 set(AI_MLC_BACKEND_NAME "fallback-llama")
 if(AI_ANDROID_ENABLE_MLC AND EXISTS "${MLC_LLM_DIR}")
-    set(AI_MLC_BACKEND_NAME "cpu")
     find_library(VULKAN_LIB vulkan)
     find_library(OPENCL_LIB OpenCL)
 
@@ -126,6 +125,8 @@ if(AI_ANDROID_ENABLE_MLC AND EXISTS "${MLC_LLM_DIR}")
     elseif(OPENCL_LIB)
         target_link_libraries(mlc_native_bridge PRIVATE ${OPENCL_LIB})
         set(AI_MLC_BACKEND_NAME "opencl")
+    else()
+        set(AI_MLC_BACKEND_NAME "cpu")
     endif()
 
     target_compile_definitions(mlc_native_bridge PRIVATE

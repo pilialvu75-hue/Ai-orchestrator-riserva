@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr std::uint64_t kMinOfflineBudgetBytes = 512ull * 1024ull * 1024ull; // 512 MiB
+constexpr std::uint64_t kMinKvCacheBudgetBytes = 512ull * 1024ull * 1024ull; // 512 MiB
 constexpr std::uint64_t kDefaultGuardrailBudgetBytes = 1536ull * 1024ull * 1024ull; // 1.5 GiB
 
 std::uint64_t total_ram_bytes() {
@@ -33,11 +33,11 @@ std::uint64_t kv_cache_guardrail_bytes() {
     static const std::uint64_t cached_guardrail = []() -> std::uint64_t {
         const std::uint64_t ram = total_ram_bytes();
         if (ram == 0) {
-            return kMinOfflineBudgetBytes;
+            return kMinKvCacheBudgetBytes;
         }
         const std::uint64_t one_third = ram / 3ull;
-        if (one_third < kMinOfflineBudgetBytes) {
-            return kMinOfflineBudgetBytes;
+        if (one_third < kMinKvCacheBudgetBytes) {
+            return kMinKvCacheBudgetBytes;
         }
         return one_third > kDefaultGuardrailBudgetBytes ? kDefaultGuardrailBudgetBytes : one_third;
     }();
