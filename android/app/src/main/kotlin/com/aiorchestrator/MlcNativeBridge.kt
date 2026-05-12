@@ -21,7 +21,7 @@ object MlcNativeBridge {
         if (loadError != null) return false
         return try {
             nativeIsAvailable()
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -30,7 +30,7 @@ object MlcNativeBridge {
         if (loadError != null) return "unavailable"
         return try {
             nativeBackendName()
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             "unavailable"
         }
     }
@@ -39,7 +39,7 @@ object MlcNativeBridge {
         if (loadError != null) return 0L
         return try {
             nativeMaxKvCacheBytes()
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             0L
         }
     }

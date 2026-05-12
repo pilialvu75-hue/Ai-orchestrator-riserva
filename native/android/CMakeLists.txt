@@ -115,6 +115,8 @@ find_library(VULKAN_LIB vulkan)
 find_library(OPENCL_LIB OpenCL)
 
 if(VULKAN_LIB)
+    # Prefer Vulkan when both backends are available because it is the primary
+    # mobile GPU path targeted by the Android MLC integration.
     target_link_libraries(mlc_native_bridge PRIVATE ${VULKAN_LIB})
     set(AI_MLC_BACKEND_NAME "vulkan")
 elseif(OPENCL_LIB)
