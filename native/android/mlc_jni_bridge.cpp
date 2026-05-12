@@ -30,15 +30,18 @@ std::uint64_t total_ram_bytes() {
 }
 
 std::uint64_t kv_cache_guardrail_bytes() {
-    const std::uint64_t ram = total_ram_bytes();
-    if (ram == 0) {
-        return kMinOfflineBudgetBytes;
-    }
-    const std::uint64_t one_third = ram / 3ull;
-    if (one_third < kMinOfflineBudgetBytes) {
-        return kMinOfflineBudgetBytes;
-    }
-    return one_third > kDefaultGuardrailBudgetBytes ? kDefaultGuardrailBudgetBytes : one_third;
+    static const std::uint64_t cached_guardrail = []() -> std::uint64_t {
+        const std::uint64_t ram = total_ram_bytes();
+        if (ram == 0) {
+            return kMinOfflineBudgetBytes;
+        }
+        const std::uint64_t one_third = ram / 3ull;
+        if (one_third < kMinOfflineBudgetBytes) {
+            return kMinOfflineBudgetBytes;
+        }
+        return one_third > kDefaultGuardrailBudgetBytes ? kDefaultGuardrailBudgetBytes : one_third;
+    }();
+    return cached_guardrail;
 }
 
 std::string backend_name() {

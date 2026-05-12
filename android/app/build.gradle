@@ -30,7 +30,7 @@ def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "
 def safeFlutterVersionCode
 try {
     safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
-} catch (Exception ignored) {
+} catch (NumberFormatException ignored) {
     safeFlutterVersionCode = 1
 }
 

@@ -111,7 +111,6 @@ target_link_libraries(mlc_native_bridge PRIVATE
     dl
 )
 
-set(AI_MLC_BACKEND_NAME "cpu")
 find_library(VULKAN_LIB vulkan)
 find_library(OPENCL_LIB OpenCL)
 
@@ -121,6 +120,8 @@ if(VULKAN_LIB)
 elseif(OPENCL_LIB)
     target_link_libraries(mlc_native_bridge PRIVATE ${OPENCL_LIB})
     set(AI_MLC_BACKEND_NAME "opencl")
+else()
+    set(AI_MLC_BACKEND_NAME "cpu")
 endif()
 
 set(MLC_LLM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/mlc-llm")
