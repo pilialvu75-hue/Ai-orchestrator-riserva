@@ -56,6 +56,9 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_m
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
+import 'package:ai_orchestrator/features/voice/data/adapters/device_voice_adapters.dart';
+import 'package:ai_orchestrator/features/voice/data/adapters/sherpa_onnx_voice_adapter.dart';
+import 'package:ai_orchestrator/features/voice/data/normalization/voice_text_normalizer.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
@@ -187,7 +190,29 @@ Future<void> initDependencies({
   sl.registerLazySingleton(() => GetSelectedModel(sl<LocalAiRepository>()));
 
   // ── Voice ─────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton<SpeechService>(() => SpeechService());
+  sl.registerLazySingleton<VoiceTextNormalizer>(
+    () => const VoiceTextNormalizer(),
+  );
+  sl.registerLazySingleton<SherpaOnnxVoiceAdapter>(
+    () => SherpaOnnxVoiceAdapter(),
+  );
+  sl.registerLazySingleton<DeviceSpeechToTextAdapter>(
+    () => DeviceSpeechToTextAdapter(),
+  );
+  sl.registerLazySingleton<DeviceFlutterTtsAdapter>(
+    () => DeviceFlutterTtsAdapter(),
+  );
+  sl.registerLazySingleton<SpeechService>(
+    () => SpeechService(
+      primaryAsr: sl<SherpaOnnxVoiceAdapter>(),
+      fallbackAsr: sl<DeviceSpeechToTextAdapter>(),
+      primaryTts: sl<SherpaOnnxVoiceAdapter>(),
+      fallbackTts: sl<DeviceFlutterTtsAdapter>(),
+      sharedAsrAdapter: false,
+      sharedTtsAdapter: false,
+      normalizer: sl<VoiceTextNormalizer>(),
+    ),
+  );
 
   // ── Multimodal ────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ImageService>(() => ImageService());

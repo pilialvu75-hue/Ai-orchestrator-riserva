@@ -37,6 +37,20 @@ llama.cpp (static)                 (third_party/llama.cpp)
 GGUF model file                    (~/.../models/<model>.gguf on device)
 ```
 
+For multimodal voice, the app now also reserves a separate Sherpa-ONNX bridge
+surface (method/event channels) so ASR/TTS remain decoupled from this llama.cpp
+inference stack:
+
+```
+Flutter Voice Layer (features/voice/)
+      │
+      ▼
+SherpaOnnxVoiceAdapter (method/event channel)
+      │
+      ▼
+Android Sherpa-ONNX native module (offline ONNX ASR/TTS)
+```
+
 The bridge is a **thin C shim** compiled from `native/android/llama_bridge.cpp`.
 It presents a simple polling API to Dart, hiding all llama.cpp internals behind
 opaque global state so that the Dart FFI bindings stay minimal and type-safe.

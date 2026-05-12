@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
@@ -13,9 +15,11 @@ import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart'
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
+import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
+const int _kAssistantTtsRecencyThresholdSeconds = 10;
 
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
@@ -236,7 +240,7 @@ class _WideLayout extends StatelessWidget {
   }
 }
 
-class _ChatBody extends StatelessWidget {
+class _ChatBody extends StatefulWidget {
   const _ChatBody({
     required this.scrollController,
     required this.onSend,
@@ -251,6 +255,21 @@ class _ChatBody extends StatelessWidget {
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
 
+  @override
+  State<_ChatBody> createState() => _ChatBodyState();
+}
+
+class _ChatBodyState extends State<_ChatBody> {
+  String? _lastSpokenAssistantMessageId;
+
+  Future<void> _speakAssistantResponse(String text) async {
+    try {
+      await di.sl<SpeechService>().speak(text);
+    } catch (error) {
+      debugPrint('TTS playback failed: $error');
+    }
+  }
+
   String? _runtimeMessageForState(ChatState state) {
     if (state is ChatLoaded) return state.runtimeMessage;
     if (state is ChatSending) return state.runtimeMessage;
@@ -261,7 +280,9 @@ class _ChatBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocConsumer<OrchestratorStateEngine, ChatState>(
       listener: (context, state) {
-        if (state is ChatLoaded || state is ChatSending) scrollToBottom();
+        if (state is ChatLoaded || state is ChatSending) {
+          widget.scrollToBottom();
+        }
         final runtimeMessage = _runtimeMessageForState(state);
         if (runtimeMessage != null && runtimeMessage.trim().isNotEmpty) {
           final l10n = context.l10n;
@@ -273,11 +294,27 @@ class _ChatBody extends StatelessWidget {
                   ? SnackBarAction(
                       label: l10n.t('settings'),
                       textColor: Colors.white,
-                      onPressed: onSettings,
+                      onPressed: widget.onSettings,
                     )
                   : null,
             ),
           );
+        }
+
+        if (state is ChatLoaded && state.messages.isNotEmpty) {
+          final latest = state.messages.last;
+          final isRecent = DateTime.now()
+                  .difference(DateTime.fromMillisecondsSinceEpoch(latest.timestamp))
+                  .inSeconds <
+              _kAssistantTtsRecencyThresholdSeconds;
+          if (isRecent &&
+              latest.role == 'assistant' &&
+              latest.content.trim().isNotEmpty &&
+              latest.id != _lastSpokenAssistantMessageId) {
+            _lastSpokenAssistantMessageId = latest.id;
+            // Fire-and-forget to keep UI/inference flow non-blocking.
+            unawaited(_speakAssistantResponse(latest.content));
+          }
         }
       },
       builder: (context, state) {
@@ -313,15 +350,15 @@ class _ChatBody extends StatelessWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           const Color(0xFF101526).withOpacity(0.65),
-                           const Color(0xFF11192B).withOpacity(0.9),
-                           const Color(0xFF0B0F17),
-                         ],
-                       ),
-                     ),
+                          const Color(0xFF11192B).withOpacity(0.9),
+                          const Color(0xFF0B0F17),
+                        ],
+                      ),
+                    ),
                     child: messages.isEmpty
                         ? _buildEmptyState(context)
                         : ListView.builder(
-                            controller: scrollController,
+                            controller: widget.scrollController,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             itemCount: messages.length,
                             itemBuilder: (_, i) => _AnimatedBubble(
@@ -334,16 +371,16 @@ class _ChatBody extends StatelessWidget {
                     top: 10,
                     right: 10,
                     child: IgnorePointer(
-                      child: _RuntimeDebugOverlay(runtimeState: runtimeState),
+                      child: _RuntimeDebugOverlay(runtimeState: widget.runtimeState),
                     ),
                   ),
                 ],
               ),
             ),
-             ChatInputBar(
-               onSend: onSend,
-               isLoading: isLoading,
-             ),
+            ChatInputBar(
+              onSend: widget.onSend,
+              isLoading: isLoading,
+            ),
           ],
         );
       },

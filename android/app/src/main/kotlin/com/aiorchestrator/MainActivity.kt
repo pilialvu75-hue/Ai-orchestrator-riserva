@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
@@ -27,6 +28,8 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private val channelName = "com.aiorchestrator/android_intents"
+    private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
+    private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
     private val logTag = "AO_UPDATE"
     private val apkInstallRequestCode = 9917
     private var pendingIntentData: Map<String, Any?>? = null
@@ -39,6 +42,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         registerIntentChannel(flutterEngine)
+        registerSherpaVoiceChannels(flutterEngine)
         extractIncomingIntent(intent)
     }
 
@@ -207,6 +211,42 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun registerSherpaVoiceChannels(engine: FlutterEngine) {
+        MethodChannel(
+            engine.dartExecutor.binaryMessenger,
+            sherpaVoiceChannelName
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "initializeSherpaOnnx" -> {
+                    // Native Sherpa engine wiring is isolated and optional.
+                    // Returning false keeps Flutter-side fallback adapters active.
+                    result.success(false)
+                }
+                "startAsr", "stopAsr", "speakTts", "stopTts" -> {
+                    result.error(
+                        "SHERPA_NOT_IMPLEMENTED",
+                        "Sherpa-ONNX native module is not configured in this build.",
+                        null
+                    )
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        EventChannel(
+            engine.dartExecutor.binaryMessenger,
+            sherpaAsrEventsChannelName
+        ).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                // Stream hook reserved for native Sherpa ASR partial/final events.
+            }
+
+            override fun onCancel(arguments: Any?) {
+                // No-op placeholder.
+            }
+        })
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

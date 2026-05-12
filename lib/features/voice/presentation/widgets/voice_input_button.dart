@@ -66,8 +66,13 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           }
         },
       );
-      _pulse.repeat(reverse: true);
-      setState(() => _listening = true);
+      final started = widget.speechService.isListening;
+      if (started) {
+        _pulse.repeat(reverse: true);
+      } else {
+        _pulse.stop();
+      }
+      setState(() => _listening = started);
     }
   }
 
