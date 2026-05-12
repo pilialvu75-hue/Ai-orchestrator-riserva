@@ -43,7 +43,7 @@ class PlannerService {
     String goal, {
     bool isOffline = false,
   }) async {
-    _log('decompose: goal="${goal.substring(0, goal.length.clamp(0, 80))}"');
+    _log('decompose: goal="${_truncate(goal)}"');
 
     final rawResponse = await _inferenceService.infer(
       InferenceRequest(
@@ -122,4 +122,7 @@ Rules:
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
   }
+
+  static String _truncate(String text, [int maxLength = 80]) =>
+      text.substring(0, text.length.clamp(0, maxLength));
 }

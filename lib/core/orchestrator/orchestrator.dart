@@ -121,20 +121,9 @@ class Orchestrator {
     }
 
     final plan = await planner.decompose(input, isOffline: isOffline);
-    final summary = StringBuffer()
-      ..writeln('📋 Plan: ${plan.goal}')
-      ..writeln();
-
-    for (final step in plan.steps) {
-      summary.writeln('${step.index + 1}. ${step.description}');
-    }
-
-    summary
-      ..writeln()
-      ..writeln('_Executing ${plan.steps.length} step(s)…_');
 
     return InferenceResponse.finalChunk(
-      text: summary.toString().trim(),
+      text: plan.toDisplayString(),
       model: InferenceConstants.localModelName,
       tokensGenerated: plan.steps.length,
     );

@@ -100,6 +100,30 @@ void main() {
       expect(plan.combinedOutput, 'only-B');
     });
 
+    test('copyWith replaces status', () {
+      final plan = buildPlan();
+      final updated = plan.copyWith(status: PlanStatus.running);
+      expect(updated.status, PlanStatus.running);
+      expect(updated.id, plan.id);
+    });
+
+    test('copyWith replaces summary', () {
+      final plan = buildPlan();
+      final updated = plan.copyWith(summary: 'All done');
+      expect(updated.summary, 'All done');
+    });
+
+    test('toDisplayString contains goal', () {
+      final plan = buildPlan();
+      expect(plan.toDisplayString(), contains('Analyse and fix the bug'));
+    });
+
+    test('toDisplayString contains each step description', () {
+      final plan = buildPlan();
+      expect(plan.toDisplayString(), contains('Step A'));
+      expect(plan.toDisplayString(), contains('Step B'));
+    });
+
     test('toString includes id and step count', () {
       final plan = buildPlan();
       expect(plan.toString(), contains('plan-1'));

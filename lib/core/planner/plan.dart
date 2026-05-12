@@ -83,6 +83,10 @@ class PlanStep {
 /// Inspired by the TaskWeaver Planner: the goal is analysed by an LLM and
 /// broken into discrete, executable steps.  The [PlannerService] creates
 /// and owns [Plan] instances; downstream components read them.
+///
+/// **Design note**: [status] and [summary] are mutable to support incremental
+/// updates as each step completes.  Use [copyWith] to produce updated copies
+/// when an immutable style is preferred (e.g. in tests or BLoC states).
 class Plan {
   Plan({
     required this.id,
@@ -102,6 +106,8 @@ class Plan {
   final List<PlanStep> steps;
 
   /// Overall execution status.
+  ///
+  /// Updated incrementally by the planning engine as steps complete.
   PlanStatus status;
 
   /// Optional human-readable summary of the plan outcome, populated after
@@ -117,6 +123,36 @@ class Plan {
   /// Concatenates all step outputs, separated by newlines.
   String get combinedOutput =>
       steps.map((s) => s.output ?? '').where((o) => o.isNotEmpty).join('\n');
+
+  /// Returns a copy of this plan with the given fields replaced.
+  Plan copyWith({
+    PlanStatus? status,
+    String? summary,
+  }) {
+    return Plan(
+      id: id,
+      goal: goal,
+      steps: steps,
+      status: status ?? this.status,
+      summary: summary ?? this.summary,
+    );
+  }
+
+  /// Returns a user-facing display string summarising the plan and its steps.
+  ///
+  /// Used by [Orchestrator] to surface the plan to the chat UI.
+  String toDisplayString() {
+    final buffer = StringBuffer()
+      ..writeln('📋 Plan: $goal')
+      ..writeln();
+    for (final step in steps) {
+      buffer.writeln('${step.index + 1}. ${step.description}');
+    }
+    buffer
+      ..writeln()
+      ..writeln('_Executing ${steps.length} step(s)…_');
+    return buffer.toString().trim();
+  }
 
   @override
   String toString() =>

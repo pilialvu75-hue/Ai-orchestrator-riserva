@@ -124,7 +124,7 @@ class CodingAssistantAgentImpl implements ReasoningAgent {
     SharedContext context, {
     int maxSteps = 10,
   }) async {
-    _log('reason: problem="${problem.substring(0, problem.length.clamp(0, 80))}"');
+    _log('reason: problem="${_truncate(problem)}"');
 
     // 1. Decompose the problem into a plan.
     final plan = await _plannerService.decompose(problem, isOffline: true);
@@ -252,13 +252,23 @@ class CodingAssistantAgentImpl implements ReasoningAgent {
       text.contains('import ');
 
   static String _detectLanguage(String text) {
-    if (text.contains('```python') || text.contains('def ') || text.contains('import os')) {
-      return 'python';
+    // Use multiple indicators per language to reduce false positives.
+    var pythonScore = 0;
+    var dartScore = 0;
+
+    if (text.contains('```python')) pythonScore += 3;
+    if (text.contains('def ') && text.contains(':')) pythonScore += 2;
+    if (text.contains('import os') || text.contains('import sys')) pythonScore += 2;
+    if (RegExp(r'\bprint\s*\(').hasMatch(text) && !text.contains('debugPrint')) {
+      pythonScore += 1;
     }
-    if (text.contains('```dart') || text.contains('void main') || text.contains('Future<')) {
-      return 'dart';
-    }
-    return 'dart';
+
+    if (text.contains('```dart')) dartScore += 3;
+    if (text.contains('void main') || text.contains('Future<')) dartScore += 2;
+    if (text.contains('debugPrint') || text.contains('setState')) dartScore += 2;
+    if (text.contains('final ') || text.contains('const ')) dartScore += 1;
+
+    return dartScore >= pythonScore ? 'dart' : 'python';
   }
 
   static const String _codingSystemPrompt =
@@ -271,4 +281,7 @@ class CodingAssistantAgentImpl implements ReasoningAgent {
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
   }
+
+  static String _truncate(String text, [int maxLength = 80]) =>
+      text.substring(0, text.length.clamp(0, maxLength));
 }

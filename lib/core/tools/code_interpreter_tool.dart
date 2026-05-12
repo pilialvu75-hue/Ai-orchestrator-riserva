@@ -85,10 +85,15 @@ class CodeInterpreterTool implements Tool {
         : '[SAFE] No destructive operations detected. This code can be run '
             'within the repository sandbox autonomously.';
 
+    final commentPrefix = _commentPrefix(language);
     final header = StringBuffer()
-      ..writeln('// Language: $language')
-      ..writeln('// Description: ${codeDescription.isNotEmpty ? codeDescription : "N/A"}')
-      ..writeln('// Safety: ${isDestructive ? "REQUIRES CONFIRMATION" : "SAFE"}')
+      ..writeln('$commentPrefix Language: $language')
+      ..writeln(
+        '$commentPrefix Description: ${codeDescription.isNotEmpty ? codeDescription : "N/A"}',
+      )
+      ..writeln(
+        '$commentPrefix Safety: ${isDestructive ? "REQUIRES CONFIRMATION" : "SAFE"}',
+      )
       ..writeln();
 
     final output = '${header}${code}\n\n$annotation';
@@ -101,6 +106,22 @@ class CodeInterpreterTool implements Tool {
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
+
+  /// Returns the single-line comment prefix for [language].
+  static String _commentPrefix(String language) {
+    switch (language.toLowerCase()) {
+      case 'python':
+      case 'shell':
+      case 'bash':
+      case 'sh':
+        return '#';
+      case 'sql':
+        return '--';
+      default:
+        // Dart, Java, JavaScript, TypeScript, C, C++, Swift, Kotlin, …
+        return '//';
+    }
+  }
 
   bool _containsDestructivePattern(String code) {
     for (final pattern in _destructivePatterns) {

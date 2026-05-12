@@ -42,7 +42,8 @@ void greet(String name) {
         'code': 'print("hello")',
         'language': 'python',
       });
-      expect(result.output, contains('Language: python'));
+      // Python uses '#' as the comment prefix.
+      expect(result.output, contains('# Language: python'));
     });
 
     test('includes description header when provided', () async {
@@ -52,6 +53,40 @@ void greet(String name) {
         'description': 'Set x to 1',
       });
       expect(result.output, contains('Set x to 1'));
+    });
+  });
+
+  group('CodeInterpreterTool – comment prefix by language', () {
+    test('uses # prefix for Python', () async {
+      final result = await tool.execute({
+        'code': 'x = 1',
+        'language': 'python',
+      });
+      expect(result.output, contains('# Language: python'));
+    });
+
+    test('uses # prefix for shell', () async {
+      final result = await tool.execute({
+        'code': 'echo hello',
+        'language': 'shell',
+      });
+      expect(result.output, contains('# Language: shell'));
+    });
+
+    test('uses -- prefix for SQL', () async {
+      final result = await tool.execute({
+        'code': 'SELECT * FROM users;',
+        'language': 'sql',
+      });
+      expect(result.output, contains('-- Language: sql'));
+    });
+
+    test('uses // prefix for Dart (default)', () async {
+      final result = await tool.execute({
+        'code': 'void main() {}',
+        'language': 'dart',
+      });
+      expect(result.output, contains('// Language: dart'));
     });
   });
 

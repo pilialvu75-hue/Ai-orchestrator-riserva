@@ -44,7 +44,7 @@ class SequentialPlanningStrategy implements OrchestrationStrategy {
     SharedContext context,
     TaskDispatcher dispatcher,
   ) async {
-    _log('execute: goal="${goal.substring(0, goal.length.clamp(0, 80))}"');
+    _log('execute: goal="${_truncate(goal)}"');
 
     final runId = _uuid.v4();
 
@@ -124,4 +124,7 @@ class SequentialPlanningStrategy implements OrchestrationStrategy {
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
   }
+
+  static String _truncate(String text, [int maxLength = 80]) =>
+      text.substring(0, text.length.clamp(0, maxLength));
 }
