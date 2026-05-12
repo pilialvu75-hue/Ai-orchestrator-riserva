@@ -3,8 +3,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
-import 'package:ai_orchestrator/core/runtime/ai_runtime_settings_service.dart';
-import 'package:ai_orchestrator/core/runtime/preferences_service.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
