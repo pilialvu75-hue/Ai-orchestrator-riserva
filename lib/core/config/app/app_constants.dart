@@ -4,13 +4,30 @@ class AppConstants {
 
   // ── Database ────────────────────────────────────────────────────────────────
   static const String databaseName = 'ai_orchestrator.db';
-  static const int databaseVersion = 4;
+  static const int databaseVersion = 5;
 
   // ── Tables ──────────────────────────────────────────────────────────────────
   static const String tableProjectMemory = 'project_memory';
   static const String tableChatHistory = 'chat_history';
   static const String tableUserPreferences = 'user_preferences';
   static const String tableDocumentChunks = 'document_chunks';
+  static const String tableSyncChanges = 'sync_changes';
+
+  // ── sync_changes columns ─────────────────────────────────────────────────────
+  static const String colSyncId = 'sync_id';
+  static const String colSyncCollection = 'collection';
+  static const String colSyncKey = 'record_key';
+  static const String colSyncValue = 'record_value';
+  static const String colSyncHlc = 'hlc';
+  static const String colSyncNodeId = 'node_id';
+  static const String colSyncApplied = 'applied';
+
+  // ── Sync / P2P constants ─────────────────────────────────────────────────────
+  static const int syncDefaultPort = 47847;
+  static const int syncDiscoveryPort = 47848;
+  static const String syncDiscoveryMulticast = '239.255.47.47';
+  static const Duration syncDiscoveryInterval = Duration(seconds: 10);
+  static const Duration syncConnectionTimeout = Duration(seconds: 5);
 
   // ── project_memory columns ──────────────────────────────────────────────────
   static const String colId = 'id';

@@ -47,6 +47,7 @@ class DatabaseHelper {
     await _createChatHistoryTable(db);
     await _createUserPreferencesTable(db);
     await _createDocumentChunksTable(db);
+    await _createSyncChangesTable(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -70,6 +71,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 4) {
       await _createDocumentChunksTable(db);
+    }
+    if (oldVersion < 5) {
+      await _createSyncChangesTable(db);
     }
   }
 
@@ -120,6 +124,29 @@ class DatabaseHelper {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_document_chunks_path
       ON ${AppConstants.tableDocumentChunks} (${AppConstants.colDocumentPath})
+    ''');
+  }
+
+  Future<void> _createSyncChangesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableSyncChanges} (
+        ${AppConstants.colSyncId}         TEXT    PRIMARY KEY,
+        ${AppConstants.colSyncCollection} TEXT    NOT NULL,
+        ${AppConstants.colSyncKey}        TEXT    NOT NULL,
+        ${AppConstants.colSyncValue}      TEXT    NOT NULL DEFAULT '',
+        ${AppConstants.colSyncHlc}        TEXT    NOT NULL,
+        ${AppConstants.colSyncNodeId}     TEXT    NOT NULL,
+        ${AppConstants.colSyncApplied}    INTEGER NOT NULL DEFAULT 1,
+        ${AppConstants.colTimestamp}      INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_changes_hlc
+      ON ${AppConstants.tableSyncChanges} (${AppConstants.colSyncHlc})
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_changes_collection_key
+      ON ${AppConstants.tableSyncChanges} (${AppConstants.colSyncCollection}, ${AppConstants.colSyncKey})
     ''');
   }
 
@@ -303,6 +330,60 @@ class DatabaseHelper {
         r[AppConstants.colPrefKey] as String:
             r[AppConstants.colPrefValue] as String,
     };
+  }
+
+  // ── sync_changes CRUD ───────────────────────────────────────────────────────
+
+  Future<void> insertSyncChange(Map<String, dynamic> row) async {
+    final db = await database;
+    await db.insert(
+      AppConstants.tableSyncChanges,
+      row,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getSyncChangesSince(String hlc) async {
+    final db = await database;
+    return db.query(
+      AppConstants.tableSyncChanges,
+      where: '${AppConstants.colSyncHlc} > ?',
+      whereArgs: [hlc],
+      orderBy: '${AppConstants.colSyncHlc} ASC',
+    );
+  }
+
+  Future<Map<String, dynamic>?> getLatestSyncChangeForKey(
+    String collection,
+    String key,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      AppConstants.tableSyncChanges,
+      where:
+          '${AppConstants.colSyncCollection} = ? AND ${AppConstants.colSyncKey} = ?',
+      whereArgs: [collection, key],
+      orderBy: '${AppConstants.colSyncHlc} DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<String?> getMaxSyncHlc() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT MAX(${AppConstants.colSyncHlc}) AS max_hlc'
+      ' FROM ${AppConstants.tableSyncChanges}',
+    );
+    return result.first['max_hlc'] as String?;
+  }
+
+  Future<int> countSyncChanges() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM ${AppConstants.tableSyncChanges}',
+    );
+    return (result.first['c'] as int?) ?? 0;
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────

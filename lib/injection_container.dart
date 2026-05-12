@@ -19,6 +19,10 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
 import 'package:ai_orchestrator/core/services/cache_manager.dart';
+import 'package:ai_orchestrator/core/sync/network/local_sync_client.dart';
+import 'package:ai_orchestrator/core/sync/network/local_sync_server.dart';
+import 'package:ai_orchestrator/core/sync/network/sync_discovery_service.dart';
+import 'package:ai_orchestrator/core/sync/sync_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_checker.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
@@ -140,6 +144,34 @@ Future<void> initDependencies({
   );
   sl.registerLazySingleton<ContextWindowManager>(
     () => ContextWindowManager(databaseHelper: sl<DatabaseHelper>()),
+  );
+
+  // ── Sync / Local-First (CRDT) ─────────────────────────────────────────────
+  sl.registerSingleton<SyncManager>(
+    SyncManager(
+      databaseHelper: sl<DatabaseHelper>(),
+      nodeId: _resolveNodeId(sharedPreferences),
+    ),
+  );
+  sl.registerLazySingleton<LocalSyncServer>(
+    () => LocalSyncServer(
+      syncManager: sl<SyncManager>(),
+      deviceName: 'AI-Orchestrator',
+      port: AppConstants.syncDefaultPort,
+    ),
+  );
+  sl.registerLazySingleton<LocalSyncClient>(
+    () => LocalSyncClient(
+      syncManager: sl<SyncManager>(),
+      httpClient: sl<http.Client>(),
+    ),
+  );
+  sl.registerLazySingleton<SyncDiscoveryService>(
+    () => SyncDiscoveryService(
+      deviceId: sl<SyncManager>().nodeId,
+      deviceName: 'AI-Orchestrator',
+      syncPort: AppConstants.syncDefaultPort,
+    ),
   );
 
   // ── Core AI ────────────────────────────────────────────────────────────────
@@ -367,4 +399,27 @@ Future<void> initDependencies({
       repository: sl<LocalAiRepository>(),
     ),
   );
+}
+
+/// Resolves a stable node ID for this installation.
+///
+/// Reads from [SharedPreferences] if already set; otherwise generates a new
+/// hex ID, persists it, and returns it so that subsequent launches use the
+/// same identity.
+String _resolveNodeId(SharedPreferences prefs) {
+  const key = 'sync_node_id';
+  final existing = prefs.getString(key);
+  if (existing != null && existing.isNotEmpty) return existing;
+  final nodeId = _generateNodeId();
+  prefs.setString(key, nodeId); // fire-and-forget; non-critical
+  return nodeId;
+}
+
+/// Generates a unique node ID combining the current microsecond timestamp
+/// and a hash of the [DateTime.now()] microsecond/millisecond mix to reduce
+/// collision risk when multiple installations are created simultaneously.
+String _generateNodeId() {
+  final t = DateTime.now();
+  final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
+  return entropy.toRadixString(16).padLeft(16, '0');
 }

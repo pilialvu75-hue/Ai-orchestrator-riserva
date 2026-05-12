@@ -7,14 +7,14 @@ import 'package:ai_orchestrator/core/tools/tool.dart';
 /// causes [ToolResult.requiresConfirmation] to be noted in the output so the
 /// UI can present a confirmation dialog before the user runs the code.
 const List<String> _destructivePatterns = [
-  r'rm\s+-rf?',         // Shell: rm -rf
-  r'shutil\.rmtree',    // Python: shutil.rmtree
-  r'os\.remove',        // Python: os.remove
-  r'os\.unlink',        // Python: os.unlink
-  r'File\.delete',      // Dart: File.delete()
-  r'Directory\.delete', // Dart: Directory.delete()
+  r'\brm\b[^\n]*-rf?\b', // Shell: rm -rf (also subprocess list form ["rm", "-rf"])
+  r'shutil\.rmtree',      // Python: shutil.rmtree
+  r'os\.remove',          // Python: os.remove
+  r'os\.unlink',          // Python: os.unlink
+  r'\bFile\b[^\n]*\.delete',      // Dart: File(...).delete() or File.delete()
+  r'\bDirectory\b[^\n]*\.delete', // Dart: Directory(...).delete() or Directory.delete()
   r'format\s+[a-zA-Z]:', // Shell: format drive
-  r'\bdrop\s+table\b',  // SQL: DROP TABLE
+  r'\bdrop\s+table\b',   // SQL: DROP TABLE
   r'\btruncate\s+table\b', // SQL: TRUNCATE TABLE
 ];
 
