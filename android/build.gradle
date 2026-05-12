@@ -3,6 +3,22 @@ allprojects {
         google()
         mavenCentral()
     }
+
+    // ── AndroidX compatibility pins ───────────────────────────────────────────
+    // Force AndroidX libraries to versions compatible with compileSdk 34 /
+    // AGP 8.5.2. Newer Flutter plugin versions can pull transitive deps that
+    // require compileSdk 36+ (e.g. activity-ktx:1.12.4, core-ktx:1.18.0).
+    configurations.all {
+        resolutionStrategy {
+            force 'androidx.activity:activity:1.8.2'
+            force 'androidx.activity:activity-ktx:1.8.2'
+            force 'androidx.core:core:1.13.1'
+            force 'androidx.core:core-ktx:1.13.1'
+        }
+        // androidx.navigationevent requires compileSdk 36+ (introduced in
+        // AGP 8.9+). Exclude it — it is not directly used by this project.
+        exclude group: 'androidx.navigationevent'
+    }
 }
 
 rootProject.buildDir = "../build"
