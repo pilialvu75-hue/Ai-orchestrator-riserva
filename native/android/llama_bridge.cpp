@@ -730,8 +730,8 @@ void llb_free_model(void) {
 
         // NOTE: g_cancel_flag is intentionally NOT cleared here.
         // The old gen thread must see cancel=true and exit cleanly.
-        // The next llb_start_gen() call will clear g_cancel_flag (line
-        // `g_cancel_flag.store(false)` in llb_start_gen) AFTER it increments
+        // The next llb_start_gen() call will clear g_cancel_flag
+        // (via g_cancel_flag.store(false) in llb_start_gen) AFTER it increments
         // g_gen_epoch, ensuring the new gen thread starts with a clean state.
         // Any state updates the old thread tries to make after that point will
         // be suppressed by the epoch check in gen_update_state / gen_mark_finished.
