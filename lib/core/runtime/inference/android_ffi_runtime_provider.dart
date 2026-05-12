@@ -59,6 +59,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const Duration _stalledInferenceTimeout = Duration(seconds: 45);
   static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
+  // 2400 polls × 24ms delay ~= 57.6s without token progress.
+  // This caps idle polling so llb_poll_token() cannot spin forever.
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
