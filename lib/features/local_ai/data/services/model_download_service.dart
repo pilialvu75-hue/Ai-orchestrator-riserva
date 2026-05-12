@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -59,7 +58,7 @@ class ModelDownloadService {
   final Dio _dio;
   final FilePicker _filePicker;
   final Map<String, CancelToken> _cancelTokens = {};
-  static final Uuid _uuid = Uuid();
+  static const Uuid _uuid = Uuid();
   static const MethodChannel _androidChannel =
       MethodChannel('com.aiorchestrator/android_intents');
 
@@ -274,12 +273,12 @@ class ModelDownloadService {
     final picked = result.files.single;
     final rawPath = picked.path?.trim();
     if (rawPath == null || rawPath.isEmpty) {
-      throw DownloadException(
+      throw const DownloadException(
         'Selected file is not accessible from the picker.',
       );
     }
 
-    final validation = await validateModelPath(
+    final validation = await _validateModelPath(
       rawPath,
       treatMissingAsMissing: true,
     );
@@ -317,7 +316,7 @@ class ModelDownloadService {
         .firstOrNull;
     final modelId = existingModelId ??
         duplicate?.id ??
-        'local_import_${_uuid.v5(Uuid.NAMESPACE_URL, fingerprint)}';
+        'local_import_${_uuid.v5(Namespace.url.value, fingerprint)}';
 
     final model = AiModel(
       id: modelId,
@@ -508,7 +507,7 @@ class ModelDownloadService {
   // ── Validation ──────────────────────────────────────────────────────────────
 
   /// Validates a GGUF model file using lightweight disk checks only.
-  Future<_ModelFileValidationResult> validateModelPath(
+  Future<_ModelFileValidationResult> _validateModelPath(
     String path, {
     bool treatMissingAsMissing = false,
   }) async {
@@ -607,7 +606,7 @@ class ModelDownloadService {
         validationStatus: ModelValidationStatus.notDownloaded,
       );
     }
-    final validation = await validateModelPath(
+    final validation = await _validateModelPath(
       path,
       treatMissingAsMissing: model.isImportedModel,
     );

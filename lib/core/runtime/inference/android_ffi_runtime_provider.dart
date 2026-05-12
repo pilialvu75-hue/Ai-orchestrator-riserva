@@ -372,7 +372,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           pollIterations++;
           final elapsed = DateTime.now().difference(startedAt);
           final sinceFirstToken =
-              firstTokenAt == null ? null : DateTime.now().difference(firstTokenAt!);
+              firstTokenAt == null ? null : DateTime.now().difference(firstTokenAt);
           _log(
             'Poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
           );
