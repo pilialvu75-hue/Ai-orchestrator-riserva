@@ -30,6 +30,7 @@ class MainActivity : FlutterActivity() {
     private val channelName = "com.aiorchestrator/android_intents"
     private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
     private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
+    private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
     private val logTag = "AO_UPDATE"
     private val apkInstallRequestCode = 9917
     private var pendingIntentData: Map<String, Any?>? = null
@@ -43,6 +44,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
+        registerMlcNativeChannel(flutterEngine)
         extractIncomingIntent(intent)
     }
 
@@ -247,6 +249,20 @@ class MainActivity : FlutterActivity() {
                 // No-op placeholder.
             }
         })
+    }
+
+    private fun registerMlcNativeChannel(engine: FlutterEngine) {
+        MethodChannel(
+            engine.dartExecutor.binaryMessenger,
+            mlcNativeChannelName
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isMlcNativeAvailable" -> result.success(MlcNativeBridge.isAvailable())
+                "getMlcBackend" -> result.success(MlcNativeBridge.backendName())
+                "getMlcRuntimeDiagnostics" -> result.success(MlcNativeBridge.diagnostics())
+                else -> result.notImplemented()
+            }
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
