@@ -35,7 +35,7 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: zulu
+          distribution: temurin
           java-version: '17'
 
       - name: Setup Flutter
@@ -47,7 +47,7 @@ jobs:
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r26d
+          ndk-version: 26.3.11579264
           local-cache: true
 
       - name: Create Android signing config
