@@ -39,6 +39,7 @@ class InferenceService {
   }
 
   void cancel(String sessionId) {
+    _log('cancel requested session=$sessionId');
     _sessions[sessionId]?.cancellationToken.cancel();
     _sessions.remove(sessionId);
   }
@@ -189,6 +190,9 @@ class InferenceService {
           allowCloudFallback &&
           !emittedLocalToken &&
           _cloudRuntimeProvider.canInfer) {
+        _log(
+          'fallback routing session=${localRequest.sessionId} from=local to=cloud reason=${chunk.errorMessage}',
+        );
         yield InferenceResponse.notice(
           'Local runtime failed, switching to cloud runtime.',
         );
@@ -218,6 +222,9 @@ class InferenceService {
   }) async* {
     if (cloudRequest.isOffline) {
       if (localRequest != null) {
+        _log(
+          'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=offline',
+        );
         yield* _streamLocalInference(
           localRequest: localRequest,
           cloudRequest: cloudRequest,
@@ -236,6 +243,9 @@ class InferenceService {
         forceCloudPrimary || _cloudRuntimeProvider.shouldPreferCloudFor(cloudRequest);
 
     if (!shouldPreferCloud && localRequest != null) {
+      _log(
+        'routing session=${cloudRequest.sessionId} mode=local-first cloudPreferred=$shouldPreferCloud',
+      );
       yield* _streamLocalInference(
         localRequest: localRequest,
         cloudRequest: cloudRequest,
@@ -256,6 +266,9 @@ class InferenceService {
       if (chunk.isError) {
         if (localRequest != null &&
             _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
+          _log(
+            'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=${chunk.errorMessage}',
+          );
           final notice = _cloudRuntimeProvider.consumeRuntimeNotice();
           if (notice != null) {
             yield InferenceResponse.notice(notice);

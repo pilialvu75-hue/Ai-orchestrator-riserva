@@ -21,6 +21,8 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
+  // Approx. 2.3GB threshold used to route high-memory models to desktop section.
+  static const int _desktopModelSizeThresholdBytes = 2300000000;
 
   @override
   void initState() {
@@ -124,6 +126,20 @@ class _ModelsPageState extends State<ModelsPage> {
         ),
         errorStyle: TextStyle(color: Colors.red.shade400),
       );
+
+  bool _isDesktopModel(AiModel model) {
+    final target = (model.platformTarget ?? 'all').toLowerCase();
+    if (target == 'windows' ||
+        target == 'linux' ||
+        target == 'macos' ||
+        target == 'desktop' ||
+        target == 'pc') {
+      return true;
+    }
+    return model.sizeBytes >= _desktopModelSizeThresholdBytes;
+  }
+
+  bool _isMobileModel(AiModel model) => !_isDesktopModel(model);
 
   // ── Build ───────────────────────────────────────────────────────────────────
 
@@ -241,30 +257,95 @@ class _ModelsPageState extends State<ModelsPage> {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.only(
-                top: 8, bottom: 96), // 96 accounts for FAB
-            itemCount: models.length,
-            itemBuilder: (_, i) {
-              final model = models[i];
-              return ModelDownloadCard(
-                model: model,
-                isSelected: selectedModelId == model.id,
-                isRecommended: model.id == recommendedId,
-                downloadProgress: downloadProgress[model.id],
-                onDownload: () => context
-                    .read<ModelDownloadBloc>()
-                    .add(StartModelDownload(model: model)),
-                onCancel: () => context
-                    .read<ModelDownloadBloc>()
-                    .add(CancelModelDownload(modelId: model.id)),
-                onSelect: () => context
-                    .read<ModelDownloadBloc>()
-                    .add(SelectActiveModel(modelId: model.id)),
-              );
-            },
+          final mobileModels = models.where(_isMobileModel).toList(growable: false);
+          final desktopModels =
+              models.where(_isDesktopModel).toList(growable: false);
+
+          return ListView(
+            padding: const EdgeInsets.only(top: 8, bottom: 96),
+            children: [
+              const _ModelSectionHeader(
+                title: 'Mobile models (Android / iOS)',
+                subtitle: 'Lightweight and low-RAM compatible options.',
+              ),
+              for (final model in mobileModels)
+                ModelDownloadCard(
+                  model: model,
+                  isSelected: selectedModelId == model.id,
+                  isRecommended: model.id == recommendedId,
+                  downloadProgress: downloadProgress[model.id],
+                  onDownload: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(StartModelDownload(model: model)),
+                  onCancel: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(CancelModelDownload(modelId: model.id)),
+                  onSelect: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(SelectActiveModel(modelId: model.id)),
+                ),
+              const SizedBox(height: 8),
+              const _ModelSectionHeader(
+                title: 'Desktop models (Windows / Linux / macOS)',
+                subtitle: 'Higher-capacity models for desktop-class devices.',
+              ),
+              for (final model in desktopModels)
+                ModelDownloadCard(
+                  model: model,
+                  isSelected: selectedModelId == model.id,
+                  isRecommended: model.id == recommendedId,
+                  downloadProgress: downloadProgress[model.id],
+                  onDownload: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(StartModelDownload(model: model)),
+                  onCancel: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(CancelModelDownload(modelId: model.id)),
+                  onSelect: () => context
+                      .read<ModelDownloadBloc>()
+                      .add(SelectActiveModel(modelId: model.id)),
+                ),
+            ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _ModelSectionHeader extends StatelessWidget {
+  const _ModelSectionHeader({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.56),
+              fontSize: 11,
+            ),
+          ),
+        ],
       ),
     );
   }

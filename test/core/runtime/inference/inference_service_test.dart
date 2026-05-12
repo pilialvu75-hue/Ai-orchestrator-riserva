@@ -64,6 +64,61 @@ void main() {
   }
 
   group('InferenceService routing', () {
+    test('local mode returns streamed final response', () async {
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          responses: <InferenceResponse>[
+            InferenceResponse.token(text: 'Hello ', model: 'gemma_2b'),
+            InferenceResponse.token(text: 'world', model: 'gemma_2b'),
+            InferenceResponse.finalChunk(
+              text: 'Hello world',
+              tokensGenerated: 2,
+              model: 'gemma_2b',
+            ),
+          ],
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(sessionId: 'local-stream', prompt: 'hello'),
+      );
+
+      expect(response.isError, false);
+      expect(response.text, 'Hello world');
+      expect(response.model, 'gemma_2b');
+      expect(response.tokensGenerated, 2);
+    });
+
+    test('cancel propagates to local runtime stream', () async {
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (_, cancellationToken) async* {
+            yield InferenceResponse.token(text: 'partial', model: 'gemma_2b');
+            while (!cancellationToken.isCancelled) {
+              await Future<void>.delayed(const Duration(milliseconds: 2));
+              yield InferenceResponse.token(text: '.', model: 'gemma_2b');
+            }
+            yield InferenceResponse.error('Inference cancelled.');
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final streamFuture = service
+          .stream(const InferenceRequest(sessionId: 'cancel-s1', prompt: 'hello'))
+          .toList();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      service.cancel('cancel-s1');
+
+      final chunks = await streamFuture;
+      expect(chunks.any((chunk) => chunk.isError), true);
+    });
+
     test('returns error when cloud mode has no API key and no local model',
         () async {
       final service = buildService(
@@ -174,10 +229,15 @@ class FakeLocalRuntimeProvider extends LocalRuntimeProvider {
   FakeLocalRuntimeProvider({
     this.responses = const <InferenceResponse>[],
     this.isSupported = true,
+    this.streamBuilder,
   });
 
   final List<InferenceResponse> responses;
   final bool isSupported;
+  final TokenStream Function(
+    InferenceRequest request,
+    CancellationToken cancellationToken,
+  )? streamBuilder;
 
   @override
   bool supportsModel(AiModel model) => isSupported;
@@ -187,6 +247,10 @@ class FakeLocalRuntimeProvider extends LocalRuntimeProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) async* {
+    if (streamBuilder != null) {
+      yield* streamBuilder!(request, cancellationToken);
+      return;
+    }
     for (final response in responses) {
       yield response;
     }
