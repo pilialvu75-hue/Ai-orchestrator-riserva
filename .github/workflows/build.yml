@@ -44,11 +44,13 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: 26.1.10909125
-          local-cache: true
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;26.1.10909125"
+          sdkmanager --licenses
 
       - name: Create Android signing config
         shell: bash

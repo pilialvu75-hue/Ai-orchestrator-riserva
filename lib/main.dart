@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
+import 'package:ai_orchestrator/app/app_shell.dart';
+import 'package:ai_orchestrator/app/runtime_bootstrap.dart';
 import 'package:ai_orchestrator/app/splash_screen.dart';
+import 'package:ai_orchestrator/app/startup_transition_controller.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
@@ -14,33 +16,137 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(const StartupApp());
+}
 
-  // Read the real installed version from the platform — never hardcode this.
-  const String versionFallback = '1.0.12';
-  String appVersion;
-  try {
-    final info = await PackageInfo.fromPlatform();
-    appVersion = info.version.isNotEmpty ? info.version : versionFallback;
-    debugPrint('[OTA] PackageInfo version: ${info.version}+${info.buildNumber}');
-  } catch (e) {
-    // Fallback: try compile-time define, then hard default.
-    appVersion = const String.fromEnvironment(
-      'APP_VERSION',
-      defaultValue: versionFallback,
-    );
-    debugPrint('[OTA] PackageInfo failed ($e), using fallback: $appVersion');
+class StartupApp extends StatefulWidget {
+  const StartupApp({super.key});
+
+  @override
+  State<StartupApp> createState() => _StartupAppState();
+}
+
+class _StartupAppState extends State<StartupApp> {
+  final StartupTransitionController _transitionController =
+      StartupTransitionController();
+  final RuntimeBootstrap _bootstrap = const RuntimeBootstrap();
+
+  Object? _startupError;
+
+  @override
+  void initState() {
+    super.initState();
+    _startBootstrap();
   }
 
-  await di.initDependencies(
-    openAiApiKey: const String.fromEnvironment('OPENAI_API_KEY'),
-    geminiApiKey: const String.fromEnvironment('GEMINI_API_KEY'),
-    claudeApiKey: const String.fromEnvironment('CLAUDE_API_KEY'),
-    grokApiKey: const String.fromEnvironment('GROK_API_KEY'),
-    copilotApiKey: const String.fromEnvironment('COPILOT_API_KEY'),
-    appVersion: appVersion,
-  );
+  Future<void> _startBootstrap() async {
+    try {
+      await _bootstrap.initialize();
+      if (!mounted) return;
+      _transitionController.markReady();
+      setState(() {
+        _startupError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _startupError = error;
+      });
+    }
+  }
 
-  runApp(const AppRoot());
+  @override
+  void dispose() {
+    _transitionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _transitionController,
+      builder: (context, _) {
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 420),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: _transitionController.isReady
+              ? const AppRoot(key: ValueKey('ready'))
+              : MaterialApp(
+                  key: const ValueKey('startup'),
+                  debugShowCheckedModeBanner: false,
+                  themeMode: ThemeMode.dark,
+                  darkTheme: ThemeData.dark(useMaterial3: true),
+                  home: _startupError == null
+                      ? const SplashScreen()
+                      : _StartupErrorScreen(
+                          error: _startupError!,
+                          onRetry: () {
+                            setState(() {
+                              _startupError = null;
+                            });
+                            _startBootstrap();
+                          },
+                        ),
+                ),
+        );
+      },
+    );
+  }
+}
+
+class _StartupErrorScreen extends StatelessWidget {
+  const _StartupErrorScreen({
+    required this.error,
+    required this.onRetry,
+  });
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D0D0D),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Color(0xFFFFB74D),
+                size: 36,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Startup failed',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$error',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AppRoot extends StatelessWidget {
@@ -90,7 +196,7 @@ class AppRoot extends StatelessWidget {
               ),
               scaffoldBackgroundColor: const Color(0xFF0D0D0D),
             ),
-            home: const SplashScreen(),
+            home: const AppShell(),
           );
         },
       ),
