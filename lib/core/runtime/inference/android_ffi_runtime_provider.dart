@@ -57,7 +57,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
   static const Duration _stalledInferenceTimeout = Duration(seconds: 45);
+  static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
+  static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
   // Very small GGUF files are usually truncated/corrupted placeholders.
@@ -355,6 +357,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final fullText = StringBuffer();
       final startedAt = DateTime.now();
       DateTime? firstTokenAt;
+      var lastTokenProgressAt = startedAt;
+      var consecutiveIdlePolls = 0;
       var runtimeNeedsReset = false;
       String? runtimeResetReason;
       monitor.update(
@@ -370,11 +374,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       try {
         while (true) {
           pollIterations++;
-          final elapsed = DateTime.now().difference(startedAt);
+          final now = DateTime.now();
+          final elapsed = now.difference(startedAt);
           final sinceFirstToken =
-              firstTokenAt == null ? null : DateTime.now().difference(firstTokenAt);
+              firstTokenAt == null ? null : now.difference(firstTokenAt);
+          final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
           _log(
-            'Poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
+            'Poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
+            ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
           );
           if (cancellationToken.isCancelled) {
             _safeCancel(bindings);
@@ -435,6 +442,53 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
+          if (firstTokenAt != null &&
+              sinceLastTokenProgress > _noTokenProgressTimeout) {
+            _safeCancel(bindings);
+            runtimeNeedsReset = true;
+            runtimeResetReason = 'token_progress_watchdog';
+            monitor.update(
+              LocalRuntimeStatus.stalled,
+              message: 'Token stream stalled',
+              tokensGenerated: estimatedTokens,
+              elapsed: elapsed,
+              startedAt: startedAt,
+            );
+            await _finishWithPartialOrRuntimeError(
+              controller,
+              stage: 'stalled',
+              message: 'Token stream stalled during local inference.',
+              modelId: modelId,
+              fullText: fullText.toString(),
+              tokensGenerated: estimatedTokens,
+              notice:
+                  'Token stream stalled after ${sinceLastTokenProgress.inSeconds}s. Returning partial response.',
+            );
+            break;
+          }
+          if (consecutiveIdlePolls >= _maxIdlePollIterations) {
+            _safeCancel(bindings);
+            runtimeNeedsReset = true;
+            runtimeResetReason = 'poll_loop_watchdog';
+            monitor.update(
+              LocalRuntimeStatus.stalled,
+              message: 'Polling loop stalled',
+              tokensGenerated: estimatedTokens,
+              elapsed: elapsed,
+              startedAt: startedAt,
+            );
+            await _finishWithPartialOrRuntimeError(
+              controller,
+              stage: 'poll_loop',
+              message: 'Token polling stalled in local runtime.',
+              modelId: modelId,
+              fullText: fullText.toString(),
+              tokensGenerated: estimatedTokens,
+              notice:
+                  'No token progress detected in polling loop. Returning partial response.',
+            );
+            break;
+          }
 
           int status;
           try {
@@ -486,6 +540,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             if (piece.isNotEmpty) {
               firstTokenAt ??= DateTime.now();
               consecutiveInvalidTokens = 0;
+              consecutiveIdlePolls = 0;
+              lastTokenProgressAt = DateTime.now();
               fullText.write(piece);
               estimatedTokens++;
               final streamingElapsed = DateTime.now().difference(startedAt);
@@ -631,6 +687,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             // status == 0: no token ready yet; yield to the Flutter event loop.
             // Use a small non-zero delay to avoid excessive CPU churn during
             // periods when the generation thread has not yet produced output.
+            consecutiveIdlePolls++;
+            if (consecutiveIdlePolls % 120 == 0) {
+              _log(
+                'Idle polling continues: idle_polls=$consecutiveIdlePolls '
+                'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
+              );
+            }
             await Future<void>.delayed(const Duration(milliseconds: 24));
           }
         }

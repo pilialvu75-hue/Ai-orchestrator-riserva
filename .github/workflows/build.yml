@@ -47,7 +47,7 @@ jobs:
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r27
+          ndk-version: r26d
           local-cache: true
 
       - name: Create Android signing config

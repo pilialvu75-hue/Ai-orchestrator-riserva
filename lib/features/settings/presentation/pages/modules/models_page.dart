@@ -16,6 +16,7 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
+  static const int _desktopModelSizeThresholdBytes = 2300000000;
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
@@ -75,6 +76,30 @@ class _ModelsPageState extends State<ModelsPage> {
     }
     if (model.isDownloaded) return 'ready';
     return 'idle';
+  }
+
+  bool _isDesktopModel(AiModel model) {
+    final target = (model.platformTarget ?? 'all').toLowerCase();
+    if (target == 'windows' ||
+        target == 'linux' ||
+        target == 'macos' ||
+        target == 'desktop' ||
+        target == 'pc') {
+      return true;
+    }
+    return model.sizeBytes >= _desktopModelSizeThresholdBytes;
+  }
+
+  bool _isMobileModel(AiModel model) {
+    if (_isDesktopModel(model)) return false;
+    final target = (model.platformTarget ?? 'all').toLowerCase();
+    if (target == 'android' ||
+        target == 'ios' ||
+        target == 'iphone' ||
+        target == 'mobile') {
+      return true;
+    }
+    return true;
   }
 
   void _showImportModelDialog() {
@@ -386,11 +411,55 @@ class _ModelsPageState extends State<ModelsPage> {
             final selectedModelId =
                 state is ModelsLoaded ? state.selectedModelId : null;
             final recommendedId = _modelManager.getRecommendedModelId(models);
+            final mobileModels = models.where(_isMobileModel).toList(growable: false);
+            final desktopModels =
+                models.where(_isDesktopModel).toList(growable: false);
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
               children: [
-                for (final model in models)
+                _ModelSectionHeader(
+                  title: 'Mobile models (Android / iOS)',
+                  subtitle:
+                      'Lightweight quantized GGUF models filtered for mobile runtime compatibility.',
+                ),
+                for (final model in mobileModels)
+                  _ModelConfigTile(
+                    model: model,
+                    status: state is ModelsLoaded
+                        ? _modelStatusFor(model, state)
+                        : 'idle',
+                    isSelected: selectedModelId == model.id,
+                    isRecommended: model.id == recommendedId,
+                    progress: state is ModelsLoaded
+                        ? state.downloadProgress[model.id]
+                        : null,
+                    onDownload: () {
+                      setState(() {
+                        _lastRequestedModelId = model.id;
+                        _statusOverrides.remove(model.id);
+                      });
+                      context.read<ModelDownloadBloc>().add(
+                            StartModelDownload(model: model),
+                          );
+                    },
+                    onCancel: () => context
+                        .read<ModelDownloadBloc>()
+                        .add(CancelModelDownload(modelId: model.id)),
+                    onSetActive: () => context
+                        .read<ModelDownloadBloc>()
+                        .add(SelectActiveModel(modelId: model.id)),
+                    onRelink: model.isImportedModel
+                        ? () => _importLocalModel(existingModelId: model.id)
+                        : null,
+                  ),
+                const SizedBox(height: 10),
+                _ModelSectionHeader(
+                  title: 'Desktop models (Windows / Linux / macOS)',
+                  subtitle:
+                      'Large/high-context models filtered for desktop-class runtime capacity.',
+                ),
+                for (final model in desktopModels)
                   _ModelConfigTile(
                     model: model,
                     status: state is ModelsLoaded
@@ -434,6 +503,44 @@ class _ModelsPageState extends State<ModelsPage> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _ModelSectionHeader extends StatelessWidget {
+  const _ModelSectionHeader({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.56),
+              fontSize: 11,
+            ),
+          ),
+        ],
       ),
     );
   }
