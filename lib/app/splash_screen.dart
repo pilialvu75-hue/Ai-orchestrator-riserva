@@ -1,15 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'package:ai_orchestrator/app/app_shell.dart';
-
-/// Lightweight startup splash that shows a brief, elegant animation before
-/// transitioning to the main [AppShell].
+/// Lightweight, GPU-friendly startup surface.
 ///
-/// Design goals (TASK 4):
-///  - Fast: total duration ≤ 2 seconds
-///  - Elegant: logo fade-in + subtle scale, then fade-out
-///  - Minimal: no heavy assets, pure widget animation
-///  - Smooth: always replaces itself with AppShell (no back-stack entry)
+/// Runtime bootstrapping is handled outside this widget; this class remains
+/// purely visual and non-blocking.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -18,57 +12,40 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _opacity;
-  late final Animation<double> _scale;
+    with TickerProviderStateMixin {
+  late final AnimationController _entryController;
+  late final AnimationController _pulseController;
+  late final Animation<double> _entryOpacity;
+  late final Animation<double> _entryScale;
 
   @override
   void initState() {
     super.initState();
 
-    _controller = AnimationController(
+    _entryController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1600),
+      duration: const Duration(milliseconds: 1100),
+    );
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
+
+    _entryOpacity = CurvedAnimation(
+      parent: _entryController,
+      curve: Curves.easeOutCubic,
+    );
+    _entryScale = Tween<double>(begin: 0.94, end: 1).animate(
+      CurvedAnimation(parent: _entryController, curve: Curves.easeOutCubic),
     );
 
-    // Fade in over 0–40 % of the total duration, then hold, then fade out.
-    _opacity = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 30),
-      TweenSequenceItem(tween: ConstantTween(1.0), weight: 40),
-      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 30),
-    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-
-    // Subtle scale: 0.88 → 1.0 during the fade-in phase.
-    _scale = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween(begin: 0.88, end: 1.0)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 30,
-      ),
-      TweenSequenceItem(tween: ConstantTween(1.0), weight: 70),
-    ]).animate(_controller);
-
-    _controller.forward().then((_) => _navigateToShell());
-  }
-
-  void _navigateToShell() {
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder<void>(
-        pageBuilder: (_, __, ___) => const AppShell(),
-        transitionsBuilder: (_, animation, __, child) => FadeTransition(
-          opacity: animation,
-          child: child,
-        ),
-        transitionDuration: const Duration(milliseconds: 300),
-      ),
-    );
+    _entryController.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _entryController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
@@ -76,60 +53,117 @@ class _SplashScreenState extends State<SplashScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0D),
-      body: Center(
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            return Opacity(
-              opacity: _opacity.value,
-              child: Transform.scale(
-                scale: _scale.value,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Icon with subtle gradient glow
-                    Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(
-                          colors: [
-                            const Color(0xFF8AB4F8).withOpacity(0.25),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.auto_awesome,
-                        color: Color(0xFF8AB4F8),
-                        size: 40,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'AI Orchestrator',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Your AI Operating System',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.45),
-                        fontSize: 13,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ],
+      body: AnimatedBuilder(
+        animation: Listenable.merge([_entryController, _pulseController]),
+        builder: (context, _) {
+          final pulse = _pulseController.value;
+          final glowOpacity = 0.16 + (pulse * 0.16);
+          final breathingScale = 0.985 + (pulse * 0.03);
+          final ambientOpacity = 0.12 + (pulse * 0.08);
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment(-1 + (pulse * 0.2), -1),
+                    end: Alignment(1, 1 - (pulse * 0.2)),
+                    colors: [
+                      const Color(0xFF0A0E15),
+                      const Color(0xFF111A2B).withOpacity(0.94),
+                      const Color(0xFF0D0D0D),
+                    ],
+                  ),
                 ),
               ),
-            );
-          },
+              Opacity(
+                opacity: ambientOpacity,
+                child: const _TerminalAtmosphere(),
+              ),
+              Center(
+                child: FadeTransition(
+                  opacity: _entryOpacity,
+                  child: ScaleTransition(
+                    scale: _entryScale,
+                    child: Transform.scale(
+                      scale: breathingScale,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  const Color(0xFF8AB4F8)
+                                      .withOpacity(glowOpacity),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.auto_awesome,
+                              color: Color(0xFF8AB4F8),
+                              size: 40,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'AI Orchestrator',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.45,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Initializing local intelligence...',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.54),
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TerminalAtmosphere extends StatelessWidget {
+  const _TerminalAtmosphere();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SizedBox(
+        width: 240,
+        height: 180,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            6,
+            (index) => Container(
+              margin: const EdgeInsets.symmetric(vertical: 5),
+              width: 220 - (index * 18),
+              height: 1,
+              color: const Color(0xFF8AB4F8).withOpacity(0.16 - (index * 0.02)),
+            ),
+          ),
         ),
       ),
     );
