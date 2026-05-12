@@ -122,7 +122,7 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Initializing local intelligence…',
+                            'Initializing local intelligence...',
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.54),
                               fontSize: 13,

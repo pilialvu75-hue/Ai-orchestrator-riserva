@@ -47,20 +47,16 @@ class RuntimeBootstrap {
 
   Future<void> _runWarmupChecks() async {
     await Future.wait<void>([
-      _guarded('database', () async {
-        await di.sl<DatabaseHelper>().database;
-      }),
-      _guarded('preferences', () async {
-        di.sl<PreferencesService>();
-      }),
-      _guarded('runtime_mode', () async {
-        await di.sl<AiRuntimeSettingsService>().loadRuntimeMode();
-      }),
-      _guarded('orchestrator_boot', () async {
-        di.sl<Orchestrator>();
-        await di.sl<LocalAiRepository>().getSelectedModel();
-      }),
+      di.sl<DatabaseHelper>().database.then((_) {}),
+      di.sl<AiRuntimeSettingsService>().loadRuntimeMode().then((_) {}),
+      di.sl<LocalAiRepository>().getSelectedModel().then((_) {}),
     ]);
+
+    // Optional preload checks should never crash startup.
+    di.sl<PreferencesService>();
+    await _guarded('orchestrator_boot', () async {
+      di.sl<Orchestrator>();
+    });
   }
 
   Future<void> _guarded(String label, Future<void> Function() task) async {
