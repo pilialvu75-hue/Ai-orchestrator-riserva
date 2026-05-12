@@ -50,7 +50,7 @@ jobs:
       - name: Install Android NDK
         run: |
           sdkmanager "ndk;26.1.10909125"
-          yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"
+          yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
 
       - name: Create Android signing config
         shell: bash

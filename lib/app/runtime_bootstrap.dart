@@ -47,20 +47,28 @@ class RuntimeBootstrap {
 
   Future<void> _runWarmupChecks() async {
     await Future.wait<void>([
-      _critical('database', () => di.sl<DatabaseHelper>().database.then((_) {})),
+      _critical('database', () async {
+        final _ = await di.sl<DatabaseHelper>().database;
+      }),
       _critical(
         'runtime_mode',
-        () => di.sl<AiRuntimeSettingsService>().loadRuntimeMode().then((_) {}),
+        () async {
+          await di.sl<AiRuntimeSettingsService>().loadRuntimeMode();
+        },
       ),
       _critical(
         'model_checks',
-        () => di.sl<LocalAiRepository>().getSelectedModel().then((_) {}),
+        () async {
+          await di.sl<LocalAiRepository>().getSelectedModel();
+        },
       ),
     ]);
 
     // Optional preload checks should never crash startup.
+    // Intentionally resolve singleton once to force lazy service construction.
     di.sl<PreferencesService>();
     await _guarded('orchestrator_boot', () async {
+      // Intentionally resolve singleton once to warm orchestration graph.
       di.sl<Orchestrator>();
     });
   }

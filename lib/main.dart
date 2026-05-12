@@ -44,9 +44,6 @@ class _StartupAppState extends State<StartupApp> {
       await _bootstrap.initialize();
       if (!mounted) return;
       _transitionController.markReady();
-      setState(() {
-        _startupError = null;
-      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
