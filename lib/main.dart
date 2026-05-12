@@ -16,17 +16,17 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Read the real installed version from the platform — never hardcode this.
-  const String _versionFallback = '1.0.12';
+  const String versionFallback = '1.0.12';
   String appVersion;
   try {
     final info = await PackageInfo.fromPlatform();
-    appVersion = info.version.isNotEmpty ? info.version : _versionFallback;
+    appVersion = info.version.isNotEmpty ? info.version : versionFallback;
     debugPrint('[OTA] PackageInfo version: ${info.version}+${info.buildNumber}');
   } catch (e) {
     // Fallback: try compile-time define, then hard default.
     appVersion = const String.fromEnvironment(
       'APP_VERSION',
-      defaultValue: _versionFallback,
+      defaultValue: versionFallback,
     );
     debugPrint('[OTA] PackageInfo failed ($e), using fallback: $appVersion');
   }

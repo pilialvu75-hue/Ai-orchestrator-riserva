@@ -23,7 +23,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final LoadChatMessages loadChatMessages;
   final PruneChatHistory pruneChatHistory;
 
-  String _activeProvider;
+  final String _activeProvider;
   List<ChatMessage> _messages = [];
 
   Future<void> _onLoadMessages(

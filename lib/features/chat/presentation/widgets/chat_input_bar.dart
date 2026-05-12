@@ -26,7 +26,7 @@ class ChatInputBar extends StatefulWidget {
 }
 
 class _ChatInputBarState extends State<ChatInputBar> {
-  static final _uuid = Uuid();
+  static const _uuid = Uuid();
 
   final _controller = TextEditingController();
   final List<ChatAttachment> _attachments = <ChatAttachment>[];

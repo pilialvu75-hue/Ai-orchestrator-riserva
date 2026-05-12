@@ -592,7 +592,7 @@ class _ModuleCard extends StatelessWidget {
                 ),
                 child: Icon(
                   icon,
-                  color: Color(0xFF8AB4F8),
+                  color: const Color(0xFF8AB4F8),
                   size: 22,
                 ),
               ),

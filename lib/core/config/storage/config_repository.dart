@@ -17,6 +17,7 @@ class ConfigRepository implements ConfigStorage {
     await _preferencesService.setBool(key, value);
   }
 
+  @override
   Future<void> remove(String key) async {
     await _preferencesService.remove(key);
   }

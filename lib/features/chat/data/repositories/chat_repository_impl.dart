@@ -19,7 +19,7 @@ class ChatRepositoryImpl implements ChatRepository {
   final ChatLocalDataSource localDataSource;
   final Orchestrator orchestrator;
 
-  static final _uuid = Uuid();
+  static const _uuid = Uuid();
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
