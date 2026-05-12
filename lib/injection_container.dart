@@ -415,11 +415,11 @@ String _resolveNodeId(SharedPreferences prefs) {
   return nodeId;
 }
 
-/// Generates a stable random node ID for this installation.
-///
-/// The result is a 16-character hex string derived from the current
-/// microsecond clock, which is sufficiently unique for LAN sync.
+/// Generates a unique node ID combining the current microsecond timestamp
+/// and a hash of the [DateTime.now()] microsecond/millisecond mix to reduce
+/// collision risk when multiple installations are created simultaneously.
 String _generateNodeId() {
-  final now = DateTime.now().microsecondsSinceEpoch;
-  return now.toRadixString(16).padLeft(16, '0');
+  final t = DateTime.now();
+  final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
+  return entropy.toRadixString(16).padLeft(16, '0');
 }

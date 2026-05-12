@@ -66,8 +66,11 @@ class SyncDiscoveryService {
       );
       // Immediately send one beacon on start.
       _broadcast();
-    } catch (_) {
+    } catch (e) {
       // Discovery is optional; if binding fails the app continues without sync.
+      // Log to aid troubleshooting (e.g. port in use, missing permissions).
+      // ignore: avoid_print
+      print('[SyncDiscoveryService] could not bind discovery socket: $e');
       _socket = null;
     }
   }
@@ -102,8 +105,10 @@ class SyncDiscoveryService {
         InternetAddress(AppConstants.syncDiscoveryMulticast),
         AppConstants.syncDiscoveryPort,
       );
-    } catch (_) {
-      // Network not available; silently ignore.
+    } catch (e) {
+      // Network not available or interface error; log for debugging.
+      // ignore: avoid_print
+      print('[SyncDiscoveryService] broadcast failed: $e');
     }
   }
 
