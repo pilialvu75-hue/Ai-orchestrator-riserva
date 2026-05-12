@@ -213,9 +213,10 @@ class _AppShellState extends State<AppShell> {
               if (ready)
                 FilledButton(
                   onPressed: () async {
-                    await _updateManager.prepareInstallIntent();
-                    if (!mounted) return;
-                    Navigator.pop(ctx);
+                      final nav = Navigator.of(ctx);
+                      await _updateManager.prepareInstallIntent();
+                      if (!mounted) return;
+                      nav.pop();
                   },
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF8AB4F8),
