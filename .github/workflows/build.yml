@@ -165,6 +165,8 @@ jobs:
           rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
           flutter pub cache repair
           flutter pub get
+          # Intentional hard refresh for CI stabilization: recovers from partial/corrupt
+          # Flutter engine downloads that caused missing arm64_v8a_debug artifacts.
           flutter precache --android --force --verbose 2>&1 | tee flutter_engine_precache.log
 
       - name: Force dependency re-resolution
@@ -173,6 +175,8 @@ jobs:
           set -o pipefail
           (
             cd android
+            # Intentional full re-resolution to avoid reusing stale dependency metadata
+            # when CI previously failed to materialize Flutter engine artifacts.
             ./gradlew --refresh-dependencies :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee dependency_tree.log
 
