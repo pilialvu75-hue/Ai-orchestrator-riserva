@@ -97,6 +97,84 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Network and repository access audit
+        shell: bash
+        run: |
+          set -o pipefail
+          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
+          {
+            echo "==== NETWORK / REPOSITORY ACCESS AUDIT ===="
+            date -u
+            echo
+            echo "==== PROXY ENV ===="
+            env | grep -iE '^(http_proxy|https_proxy|no_proxy)=' || echo "No proxy variables set"
+            echo
+            echo "==== DNS CHECK ===="
+            for host in storage.googleapis.com dl.google.com repo.maven.apache.org pub.dev; do
+              echo "--- $host ---"
+              getent hosts "$host" || true
+            done
+            echo
+            echo "==== ENDPOINT REACHABILITY ===="
+            URLS=(
+              "https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.pom"
+              "https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.pom"
+              "https://dl.google.com/dl/android/maven2/"
+              "https://repo.maven.apache.org/maven2/"
+              "https://pub.dev/"
+            )
+            for url in "${URLS[@]}"; do
+              echo "--- $url ---"
+              curl -I -L --retry 3 --retry-delay 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$url" || true
+            done
+          } | tee -a gradle_stacktrace.log
+
+      - name: Clean Flutter/Gradle state and repair caches
+        shell: bash
+        env:
+          TERM: dumb
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+        run: |
+          set -o pipefail
+          flutter clean
+          rm -rf .cxx build android/.gradle
+          rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
+          flutter pub cache repair
+          flutter pub get
+          flutter precache --android --force --verbose 2>&1 | tee flutter_engine_presolve.log
+
+      - name: Force dependency re-resolution
+        shell: bash
+        env:
+          TERM: dumb
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+        run: |
+          set -o pipefail
+          (
+            cd android
+            ./gradlew --refresh-dependencies :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
+          ) 2>&1 | tee dependency_tree.log
+
+      - name: Flutter SDK integrity and engine consistency
+        shell: bash
+        run: |
+          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
+          {
+            echo "==== FLUTTER SDK INTEGRITY ===="
+            flutter --version
+            flutter doctor -v
+            echo
+            echo "==== FLUTTER ENGINE HASH ===="
+            echo "engine_hash=${ENGINE_HASH}"
+            echo "engine_version=${ENGINE_VERSION}"
+            echo "arm64_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
+            echo "embedding_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
+          } | tee -a gradle_stacktrace.log
+
       - name: Flutter analyze
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
@@ -117,6 +195,9 @@ jobs:
             echo "org.gradle.console=plain"
             # Force info-level logging globally so detailed diagnostics always appear
             echo "org.gradle.logging.level=info"
+            # Retry unstable repository downloads to mitigate transient CI network failures
+            echo "org.gradle.internal.repository.max.retries=3"
+            echo "org.gradle.internal.repository.initial.backoff=1000"
           } >> ~/.gradle/gradle.properties
 
       - name: Determine version
@@ -141,11 +222,12 @@ jobs:
       - name: Prepare forensic log files
         shell: bash
         run: |
-          : > flutter_verbose.log
-          : > gradle_stacktrace.log
-          : > dependency_tree.log
-          : > cmake_diagnostics.log
-          : > kotlin_diagnostics.log
+          touch flutter_verbose.log
+          touch gradle_stacktrace.log
+          touch dependency_tree.log
+          touch cmake_diagnostics.log
+          touch kotlin_diagnostics.log
+          touch flutter_engine_presolve.log
 
       - name: Print build environment (forensic baseline)
         shell: bash
@@ -214,7 +296,7 @@ jobs:
           # Pass plain-console and info-level logging into the Gradle daemon that
           # Flutter spawns internally, preventing any line-truncation from the
           # rich Gradle console or ANSI escape-code sequences.
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
@@ -226,13 +308,13 @@ jobs:
         shell: bash
         env:
           TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
             cd android
-            ./gradlew assembleDebug --stacktrace --info --warning-mode all --console=plain
+            ./gradlew --refresh-dependencies assembleDebug --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee -a gradle_stacktrace.log
 
       - name: Resolve debug APK path
@@ -277,7 +359,7 @@ jobs:
         shell: bash
         env:
           TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
@@ -285,6 +367,25 @@ jobs:
             cd android
             ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee dependency_tree.log
+
+      - name: Extract exact Flutter artifact dependency diagnostics
+        if: always()
+        shell: bash
+        run: |
+          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
+          echo "==== EXACT FLUTTER ENGINE DEPENDENCY DIAGNOSTICS ===="
+          echo "dependency_name=io.flutter:arm64_v8a_debug:${ENGINE_VERSION}"
+          echo "repository_source=https://storage.googleapis.com/download.flutter.io"
+          echo "artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
+          echo "embedding_dependency=io.flutter:flutter_embedding_debug:${ENGINE_VERSION}"
+          echo "embedding_artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
+          echo
+          echo "==== RESOLUTION EVIDENCE (dependency_tree.log) ===="
+          grep -n -E "io\\.flutter:arm64_v8a_debug|io\\.flutter:flutter_embedding_debug|Could not resolve|Could not find|https://storage.googleapis.com/download.flutter.io" dependency_tree.log | head -n 200 || true
+          echo
+          echo "==== ENGINE DOWNLOAD LOGS (flutter_engine_presolve.log / flutter_verbose.log) ===="
+          grep -n -E "arm64_v8a_debug|flutter_embedding_debug|download.flutter.io|Downloading|Could not resolve|Could not find" flutter_engine_presolve.log flutter_verbose.log | head -n 200 || true
 
       - name: Native build diagnostics (CMake/NDK/JNI/.so)
         if: always()
@@ -469,6 +570,7 @@ jobs:
             dependency_tree.log
             cmake_diagnostics.log
             kotlin_diagnostics.log
+            flutter_engine_presolve.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
