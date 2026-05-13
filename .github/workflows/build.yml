@@ -235,6 +235,23 @@ jobs:
             ./gradlew assembleDebug --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee -a gradle_stacktrace.log
 
+      - name: Resolve debug APK path
+        if: always()
+        shell: bash
+        run: |
+          # Prefer the universal APK produced by ABI splits (universalApk=true);
+          # fall back to the flat debug APK path for non-split builds.
+          UNIVERSAL=$(find build/app/outputs/flutter-apk \
+                        -maxdepth 1 -name 'app-universal-debug.apk' 2>/dev/null \
+                        | head -1 || true)
+          if [ -n "$UNIVERSAL" ]; then
+            echo "DEBUG_APK_PATH=$UNIVERSAL" >> "$GITHUB_ENV"
+            echo "Resolved APK: $UNIVERSAL (universal)"
+          else
+            echo "DEBUG_APK_PATH=build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_ENV"
+            echo "Resolved APK: build/app/outputs/flutter-apk/app-debug.apk (flat)"
+          fi
+
       - name: Kotlin diagnostics
         if: always()
         continue-on-error: true
@@ -384,15 +401,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          # When ABI splits with universalApk=true are enabled, Flutter outputs
-          # app-universal-debug.apk alongside per-ABI APKs.  Fall back to the
-          # legacy flat path for non-split builds.
-          APK=$(find build/app/outputs/flutter-apk \
-                  -name 'app-universal-debug.apk' 2>/dev/null | head -1 || true)
-          if [ -z "$APK" ]; then
-            APK="build/app/outputs/flutter-apk/app-debug.apk"
-          fi
-
+          APK="${{ env.DEBUG_APK_PATH }}"
           if [ ! -f "$APK" ]; then
             echo "APK not generated; skipping APK forensic inspection"
             exit 0
@@ -467,18 +476,7 @@ jobs:
         if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
         run: |
           mkdir -p release-assets
-
-          # Prefer the universal APK (all ABIs bundled) when ABI splits are enabled;
-          # fall back to the flat debug APK for non-split builds.
-          UNIVERSAL=$(find build/app/outputs/flutter-apk \
-                        -name 'app-universal-debug.apk' 2>/dev/null | head -1 || true)
-          if [ -n "$UNIVERSAL" ]; then
-            SRC="$UNIVERSAL"
-          else
-            SRC="build/app/outputs/flutter-apk/app-debug.apk"
-          fi
-
-          cp "$SRC" release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+          cp "${{ env.DEBUG_APK_PATH }}" release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
       - name: Upload artifact
         if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
