@@ -115,15 +115,13 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
 
-      - name: Prepare forensic log directories
+      - name: Prepare forensic log files
         shell: bash
         run: |
-          mkdir -p build/forensics build/reports
-          : > build/forensics/flutter-verbose-log.txt
-          : > build/forensics/gradle-full-log.txt
-          : > build/forensics/cmake-build-log.txt
-          : > build/forensics/ndk-build-log.txt
-          : > build/reports/dependency-tree.txt
+          : > flutter_verbose.log
+          : > gradle_stacktrace.log
+          : > dependency_tree.log
+          : > cmake_diagnostics.log
 
       - name: Runner memory and stability baseline
         shell: bash
@@ -141,7 +139,7 @@ jobs:
             echo
             echo "==== JAVA/GRADLE PROCESSES ===="
             ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
-          } | tee -a build/forensics/gradle-full-log.txt
+          } | tee -a gradle_stacktrace.log
 
       - name: Build debug APK (Flutter verbose forensic)
         id: flutter_forensic
@@ -149,7 +147,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          flutter build apk --debug --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee build/forensics/flutter-verbose-log.txt
+          flutter build apk --debug --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
 
       - name: Build debug APK (Gradle forensic)
         id: gradle_forensic
@@ -160,7 +158,7 @@ jobs:
           (
             cd android
             ./gradlew assembleDebug --stacktrace --info --warning-mode all
-          ) 2>&1 | tee -a build/forensics/gradle-full-log.txt
+          ) 2>&1 | tee -a gradle_stacktrace.log
 
       - name: Dependency conflict scan
         if: always()
@@ -171,7 +169,7 @@ jobs:
           (
             cd android
             ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all
-          ) 2>&1 | tee build/reports/dependency-tree.txt
+          ) 2>&1 | tee dependency_tree.log
 
       - name: Native build diagnostics (CMake/NDK/JNI/.so)
         if: always()
@@ -222,7 +220,7 @@ jobs:
             echo "==== STRIP TOOL PRESENCE ===="
             command -v llvm-strip || true
             command -v strip || true
-          } | tee build/forensics/cmake-build-log.txt
+          } | tee cmake_diagnostics.log
 
       - name: NDK/JNI packaging diagnostics
         if: always()
@@ -238,7 +236,7 @@ jobs:
             echo
             echo "==== CXX BUILD TREE ===="
             find build/.cxx -maxdepth 6 -type f 2>/dev/null | sort
-          } | tee build/forensics/ndk-build-log.txt
+          } | tee -a cmake_diagnostics.log
 
       - name: Runner memory and stability post-build
         if: always()
@@ -250,7 +248,25 @@ jobs:
             free -h || true
             df -h || true
             ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
-          } | tee -a build/forensics/gradle-full-log.txt
+          } | tee -a gradle_stacktrace.log
+
+      - name: Print forensic log tails
+        if: always()
+        shell: bash
+        run: |
+          echo "==== TAIL gradle_stacktrace.log (last 400 lines) ===="
+          if [ -f gradle_stacktrace.log ]; then
+            tail -n 400 gradle_stacktrace.log
+          else
+            echo "gradle_stacktrace.log not found"
+          fi
+          echo
+          echo "==== TAIL flutter_verbose.log (last 300 lines) ===="
+          if [ -f flutter_verbose.log ]; then
+            tail -n 300 flutter_verbose.log
+          else
+            echo "flutter_verbose.log not found"
+          fi
 
       - name: Verify native libraries
         if: always()
@@ -270,11 +286,10 @@ jobs:
           name: gradle-forensics-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           path: |
-            build/forensics/flutter-verbose-log.txt
-            build/forensics/gradle-full-log.txt
-            build/forensics/cmake-build-log.txt
-            build/forensics/ndk-build-log.txt
-            build/reports/dependency-tree.txt
+            flutter_verbose.log
+            gradle_stacktrace.log
+            dependency_tree.log
+            cmake_diagnostics.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
