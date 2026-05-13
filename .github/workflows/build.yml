@@ -18,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
 
     timeout-minutes: 90
+    env:
+      TERM: dumb
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      # Gradle backoff unit is milliseconds: 1000 = 1 second.
+      GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
 
     steps:
       - name: Checkout repository
@@ -97,6 +102,99 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Compute Flutter engine metadata
+        shell: bash
+        run: |
+          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          if [ -z "${ENGINE_HASH}" ]; then
+            echo "ERROR: Flutter engine version file (bin/internal/engine.version) is missing or unreadable; cannot resolve Flutter engine artifact URLs."
+            exit 1
+          fi
+          # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
+          echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
+          echo "ENGINE_VERSION=1.0.0-${ENGINE_HASH}" >> "$GITHUB_ENV"
+
+      - name: Prepare forensic log files
+        shell: bash
+        run: |
+          # Create/truncate forensic outputs early so partial diagnostics still exist if later steps fail.
+          : > flutter_verbose.log
+          : > gradle_stacktrace.log
+          : > dependency_tree.log
+          : > cmake_diagnostics.log
+          : > kotlin_diagnostics.log
+
+      - name: Network and repository access audit
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "==== NETWORK / REPOSITORY ACCESS AUDIT ===="
+            date -u
+            echo
+            echo "==== PROXY ENV ===="
+            env | grep -iE '^(http_proxy|https_proxy|no_proxy)=' || echo "No proxy variables set"
+            echo
+            echo "==== DNS CHECK ===="
+            for host in storage.googleapis.com dl.google.com repo.maven.apache.org pub.dev; do
+              echo "--- $host ---"
+              getent hosts "$host" || true
+            done
+            echo
+            echo "==== ENDPOINT REACHABILITY ===="
+            URLS=(
+              "https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.pom"
+              "https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.pom"
+              "https://dl.google.com/dl/android/maven2/"
+              "https://repo.maven.apache.org/maven2/"
+              "https://pub.dev/"
+            )
+            echo "(diagnostic-only reachability checks; failures are logged and do not fail this audit step)"
+            for url in "${URLS[@]}"; do
+              echo "--- $url ---"
+              curl -I -L --retry 3 --retry-delay 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$url" || true
+            done
+          } | tee -a gradle_stacktrace.log
+
+      - name: Clean Flutter/Gradle state and repair caches
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter clean
+          rm -rf .cxx build android/.gradle
+          rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
+          flutter pub cache repair
+          flutter pub get
+          # Intentional hard refresh for CI stabilization: recovers from partial/corrupt
+          # Flutter engine downloads that caused missing arm64_v8a_debug artifacts.
+          flutter precache --android --force --verbose 2>&1 | tee flutter_engine_precache.log
+
+      - name: Force dependency re-resolution
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd android
+            # Intentional full re-resolution to avoid reusing stale dependency metadata
+            # when CI previously failed to materialize Flutter engine artifacts.
+            ./gradlew --refresh-dependencies :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
+          ) 2>&1 | tee dependency_tree.log
+
+      - name: Flutter SDK integrity and engine consistency
+        shell: bash
+        run: |
+          {
+            echo "==== FLUTTER SDK INTEGRITY ===="
+            flutter --version
+            flutter doctor -v
+            echo
+            echo "==== FLUTTER ENGINE HASH ===="
+            echo "engine_hash=${ENGINE_HASH}"
+            echo "engine_version=${ENGINE_VERSION}"
+            echo "arm64_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
+            echo "embedding_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
+          } | tee -a gradle_stacktrace.log
+
       - name: Flutter analyze
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
@@ -137,15 +235,6 @@ jobs:
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
-
-      - name: Prepare forensic log files
-        shell: bash
-        run: |
-          : > flutter_verbose.log
-          : > gradle_stacktrace.log
-          : > dependency_tree.log
-          : > cmake_diagnostics.log
-          : > kotlin_diagnostics.log
 
       - name: Print build environment (forensic baseline)
         shell: bash
@@ -209,13 +298,6 @@ jobs:
         id: flutter_forensic
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          # Pass plain-console and info-level logging into the Gradle daemon that
-          # Flutter spawns internally, preventing any line-truncation from the
-          # rich Gradle console or ANSI escape-code sequences.
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
@@ -224,10 +306,6 @@ jobs:
         id: gradle_forensic
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
@@ -275,16 +353,29 @@ jobs:
         if: always()
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
             cd android
             ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee dependency_tree.log
+
+      - name: Extract exact Flutter artifact dependency diagnostics
+        if: always()
+        shell: bash
+        run: |
+          echo "==== EXACT FLUTTER ENGINE DEPENDENCY DIAGNOSTICS ===="
+          echo "dependency_name=io.flutter:arm64_v8a_debug:${ENGINE_VERSION}"
+          echo "repository_source=https://storage.googleapis.com/download.flutter.io"
+          echo "artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
+          echo "embedding_dependency=io.flutter:flutter_embedding_debug:${ENGINE_VERSION}"
+          echo "embedding_artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
+          echo
+          echo "==== RESOLUTION EVIDENCE (dependency_tree.log) ===="
+          grep -n -E "io\\.flutter:arm64_v8a_debug|io\\.flutter:flutter_embedding_debug|Could not resolve|Could not find|https://storage.googleapis.com/download.flutter.io" dependency_tree.log | head -n 200 || true
+          echo
+          echo "==== ENGINE DOWNLOAD LOGS (flutter_engine_precache.log / flutter_verbose.log) ===="
+          grep -n -E "arm64_v8a_debug|flutter_embedding_debug|download.flutter.io|Downloading|Could not resolve|Could not find" flutter_engine_precache.log flutter_verbose.log | head -n 200 || true
 
       - name: Native build diagnostics (CMake/NDK/JNI/.so)
         if: always()
@@ -469,6 +560,7 @@ jobs:
             dependency_tree.log
             cmake_diagnostics.log
             kotlin_diagnostics.log
+            flutter_engine_precache.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
