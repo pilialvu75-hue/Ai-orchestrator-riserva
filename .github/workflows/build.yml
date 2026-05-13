@@ -199,7 +199,7 @@ jobs:
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
-          flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
+          flutter build apk --debug --target-platform=android-arm64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
 
       - name: Build debug APK (Gradle forensic)
         id: gradle_forensic
@@ -359,6 +359,56 @@ jobs:
               echo
             fi
           done
+
+      - name: APK forensic inspection (aapt / unzip / apksigner)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          APK="build/app/outputs/flutter-apk/app-debug.apk"
+          if [ ! -f "$APK" ]; then
+            echo "APK not generated; skipping APK forensic inspection"
+            exit 0
+          fi
+
+          echo "==== APK SIZE ===="
+          du -sh "$APK"
+          ls -lh "$APK"
+          echo
+
+          echo "==== AAPT DUMP BADGING ===="
+          AAPT=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "aapt" -type f | sort -V | tail -1 || true)
+          if [ -n "$AAPT" ]; then
+            "$AAPT" dump badging "$APK" 2>&1 | grep -E "(package:|sdkVersion:|targetSdkVersion:|native-code:|uses-permission:|application-label:)" || true
+          else
+            echo "aapt not found"
+          fi
+          echo
+
+          echo "==== APK NATIVE LIBRARY MANIFEST (unzip) ===="
+          unzip -l "$APK" | grep '\.so$' | sort || true
+          echo
+
+          echo "==== APK SIGNATURE VERIFICATION (apksigner) ===="
+          APKSIGNER=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "apksigner" -type f | sort -V | tail -1 || true)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1 | head -n 40 || true
+          else
+            echo "apksigner not found"
+          fi
+          echo
+
+          echo "==== APK ZIP INTEGRITY (unzip test) ===="
+          unzip -t "$APK" > /dev/null && echo "ZIP OK" || echo "ZIP CORRUPTED"
+          echo
+
+          echo "==== DUPLICATE NATIVE LIB NAMES IN APK ===="
+          unzip -l "$APK" | grep '\.so$' | awk '{print $NF}' \
+            | while read -r path; do basename "$path"; done \
+            | sort | uniq -c | sort -nr \
+            | awk '$1>1 {print "DUPLICATE:", $0}' \
+            || echo "No duplicates"
+          echo
 
       - name: Verify native libraries
         if: always()

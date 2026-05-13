@@ -18,8 +18,12 @@ if (keystorePropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty("flutter.versionCode") ?: "1"
 def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
-def supportedAndroidAbis = ["arm64-v8a", "x86_64"]
-def supportedFlutterTargetPlatforms = ["android-arm64", "android-x64"]
+// Restrict to arm64-v8a only for physical-device debug installs.
+// x86_64 support is preserved in native/android/CMakeLists.txt and
+// can be re-enabled here (and in the CI --target-platform flag) once
+// the APK install regression on physical Samsung hardware is resolved.
+def supportedAndroidAbis = ["arm64-v8a"]
+def supportedFlutterTargetPlatforms = ["android-arm64"]
 def safeFlutterVersionCode
 try {
     safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
@@ -82,7 +86,14 @@ android {
             cmake {
                 abiFilters(*supportedAndroidAbis)
                 cppFlags "-std=c++17 -O3 -fno-finite-math-only -DNDEBUG"
-                arguments "-DAI_ANDROID_ENABLE_MLC=OFF"
+                arguments(
+                    "-DAI_ANDROID_ENABLE_MLC=OFF",
+                    // Disable OpenMP to prevent libomp.so from being bundled
+                    // into the APK. libomp.so (LLVM OpenMP runtime) is not a
+                    // standard Android system library and causes "App not
+                    // installed" / "Package invalid" errors on Samsung devices.
+                    "-DGGML_OPENMP=OFF"
+                )
             }
         }
     }
@@ -129,8 +140,8 @@ android {
         }
     }
 
-    // Disable ABI splits to produce a single universal fat APK that can be
-    // installed directly on any supported device (arm64-v8a or x86_64).
+    // Disable ABI splits to produce a single universal APK for arm64-v8a.
+    // x86_64 can be re-enabled by updating supportedAndroidAbis above.
     splits {
         abi {
             enable false
