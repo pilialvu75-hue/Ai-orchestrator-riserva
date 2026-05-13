@@ -97,13 +97,27 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Compute Flutter engine metadata
+        shell: bash
+        run: |
+          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
+          echo "ENGINE_VERSION=1.0.0-${ENGINE_HASH}" >> "$GITHUB_ENV"
+
+      - name: Prepare forensic log files
+        shell: bash
+        run: |
+          : > flutter_verbose.log
+          : > gradle_stacktrace.log
+          : > dependency_tree.log
+          : > cmake_diagnostics.log
+          : > kotlin_diagnostics.log
+          : > flutter_engine_presolve.log
+
       - name: Network and repository access audit
         shell: bash
         run: |
           set -o pipefail
-          : > gradle_stacktrace.log
-          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
-          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
           {
             echo "==== NETWORK / REPOSITORY ACCESS AUDIT ===="
             date -u
@@ -139,7 +153,6 @@ jobs:
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
-          : > flutter_engine_presolve.log
           flutter clean
           rm -rf .cxx build android/.gradle
           rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
@@ -155,7 +168,6 @@ jobs:
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
-          : > dependency_tree.log
           (
             cd android
             ./gradlew --refresh-dependencies :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
@@ -164,8 +176,6 @@ jobs:
       - name: Flutter SDK integrity and engine consistency
         shell: bash
         run: |
-          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
-          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
           {
             echo "==== FLUTTER SDK INTEGRITY ===="
             flutter --version
@@ -221,16 +231,6 @@ jobs:
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
-
-      - name: Prepare forensic log files
-        shell: bash
-        run: |
-          : > flutter_verbose.log
-          touch gradle_stacktrace.log
-          touch dependency_tree.log
-          : > cmake_diagnostics.log
-          : > kotlin_diagnostics.log
-          touch flutter_engine_presolve.log
 
       - name: Print build environment (forensic baseline)
         shell: bash
@@ -375,8 +375,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
-          ENGINE_VERSION="1.0.0-${ENGINE_HASH}"
           echo "==== EXACT FLUTTER ENGINE DEPENDENCY DIAGNOSTICS ===="
           echo "dependency_name=io.flutter:arm64_v8a_debug:${ENGINE_VERSION}"
           echo "repository_source=https://storage.googleapis.com/download.flutter.io"
