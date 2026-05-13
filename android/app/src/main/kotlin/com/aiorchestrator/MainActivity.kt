@@ -306,7 +306,15 @@ class MainActivity : FlutterActivity() {
         }
         sherpaLibrariesChecked = true
         val failures = mutableListOf<String>()
+        val nativeLibraryDirectory = File(applicationInfo.nativeLibraryDir)
         for (group in sherpaLibraryGroups) {
+            val missingLibraries = group.filterNot { libraryName ->
+                File(nativeLibraryDirectory, System.mapLibraryName(libraryName)).exists()
+            }
+            if (missingLibraries.isNotEmpty()) {
+                failures += "${group.joinToString("+")}: missing ${missingLibraries.joinToString(",")}"
+                continue
+            }
             try {
                 group.forEach(System::loadLibrary)
                 sherpaLibrariesLoaded = true

@@ -22,6 +22,10 @@ class VoiceInputService {
   bool get isListening => _engine.isListening;
 
   Future<bool> initialize() async {
+    if (_lastStatus?.readyForInput == true) {
+      return true;
+    }
+
     final requiresRuntimeMicPermission = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS ||

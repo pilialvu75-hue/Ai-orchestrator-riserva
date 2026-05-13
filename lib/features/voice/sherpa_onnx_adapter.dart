@@ -72,10 +72,9 @@ class SherpaOnnxAdapter implements VoiceEngine {
     await _asrSubscription?.cancel();
     _asrSubscription = _asrEventChannel.receiveBroadcastStream().listen(
       (dynamic event) {
-        if (event is! Map) return;
-        final map = Map<Object?, Object?>.from(event as Map<dynamic, dynamic>);
-        final text = (map['text'] as String? ?? '').trim();
-        final isFinal = map['isFinal'] == true;
+        if (event is! Map<dynamic, dynamic>) return;
+        final text = (event['text'] as String? ?? '').trim();
+        final isFinal = event['isFinal'] == true;
         if (text.isNotEmpty) {
           onResult(text, isFinal);
         }

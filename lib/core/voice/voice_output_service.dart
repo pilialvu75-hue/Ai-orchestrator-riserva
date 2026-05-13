@@ -18,6 +18,10 @@ class VoiceOutputService {
   bool get isSpeaking => _engine.isSpeaking;
 
   Future<bool> initialize() async {
+    if (_lastStatus?.readyForOutput == true) {
+      return true;
+    }
+
     _lastStatus = await _engine.initialize();
     return _lastStatus?.readyForOutput == true;
   }
