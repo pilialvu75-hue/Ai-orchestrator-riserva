@@ -142,7 +142,11 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          APP_VERSION=$(python -c "from pathlib import Path; lines = Path('pubspec.yaml').read_text().splitlines(); print(next(line.split(':', 1)[1].strip() for line in lines if line.startswith('version:')))")
+          APP_VERSION=$(grep -E '^version:' pubspec.yaml | head -n 1 | sed 's/^version:[[:space:]]*//')
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::version not found in pubspec.yaml"
+            exit 1
+          fi
           VERSION_NAME="${APP_VERSION%%+*}"
           if [[ "$APP_VERSION" == *+* ]]; then
             PUBSPEC_VERSION_CODE="${APP_VERSION##*+}"
@@ -231,8 +235,9 @@ jobs:
         run: |
           set -euo pipefail
           find "$GITHUB_WORKSPACE" \
-            -path "$GITHUB_WORKSPACE/.git" -prune -o \
-            -type f \( -name '*.jks' -o -name '*.keystore' -o -name 'key.properties' \) \
+            -type f \
+            -not -path "$GITHUB_WORKSPACE/.git/*" \
+            \( -name '*.jks' -o -name '*.keystore' -o -name 'key.properties' \) \
             -print | tee sensitive_files_audit.log
           if [ -s sensitive_files_audit.log ]; then
             echo "::error::Sensitive signing files were found inside the workspace"
