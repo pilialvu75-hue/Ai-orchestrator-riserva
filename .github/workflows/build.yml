@@ -787,6 +787,10 @@ jobs:
             echo "BUILD SUCCEEDED"
             echo "Validated APK: ${{ env.DEBUG_APK_PATH }}"
           else
-            echo "BUILD FAILED — gradle: ${{ steps.gradle_forensic.outcome }}, DEBUG_APK_FOUND: ${{ env.DEBUG_APK_FOUND }}, apksigner: ${{ steps.validate_apk_signature.outcome }}, zipalign: ${{ steps.validate_apk_zipalign.outcome }}"
+            echo "BUILD FAILED"
+            echo "gradle: ${{ steps.gradle_forensic.outcome }}"
+            echo "DEBUG_APK_FOUND: ${{ env.DEBUG_APK_FOUND }}"
+            echo "apksigner: ${{ steps.validate_apk_signature.outcome }}"
+            echo "zipalign: ${{ steps.validate_apk_zipalign.outcome }}"
             exit 1
           fi
