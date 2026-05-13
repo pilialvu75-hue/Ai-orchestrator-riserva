@@ -95,7 +95,7 @@ jobs:
 
       - name: Prepare runtime Android signing files
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
