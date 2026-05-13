@@ -654,11 +654,11 @@ jobs:
           unzip -t "$APK" | tee -a apk_contents.log
 
           grep -Eq 'lib/arm64-v8a/.*\.so' apk_contents.log \
-            || { echo "Missing lib/arm64-v8a/*.so entries" | tee -a apk_contents.log; exit 1; }
+            || { echo "ERROR: APK validation failed - required arm64-v8a native libraries not found" | tee -a apk_contents.log; exit 1; }
           grep -Fq 'AndroidManifest.xml' apk_contents.log \
-            || { echo "Missing AndroidManifest.xml" | tee -a apk_contents.log; exit 1; }
+            || { echo "ERROR: APK validation failed - AndroidManifest.xml not found in APK" | tee -a apk_contents.log; exit 1; }
           grep -Fq 'classes.dex' apk_contents.log \
-            || { echo "Missing classes.dex" | tee -a apk_contents.log; exit 1; }
+            || { echo "ERROR: APK validation failed - classes.dex not found in APK" | tee -a apk_contents.log; exit 1; }
 
       - name: Upload forensic diagnostics artifacts
         if: always()
