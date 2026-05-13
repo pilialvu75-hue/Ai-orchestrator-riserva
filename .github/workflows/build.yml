@@ -380,35 +380,20 @@ jobs:
           set -o nounset
           set -o pipefail
 
-          # Prefer the original arm64-specific Flutter-generated APK directly.
-          CANDIDATES=(
-            "build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
-            "build/app/outputs/flutter-apk/app-universal-debug.apk"
-            "build/app/outputs/flutter-apk/app-debug.apk"
-          )
-
-          RESOLVED_APK=""
-          for apk in "${CANDIDATES[@]}"; do
-            if [ -f "$apk" ]; then
-              RESOLVED_APK="$apk"
-              break
-            fi
-          done
-
-          if [ -z "$RESOLVED_APK" ]; then
-            RESOLVED_APK=$(find build/app/outputs -type f \
+          PRIMARY_APK="build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
+          echo "DEBUG_APK_PATH=$PRIMARY_APK" >> "$GITHUB_ENV"
+          if [ -f "$PRIMARY_APK" ]; then
+            echo "DEBUG_APK_FOUND=true" >> "$GITHUB_ENV"
+            echo "Resolved APK: $PRIMARY_APK"
+          else
+            echo "DEBUG_APK_FOUND=false" >> "$GITHUB_ENV"
+            echo "Resolved APK: missing primary ARM64 APK at $PRIMARY_APK"
+            FALLBACK_APK=$(find build/app/outputs -type f \
               \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
               | sort | head -1 || true)
-          fi
-
-          if [ -n "$RESOLVED_APK" ]; then
-            echo "DEBUG_APK_PATH=$RESOLVED_APK" >> "$GITHUB_ENV"
-            echo "DEBUG_APK_FOUND=true" >> "$GITHUB_ENV"
-            echo "Resolved APK: $RESOLVED_APK"
-          else
-            echo "DEBUG_APK_PATH=" >> "$GITHUB_ENV"
-            echo "DEBUG_APK_FOUND=false" >> "$GITHUB_ENV"
-            echo "Resolved APK: not found"
+            if [ -n "$FALLBACK_APK" ]; then
+              echo "Fallback APK discovered for diagnostics only: $FALLBACK_APK"
+            fi
           fi
 
       - name: Kotlin diagnostics
@@ -649,8 +634,8 @@ jobs:
             build/.cxx/**/CMakeFiles/CMakeError.log
 
       - name: Validate APK signature
+        id: validate_apk_signature
         if: env.DEBUG_APK_FOUND == 'true'
-        continue-on-error: true
         shell: bash
         run: |
           APKSIGNER=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "apksigner" -type f | sort -V | tail -1 || true)
@@ -658,11 +643,12 @@ jobs:
             "$APKSIGNER" verify --verbose "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_signature.log
           else
             echo "apksigner not found" | tee apk_signature.log
+            exit 1
           fi
 
       - name: Validate APK zipalign
+        id: validate_apk_zipalign
         if: env.DEBUG_APK_FOUND == 'true'
-        continue-on-error: true
         shell: bash
         run: |
           ZIPALIGN=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "zipalign" -type f | sort -V | tail -1 || true)
@@ -670,10 +656,42 @@ jobs:
             "$ZIPALIGN" -c -v 4 "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_zipalign.log
           else
             echo "zipalign not found" | tee apk_zipalign.log
+            exit 1
+          fi
+
+      - name: Compute release readiness
+        id: release_gate
+        if: always()
+        shell: bash
+        run: |
+          GRADLE_OUTCOME="${{ steps.gradle_forensic.outcome }}"
+          APK_FOUND="${{ env.DEBUG_APK_FOUND }}"
+          APKSIGNER_OUTCOME="${{ steps.validate_apk_signature.outcome }}"
+          ZIPALIGN_OUTCOME="${{ steps.validate_apk_zipalign.outcome }}"
+
+          if [ -z "$APKSIGNER_OUTCOME" ]; then
+            APKSIGNER_OUTCOME="skipped"
+          fi
+          if [ -z "$ZIPALIGN_OUTCOME" ]; then
+            ZIPALIGN_OUTCOME="skipped"
+          fi
+
+          echo "gradle_outcome=$GRADLE_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "apk_found=$APK_FOUND" >> "$GITHUB_OUTPUT"
+          echo "apksigner_outcome=$APKSIGNER_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "zipalign_outcome=$ZIPALIGN_OUTCOME" >> "$GITHUB_OUTPUT"
+
+          if [[ "$GRADLE_OUTCOME" == "success" \
+             && "$APK_FOUND" == "true" \
+             && "$APKSIGNER_OUTCOME" == "success" \
+             && "$ZIPALIGN_OUTCOME" == "success" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Prepare release assets
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true'
+        if: steps.release_gate.outputs.ready == 'true'
         run: |
           if [ ! -f "${{ env.DEBUG_APK_PATH }}" ]; then
             echo "Resolved APK path does not exist: ${{ env.DEBUG_APK_PATH }}"
@@ -682,14 +700,14 @@ jobs:
           echo "Final APK path: ${{ env.DEBUG_APK_PATH }}"
 
       - name: Upload artifact
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true'
+        if: steps.release_gate.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: AI-Orchestrator-Core-arm64-v8a-debug-${{ steps.version.outputs.tag }}
           path: ${{ env.DEBUG_APK_PATH }}
 
       - name: Generate release notes
-        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         shell: bash
         run: |
           {
@@ -710,7 +728,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -723,12 +741,18 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
-            echo "Forensic build commands reported failure."
-            echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
-            echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
-            echo "Build failed - continuing to diagnostics phase"
+          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" ]]; then
+            echo "Flutter forensic build reported a non-blocking failure."
           fi
+          if [[ "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
+            echo "Gradle build did not succeed."
+          fi
+          echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
+          echo "gradle outcome: ${{ steps.release_gate.outputs.gradle_outcome }}"
+          echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
+          echo "DEBUG_APK_PATH: ${{ env.DEBUG_APK_PATH }}"
+          echo "APK signature validation: ${{ steps.release_gate.outputs.apksigner_outcome }}"
+          echo "APK zipalign validation: ${{ steps.release_gate.outputs.zipalign_outcome }}"
 
       - name: validate-results
         if: always()
@@ -773,8 +797,14 @@ jobs:
           done
           echo
           echo "==== FINAL PASS/FAIL DECISION ===="
-          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
-            echo "BUILD FAILED — flutter: ${{ steps.flutter_forensic.outcome }}, gradle: ${{ steps.gradle_forensic.outcome }}"
+          if [[ "${{ steps.release_gate.outputs.ready }}" == "true" ]]; then
+            echo "BUILD SUCCEEDED"
+            echo "Validated APK: ${{ env.DEBUG_APK_PATH }}"
+          else
+            echo "BUILD FAILED"
+            echo "gradle: ${{ steps.release_gate.outputs.gradle_outcome }}"
+            echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
+            echo "apksigner: ${{ steps.release_gate.outputs.apksigner_outcome }}"
+            echo "zipalign: ${{ steps.release_gate.outputs.zipalign_outcome }}"
             exit 1
           fi
-          echo "BUILD SUCCEEDED"
