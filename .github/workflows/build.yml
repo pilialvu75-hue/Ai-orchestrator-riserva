@@ -107,7 +107,7 @@ jobs:
         run: |
           ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
           if [ -z "${ENGINE_HASH}" ]; then
-            echo "ERROR: Flutter engine.version is missing or unreadable; cannot resolve Flutter engine artifact URLs."
+            echo "ERROR: Flutter engine version file (bin/internal/engine.version) is missing or unreadable; cannot resolve Flutter engine artifact URLs."
             exit 1
           fi
           # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
@@ -149,9 +149,9 @@ jobs:
               "https://repo.maven.apache.org/maven2/"
               "https://pub.dev/"
             )
+            echo "(diagnostic-only reachability checks; failures are logged and do not fail this audit step)"
             for url in "${URLS[@]}"; do
               echo "--- $url ---"
-              echo "(diagnostic-only check; failures are logged and do not fail this audit step)"
               curl -I -L --retry 3 --retry-delay 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$url" || true
             done
           } | tee -a gradle_stacktrace.log
