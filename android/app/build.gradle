@@ -156,7 +156,7 @@ android {
 
 tasks.register("normalizeFlutterDebugApkOutput") {
     doLast {
-        def target = rootProject.file("../build/app/outputs/flutter-apk/app-debug.apk")
+        def target = new File(rootProject.projectDir.parentFile, "build/app/outputs/flutter-apk/app-debug.apk")
         def sourceCandidates = [
             rootProject.file("../build/app/outputs/flutter-apk/app-universal-debug.apk"),
             rootProject.file("../build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"),
@@ -173,7 +173,7 @@ tasks.register("normalizeFlutterDebugApkOutput") {
 
         def source = sourceCandidates.find { it.exists() }
         if (source == null) {
-            logger.lifecycle("No split debug APK found to normalize.")
+            logger.warn("No split debug APK found to normalize.")
             return
         }
 
