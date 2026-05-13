@@ -18,12 +18,13 @@ if (keystorePropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty("flutter.versionCode") ?: "1"
 def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
-// Restrict to arm64-v8a only for physical-device debug installs.
-// x86_64 support is preserved in native/android/CMakeLists.txt and
-// can be re-enabled here (and in the CI --target-platform flag) once
-// the APK install regression on physical Samsung hardware is resolved.
-def supportedAndroidAbis = ["arm64-v8a"]
-def supportedFlutterTargetPlatforms = ["android-arm64"]
+// Universal APK configuration — targets all 64-bit ABIs supported by the
+// native CMake bridge (arm64-v8a and x86_64).  armeabi-v7a is listed in
+// the ABI splits so the universal APK is accepted by the Play Store ABI
+// filter; no native libs are compiled for armeabi-v7a (CMake guard still
+// limits compilation to the two 64-bit targets above).
+def supportedAndroidAbis = ["arm64-v8a", "x86_64"]
+def supportedFlutterTargetPlatforms = ["android-arm64", "android-x64"]
 def safeFlutterVersionCode
 try {
     safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
@@ -77,10 +78,6 @@ android {
         versionCode safeFlutterVersionCode
         versionName flutterVersionName
         buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", "false"
-
-        ndk {
-            abiFilters(*supportedAndroidAbis)
-        }
 
         externalNativeBuild {
             cmake {
@@ -140,11 +137,16 @@ android {
         }
     }
 
-    // Disable ABI splits to produce a single universal APK for arm64-v8a.
-    // x86_64 can be re-enabled by updating supportedAndroidAbis above.
+    // ABI splits — generates individual per-ABI APKs AND one universal APK
+    // that bundles all three architectures.  ndk.abiFilters is intentionally
+    // absent from defaultConfig; using both simultaneously causes a Gradle
+    // conflict that breaks the universal-APK output.
     splits {
         abi {
-            enable false
+            enable true
+            reset()
+            include "arm64-v8a", "armeabi-v7a", "x86_64"
+            universalApk true
         }
     }
 
@@ -152,7 +154,6 @@ android {
         jniLibs {
             useLegacyPackaging true
             excludes += [
-                "**/armeabi-v7a/**",
                 "**/x86/**"
             ]
         }

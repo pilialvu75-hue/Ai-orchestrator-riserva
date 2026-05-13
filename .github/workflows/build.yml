@@ -199,7 +199,7 @@ jobs:
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
-          flutter build apk --debug --target-platform=android-arm64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
+          flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
 
       - name: Build debug APK (Gradle forensic)
         id: gradle_forensic
