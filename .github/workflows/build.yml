@@ -380,10 +380,11 @@ jobs:
           set -o nounset
           set -o pipefail
 
+          # Prefer the original arm64-specific Flutter-generated APK directly.
           CANDIDATES=(
-            "build/app/outputs/flutter-apk/app-debug.apk"
-            "build/app/outputs/flutter-apk/app-universal-debug.apk"
             "build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
+            "build/app/outputs/flutter-apk/app-universal-debug.apk"
+            "build/app/outputs/flutter-apk/app-debug.apk"
           )
 
           RESOLVED_APK=""
@@ -396,18 +397,11 @@ jobs:
 
           if [ -z "$RESOLVED_APK" ]; then
             RESOLVED_APK=$(find build/app/outputs -type f \
-              \( -name "app-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-arm64-v8a-debug.apk" \) \
+              \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
               | sort | head -1 || true)
           fi
 
           if [ -n "$RESOLVED_APK" ]; then
-            mkdir -p build/app/outputs/flutter-apk
-            if [ "$RESOLVED_APK" != "build/app/outputs/flutter-apk/app-debug.apk" ]; then
-              cp "$RESOLVED_APK" build/app/outputs/flutter-apk/app-debug.apk
-              echo "Normalized APK copy: $RESOLVED_APK -> build/app/outputs/flutter-apk/app-debug.apk"
-              RESOLVED_APK="build/app/outputs/flutter-apk/app-debug.apk"
-            fi
-
             echo "DEBUG_APK_PATH=$RESOLVED_APK" >> "$GITHUB_ENV"
             echo "DEBUG_APK_FOUND=true" >> "$GITHUB_ENV"
             echo "Resolved APK: $RESOLVED_APK"
@@ -627,8 +621,8 @@ jobs:
       - name: Verify native libraries
         if: always()
         run: |
-          if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
-            unzip -l build/app/outputs/flutter-apk/app-debug.apk \
+          if [ -n "${{ env.DEBUG_APK_PATH }}" ] && [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
+            unzip -l "${{ env.DEBUG_APK_PATH }}" \
               | grep 'lib/arm64-v8a/libllama_bridge.so' \
               || echo "WARNING: libllama_bridge.so not found — native MLC disabled in this build"
           else
@@ -649,8 +643,34 @@ jobs:
             kotlin_diagnostics.log
             apk_discovery.log
             flutter_engine_precache.log
+            apk_signature.log
+            apk_zipalign.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
+
+      - name: Validate APK signature
+        if: env.DEBUG_APK_FOUND == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          APKSIGNER=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "apksigner" -type f | sort -V | tail -1 || true)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_signature.log
+          else
+            echo "apksigner not found" | tee apk_signature.log
+          fi
+
+      - name: Validate APK zipalign
+        if: env.DEBUG_APK_FOUND == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          ZIPALIGN=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "zipalign" -type f | sort -V | tail -1 || true)
+          if [ -n "$ZIPALIGN" ]; then
+            "$ZIPALIGN" -c -v 4 "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_zipalign.log
+          else
+            echo "zipalign not found" | tee apk_zipalign.log
+          fi
 
       - name: Prepare release assets
         if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true'
@@ -660,15 +680,13 @@ jobs:
             exit 1
           fi
           echo "Final APK path: ${{ env.DEBUG_APK_PATH }}"
-          mkdir -p release-assets
-          cp "${{ env.DEBUG_APK_PATH }}" release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
       - name: Upload artifact
         if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Orchestrator-Core-${{ steps.version.outputs.tag }}
-          path: release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+          name: AI-Orchestrator-Core-arm64-v8a-debug-${{ steps.version.outputs.tag }}
+          path: ${{ env.DEBUG_APK_PATH }}
 
       - name: Generate release notes
         if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
@@ -699,7 +717,7 @@ jobs:
           name: AI-Orchestrator-Core ${{ steps.version.outputs.version_name }}
           body_path: RELEASE_NOTES.md
           files: |
-            release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+            ${{ env.DEBUG_APK_PATH }}
 
       - name: Enforce forensic build success gate
         if: always()
