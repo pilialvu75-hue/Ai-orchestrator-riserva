@@ -25,7 +25,7 @@ jobs:
       TERM: dumb
       JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
       GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8
-      SIGNING_DIR: ${{ runner.temp }}/android-signing
+      SIGNING_DIR: /tmp/android-signing
 
     steps:
       - name: Checkout repository
