@@ -142,7 +142,7 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          APP_VERSION=$(grep -E '^version:' pubspec.yaml | head -n 1 | sed 's/^version:[[:space:]]*//')
+          APP_VERSION=$(awk -F': *' '$1 == "version" { print $2; exit }' pubspec.yaml)
           if [ -z "$APP_VERSION" ]; then
             echo "::error::version not found in pubspec.yaml"
             exit 1
@@ -203,12 +203,15 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE_APK_PATH=""
+          # Prefer the ABI-specific release APK, then the default Flutter output,
+          # then the universal split artifact as a final fallback.
           for candidate in \
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
             build/app/outputs/flutter-apk/app-release.apk \
             build/app/outputs/flutter-apk/app-universal-release.apk; do
             if [ -f "$candidate" ]; then
               RELEASE_APK_PATH="$candidate"
+              echo "Selected release APK candidate: $candidate"
               break
             fi
           done
@@ -216,6 +219,8 @@ jobs:
             RELEASE_APK_PATH=$(find build/app/outputs -type f -name '*release*.apk' | sort | head -n 1 || true)
           fi
           RELEASE_AAB_PATH=$(find build/app/outputs -type f -name '*release*.aab' | sort | head -n 1 || true)
+          echo "Resolved release APK path: ${RELEASE_APK_PATH:-missing}"
+          echo "Resolved release AAB path: ${RELEASE_AAB_PATH:-missing}"
 
           if [ -z "$RELEASE_APK_PATH" ] || [ ! -f "$RELEASE_APK_PATH" ]; then
             echo "::error::Signed release APK not found"
