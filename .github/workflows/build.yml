@@ -13,16 +13,19 @@ concurrency:
   group: android-release-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
-
     timeout-minutes: 90
     env:
       TERM: dumb
-      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-      # Gradle backoff unit is milliseconds: 1000 = 1 second.
-      GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
+      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
+      GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8
+      SIGNING_DIR: ${{ runner.temp }}/android-signing
 
     steps:
       - name: Checkout repository
@@ -58,11 +61,7 @@ jobs:
           yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
 
       - name: Reset Android debug keystore
-        shell: bash
         run: |
-          # Remove any stale or corrupted debug.keystore and generate a fresh one.
-          # The standard Android debug certificate uses the fixed credentials below
-          # so that the debug APK is always signed and installable on physical devices.
           mkdir -p ~/.android
           rm -f ~/.android/debug.keystore
           keytool -genkeypair \
@@ -74,179 +73,64 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "Debug keystore regenerated: $(ls -lh ~/.android/debug.keystore)"
 
-      - name: Create Android signing config
-        shell: bash
+      - name: Validate Android signing secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release-keystore.jks
-
-            {
-              echo "storeFile=release-keystore.jks"
-              echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
-              echo "keyAlias=$ANDROID_KEY_ALIAS"
-              echo "keyPassword=$ANDROID_KEY_PASSWORD"
-            } > android/key.properties
-
-            echo "Release signing configured"
-          else
-            echo "Secrets missing -> fallback debug signing"
+          set -euo pipefail
+          missing=()
+          for secret_name in ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!secret_name:-}" ]; then
+              missing+=("$secret_name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required Android signing secrets: ${missing[*]}"
+            exit 1
           fi
+
+      - name: Prepare runtime Android signing files
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          rm -rf "$SIGNING_DIR"
+          mkdir -p "$SIGNING_DIR"
+          KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::error::Decoded Android keystore is empty"
+            exit 1
+          fi
+          echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Compute Flutter engine metadata
-        shell: bash
-        run: |
-          ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
-          if [ -z "${ENGINE_HASH}" ]; then
-            echo "ERROR: Flutter engine version file (bin/internal/engine.version) is missing or unreadable; cannot resolve Flutter engine artifact URLs."
-            exit 1
-          fi
-          # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
-          echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
-          echo "ENGINE_VERSION=1.0.0-${ENGINE_HASH}" >> "$GITHUB_ENV"
-
-      - name: Prepare forensic log files
-        shell: bash
-        run: |
-          # Create/truncate forensic outputs early so partial diagnostics still exist if later steps fail.
-          : > flutter_verbose.log
-          : > gradle_stacktrace.log
-          : > dependency_tree.log
-          : > cmake_diagnostics.log
-          : > kotlin_diagnostics.log
-
-      - name: Network and repository access audit
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            echo "==== NETWORK / REPOSITORY ACCESS AUDIT ===="
-            date -u
-            echo
-            echo "==== PROXY ENV ===="
-            env | grep -iE '^(http_proxy|https_proxy|no_proxy)=' || echo "No proxy variables set"
-            echo
-            echo "==== DNS CHECK ===="
-            for host in storage.googleapis.com dl.google.com repo.maven.apache.org pub.dev; do
-              echo "--- $host ---"
-              getent hosts "$host" || true
-            done
-            echo
-            echo "==== ENDPOINT REACHABILITY ===="
-            URLS=(
-              "https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.pom"
-              "https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.pom"
-              "https://dl.google.com/dl/android/maven2/"
-              "https://repo.maven.apache.org/maven2/"
-              "https://pub.dev/"
-            )
-            echo "(diagnostic-only reachability checks; failures are logged and do not fail this audit step)"
-            for url in "${URLS[@]}"; do
-              echo "--- $url ---"
-              curl -I -L --retry 3 --retry-delay 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$url" || true
-            done
-          } | tee -a gradle_stacktrace.log
-
-      - name: Clean Flutter/Gradle state and repair caches
-        shell: bash
-        run: |
-          set -o pipefail
-          flutter clean
-          rm -rf .cxx build android/.gradle
-          rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
-          flutter pub cache repair
-          flutter pub get
-          # Intentional hard refresh for CI stabilization: recovers from partial/corrupt
-          # Flutter engine downloads that caused missing arm64_v8a_debug artifacts.
-          flutter precache --android --force --verbose 2>&1 | tee flutter_engine_precache.log
-
-      - name: Verify Android Gradle wrapper files
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f android/gradlew
-          test -f android/gradlew.bat
-          test -f android/gradle/wrapper/gradle-wrapper.jar
-          test -f android/gradle/wrapper/gradle-wrapper.properties
-          chmod +x android/gradlew
-          ls -lah android/gradlew android/gradlew.bat android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties
-
-      - name: Ensure Android local.properties for Gradle wrapper checks
-        shell: bash
+      - name: Ensure Android local.properties
         run: |
           set -euo pipefail
           if [ -z "${FLUTTER_ROOT:-}" ]; then
-            echo "FLUTTER_ROOT is not set"
+            echo "::error::FLUTTER_ROOT is not set"
             exit 1
           fi
-          if [ ! -d "${FLUTTER_ROOT}/packages/flutter_tools/gradle" ]; then
-            echo "Flutter Gradle tooling not found under FLUTTER_ROOT=${FLUTTER_ROOT}"
-            exit 1
-          fi
-          if [ ! -f android/local.properties ]; then
-            touch android/local.properties
-          fi
-          awk -v flutter_root="${FLUTTER_ROOT}" '
-            BEGIN { replaced = 0 }
-            /^flutter\.sdk=/ {
-              print "flutter.sdk=" flutter_root
-              replaced = 1
-              next
-            }
-            { print }
-            END {
-              if (!replaced) {
-                print "flutter.sdk=" flutter_root
-              }
-            }
-          ' android/local.properties > android/local.properties.tmp
-          mv android/local.properties.tmp android/local.properties
-          grep -n '^flutter\.sdk=' android/local.properties
+          {
+            echo "flutter.sdk=$FLUTTER_ROOT"
+            echo "sdk.dir=$ANDROID_SDK_ROOT"
+          } > android/local.properties
 
-      - name: Validate Gradle wrapper execution
-        shell: bash
+      - name: Validate Gradle wrapper
         run: |
-          set -euo pipefail
+          chmod +x android/gradlew
           (
             cd android
             ./gradlew --version --console=plain
-            ./gradlew tasks --console=plain
-          ) 2>&1 | tee gradle_wrapper_validation.log
-
-      - name: Force dependency re-resolution
-        shell: bash
-        run: |
-          set -o pipefail
-          (
-            cd android
-            # Intentional full re-resolution to avoid reusing stale dependency metadata
-            # when CI previously failed to materialize Flutter engine artifacts.
-            ./gradlew --refresh-dependencies :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
-          ) 2>&1 | tee dependency_tree.log
-
-      - name: Flutter SDK integrity and engine consistency
-        shell: bash
-        run: |
-          {
-            echo "==== FLUTTER SDK INTEGRITY ===="
-            flutter --version
-            flutter doctor -v
-            echo
-            echo "==== FLUTTER ENGINE HASH ===="
-            echo "engine_hash=${ENGINE_HASH}"
-            echo "engine_version=${ENGINE_VERSION}"
-            echo "arm64_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
-            echo "embedding_artifact=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
-          } | tee -a gradle_stacktrace.log
+          )
 
       - name: Flutter analyze
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
@@ -254,610 +138,176 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
-      - name: Configure Gradle forensic JVM settings
-        shell: bash
-        run: |
-          mkdir -p ~/.gradle
-          {
-            echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
-            echo "org.gradle.daemon=true"
-            echo "org.gradle.parallel=true"
-            echo "org.gradle.configureondemand=true"
-            echo "org.gradle.workers.max=2"
-            # Force plain (non-rich) console so GitHub Actions never truncates Gradle output lines
-            echo "org.gradle.console=plain"
-            # Force info-level logging globally so detailed diagnostics always appear
-            echo "org.gradle.logging.level=info"
-          } >> ~/.gradle/gradle.properties
-
-      - name: Determine version
+      - name: Determine version metadata
         id: version
-        shell: bash
         run: |
-          VERSIONCODE=${VERSIONCODE:-1}
-          LATEST_TAG_CODE=$(git tag | grep '^v1\.0\.' | sed 's/v1\.0\.//' | sort -n | tail -1 || true)
-
-          if [ -n "$LATEST_TAG_CODE" ]; then
-            VERSION_CODE=$((LATEST_TAG_CODE + 1))
+          set -euo pipefail
+          APP_VERSION=$(python -c "from pathlib import Path; lines = Path('pubspec.yaml').read_text().splitlines(); print(next(line.split(':', 1)[1].strip() for line in lines if line.startswith('version:')))")
+          VERSION_NAME="${APP_VERSION%%+*}"
+          if [[ "$APP_VERSION" == *+* ]]; then
+            PUBSPEC_VERSION_CODE="${APP_VERSION##*+}"
           else
-            VERSION_CODE=$VERSIONCODE
+            PUBSPEC_VERSION_CODE="${GITHUB_RUN_NUMBER}"
           fi
-
-          VERSION_NAME="1.0.$VERSION_CODE"
-
-          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
-
-      - name: Print build environment (forensic baseline)
-        shell: bash
-        run: |
-          {
-            echo "==== BUILD ENVIRONMENT FORENSIC BASELINE ===="
-            date -u
-            echo
-            echo "==== JAVA ===="
-            java -version 2>&1 || true
-            javac -version 2>&1 || true
-            echo
-            echo "==== FLUTTER / DART ===="
-            flutter --version 2>&1 || true
-            dart --version 2>&1 || true
-            echo
-            echo "==== GRADLE WRAPPER ===="
-            (cd android && ./gradlew --version 2>&1) || true
-            echo
-            echo "==== ANDROID SDK ===="
-            echo "ANDROID_SDK_ROOT: ${ANDROID_SDK_ROOT:-unset}"
-            echo "ANDROID_HOME: ${ANDROID_HOME:-unset}"
-            ls "${ANDROID_SDK_ROOT}/ndk" 2>/dev/null || echo "ndk directory not found"
-            echo
-            echo "==== INSTALLED NDK VERSIONS ===="
-            ls "${ANDROID_SDK_ROOT}/ndk/" 2>/dev/null | sort || echo "none found"
-            echo
-            echo "==== CMAKE ===="
-            cmake --version 2>/dev/null || echo "cmake not in PATH"
-            find "${ANDROID_SDK_ROOT}/cmake" -maxdepth 2 -name cmake -type f 2>/dev/null | sort || true
-            echo
-            echo "==== SETTINGS.GRADLE AGP/KOTLIN PINS ===="
-            cat android/settings.gradle || true
-            echo
-            echo "==== APP BUILD.GRADLE SDK/NDK PINS ===="
-            grep -n -E "(compileSdk|targetSdk|minSdk|ndkVersion|version)" android/app/build.gradle || true
-            echo
-            echo "==== GRADLE.PROPERTIES (user home) ===="
-            cat ~/.gradle/gradle.properties || true
-          } | tee -a gradle_stacktrace.log
-
-      - name: Runner memory and stability baseline
-        shell: bash
-        run: |
-          {
-            echo "==== SYSTEM BASELINE ===="
-            date -u
-            uname -a
-            echo
-            echo "==== MEMORY ===="
-            free -h || true
-            echo
-            echo "==== DISK ===="
-            df -h || true
-            echo
-            echo "==== JAVA/GRADLE PROCESSES ===="
-            ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
-          } | tee -a gradle_stacktrace.log
-
-      - name: Build debug APK (Flutter verbose forensic)
-        id: flutter_forensic
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          flutter build apk --debug --target-platform=android-arm64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
-
-      - name: Build debug APK (Gradle forensic)
-        id: gradle_forensic
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          (
-            cd android
-            ./gradlew assembleDebug --stacktrace --info --warning-mode all --console=plain
-          ) 2>&1 | tee -a gradle_stacktrace.log
-
-      - name: Discover generated Android artifacts
-        if: always()
-        shell: bash
-        run: |
-          find build -type f \( -name "*.apk" -o -name "*.aab" \) | sort | tee apk_discovery.log
-
-      - name: Resolve debug APK path
-        if: always()
-        shell: bash
-        run: |
-          set -o errexit
-          set -o nounset
-          set -o pipefail
-
-          PRIMARY_APK="build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
-          echo "DEBUG_APK_PATH=$PRIMARY_APK" >> "$GITHUB_ENV"
-          if [ -f "$PRIMARY_APK" ]; then
-            echo "DEBUG_APK_FOUND=true" >> "$GITHUB_ENV"
-            echo "Resolved APK: $PRIMARY_APK"
+          if [ "$GITHUB_RUN_NUMBER" -gt "$PUBSPEC_VERSION_CODE" ]; then
+            VERSION_CODE="$GITHUB_RUN_NUMBER"
           else
-            echo "DEBUG_APK_FOUND=false" >> "$GITHUB_ENV"
-            echo "Resolved APK: missing primary ARM64 APK at $PRIMARY_APK"
-            FALLBACK_APK=$(find build/app/outputs -type f \
-              \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
-              | sort | head -1 || true)
-            if [ -n "$FALLBACK_APK" ]; then
-              echo "Fallback APK discovered for diagnostics only: $FALLBACK_APK"
-            fi
+            VERSION_CODE="$PUBSPEC_VERSION_CODE"
           fi
-
-      - name: Kotlin diagnostics
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
+          TAG="v${VERSION_NAME}+${VERSION_CODE}"
           {
-            echo "==== KOTLIN VERSION ===="
-            command -v kotlinc &>/dev/null && kotlinc -version 2>&1 || echo "kotlinc not found in PATH"
-            echo
-            echo "==== KOTLIN GRADLE PLUGIN ===="
-            grep -rn -E 'kotlin["\(]|kotlin-gradle-plugin' android/settings.gradle android/build.gradle android/app/build.gradle 2>/dev/null || true
-            echo
-            echo "==== KOTLIN BUILD ERRORS ===="
-            grep -n -E "(error:|warning:|^\s+at )" gradle_stacktrace.log 2>/dev/null | head -n 200 || true
-            echo
-            echo "==== KOTLIN METADATA ===="
-            find . -type f -name '*.kotlin_module' | head -n 20 | sort
-          } | tee kotlin_diagnostics.log
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Dependency conflict scan
-        if: always()
-        continue-on-error: true
-        shell: bash
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set -o pipefail
-          (
-            cd android
-            ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
-          ) 2>&1 | tee dependency_tree.log
+          set -euo pipefail
+          flutter build apk \
+            --release \
+            --target-platform=android-arm64 \
+            --build-name="${{ steps.version.outputs.version_name }}" \
+            --build-number="${{ steps.version.outputs.version_code }}" \
+            2>&1 | tee release_apk_build.log
 
-      - name: Extract exact Flutter artifact dependency diagnostics
-        if: always()
-        shell: bash
+      - name: Build signed release AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "==== EXACT FLUTTER ENGINE DEPENDENCY DIAGNOSTICS ===="
-          echo "dependency_name=io.flutter:arm64_v8a_debug:${ENGINE_VERSION}"
-          echo "repository_source=https://storage.googleapis.com/download.flutter.io"
-          echo "artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/${ENGINE_VERSION}/arm64_v8a_debug-${ENGINE_VERSION}.jar"
-          echo "embedding_dependency=io.flutter:flutter_embedding_debug:${ENGINE_VERSION}"
-          echo "embedding_artifact_url=https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/${ENGINE_VERSION}/flutter_embedding_debug-${ENGINE_VERSION}.jar"
-          echo
-          echo "==== RESOLUTION EVIDENCE (dependency_tree.log) ===="
-          grep -n -E "io\\.flutter:arm64_v8a_debug|io\\.flutter:flutter_embedding_debug|Could not resolve|Could not find|https://storage.googleapis.com/download.flutter.io" dependency_tree.log | head -n 200 || true
-          echo
-          echo "==== ENGINE DOWNLOAD LOGS (flutter_engine_precache.log / flutter_verbose.log) ===="
-          grep -n -E "arm64_v8a_debug|flutter_embedding_debug|download.flutter.io|Downloading|Could not resolve|Could not find" flutter_engine_precache.log flutter_verbose.log | head -n 200 || true
+          set -euo pipefail
+          flutter build appbundle \
+            --release \
+            --target-platform=android-arm64 \
+            --build-name="${{ steps.version.outputs.version_name }}" \
+            --build-number="${{ steps.version.outputs.version_code }}" \
+            2>&1 | tee release_aab_build.log
 
-      - name: Native build diagnostics (CMake/NDK/JNI/.so)
-        if: always()
-        continue-on-error: true
-        shell: bash
+      - name: Discover release outputs
         run: |
-          {
-            echo "==== CMAKE LOGS ===="
-            while IFS= read -r f; do
-              echo "----- $f -----"
-              cat "$f"
-              echo
-            done < <(find build -type f \( -name 'CMakeError.log' -o -name 'CMakeOutput.log' -o -name 'build_command.txt' -o -name 'configure.log' -o -name 'configure_output.txt' \) 2>/dev/null | sort)
-            echo "==== NDK LOGS ===="
-            while IFS= read -r f; do
-              echo "----- $f -----"
-              cat "$f"
-              echo
-            done < <(find build -type f \( -name '*.ninja_log' -o -name '*.ninja_deps' -o -name 'ninja*.log' \) 2>/dev/null | sort)
-            echo "==== JNI / SHARED LIBS INVENTORY ===="
-            find . -type f -name '*.so' | sort
-            echo
-            echo "==== VERIFY KEY LIBRARIES ===="
-            find . -type f \( -name 'libllama_bridge.so' -o -iname '*sherpa*onnx*.so' -o -iname '*sherpa*.so' \) | sort
-            echo
-            echo "==== DUPLICATE .SO NAMES ===="
-            find . -type f -name '*.so' -exec basename {} \; | sort | uniq -c | sort -nr | awk '$1>1 {print}'
-            echo
-            echo "==== ABI PACKAGING (APK) ===="
-            if [ -n "${{ env.DEBUG_APK_PATH }}" ] && [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
-              unzip -l "${{ env.DEBUG_APK_PATH }}" | grep ' lib/.*\.so$' || true
-            else
-              echo "APK not generated"
-            fi
-            echo
-            echo "==== VULKAN / OPENCL LINKAGE ===="
-            while IFS= read -r so; do
-              echo "----- $so -----"
-              (readelf -d "$so" 2>/dev/null | grep -Ei 'NEEDED.*(vulkan|opencl|c\\+\\+_shared|c\\+\\+_static)' || true)
-            done < <(find . -type f -name '*.so' | sort)
-            echo
-            echo "==== MISSING SYMBOLS CHECK ===="
-            while IFS= read -r so; do
-              echo "----- $so -----"
-              (readelf -Ws "$so" 2>/dev/null | grep ' UND ' | head -n 200 || true)
-            done < <(find . -type f -name '*.so' | sort)
-            echo
-            echo "==== STRIP TOOL PRESENCE ===="
-            command -v llvm-strip || true
-            command -v strip || true
-          } | tee cmake_diagnostics.log
+          set -euo pipefail
+          find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) | sort | tee release_outputs.log
 
-      - name: NDK/JNI packaging diagnostics
-        if: always()
-        continue-on-error: true
-        shell: bash
+      - name: Resolve release asset paths
+        id: release_assets
         run: |
-          {
-            echo "==== NDK/JNI DIRECTORIES ===="
-            find android/app/src -maxdepth 6 -type d \( -name jniLibs -o -name libs \) -print | sort
-            echo
-            echo "==== JNILIBS FILES ===="
-            find android/app/src -maxdepth 8 -type f -name '*.so' -print | sort
-            echo
-            echo "==== CXX BUILD TREE ===="
-            find build/.cxx -maxdepth 6 -type f 2>/dev/null | sort
-          } | tee -a cmake_diagnostics.log
-
-      - name: Runner memory and stability post-build
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "==== SYSTEM POST-BUILD ===="
-            date -u
-            free -h || true
-            df -h || true
-            ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
-          } | tee -a gradle_stacktrace.log
-
-      - name: Print forensic log tails
-        if: always()
-        shell: bash
-        run: |
-          echo "==== TAIL gradle_stacktrace.log (last 500 lines) ===="
-          if [ -f gradle_stacktrace.log ]; then
-            tail -n 500 gradle_stacktrace.log
-          else
-            echo "gradle_stacktrace.log not found"
-          fi
-          echo
-          echo "==== TAIL flutter_verbose.log (last 300 lines) ===="
-          if [ -f flutter_verbose.log ]; then
-            tail -n 300 flutter_verbose.log
-          else
-            echo "flutter_verbose.log not found"
-          fi
-
-      - name: Root cause extraction
-        if: always()
-        shell: bash
-        run: |
-          echo "==== ROOT CAUSE EXTRACTION ===="
-          for log in flutter_verbose.log gradle_stacktrace.log dependency_tree.log cmake_diagnostics.log kotlin_diagnostics.log; do
-            if [ -f "$log" ]; then
-              echo "--- Searching $log for failure patterns ---"
-              grep -n -E "(FAILURE:|Execution failed for task|Caused by:|Exception:|error:)" "$log" | head -n 100 || true
-              echo
+          set -euo pipefail
+          RELEASE_APK_PATH=""
+          for candidate in \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-universal-release.apk; do
+            if [ -f "$candidate" ]; then
+              RELEASE_APK_PATH="$candidate"
+              break
             fi
           done
-
-      - name: APK forensic inspection (aapt / unzip / apksigner)
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          APK="${{ env.DEBUG_APK_PATH }}"
-          if [ ! -f "$APK" ]; then
-            echo "APK not generated; skipping APK forensic inspection"
-            exit 0
+          if [ -z "$RELEASE_APK_PATH" ]; then
+            RELEASE_APK_PATH=$(find build/app/outputs -type f -name '*release*.apk' | sort | head -n 1 || true)
           fi
+          RELEASE_AAB_PATH=$(find build/app/outputs -type f -name '*release*.aab' | sort | head -n 1 || true)
 
-          echo "==== APK SIZE ===="
-          du -sh "$APK"
-          ls -lh "$APK"
-          echo
-
-          echo "==== AAPT DUMP BADGING ===="
-          AAPT=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "aapt" -type f | sort -V | tail -1 || true)
-          if [ -n "$AAPT" ]; then
-            "$AAPT" dump badging "$APK" 2>&1 | grep -E "(package:|sdkVersion:|targetSdkVersion:|native-code:|uses-permission:|application-label:)" || true
-          else
-            echo "aapt not found"
+          if [ -z "$RELEASE_APK_PATH" ] || [ ! -f "$RELEASE_APK_PATH" ]; then
+            echo "::error::Signed release APK not found"
+            exit 1
           fi
-          echo
-
-          echo "==== APK NATIVE LIBRARY MANIFEST (unzip) ===="
-          unzip -l "$APK" | grep '\.so$' | sort || true
-          echo
-
-          echo "==== APK SIGNATURE VERIFICATION (apksigner) ===="
-          APKSIGNER=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "apksigner" -type f | sort -V | tail -1 || true)
-          if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1 | head -n 40 || true
-          else
-            echo "apksigner not found"
-          fi
-          echo
-
-          echo "==== APK ZIP INTEGRITY (unzip test) ===="
-          unzip -t "$APK" > /dev/null && echo "ZIP OK" || echo "ZIP CORRUPTED"
-          echo
-
-          echo "==== DUPLICATE NATIVE LIB NAMES IN APK ===="
-          unzip -l "$APK" | grep '\.so$' | awk '{print $NF}' \
-            | while read -r path; do basename "$path"; done \
-            | sort | uniq -c | sort -nr \
-            | awk '$1>1 {print "DUPLICATE:", $0}' \
-            || echo "No duplicates"
-          echo
-
-      - name: Verify native libraries
-        if: always()
-        run: |
-          if [ -n "${{ env.DEBUG_APK_PATH }}" ] && [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
-            unzip -l "${{ env.DEBUG_APK_PATH }}" \
-              | grep 'lib/arm64-v8a/libllama_bridge.so' \
-              || echo "WARNING: libllama_bridge.so not found — native MLC disabled in this build"
-          else
-            echo "APK not generated; skipping native lib verification"
-          fi
-
-      - name: Validate APK signature
-        id: validate_apk_signature
-        if: env.DEBUG_APK_FOUND == 'true'
-        shell: bash
-        run: |
-          APKSIGNER=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "apksigner" -type f | sort -V | tail -1 || true)
-          if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --verbose "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_signature.log
-          else
-            echo "apksigner not found" | tee apk_signature.log
+          if [ -z "$RELEASE_AAB_PATH" ] || [ ! -f "$RELEASE_AAB_PATH" ]; then
+            echo "::error::Signed release AAB not found"
             exit 1
           fi
 
-      - name: Validate APK zipalign
-        id: validate_apk_zipalign
-        if: env.DEBUG_APK_FOUND == 'true'
-        shell: bash
+          {
+            echo "release_apk_path=$RELEASE_APK_PATH"
+            echo "release_aab_path=$RELEASE_AAB_PATH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify workspace has no tracked signing leftovers
         run: |
-          ZIPALIGN=$(find "${ANDROID_SDK_ROOT}/build-tools" -name "zipalign" -type f | sort -V | tail -1 || true)
-          if [ -n "$ZIPALIGN" ]; then
-            "$ZIPALIGN" -c -v 4 "${{ env.DEBUG_APK_PATH }}" 2>&1 | tee apk_zipalign.log
-          else
-            echo "zipalign not found" | tee apk_zipalign.log
+          set -euo pipefail
+          find "$GITHUB_WORKSPACE" \
+            -path "$GITHUB_WORKSPACE/.git" -prune -o \
+            -type f \( -name '*.jks' -o -name '*.keystore' -o -name 'key.properties' \) \
+            -print | tee sensitive_files_audit.log
+          if [ -s sensitive_files_audit.log ]; then
+            echo "::error::Sensitive signing files were found inside the workspace"
             exit 1
           fi
 
-      - name: Inspect APK contents
-        id: inspect_apk_contents
-        if: env.DEBUG_APK_FOUND == 'true'
-        shell: bash
+      - name: Validate signed release APK
         run: |
-          set -o errexit
-          set -o nounset
-          set -o pipefail
+          set -euo pipefail
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
+          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name zipalign -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose --print-certs "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_signature.log
+          "$ZIPALIGN" -c -v 4 "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_zipalign.log
+          unzip -t "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_contents.log
 
-          APK="${{ env.DEBUG_APK_PATH }}"
-          unzip -l "$APK" | tee apk_contents.log
-          unzip -t "$APK" | tee -a apk_contents.log
+      - name: Validate signed release AAB
+        run: |
+          set -euo pipefail
+          AAB_PATH="${{ steps.release_assets.outputs.release_aab_path }}"
+          test -s "$AAB_PATH"
+          unzip -l "$AAB_PATH" | tee aab_contents.log
+          unzip -t "$AAB_PATH" | tee -a aab_contents.log
+          grep -Fq 'base/manifest/AndroidManifest.xml' aab_contents.log
 
-          grep -Eq 'lib/arm64-v8a/.*\.so' apk_contents.log \
-            || { echo "ERROR: APK validation failed - required arm64-v8a native libraries not found" | tee -a apk_contents.log; exit 1; }
-          grep -Fq 'AndroidManifest.xml' apk_contents.log \
-            || { echo "ERROR: APK validation failed - AndroidManifest.xml not found in APK" | tee -a apk_contents.log; exit 1; }
-          grep -Fq 'classes.dex' apk_contents.log \
-            || { echo "ERROR: APK validation failed - classes.dex not found in APK" | tee -a apk_contents.log; exit 1; }
-
-      - name: Upload forensic diagnostics artifacts
+      - name: Upload release diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gradle-forensics-${{ github.run_id }}-${{ github.run_attempt }}
+          name: android-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           path: |
-            flutter_verbose.log
-            gradle_stacktrace.log
-            dependency_tree.log
-            cmake_diagnostics.log
-            kotlin_diagnostics.log
-            apk_discovery.log
-            flutter_engine_precache.log
+            release_apk_build.log
+            release_aab_build.log
+            release_outputs.log
+            sensitive_files_audit.log
             apk_signature.log
             apk_zipalign.log
             apk_contents.log
-            build/.cxx/**/CMakeFiles/CMakeOutput.log
-            build/.cxx/**/CMakeFiles/CMakeError.log
+            aab_contents.log
 
-      - name: Compute release readiness
-        id: release_gate
-        if: always()
-        shell: bash
-        run: |
-          APK_FOUND="${{ env.DEBUG_APK_FOUND }}"
-          APKSIGNER_OUTCOME="${{ steps.validate_apk_signature.outcome }}"
-          ZIPALIGN_OUTCOME="${{ steps.validate_apk_zipalign.outcome }}"
-          CONTENTS_OUTCOME="${{ steps.inspect_apk_contents.outcome }}"
-          APK_SIZE_BYTES=0
-
-          if [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
-            APK_SIZE_BYTES=$(wc -c < "${{ env.DEBUG_APK_PATH }}")
-          fi
-
-          if [ -z "$APKSIGNER_OUTCOME" ]; then
-            APKSIGNER_OUTCOME="skipped"
-          fi
-          if [ -z "$ZIPALIGN_OUTCOME" ]; then
-            ZIPALIGN_OUTCOME="skipped"
-          fi
-          if [ -z "$CONTENTS_OUTCOME" ]; then
-            CONTENTS_OUTCOME="skipped"
-          fi
-
-          echo "apk_found=$APK_FOUND" >> "$GITHUB_OUTPUT"
-          echo "apk_size_bytes=$APK_SIZE_BYTES" >> "$GITHUB_OUTPUT"
-          echo "apk_nonzero=$([ "$APK_SIZE_BYTES" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "apksigner_outcome=$APKSIGNER_OUTCOME" >> "$GITHUB_OUTPUT"
-          echo "zipalign_outcome=$ZIPALIGN_OUTCOME" >> "$GITHUB_OUTPUT"
-          echo "contents_outcome=$CONTENTS_OUTCOME" >> "$GITHUB_OUTPUT"
-
-          if [[ "$APK_FOUND" == "true" \
-             && "$APK_SIZE_BYTES" -gt 0 \
-             && "$APKSIGNER_OUTCOME" == "success" \
-             && "$ZIPALIGN_OUTCOME" == "success" \
-             && "$CONTENTS_OUTCOME" == "success" ]]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Prepare release assets
-        if: steps.release_gate.outputs.ready == 'true'
-        run: |
-          if [ ! -f "${{ env.DEBUG_APK_PATH }}" ]; then
-            echo "Resolved APK path does not exist: ${{ env.DEBUG_APK_PATH }}"
-            exit 1
-          fi
-          echo "Final APK path: ${{ env.DEBUG_APK_PATH }}"
-
-      - name: Upload artifact
-        if: steps.release_gate.outputs.ready == 'true'
+      - name: Upload signed release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Orchestrator-Core-arm64-v8a-debug-${{ steps.version.outputs.tag }}
-          path: ${{ env.DEBUG_APK_PATH }}
+          name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
+          path: |
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            ${{ steps.release_assets.outputs.release_aab_path }}
 
       - name: Generate release notes
-        if: steps.release_gate.outputs.ready == 'true'
-        shell: bash
         run: |
           {
-            echo "## AI-Orchestrator-Core"
+            echo "## Android release"
             echo
-            echo "### Included fixes"
+            echo "- Version: ${{ steps.version.outputs.version_name }}"
+            echo "- Build number: ${{ steps.version.outputs.version_code }}"
+            echo "- Signed APK: ${{ steps.release_assets.outputs.release_apk_path }}"
+            echo "- Signed AAB: ${{ steps.release_assets.outputs.release_aab_path }}"
             echo
-            echo "- Fixed GGUF picker"
-            echo "- Improved llama.cpp runtime stability"
-            echo "- Increased inference timeout"
-            echo "- Improved DeepSeek compatibility"
-            echo "- Improved local model loading"
-            echo "- Fixed Android signing pipeline"
-            echo
-            echo "### Commit history"
+            echo "### Recent commits"
             echo
             git log --pretty=format:'- %s (%h)' -n 20
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        if: steps.release_gate.outputs.ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: AI-Orchestrator-Core ${{ steps.version.outputs.version_name }}
+          name: AI-Orchestrator Android ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
           body_path: RELEASE_NOTES.md
           files: |
-            ${{ env.DEBUG_APK_PATH }}
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            ${{ steps.release_assets.outputs.release_aab_path }}
 
-      - name: Enforce forensic build success gate
+      - name: Cleanup signing files
         if: always()
-        shell: bash
         run: |
-          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" ]]; then
-            echo "Flutter forensic build reported a non-blocking failure."
-          fi
-          if [[ "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
-            echo "Gradle build did not succeed."
-          fi
-          echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
-          echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
-          echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
-          echo "DEBUG_APK_PATH: ${{ env.DEBUG_APK_PATH }}"
-          echo "APK size bytes: ${{ steps.release_gate.outputs.apk_size_bytes }}"
-          echo "APK non-zero: ${{ steps.release_gate.outputs.apk_nonzero }}"
-          echo "APK signature validation: ${{ steps.release_gate.outputs.apksigner_outcome }}"
-          echo "APK zipalign validation: ${{ steps.release_gate.outputs.zipalign_outcome }}"
-          echo "APK contents validation: ${{ steps.release_gate.outputs.contents_outcome }}"
-
-      - name: validate-results
-        if: always()
-        shell: bash
-        run: |
-          echo "==== VALIDATE RESULTS: FORENSIC OUTPUT ===="
-          echo
-          echo "--- Last 500 lines of gradle_stacktrace.log ---"
-          if [ -f gradle_stacktrace.log ]; then
-            tail -n 500 gradle_stacktrace.log
-          else
-            echo "gradle_stacktrace.log not found"
-          fi
-          echo
-          echo "--- Last 300 lines of flutter_verbose.log ---"
-          if [ -f flutter_verbose.log ]; then
-            tail -n 300 flutter_verbose.log
-          else
-            echo "flutter_verbose.log not found"
-          fi
-          echo
-          echo "--- First occurrence of 'Caused by:' ---"
-          for log in gradle_stacktrace.log flutter_verbose.log dependency_tree.log; do
-            if [ -f "$log" ]; then
-              MATCH=$(grep -n "Caused by:" "$log" | head -n 1 || true)
-              if [ -n "$MATCH" ]; then
-                echo "[$log] $MATCH"
-                break
-              fi
-            fi
-          done
-          echo
-          echo "--- First occurrence of 'Execution failed for task' ---"
-          for log in gradle_stacktrace.log flutter_verbose.log; do
-            if [ -f "$log" ]; then
-              MATCH=$(grep -n "Execution failed for task" "$log" | head -n 1 || true)
-              if [ -n "$MATCH" ]; then
-                echo "[$log] $MATCH"
-                break
-              fi
-            fi
-          done
-          echo
-          echo "==== FINAL PASS/FAIL DECISION ===="
-          if [[ "${{ steps.release_gate.outputs.ready }}" == "true" ]]; then
-            echo "BUILD SUCCEEDED"
-            echo "Validated APK: ${{ env.DEBUG_APK_PATH }}"
-          else
-            echo "BUILD FAILED"
-            if [[ "${{ steps.release_gate.outputs.apk_found }}" != "true" ]]; then
-              echo "Reason: APK missing at ${{ env.DEBUG_APK_PATH }}"
-            fi
-            if [[ "${{ steps.release_gate.outputs.apk_nonzero }}" != "true" ]]; then
-              echo "Reason: APK size is zero bytes"
-            fi
-            if [[ "${{ steps.release_gate.outputs.apksigner_outcome }}" != "success" ]]; then
-              echo "Reason: apksigner verify failed"
-            fi
-            if [[ "${{ steps.release_gate.outputs.zipalign_outcome }}" != "success" ]]; then
-              echo "Reason: zipalign validation failed"
-            fi
-            if [[ "${{ steps.release_gate.outputs.contents_outcome }}" != "success" ]]; then
-              echo "Reason: APK contents validation failed"
-            fi
-            echo "flutter: ${{ steps.flutter_forensic.outcome }}"
-            echo "gradle: ${{ steps.gradle_forensic.outcome }}"
-            echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
-            echo "apk_size_bytes: ${{ steps.release_gate.outputs.apk_size_bytes }}"
-            echo "apksigner: ${{ steps.release_gate.outputs.apksigner_outcome }}"
-            echo "zipalign: ${{ steps.release_gate.outputs.zipalign_outcome }}"
-            echo "contents: ${{ steps.release_gate.outputs.contents_outcome }}"
-            exit 1
-          fi
+          rm -rf "$SIGNING_DIR"
+          rm -f android/key.properties android/release-keystore.jks

@@ -1,3 +1,5 @@
+import java.util.Locale
+
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
@@ -11,7 +13,8 @@ if (localPropertiesFile.exists()) {
 }
 
 def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file("key.properties")
+def keystorePropertiesPath = System.getenv("ANDROID_KEY_PROPERTIES_FILE")
+def keystorePropertiesFile = keystorePropertiesPath ? file(keystorePropertiesPath) : rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
@@ -39,6 +42,10 @@ def requestedTargetPlatforms = requestedTargetPlatformsRaw
     .split(",")
     .collect { it.trim() }
     .findAll { !it.isEmpty() }
+def requestedGradleTasks = gradle.startParameter.taskNames.collect { it.toLowerCase(Locale.ROOT) }
+def requiresReleaseSigning = requestedGradleTasks.any { taskName ->
+    taskName.contains("release") || taskName.contains("bundle") || taskName.contains("publish")
+}
 def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
     !supportedFlutterTargetPlatforms.contains(it)
 }
@@ -103,12 +110,19 @@ android {
             def storePasswordValue = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
             def keyAliasValue = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
             def keyPasswordValue = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
+            def releaseStoreFile = storeFilePath ? file(storeFilePath) : null
 
-            if (storeFilePath != null && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
-                storeFile file(storeFilePath)
+            if (releaseStoreFile != null && releaseStoreFile.exists() && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
+                storeFile releaseStoreFile
                 storePassword storePasswordValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue
+            } else if (requiresReleaseSigning) {
+                throw new GradleException(
+                    "Missing Android release signing configuration. " +
+                    "Provide KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD " +
+                    "or a valid key.properties/ANDROID_KEY_PROPERTIES_FILE before running release tasks."
+                )
             } else {
                 initWith signingConfigs.debug
             }
