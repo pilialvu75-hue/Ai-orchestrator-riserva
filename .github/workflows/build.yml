@@ -184,7 +184,7 @@ jobs:
               echo "----- $f -----"
               cat "$f"
               echo
-            done < <(find build -type f \( -name 'CMakeError.log' -o -name 'CMakeOutput.log' -o -name 'build_command.txt' -o -name 'configure_*' \) 2>/dev/null | sort)
+            done < <(find build -type f \( -name 'CMakeError.log' -o -name 'CMakeOutput.log' -o -name 'build_command.txt' -o -name 'configure.log' -o -name 'configure_output.txt' \) 2>/dev/null | sort)
             echo "==== NDK LOGS ===="
             while IFS= read -r f; do
               echo "----- $f -----"
@@ -198,7 +198,7 @@ jobs:
             find . -type f \( -name 'libllama_bridge.so' -o -iname '*sherpa*onnx*.so' -o -iname '*sherpa*.so' \) | sort
             echo
             echo "==== DUPLICATE .SO NAMES ===="
-            find . -type f -name '*.so' -printf '%f\n' | sort | uniq -c | sort -nr | awk '$1>1 {print}'
+            find . -type f -name '*.so' -exec basename {} \; | sort | uniq -c | sort -nr | awk '$1>1 {print}'
             echo
             echo "==== ABI PACKAGING (APK) ===="
             if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
