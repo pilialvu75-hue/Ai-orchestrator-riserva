@@ -381,10 +381,6 @@ jobs:
           set -o pipefail
 
           PRIMARY_APK="build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
-          FALLBACK_APK=$(find build/app/outputs -type f \
-            \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
-            | sort | head -1 || true)
-
           RESOLVED_APK="$PRIMARY_APK"
 
           echo "DEBUG_APK_PATH=$RESOLVED_APK" >> "$GITHUB_ENV"
@@ -394,6 +390,9 @@ jobs:
           else
             echo "DEBUG_APK_FOUND=false" >> "$GITHUB_ENV"
             echo "Resolved APK: missing primary ARM64 APK at $RESOLVED_APK"
+            FALLBACK_APK=$(find build/app/outputs -type f \
+              \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
+              | sort | head -1 || true)
             if [ -n "$FALLBACK_APK" ]; then
               echo "Fallback APK discovered for diagnostics only: $FALLBACK_APK"
             fi
