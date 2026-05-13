@@ -21,6 +21,7 @@ jobs:
     env:
       TERM: dumb
       JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      # Gradle backoff unit is milliseconds: 1000 = 1 second.
       GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
 
     steps:
@@ -116,6 +117,7 @@ jobs:
       - name: Prepare forensic log files
         shell: bash
         run: |
+          # Create/truncate forensic outputs early so partial diagnostics still exist if later steps fail.
           : > flutter_verbose.log
           : > gradle_stacktrace.log
           : > dependency_tree.log
@@ -163,7 +165,7 @@ jobs:
           rm -rf "${HOME}/.gradle/caches/modules-2/files-2.1/io.flutter"
           flutter pub cache repair
           flutter pub get
-          flutter precache --android --force --verbose 2>&1 | tee flutter_engine_presolve.log
+          flutter precache --android --force --verbose 2>&1 | tee flutter_engine_precache.log
 
       - name: Force dependency re-resolution
         shell: bash
@@ -368,8 +370,8 @@ jobs:
           echo "==== RESOLUTION EVIDENCE (dependency_tree.log) ===="
           grep -n -E "io\\.flutter:arm64_v8a_debug|io\\.flutter:flutter_embedding_debug|Could not resolve|Could not find|https://storage.googleapis.com/download.flutter.io" dependency_tree.log | head -n 200 || true
           echo
-          echo "==== ENGINE DOWNLOAD LOGS (flutter_engine_presolve.log / flutter_verbose.log) ===="
-          grep -n -E "arm64_v8a_debug|flutter_embedding_debug|download.flutter.io|Downloading|Could not resolve|Could not find" flutter_engine_presolve.log flutter_verbose.log | head -n 200 || true
+          echo "==== ENGINE DOWNLOAD LOGS (flutter_engine_precache.log / flutter_verbose.log) ===="
+          grep -n -E "arm64_v8a_debug|flutter_embedding_debug|download.flutter.io|Downloading|Could not resolve|Could not find" flutter_engine_precache.log flutter_verbose.log | head -n 200 || true
 
       - name: Native build diagnostics (CMake/NDK/JNI/.so)
         if: always()
@@ -554,7 +556,7 @@ jobs:
             dependency_tree.log
             cmake_diagnostics.log
             kotlin_diagnostics.log
-            flutter_engine_presolve.log
+            flutter_engine_precache.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
