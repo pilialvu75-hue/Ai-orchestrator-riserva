@@ -245,14 +245,14 @@ class MainActivity : FlutterActivity() {
                         result.error(
                             "SHERPA_NOT_AVAILABLE",
                             sherpaLibraryError ?: "Sherpa-ONNX libraries are unavailable in this build.",
-                            buildSherpaStatus()
-                        )
+                        buildSherpaStatus()
+                    )
                         return@setMethodCallHandler
                     }
                     result.error(
                         "SHERPA_NOT_IMPLEMENTED",
                         "Sherpa-ONNX native audio session wiring is not configured in this build.",
-                        buildSherpaStatus(initialized = true)
+                        buildSherpaStatus(isInitialized = true)
                     )
                 }
                 else -> result.notImplemented()
@@ -273,7 +273,7 @@ class MainActivity : FlutterActivity() {
         })
     }
 
-    private fun buildSherpaStatus(initialized: Boolean = false): Map<String, Any?> {
+    private fun buildSherpaStatus(isInitialized: Boolean = false): Map<String, Any?> {
         val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
         val hasAudioOutputs = if (audioManager == null) {
             false
@@ -295,7 +295,7 @@ class MainActivity : FlutterActivity() {
             ),
             "audioSessionReady" to (audioManager != null),
             "speakerOutputReady" to hasAudioOutputs,
-            "initialized" to (initialized && librariesLoaded),
+            "initialized" to (isInitialized && librariesLoaded),
             "offlineAsrAvailable" to librariesLoaded,
             "offlineTtsAvailable" to librariesLoaded,
             "details" to sherpaLibraryError
@@ -334,13 +334,10 @@ class MainActivity : FlutterActivity() {
             failures += "${group.joinToString("+")}: ${groupFailures.joinToString(" | ")}"
         }
         if (!sherpaLibrariesLoaded) {
-            val failureSummary = failures.joinToString(" | ").ifBlank {
+            sherpaLibraryError = if (failures.isEmpty()) {
                 "Sherpa-ONNX runtime libraries could not be loaded."
-            }
-            sherpaLibraryError = if (failures.isNotEmpty()) {
-                "Sherpa-ONNX fallback groups attempted: $failureSummary"
             } else {
-                failureSummary
+                "Sherpa-ONNX fallback groups attempted: ${failures.joinToString(" | ")}"
             }
         }
         return sherpaLibrariesLoaded
