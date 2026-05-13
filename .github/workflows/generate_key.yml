@@ -1,20 +1,26 @@
 name: Generate New Keystore
-on: workflow_dispatch # Si avvia solo quando premi tu il tasto
+
+on:
+  workflow_dispatch:
 
 jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate Key
+      - name: Generate Keystore File
         run: |
-          keytool -genkey -v -keystore release.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
+          keytool -genkey -v \
+            -keystore release.jks \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
             -alias my-key-alias \
             -storepass PASSWORD_TEMPORANEA \
             -keypass PASSWORD_TEMPORANEA \
             -dname "CN=AI Orchestrator, O=Android, C=IT"
           
+          echo "------------------------------------------"
           echo "COPIA LA STRINGA QUI SOTTO:"
           base64 -w 0 release.jks
           echo ""
-          echo "FINE STRINGA"
+          echo "------------------------------------------"
