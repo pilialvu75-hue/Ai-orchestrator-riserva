@@ -152,14 +152,14 @@ class _Header extends StatelessWidget {
               ),
             ),
             child: Row(
-              children: const [
-                Icon(
+              children: [
+                const Icon(
                   Icons.warning_amber_rounded,
                   color: Color(0xFFFFB74D),
                   size: 16,
                 ),
-                SizedBox(width: 8),
-                Expanded(
+                const SizedBox(width: 8),
+                const Expanded(
                   child: Text(
                     'This is Beta software. You must accept these terms to use the app.',
                     style: TextStyle(
