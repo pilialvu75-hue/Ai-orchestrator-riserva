@@ -243,7 +243,7 @@ jobs:
           # fall back to the flat debug APK path for non-split builds.
           UNIVERSAL=$(find build/app/outputs/flutter-apk \
                         -maxdepth 1 -name 'app-universal-debug.apk' 2>/dev/null \
-                        | head -1 || true)
+                        | head -1)
           if [ -n "$UNIVERSAL" ]; then
             echo "DEBUG_APK_PATH=$UNIVERSAL" >> "$GITHUB_ENV"
             echo "Resolved APK: $UNIVERSAL (universal)"
