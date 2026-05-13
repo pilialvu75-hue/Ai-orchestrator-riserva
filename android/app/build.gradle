@@ -113,10 +113,27 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Explicit debug signing via the auto-generated debug.keystore so the
+            // APK is always signed and installable on physical devices.
+            signingConfig signingConfigs.debug
+            // Suffix isolates the debug package from any existing release install,
+            // eliminating "INSTALL_FAILED_UPDATE_INCOMPATIBLE" signature conflicts.
+            applicationIdSuffix ".debug"
+            debuggable true
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
+        }
+    }
+
+    // Disable ABI splits to produce a single universal fat APK that can be
+    // installed directly on any supported device (arm64-v8a or x86_64).
+    splits {
+        abi {
+            enable false
         }
     }
 
