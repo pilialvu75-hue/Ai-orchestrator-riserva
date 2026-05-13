@@ -122,6 +122,7 @@ jobs:
           : > gradle_stacktrace.log
           : > dependency_tree.log
           : > cmake_diagnostics.log
+          : > kotlin_diagnostics.log
 
       - name: Runner memory and stability baseline
         shell: bash
@@ -159,6 +160,25 @@ jobs:
             cd android
             ./gradlew assembleDebug --stacktrace --info --warning-mode all
           ) 2>&1 | tee -a gradle_stacktrace.log
+
+      - name: Kotlin diagnostics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          {
+            echo "==== KOTLIN VERSION ===="
+            command -v kotlinc &>/dev/null && kotlinc -version 2>&1 || echo "kotlinc not found in PATH"
+            echo
+            echo "==== KOTLIN GRADLE PLUGIN ===="
+            grep -rn -E 'kotlin["\(]|kotlin-gradle-plugin' android/settings.gradle android/build.gradle android/app/build.gradle 2>/dev/null || true
+            echo
+            echo "==== KOTLIN BUILD ERRORS ===="
+            grep -n -E "(error:|warning:|^\s+at )" gradle_stacktrace.log 2>/dev/null | head -n 200 || true
+            echo
+            echo "==== KOTLIN METADATA ===="
+            find . -type f -name '*.kotlin_module' | head -n 20 | sort
+          } | tee kotlin_diagnostics.log
 
       - name: Dependency conflict scan
         if: always()
@@ -254,9 +274,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "==== TAIL gradle_stacktrace.log (last 400 lines) ===="
+          echo "==== TAIL gradle_stacktrace.log (last 500 lines) ===="
           if [ -f gradle_stacktrace.log ]; then
-            tail -n 400 gradle_stacktrace.log
+            tail -n 500 gradle_stacktrace.log
           else
             echo "gradle_stacktrace.log not found"
           fi
@@ -267,6 +287,19 @@ jobs:
           else
             echo "flutter_verbose.log not found"
           fi
+
+      - name: Root cause extraction
+        if: always()
+        shell: bash
+        run: |
+          echo "==== ROOT CAUSE EXTRACTION ===="
+          for log in flutter_verbose.log gradle_stacktrace.log dependency_tree.log cmake_diagnostics.log kotlin_diagnostics.log; do
+            if [ -f "$log" ]; then
+              echo "--- Searching $log for failure patterns ---"
+              grep -n -E "(FAILURE:|Execution failed for task|Caused by:|Exception:|error:)" "$log" | head -n 100 || true
+              echo
+            fi
+          done
 
       - name: Verify native libraries
         if: always()
@@ -290,6 +323,7 @@ jobs:
             gradle_stacktrace.log
             dependency_tree.log
             cmake_diagnostics.log
+            kotlin_diagnostics.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
@@ -308,19 +342,8 @@ jobs:
           name: AI-Orchestrator-Core-${{ steps.version.outputs.tag }}
           path: release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
-      - name: Enforce forensic build success gate
-        if: always()
-        shell: bash
-        run: |
-          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
-            echo "Forensic build commands reported failure."
-            echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
-            echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
-            exit 1
-          fi
-
       - name: Generate release notes
-        if: success()
+        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
         shell: bash
         run: |
           {
@@ -341,7 +364,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        if: success()
+        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -349,3 +372,14 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+
+      - name: Enforce forensic build success gate
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
+            echo "Forensic build commands reported failure."
+            echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
+            echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
+            exit 1
+          fi
