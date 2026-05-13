@@ -102,7 +102,8 @@ jobs:
           rm -rf "$SIGNING_DIR"
           mkdir -p "$SIGNING_DIR"
           KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          export KEYSTORE_PATH
+          python -c "import base64, os, pathlib; pathlib.Path(os.environ['KEYSTORE_PATH']).write_bytes(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64']))"
           if [ ! -s "$KEYSTORE_PATH" ]; then
             echo "::error::Decoded Android keystore is empty"
             exit 1
@@ -254,6 +255,8 @@ jobs:
           set -euo pipefail
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
           ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name zipalign -type f | sort -V | tail -1)
+          test -n "$APKSIGNER" || { echo "::error::apksigner not found"; exit 1; }
+          test -n "$ZIPALIGN" || { echo "::error::zipalign not found"; exit 1; }
           "$APKSIGNER" verify --verbose --print-certs "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_signature.log
           "$ZIPALIGN" -c -v 4 "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_zipalign.log
           unzip -t "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_contents.log
@@ -286,7 +289,7 @@ jobs:
       - name: Upload signed release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
+          name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
           path: |
             ${{ steps.release_assets.outputs.release_apk_path }}
             ${{ steps.release_assets.outputs.release_aab_path }}
