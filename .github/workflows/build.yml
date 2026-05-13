@@ -381,5 +381,54 @@ jobs:
             echo "Forensic build commands reported failure."
             echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
             echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
+            echo "Build failed - continuing to diagnostics phase"
+          fi
+
+      - name: validate-results
+        if: always()
+        shell: bash
+        run: |
+          echo "==== VALIDATE RESULTS: FORENSIC OUTPUT ===="
+          echo
+          echo "--- Last 500 lines of gradle_stacktrace.log ---"
+          if [ -f gradle_stacktrace.log ]; then
+            tail -n 500 gradle_stacktrace.log
+          else
+            echo "gradle_stacktrace.log not found"
+          fi
+          echo
+          echo "--- Last 300 lines of flutter_verbose.log ---"
+          if [ -f flutter_verbose.log ]; then
+            tail -n 300 flutter_verbose.log
+          else
+            echo "flutter_verbose.log not found"
+          fi
+          echo
+          echo "--- First occurrence of 'Caused by:' ---"
+          for log in gradle_stacktrace.log flutter_verbose.log dependency_tree.log; do
+            if [ -f "$log" ]; then
+              MATCH=$(grep -n "Caused by:" "$log" | head -n 1 || true)
+              if [ -n "$MATCH" ]; then
+                echo "[$log] $MATCH"
+                break
+              fi
+            fi
+          done
+          echo
+          echo "--- First occurrence of 'Execution failed for task' ---"
+          for log in gradle_stacktrace.log flutter_verbose.log; do
+            if [ -f "$log" ]; then
+              MATCH=$(grep -n "Execution failed for task" "$log" | head -n 1 || true)
+              if [ -n "$MATCH" ]; then
+                echo "[$log] $MATCH"
+                break
+              fi
+            fi
+          done
+          echo
+          echo "==== FINAL PASS/FAIL DECISION ===="
+          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
+            echo "BUILD FAILED — flutter: ${{ steps.flutter_forensic.outcome }}, gradle: ${{ steps.gradle_forensic.outcome }}"
             exit 1
           fi
+          echo "BUILD SUCCEEDED"
