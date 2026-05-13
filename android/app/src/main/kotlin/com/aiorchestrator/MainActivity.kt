@@ -335,6 +335,9 @@ class MainActivity : FlutterActivity() {
             sherpaLibraryError = failures.joinToString(" | ").ifBlank {
                 "Sherpa-ONNX runtime libraries could not be loaded."
             }
+            if (failures.isNotEmpty()) {
+                sherpaLibraryError = "Sherpa-ONNX fallback groups attempted: $sherpaLibraryError"
+            }
         }
         return sherpaLibrariesLoaded
     }

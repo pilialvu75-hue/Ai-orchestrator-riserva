@@ -1,3 +1,5 @@
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+
 const String sherpaOnnxEngineId = 'sherpa-onnx';
 
 typedef VoiceRecognitionResultCallback = void Function(String text, bool isFinal);
@@ -89,7 +91,7 @@ abstract class VoiceEngine {
 
   Future<void> startListening({
     required VoiceRecognitionResultCallback onResult,
-    String localeId = 'en_US',
+    String localeId = AppConstants.sttDefaultLocaleId,
   });
 
   Future<void> stopListening();
