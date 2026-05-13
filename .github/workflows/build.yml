@@ -664,10 +664,27 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ "${{ steps.gradle_forensic.outcome }}" == "success" \
-             && "${{ env.DEBUG_APK_FOUND }}" == "true" \
-             && "${{ steps.validate_apk_signature.outcome }}" == "success" \
-             && "${{ steps.validate_apk_zipalign.outcome }}" == "success" ]]; then
+          GRADLE_OUTCOME="${{ steps.gradle_forensic.outcome }}"
+          APK_FOUND="${{ env.DEBUG_APK_FOUND }}"
+          APKSIGNER_OUTCOME="${{ steps.validate_apk_signature.outcome }}"
+          ZIPALIGN_OUTCOME="${{ steps.validate_apk_zipalign.outcome }}"
+
+          if [ -z "$APKSIGNER_OUTCOME" ]; then
+            APKSIGNER_OUTCOME="skipped"
+          fi
+          if [ -z "$ZIPALIGN_OUTCOME" ]; then
+            ZIPALIGN_OUTCOME="skipped"
+          fi
+
+          echo "gradle_outcome=$GRADLE_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "apk_found=$APK_FOUND" >> "$GITHUB_OUTPUT"
+          echo "apksigner_outcome=$APKSIGNER_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "zipalign_outcome=$ZIPALIGN_OUTCOME" >> "$GITHUB_OUTPUT"
+
+          if [[ "$GRADLE_OUTCOME" == "success" \
+             && "$APK_FOUND" == "true" \
+             && "$APKSIGNER_OUTCOME" == "success" \
+             && "$ZIPALIGN_OUTCOME" == "success" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -731,11 +748,11 @@ jobs:
             echo "Gradle build did not succeed."
           fi
           echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
-          echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
-          echo "DEBUG_APK_FOUND: ${{ env.DEBUG_APK_FOUND }}"
+          echo "gradle outcome: ${{ steps.release_gate.outputs.gradle_outcome }}"
+          echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
           echo "DEBUG_APK_PATH: ${{ env.DEBUG_APK_PATH }}"
-          echo "APK signature validation: ${{ steps.validate_apk_signature.outcome }}"
-          echo "APK zipalign validation: ${{ steps.validate_apk_zipalign.outcome }}"
+          echo "APK signature validation: ${{ steps.release_gate.outputs.apksigner_outcome }}"
+          echo "APK zipalign validation: ${{ steps.release_gate.outputs.zipalign_outcome }}"
 
       - name: validate-results
         if: always()
@@ -780,17 +797,14 @@ jobs:
           done
           echo
           echo "==== FINAL PASS/FAIL DECISION ===="
-          if [[ "${{ steps.gradle_forensic.outcome }}" == "success" \
-             && "${{ env.DEBUG_APK_FOUND }}" == "true" \
-             && "${{ steps.validate_apk_signature.outcome }}" == "success" \
-             && "${{ steps.validate_apk_zipalign.outcome }}" == "success" ]]; then
+          if [[ "${{ steps.release_gate.outputs.ready }}" == "true" ]]; then
             echo "BUILD SUCCEEDED"
             echo "Validated APK: ${{ env.DEBUG_APK_PATH }}"
           else
             echo "BUILD FAILED"
-            echo "gradle: ${{ steps.gradle_forensic.outcome }}"
-            echo "DEBUG_APK_FOUND: ${{ env.DEBUG_APK_FOUND }}"
-            echo "apksigner: ${{ steps.validate_apk_signature.outcome }}"
-            echo "zipalign: ${{ steps.validate_apk_zipalign.outcome }}"
+            echo "gradle: ${{ steps.release_gate.outputs.gradle_outcome }}"
+            echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
+            echo "apksigner: ${{ steps.release_gate.outputs.apksigner_outcome }}"
+            echo "zipalign: ${{ steps.release_gate.outputs.zipalign_outcome }}"
             exit 1
           fi
