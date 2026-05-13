@@ -169,6 +169,59 @@ jobs:
           # Flutter engine downloads that caused missing arm64_v8a_debug artifacts.
           flutter precache --android --force --verbose 2>&1 | tee flutter_engine_precache.log
 
+      - name: Verify Android Gradle wrapper files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f android/gradlew
+          test -f android/gradlew.bat
+          test -f android/gradle/wrapper/gradle-wrapper.jar
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+          chmod +x android/gradlew
+          ls -lah android/gradlew android/gradlew.bat android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Ensure Android local.properties for Gradle wrapper checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${FLUTTER_ROOT:-}" ]; then
+            echo "FLUTTER_ROOT is not set"
+            exit 1
+          fi
+          if [ ! -d "${FLUTTER_ROOT}/packages/flutter_tools/gradle" ]; then
+            echo "Flutter Gradle tooling not found under FLUTTER_ROOT=${FLUTTER_ROOT}"
+            exit 1
+          fi
+          if [ ! -f android/local.properties ]; then
+            touch android/local.properties
+          fi
+          awk -v flutter_root="${FLUTTER_ROOT}" '
+            BEGIN { replaced = 0 }
+            /^flutter\.sdk=/ {
+              print "flutter.sdk=" flutter_root
+              replaced = 1
+              next
+            }
+            { print }
+            END {
+              if (!replaced) {
+                print "flutter.sdk=" flutter_root
+              }
+            }
+          ' android/local.properties > android/local.properties.tmp
+          mv android/local.properties.tmp android/local.properties
+          grep -n '^flutter\.sdk=' android/local.properties
+
+      - name: Validate Gradle wrapper execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd android
+            ./gradlew --version --console=plain
+            ./gradlew tasks --console=plain
+          ) 2>&1 | tee gradle_wrapper_validation.log
+
       - name: Force dependency re-resolution
         shell: bash
         run: |
