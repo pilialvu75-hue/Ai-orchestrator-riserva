@@ -76,14 +76,14 @@ jobs:
 
       - name: Validate Android signing secrets
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
           missing=()
-          for secret_name in ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+          for secret_name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!secret_name:-}" ]; then
               missing+=("$secret_name")
             fi
@@ -95,7 +95,7 @@ jobs:
 
       - name: Prepare runtime Android signing files
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
@@ -109,13 +109,13 @@ jobs:
           import pathlib
           import sys
 
-          raw = os.environ["ANDROID_KEYSTORE_BASE64"]
+          raw = os.environ["KEYSTORE_BASE64"]
           path = pathlib.Path(os.environ["KEYSTORE_PATH"])
 
           try:
               path.write_bytes(base64.b64decode(raw))
           except Exception as exc:
-              print(f"::error::ANDROID_KEYSTORE_BASE64 is not valid base64 data: {exc}", file=sys.stderr)
+              print(f"::error::KEYSTORE_BASE64 is not valid base64 data: {exc}", file=sys.stderr)
               raise SystemExit(1)
           PY
           if [ ! -s "$KEYSTORE_PATH" ]; then
