@@ -2,11 +2,11 @@
 
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
-import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
@@ -34,7 +34,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final List<ChatAttachment> _attachments = <ChatAttachment>[];
   late final ImageService _imageService;
   late final FileAttachmentService _fileAttachmentService;
-  late final SpeechService _speechService;
+  late final VoiceInputService _voiceInputService;
 
   bool _hasText = false;
 
@@ -43,7 +43,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     super.initState();
     _imageService = di.sl<ImageService>();
     _fileAttachmentService = di.sl<FileAttachmentService>();
-    _speechService = di.sl<SpeechService>();
+    _voiceInputService = di.sl<VoiceInputService>();
     _controller.addListener(() {
       setState(() => _hasText = _controller.text.trim().isNotEmpty);
     });
@@ -224,7 +224,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                   const SizedBox(width: 10),
                   VoiceInputButton(
-                    speechService: _speechService,
+                    voiceInputService: _voiceInputService,
                     size: 42,
                     onResult: (text, _) {
                       final value = TextEditingValue(

@@ -270,7 +270,7 @@ Entrambi convergono sullo stesso contratto di risposta (`InferenceResponse`) in 
 | `CacheManager` | Cache in memoria per risposte frequenti, riduce le chiamate API ridondanti |
 | `BixbyHandler` | Gestione comandi vocali tramite Bixby (Samsung) |
 | `AndroidIntentHandler` | Ricezione di intent Android esterni (es. condivisione testo da altre app) |
-| `SpeechService` | STT (Speech-to-Text) e TTS (Text-to-Speech) per l'input/output vocale |
+| `VoiceInputService` / `VoiceOutputService` | Gestiscono input/output vocale offline tramite `SherpaOnnxAdapter` |
 | `ImageService` | Acquisizione e preprocessing di immagini per il modulo multimodale |
 
 ---

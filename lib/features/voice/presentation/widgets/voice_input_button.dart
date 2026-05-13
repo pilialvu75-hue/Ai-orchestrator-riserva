@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
+import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 
 /// Floating mic button that toggles speech-to-text recording.
 ///
@@ -8,12 +8,12 @@ import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart
 class VoiceInputButton extends StatefulWidget {
   const VoiceInputButton({
     super.key,
-    required this.speechService,
+    required this.voiceInputService,
     required this.onResult,
     this.size = 56,
   });
 
-  final SpeechService speechService;
+  final VoiceInputService voiceInputService;
 
   /// Called with each recognised phrase. [isFinal] is `true` on the final
   /// result for the current utterance.
@@ -53,11 +53,11 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
   Future<void> _toggle() async {
     if (_listening) {
-      await widget.speechService.stopListening();
+      await widget.voiceInputService.stopListening();
       _pulse.stop();
       setState(() => _listening = false);
     } else {
-      await widget.speechService.startListening(
+      await widget.voiceInputService.startListening(
         onResult: (text, isFinal) {
           widget.onResult(text, isFinal);
           if (isFinal) {
@@ -66,7 +66,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           }
         },
       );
-      final started = widget.speechService.isListening;
+      final started = widget.voiceInputService.isListening;
       if (started) {
         _pulse.repeat(reverse: true);
       } else {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
@@ -16,7 +17,6 @@ import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart'
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
-import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
@@ -265,7 +265,7 @@ class _ChatBodyState extends State<_ChatBody> {
 
   Future<void> _speakAssistantResponse(String text) async {
     try {
-      await di.sl<SpeechService>().speak(text);
+      await di.sl<VoiceOutputService>().speak(text);
     } catch (error) {
       debugPrint('TTS playback failed: $error');
     }

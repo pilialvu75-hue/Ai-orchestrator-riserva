@@ -150,14 +150,11 @@ RuntimeProvider (core/runtime/)
 ### Voice Providers
 
 ```
-SpeechService (features/voice/data/services/)
-    ├── VoiceAsrAdapter (contract)
-    │     ├── SherpaOnnxVoiceAdapter (offline ONNX, method/event channel)
-    │     └── DeviceSpeechToTextAdapter (fallback)
-    ├── VoiceTextNormalizer (text normalization layer)
-    └── VoiceTtsAdapter (contract)
-          ├── SherpaOnnxVoiceAdapter (offline ONNX, method channel)
-          └── DeviceFlutterTtsAdapter (fallback)
+VoiceEngine (core/voice/)
+    └── SherpaOnnxAdapter (features/voice/, offline ONNX method/event channel)
+          ├── VoiceInputService (core/voice/)
+          ├── VoiceOutputService (core/voice/)
+          └── VoiceTextNormalizer (text normalization layer)
 ```
 
 Voice remains isolated from `core/orchestrator` and `core/runtime/inference`: it only

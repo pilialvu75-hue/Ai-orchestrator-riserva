@@ -1,10 +1,14 @@
 package com.aiorchestrator
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import io.flutter.embedding.android.FlutterActivity
@@ -33,10 +37,21 @@ class MainActivity : FlutterActivity() {
     private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
     private val logTag = "AO_UPDATE"
     private val apkInstallRequestCode = 9917
+    // Native Sherpa/ONNX builds use different shared-library names depending on
+    // packaging strategy; probe the most common combinations in priority order.
+    private val sherpaLibraryGroups = listOf(
+        listOf("onnxruntime", "sherpa-onnx-jni"),
+        listOf("onnxruntime", "sherpa-onnx"),
+        listOf("onnxruntime4j_jni", "sherpa-onnx-jni"),
+        listOf("onnxruntime", "sherpa_onnx_jni")
+    )
     private var pendingIntentData: Map<String, Any?>? = null
     private var lastInstallerLaunchSuccess: Boolean? = null
     private var lastInstallerException: String? = null
     private var lastInstallerResultCode: Int? = null
+    private var sherpaLibrariesChecked = false
+    private var sherpaLibrariesLoaded = false
+    private var sherpaLibraryError: String? = null
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -222,15 +237,22 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "initializeSherpaOnnx" -> {
-                    // Native Sherpa engine wiring is isolated and optional.
-                    // Returning false keeps Flutter-side fallback adapters active.
-                    result.success(false)
+                    result.success(buildSherpaStatus())
                 }
+                "getSherpaStatus" -> result.success(buildSherpaStatus())
                 "startAsr", "stopAsr", "speakTts", "stopTts" -> {
+                    if (!ensureSherpaLibrariesLoaded()) {
+                        result.error(
+                            "SHERPA_NOT_AVAILABLE",
+                            sherpaLibraryError ?: "Sherpa-ONNX libraries are unavailable in this build.",
+                        buildSherpaStatus()
+                    )
+                        return@setMethodCallHandler
+                    }
                     result.error(
                         "SHERPA_NOT_IMPLEMENTED",
-                        "Sherpa-ONNX native module is not configured in this build.",
-                        null
+                        "Sherpa-ONNX native audio session wiring is not configured in this build.",
+                        buildSherpaStatus(isInitialized = true)
                     )
                 }
                 else -> result.notImplemented()
@@ -249,6 +271,76 @@ class MainActivity : FlutterActivity() {
                 // No-op placeholder.
             }
         })
+    }
+
+    private fun buildSherpaStatus(isInitialized: Boolean = false): Map<String, Any?> {
+        val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
+        val hasAudioOutputs = if (audioManager == null) {
+            false
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).isNotEmpty()
+        } else {
+            true
+        }
+        val librariesLoaded = ensureSherpaLibrariesLoaded()
+        return mapOf(
+            "engineId" to "sherpa-onnx",
+            "supportedPlatform" to true,
+            "nativeLibrariesLoaded" to librariesLoaded,
+            "microphonePermissionGranted" to (
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            ),
+            "audioSessionReady" to (audioManager != null),
+            "speakerOutputReady" to hasAudioOutputs,
+            "initialized" to (isInitialized && librariesLoaded),
+            "offlineAsrAvailable" to librariesLoaded,
+            "offlineTtsAvailable" to librariesLoaded,
+            "details" to sherpaLibraryError
+        )
+    }
+
+    private fun ensureSherpaLibrariesLoaded(): Boolean {
+        if (sherpaLibrariesChecked) {
+            return sherpaLibrariesLoaded
+        }
+        sherpaLibrariesChecked = true
+        val failures = mutableListOf<String>()
+        val nativeLibraryDirectory = File(applicationInfo.nativeLibraryDir)
+        for (group in sherpaLibraryGroups) {
+            val missingLibraries = group.filterNot { libraryName ->
+                File(nativeLibraryDirectory, System.mapLibraryName(libraryName)).exists()
+            }
+            if (missingLibraries.isNotEmpty()) {
+                failures += "${group.joinToString("+")}: missing ${missingLibraries.joinToString(",")}"
+                continue
+            }
+            val groupFailures = mutableListOf<String>()
+            for (libraryName in group) {
+                try {
+                    System.loadLibrary(libraryName)
+                } catch (error: Throwable) {
+                    groupFailures += "$libraryName: ${error.message}"
+                    break
+                }
+            }
+            if (groupFailures.isEmpty()) {
+                sherpaLibrariesLoaded = true
+                sherpaLibraryError = null
+                break
+            }
+            failures += "${group.joinToString("+")}: ${groupFailures.joinToString(" | ")}"
+        }
+        if (!sherpaLibrariesLoaded) {
+            sherpaLibraryError = if (failures.isEmpty()) {
+                "Sherpa-ONNX runtime libraries could not be loaded."
+            } else {
+                "Sherpa-ONNX fallback groups attempted: ${failures.joinToString(" | ")}"
+            }
+        }
+        return sherpaLibrariesLoaded
     }
 
     private fun registerMlcNativeChannel(engine: FlutterEngine) {
