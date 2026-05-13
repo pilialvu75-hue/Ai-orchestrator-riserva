@@ -381,15 +381,13 @@ jobs:
           set -o pipefail
 
           PRIMARY_APK="build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
-          RESOLVED_APK="$PRIMARY_APK"
-
-          echo "DEBUG_APK_PATH=$RESOLVED_APK" >> "$GITHUB_ENV"
-          if [ -f "$RESOLVED_APK" ]; then
+          echo "DEBUG_APK_PATH=$PRIMARY_APK" >> "$GITHUB_ENV"
+          if [ -f "$PRIMARY_APK" ]; then
             echo "DEBUG_APK_FOUND=true" >> "$GITHUB_ENV"
-            echo "Resolved APK: $RESOLVED_APK"
+            echo "Resolved APK: $PRIMARY_APK"
           else
             echo "DEBUG_APK_FOUND=false" >> "$GITHUB_ENV"
-            echo "Resolved APK: missing primary ARM64 APK at $RESOLVED_APK"
+            echo "Resolved APK: missing primary ARM64 APK at $PRIMARY_APK"
             FALLBACK_APK=$(find build/app/outputs -type f \
               \( -name "app-arm64-v8a-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-debug.apk" \) \
               | sort | head -1 || true)
@@ -661,8 +659,22 @@ jobs:
             exit 1
           fi
 
+      - name: Compute release readiness
+        id: release_gate
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.gradle_forensic.outcome }}" == "success" \
+             && "${{ env.DEBUG_APK_FOUND }}" == "true" \
+             && "${{ steps.validate_apk_signature.outcome }}" == "success" \
+             && "${{ steps.validate_apk_zipalign.outcome }}" == "success" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Prepare release assets
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true' && steps.validate_apk_signature.outcome == 'success' && steps.validate_apk_zipalign.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         run: |
           if [ ! -f "${{ env.DEBUG_APK_PATH }}" ]; then
             echo "Resolved APK path does not exist: ${{ env.DEBUG_APK_PATH }}"
@@ -671,14 +683,14 @@ jobs:
           echo "Final APK path: ${{ env.DEBUG_APK_PATH }}"
 
       - name: Upload artifact
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true' && steps.validate_apk_signature.outcome == 'success' && steps.validate_apk_zipalign.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: AI-Orchestrator-Core-arm64-v8a-debug-${{ steps.version.outputs.tag }}
           path: ${{ env.DEBUG_APK_PATH }}
 
       - name: Generate release notes
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true' && steps.validate_apk_signature.outcome == 'success' && steps.validate_apk_zipalign.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         shell: bash
         run: |
           {
@@ -699,7 +711,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_FOUND == 'true' && steps.validate_apk_signature.outcome == 'success' && steps.validate_apk_zipalign.outcome == 'success'
+        if: steps.release_gate.outputs.ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
