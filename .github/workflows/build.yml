@@ -114,8 +114,8 @@ jobs:
 
           try:
               path.write_bytes(base64.b64decode(raw))
-          except Exception:
-              print("::error::ANDROID_KEYSTORE_BASE64 is not valid base64 data", file=sys.stderr)
+          except Exception as exc:
+              print(f"::error::ANDROID_KEYSTORE_BASE64 is not valid base64 data: {exc}", file=sys.stderr)
               raise SystemExit(1)
           PY
           if [ ! -s "$KEYSTORE_PATH" ]; then
@@ -132,6 +132,10 @@ jobs:
           set -euo pipefail
           if [ -z "${FLUTTER_ROOT:-}" ]; then
             echo "::error::FLUTTER_ROOT is not set"
+            exit 1
+          fi
+          if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
+            echo "::error::ANDROID_SDK_ROOT is not set"
             exit 1
           fi
           {

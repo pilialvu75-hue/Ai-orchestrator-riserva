@@ -44,7 +44,10 @@ def requestedTargetPlatforms = requestedTargetPlatformsRaw
     .findAll { !it.isEmpty() }
 def requestedGradleTasks = gradle.startParameter.taskNames.collect { it.toLowerCase(Locale.ROOT) }
 def requiresReleaseSigning = requestedGradleTasks.any { taskName ->
-    taskName.contains("release") || taskName.contains("bundle") || taskName.contains("publish")
+    taskName.contains("assemblerelease")
+        || taskName.contains("bundlerelease")
+        || taskName.contains("packagerelease")
+        || (taskName.contains("publish") && taskName.contains("release"))
 }
 def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
     !supportedFlutterTargetPlatforms.contains(it)
