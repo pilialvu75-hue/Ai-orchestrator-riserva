@@ -195,11 +195,21 @@ jobs:
           if [ ! -f android/local.properties ]; then
             touch android/local.properties
           fi
-          if grep -q '^flutter\.sdk=' android/local.properties; then
-            sed -i "s|^flutter\\.sdk=.*|flutter.sdk=${FLUTTER_ROOT}|" android/local.properties
-          else
-            echo "flutter.sdk=${FLUTTER_ROOT}" >> android/local.properties
-          fi
+          awk -v flutter_root="${FLUTTER_ROOT}" '
+            BEGIN { replaced = 0 }
+            /^flutter\.sdk=/ {
+              print "flutter.sdk=" flutter_root
+              replaced = 1
+              next
+            }
+            { print }
+            END {
+              if (!replaced) {
+                print "flutter.sdk=" flutter_root
+              }
+            }
+          ' android/local.properties > android/local.properties.tmp
+          mv android/local.properties.tmp android/local.properties
           grep -n '^flutter\.sdk=' android/local.properties
 
       - name: Validate Gradle wrapper execution
