@@ -84,6 +84,18 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
+      - name: Configure Gradle forensic JVM settings
+        shell: bash
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+            echo "org.gradle.daemon=true"
+            echo "org.gradle.parallel=true"
+            echo "org.gradle.configureondemand=true"
+            echo "org.gradle.workers.max=2"
+          } >> ~/.gradle/gradle.properties
+
       - name: Determine version
         id: version
         shell: bash
@@ -103,16 +115,171 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_NAME" >> $GITHUB_OUTPUT
 
-      - name: Build debug APK
-        run: flutter build apk --debug --build-name=${{ steps.version.outputs.version_name }} --build-number=${{ steps.version.outputs.version_code }}
+      - name: Prepare forensic log directories
+        shell: bash
+        run: |
+          mkdir -p build/forensics build/reports
+          : > build/forensics/flutter-verbose-log.txt
+          : > build/forensics/gradle-full-log.txt
+          : > build/forensics/cmake-build-log.txt
+          : > build/forensics/ndk-build-log.txt
+          : > build/reports/dependency-tree.txt
+
+      - name: Runner memory and stability baseline
+        shell: bash
+        run: |
+          {
+            echo "==== SYSTEM BASELINE ===="
+            date -u
+            uname -a
+            echo
+            echo "==== MEMORY ===="
+            free -h || true
+            echo
+            echo "==== DISK ===="
+            df -h || true
+            echo
+            echo "==== JAVA/GRADLE PROCESSES ===="
+            ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
+          } | tee -a build/forensics/gradle-full-log.txt
+
+      - name: Build debug APK (Flutter verbose forensic)
+        id: flutter_forensic
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --debug --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee build/forensics/flutter-verbose-log.txt
+
+      - name: Build debug APK (Gradle forensic)
+        id: gradle_forensic
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd android
+            ./gradlew assembleDebug --stacktrace --info --warning-mode all
+          ) 2>&1 | tee -a build/forensics/gradle-full-log.txt
+
+      - name: Dependency conflict scan
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd android
+            ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all
+          ) 2>&1 | tee build/reports/dependency-tree.txt
+
+      - name: Native build diagnostics (CMake/NDK/JNI/.so)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          {
+            echo "==== CMAKE LOGS ===="
+            while IFS= read -r f; do
+              echo "----- $f -----"
+              cat "$f"
+              echo
+            done < <(find build -type f \( -name 'CMakeError.log' -o -name 'CMakeOutput.log' -o -name 'build_command.txt' -o -name 'configure.log' -o -name 'configure_output.txt' \) 2>/dev/null | sort)
+            echo "==== NDK LOGS ===="
+            while IFS= read -r f; do
+              echo "----- $f -----"
+              cat "$f"
+              echo
+            done < <(find build -type f \( -name '*.ninja_log' -o -name '*.ninja_deps' -o -name 'ninja*.log' \) 2>/dev/null | sort)
+            echo "==== JNI / SHARED LIBS INVENTORY ===="
+            find . -type f -name '*.so' | sort
+            echo
+            echo "==== VERIFY KEY LIBRARIES ===="
+            find . -type f \( -name 'libllama_bridge.so' -o -iname '*sherpa*onnx*.so' -o -iname '*sherpa*.so' \) | sort
+            echo
+            echo "==== DUPLICATE .SO NAMES ===="
+            find . -type f -name '*.so' -exec basename {} \; | sort | uniq -c | sort -nr | awk '$1>1 {print}'
+            echo
+            echo "==== ABI PACKAGING (APK) ===="
+            if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
+              unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep ' lib/.*\.so$' || true
+            else
+              echo "APK not generated"
+            fi
+            echo
+            echo "==== VULKAN / OPENCL LINKAGE ===="
+            while IFS= read -r so; do
+              echo "----- $so -----"
+              (readelf -d "$so" 2>/dev/null | grep -Ei 'NEEDED.*(vulkan|opencl|c\\+\\+_shared|c\\+\\+_static)' || true)
+            done < <(find . -type f -name '*.so' | sort)
+            echo
+            echo "==== MISSING SYMBOLS CHECK ===="
+            while IFS= read -r so; do
+              echo "----- $so -----"
+              (readelf -Ws "$so" 2>/dev/null | grep ' UND ' | head -n 200 || true)
+            done < <(find . -type f -name '*.so' | sort)
+            echo
+            echo "==== STRIP TOOL PRESENCE ===="
+            command -v llvm-strip || true
+            command -v strip || true
+          } | tee build/forensics/cmake-build-log.txt
+
+      - name: NDK/JNI packaging diagnostics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          {
+            echo "==== NDK/JNI DIRECTORIES ===="
+            find android/app/src -maxdepth 6 -type d \( -name jniLibs -o -name libs \) -print | sort
+            echo
+            echo "==== JNILIBS FILES ===="
+            find android/app/src -maxdepth 8 -type f -name '*.so' -print | sort
+            echo
+            echo "==== CXX BUILD TREE ===="
+            find build/.cxx -maxdepth 6 -type f 2>/dev/null | sort
+          } | tee build/forensics/ndk-build-log.txt
+
+      - name: Runner memory and stability post-build
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "==== SYSTEM POST-BUILD ===="
+            date -u
+            free -h || true
+            df -h || true
+            ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 40 || true
+          } | tee -a build/forensics/gradle-full-log.txt
 
       - name: Verify native libraries
+        if: always()
         run: |
-          unzip -l build/app/outputs/flutter-apk/app-debug.apk \
-            | grep 'lib/arm64-v8a/libllama_bridge.so' \
-            || echo "WARNING: libllama_bridge.so not found — native MLC disabled in this build"
+          if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
+            unzip -l build/app/outputs/flutter-apk/app-debug.apk \
+              | grep 'lib/arm64-v8a/libllama_bridge.so' \
+              || echo "WARNING: libllama_bridge.so not found — native MLC disabled in this build"
+          else
+            echo "APK not generated; skipping native lib verification"
+          fi
+
+      - name: Upload forensic diagnostics artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-forensics-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            build/forensics/flutter-verbose-log.txt
+            build/forensics/gradle-full-log.txt
+            build/forensics/cmake-build-log.txt
+            build/forensics/ndk-build-log.txt
+            build/reports/dependency-tree.txt
+            build/.cxx/**/CMakeFiles/CMakeOutput.log
+            build/.cxx/**/CMakeFiles/CMakeError.log
 
       - name: Prepare release assets
+        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
         run: |
           mkdir -p release-assets
 
@@ -120,12 +287,25 @@ jobs:
              release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
       - name: Upload artifact
+        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: AI-Orchestrator-Core-${{ steps.version.outputs.tag }}
           path: release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
+      - name: Enforce forensic build success gate
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.flutter_forensic.outcome }}" != "success" || "${{ steps.gradle_forensic.outcome }}" != "success" ]]; then
+            echo "Forensic build commands reported failure."
+            echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
+            echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
+            exit 1
+          fi
+
       - name: Generate release notes
+        if: success()
         shell: bash
         run: |
           {
@@ -146,6 +326,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
