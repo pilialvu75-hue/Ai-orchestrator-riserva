@@ -105,6 +105,9 @@ jobs:
         shell: bash
         run: |
           ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          if [ -z "${ENGINE_HASH}" ]; then
+            echo "WARNING: Flutter engine.version is missing or unreadable; artifact URLs may be incomplete."
+          fi
           # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
           echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
           echo "ENGINE_VERSION=1.0.0-${ENGINE_HASH}" >> "$GITHUB_ENV"
@@ -206,9 +209,6 @@ jobs:
             echo "org.gradle.console=plain"
             # Force info-level logging globally so detailed diagnostics always appear
             echo "org.gradle.logging.level=info"
-            # Retry unstable repository downloads to mitigate transient CI network failures
-            echo "org.gradle.internal.repository.max.retries=3"
-            echo "org.gradle.internal.repository.initial.backoff=1000"
           } >> ~/.gradle/gradle.properties
 
       - name: Determine version
