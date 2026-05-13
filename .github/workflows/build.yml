@@ -471,8 +471,8 @@ jobs:
             find . -type f -name '*.so' -exec basename {} \; | sort | uniq -c | sort -nr | awk '$1>1 {print}'
             echo
             echo "==== ABI PACKAGING (APK) ===="
-            if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
-              unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep ' lib/.*\.so$' || true
+            if [ -n "${{ env.DEBUG_APK_PATH }}" ] && [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
+              unzip -l "${{ env.DEBUG_APK_PATH }}" | grep ' lib/.*\.so$' || true
             else
               echo "APK not generated"
             fi
@@ -614,25 +614,6 @@ jobs:
             echo "APK not generated; skipping native lib verification"
           fi
 
-      - name: Upload forensic diagnostics artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-forensics-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          path: |
-            flutter_verbose.log
-            gradle_stacktrace.log
-            dependency_tree.log
-            cmake_diagnostics.log
-            kotlin_diagnostics.log
-            apk_discovery.log
-            flutter_engine_precache.log
-            apk_signature.log
-            apk_zipalign.log
-            build/.cxx/**/CMakeFiles/CMakeOutput.log
-            build/.cxx/**/CMakeFiles/CMakeError.log
-
       - name: Validate APK signature
         id: validate_apk_signature
         if: env.DEBUG_APK_FOUND == 'true'
@@ -659,15 +640,60 @@ jobs:
             exit 1
           fi
 
+      - name: Inspect APK contents
+        id: inspect_apk_contents
+        if: env.DEBUG_APK_FOUND == 'true'
+        shell: bash
+        run: |
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+
+          APK="${{ env.DEBUG_APK_PATH }}"
+          unzip -l "$APK" | tee apk_contents.log
+          unzip -t "$APK" | tee -a apk_contents.log
+
+          grep -Eq 'lib/arm64-v8a/[^[:space:]]+\.so$' apk_contents.log \
+            || { echo "Missing lib/arm64-v8a/*.so entries" | tee -a apk_contents.log; exit 1; }
+          grep -Fq 'AndroidManifest.xml' apk_contents.log \
+            || { echo "Missing AndroidManifest.xml" | tee -a apk_contents.log; exit 1; }
+          grep -Fq 'classes.dex' apk_contents.log \
+            || { echo "Missing classes.dex" | tee -a apk_contents.log; exit 1; }
+
+      - name: Upload forensic diagnostics artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-forensics-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            flutter_verbose.log
+            gradle_stacktrace.log
+            dependency_tree.log
+            cmake_diagnostics.log
+            kotlin_diagnostics.log
+            apk_discovery.log
+            flutter_engine_precache.log
+            apk_signature.log
+            apk_zipalign.log
+            apk_contents.log
+            build/.cxx/**/CMakeFiles/CMakeOutput.log
+            build/.cxx/**/CMakeFiles/CMakeError.log
+
       - name: Compute release readiness
         id: release_gate
         if: always()
         shell: bash
         run: |
-          GRADLE_OUTCOME="${{ steps.gradle_forensic.outcome }}"
           APK_FOUND="${{ env.DEBUG_APK_FOUND }}"
           APKSIGNER_OUTCOME="${{ steps.validate_apk_signature.outcome }}"
           ZIPALIGN_OUTCOME="${{ steps.validate_apk_zipalign.outcome }}"
+          CONTENTS_OUTCOME="${{ steps.inspect_apk_contents.outcome }}"
+          APK_SIZE_BYTES=0
+
+          if [ -f "${{ env.DEBUG_APK_PATH }}" ]; then
+            APK_SIZE_BYTES=$(stat -c%s "${{ env.DEBUG_APK_PATH }}")
+          fi
 
           if [ -z "$APKSIGNER_OUTCOME" ]; then
             APKSIGNER_OUTCOME="skipped"
@@ -675,16 +701,22 @@ jobs:
           if [ -z "$ZIPALIGN_OUTCOME" ]; then
             ZIPALIGN_OUTCOME="skipped"
           fi
+          if [ -z "$CONTENTS_OUTCOME" ]; then
+            CONTENTS_OUTCOME="skipped"
+          fi
 
-          echo "gradle_outcome=$GRADLE_OUTCOME" >> "$GITHUB_OUTPUT"
           echo "apk_found=$APK_FOUND" >> "$GITHUB_OUTPUT"
+          echo "apk_size_bytes=$APK_SIZE_BYTES" >> "$GITHUB_OUTPUT"
+          echo "apk_nonzero=$([ "$APK_SIZE_BYTES" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "apksigner_outcome=$APKSIGNER_OUTCOME" >> "$GITHUB_OUTPUT"
           echo "zipalign_outcome=$ZIPALIGN_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "contents_outcome=$CONTENTS_OUTCOME" >> "$GITHUB_OUTPUT"
 
-          if [[ "$GRADLE_OUTCOME" == "success" \
-             && "$APK_FOUND" == "true" \
+          if [[ "$APK_FOUND" == "true" \
+             && "$APK_SIZE_BYTES" -gt 0 \
              && "$APKSIGNER_OUTCOME" == "success" \
-             && "$ZIPALIGN_OUTCOME" == "success" ]]; then
+             && "$ZIPALIGN_OUTCOME" == "success" \
+             && "$CONTENTS_OUTCOME" == "success" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -748,11 +780,14 @@ jobs:
             echo "Gradle build did not succeed."
           fi
           echo "flutter outcome: ${{ steps.flutter_forensic.outcome }}"
-          echo "gradle outcome: ${{ steps.release_gate.outputs.gradle_outcome }}"
+          echo "gradle outcome: ${{ steps.gradle_forensic.outcome }}"
           echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
           echo "DEBUG_APK_PATH: ${{ env.DEBUG_APK_PATH }}"
+          echo "APK size bytes: ${{ steps.release_gate.outputs.apk_size_bytes }}"
+          echo "APK non-zero: ${{ steps.release_gate.outputs.apk_nonzero }}"
           echo "APK signature validation: ${{ steps.release_gate.outputs.apksigner_outcome }}"
           echo "APK zipalign validation: ${{ steps.release_gate.outputs.zipalign_outcome }}"
+          echo "APK contents validation: ${{ steps.release_gate.outputs.contents_outcome }}"
 
       - name: validate-results
         if: always()
@@ -802,9 +837,27 @@ jobs:
             echo "Validated APK: ${{ env.DEBUG_APK_PATH }}"
           else
             echo "BUILD FAILED"
-            echo "gradle: ${{ steps.release_gate.outputs.gradle_outcome }}"
+            if [[ "${{ steps.release_gate.outputs.apk_found }}" != "true" ]]; then
+              echo "Reason: APK missing at ${{ env.DEBUG_APK_PATH }}"
+            fi
+            if [[ "${{ steps.release_gate.outputs.apk_nonzero }}" != "true" ]]; then
+              echo "Reason: APK size is zero bytes"
+            fi
+            if [[ "${{ steps.release_gate.outputs.apksigner_outcome }}" != "success" ]]; then
+              echo "Reason: apksigner verify failed"
+            fi
+            if [[ "${{ steps.release_gate.outputs.zipalign_outcome }}" != "success" ]]; then
+              echo "Reason: zipalign validation failed"
+            fi
+            if [[ "${{ steps.release_gate.outputs.contents_outcome }}" != "success" ]]; then
+              echo "Reason: APK contents validation failed"
+            fi
+            echo "flutter: ${{ steps.flutter_forensic.outcome }}"
+            echo "gradle: ${{ steps.gradle_forensic.outcome }}"
             echo "DEBUG_APK_FOUND: ${{ steps.release_gate.outputs.apk_found }}"
+            echo "apk_size_bytes: ${{ steps.release_gate.outputs.apk_size_bytes }}"
             echo "apksigner: ${{ steps.release_gate.outputs.apksigner_outcome }}"
             echo "zipalign: ${{ steps.release_gate.outputs.zipalign_outcome }}"
+            echo "contents: ${{ steps.release_gate.outputs.contents_outcome }}"
             exit 1
           fi
