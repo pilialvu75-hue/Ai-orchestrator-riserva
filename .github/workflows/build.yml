@@ -52,6 +52,25 @@ jobs:
           sdkmanager "ndk;26.1.10909125"
           yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
 
+      - name: Reset Android debug keystore
+        shell: bash
+        run: |
+          # Remove any stale or corrupted debug.keystore and generate a fresh one.
+          # The standard Android debug certificate uses the fixed credentials below
+          # so that the debug APK is always signed and installable on physical devices.
+          mkdir -p ~/.android
+          rm -f ~/.android/debug.keystore
+          keytool -genkeypair \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "Debug keystore regenerated: $(ls -lh ~/.android/debug.keystore)"
+
       - name: Create Android signing config
         shell: bash
         env:
@@ -365,7 +384,15 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          APK="build/app/outputs/flutter-apk/app-debug.apk"
+          # When ABI splits with universalApk=true are enabled, Flutter outputs
+          # app-universal-debug.apk alongside per-ABI APKs.  Fall back to the
+          # legacy flat path for non-split builds.
+          APK=$(find build/app/outputs/flutter-apk \
+                  -name 'app-universal-debug.apk' 2>/dev/null | head -1 || true)
+          if [ -z "$APK" ]; then
+            APK="build/app/outputs/flutter-apk/app-debug.apk"
+          fi
+
           if [ ! -f "$APK" ]; then
             echo "APK not generated; skipping APK forensic inspection"
             exit 0
@@ -441,8 +468,17 @@ jobs:
         run: |
           mkdir -p release-assets
 
-          cp build/app/outputs/flutter-apk/app-debug.apk \
-             release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
+          # Prefer the universal APK (all ABIs bundled) when ABI splits are enabled;
+          # fall back to the flat debug APK for non-split builds.
+          UNIVERSAL=$(find build/app/outputs/flutter-apk \
+                        -name 'app-universal-debug.apk' 2>/dev/null | head -1 || true)
+          if [ -n "$UNIVERSAL" ]; then
+            SRC="$UNIVERSAL"
+          else
+            SRC="build/app/outputs/flutter-apk/app-debug.apk"
+          fi
+
+          cp "$SRC" release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
       - name: Upload artifact
         if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
