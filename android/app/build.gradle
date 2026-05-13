@@ -110,10 +110,10 @@ android {
             def storePasswordValue = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
             def keyAliasValue = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
             def keyPasswordValue = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
-            def resolvedStoreFile = storeFilePath ? file(storeFilePath) : null
+            def storeFileCandidate = storeFilePath ? file(storeFilePath) : null
 
-            if (resolvedStoreFile != null && resolvedStoreFile.exists() && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
-                storeFile resolvedStoreFile
+            if (storeFileCandidate != null && storeFileCandidate.exists() && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
+                storeFile storeFileCandidate
                 storePassword storePasswordValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue

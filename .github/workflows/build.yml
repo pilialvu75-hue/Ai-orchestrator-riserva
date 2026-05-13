@@ -103,7 +103,21 @@ jobs:
           mkdir -p "$SIGNING_DIR"
           KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
           export KEYSTORE_PATH
-          python -c "import base64, os, pathlib; pathlib.Path(os.environ['KEYSTORE_PATH']).write_bytes(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64']))"
+          python - <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+
+          raw = os.environ["ANDROID_KEYSTORE_BASE64"]
+          path = pathlib.Path(os.environ["KEYSTORE_PATH"])
+
+          try:
+              path.write_bytes(base64.b64decode(raw))
+          except Exception:
+              print("::error::ANDROID_KEYSTORE_BASE64 is not valid base64 data", file=sys.stderr)
+              raise SystemExit(1)
+          PY
           if [ ! -s "$KEYSTORE_PATH" ]; then
             echo "::error::Decoded Android keystore is empty"
             exit 1
@@ -217,7 +231,7 @@ jobs:
             fi
           done
           if [ -z "$RELEASE_APK_PATH" ]; then
-            RELEASE_APK_PATH=$(find build/app/outputs -type f -name '*release*.apk' | sort | head -n 1 || true)
+            RELEASE_APK_PATH=$(find build/app/outputs -type f \( -name 'app-*-release.apk' -o -name 'app-release.apk' \) | sort | head -n 1 || true)
           fi
           RELEASE_AAB_PATH=$(find build/app/outputs -type f -name '*release*.aab' | sort | head -n 1 || true)
           echo "Resolved release APK path: ${RELEASE_APK_PATH:-missing}"
