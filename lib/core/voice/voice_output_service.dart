@@ -17,13 +17,13 @@ class VoiceOutputService {
 
   bool get isSpeaking => _engine.isSpeaking;
 
-  Future<bool> initialise() async {
+  Future<bool> initialize() async {
     _lastStatus = await _engine.initialize();
     return _lastStatus?.readyForOutput == true;
   }
 
   Future<void> speak(String text) async {
-    final ready = await initialise();
+    final ready = await initialize();
     if (!ready) return;
 
     final normalized = _normalizer.normalizeForTts(text);

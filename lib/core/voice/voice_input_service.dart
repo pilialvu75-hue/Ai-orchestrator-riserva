@@ -21,7 +21,7 @@ class VoiceInputService {
 
   bool get isListening => _engine.isListening;
 
-  Future<bool> initialise() async {
+  Future<bool> initialize() async {
     final requiresRuntimeMicPermission = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS ||
@@ -53,7 +53,7 @@ class VoiceInputService {
     required VoiceRecognitionResultCallback onResult,
     String localeId = AppConstants.sttDefaultLocaleId,
   }) async {
-    final ready = await initialise();
+    final ready = await initialize();
     if (!ready) return;
 
     await _engine.startListening(
