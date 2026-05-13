@@ -205,7 +205,7 @@ jobs:
       - name: Validate Gradle wrapper execution
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           (
             cd android
             ./gradlew --version --console=plain
