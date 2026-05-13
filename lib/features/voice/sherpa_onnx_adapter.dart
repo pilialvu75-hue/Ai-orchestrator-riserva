@@ -160,7 +160,14 @@ class SherpaOnnxAdapter implements VoiceEngine {
       );
     }
     if (response is bool) {
-      final supported = defaultTargetPlatform == TargetPlatform.android;
+      final supported = switch (defaultTargetPlatform) {
+        TargetPlatform.android ||
+        TargetPlatform.windows ||
+        TargetPlatform.linux ||
+        TargetPlatform.macOS =>
+          true,
+        _ => false,
+      };
       return VoiceEngineStatus(
         engineId: sherpaOnnxEngineId,
         supportedPlatform: supported,

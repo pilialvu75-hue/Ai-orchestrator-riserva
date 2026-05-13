@@ -37,6 +37,8 @@ class MainActivity : FlutterActivity() {
     private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
     private val logTag = "AO_UPDATE"
     private val apkInstallRequestCode = 9917
+    // Native Sherpa/ONNX builds use different shared-library names depending on
+    // packaging strategy; probe the most common combinations in priority order.
     private val sherpaLibraryGroups = listOf(
         listOf("onnxruntime", "sherpa-onnx-jni"),
         listOf("onnxruntime", "sherpa-onnx"),
@@ -332,11 +334,13 @@ class MainActivity : FlutterActivity() {
             failures += "${group.joinToString("+")}: ${groupFailures.joinToString(" | ")}"
         }
         if (!sherpaLibrariesLoaded) {
-            sherpaLibraryError = failures.joinToString(" | ").ifBlank {
+            val failureSummary = failures.joinToString(" | ").ifBlank {
                 "Sherpa-ONNX runtime libraries could not be loaded."
             }
-            if (failures.isNotEmpty()) {
-                sherpaLibraryError = "Sherpa-ONNX fallback groups attempted: $sherpaLibraryError"
+            sherpaLibraryError = if (failures.isNotEmpty()) {
+                "Sherpa-ONNX fallback groups attempted: $failureSummary"
+            } else {
+                failureSummary
             }
         }
         return sherpaLibrariesLoaded
