@@ -145,7 +145,7 @@ android {
         abi {
             enable true
             reset()
-            include "arm64-v8a", "armeabi-v7a", "x86_64"
+            include "arm64-v8a", "armeabi-v7a" /* no native libs; included for Play Store ABI filter */, "x86_64"
             universalApk true
         }
     }
