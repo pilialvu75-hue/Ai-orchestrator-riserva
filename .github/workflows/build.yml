@@ -106,7 +106,8 @@ jobs:
         run: |
           ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
           if [ -z "${ENGINE_HASH}" ]; then
-            echo "WARNING: Flutter engine.version is missing or unreadable; artifact URLs may be incomplete."
+            echo "ERROR: Flutter engine.version is missing or unreadable; cannot resolve Flutter engine artifact URLs."
+            exit 1
           fi
           # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
           echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
@@ -120,7 +121,6 @@ jobs:
           : > dependency_tree.log
           : > cmake_diagnostics.log
           : > kotlin_diagnostics.log
-          : > flutter_engine_presolve.log
 
       - name: Network and repository access audit
         shell: bash
