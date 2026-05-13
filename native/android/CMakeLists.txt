@@ -41,7 +41,7 @@
 #       externalNativeBuild {
 #           cmake {
 #               cppFlags "-std=c++17 -O3"
-#               abiFilters "arm64-v8a", "x86_64"
+#               abiFilters "arm64-v8a"
 #           }
 #       }
 #   }
@@ -52,7 +52,7 @@ project(llama_bridge VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(SUPPORTED_ANDROID_ABIS arm64-v8a x86_64)
+set(SUPPORTED_ANDROID_ABIS arm64-v8a)
 option(AI_ANDROID_ENABLE_MLC "Enable MLC-LLM JNI bridge integration" OFF)
 
 if(ANDROID AND DEFINED ANDROID_ABI AND NOT ANDROID_ABI IN_LIST SUPPORTED_ANDROID_ABIS)
