@@ -130,14 +130,6 @@ android {
         }
     }
 
-    splits {
-        abi {
-            enable true
-            reset()
-            include(*supportedAndroidAbis)
-            universalApk false
-        }
-    }
 }
 
 flutter {
