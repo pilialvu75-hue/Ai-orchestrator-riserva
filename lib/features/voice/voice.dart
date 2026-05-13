@@ -1,7 +1,6 @@
-export 'data/adapters/device_voice_adapters.dart';
-export 'data/adapters/sherpa_onnx_voice_adapter.dart';
-export 'data/adapters/voice_asr_adapter.dart';
-export 'data/adapters/voice_tts_adapter.dart';
-export 'data/normalization/voice_text_normalizer.dart';
-export 'data/services/speech_service.dart';
+export '../../core/voice/voice_engine.dart';
+export '../../core/voice/voice_input_service.dart';
+export '../../core/voice/voice_output_service.dart';
+export '../../core/voice/voice_text_normalizer.dart';
+export 'sherpa_onnx_adapter.dart';
 export 'presentation/widgets/voice_input_button.dart';

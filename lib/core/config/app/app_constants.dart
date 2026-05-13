@@ -197,10 +197,6 @@ class AppConstants {
   static const String updateGitHubRepo = 'AI-Orchestrator-Core';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
-  static const double ttsSpeechRate = 0.5;
-  static const double ttsVolume = 1.0;
-  static const double ttsPitch = 1.0;
-  static const String ttsDefaultLocale = 'en-US';
   static const String sttDefaultLocaleId = 'en_US';
   static const String sherpaVoiceMethodChannel =
       'com.aiorchestrator/sherpa_onnx_voice';

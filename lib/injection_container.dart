@@ -18,6 +18,10 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
+import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
+import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
+import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 import 'package:ai_orchestrator/core/services/cache_manager.dart';
 import 'package:ai_orchestrator/core/sync/network/local_sync_client.dart';
 import 'package:ai_orchestrator/core/sync/network/local_sync_server.dart';
@@ -65,10 +69,7 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/get_project_me
 import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
-import 'package:ai_orchestrator/features/voice/data/services/speech_service.dart';
-import 'package:ai_orchestrator/features/voice/data/adapters/device_voice_adapters.dart';
-import 'package:ai_orchestrator/features/voice/data/adapters/sherpa_onnx_voice_adapter.dart';
-import 'package:ai_orchestrator/features/voice/data/normalization/voice_text_normalizer.dart';
+import 'package:ai_orchestrator/features/voice/sherpa_onnx_adapter.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
@@ -246,23 +247,18 @@ Future<void> initDependencies({
   sl.registerLazySingleton<VoiceTextNormalizer>(
     () => const VoiceTextNormalizer(),
   );
-  sl.registerLazySingleton<SherpaOnnxVoiceAdapter>(
-    () => SherpaOnnxVoiceAdapter(),
+  sl.registerLazySingleton<VoiceEngine>(
+    () => SherpaOnnxAdapter(),
   );
-  sl.registerLazySingleton<DeviceSpeechToTextAdapter>(
-    () => DeviceSpeechToTextAdapter(),
+  sl.registerLazySingleton<VoiceInputService>(
+    () => VoiceInputService(
+      engine: sl<VoiceEngine>(),
+      normalizer: sl<VoiceTextNormalizer>(),
+    ),
   );
-  sl.registerLazySingleton<DeviceFlutterTtsAdapter>(
-    () => DeviceFlutterTtsAdapter(),
-  );
-  sl.registerLazySingleton<SpeechService>(
-    () => SpeechService(
-      primaryAsr: sl<SherpaOnnxVoiceAdapter>(),
-      fallbackAsr: sl<DeviceSpeechToTextAdapter>(),
-      primaryTts: sl<SherpaOnnxVoiceAdapter>(),
-      fallbackTts: sl<DeviceFlutterTtsAdapter>(),
-      sharedAsrAdapter: false,
-      sharedTtsAdapter: false,
+  sl.registerLazySingleton<VoiceOutputService>(
+    () => VoiceOutputService(
+      engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );
