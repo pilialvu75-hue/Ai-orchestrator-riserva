@@ -94,6 +94,10 @@ jobs:
             echo "org.gradle.parallel=true"
             echo "org.gradle.configureondemand=true"
             echo "org.gradle.workers.max=2"
+            # Force plain (non-rich) console so GitHub Actions never truncates Gradle output lines
+            echo "org.gradle.console=plain"
+            # Force info-level logging globally so detailed diagnostics always appear
+            echo "org.gradle.logging.level=info"
           } >> ~/.gradle/gradle.properties
 
       - name: Determine version
@@ -124,6 +128,46 @@ jobs:
           : > cmake_diagnostics.log
           : > kotlin_diagnostics.log
 
+      - name: Print build environment (forensic baseline)
+        shell: bash
+        run: |
+          {
+            echo "==== BUILD ENVIRONMENT FORENSIC BASELINE ===="
+            date -u
+            echo
+            echo "==== JAVA ===="
+            java -version 2>&1 || true
+            javac -version 2>&1 || true
+            echo
+            echo "==== FLUTTER / DART ===="
+            flutter --version 2>&1 || true
+            dart --version 2>&1 || true
+            echo
+            echo "==== GRADLE WRAPPER ===="
+            (cd android && ./gradlew --version 2>&1) || true
+            echo
+            echo "==== ANDROID SDK ===="
+            echo "ANDROID_SDK_ROOT: ${ANDROID_SDK_ROOT:-unset}"
+            echo "ANDROID_HOME: ${ANDROID_HOME:-unset}"
+            ls "${ANDROID_SDK_ROOT}/ndk" 2>/dev/null || echo "ndk directory not found"
+            echo
+            echo "==== INSTALLED NDK VERSIONS ===="
+            ls "${ANDROID_SDK_ROOT}/ndk/" 2>/dev/null | sort || echo "none found"
+            echo
+            echo "==== CMAKE ===="
+            cmake --version 2>/dev/null || echo "cmake not in PATH"
+            find "${ANDROID_SDK_ROOT}/cmake" -maxdepth 2 -name cmake -type f 2>/dev/null | sort || true
+            echo
+            echo "==== SETTINGS.GRADLE AGP/KOTLIN PINS ===="
+            cat android/settings.gradle || true
+            echo
+            echo "==== APP BUILD.GRADLE SDK/NDK PINS ===="
+            grep -n -E "(compileSdk|targetSdk|minSdk|ndkVersion|version)" android/app/build.gradle || true
+            echo
+            echo "==== GRADLE.PROPERTIES (user home) ===="
+            cat ~/.gradle/gradle.properties || true
+          } | tee -a gradle_stacktrace.log
+
       - name: Runner memory and stability baseline
         shell: bash
         run: |
@@ -146,6 +190,13 @@ jobs:
         id: flutter_forensic
         continue-on-error: true
         shell: bash
+        env:
+          TERM: dumb
+          # Pass plain-console and info-level logging into the Gradle daemon that
+          # Flutter spawns internally, preventing any line-truncation from the
+          # rich Gradle console or ANSI escape-code sequences.
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
@@ -154,11 +205,15 @@ jobs:
         id: gradle_forensic
         continue-on-error: true
         shell: bash
+        env:
+          TERM: dumb
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
             cd android
-            ./gradlew assembleDebug --stacktrace --info --warning-mode all
+            ./gradlew assembleDebug --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee -a gradle_stacktrace.log
 
       - name: Kotlin diagnostics
@@ -184,11 +239,15 @@ jobs:
         if: always()
         continue-on-error: true
         shell: bash
+        env:
+          TERM: dumb
+          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
             cd android
-            ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all
+            ./gradlew :app:dependencies --configuration debugRuntimeClasspath --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee dependency_tree.log
 
       - name: Native build diagnostics (CMake/NDK/JNI/.so)
