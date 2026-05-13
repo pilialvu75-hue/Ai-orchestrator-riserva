@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
 
     timeout-minutes: 90
+    env:
+      TERM: dumb
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
 
     steps:
       - name: Checkout repository
@@ -101,6 +105,7 @@ jobs:
         shell: bash
         run: |
           ENGINE_HASH="$(cat "${FLUTTER_ROOT}/bin/internal/engine.version" 2>/dev/null || true)"
+          # Flutter Android engine Maven artifacts are versioned as 1.0.0-<engine_hash>.
           echo "ENGINE_HASH=${ENGINE_HASH}" >> "$GITHUB_ENV"
           echo "ENGINE_VERSION=1.0.0-${ENGINE_HASH}" >> "$GITHUB_ENV"
 
@@ -141,16 +146,13 @@ jobs:
             )
             for url in "${URLS[@]}"; do
               echo "--- $url ---"
+              echo "(diagnostic-only check; failures are logged and do not fail this audit step)"
               curl -I -L --retry 3 --retry-delay 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$url" || true
             done
           } | tee -a gradle_stacktrace.log
 
       - name: Clean Flutter/Gradle state and repair caches
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           flutter clean
@@ -162,10 +164,6 @@ jobs:
 
       - name: Force dependency re-resolution
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
@@ -294,13 +292,6 @@ jobs:
         id: flutter_forensic
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          # Pass plain-console and info-level logging into the Gradle daemon that
-          # Flutter spawns internally, preventing any line-truncation from the
-          # rich Gradle console or ANSI escape-code sequences.
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
@@ -309,10 +300,6 @@ jobs:
         id: gradle_forensic
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
@@ -360,10 +347,6 @@ jobs:
         if: always()
         continue-on-error: true
         shell: bash
-        env:
-          TERM: dumb
-          GRADLE_OPTS: "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dorg.gradle.internal.repository.max.retries=3 -Dorg.gradle.internal.repository.initial.backoff=1000 -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           (
