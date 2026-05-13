@@ -66,8 +66,10 @@ class SherpaOnnxAdapter implements VoiceEngine {
     required VoiceRecognitionResultCallback onResult,
     String localeId = AppConstants.sttDefaultLocaleId,
   }) async {
-    final status = _status.initialized ? _status : await initialize();
-    if (!status.readyForInput) return;
+    if (!_status.initialized) {
+      await initialize();
+    }
+    if (!_status.readyForInput) return;
 
     await _asrSubscription?.cancel();
     _asrSubscription = _asrEventChannel.receiveBroadcastStream().listen(
@@ -115,8 +117,10 @@ class SherpaOnnxAdapter implements VoiceEngine {
   @override
   Future<void> speak(String text) async {
     if (text.trim().isEmpty) return;
-    final status = _status.initialized ? _status : await initialize();
-    if (!status.readyForOutput) return;
+    if (!_status.initialized) {
+      await initialize();
+    }
+    if (!_status.readyForOutput) return;
 
     try {
       await _methodChannel.invokeMethod<void>('speakTts', <String, dynamic>{
@@ -158,7 +162,7 @@ class SherpaOnnxAdapter implements VoiceEngine {
     if (response is bool) {
       final supported = defaultTargetPlatform == TargetPlatform.android;
       return VoiceEngineStatus(
-        engineId: 'sherpa-onnx',
+        engineId: sherpaOnnxEngineId,
         supportedPlatform: supported,
         nativeLibrariesLoaded: response,
         microphonePermissionGranted: response,

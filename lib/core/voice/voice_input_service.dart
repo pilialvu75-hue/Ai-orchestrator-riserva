@@ -34,7 +34,7 @@ class VoiceInputService {
       final permission = await Permission.microphone.request();
       if (!permission.isGranted) {
         _lastStatus = const VoiceEngineStatus(
-          engineId: 'sherpa-onnx',
+          engineId: sherpaOnnxEngineId,
           supportedPlatform: true,
           nativeLibrariesLoaded: false,
           microphonePermissionGranted: false,

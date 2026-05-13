@@ -315,14 +315,21 @@ class MainActivity : FlutterActivity() {
                 failures += "${group.joinToString("+")}: missing ${missingLibraries.joinToString(",")}"
                 continue
             }
-            try {
-                group.forEach(System::loadLibrary)
+            val groupFailures = mutableListOf<String>()
+            for (libraryName in group) {
+                try {
+                    System.loadLibrary(libraryName)
+                } catch (error: Throwable) {
+                    groupFailures += "$libraryName: ${error.message}"
+                    break
+                }
+            }
+            if (groupFailures.isEmpty()) {
                 sherpaLibrariesLoaded = true
                 sherpaLibraryError = null
                 break
-            } catch (error: Throwable) {
-                failures += "${group.joinToString("+")}: ${error.message}"
             }
+            failures += "${group.joinToString("+")}: ${groupFailures.joinToString(" | ")}"
         }
         if (!sherpaLibrariesLoaded) {
             sherpaLibraryError = failures.joinToString(" | ").ifBlank {

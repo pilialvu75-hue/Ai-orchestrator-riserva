@@ -1,3 +1,5 @@
+const String sherpaOnnxEngineId = 'sherpa-onnx';
+
 typedef VoiceRecognitionResultCallback = void Function(String text, bool isFinal);
 
 class VoiceEngineStatus {
@@ -45,7 +47,7 @@ class VoiceEngineStatus {
     String? details,
   }) {
     return VoiceEngineStatus(
-      engineId: 'sherpa-onnx',
+      engineId: sherpaOnnxEngineId,
       supportedPlatform: false,
       nativeLibrariesLoaded: false,
       microphonePermissionGranted: false,
@@ -62,7 +64,7 @@ class VoiceEngineStatus {
     bool readBool(String key) => map[key] == true;
 
     return VoiceEngineStatus(
-      engineId: map['engineId'] as String? ?? 'sherpa-onnx',
+      engineId: map['engineId'] as String? ?? sherpaOnnxEngineId,
       supportedPlatform: readBool('supportedPlatform'),
       nativeLibrariesLoaded: readBool('nativeLibrariesLoaded'),
       microphonePermissionGranted: readBool('microphonePermissionGranted'),
