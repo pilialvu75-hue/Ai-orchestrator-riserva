@@ -18,13 +18,9 @@ if (keystorePropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty("flutter.versionCode") ?: "1"
 def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
-// Universal APK configuration — targets all 64-bit ABIs supported by the
-// native CMake bridge (arm64-v8a and x86_64).  armeabi-v7a is listed in
-// the ABI splits so the universal APK is accepted by the Play Store ABI
-// filter; no native libs are compiled for armeabi-v7a (CMake guard still
-// limits compilation to the two 64-bit targets above).
-def supportedAndroidAbis = ["arm64-v8a", "x86_64"]
-def supportedFlutterTargetPlatforms = ["android-arm64", "android-x64"]
+// Primary Android target ABI.
+def supportedAndroidAbis = ["arm64-v8a"]
+def supportedFlutterTargetPlatforms = ["android-arm64"]
 def safeFlutterVersionCode
 try {
     safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
@@ -137,19 +133,12 @@ android {
         }
     }
 
-    // ABI splits — generates individual per-ABI APKs AND one universal APK
-    // that bundles all three architectures.  ndk.abiFilters is intentionally
-    // absent from defaultConfig; using both simultaneously causes a Gradle
-    // conflict that breaks the universal-APK output.
+    // ABI splits — generates arm64-specific and universal APK outputs.
     splits {
         abi {
             enable true
             reset()
-            include "arm64-v8a",
-                    "x86_64",
-                    // armeabi-v7a has no native libs here; included so the
-                    // universal APK satisfies Play Store ABI filter requirements.
-                    "armeabi-v7a"
+            include "arm64-v8a"
             universalApk true
         }
     }
@@ -163,6 +152,43 @@ android {
         }
     }
 
+}
+
+tasks.register("normalizeFlutterDebugApkOutput") {
+    doLast {
+        def target = rootProject.file("../build/app/outputs/flutter-apk/app-debug.apk")
+        def sourceCandidates = [
+            rootProject.file("../build/app/outputs/flutter-apk/app-universal-debug.apk"),
+            rootProject.file("../build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"),
+            file("$buildDir/outputs/flutter-apk/app-universal-debug.apk"),
+            file("$buildDir/outputs/flutter-apk/app-arm64-v8a-debug.apk"),
+            file("$buildDir/outputs/apk/debug/app-universal-debug.apk"),
+            file("$buildDir/outputs/apk/debug/app-arm64-v8a-debug.apk")
+        ]
+
+        if (target.exists()) {
+            logger.lifecycle("Debug APK already normalized at ${target.absolutePath}")
+            return
+        }
+
+        def source = sourceCandidates.find { it.exists() }
+        if (source == null) {
+            logger.lifecycle("No split debug APK found to normalize.")
+            return
+        }
+
+        target.parentFile.mkdirs()
+        java.nio.file.Files.copy(
+            source.toPath(),
+            target.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        )
+        logger.lifecycle("Normalized APK output: ${source.absolutePath} -> ${target.absolutePath}")
+    }
+}
+
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+    finalizedBy(tasks.named("normalizeFlutterDebugApkOutput"))
 }
 
 flutter {

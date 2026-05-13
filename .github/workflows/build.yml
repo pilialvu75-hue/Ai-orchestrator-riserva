@@ -353,7 +353,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          flutter build apk --debug --target-platform=android-arm64,android-x64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
+          flutter build apk --debug --target-platform=android-arm64 --build-name=1.0.1 --build-number=1 --verbose 2>&1 | tee flutter_verbose.log
 
       - name: Build debug APK (Gradle forensic)
         id: gradle_forensic
@@ -366,21 +366,53 @@ jobs:
             ./gradlew assembleDebug --stacktrace --info --warning-mode all --console=plain
           ) 2>&1 | tee -a gradle_stacktrace.log
 
+      - name: Discover generated Android artifacts
+        if: always()
+        shell: bash
+        run: |
+          find build -type f \( -name "*.apk" -o -name "*.aab" \) | sort | tee apk_discovery.log
+
       - name: Resolve debug APK path
         if: always()
         shell: bash
         run: |
-          # Prefer the universal APK produced by ABI splits (universalApk=true);
-          # fall back to the flat debug APK path for non-split builds.
-          UNIVERSAL=$(find build/app/outputs/flutter-apk \
-                        -maxdepth 1 -name 'app-universal-debug.apk' 2>/dev/null \
-                        | head -1)
-          if [ -n "$UNIVERSAL" ]; then
-            echo "DEBUG_APK_PATH=$UNIVERSAL" >> "$GITHUB_ENV"
-            echo "Resolved APK: $UNIVERSAL (universal)"
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+
+          CANDIDATES=(
+            "build/app/outputs/flutter-apk/app-debug.apk"
+            "build/app/outputs/flutter-apk/app-universal-debug.apk"
+            "build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk"
+          )
+
+          RESOLVED_APK=""
+          for apk in "${CANDIDATES[@]}"; do
+            if [ -f "$apk" ]; then
+              RESOLVED_APK="$apk"
+              break
+            fi
+          done
+
+          if [ -z "$RESOLVED_APK" ]; then
+            RESOLVED_APK=$(find build -type f \
+              \( -name "app-debug.apk" -o -name "app-universal-debug.apk" -o -name "app-arm64-v8a-debug.apk" \) \
+              | sort | head -1 || true)
+          fi
+
+          if [ -n "$RESOLVED_APK" ]; then
+            mkdir -p build/app/outputs/flutter-apk
+            if [ "$RESOLVED_APK" != "build/app/outputs/flutter-apk/app-debug.apk" ]; then
+              cp "$RESOLVED_APK" build/app/outputs/flutter-apk/app-debug.apk
+              echo "Normalized APK copy: $RESOLVED_APK -> build/app/outputs/flutter-apk/app-debug.apk"
+              RESOLVED_APK="build/app/outputs/flutter-apk/app-debug.apk"
+            fi
+
+            echo "DEBUG_APK_PATH=$RESOLVED_APK" >> "$GITHUB_ENV"
+            echo "Resolved APK: $RESOLVED_APK"
           else
-            echo "DEBUG_APK_PATH=build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_ENV"
-            echo "Resolved APK: build/app/outputs/flutter-apk/app-debug.apk (flat)"
+            echo "DEBUG_APK_PATH=" >> "$GITHUB_ENV"
+            echo "Resolved APK: not found"
           fi
 
       - name: Kotlin diagnostics
@@ -613,18 +645,24 @@ jobs:
             dependency_tree.log
             cmake_diagnostics.log
             kotlin_diagnostics.log
+            apk_discovery.log
             flutter_engine_precache.log
             build/.cxx/**/CMakeFiles/CMakeOutput.log
             build/.cxx/**/CMakeFiles/CMakeError.log
 
       - name: Prepare release assets
-        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
+        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_PATH != ''
         run: |
+          if [ ! -f "${{ env.DEBUG_APK_PATH }}" ]; then
+            echo "Resolved APK path does not exist: ${{ env.DEBUG_APK_PATH }}"
+            exit 1
+          fi
+          echo "Final APK path: ${{ env.DEBUG_APK_PATH }}"
           mkdir -p release-assets
           cp "${{ env.DEBUG_APK_PATH }}" release-assets/AI-Orchestrator-Core-${{ steps.version.outputs.tag }}.apk
 
       - name: Upload artifact
-        if: steps.flutter_forensic.outcome == 'success' && steps.gradle_forensic.outcome == 'success'
+        if: steps.gradle_forensic.outcome == 'success' && env.DEBUG_APK_PATH != ''
         uses: actions/upload-artifact@v4
         with:
           name: AI-Orchestrator-Core-${{ steps.version.outputs.tag }}
