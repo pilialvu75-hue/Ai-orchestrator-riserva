@@ -74,6 +74,8 @@ import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
 import 'package:ai_orchestrator/native/runtime/local_runtime_provider_factory.dart';
+import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.dart';
+import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 
 final sl = GetIt.instance;
 
@@ -102,6 +104,14 @@ Future<void> initDependencies({
       LanguageService(configRepository: sl<ConfigRepository>());
   await languageService.loadSavedLanguage();
   sl.registerSingleton<LanguageService>(languageService);
+
+  // ── AppLegalCore ──────────────────────────────────────────────────────────
+  sl.registerLazySingleton<LegalStorageService>(
+    () => LegalStorageService(sl<PreferencesService>()),
+  );
+  sl.registerLazySingleton<EulaService>(
+    () => EulaService(storageService: sl<LegalStorageService>()),
+  );
 
   // ── Core ──────────────────────────────────────────────────────────────────
   sl.registerSingleton<DatabaseHelper>(DatabaseHelper.instance);

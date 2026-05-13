@@ -6,6 +6,8 @@ import 'package:ai_orchestrator/app/app_shell.dart';
 import 'package:ai_orchestrator/app/runtime_bootstrap.dart';
 import 'package:ai_orchestrator/app/splash_screen.dart';
 import 'package:ai_orchestrator/app/startup_transition_controller.dart';
+import 'package:ai_orchestrator/core/app_legal/app_legal_initializer.dart';
+import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
@@ -193,7 +195,10 @@ class AppRoot extends StatelessWidget {
               ),
               scaffoldBackgroundColor: const Color(0xFF0D0D0D),
             ),
-            home: const AppShell(),
+            home: AppLegalInitializer(
+              eulaService: di.sl<EulaService>(),
+              child: const AppShell(),
+            ),
           );
         },
       ),
