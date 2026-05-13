@@ -18,11 +18,34 @@ if (keystorePropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty("flutter.versionCode") ?: "1"
 def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
+def supportedAndroidAbis = ["arm64-v8a", "x86_64"]
+def supportedFlutterTargetPlatforms = ["android-arm64", "android-x64"]
 def safeFlutterVersionCode
 try {
     safeFlutterVersionCode = Integer.parseInt(flutterVersionCode)
 } catch (NumberFormatException ignored) {
     safeFlutterVersionCode = 1
+}
+
+def requestedTargetPlatformsRaw = (
+    project.findProperty("target-platform")
+        ?: localProperties.getProperty("target-platform")
+        ?: localProperties.getProperty("flutter.target-platform")
+        ?: localProperties.getProperty("flutter.targetPlatform")
+        ?: supportedFlutterTargetPlatforms.join(",")
+).toString()
+def requestedTargetPlatforms = requestedTargetPlatformsRaw
+    .split(",")
+    .collect { it.trim() }
+    .findAll { !it.isEmpty() }
+def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
+    !supportedFlutterTargetPlatforms.contains(it)
+}
+if (!unsupportedTargetPlatforms.isEmpty()) {
+    throw new GradleException(
+        "Unsupported Flutter target platform(s): ${unsupportedTargetPlatforms}. " +
+        "Only 64-bit targets are allowed: ${supportedFlutterTargetPlatforms}"
+    )
 }
 
 android {
@@ -52,11 +75,12 @@ android {
         buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", "false"
 
         ndk {
-            abiFilters "arm64-v8a", "x86_64"
+            abiFilters(*supportedAndroidAbis)
         }
 
         externalNativeBuild {
             cmake {
+                abiFilters(*supportedAndroidAbis)
                 cppFlags "-std=c++17 -O3 -fno-finite-math-only -DNDEBUG"
                 arguments "-DAI_ANDROID_ENABLE_MLC=OFF"
             }
@@ -99,6 +123,19 @@ android {
     packagingOptions {
         jniLibs {
             useLegacyPackaging true
+            excludes += [
+                "**/armeabi-v7a/**",
+                "**/x86/**"
+            ]
+        }
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include(*supportedAndroidAbis)
+            universalApk false
         }
     }
 }
