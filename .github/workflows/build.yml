@@ -184,6 +184,13 @@ jobs:
             echo "tag=$TAG"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate build README/manual (IT)
+        run: |
+          set -euo pipefail
+          python3 scripts/generate_build_readme_it.py \
+            --output BUILD_README_IT.md \
+            --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
+
       - name: Build signed release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -303,6 +310,7 @@ jobs:
             apk_zipalign.log
             apk_contents.log
             aab_contents.log
+            BUILD_README_IT.md
 
       - name: Upload signed release artifacts
         uses: actions/upload-artifact@v4
@@ -311,6 +319,7 @@ jobs:
           path: |
             ${{ steps.release_assets.outputs.release_apk_path }}
             ${{ steps.release_assets.outputs.release_aab_path }}
+            BUILD_README_IT.md
 
       - name: Generate release notes
         run: |
@@ -336,6 +345,7 @@ jobs:
           files: |
             ${{ steps.release_assets.outputs.release_apk_path }}
             ${{ steps.release_assets.outputs.release_aab_path }}
+            BUILD_README_IT.md
 
       - name: Cleanup signing files
         if: always()
