@@ -203,7 +203,7 @@ class UpdateChecker {
     ReleaseChannel preferredChannel,
   ) async {
     final uri = Uri.parse(
-      'https://api.github.com/repos/pilialvu75-hue/AI-Orchestrator-Core/releases',
+      'https://api.github.com/repos/$githubOwner/$githubRepo/releases',
     );
     _logUpdate('Fetching GitHub releases metadata from: $uri');
     final response = await _httpClient.get(
@@ -289,7 +289,7 @@ class UpdateChecker {
       final name = ((asset['name'] as String?) ?? '').toLowerCase();
       final url = (asset['browser_download_url'] as String?)?.trim();
       if (url == null || url.isEmpty) continue;
-      if (name.endsWith('Ai-Orchestrator-Core-v.apk') || url.toLowerCase().endsWith('.apk')) {
+      if (name.endsWith('.apk') || url.toLowerCase().endsWith('.apk')) {
         final uri = Uri.tryParse(url);
         if (uri != null &&
             (uri.scheme == 'https' || uri.scheme == 'http') &&

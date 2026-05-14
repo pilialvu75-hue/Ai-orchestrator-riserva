@@ -8,18 +8,18 @@
 //   3. If EULA acceptance IS required   → show [EulaPage].
 //   4. If the user declines             → show [LegalBlockedPage].
 //
-// Because the check happens asynchronously a brief transparent loading state
-// is shown while the persisted preference is being read; this is invisible in
-// practice (SharedPreferences read is sub-millisecond).
+// Because the check happens asynchronously, an opening presentation is shown
+// before the legal gate is resolved.
 //
 // Architecture notes
 // ──────────────────
 // • The widget is purely presentation-level.  All business logic lives in
 //   [EulaService]; this widget just reacts to its output.
-// • Compatible with AI-Orchestrator-Core and future AppHealthCore modules
+// • Compatible with AI-Orchestrator-Riserva and future AppHealthCore modules
 //   because it wraps rather than replaces the host widget tree.
 
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/app/splash_screen.dart';
 
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/app_legal/ui/eula_page.dart';
@@ -53,7 +53,14 @@ class _AppLegalInitializerState extends State<AppLegalInitializer> {
   }
 
   Future<void> _initialize() async {
+    final startedAt = DateTime.now();
     await widget.eulaService.initialize();
+    final elapsed = DateTime.now().difference(startedAt);
+    const minIntroDuration = Duration(milliseconds: 1600);
+    final remaining = minIntroDuration - elapsed;
+    if (remaining > Duration.zero) {
+      await Future.delayed(remaining);
+    }
     if (!mounted) return;
     setState(() {
       _status = widget.eulaService.eulaRequired
@@ -94,15 +101,12 @@ class _AppLegalInitializerState extends State<AppLegalInitializer> {
   }
 }
 
-/// Invisible placeholder shown for the few milliseconds while preferences load.
+/// Opening presentation shown while legal preferences are being resolved.
 class _LoadingGate extends StatelessWidget {
   const _LoadingGate();
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0D0D0D),
-      body: SizedBox.expand(),
-    );
+    return const SplashScreen();
   }
 }
