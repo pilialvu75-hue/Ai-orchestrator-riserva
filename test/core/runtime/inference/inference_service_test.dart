@@ -172,7 +172,7 @@ void main() {
 
       expect(terminal.isError, true);
       expect(
-        terminal.state,
+        terminal.terminalState,
         anyOf(
           InferenceTerminalState.modelUnavailable,
           InferenceTerminalState.failed,
