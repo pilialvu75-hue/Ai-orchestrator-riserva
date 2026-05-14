@@ -127,6 +127,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final accessibleNavigation = MediaQuery.accessibleNavigationOf(context);
 
     return BlocListener<ModelDownloadBloc, ModelDownloadState>(
       listenWhen: (previous, current) {
@@ -199,11 +200,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 24,
               ),
               children: [
-                GestureDetector(
-                  onLongPress: _runRuntimeSelfTest,
-                  child: _SettingsHero(
-                    runtimeState: _runtimeState,
-                    selfTestRunning: _runningSelfTest,
+                Semantics(
+                  button: true,
+                  label: 'Run Runtime Self-Test',
+                  hint: accessibleNavigation
+                      ? 'Double tap to run the local runtime proof-of-life check.'
+                      : 'Long press to run the local runtime proof-of-life check.',
+                  child: GestureDetector(
+                    onLongPress: _runRuntimeSelfTest,
+                    onTap: accessibleNavigation ? _runRuntimeSelfTest : null,
+                    child: _SettingsHero(
+                      runtimeState: _runtimeState,
+                      selfTestRunning: _runningSelfTest,
+                    ),
                   ),
                 ),
 

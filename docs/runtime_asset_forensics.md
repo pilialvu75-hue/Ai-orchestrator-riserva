@@ -13,7 +13,6 @@ Scanned for `.gguf`, `.bin`, `.onnx`, `tokenizer*`, native `.so`, APK runtime as
 - `.so`: none committed in the repository
 - `android/app/src/main/jniLibs/`: missing
 - `android/app/src/main/assets/`: missing
-- `assets/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`: missing
 
 ## Runtime artifact inventory
 
@@ -72,5 +71,5 @@ Scanned for `.gguf`, `.bin`, `.onnx`, `tokenizer*`, native `.so`, APK runtime as
 1. No real `.gguf` model file is committed in the repository.
 2. No prebuilt `libllama_bridge.so` or `libmlc_native_bridge.so` is committed in `android/app/src/main/jniLibs/`.
 3. `third_party/llama.cpp` is an empty submodule mount point in the current checkout until `git submodule update --init --recursive` runs.
-4. The new Flutter asset registry contains metadata only; the referenced TinyLlama GGUF asset path is not present yet.
+4. The new Flutter asset registry contains metadata only; it does not bundle a GGUF payload yet.
 5. CI verifies generic ARM64 native-library presence, but this checkout cannot prove APK packaging without a successful Android build.
