@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 
@@ -45,9 +46,9 @@ class RuntimeSelfTestService {
 
       final validation =
           await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
-      if (validation.status.name == 'ffiMissing' ||
-          validation.status.name == 'modelMissing' ||
-          validation.status.name == 'failed') {
+      if (validation.status == LocalRuntimeStatus.ffiMissing ||
+          validation.status == LocalRuntimeStatus.modelMissing ||
+          validation.status == LocalRuntimeStatus.failed) {
         return RuntimeSelfTestResult(
           success: false,
           summary:

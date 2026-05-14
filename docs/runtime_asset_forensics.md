@@ -18,7 +18,7 @@ Scanned for `.gguf`, `.bin`, `.onnx`, `tokenizer*`, native `.so`, APK runtime as
 
 | Path | Size (bytes) | Purpose | Referenced by Flutter | Copied into APK | Loadable at runtime |
 |---|---:|---|---|---|---|
-| `assets/models/manifest.json` | 553 | Flutter asset manifest for curated local-model metadata; currently lists TinyLlama 1.1B Chat metadata only. | Yes (`lib/features/local_ai/data/services/bundled_model_registry_service.dart`, `pubspec.yaml`) | Yes, as Flutter asset metadata. | Yes, for metadata only; no GGUF payload is bundled beside it. |
+| `assets/models/manifest.json` | 465 | Flutter asset manifest for curated local-model metadata; keyed by model ID and currently lists TinyLlama 1.1B Chat metadata only. | Yes (`lib/features/local_ai/data/services/bundled_model_registry_service.dart`, `pubspec.yaml`) | Yes, as Flutter asset metadata. | Yes, for metadata only; no GGUF payload is bundled beside it. |
 | `models/manifest.json` | 47 | Remote version-manifest payload used by update checks. | Yes (`AppConstants.modelVersionManifestUrl`, `ModelDownloadService.checkForUpdates`) | No | No; this is repository/HTTP metadata only. |
 | `pubspec.yaml` | 1041 | Declares `assets/models/` for Flutter packaging. | Yes | Yes | Indirectly; enables loading `assets/models/manifest.json`. |
 | `lib/core/config/app/app_constants.dart` | 8024 | Fallback built-in catalog and download URL registry; now reduced to the TinyLlama verification model. | Yes | Compiled into Dart snapshot | Yes, as app logic. |

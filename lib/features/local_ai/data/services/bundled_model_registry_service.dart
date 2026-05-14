@@ -14,20 +14,24 @@ class BundledModelRegistryService {
     try {
       final raw = await rootBundle.loadString(manifestAssetPath);
       final decoded = jsonDecode(raw);
-      if (decoded is! List) {
-        debugPrint(
-          '[MODEL_LOAD] Asset manifest did not contain a list; falling back to AppConstants.availableModels.',
-        );
-        return AppConstants.availableModels;
-      }
-      return decoded
-          .whereType<Map>()
-          .map(
-            (entry) => entry.map(
+      if (decoded is Map<String, dynamic>) {
+        return decoded.entries.map((entry) {
+          final value = entry.value;
+          if (value is! Map) {
+            return <String, dynamic>{'id': entry.key};
+          }
+          return <String, dynamic>{
+            'id': entry.key,
+            ...value.map(
               (key, value) => MapEntry(key.toString(), value),
             ),
-          )
-          .toList(growable: false);
+          };
+        }).toList(growable: false);
+      }
+      debugPrint(
+        '[MODEL_LOAD] Asset manifest did not contain a keyed object; falling back to AppConstants.availableModels.',
+      );
+      return AppConstants.availableModels;
     } catch (error) {
       debugPrint(
         '[MODEL_LOAD] Failed to load $manifestAssetPath, using fallback catalog: $error',

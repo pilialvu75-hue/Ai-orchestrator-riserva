@@ -107,7 +107,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       status: LocalRuntimeStatus.runtimeUnavailable,
       message:
           '${selectedModel.displayName} is present, but local inference is not proven yet. '
-          'Run Runtime Self-Test or send a prompt to verify token streaming.',
+          'Open Settings and activate Runtime Self-Test, or send a prompt to verify token streaming.',
     );
   }
 
