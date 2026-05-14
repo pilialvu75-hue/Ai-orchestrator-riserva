@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
@@ -13,6 +15,11 @@ import 'package:flutter/foundation.dart';
 
 class InferenceService {
   static const _logTag = 'INFERENCE';
+  static const Duration _requestTimeout = Duration(minutes: 4);
+  static const Duration _streamIdleTimeout = Duration(seconds: 75);
+  static const int _maxRetryCount = 1;
+  static const int _maxChunksPerRequest = 4096;
+  static const Duration _duplicatePromptWindow = Duration(seconds: 3);
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -30,6 +37,9 @@ class InferenceService {
   final CloudRuntimeProvider _cloudRuntimeProvider;
 
   final Map<String, RuntimeSession> _sessions = <String, RuntimeSession>{};
+  final Set<String> _activeSessionIds = <String>{};
+  final Map<String, _PromptFingerprint> _lastPromptBySession =
+      <String, _PromptFingerprint>{};
 
   RuntimeSession createSession(String sessionId) {
     return _sessions.putIfAbsent(
@@ -45,49 +55,50 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
-    final session = createSession(request.sessionId);
-    final runtimeMode = await _loadRuntimeMode();
+    final promptHash = _promptHash(request);
     _log(
-      'stream start session=${request.sessionId} mode=${runtimeMode.name} prompt_chars=${request.prompt.length}',
+      'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
+      'context_lines=${request.context.length} offline=${request.isOffline}',
     );
-
-    final selectedModel = await _resolveSelectedModelForLocalRuntime();
-    final localRequest = _buildLocalRequest(request, selectedModel);
-
-    switch (runtimeMode) {
-      case AiRuntimeMode.local:
-        if (localRequest != null) {
-          yield* _streamLocalInference(
-            localRequest: localRequest,
-            cloudRequest: request,
-            cancellationToken: session.cancellationToken,
-            allowCloudFallback: true,
-          );
-        } else {
-          yield InferenceResponse.error(
-            'Local AI mode requires a downloaded validated model. Please download one in Settings > Models or switch to Cloud or Hybrid mode.',
-          );
-        }
-        break;
-      case AiRuntimeMode.cloud:
-        yield* _streamAutomaticOrchestration(
-          cloudRequest: request,
-          localRequest: localRequest,
-          cancellationToken: session.cancellationToken,
-          forceCloudPrimary: true,
-        );
-        break;
-      case AiRuntimeMode.hybrid:
-        yield* _streamAutomaticOrchestration(
-          cloudRequest: request,
-          localRequest: localRequest,
-          cancellationToken: session.cancellationToken,
-        );
-        break;
+    if (!_tryAcquirePromptGuard(
+      sessionId: request.sessionId,
+      promptHash: promptHash,
+    )) {
+      _log(
+        'duplicate prompt guard blocked session=${request.sessionId} prompt_hash=$promptHash',
+      );
+      yield InferenceResponse.error(
+        'Duplicate prompt detected; previous inference is still active.',
+      );
+      return;
     }
 
-    _sessions.remove(request.sessionId);
-    _log('stream end session=${request.sessionId}');
+    final session = createSession(request.sessionId);
+    try {
+      final runtimeMode = await _loadRuntimeMode();
+      _log(
+        'prompt routing session=${request.sessionId} mode=${runtimeMode.name} prompt_hash=$promptHash',
+      );
+
+      final selectedModel = await _resolveSelectedModelForLocalRuntime();
+      final localRequest = _buildLocalRequest(request, selectedModel);
+      _log(
+        'model selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
+        'local_runtime_connected=${localRequest != null}',
+      );
+
+      yield* _streamWithRetryAndGuards(
+        runtimeMode: runtimeMode,
+        cloudRequest: request,
+        localRequest: localRequest,
+        cancellationToken: session.cancellationToken,
+      );
+    } finally {
+      _sessions.remove(request.sessionId);
+      _activeSessionIds.remove(request.sessionId);
+      _log('async listener cleanup session=${request.sessionId}');
+      _log('stream end session=${request.sessionId}');
+    }
   }
 
   Future<InferenceResponse> infer(InferenceRequest request) async {
@@ -152,8 +163,12 @@ class InferenceService {
         selected.validationStatus == ModelValidationStatus.notDownloaded ||
         selected.validationStatus == ModelValidationStatus.downloading ||
         !_runtimeProvider.supportsModel(selected)) {
+      _log('memory retrieval/model validation local model unavailable');
       return null;
     }
+    _log(
+      'memory retrieval/model validation local model ready id=${selected.id} path=${selected.localPath}',
+    );
     return selected;
   }
 
@@ -212,6 +227,186 @@ class InferenceService {
     _log(
       'local stream end session=${localRequest.sessionId} emittedLocalToken=$emittedLocalToken chunks=$localChunkCount',
     );
+  }
+
+  TokenStream _streamWithRetryAndGuards({
+    required AiRuntimeMode runtimeMode,
+    required InferenceRequest cloudRequest,
+    required InferenceRequest? localRequest,
+    required CancellationToken cancellationToken,
+  }) async* {
+    for (var attempt = 1; attempt <= _maxRetryCount + 1; attempt++) {
+      var emittedContent = false;
+      var shouldRetry = false;
+      var retryReason = '';
+      final routedStream = _routeInference(
+        runtimeMode: runtimeMode,
+        cloudRequest: cloudRequest,
+        localRequest: localRequest,
+        cancellationToken: cancellationToken,
+      );
+      await for (final chunk in _guardInferenceStream(
+        stream: routedStream,
+        sessionId: cloudRequest.sessionId,
+        cancellationToken: cancellationToken,
+        attempt: attempt,
+      )) {
+        if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+          _log(
+            'streaming callbacks session=${cloudRequest.sessionId} notice="${chunk.runtimeNotice}"',
+          );
+          yield chunk;
+          continue;
+        }
+        if (chunk.text.trim().isNotEmpty) {
+          emittedContent = true;
+        }
+        if (chunk.isError &&
+            attempt <= _maxRetryCount &&
+            !emittedContent &&
+            _isRetryableError(chunk.errorMessage)) {
+          shouldRetry = true;
+          retryReason = chunk.errorMessage ?? 'transient runtime failure';
+          _log(
+            'retry handler session=${cloudRequest.sessionId} attempt=$attempt reason="$retryReason"',
+          );
+          continue;
+        }
+        _log(
+          'response parsing session=${cloudRequest.sessionId} attempt=$attempt isFinal=${chunk.isFinal} '
+          'isError=${chunk.isError} text_len=${chunk.text.length}',
+        );
+        yield chunk;
+        if (chunk.isFinal) {
+          return;
+        }
+      }
+      if (!shouldRetry || cancellationToken.isCancelled) {
+        return;
+      }
+      yield InferenceResponse.notice(
+        'Transient runtime issue detected, retrying once.',
+      );
+    }
+  }
+
+  TokenStream _routeInference({
+    required AiRuntimeMode runtimeMode,
+    required InferenceRequest cloudRequest,
+    required InferenceRequest? localRequest,
+    required CancellationToken cancellationToken,
+  }) {
+    switch (runtimeMode) {
+      case AiRuntimeMode.local:
+        if (localRequest != null) {
+          return _streamLocalInference(
+            localRequest: localRequest,
+            cloudRequest: cloudRequest,
+            cancellationToken: cancellationToken,
+            allowCloudFallback: true,
+          );
+        }
+        return Stream<InferenceResponse>.value(
+          InferenceResponse.error(
+            'Local AI mode requires a downloaded validated model. Please download one in Settings > Models or switch to Cloud or Hybrid mode.',
+          ),
+        );
+      case AiRuntimeMode.cloud:
+        return _streamAutomaticOrchestration(
+          cloudRequest: cloudRequest,
+          localRequest: localRequest,
+          cancellationToken: cancellationToken,
+          forceCloudPrimary: true,
+        );
+      case AiRuntimeMode.hybrid:
+        return _streamAutomaticOrchestration(
+          cloudRequest: cloudRequest,
+          localRequest: localRequest,
+          cancellationToken: cancellationToken,
+        );
+    }
+  }
+
+  TokenStream _guardInferenceStream({
+    required TokenStream stream,
+    required String sessionId,
+    required CancellationToken cancellationToken,
+    required int attempt,
+  }) async* {
+    final startedAt = DateTime.now();
+    var chunkCount = 0;
+    await for (final chunk in stream.timeout(
+      _streamIdleTimeout,
+      onTimeout: (sink) {
+        cancellationToken.cancel();
+        sink.add(
+          InferenceResponse.error(
+            'Inference stream timed out waiting for tokens.',
+          ),
+        );
+        sink.close();
+      },
+    )) {
+      chunkCount++;
+      if (chunkCount > _maxChunksPerRequest) {
+        cancellationToken.cancel();
+        _log(
+          'hard stop protection session=$sessionId attempt=$attempt max_chunks=$_maxChunksPerRequest',
+        );
+        yield InferenceResponse.error(
+          'Inference stopped after exceeding safe stream chunk limit.',
+        );
+        return;
+      }
+      if (DateTime.now().difference(startedAt) > _requestTimeout) {
+        cancellationToken.cancel();
+        _log(
+          'hard stop protection session=$sessionId attempt=$attempt request_timeout_ms=${_requestTimeout.inMilliseconds}',
+        );
+        yield InferenceResponse.error(
+          'Inference request timed out.',
+        );
+        return;
+      }
+      yield chunk;
+    }
+  }
+
+  bool _tryAcquirePromptGuard({
+    required String sessionId,
+    required String promptHash,
+  }) {
+    final now = DateTime.now();
+    final last = _lastPromptBySession[sessionId];
+    final isRapidDuplicate = last != null &&
+        last.hash == promptHash &&
+        now.difference(last.at) <= _duplicatePromptWindow;
+    if (_activeSessionIds.contains(sessionId) || isRapidDuplicate) {
+      return false;
+    }
+    _activeSessionIds.add(sessionId);
+    _lastPromptBySession[sessionId] = _PromptFingerprint(promptHash, now);
+    return true;
+  }
+
+  bool _isRetryableError(String? errorMessage) {
+    final normalized = (errorMessage ?? '').toLowerCase();
+    return normalized.contains('timeout') ||
+        normalized.contains('timed out') ||
+        normalized.contains('stalled') ||
+        normalized.contains('tempor') ||
+        normalized.contains('network');
+  }
+
+  // Stable request fingerprint used only for rapid duplicate suppression inside
+  // `_duplicatePromptWindow` to prevent auto-retriggered inference loops.
+  String _promptHash(InferenceRequest request) {
+    return Object.hash(
+      request.sessionId,
+      request.prompt.trim(),
+      request.systemPrompt?.trim() ?? '',
+      request.context.join('\n'),
+    ).toRadixString(16);
   }
 
   TokenStream _streamAutomaticOrchestration({
@@ -290,4 +485,11 @@ class InferenceService {
     debugPrint('[$_logTag] $message');
   }
 
+}
+
+class _PromptFingerprint {
+  const _PromptFingerprint(this.hash, this.at);
+
+  final String hash;
+  final DateTime at;
 }

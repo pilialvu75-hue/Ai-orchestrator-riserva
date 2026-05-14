@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
@@ -21,6 +22,8 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// must be placed **above** [MaterialApp] so that all navigated routes share
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
+  static const _logTag = 'ORCHESTRATOR_STATE';
+
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
   })  : _chatRepository = chatRepository,
@@ -35,10 +38,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onLoadMessages(
       LoadMessagesEvent event, Emitter<ChatState> emit) async {
+    _log('listener load_messages session=${event.sessionId}');
     emit(const ChatLoading());
     try {
       final messages = await _chatRepository.getMessages(event.sessionId);
       _messages = List<ChatMessage>.from(messages);
+      _log('message persistence load_complete session=${event.sessionId} count=${_messages.length}');
       emit(ChatLoaded(messages: List.unmodifiable(_messages)));
     } catch (error) {
       emit(ChatError(message: _extractErrorMessage(error)));
@@ -47,6 +52,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
+    _log(
+      'listener send_message session=${event.sessionId} prompt_chars=${event.userPrompt.length} attachments=${event.attachments.length}',
+    );
     final now = DateTime.now().millisecondsSinceEpoch;
     final optimisticUserMessage = ChatMessage(
       id: 'pending-user-$now',
@@ -88,6 +96,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         attachments: event.attachments,
         onPartialResponse: (partialText) {
           if (emit.isDone) return;
+          _log(
+            'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
+          );
           emit(
             ChatSending(
               messages: List.unmodifiable(<ChatMessage>[
@@ -109,6 +120,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         onRuntimeNotice: (notice) {
           runtimeNotice = notice;
           if (emit.isDone) return;
+          _log(
+            'streaming callbacks session=${event.sessionId} runtime_notice="$notice"',
+          );
           emit(
             ChatSending(
               messages: List.unmodifiable(<ChatMessage>[
@@ -131,6 +145,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       );
       final messages = await _chatRepository.getMessages(event.sessionId);
       _messages = List<ChatMessage>.from(messages);
+      _log('message persistence send_complete session=${event.sessionId} count=${_messages.length}');
       emit(
         ChatLoaded(
           messages: List.unmodifiable(_messages),
@@ -172,5 +187,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         message.contains('api key') ||
         message.contains('not configured') ||
         message.contains('switch to local ai mode');
+  }
+
+  static void _log(String message) {
+    debugPrint('[$_logTag] $message');
   }
 }
