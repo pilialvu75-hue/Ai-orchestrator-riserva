@@ -145,6 +145,8 @@ jobs:
         run: |
           set -euo pipefail
           : > keystore_validation.log
+          echo "::add-mask::${KEYSTORE_PASSWORD:-}"
+          echo "::add-mask::${KEY_PASSWORD:-}"
           if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
             {
               echo "Release keystore validation skipped due to missing credentials."
@@ -235,6 +237,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          FORCE_DEBUG_RELEASE_SIGNING: "true"
         run: |
           set -euo pipefail
           flutter build apk \
@@ -249,6 +252,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          FORCE_DEBUG_RELEASE_SIGNING: "true"
         run: |
           set -euo pipefail
           flutter build appbundle \
