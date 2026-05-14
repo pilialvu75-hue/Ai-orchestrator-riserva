@@ -14,7 +14,7 @@ A hidden debug action now exists on the Settings runtime card:
 2. Runtime validation does not report `LocalRuntimeStatus.modelMissing`, `LocalRuntimeStatus.ffiMissing`, or `LocalRuntimeStatus.failed`.
 3. A **real** chat request is executed through the existing pipeline.
 4. At least one streamed partial response arrives.
-5. Final assistant output is persisted in SQLite for session `__runtime_self_test__`.
+5. Final assistant output is persisted in SQLite for session `runtime_self_test`.
 
 ## Execution path used by self-test
 

@@ -22,7 +22,7 @@ class RuntimeSelfTestService {
         _localAiRepository = localAiRepository,
         _chatRepository = chatRepository;
 
-  static const String selfTestSessionId = '__runtime_self_test__';
+  static const String selfTestSessionId = 'runtime_self_test';
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
