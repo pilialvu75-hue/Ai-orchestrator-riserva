@@ -139,20 +139,22 @@ void main() {
       expect(response.errorMessage, CloudRuntimeProvider.fullyLocalNotice);
     });
 
-    test('falls back to local when cloud mode is selected without API key',
+    test('fails explicitly when cloud mode is selected without API key',
         () async {
       var cloudCalls = 0;
+      var localCalls = 0;
       final service = buildService(
         mode: AiRuntimeMode.cloud,
         selectedModel: validModel,
         localRuntimeProvider: FakeLocalRuntimeProvider(
-          responses: <InferenceResponse>[
-            InferenceResponse.finalChunk(
+          streamBuilder: (_, __) async* {
+            localCalls += 1;
+            yield InferenceResponse.finalChunk(
               text: 'Local response',
               tokensGenerated: 4,
               model: 'gemma_2b',
-            ),
-          ],
+            );
+          },
         ),
         cloudRuntimeProvider: buildCloudProvider(
           configured: false,
@@ -163,13 +165,20 @@ void main() {
         ),
       );
 
-      final response = await service.infer(
-        const InferenceRequest(sessionId: 's2', prompt: 'hello'),
-      );
+      final chunks = await service
+          .stream(const InferenceRequest(sessionId: 's2', prompt: 'hello'))
+          .toList();
+      final terminal = chunks.last;
 
-      expect(response.isError, false);
-      expect(response.text, 'Local response');
-      expect(response.model, 'gemma_2b');
+      expect(terminal.isError, true);
+      expect(
+        terminal.state,
+        anyOf(
+          InferenceTerminalState.modelUnavailable,
+          InferenceTerminalState.failed,
+        ),
+      );
+      expect(localCalls, 0);
       expect(cloudCalls, 0);
     });
 
