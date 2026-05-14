@@ -136,7 +136,7 @@ jobs:
           try:
               path.write_bytes(base64.b64decode(raw))
           except Exception as exc:
-              print(f"::error::KEYSTORE_BASE64 is not valid base64 data: {exc}", file=sys.stderr)
+              print(f"::error::Release keystore base64 data is not valid: {exc}", file=sys.stderr)
               raise SystemExit(1)
           PY
           then
@@ -151,7 +151,7 @@ jobs:
             rm -f "$KEYSTORE_PATH"
             exit 0
           fi
-          echo "decoded_keystore_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
+          echo "decoded_keystore_size_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Audit runtime release keystore
