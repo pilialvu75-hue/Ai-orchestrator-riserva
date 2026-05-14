@@ -3,9 +3,9 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart
 
 void main() {
   group('LocalRuntimeState', () {
-    test('default state is loading with no message', () {
+    test('default state is uninitialized with no message', () {
       const state = LocalRuntimeState();
-      expect(state.status, LocalRuntimeStatus.loading);
+      expect(state.status, LocalRuntimeStatus.uninitialized);
       expect(state.message, isNull);
     });
 
@@ -27,11 +27,11 @@ void main() {
 
     test('equality compares status and message', () {
       const a = LocalRuntimeState(
-          status: LocalRuntimeStatus.runtimeFailed, message: 'oops');
+          status: LocalRuntimeStatus.failed, message: 'oops');
       const b = LocalRuntimeState(
-          status: LocalRuntimeStatus.runtimeFailed, message: 'oops');
+          status: LocalRuntimeStatus.failed, message: 'oops');
       const c = LocalRuntimeState(
-          status: LocalRuntimeStatus.runtimeFailed, message: 'other');
+          status: LocalRuntimeStatus.failed, message: 'other');
 
       expect(a, equals(b));
       expect(a, isNot(equals(c)));
@@ -39,15 +39,15 @@ void main() {
 
     test('toString includes status name', () {
       const state =
-          LocalRuntimeState(status: LocalRuntimeStatus.inferring);
-      expect(state.toString(), contains('inferring'));
+          LocalRuntimeState(status: LocalRuntimeStatus.inferencing);
+      expect(state.toString(), contains('inferencing'));
     });
   });
 
   group('LocalRuntimeMonitor', () {
-    test('initial state is loading', () {
+    test('initial state is uninitialized', () {
       final monitor = LocalRuntimeMonitor();
-      expect(monitor.state.status, LocalRuntimeStatus.loading);
+      expect(monitor.state.status, LocalRuntimeStatus.uninitialized);
     });
 
     test('update transitions state and notifies listener', () {
@@ -73,7 +73,7 @@ void main() {
       monitor.addListener((_) => calls2++);
 
       monitor.update(LocalRuntimeStatus.ready);
-      monitor.update(LocalRuntimeStatus.inferring);
+      monitor.update(LocalRuntimeStatus.inferencing);
 
       expect(calls1, 2);
       expect(calls2, 2);
@@ -102,7 +102,7 @@ void main() {
     test('successive updates replace previous state', () {
       final monitor = LocalRuntimeMonitor();
       monitor.update(LocalRuntimeStatus.loading, message: 'a');
-      monitor.update(LocalRuntimeStatus.inferring, message: 'b');
+      monitor.update(LocalRuntimeStatus.inferencing, message: 'b');
       monitor.update(LocalRuntimeStatus.ready);
 
       expect(monitor.state.status, LocalRuntimeStatus.ready);

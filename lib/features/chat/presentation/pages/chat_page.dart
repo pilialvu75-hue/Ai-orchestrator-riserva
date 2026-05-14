@@ -613,11 +613,15 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
   String get _title {
     final message = (widget.runtimeState.message ?? '').toLowerCase();
     switch (widget.runtimeState.status) {
+      case LocalRuntimeStatus.uninitialized:
+        return 'Runtime idle';
       case LocalRuntimeStatus.loading:
         return 'Loading model';
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return 'Runtime unverified';
       case LocalRuntimeStatus.tokenizing:
         return 'Tokenizing';
-      case LocalRuntimeStatus.inferring:
+      case LocalRuntimeStatus.inferencing:
         return 'Generating';
       case LocalRuntimeStatus.streaming:
         return 'Streaming';
@@ -629,9 +633,9 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
         return 'Runtime stalled';
       case LocalRuntimeStatus.ready:
         return 'Runtime ready';
-      case LocalRuntimeStatus.missingLibrary:
+      case LocalRuntimeStatus.ffiMissing:
       case LocalRuntimeStatus.modelMissing:
-      case LocalRuntimeStatus.runtimeFailed:
+      case LocalRuntimeStatus.failed:
         if (message.startsWith('out of memory') || message.contains('out of memory')) {
           return 'Runtime error';
         }
@@ -641,22 +645,26 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
 
   Color get _color {
     switch (widget.runtimeState.status) {
+      case LocalRuntimeStatus.uninitialized:
+        return const Color(0xFF6B7280);
       case LocalRuntimeStatus.ready:
         return const Color(0xFF8AB4F8);
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return const Color(0xFFF9A826);
       case LocalRuntimeStatus.completed:
         return const Color(0xFF4ADE80);
       case LocalRuntimeStatus.streaming:
         return const Color(0xFF7DD3FC);
-      case LocalRuntimeStatus.inferring:
+      case LocalRuntimeStatus.inferencing:
       case LocalRuntimeStatus.tokenizing:
       case LocalRuntimeStatus.loading:
         return const Color(0xFFF9A826);
       case LocalRuntimeStatus.timedOut:
         return const Color(0xFFFFB74D);
       case LocalRuntimeStatus.stalled:
-      case LocalRuntimeStatus.missingLibrary:
+      case LocalRuntimeStatus.ffiMissing:
       case LocalRuntimeStatus.modelMissing:
-      case LocalRuntimeStatus.runtimeFailed:
+      case LocalRuntimeStatus.failed:
         return const Color(0xFFFF8A80);
     }
   }
@@ -664,7 +672,7 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
   Duration get _displayElapsed {
     final state = widget.runtimeState;
     if (state.startedAt != null &&
-        (state.status == LocalRuntimeStatus.inferring ||
+        (state.status == LocalRuntimeStatus.inferencing ||
             state.status == LocalRuntimeStatus.streaming ||
             state.status == LocalRuntimeStatus.tokenizing)) {
       return DateTime.now().difference(state.startedAt!);
@@ -741,9 +749,10 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
           _statusPill(
             icon: Icons.memory_rounded,
             label: 'Local runtime',
-            active: widget.runtimeState.status != LocalRuntimeStatus.missingLibrary &&
+            active: widget.runtimeState.status != LocalRuntimeStatus.ffiMissing &&
+                widget.runtimeState.status != LocalRuntimeStatus.runtimeUnavailable &&
                 widget.runtimeState.status != LocalRuntimeStatus.modelMissing &&
-                widget.runtimeState.status != LocalRuntimeStatus.runtimeFailed,
+                widget.runtimeState.status != LocalRuntimeStatus.failed,
           ),
           const SizedBox(height: 4),
           _statusPill(

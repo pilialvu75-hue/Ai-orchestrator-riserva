@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
@@ -47,6 +48,7 @@ import 'package:ai_orchestrator/features/coding_assistant/sequential_planning_st
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
 import 'package:ai_orchestrator/features/document_intelligence/offline_document_intelligence_plugin.dart';
 import 'package:ai_orchestrator/features/local_ai/data/repositories/local_ai_repository_impl.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/usecases/local_ai_usecases.dart';
@@ -247,7 +249,14 @@ Future<void> initDependencies({
   );
 
   // ── Local AI (offline model download / selection) ──────────────────────────
-  sl.registerLazySingleton<ModelDownloadService>(() => ModelDownloadService());
+  sl.registerLazySingleton<BundledModelRegistryService>(
+    () => const BundledModelRegistryService(),
+  );
+  sl.registerLazySingleton<ModelDownloadService>(
+    () => ModelDownloadService(
+      bundledModelRegistryService: sl<BundledModelRegistryService>(),
+    ),
+  );
   sl.registerLazySingleton<LocalAiRepository>(
     () => LocalAiRepositoryImpl(downloadService: sl<ModelDownloadService>()),
   );
@@ -255,6 +264,13 @@ Future<void> initDependencies({
     () => LocalRuntimeDiagnosticsService(
       runtimeProvider: sl<LocalRuntimeProvider>(),
       localAiRepository: sl<LocalAiRepository>(),
+    ),
+  );
+  sl.registerLazySingleton<RuntimeSelfTestService>(
+    () => RuntimeSelfTestService(
+      runtimeProvider: sl<LocalRuntimeProvider>(),
+      localAiRepository: sl<LocalAiRepository>(),
+      chatRepository: sl<ChatRepository>(),
     ),
   );
   sl.registerLazySingleton(() => GetAvailableModels(sl<LocalAiRepository>()));

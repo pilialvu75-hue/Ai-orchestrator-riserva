@@ -27,6 +27,22 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     ..._mobileValidatedModelIds,
   };
 
+  String? _verifiedModelPath;
+
+  @protected
+  void markRuntimeVerified(String modelPath) {
+    _verifiedModelPath = modelPath;
+  }
+
+  @protected
+  void clearRuntimeVerification() {
+    _verifiedModelPath = null;
+  }
+
+  @protected
+  bool hasVerifiedRuntimeForModel(String modelPath) =>
+      _verifiedModelPath != null && _verifiedModelPath == modelPath;
+
   bool supportsModel(AiModel model) {
     if (!_isModelAllowedOnPlatform(model.effectiveRuntimeModelId)) return false;
     return model.validationStatus == ModelValidationStatus.validatedOk;
@@ -52,7 +68,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (selectedModel.validationStatus == ModelValidationStatus.invalidModel) {
       return const LocalRuntimeState(
-        status: LocalRuntimeStatus.runtimeFailed,
+        status: LocalRuntimeStatus.failed,
         message: 'Selected model file is not a valid GGUF runtime model.',
       );
     }
@@ -75,14 +91,23 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (!supportsModel(selectedModel)) {
       return const LocalRuntimeState(
-        status: LocalRuntimeStatus.runtimeFailed,
+        status: LocalRuntimeStatus.failed,
         message: 'Selected model is not supported by the local runtime.',
       );
     }
 
+    if (hasVerifiedRuntimeForModel(selectedModel.localPath!)) {
+      return LocalRuntimeState(
+        status: LocalRuntimeStatus.ready,
+        message: '${selectedModel.displayName} verified for local inference.',
+      );
+    }
+
     return LocalRuntimeState(
-      status: LocalRuntimeStatus.ready,
-      message: '${selectedModel.displayName} ready for local inference.',
+      status: LocalRuntimeStatus.runtimeUnavailable,
+      message:
+          '${selectedModel.displayName} is present, but local inference is not proven yet. '
+          'Open Settings and activate Runtime Self-Test, or send a prompt to verify token streaming.',
     );
   }
 
@@ -99,12 +124,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         final modelId = request.modelId;
 
         if (modelPath == null || modelPath.isEmpty || modelId == null) {
+          clearRuntimeVerification();
           controller.add(InferenceResponse.error('Missing local model path.'));
           await controller.close();
           return;
         }
 
         if (!_isModelAllowedOnPlatform(modelId)) {
+          clearRuntimeVerification();
           controller.add(
             InferenceResponse.error(
               'Selected model is not validated for runtime execution on this platform.',
@@ -117,6 +144,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         final isValidModelFile =
             await Isolate.run(() => _hasGgufHeader(modelPath));
         if (!isValidModelFile) {
+          clearRuntimeVerification();
           controller.add(InferenceResponse.error(
             'Selected model file is missing or invalid GGUF.',
           ));
@@ -137,6 +165,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         try {
           process = await Process.start(executable, args);
         } on ProcessException catch (e) {
+          clearRuntimeVerification();
           controller.add(
             InferenceResponse.error(
               'Failed to start llama.cpp runtime process: ${e.message}',
@@ -145,6 +174,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           await controller.close();
           return;
         } catch (e) {
+          clearRuntimeVerification();
           controller.add(InferenceResponse.error('Failed to start inference: $e'));
           await controller.close();
           return;
@@ -187,6 +217,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         await stderrSub.cancel();
 
         if (cancellationToken.isCancelled) {
+          clearRuntimeVerification();
           controller.add(InferenceResponse.error(
             'Inference cancelled.',
             state: InferenceTerminalState.cancelled,
@@ -196,6 +227,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         if (exitCode != 0 && fullText.isEmpty) {
+          clearRuntimeVerification();
           final stderr = stderrBuffer.toString().trim();
           controller.add(
             InferenceResponse.error(
@@ -208,6 +240,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
+        markRuntimeVerified(modelPath);
         controller.add(
           InferenceResponse.finalChunk(
             text: fullText.toString(),
@@ -217,6 +250,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         );
         await controller.close();
       } catch (error, stackTrace) {
+        clearRuntimeVerification();
         // Unexpected exception: ensure the StreamController is always closed
         // so consumers are never left waiting indefinitely.
         debugPrint('[$_localProviderTag] unexpected inference error: $error\n$stackTrace');

@@ -14,7 +14,7 @@ void main() {
       expect(state.status, LocalRuntimeStatus.modelMissing);
     });
 
-    test('returns runtimeFailed for invalid model metadata', () async {
+    test('returns failed for invalid model metadata', () async {
       const model = AiModel(
         id: 'llama_1b',
         displayName: 'Llama 3.2 1B',
@@ -29,10 +29,10 @@ void main() {
       );
 
       final state = await provider.validateRuntime(selectedModel: model);
-      expect(state.status, LocalRuntimeStatus.runtimeFailed);
+      expect(state.status, LocalRuntimeStatus.failed);
     });
 
-    test('returns ready for a supported validated GGUF file', () async {
+    test('returns runtimeUnavailable until inference is proven', () async {
       final tempDir = await Directory.systemTemp.createTemp('runtime-test-');
       addTearDown(() async => tempDir.delete(recursive: true));
       final file = File('${tempDir.path}/model.gguf');
@@ -52,7 +52,7 @@ void main() {
       );
 
       final state = await provider.validateRuntime(selectedModel: model);
-      expect(state.status, LocalRuntimeStatus.ready);
+      expect(state.status, LocalRuntimeStatus.runtimeUnavailable);
     });
   });
 }

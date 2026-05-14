@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -14,7 +15,9 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 ///   Spawns the llama.cpp CLI executable via [Process.start] as before.
 LocalRuntimeProvider createLocalRuntimeProvider() {
   if (Platform.isAndroid) {
+    debugPrint('[RUNTIME_PATH] platform=android provider=AndroidFfiRuntimeProvider');
     return AndroidFfiRuntimeProvider();
   }
+  debugPrint('[RUNTIME_PATH] platform=desktop provider=LocalRuntimeProvider');
   return LocalRuntimeProvider();
 }

@@ -82,7 +82,7 @@ class ChatRepositoryImpl implements ChatRepository {
         systemPrompt: systemPrompt,
       )) {
         if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
-          _log('streaming callbacks session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
+          _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
           onRuntimeNotice?.call(chunk.runtimeNotice!);
           continue;
         }
@@ -107,12 +107,12 @@ class ChatRepositoryImpl implements ChatRepository {
             responseProvider = chunk.model!;
           }
           _log(
-            'response parsing session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
+            '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
           );
         } else {
           streamedResponse.write(chunk.text);
           _log(
-            'streaming callbacks session=$sessionId partial_chars=${streamedResponse.length}',
+            '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
           );
           onPartialResponse?.call(streamedResponse.toString());
         }
@@ -132,7 +132,7 @@ class ChatRepositoryImpl implements ChatRepository {
         provider: responseProvider,
       );
       await localDataSource.insertMessage(assistantMsg);
-      _log('message persistence session=$sessionId role=assistant id=${assistantMsg.id}');
+      _log('[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}');
       return assistantMsg;
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
