@@ -203,7 +203,7 @@ class UpdateChecker {
     ReleaseChannel preferredChannel,
   ) async {
     final uri = Uri.parse(
-      'https://api.github.com/repos/$githubOwner/$githubRepo/releases',
+      'https://api.github.com/repos/${this.githubOwner}/${this.githubRepo}/releases',
     );
     _logUpdate('Fetching GitHub releases metadata from: $uri');
     final response = await _httpClient.get(
