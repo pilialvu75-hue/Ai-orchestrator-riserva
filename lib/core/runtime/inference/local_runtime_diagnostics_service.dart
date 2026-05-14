@@ -21,6 +21,20 @@ class LocalRuntimeDiagnosticsService {
 
   bool _hasRunStartupValidation = false;
 
+  /// Returns `true` when the runtime state indicates that local inference
+  /// cannot proceed (model missing, FFI library absent, or hard runtime
+  /// failure).  UI layers may use this to surface a clear blocking warning
+  /// instead of silently accepting a "not ready" state.
+  bool get isBlockedForLocalMode =>
+      monitor.state.status == LocalRuntimeStatus.ffiMissing ||
+      monitor.state.status == LocalRuntimeStatus.modelMissing ||
+      monitor.state.status == LocalRuntimeStatus.failed;
+
+  /// The message from the last completed startup validation, or `null` if
+  /// validation has not yet run.
+  String? get startupValidationMessage =>
+      _hasRunStartupValidation ? monitor.state.message : null;
+
   Future<void> validateOnStartup() async {
     if (_hasRunStartupValidation) return;
     _hasRunStartupValidation = true;

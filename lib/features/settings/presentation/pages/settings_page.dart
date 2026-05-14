@@ -212,6 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     child: _SettingsHero(
                       runtimeState: _runtimeState,
                       selfTestRunning: _runningSelfTest,
+                      runtimeModeName: _aiRuntimeSettingsService.runtimeMode.name,
                     ),
                   ),
                 ),
@@ -348,10 +349,15 @@ class _SettingsHero extends StatelessWidget {
   const _SettingsHero({
     required this.runtimeState,
     required this.selfTestRunning,
+    this.runtimeModeName,
   });
 
   final LocalRuntimeState runtimeState;
   final bool selfTestRunning;
+
+  /// Optional current AI runtime mode name (e.g. `'local'`, `'cloud'`,
+  /// `'hybrid'`).  When provided it is appended to the diagnostics row.
+  final String? runtimeModeName;
 
   String _titleForStatus(BuildContext context) {
     switch (runtimeState.status) {
@@ -599,7 +605,13 @@ class _SettingsHero extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'Diagnostics · status=${runtimeState.status.name} · tokens=${runtimeState.tokensGenerated} · elapsed=${_formatElapsed(runtimeState.elapsed)}',
+            [
+              'Diagnostics',
+              if (runtimeModeName != null) 'mode=$runtimeModeName',
+              'status=${runtimeState.status.name}',
+              'tokens=${runtimeState.tokensGenerated}',
+              'elapsed=${_formatElapsed(runtimeState.elapsed)}',
+            ].join(' · '),
             style: TextStyle(
               color: Colors.white.withOpacity(0.62),
               fontSize: 11,

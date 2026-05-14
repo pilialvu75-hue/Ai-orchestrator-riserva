@@ -72,13 +72,19 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     required CancellationToken cancellationToken,
   }) async* {
     if (cancellationToken.isCancelled) {
-      yield InferenceResponse.error('Inference cancelled.');
+      yield InferenceResponse.error(
+        'Inference cancelled.',
+        state: InferenceTerminalState.cancelled,
+      );
       return;
     }
 
     if (!canInfer) {
       _pendingLocalFallbackNotice = true;
-      yield InferenceResponse.error(fullyLocalNotice);
+      yield InferenceResponse.error(
+        fullyLocalNotice,
+        state: InferenceTerminalState.modelUnavailable,
+      );
       return;
     }
 
@@ -99,7 +105,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     for (final provider in providerOrder) {
       if (!_isProviderReady(provider)) continue;
       if (cancellationToken.isCancelled) {
-        yield InferenceResponse.error('Inference cancelled.');
+        yield InferenceResponse.error(
+          'Inference cancelled.',
+          state: InferenceTerminalState.cancelled,
+        );
         return;
       }
       try {
@@ -113,7 +122,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           ),
         );
         if (cancellationToken.isCancelled) {
-          yield InferenceResponse.error('Inference cancelled.');
+          yield InferenceResponse.error(
+            'Inference cancelled.',
+            state: InferenceTerminalState.cancelled,
+          );
           return;
         }
         _markSuccess(provider);
@@ -133,7 +145,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
     if (areAllProvidersUnavailable) {
       _pendingLocalFallbackNotice = true;
-      yield InferenceResponse.error(fullyLocalNotice);
+      yield InferenceResponse.error(
+        fullyLocalNotice,
+        state: InferenceTerminalState.modelUnavailable,
+      );
       return;
     }
     yield InferenceResponse.error(lastError ?? 'Cloud AI request failed.');

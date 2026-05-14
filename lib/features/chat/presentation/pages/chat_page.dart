@@ -761,10 +761,9 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
             active: widget.voiceEngineActive,
           ),
           const SizedBox(height: 4),
-          _statusPill(
-            icon: Icons.cloud_off_rounded,
-            label: 'Offline mode',
-            active: widget.offlineModeActive,
+          Text(
+            'Mode: ${widget.offlineModeActive ? 'local' : 'cloud/hybrid'}',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 4),
           _statusPill(
