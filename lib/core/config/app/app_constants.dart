@@ -97,7 +97,7 @@ class AppConstants {
   // ── Local AI model definitions ────────────────────────────────────────────
   /// Version-manifest endpoint (replace with your actual hosting URL).
   static const String modelVersionManifestUrl =
-      'https://raw.githubusercontent.com/pilialvu75-hue/AI-Orchestrator-Core/main/models/manifest.json';
+      'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/models/manifest.json';
 
   /// Platform target values used in model definitions.
   static const String platformAndroid = 'android';
@@ -192,9 +192,9 @@ class AppConstants {
   static const int contextWindowMaxMessages = 20;
   static const Duration modelDownloadTimeout = Duration(hours: 2);
   static const String updateManifestUrl =
-      'https://raw.githubusercontent.com/pilialvu75-hue/AI-Orchestrator-Core/main/update/version.json';
+      'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/update/version.json';
   static const String updateGitHubOwner = 'pilialvu75-hue';
-  static const String updateGitHubRepo = 'AI-Orchestrator-Core';
+  static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
   static const String sttDefaultLocaleId = 'en_US';
