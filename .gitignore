@@ -2,3 +2,5 @@
 /android/key.properties
 *.jks
 *.keystore
+__pycache__/
+*.pyc
