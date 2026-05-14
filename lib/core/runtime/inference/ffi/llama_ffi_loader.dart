@@ -41,12 +41,15 @@ abstract final class LlamaFfiLoader {
 
     try {
       final lib = DynamicLibrary.open(bridgeLibraryName);
+      log?.call('[FFI_INIT] Opened $bridgeLibraryName for ABI $currentAbiName.');
       return LlamaFfiLibraryHandle(
         library: lib,
         bindings: LlamaBridgeBindings(lib),
       );
     } catch (error) {
-      log?.call('Could not open $bridgeLibraryName for ABI $currentAbiName: $error');
+      log?.call(
+        '[FFI_INIT] Could not open $bridgeLibraryName for ABI $currentAbiName: $error',
+      );
       return null;
     }
   }

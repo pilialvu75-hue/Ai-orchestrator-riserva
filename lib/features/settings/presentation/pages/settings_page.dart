@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
@@ -27,8 +28,10 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final AiRuntimeSettingsService _aiRuntimeSettingsService;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
+  late final RuntimeSelfTestService _runtimeSelfTestService;
 
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
+  bool _runningSelfTest = false;
 
   @override
   void initState() {
@@ -36,6 +39,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     _aiRuntimeSettingsService = di.sl<AiRuntimeSettingsService>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
+    _runtimeSelfTestService = di.sl<RuntimeSelfTestService>();
 
     _runtimeState = _runtimeDiagnostics.monitor.state;
 
@@ -63,6 +67,42 @@ class _SettingsPageState extends State<SettingsPage> {
       debugPrint(
         'SettingsPage: runtime diagnostics refresh failed: $error',
       );
+    }
+  }
+
+  Future<void> _runRuntimeSelfTest() async {
+    if (_runningSelfTest) return;
+    setState(() => _runningSelfTest = true);
+    try {
+      final result = await _runtimeSelfTestService.run();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF111827),
+          title: Text(
+            result.success ? 'Runtime Self-Test Passed' : 'Runtime Self-Test Failed',
+            style: const TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Text(
+              result.summary,
+              style: const TextStyle(color: Colors.white70, height: 1.4),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _runningSelfTest = false);
+      }
+      await _refreshRuntimeDiagnostics();
     }
   }
 
@@ -159,8 +199,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 24,
               ),
               children: [
-                _SettingsHero(
-                  runtimeState: _runtimeState,
+                GestureDetector(
+                  onLongPress: _runRuntimeSelfTest,
+                  child: _SettingsHero(
+                    runtimeState: _runtimeState,
+                    selfTestRunning: _runningSelfTest,
+                  ),
                 ),
 
                 const SizedBox(height: 16),
@@ -294,14 +338,21 @@ class _SettingsPageState extends State<SettingsPage> {
 class _SettingsHero extends StatelessWidget {
   const _SettingsHero({
     required this.runtimeState,
+    required this.selfTestRunning,
   });
 
   final LocalRuntimeState runtimeState;
+  final bool selfTestRunning;
 
   String _titleForStatus(BuildContext context) {
     switch (runtimeState.status) {
+      case LocalRuntimeStatus.uninitialized:
+        return 'Runtime idle';
       case LocalRuntimeStatus.ready:
         return context.l10n.t('runtime_ready');
+
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return 'Runtime unverified';
 
       case LocalRuntimeStatus.loading:
         return context.l10n.t('runtime_loading');
@@ -312,7 +363,7 @@ class _SettingsHero extends StatelessWidget {
       case LocalRuntimeStatus.streaming:
         return 'Streaming response...';
 
-      case LocalRuntimeStatus.inferring:
+      case LocalRuntimeStatus.inferencing:
         return 'Generating response...';
 
       case LocalRuntimeStatus.stalled:
@@ -324,7 +375,7 @@ class _SettingsHero extends StatelessWidget {
       case LocalRuntimeStatus.timedOut:
         return 'Timed out';
 
-      case LocalRuntimeStatus.missingLibrary:
+      case LocalRuntimeStatus.ffiMissing:
         return context.l10n.t(
           'runtime_missing_library',
         );
@@ -334,15 +385,20 @@ class _SettingsHero extends StatelessWidget {
           'runtime_model_missing',
         );
 
-      case LocalRuntimeStatus.runtimeFailed:
+      case LocalRuntimeStatus.failed:
         return context.l10n.t('runtime_failed');
     }
   }
 
   Color _accentForStatus() {
     switch (runtimeState.status) {
+      case LocalRuntimeStatus.uninitialized:
+        return const Color(0xFF6B7280);
       case LocalRuntimeStatus.ready:
         return const Color(0xFF8AB4F8);
+
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return const Color(0xFFF9A826);
 
       case LocalRuntimeStatus.loading:
         return const Color(0xFF7DD3FC);
@@ -353,7 +409,7 @@ class _SettingsHero extends StatelessWidget {
       case LocalRuntimeStatus.streaming:
         return const Color(0xFF34D399);
 
-      case LocalRuntimeStatus.inferring:
+      case LocalRuntimeStatus.inferencing:
         return const Color(0xFF34D399);
 
       case LocalRuntimeStatus.stalled:
@@ -365,11 +421,11 @@ class _SettingsHero extends StatelessWidget {
       case LocalRuntimeStatus.timedOut:
         return const Color(0xFFFF8A80);
 
-      case LocalRuntimeStatus.missingLibrary:
+      case LocalRuntimeStatus.ffiMissing:
       case LocalRuntimeStatus.modelMissing:
         return const Color(0xFFF9A826);
 
-      case LocalRuntimeStatus.runtimeFailed:
+      case LocalRuntimeStatus.failed:
         return const Color(0xFFFF8A80);
     }
   }
@@ -461,6 +517,16 @@ class _SettingsHero extends StatelessWidget {
                             .withOpacity(0.6),
                         fontSize: 12,
                         height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      selfTestRunning
+                          ? 'Running Runtime Self-Test...'
+                          : 'Hidden action: long-press this card to run Runtime Self-Test.',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 11,
                       ),
                     ),
                   ],

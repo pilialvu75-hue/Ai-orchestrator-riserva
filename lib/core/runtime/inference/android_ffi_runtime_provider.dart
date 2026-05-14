@@ -93,7 +93,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _libraryHandle = handle;
     _bindings = handle.bindings;
     _log(
-      'Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
+      '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
       ' abi=${LlamaFfiLoader.currentAbiName}',
     );
     return true;
@@ -103,7 +103,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
     if (!LlamaFfiLoader.isCurrentPlatformSupported) {
       return LocalRuntimeState(
-        status: LocalRuntimeStatus.runtimeFailed,
+        status: LocalRuntimeStatus.failed,
         message:
             'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}). '
             'Only ${LlamaFfiLoader.supportedAbiNames} builds are supported.',
@@ -111,7 +111,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     if (!_ensureLibraryLoaded()) {
       return const LocalRuntimeState(
-        status: LocalRuntimeStatus.missingLibrary,
+        status: LocalRuntimeStatus.ffiMissing,
         message:
             'libllama_bridge.so is missing for this Android build. Rebuild the native runtime for arm64-v8a or x86_64.',
       );
@@ -143,6 +143,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final modelId = request.modelId;
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        clearRuntimeVerification();
         monitor.update(
           LocalRuntimeStatus.modelMissing,
           message: 'No validated local model is selected.',
@@ -156,12 +157,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (!_androidSafeModelIds.contains(modelId)) {
+        clearRuntimeVerification();
         const unsupportedAndroidModelMessage =
             'Selected model is not enabled for Android local runtime. '
             'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
             'gemma-2-2b-it, llama_1b, or gemma_2b.';
         monitor.update(
-          LocalRuntimeStatus.runtimeFailed,
+          LocalRuntimeStatus.failed,
           message: unsupportedAndroidModelMessage,
         );
         _finishWithRuntimeError(
@@ -176,7 +178,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final modelValidationError =
           await Isolate.run(() => _validateModelFileForRuntime(modelPath));
       if (modelValidationError != null) {
-        monitor.update(LocalRuntimeStatus.runtimeFailed, message: modelValidationError);
+        clearRuntimeVerification();
+        monitor.update(LocalRuntimeStatus.failed, message: modelValidationError);
         _finishWithRuntimeError(
           controller,
           stage: 'model_validation',
@@ -186,8 +189,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (!_ensureLibraryLoaded()) {
+        clearRuntimeVerification();
         monitor.update(
-          LocalRuntimeStatus.missingLibrary,
+          LocalRuntimeStatus.ffiMissing,
           message:
               'libllama_bridge.so is missing for this Android build.',
         );
@@ -207,14 +211,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // Let UI observers process the loading state before the blocking FFI load.
       await Future<void>.delayed(Duration.zero);
       _logAi('loading model...');
-      _log('Model load start: modelId=$modelId path=$modelPath n_ctx=512 threads=2');
+      _log('[MODEL_LOAD] start modelId=$modelId path=$modelPath n_ctx=512 threads=2');
 
       int loadResult;
       try {
         loadResult = bindings.loadModel(modelPath);
       } catch (error) {
+        clearRuntimeVerification();
         monitor.update(
-          LocalRuntimeStatus.runtimeFailed,
+          LocalRuntimeStatus.failed,
           message: 'Model load failed: $error',
         );
         _finishWithRuntimeError(
@@ -225,13 +230,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      _log('llb_load_model returned: $loadResult');
+      _log('[MODEL_LOAD] llb_load_model returned: $loadResult');
       final loadedAfterLoad = bindings.isLoaded();
-      _log('llb_is_loaded after model_load: $loadedAfterLoad');
+      _log('[MODEL_LOAD] llb_is_loaded after model_load: $loadedAfterLoad');
 
       if (loadResult != 0) {
+        clearRuntimeVerification();
         final errMsg = _safeLastError(bindings);
-        monitor.update(LocalRuntimeStatus.runtimeFailed, message: errMsg);
+        monitor.update(LocalRuntimeStatus.failed, message: errMsg);
         _finishWithRuntimeError(
           controller,
           stage: 'model_load',
@@ -240,7 +246,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      _log('Model load end: modelId=$modelId');
+      _log('[MODEL_LOAD] end modelId=$modelId');
       _logAi('model loaded');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────
@@ -256,12 +262,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         resetProgress: true,
       );
       _log(
-        'Tokenization step start: prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
+        '[MODEL_EXECUTION] tokenization start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
       );
       final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
       if (request.maxTokens > _safeMaxTokens) {
         _log(
-          'Requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
+          '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
         );
       }
 
@@ -269,11 +275,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // llb_start_gen so load failures are visible in logs before
       // generation starts.
       final loadedCheck = bindings.isLoaded();
-      _log('llb_is_loaded before start_generation: $loadedCheck');
+      _log('[MODEL_EXECUTION] llb_is_loaded before start_generation: $loadedCheck');
       if (loadedCheck != 1) {
+        clearRuntimeVerification();
         final nativeErr = _safeLastError(bindings);
         monitor.update(
-          LocalRuntimeStatus.runtimeFailed,
+          LocalRuntimeStatus.failed,
           message: 'Model not loaded (llb_is_loaded=$loadedCheck).',
         );
         _finishWithRuntimeError(
@@ -287,7 +294,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       _log(
-        'Calling native llb_start_gen: prompt_chars=${prompt.length}'
+        '[MODEL_EXECUTION] Calling native llb_start_gen: prompt_chars=${prompt.length}'
         ' max_tokens=$maxTokens temperature=${request.temperature}',
       );
       _logAi('starting inference...');
@@ -301,8 +308,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
       } catch (error) {
         startupWatch.stop();
+        clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
-        monitor.update(LocalRuntimeStatus.runtimeFailed,
+        monitor.update(LocalRuntimeStatus.failed,
             message: 'Native start_generation failed: $error');
         _finishWithRuntimeError(
           controller,
@@ -313,10 +321,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
       startupWatch.stop();
-      _log('llb_start_gen returned: $startResult');
+      _log('[MODEL_EXECUTION] llb_start_gen returned: $startResult');
 
       if (startupWatch.elapsed > _startGenerationTimeout) {
         _safeCancel(bindings);
+        clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_timeout');
         monitor.update(
           LocalRuntimeStatus.timedOut,
@@ -334,9 +343,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (startResult != 0) {
+        clearRuntimeVerification();
         final err = _safeLastError(bindings);
         _safeResetRuntime(bindings, reason: 'start_generation_failed');
-        monitor.update(LocalRuntimeStatus.runtimeFailed, message: err);
+        monitor.update(LocalRuntimeStatus.failed, message: err);
         _finishWithRuntimeError(
           controller,
           stage: 'start_generation',
@@ -364,14 +374,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       var runtimeNeedsReset = false;
       String? runtimeResetReason;
       monitor.update(
-        LocalRuntimeStatus.inferring,
+        LocalRuntimeStatus.inferencing,
         message: 'Generating',
         tokensGenerated: 0,
         elapsed: Duration.zero,
         startedAt: startedAt,
       );
       _logAi('streaming callback active');
-      _log('Inference loop start: max_tokens=$maxTokens');
+      _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
 
       try {
         while (true) {
@@ -382,18 +392,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               firstTokenAt == null ? null : now.difference(firstTokenAt);
           final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
           _log(
-            'Poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
+            '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
             ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
           );
           if (cancellationToken.isCancelled) {
             _safeCancel(bindings);
+            clearRuntimeVerification();
             _finishWithRuntimeError(
               controller,
               stage: 'cancelled',
               message: 'Inference cancelled.',
             );
             monitor.update(
-              LocalRuntimeStatus.ready,
+              LocalRuntimeStatus.runtimeUnavailable,
               message: 'Cancelled',
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
@@ -403,6 +414,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
           if (elapsed > _generationTimeout) {
             _safeCancel(bindings);
+            clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'generation_timeout';
             monitor.update(
@@ -427,6 +439,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           }
           if (firstTokenAt == null && elapsed > _stalledInferenceTimeout) {
             _safeCancel(bindings);
+            clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
             monitor.update(
@@ -447,6 +460,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           if (firstTokenAt != null &&
               sinceLastTokenProgress > _noTokenProgressTimeout) {
             _safeCancel(bindings);
+            clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'token_progress_watchdog';
             monitor.update(
@@ -470,6 +484,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           }
           if (consecutiveIdlePolls >= _maxIdlePollIterations) {
             _safeCancel(bindings);
+            clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_loop_watchdog';
             monitor.update(
@@ -496,10 +511,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           try {
             status = bindings.pollToken(tokenBuf);
           } catch (error) {
+            clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_token_exception';
             monitor.update(
-              LocalRuntimeStatus.runtimeFailed,
+              LocalRuntimeStatus.failed,
               message: 'Native poll_token failed: $error',
             );
             _finishWithRuntimeError(
@@ -510,7 +526,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
-          _log('Poll status iteration=$pollIterations status=$status');
+          _log('[TOKEN_STREAM] poll status iteration=$pollIterations status=$status');
 
           if (status == 1) {
             String piece;
@@ -520,10 +536,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               consecutiveInvalidTokens++;
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
                 _safeCancel(bindings);
+                clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'token_decode_exception';
                 monitor.update(
-                  LocalRuntimeStatus.runtimeFailed,
+                  LocalRuntimeStatus.failed,
                   message: 'Invalid generated token stream.',
                   tokensGenerated: estimatedTokens,
                   elapsed: DateTime.now().difference(startedAt),
@@ -546,22 +563,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               lastTokenProgressAt = DateTime.now();
               fullText.write(piece);
               estimatedTokens++;
+              markRuntimeVerified(modelPath);
               final streamingElapsed = DateTime.now().difference(startedAt);
               if (estimatedTokens % 16 == 0) {
-                _log('Generated token count: $estimatedTokens');
+                _log('[TOKEN_STREAM] token_count=$estimatedTokens');
               }
               _log(
-                'Generated piece token_index=$estimatedTokens text="${piece.replaceAll('\n', r'\n')}"'
+                '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${piece.replaceAll('\n', r'\n')}"'
                 ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
               );
               if (piece == lastPiece) {
                 repeatedTokenCount++;
                 if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
                   _safeCancel(bindings);
+                  clearRuntimeVerification();
                   runtimeNeedsReset = true;
                   runtimeResetReason = 'repeated_token_loop';
                   monitor.update(
-                    LocalRuntimeStatus.runtimeFailed,
+                    LocalRuntimeStatus.failed,
                     message: 'Repeated-token loop detected.',
                     tokensGenerated: estimatedTokens,
                     elapsed: streamingElapsed,
@@ -590,14 +609,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             } else {
               consecutiveInvalidTokens++;
               _log(
-                'Empty token detected iteration=$pollIterations consecutive_empty=$consecutiveInvalidTokens',
+                '[TOKEN_STREAM] empty token iteration=$pollIterations consecutive_empty=$consecutiveInvalidTokens',
               );
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
                 _safeCancel(bindings);
+                clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'empty_token_loop';
                 monitor.update(
-                  LocalRuntimeStatus.runtimeFailed,
+                  LocalRuntimeStatus.failed,
                   message: 'Invalid empty token stream.',
                   tokensGenerated: estimatedTokens,
                   elapsed: DateTime.now().difference(startedAt),
@@ -614,8 +634,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           } else if (status == 2) {
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
+            markRuntimeVerified(modelPath);
             _log(
-              'EOS detected. generated_tokens=$estimatedTokens elapsed_ms=${completedElapsed.inMilliseconds}',
+              '[FINAL_RESPONSE] eos generated_tokens=$estimatedTokens elapsed_ms=${completedElapsed.inMilliseconds}',
             );
             _logAi('inference completed');
             controller.add(InferenceResponse.finalChunk(
@@ -633,18 +654,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           } else if (status == -99) {
             // Cancelled by the native thread.
+            clearRuntimeVerification();
             _finishWithRuntimeError(
               controller,
               stage: 'cancelled',
               message: 'Inference cancelled.',
             );
             monitor.update(
-              LocalRuntimeStatus.ready,
+              LocalRuntimeStatus.runtimeUnavailable,
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
             );
             break;
           } else if (status == -1) {
+            clearRuntimeVerification();
             final err = _safeLastError(bindings);
             final statusLower = err.toLowerCase();
             runtimeNeedsReset = true;
@@ -652,14 +675,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             if (statusLower.contains('out of memory') ||
                 statusLower.contains('oom') ||
                 statusLower.contains('memory')) {
-              monitor.update(LocalRuntimeStatus.runtimeFailed,
+              monitor.update(LocalRuntimeStatus.failed,
                   message: 'Out of memory: $err',
                   tokensGenerated: estimatedTokens,
                   elapsed: DateTime.now().difference(startedAt),
                   startedAt: startedAt);
             } else {
               monitor.update(
-                LocalRuntimeStatus.runtimeFailed,
+                LocalRuntimeStatus.failed,
                 message: err,
                 tokensGenerated: estimatedTokens,
                 elapsed: DateTime.now().difference(startedAt),
@@ -692,7 +715,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             consecutiveIdlePolls++;
             if (consecutiveIdlePolls % 120 == 0) {
               _log(
-                'Idle polling continues: idle_polls=$consecutiveIdlePolls '
+                '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
                 'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
               );
             }
@@ -709,11 +732,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         final terminalState = monitor.state.status;
         if (terminalState == LocalRuntimeStatus.loading ||
             terminalState == LocalRuntimeStatus.tokenizing ||
-            terminalState == LocalRuntimeStatus.inferring ||
-            terminalState == LocalRuntimeStatus.streaming) {
+            terminalState == LocalRuntimeStatus.inferencing ||
+            terminalState == LocalRuntimeStatus.streaming ||
+            terminalState == LocalRuntimeStatus.completed) {
           monitor.update(
             LocalRuntimeStatus.ready,
-            message: 'Runtime ready for the next prompt.',
+            message: 'Runtime verified and ready for the next prompt.',
             tokensGenerated: 0,
             elapsed: Duration.zero,
             startedAt: null,
@@ -845,10 +869,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     try {
       final value = bindings.lastError();
       if (value.trim().isEmpty) return 'Unknown native runtime error.';
-      _log('Native error: $value');
+      _log('[MODEL_EXECUTION] native error: $value');
       return value;
     } catch (error) {
-      _log('llb_last_error failed: $error');
+      _log('[MODEL_EXECUTION] llb_last_error failed: $error');
       return 'Native runtime error (unable to read details).';
     }
   }
@@ -857,7 +881,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     try {
       bindings.cancel();
     } catch (error) {
-      _log('llb_cancel failed: $error');
+      _log('[MODEL_EXECUTION] llb_cancel failed: $error');
     }
   }
 
@@ -866,13 +890,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String reason,
   }) {
     try {
-      _log('Resetting native runtime: $reason');
-      _log('llb_is_loaded before reset: ${bindings.isLoaded()}');
+      _log('[MODEL_EXECUTION] resetting native runtime: $reason');
+      _log('[MODEL_EXECUTION] llb_is_loaded before reset: ${bindings.isLoaded()}');
       bindings.cancel();
       bindings.freeModel();
-      _log('llb_is_loaded after reset: ${bindings.isLoaded()}');
+      _log('[MODEL_EXECUTION] llb_is_loaded after reset: ${bindings.isLoaded()}');
     } catch (error) {
-      _log('Runtime reset failed: $error');
+      _log('[MODEL_EXECUTION] runtime reset failed: $error');
     }
   }
 

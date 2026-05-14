@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 
 /// Magic bytes that every valid GGUF file starts with: ASCII "GGUF".
@@ -34,9 +35,15 @@ class _ModelFileValidationResult {
 /// these requests – they belong only in online-provider calls (OpenAI, Gemini,
 /// etc.) and are handled exclusively by their respective data-sources.
 class ModelDownloadService {
-  ModelDownloadService({Dio? dio, FilePicker? filePicker})
+  ModelDownloadService({
+    Dio? dio,
+    FilePicker? filePicker,
+    BundledModelRegistryService? bundledModelRegistryService,
+  })
       : _dio = dio ?? _buildDownloadDio(),
-        _filePicker = filePicker ?? FilePicker.platform;
+        _filePicker = filePicker ?? FilePicker.platform,
+        _bundledModelRegistryService =
+            bundledModelRegistryService ?? const BundledModelRegistryService();
 
   /// Builds a Dio instance that is explicitly configured for unauthenticated
   /// public-CDN downloads (Hugging Face / GitHub Releases / etc.).
@@ -57,6 +64,7 @@ class ModelDownloadService {
 
   final Dio _dio;
   final FilePicker _filePicker;
+  final BundledModelRegistryService _bundledModelRegistryService;
   final Map<String, CancelToken> _cancelTokens = {};
   static const Uuid _uuid = Uuid();
   static const MethodChannel _androidChannel =
@@ -73,8 +81,9 @@ class ModelDownloadService {
   /// and stamped with the appropriate [ModelValidationStatus].
   Future<List<AiModel>> getAvailableModels() async {
     final modelsDir = await _modelsDirectory();
+    final catalog = await _bundledModelRegistryService.loadCatalog();
     final builtIn = await Future.wait(
-      AppConstants.availableModels.map((m) async {
+      catalog.map((m) async {
         final file = File('${modelsDir.path}/${m['fileName']}');
         final downloaded = await file.exists();
         ModelValidationStatus status;

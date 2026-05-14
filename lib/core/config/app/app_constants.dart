@@ -106,86 +106,16 @@ class AppConstants {
 
   static const List<Map<String, dynamic>> availableModels = [
     {
-      'id': 'gemma_2b',
-      'displayName': 'Gemma 2B',
-      'fileName': 'gemma-2-2b-it-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 1500000000,
-      'description': 'Google Gemma 2B – balanced speed and quality',
-      'platformTarget': 'all',
-    },
-    {
-      'id': 'phi4_mini',
-      'displayName': 'Phi-4 Mini',
-      'fileName': 'Phi-4-mini-instruct-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/bartowski/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 2200000000,
-      'description': 'Microsoft Phi-4 Mini – strong reasoning',
-      'platformTarget': 'all',
-    },
-    {
       'id': 'llama_1b',
-      'displayName': 'Llama 3.2 1B',
-      'fileName': 'Llama-3.2-1B-Instruct-Q4_K_M.gguf',
+      'displayName': 'TinyLlama 1.1B Chat',
+      'fileName': 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
       'downloadUrl':
-          'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf',
+          'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf?download=true',
       'version': '1.0.0',
-      'sizeBytes': 800000000,
+      'sizeBytes': 669000000,
       'description':
-          'Meta Llama 3.2 1B – fastest, lowest memory usage',
-      'platformTarget': 'all',
-    },
-    {
-      'id': 'deepseek_r1_1_5b',
-      'displayName': 'DeepSeek-R1-Distill-Qwen-1.5B',
-      'fileName': 'DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 1120000000,
-      'description':
-          'DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M) – Coding Specialist · ~1.12 GB · Quantization: Q4_K_M · Android/mobile recommended',
+          'TinyLlama 1.1B Chat (Q4_K_M) – minimal verification model for Android local-runtime proof-of-life.',
       'platformTarget': 'android',
-    },
-    {
-      'id': 'qwen3_1_7b',
-      'displayName': 'Qwen3-1.7B',
-      'fileName': 'Qwen3-1.7B-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 1100000000,
-      'description':
-          'Qwen3-1.7B (Q4_K_M) – Chat Fluida + Orchestrator · ~1.1 GB · Quantization: Q4_K_M · Universal',
-      'platformTarget': 'all',
-    },
-    {
-      'id': 'gemma_2_2b_it',
-      'displayName': 'Gemma-2-2B-IT',
-      'fileName': 'gemma-2-2b-it-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 1710000000,
-      'description':
-          'Google Gemma-2-2B-IT (Q4_K_M) – Creative Tester / Validator · ~1.71 GB · Quantization: Q4_K_M · Universal',
-      'platformTarget': 'all',
-    },
-    {
-      'id': 'deepseek_r1_7b',
-      'displayName': 'DeepSeek-R1-Distill-Qwen-7B (PC Only)',
-      'fileName': 'DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf?download=true',
-      'version': '1.0.0',
-      'sizeBytes': 4680000000,
-      'description':
-          'DeepSeek-R1-Distill-Qwen-7B (Q4_K_M) – Reasoning Specialist · ~4.68 GB · Desktop/PC recommended only · Not supported on Android',
-      'platformTarget': 'windows',
     },
   ];
 

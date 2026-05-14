@@ -6,33 +6,35 @@ import 'package:flutter/foundation.dart';
 /// reflect the current state of the local AI runtime without coupling
 /// directly to provider internals.
 enum LocalRuntimeStatus {
+  uninitialized,
   loading,
   tokenizing,
+  runtimeUnavailable,
 
   /// Model is loaded and ready to accept inference requests.
   ready,
 
   /// An inference request is actively running.
-  inferring,
+  inferencing,
   streaming,
   completed,
   timedOut,
   stalled,
 
   /// Required Android native library is missing for the current ABI.
-  missingLibrary,
+  ffiMissing,
 
   /// No valid local model is selected or present on disk.
   modelMissing,
 
   /// Runtime initialization failed after all required artifacts were found.
-  runtimeFailed,
+  failed,
 }
 
 /// Snapshot of the local runtime state at a point in time.
 class LocalRuntimeState {
   const LocalRuntimeState({
-    this.status = LocalRuntimeStatus.loading,
+    this.status = LocalRuntimeStatus.uninitialized,
     this.message,
     this.tokensGenerated = 0,
     this.elapsed = Duration.zero,

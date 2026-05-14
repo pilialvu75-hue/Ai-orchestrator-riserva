@@ -55,6 +55,9 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
+    _log(
+      '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
+    );
     final promptHash = _promptHash(request);
     _log(
       'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
@@ -77,14 +80,15 @@ class InferenceService {
     try {
       final runtimeMode = await _loadRuntimeMode();
       _log(
-        'prompt routing session=${request.sessionId} mode=${runtimeMode.name} prompt_hash=$promptHash',
+        '[RUNTIME_PATH] routing session=${request.sessionId} mode=${runtimeMode.name} '
+        'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
       );
 
       final selectedModel = await _resolveSelectedModelForLocalRuntime();
       final localRequest = _buildLocalRequest(request, selectedModel);
       _log(
-        'model selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
-        'local_runtime_connected=${localRequest != null}',
+        '[MODEL_LOAD] selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
+        'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
       );
 
       yield* _streamWithRetryAndGuards(
@@ -198,7 +202,7 @@ class InferenceService {
     )) {
       localChunkCount++;
       _log(
-        'local chunk session=${localRequest.sessionId} chunk=$localChunkCount '
+        '[TOKEN_STREAM] local chunk session=${localRequest.sessionId} chunk=$localChunkCount '
         'isFinal=${chunk.isFinal} isError=${chunk.isError} text_len=${chunk.text.length} '
         'tokens=${chunk.tokensGenerated} notice=${chunk.runtimeNotice}',
       );
@@ -207,7 +211,7 @@ class InferenceService {
           !emittedLocalToken &&
           _cloudRuntimeProvider.canInfer) {
         _log(
-          'fallback routing session=${localRequest.sessionId} from=local to=cloud reason=${chunk.errorMessage}',
+          '[RUNTIME_PATH] fallback session=${localRequest.sessionId} from=local to=cloud reason=${chunk.errorMessage}',
         );
         yield InferenceResponse.notice(
           'Local runtime failed, switching to cloud runtime.',
@@ -226,7 +230,7 @@ class InferenceService {
       yield chunk;
     }
     _log(
-      'local stream end session=${localRequest.sessionId} emittedLocalToken=$emittedLocalToken chunks=$localChunkCount',
+      '[FINAL_RESPONSE] local stream end session=${localRequest.sessionId} emittedLocalToken=$emittedLocalToken chunks=$localChunkCount',
     );
   }
 
@@ -254,7 +258,7 @@ class InferenceService {
       )) {
         if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
           _log(
-            'streaming callbacks session=${cloudRequest.sessionId} notice="${chunk.runtimeNotice}"',
+            '[TOKEN_STREAM] notice session=${cloudRequest.sessionId} notice="${chunk.runtimeNotice}"',
           );
           yield chunk;
           continue;
@@ -269,12 +273,12 @@ class InferenceService {
           shouldRetry = true;
           retryReason = chunk.errorMessage ?? 'transient runtime failure';
           _log(
-            'retry handler session=${cloudRequest.sessionId} attempt=$attempt reason="$retryReason"',
+            '[RUNTIME_PATH] retry session=${cloudRequest.sessionId} attempt=$attempt reason="$retryReason"',
           );
           continue;
         }
         _log(
-          'response parsing session=${cloudRequest.sessionId} attempt=$attempt isFinal=${chunk.isFinal} '
+          '[FINAL_RESPONSE] session=${cloudRequest.sessionId} attempt=$attempt isFinal=${chunk.isFinal} '
           'isError=${chunk.isError} text_len=${chunk.text.length}',
         );
         yield chunk;
@@ -299,6 +303,9 @@ class InferenceService {
   }) {
     switch (runtimeMode) {
       case AiRuntimeMode.local:
+        _log(
+          '[RUNTIME_PATH] mode=local session=${cloudRequest.sessionId} local_request=${localRequest != null}',
+        );
         if (localRequest != null) {
           return _streamLocalInference(
             localRequest: localRequest,
@@ -313,6 +320,7 @@ class InferenceService {
           ),
         );
       case AiRuntimeMode.cloud:
+        _log('[RUNTIME_PATH] mode=cloud session=${cloudRequest.sessionId}');
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
@@ -320,6 +328,7 @@ class InferenceService {
           forceCloudPrimary: true,
         );
       case AiRuntimeMode.hybrid:
+        _log('[RUNTIME_PATH] mode=hybrid session=${cloudRequest.sessionId}');
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
