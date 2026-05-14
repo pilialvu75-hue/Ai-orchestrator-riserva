@@ -298,6 +298,20 @@ jobs:
           set -euo pipefail
           find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) | sort | tee release_outputs.log
 
+      - name: APK forensics
+        run: |
+          set -euo pipefail
+          echo "=== APK discovery (full build tree) ==="
+          find build -name "*.apk" | sort | tee apk_forensics.log
+          FIRST_APK=$(find build -name "*.apk" | sort | head -n 1 || true)
+          if [ -n "$FIRST_APK" ]; then
+            AAPT=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -1 || true)
+            if [ -n "$AAPT" ]; then
+              echo "=== aapt dump badging: $FIRST_APK ==="
+              "$AAPT" dump badging "$FIRST_APK" | tee -a apk_forensics.log || true
+            fi
+          fi
+
       - name: Resolve release asset paths
         id: release_assets
         run: |
@@ -379,6 +393,7 @@ jobs:
             release_apk_build.log
             release_aab_build.log
             release_outputs.log
+            apk_forensics.log
             keystore_decode.log
             keystore_validation.log
             sensitive_files_audit.log

@@ -90,6 +90,12 @@ android {
         versionName flutterVersionName
         buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", "false"
 
+        ndk {
+            // Must match supportedAndroidAbis so the JNI packager and CMake
+            // both target the same single ABI.
+            abiFilters "arm64-v8a"
+        }
+
         externalNativeBuild {
             cmake {
                 abiFilters(*supportedAndroidAbis)
@@ -158,16 +164,6 @@ android {
             signingConfig forceDebugReleaseSigning ? signingConfigs.debug : signingConfigs.release
             minifyEnabled false
             shrinkResources false
-        }
-    }
-
-    // ABI splits — generates arm64-specific and universal APK outputs.
-    splits {
-        abi {
-            enable true
-            reset()
-            include "arm64-v8a"
-            universalApk true
         }
     }
 
