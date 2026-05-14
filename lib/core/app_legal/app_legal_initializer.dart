@@ -15,7 +15,7 @@
 // ──────────────────
 // • The widget is purely presentation-level.  All business logic lives in
 //   [EulaService]; this widget just reacts to its output.
-// • Compatible with AI-Orchestrator-Riserva and future AppHealthCore modules
+// • Compatible with Ai-orchestrator-riserva and future AppHealthCore modules
 //   because it wraps rather than replaces the host widget tree.
 
 import 'package:flutter/material.dart';

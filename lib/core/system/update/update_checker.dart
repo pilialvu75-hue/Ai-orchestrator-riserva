@@ -289,7 +289,7 @@ class UpdateChecker {
       final name = ((asset['name'] as String?) ?? '').toLowerCase();
       final url = (asset['browser_download_url'] as String?)?.trim();
       if (url == null || url.isEmpty) continue;
-      if (name.endsWith('.apk') || url.toLowerCase().endsWith('.apk')) {
+      if (name.endsWith('.apk')) {
         final uri = Uri.tryParse(url);
         if (uri != null &&
             (uri.scheme == 'https' || uri.scheme == 'http') &&
