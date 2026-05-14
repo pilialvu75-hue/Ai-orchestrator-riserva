@@ -312,6 +312,33 @@ jobs:
             fi
           fi
 
+      - name: Verify Flutter native libraries in APK
+        run: |
+          set -euo pipefail
+          RELEASE_APK=$(find build/app/outputs/flutter-apk -name "app-*release*.apk" | sort | head -n 1 || true)
+          if [ -z "$RELEASE_APK" ]; then
+            echo "::warning::No release APK found for native lib check"
+            exit 0
+          fi
+          echo "=== .so files in $RELEASE_APK ==="
+          unzip -l "$RELEASE_APK" | grep '\.so' | tee native_libs_check.log
+          MISSING=""
+          if ! unzip -l "$RELEASE_APK" | grep -q 'libflutter\.so'; then
+            MISSING="$MISSING libflutter.so"
+          fi
+          if ! unzip -l "$RELEASE_APK" | grep -q 'libapp\.so'; then
+            MISSING="$MISSING libapp.so"
+          fi
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing critical Flutter native libraries in APK:$MISSING"
+            exit 1
+          fi
+          if ! unzip -l "$RELEASE_APK" | grep -q 'lib/arm64-v8a/'; then
+            echo "::error::Missing lib/arm64-v8a/ directory in APK — no ARM64 native code present"
+            exit 1
+          fi
+          echo "Flutter native libraries verified: libflutter.so and libapp.so present in lib/arm64-v8a/"
+
       - name: Resolve release asset paths
         id: release_assets
         run: |
@@ -397,6 +424,7 @@ jobs:
             keystore_decode.log
             keystore_validation.log
             sensitive_files_audit.log
+            native_libs_check.log
             apk_signature.log
             apk_zipalign.log
             apk_contents.log

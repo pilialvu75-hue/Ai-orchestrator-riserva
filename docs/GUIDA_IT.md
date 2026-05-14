@@ -1,340 +1,273 @@
-# AI Orchestrator — Guida Utente (Italiano)
+# Guida generale di AI-Orchestrator
 
-> Versione: 1.0.0 · Lingua: Italiano
+AI-Orchestrator è una **piattaforma modulare offline-first di orchestrazione cognitiva**.
+Non va interpretata come una semplice app di chat AI: il suo scopo è coordinare memoria, inferenza, documenti, voce, sincronizzazione e automazione in un runtime locale estendibile.
 
----
+## 1. Obiettivo del progetto
 
-## Indice
+Il progetto nasce per offrire un ambiente in cui l'utente possa:
 
-1. [Introduzione](#1-introduzione)
-2. [Requisiti di sistema](#2-requisiti-di-sistema)
-3. [Installazione](#3-installazione)
-   - [Android (APK)](#android-apk)
-   - [Windows (EXE)](#windows-exe)
-4. [Configurazione iniziale](#4-configurazione-iniziale)
-5. [Funzionalità principali](#5-funzionalità-principali)
-6. [Provider AI supportati](#6-provider-ai-supportati)
-7. [Memoria di progetto](#7-memoria-di-progetto)
-8. [Cronologia chat](#8-cronologia-chat)
-9. [Impostazioni e preferenze](#9-impostazioni-e-preferenze)
-10. [Risoluzione dei problemi](#10-risoluzione-dei-problemi)
-11. [Privacy e sicurezza](#11-privacy-e-sicurezza)
-12. [Flusso decisionale](#12-flusso-decisionale)
-13. [Architettura agenti](#13-architettura-agenti)
-14. [Priorità di esecuzione](#14-priorità-di-esecuzione)
-15. [Gestione offline/online reale](#15-gestione-offlineonline-reale)
-16. [Licenza](#16-licenza)
+- conservare il contesto di lavoro sul dispositivo
+- usare modelli locali quando possibile
+- passare ai provider cloud solo quando necessario
+- indicizzare documenti in locale
+- integrare input/output vocale offline
+- sincronizzare dati e stato in ottica local-first
+- evolvere verso scenari di sviluppo assistito e MobileIDE
 
----
+In termini architetturali, il repository rappresenta la base di **AI-Orchestrator-Core** con una direzione evolutiva verso un ecosistema più ampio.
 
-## 1. Introduzione
+## 2. Visione offline-first
 
-**AI Orchestrator** è un'applicazione Flutter multi-piattaforma (Android e Windows) pensata per
-sviluppatori e team che vogliono gestire la memoria di progetto, interagire con diversi modelli di
-intelligenza artificiale e mantenere uno storico contestuale delle conversazioni — tutto in un'unica
-interfaccia.
+La filosofia del progetto è semplice:
 
-L'architettura segue il pattern **Clean Architecture** con BLoC per la gestione dello stato, garantendo
-un'app robusta, testabile e facilmente estendibile.
+> i dati dell'utente devono rimanere utili e accessibili anche senza rete.
 
----
+Per questo motivo il repository privilegia:
 
-## 2. Requisiti di sistema
+- persistenza locale tramite SQLite
+- memoria contestuale locale
+- indicizzazione documentale locale
+- sincronizzazione basata su cambi locali
+- runtime Android on-device tramite FFI
+- servizi cloud opzionali e non centrali
 
-| Piattaforma | Requisiti minimi |
-|-------------|-----------------|
-| **Android** | Android 6.0 (API 23) o superiore, 100 MB di spazio libero |
-| **Windows** | Windows 10 (64-bit) o superiore, .NET runtime incluso nel pacchetto |
+Quando la rete non è disponibile, l'applicazione deve degradare in modo controllato, non collassare.
 
----
+## 3. Come è organizzato il sistema
 
-## 3. Installazione
+### `lib/core/`
+Contiene i contratti stabili e i servizi trasversali:
 
-### Android (APK)
+- orchestrazione
+- runtime di inferenza
+- memoria contestuale
+- sincronizzazione CRDT
+- servizi vocali
+- configurazione
+- plugin registry
+- servizi di update
 
-1. Scarica il file `ai-orchestrator-<versione>.apk` dalla sezione **Releases** di GitHub.
-2. Sul dispositivo Android, vai in **Impostazioni → Sicurezza → Origini sconosciute** e abilita
-   l'installazione da fonti esterne (necessario solo la prima volta).
-3. Apri il file APK scaricato e segui le istruzioni a schermo per completare l'installazione.
-4. Al primo avvio, l'app richiede le autorizzazioni necessarie (storage per il database locale).
+### `lib/features/`
+Contiene i moduli applicativi in stile Clean Architecture:
 
-### Windows (EXE)
+- `chat`
+- `projects`
+- `local_ai`
+- `cloud_ai`
+- `voice`
+- `document_intelligence`
+- `coding_assistant`
+- `settings`
+- `onboarding`
+- `multimodal`
 
-1. Scarica il file `ai-orchestrator-windows-<versione>.zip` dalla sezione **Releases** di GitHub.
-2. Estrai il contenuto dello ZIP in una cartella a tua scelta (es. `C:\Programmi\AI-Orchestrator`).
-3. Avvia `ai_orchestrator.exe` contenuto nella cartella estratta.
-4. Non è richiesta alcuna installazione aggiuntiva: tutte le dipendenze sono incluse nel pacchetto.
+### `lib/native/` e `native/`
+Contengono il ponte con il mondo piattaforma/runtime:
 
-> **Nota per Windows Defender:** al primo avvio potrebbe comparire un avviso di SmartScreen.
-> Clicca su **Altre informazioni → Esegui comunque** per procedere.
+- esecuzione Android
+- intent Android
+- integrazione Bixby
+- bridge `llama.cpp`
+- hook futuri per runtime MLC
 
----
+## 4. Runtime locale vs cloud
 
-## 4. Configurazione iniziale
+AI-Orchestrator supporta tre modalità concettuali.
 
-Al primo avvio, AI Orchestrator mostra un **onboarding in tre passi**:
+### Modalità locale
+Usa un modello scaricato e validato in locale.
+Su Android il percorso attuale passa da:
 
-| Passo | Descrizione |
-|-------|-------------|
-| 1 | Benvenuto e presentazione delle funzionalità |
-| 2 | Selezione del provider AI predefinito |
-| 3 | Verifica aggiornamenti dei modelli disponibili |
+- `AndroidFfiRuntimeProvider`
+- `libllama_bridge.so`
+- `llama.cpp`
+- file GGUF nel filesystem dell'app
 
-Al termine dell'onboarding puoi inserire le **chiavi API** per i provider che intendi usare
-(vedi sezione [Provider AI supportati](#6-provider-ai-supportati)).
+### Modalità cloud
+Usa provider remoti tramite il layer `cloud_ai`.
+Il repository include data source per:
 
----
+- OpenAI
+- Gemini
+- Claude
+- Grok
+- Copilot
 
-## 5. Funzionalità principali
+### Modalità ibrida
+`InferenceService` decide il routing e può:
 
-### 💬 Chat AI
-Interfaccia conversazionale ispirata a Gemini con supporto multi-turno. Ogni sessione viene
-salvata nel database locale SQLite, permettendo di riprendere le conversazioni in qualsiasi momento.
+- provare il locale per primo
+- usare il cloud come fallback
+- ripiegare sul locale se il cloud non è disponibile e c'è un modello valido
 
-### 🧠 Memoria di progetto
-Salva e recupera il contesto del progetto corrente:
-- **Obiettivo principale** (`master_goal`): la descrizione ad alto livello del progetto.
-- **Contesto corrente** (`current_context`): dettagli sulla fase attuale di sviluppo.
-- **Ultimo snippet di codice** (`last_code_snippet`): il frammento di codice più recente condiviso.
+Questa separazione è fondamentale perché evita che l'app sia vincolata a un singolo backend.
 
-### 🔄 Multi-provider AI
-Passa da un provider all'altro senza perdere la cronologia della sessione.
+## 5. Memoria di progetto e contesto
 
-### 📋 Cronologia sessioni
-Tutte le sessioni di chat sono indicizzate per `session_id`, `provider` e `timestamp`, così puoi
-filtrare e recuperare conversazioni precedenti.
+La memoria è uno dei pilastri del sistema.
 
----
+### Memoria breve
+`ContextWindowManager` gestisce la finestra di contesto utile alla sessione attiva.
 
-## 6. Provider AI supportati
+### Memoria persistente
+Le informazioni principali vengono salvate in SQLite:
 
-| Provider | Chiave API richiesta | Modalità offline |
-|----------|---------------------|-----------------|
-| OpenAI (GPT-4 / GPT-3.5) | `OPENAI_API_KEY` | ✗ |
-| Google Gemini | `GEMINI_API_KEY` | ✗ |
-| xAI Grok | `GROK_API_KEY` | ✗ |
-| GitHub Copilot | `COPILOT_API_KEY` | ✗ |
-| Modello locale | — | ✓ |
+- cronologia chat
+- memoria di progetto
+- preferenze utente
+- chunk documentali indicizzati
+- record di sincronizzazione
 
-Le chiavi API possono essere inserite nelle impostazioni dell'app; vengono memorizzate in modo
-sicuro nella tabella `user_preferences` del database locale e non vengono mai trasmesse a server
-di terze parti diversi dal provider selezionato.
+### Perché è importante
+Questo approccio permette di mantenere continuità tra sessioni, ridurre dipendenze dal cloud e preparare il terreno a futuri agenti specializzati.
 
----
+## 6. Sistema documentale e memoria vettoriale
 
-## 7. Memoria di progetto
-
-La memoria di progetto è il cuore di AI Orchestrator. Permette all'assistente AI di mantenere
-il contesto anche tra sessioni diverse.
-
-### Come aggiornare la memoria
-
-1. Apri la sezione **Memoria di Progetto** dalla barra di navigazione principale.
-2. Modifica i campi **Obiettivo**, **Contesto** e **Ultimo Snippet**.
-3. Premi **Salva** — i dati vengono persistiti immediatamente nel database SQLite locale.
-
-### Come viene usata nelle risposte AI
-
-Ad ogni messaggio inviato all'AI, la memoria di progetto viene allegata automaticamente al prompt
-di sistema, garantendo risposte coerenti con il lavoro in corso.
-
----
-
-## 8. Cronologia chat
-
-- Ogni conversazione è identificata da un `session_id` univoco (UUID v4).
-- Le sessioni vengono elencate in ordine cronologico inverso.
-- Per avviare una nuova sessione: tocca l'icona **+** nella schermata Chat.
-- Per cancellare una sessione: tieni premuto sulla voce nell'elenco e seleziona **Elimina**.
-
----
-
-## 9. Impostazioni e preferenze
-
-| Impostazione | Descrizione |
-|---|---|
-| Provider AI predefinito | Il provider selezionato all'avvio di ogni nuova sessione |
-| Chiavi API | Inserimento e modifica delle chiavi per i provider cloud |
-| Lingua dell'interfaccia | Italiano / English (in sviluppo) |
-| Tema | Scuro (predefinito) / Chiaro |
-| Cancella dati locali | Elimina tutta la cronologia e la memoria di progetto |
-
----
-
-## 10. Risoluzione dei problemi
+Il modulo `document_intelligence` implementa una pipeline locale di indicizzazione.
 
-### L'app non risponde ai messaggi
-- Verifica che la chiave API del provider selezionato sia corretta e non scaduta.
-- Controlla la connessione a Internet (necessaria per i provider cloud).
-- Se usi il modello locale, assicurati che il modello sia stato scaricato completamente.
-
-### Il database risulta corrotto
-1. Vai in **Impostazioni → Cancella dati locali**.
-2. Riavvia l'app — il database verrà ricreato automaticamente.
-
-### L'APK non si installa su Android
-- Assicurati di aver abilitato l'installazione da **Origini sconosciute**.
-- Verifica che la versione di Android sia 6.0 o superiore.
-
-### L'EXE non si avvia su Windows
-- Estrai tutti i file dallo ZIP prima di avviare l'eseguibile.
-- Non spostare solo il file `.exe` fuori dalla cartella: richiede le DLL incluse nel pacchetto.
+### Pipeline attuale
+1. lettura del file
+2. estrazione del testo
+3. suddivisione in chunk sovrapposti
+4. generazione di vettori hash compatti
+5. salvataggio in SQLite
+6. ricerca per similarità coseno
 
----
+### Cosa significa davvero
+Non esiste ancora un database vettoriale esterno completo. La memoria vettoriale attuale è una base embedded, locale, leggera e sufficiente per retrieval offline e futura evoluzione architetturale.
 
-## 11. Privacy e sicurezza
-
-- Tutti i dati (memoria di progetto, cronologia chat, preferenze) sono salvati **esclusivamente
-  sul dispositivo** in un database SQLite locale.
-- Le chiavi API vengono inviate **solo** al provider AI corrispondente per elaborare le richieste.
-- L'app **non** raccoglie telemetria, analytics o dati personali.
-- Il codice sorgente è aperto e disponibile su [GitHub](https://github.com/pilialvu75-hue/AI-Orchestrator-Core).
+## 7. Pipeline vocale
 
----
-
-## 12. Flusso decisionale
+Il sottosistema voce è modulare e separato dal runtime di inferenza GGUF.
 
-Ogni volta che l'utente invia un messaggio, AI Orchestrator esegue la seguente sequenza di operazioni:
+### Componenti principali
+- `SherpaOnnxAdapter`
+- `VoiceInputService`
+- `VoiceOutputService`
+- `VoiceTextNormalizer`
 
-```
-Utente invia messaggio
-        │
-        ▼
-ChatBloc riceve l'evento SendChatMessageEvent
-        │
-        ▼
-ContextWindowManager recupera la finestra di contesto
-(ultimi N messaggi dalla sessione attiva)
-        │
-        ▼
-ProjectMemoryRepository carica la memoria di progetto
-(master_goal, current_context, last_code_snippet)
-        │
-        ▼
-CacheManager verifica se esiste una risposta in cache
-        │
-   ┌────┴────┐
-   ▼         ▼
-HIT cache  MISS cache
-   │         │
-Risposta     ▼
-immediata  Provider selezionato?
-           ┌────────────┬──────────────────┐
-           ▼            ▼
-    Cloud (online) Locale (offline)
-           ▼            ▼
-     CloudRuntimeProvider  LocalRuntimeProvider
-        (online)              (offline GGUF)
-           │            │
-           └─────┬──────┘
-                 ▼
-         Risposta salvata in SQLite
-         (chat_history + aggiornamento cache)
-                 │
-                 ▼
-         ChatBloc emette ChatLoaded
-         → UI aggiornata
-```
+### Funzioni
+- ASR offline
+- TTS offline
+- normalizzazione del testo
+- integrazione controllata con il flusso di orchestrazione
 
-In caso di errore di rete con provider cloud, il BLoC emette uno stato `ChatError` con il messaggio originale della `Failure`, consentendo all'utente di ritentare o passare al modello locale.
+La voce non deve contaminare il layer di orchestrazione principale: produce testo in ingresso e consuma testo in uscita.
 
----
+## 8. Integrazione ONNX
 
-## 13. Architettura agenti
+L'integrazione ONNX è presente soprattutto nella pipeline vocale tramite Sherpa-ONNX.
+Questo consente di mantenere separati:
 
-AI Orchestrator è strutturato attorno a quattro **agenti BLoC** principali, ognuno con responsabilità ben definite:
+- runtime conversazionale GGUF / llama.cpp
+- pipeline ASR/TTS offline basata su ONNX
 
-| Agente (BLoC) | Responsabilità | Dipendenze chiave |
-|---|---|---|
-| **ProjectMemoryBloc** | CRUD sulla memoria di progetto (obiettivo, contesto, snippet) | `ProjectMemoryRepository` → SQLite |
-| **ChatBloc** | Gestione del ciclo di vita della chat: invio messaggi, caricamento storico, pruning | `ChatRepository`, `AiRepository`, `ContextWindowManager` |
-| **OnboardingBloc** | Guida al primo avvio, selezione provider, verifica aggiornamenti modelli | `ModelRegistryDataSource` |
-| **ModelDownloadBloc** | Download, selezione e aggiornamento dei modelli GGUF locali | `LocalAiRepository`, `ModelDownloadService` |
+Il vantaggio è architetturale: i due mondi possono evolvere in modo indipendente.
 
-### Runtime di inferenza unificato (`InferenceService`)
+## 9. Accelerazione MLC
 
-L’inferenza è instradata da `InferenceService`, che usa:
+Nel runtime Android esiste una superficie di integrazione MLC (`mlc_native_bridge`), ma allo stato attuale non è il percorso abilitato di default.
 
-| Componente | Endpoint/Sorgente | Modalità |
-|---|---|---|
-| `CloudRuntimeProvider` | repository cloud (`OpenAiDataSource`, `GeminiDataSource`, `GrokDataSource`, `CopilotDataSource`) | online |
-| `LocalRuntimeProvider` | file system locale + modello GGUF validato | offline |
+In pratica:
 
-Entrambi convergono sullo stesso contratto di risposta (`InferenceResponse`) in modalità streaming/tokenizzata, con fallback automatico cloud quando il runtime locale fallisce prima di produrre output.
+- l'app ha un punto di aggancio per future accelerazioni MLC
+- la build Android attuale usa `AI_ANDROID_ENABLE_MLC=OFF`
+- `ANDROID_NATIVE_MLC_ENABLED` è disabilitato
 
-### Servizi di supporto
+Quindi l'accelerazione MLC è una direzione evolutiva concreta, non ancora il backend primario attivo in produzione.
 
-| Servizio | Funzione |
-|---|---|
-| `ContextWindowManager` | Mantiene la finestra di contesto in memoria (short-term) e la persiste su SQLite (long-term) |
-| `CacheManager` | Cache in memoria per risposte frequenti, riduce le chiamate API ridondanti |
-| `BixbyHandler` | Gestione comandi vocali tramite Bixby (Samsung) |
-| `AndroidIntentHandler` | Ricezione di intent Android esterni (es. condivisione testo da altre app) |
-| `VoiceInputService` / `VoiceOutputService` | Gestiscono input/output vocale offline tramite `SherpaOnnxAdapter` |
-| `ImageService` | Acquisizione e preprocessing di immagini per il modulo multimodale |
+## 10. Logica di orchestrazione dei task
 
----
+`Orchestrator` classifica l'input tramite `IntentAnalyzer` e instrada verso:
 
-## 14. Priorità di esecuzione
+- `ExecutionEngine` per comandi o azioni di sistema
+- `PlannerService` per decomposizione di task e coding/planning
+- `InferenceService` per chat, reasoning e generazione
 
-Quando più richieste concorrenti vengono generate (es. messaggio in arrivo + aggiornamento memoria + download modello), AI Orchestrator applica le seguenti priorità:
+Questo rende l'architettura più simile a una piattaforma di orchestrazione che a un semplice client AI.
 
-| Priorità | Operazione | Motivo |
-|:---:|---|---|
-| 1 (Alta) | Risposta al messaggio utente (`ChatBloc`) | Esperienza utente in tempo reale |
-| 2 | Salvataggio memoria di progetto (`ProjectMemoryBloc`) | Consistenza del contesto per le risposte successive |
-| 3 | Pruning della cronologia chat (`PruneChatHistory`) | Ottimizzazione storage, non bloccante |
-| 4 (Bassa) | Download modello locale (`ModelDownloadBloc`) | Operazione in background, non interrompe la chat |
+## 11. Sincronizzazione local-first
 
-### Regole di concorrenza
+`SyncManager` mantiene record CRDT con persistenza SQLite.
 
-- **Chat e memoria** operano su `Isolates` separati tramite il layer `sqflite`, evitando blocchi sulla UI.
-- Il **download del modello** avviene in background; lo stato di avanzamento è esposto tramite `Stream<double>` nel `ModelDownloadBloc`.
-- Il **pruning** viene eseguito solo quando il numero di messaggi in una sessione supera la soglia definita in `AppConstants.chatHistoryMaxMessages`, per non rallentare le operazioni principali.
-- La **cache** (`CacheManager`) viene consultata prima di qualsiasi chiamata al provider, abbattendo la latenza percepita dall'utente.
+### Proprietà importanti
+- la scrittura locale avviene sempre per prima
+- i cambi vengono esportati/importati come changeset
+- i conflitti vengono risolti con logica last-write-wins
+- la rete è opzionale, non strutturale
 
----
+Questo prepara l'espansione futura verso sincronizzazione peer-to-peer o multi-device.
 
-## 15. Gestione offline/online reale
+## 12. Vincoli Android
 
-AI Orchestrator supporta un funzionamento ibrido: può operare sia con provider cloud (online) sia con modelli locali GGUF (offline), senza richiedere modifiche alla configurazione tra una sessione e l'altra.
+Android è oggi la piattaforma più delicata perché combina:
 
-### Modalità online (provider cloud)
+- Flutter engine
+- librerie native `.so`
+- firma APK
+- ABI supportate
+- toolchain Gradle / Kotlin / NDK
 
-| Aspetto | Dettaglio |
-|---|---|
-| **Connessione richiesta** | Sì — connessione Internet attiva |
-| **Latenza** | Variabile (dipende dal provider e dalla rete) |
-| **Limite token** | Definito dal contratto API del provider |
-| **Streaming** | Supportato via `streamComplete()` |
-| **Gestione errori** | `NetworkFailure` o `ServerFailure` emessi dal repository; il BLoC espone lo stato `ChatError` con messaggio leggibile |
+I punti chiave attuali sono:
 
-### Modalità offline (modello locale GGUF)
+- target ARM64 (`arm64-v8a`)
+- packaging corretto di `libflutter.so` e `libapp.so`
+- build release senza minify e senza resource shrinking
+- `GGML_OPENMP=OFF` per evitare l'inclusione di `libomp.so`
 
-| Aspetto | Dettaglio |
-|---|---|
-| **Connessione richiesta** | No — completamente offline dopo il download |
-| **Download modello** | Gestito da `ModelDownloadBloc` con progresso in tempo reale |
-| **Selezione modello** | Tramite `SelectModel` use case; la scelta è persistita in `user_preferences` |
-| **Inferenza** | Eseguita localmente tramite `LocalAiRepository` → `ModelDownloadService` |
-| **Aggiornamenti** | Verificati da `CheckForUpdates`; il download del nuovo modello avviene in background |
+## 13. Sicurezza e privacy
 
-### Passaggio tra modalità
+Il modello di sicurezza del progetto è prudente.
 
-1. Vai in **Impostazioni → Provider AI predefinito**.
-2. Seleziona un provider cloud (OpenAI, Gemini, Grok, Copilot) oppure **Modello locale**.
-3. La preferenza viene salvata in `user_preferences` e applicata immediatamente alla sessione corrente.
-4. Il `ChatBloc` instrada automaticamente ogni nuovo messaggio al provider attivo, senza perdere la cronologia della sessione.
+### Principi
+- dati locali per default
+- cloud solo se selezionato esplicitamente
+- niente dipendenza architetturale dalla telemetria
+- separazione chiara tra runtime locale e provider remoti
 
-> **Suggerimento:** se la connessione è assente e viene selezionato un provider cloud, il `ChatBloc` emette immediatamente `ChatError` con indicazione di `NetworkFailure`, permettendo all'utente di passare al modello locale prima di riprovare.
+### Conseguenze pratiche
+- conversazioni e memoria di progetto restano sul dispositivo
+- i documenti indicizzati restano sul dispositivo
+- i record di sync restano sul dispositivo finché non vengono condivisi
+- le richieste cloud passano solo verso il provider scelto
 
----
+## 14. Espansione futura desktop
 
-## 16. Licenza
+L'architettura è già predisposta a un'estensione futura verso:
 
-Questo progetto è distribuito sotto licenza **MIT**.
-Consulta il file `LICENSE` nel repository per i dettagli completi.
+- Windows
+- Linux
+- macOS
 
----
+Il principio è aggiungere nuovi adapter di runtime e nuove implementazioni native senza rompere i contratti di `core/`.
 
-*Guida generata automaticamente durante il processo di build CI/CD.*
+## 15. Direzione MobileIDE
+
+La traiettoria evolutiva del progetto non è solo “assistant mobile”, ma una forma di **MobileIDE cognitiva offline-first**.
+
+Questo significa che in prospettiva AI-Orchestrator potrà coordinare:
+
+- pianificazione di attività
+- memoria di progetto strutturata
+- retrieval documentale locale
+- automazioni modulari
+- agenti specializzati
+- assistenza al coding e alla manutenzione
+
+## 16. A chi serve questa repository
+
+Questa documentazione è pensata per:
+
+- utenti finali che vogliono capire il comportamento dell'app
+- contributor che devono individuare i moduli corretti
+- maintainer futuri che devono preservare i confini architetturali
+- agenti AI che devono ragionare sul codice senza trattare il progetto come una chat app generica
+
+## 17. Documenti collegati
+
+- [MODULAR_ARCHITECTURE.md](MODULAR_ARCHITECTURE.md)
+- [OFFLINE_RUNTIME.md](OFFLINE_RUNTIME.md)
+- [ANDROID_BUILD.md](ANDROID_BUILD.md)
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- [ROADMAP_EVOLUTIVA.md](ROADMAP_EVOLUTIVA.md)
