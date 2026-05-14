@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 class BundledModelRegistryService {
   const BundledModelRegistryService();
 
+  // Keep this in sync with pubspec.yaml > flutter > assets.
   static const String manifestAssetPath = 'assets/models/manifest.json';
 
   Future<List<Map<String, dynamic>>> loadCatalog() async {

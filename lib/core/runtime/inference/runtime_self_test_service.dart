@@ -22,6 +22,7 @@ class RuntimeSelfTestService {
         _localAiRepository = localAiRepository,
         _chatRepository = chatRepository;
 
+  /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
 
   final LocalRuntimeProvider _runtimeProvider;

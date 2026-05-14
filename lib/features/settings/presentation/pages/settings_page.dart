@@ -204,7 +204,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   button: true,
                   label: 'Run Runtime Self-Test',
                   hint: accessibleNavigation
-                      ? 'Activate to run the local runtime proof-of-life check. Long press also works.'
+                      ? 'Activate to run the local runtime proof-of-life check.'
                       : 'Long press to run the local runtime proof-of-life check.',
                   child: GestureDetector(
                     onLongPress: _runRuntimeSelfTest,
