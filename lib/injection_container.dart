@@ -42,10 +42,6 @@ import 'package:ai_orchestrator/features/cloud_ai/domain/usecases/send_ai_query.
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
-import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages.dart';
-import 'package:ai_orchestrator/features/chat/domain/usecases/prune_chat_history.dart';
-import 'package:ai_orchestrator/features/chat/domain/usecases/send_chat_message.dart';
-import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_bloc.dart';
 import 'package:ai_orchestrator/features/coding_assistant/coding_assistant_agent_impl.dart';
 import 'package:ai_orchestrator/features/coding_assistant/sequential_planning_strategy.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
@@ -341,9 +337,16 @@ Future<void> initDependencies({
     () => InferenceService(
       loadSelectedModel: () async {
         final result = await sl<LocalAiRepository>().getSelectedModel();
-        // Intentionally degrade to null on selection read failure so runtime
-        // falls back to cloud inference without crashing startup/session flows.
-        return result.fold((_) => null, (model) => model);
+        return result.fold(
+          (failure) {
+            // Model selection failures are logged and treated as "no local
+            // model" so the runtime can fall back to cloud inference instead
+            // of crashing the session.  This is a diagnostic log, not silent.
+            debugPrint('[RUNTIME] model selection failed: ${failure.message}');
+            return null;
+          },
+          (model) => model,
+        );
       },
       loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
       runtimeProvider: sl<LocalRuntimeProvider>(),
@@ -379,9 +382,6 @@ Future<void> initDependencies({
   sl.registerLazySingleton(
       () => DeleteAllProjectMemories(sl<ProjectMemoryRepository>()));
   sl.registerLazySingleton(() => SendAiQuery(sl<AiRepository>()));
-  sl.registerLazySingleton(() => SendChatMessage(sl<ChatRepository>()));
-  sl.registerLazySingleton(() => LoadChatMessages(sl<ChatRepository>()));
-  sl.registerLazySingleton(() => PruneChatHistory(sl<ChatRepository>()));
 
   // ── BLoCs ──────────────────────────────────────────────────────────────────
   sl.registerFactory(
@@ -397,13 +397,6 @@ Future<void> initDependencies({
   sl.registerFactory(
     () => OrchestratorStateEngine(
       chatRepository: sl<ChatRepository>(),
-    ),
-  );
-  sl.registerFactory(
-    () => ChatBloc(
-      sendChatMessage: sl<SendChatMessage>(),
-      loadChatMessages: sl<LoadChatMessages>(),
-      pruneChatHistory: sl<PruneChatHistory>(),
     ),
   );
   sl.registerFactory(

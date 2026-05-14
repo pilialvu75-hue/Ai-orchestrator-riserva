@@ -52,7 +52,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _safeMaxTokens = 128;
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
-  static const Duration _generationTimeout = Duration(seconds: 200);
+  static const Duration _generationTimeout = Duration(seconds: 90);
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.

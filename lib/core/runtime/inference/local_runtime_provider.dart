@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.da
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const Set<String> _mobileValidatedModelIds = <String>{
@@ -93,114 +94,145 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     final controller = StreamController<InferenceResponse>();
 
     () async {
-      final modelPath = request.modelPath;
-      final modelId = request.modelId;
-
-      if (modelPath == null || modelPath.isEmpty || modelId == null) {
-        controller.add(InferenceResponse.error('Missing local model path.'));
-        await controller.close();
-        return;
-      }
-
-      if (!_isModelAllowedOnPlatform(modelId)) {
-        controller.add(
-          InferenceResponse.error(
-            'Selected model is not validated for runtime execution on this platform.',
-          ),
-        );
-        await controller.close();
-        return;
-      }
-
-      final isValidModelFile =
-          await Isolate.run(() => _hasGgufHeader(modelPath));
-      if (!isValidModelFile) {
-        controller.add(InferenceResponse.error(
-          'Selected model file is missing or invalid GGUF.',
-        ));
-        await controller.close();
-        return;
-      }
-
-      final executable = _resolveLlamaExecutable();
-      final args = _buildArgs(request);
-      final stderrBuffer = StringBuffer();
-      final fullText = StringBuffer();
-
-      Process? process;
-      StreamSubscription<String>? stdoutSub;
-      StreamSubscription<String>? stderrSub;
-      var estimatedTokenCount = 0;
-
       try {
-        process = await Process.start(executable, args);
-      } on ProcessException catch (e) {
+        final modelPath = request.modelPath;
+        final modelId = request.modelId;
+
+        if (modelPath == null || modelPath.isEmpty || modelId == null) {
+          controller.add(InferenceResponse.error('Missing local model path.'));
+          await controller.close();
+          return;
+        }
+
+        if (!_isModelAllowedOnPlatform(modelId)) {
+          controller.add(
+            InferenceResponse.error(
+              'Selected model is not validated for runtime execution on this platform.',
+            ),
+          );
+          await controller.close();
+          return;
+        }
+
+        final isValidModelFile =
+            await Isolate.run(() => _hasGgufHeader(modelPath));
+        if (!isValidModelFile) {
+          controller.add(InferenceResponse.error(
+            'Selected model file is missing or invalid GGUF.',
+          ));
+          await controller.close();
+          return;
+        }
+
+        final executable = _resolveLlamaExecutable();
+        final args = _buildArgs(request);
+        final stderrBuffer = StringBuffer();
+        final fullText = StringBuffer();
+
+        Process? process;
+        StreamSubscription<String>? stdoutSub;
+        StreamSubscription<String>? stderrSub;
+        var estimatedTokenCount = 0;
+
+        try {
+          process = await Process.start(executable, args);
+        } on ProcessException catch (e) {
+          controller.add(
+            InferenceResponse.error(
+              'Failed to start llama.cpp runtime process: ${e.message}',
+            ),
+          );
+          await controller.close();
+          return;
+        } catch (e) {
+          controller.add(InferenceResponse.error('Failed to start inference: $e'));
+          await controller.close();
+          return;
+        }
+
+        cancellationToken.onCancel(() {
+          process?.kill(ProcessSignal.sigterm);
+        });
+
+        stdoutSub = process.stdout
+            .transform(utf8.decoder)
+            .listen(
+          (chunk) {
+            // Stream callbacks run sequentially on this isolate event loop.
+            if (chunk.isEmpty) return;
+            fullText.write(chunk);
+            estimatedTokenCount += _estimateTokenCount(chunk);
+            controller.add(InferenceResponse.token(text: chunk, model: modelId));
+          },
+          onError: (Object error) {
+            // Log stdout decode errors (e.g. malformed UTF-8) but keep the
+            // stream alive; the process exit code will handle final state.
+            debugPrint('[$_localProviderTag] stdout decode error: $error');
+          },
+          cancelOnError: false,
+        );
+
+        stderrSub = process.stderr
+            .transform(utf8.decoder)
+            .listen(
+          stderrBuffer.write,
+          onError: (Object error) {
+            debugPrint('[$_localProviderTag] stderr decode error: $error');
+          },
+          cancelOnError: false,
+        );
+
+        final exitCode = await process.exitCode;
+        await stdoutSub.cancel();
+        await stderrSub.cancel();
+
+        if (cancellationToken.isCancelled) {
+          controller.add(InferenceResponse.error(
+            'Inference cancelled.',
+            state: InferenceTerminalState.cancelled,
+          ));
+          await controller.close();
+          return;
+        }
+
+        if (exitCode != 0 && fullText.isEmpty) {
+          final stderr = stderrBuffer.toString().trim();
+          controller.add(
+            InferenceResponse.error(
+              stderr.isEmpty
+                  ? 'llama.cpp runtime failed with exit code $exitCode.'
+                  : stderr,
+            ),
+          );
+          await controller.close();
+          return;
+        }
+
         controller.add(
-          InferenceResponse.error(
-            'Failed to start llama.cpp runtime process: ${e.message}',
+          InferenceResponse.finalChunk(
+            text: fullText.toString(),
+            tokensGenerated: estimatedTokenCount,
+            model: modelId,
           ),
         );
         await controller.close();
-        return;
-      } catch (e) {
-        controller.add(InferenceResponse.error('Failed to start inference: $e'));
-        await controller.close();
-        return;
+      } catch (error, stackTrace) {
+        // Unexpected exception: ensure the StreamController is always closed
+        // so consumers are never left waiting indefinitely.
+        debugPrint('[$_localProviderTag] unexpected inference error: $error\n$stackTrace');
+        if (!controller.isClosed) {
+          controller.add(
+            InferenceResponse.error('Local runtime internal error: $error'),
+          );
+          await controller.close();
+        }
       }
-
-      cancellationToken.onCancel(() {
-        process?.kill(ProcessSignal.sigterm);
-      });
-
-      stdoutSub = process.stdout
-          .transform(utf8.decoder)
-          .listen((chunk) {
-        // Stream callbacks run sequentially on this isolate event loop.
-        if (chunk.isEmpty) return;
-        fullText.write(chunk);
-        estimatedTokenCount += _estimateTokenCount(chunk);
-        controller.add(InferenceResponse.token(text: chunk, model: modelId));
-      });
-
-      stderrSub = process.stderr
-          .transform(utf8.decoder)
-          .listen(stderrBuffer.write);
-
-      final exitCode = await process.exitCode;
-      await stdoutSub.cancel();
-      await stderrSub.cancel();
-
-      if (cancellationToken.isCancelled) {
-        controller.add(InferenceResponse.error('Inference cancelled.'));
-        await controller.close();
-        return;
-      }
-
-      if (exitCode != 0 && fullText.isEmpty) {
-        final stderr = stderrBuffer.toString().trim();
-        controller.add(
-          InferenceResponse.error(
-            stderr.isEmpty
-                ? 'llama.cpp runtime failed with exit code $exitCode.'
-                : stderr,
-          ),
-        );
-        await controller.close();
-        return;
-      }
-
-      controller.add(
-        InferenceResponse.finalChunk(
-          text: fullText.toString(),
-          tokensGenerated: estimatedTokenCount,
-          model: modelId,
-        ),
-      );
-      await controller.close();
     }();
 
     return controller.stream;
   }
+
+  static const String _localProviderTag = 'LOCAL_RUNTIME';
 
   bool _isModelAllowedOnPlatform(String modelId) {
     final allowed = _isDesktopPlatform()

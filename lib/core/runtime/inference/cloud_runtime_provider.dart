@@ -51,13 +51,14 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   bool shouldFallBackToLocal(String? message) {
-    final normalized = (message ?? '').toLowerCase();
+    if (message == null || message == fullyLocalNotice) return false;
+    final normalized = message.toLowerCase();
     return normalized.contains('not configured') ||
         normalized.contains('authentication failed') ||
         normalized.contains('verify your api key') ||
         normalized.contains('rate limit') ||
         normalized.contains('quota') ||
-        normalized.contains('unavailable');
+        normalized.contains('all providers unavailable');
   }
 
   bool shouldPreferCloudFor(InferenceRequest request) {
