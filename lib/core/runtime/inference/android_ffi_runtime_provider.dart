@@ -136,6 +136,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           controller,
           stage: 'cancelled',
           message: 'Inference cancelled.',
+          state: InferenceTerminalState.cancelled,
         );
         return;
       }
@@ -402,6 +403,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'cancelled',
               message: 'Inference cancelled.',
+              state: InferenceTerminalState.cancelled,
             );
             monitor.update(
               LocalRuntimeStatus.runtimeUnavailable,
@@ -434,6 +436,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               tokensGenerated: estimatedTokens,
               notice:
                   'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
+              partialTerminalState: InferenceTerminalState.timeout,
             );
             break;
           }
@@ -479,6 +482,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               tokensGenerated: estimatedTokens,
               notice:
                   'Token stream stalled after ${sinceLastTokenProgress.inSeconds}s. Returning partial response.',
+              partialTerminalState: InferenceTerminalState.timeout,
             );
             break;
           }
@@ -503,6 +507,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               tokensGenerated: estimatedTokens,
               notice:
                   'No token progress detected in polling loop. Returning partial response.',
+              partialTerminalState: InferenceTerminalState.timeout,
             );
             break;
           }
@@ -659,6 +664,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'cancelled',
               message: 'Inference cancelled.',
+              state: InferenceTerminalState.cancelled,
             );
             monitor.update(
               LocalRuntimeStatus.runtimeUnavailable,
@@ -699,6 +705,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 fullText: fullText.toString(),
                 tokensGenerated: estimatedTokens,
                 notice: err,
+                partialTerminalState: InferenceTerminalState.timeout,
               );
             } else {
               _finishWithRuntimeError(
@@ -765,10 +772,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _finishWithError(
     StreamController<InferenceResponse> ctrl,
-    String message,
-  ) {
+    String message, {
+    InferenceTerminalState state = InferenceTerminalState.failed,
+  }) {
     if (ctrl.isClosed) return;
-    ctrl.add(InferenceResponse.error(message));
+    ctrl.add(InferenceResponse.error(message, state: state));
     ctrl.close();
   }
 
@@ -777,6 +785,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String stage,
     required String message,
     String? details,
+    InferenceTerminalState state = InferenceTerminalState.failed,
   }) {
     final exception = RuntimeStageException(
       stage: stage,
@@ -788,7 +797,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       'runtime error: ${exception.toLogMessage()}',
     );
     _log(payload);
-    _finishWithError(ctrl, payload);
+    _finishWithError(ctrl, payload, state: state);
   }
 
   static Future<void> _finishWithPartialOrRuntimeError(
@@ -799,6 +808,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String fullText,
     required int tokensGenerated,
     String? notice,
+    InferenceTerminalState partialTerminalState = InferenceTerminalState.failed,
   }) async {
     if (ctrl.isClosed) return;
     if (fullText.trim().isNotEmpty) {
@@ -806,10 +816,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ctrl.add(InferenceResponse.notice(notice));
       }
       ctrl.add(
-        InferenceResponse.finalChunk(
+        InferenceResponse(
           text: fullText,
-          tokensGenerated: tokensGenerated,
           model: modelId,
+          tokensGenerated: tokensGenerated,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+          isFinal: true,
+          terminalState: partialTerminalState,
         ),
       );
       await ctrl.close();
@@ -819,6 +832,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       ctrl,
       stage: stage,
       message: message,
+      state: partialTerminalState,
     );
   }
 

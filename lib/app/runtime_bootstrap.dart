@@ -5,6 +5,8 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
@@ -70,6 +72,31 @@ class RuntimeBootstrap {
     await _guarded('orchestrator_boot', () async {
       // Intentionally resolve singleton once to warm orchestration graph.
       di.sl<Orchestrator>();
+    });
+
+    // Loud diagnostic: if the user selected local mode but the runtime is not
+    // ready, emit a prominent log so CI logs and device logs make the gap
+    // immediately visible.  This is a best-effort check and must never throw.
+    await _guarded('local_runtime_startup_check', () async {
+      final runtimeMode = await di.sl<AiRuntimeSettingsService>().loadRuntimeMode();
+      if (runtimeMode != AiRuntimeMode.local) return;
+      debugPrint('[STARTUP_WARN] AI mode=local — validating local runtime before first use…');
+      final diagnostics = di.sl<LocalRuntimeDiagnosticsService>();
+      await diagnostics.refresh();
+      final state = diagnostics.monitor.state;
+      if (state.status == LocalRuntimeStatus.ffiMissing ||
+          state.status == LocalRuntimeStatus.modelMissing ||
+          state.status == LocalRuntimeStatus.failed ||
+          state.status == LocalRuntimeStatus.runtimeUnavailable) {
+        debugPrint(
+          '[STARTUP_ERROR] LOCAL MODE SELECTED BUT RUNTIME NOT READY — '
+          'status=${state.status.name} message="${state.message ?? "none"}"',
+        );
+      } else {
+        debugPrint(
+          '[STARTUP_OK] local runtime status=${state.status.name}',
+        );
+      }
     });
   }
 

@@ -311,7 +311,7 @@ class InferenceService {
             localRequest: localRequest,
             cloudRequest: cloudRequest,
             cancellationToken: cancellationToken,
-            allowCloudFallback: true,
+            allowCloudFallback: false,
           );
         }
         return Stream<InferenceResponse>.value(
@@ -352,6 +352,7 @@ class InferenceService {
         sink.add(
           InferenceResponse.error(
             'Inference stream timed out waiting for tokens.',
+            state: InferenceTerminalState.timeout,
           ),
         );
         sink.close();
@@ -375,6 +376,7 @@ class InferenceService {
         );
         yield InferenceResponse.error(
           'Inference request timed out.',
+          state: InferenceTerminalState.timeout,
         );
         return;
       }
