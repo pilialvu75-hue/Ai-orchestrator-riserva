@@ -43,9 +43,9 @@ class _ChatPageState extends State<ChatPage> {
   late final VoiceEngine _voiceEngine;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
   bool _voiceEngineActive = false;
-  bool _offlineModeActive = false;
   bool _gpuAccelerationActive = false;
   String _gpuBackend = 'cpu';
+  String _runtimeModeName = 'hybrid';
 
   @override
   void initState() {
@@ -96,7 +96,7 @@ class _ChatPageState extends State<ChatPage> {
     }
     if (!mounted) return;
     setState(() {
-      _offlineModeActive = runtimeMode == AiRuntimeMode.local;
+      _runtimeModeName = runtimeMode.name;
       _voiceEngineActive =
           voiceStatus.offlineAsrAvailable && voiceStatus.readyForInput;
       _gpuAccelerationActive = gpuActive;
@@ -172,9 +172,9 @@ class _ChatPageState extends State<ChatPage> {
                   scrollToBottom: _scrollToBottom,
                   runtimeState: _runtimeState,
                   voiceEngineActive: _voiceEngineActive,
-                  offlineModeActive: _offlineModeActive,
                   gpuAccelerationActive: _gpuAccelerationActive,
                   gpuBackend: _gpuBackend,
+                  runtimeModeName: _runtimeModeName,
                 )
               : _NarrowLayout(
                   scrollController: _scrollController,
@@ -183,9 +183,9 @@ class _ChatPageState extends State<ChatPage> {
                   scrollToBottom: _scrollToBottom,
                   runtimeState: _runtimeState,
                   voiceEngineActive: _voiceEngineActive,
-                  offlineModeActive: _offlineModeActive,
                   gpuAccelerationActive: _gpuAccelerationActive,
                   gpuBackend: _gpuBackend,
+                  runtimeModeName: _runtimeModeName,
                 );
         },
       ),
@@ -203,9 +203,9 @@ class _NarrowLayout extends StatelessWidget {
     required this.scrollToBottom,
     required this.runtimeState,
     required this.voiceEngineActive,
-    required this.offlineModeActive,
     required this.gpuAccelerationActive,
     required this.gpuBackend,
+    required this.runtimeModeName,
   });
 
   final ScrollController scrollController;
@@ -214,9 +214,9 @@ class _NarrowLayout extends StatelessWidget {
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
   final bool voiceEngineActive;
-  final bool offlineModeActive;
   final bool gpuAccelerationActive;
   final String gpuBackend;
+  final String runtimeModeName;
 
   @override
   Widget build(BuildContext context) {
@@ -227,9 +227,9 @@ class _NarrowLayout extends StatelessWidget {
       scrollToBottom: scrollToBottom,
       runtimeState: runtimeState,
       voiceEngineActive: voiceEngineActive,
-      offlineModeActive: offlineModeActive,
       gpuAccelerationActive: gpuAccelerationActive,
       gpuBackend: gpuBackend,
+      runtimeModeName: runtimeModeName,
     );
   }
 }
@@ -244,9 +244,9 @@ class _WideLayout extends StatelessWidget {
     required this.scrollToBottom,
     required this.runtimeState,
     required this.voiceEngineActive,
-    required this.offlineModeActive,
     required this.gpuAccelerationActive,
     required this.gpuBackend,
+    required this.runtimeModeName,
   });
 
   final ScrollController scrollController;
@@ -255,9 +255,9 @@ class _WideLayout extends StatelessWidget {
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
   final bool voiceEngineActive;
-  final bool offlineModeActive;
   final bool gpuAccelerationActive;
   final String gpuBackend;
+  final String runtimeModeName;
 
   @override
   Widget build(BuildContext context) {
@@ -310,9 +310,9 @@ class _WideLayout extends StatelessWidget {
              scrollToBottom: scrollToBottom,
              runtimeState: runtimeState,
              voiceEngineActive: voiceEngineActive,
-             offlineModeActive: offlineModeActive,
              gpuAccelerationActive: gpuAccelerationActive,
              gpuBackend: gpuBackend,
+             runtimeModeName: runtimeModeName,
            ),
         ),
       ],
@@ -328,9 +328,9 @@ class _ChatBody extends StatefulWidget {
     required this.scrollToBottom,
     required this.runtimeState,
     required this.voiceEngineActive,
-    required this.offlineModeActive,
     required this.gpuAccelerationActive,
     required this.gpuBackend,
+    required this.runtimeModeName,
   });
 
   final ScrollController scrollController;
@@ -339,9 +339,9 @@ class _ChatBody extends StatefulWidget {
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
   final bool voiceEngineActive;
-  final bool offlineModeActive;
   final bool gpuAccelerationActive;
   final String gpuBackend;
+  final String runtimeModeName;
 
   @override
   State<_ChatBody> createState() => _ChatBodyState();
@@ -457,9 +457,9 @@ class _ChatBodyState extends State<_ChatBody> {
                       child: _RuntimeDebugOverlay(
                         runtimeState: widget.runtimeState,
                         voiceEngineActive: widget.voiceEngineActive,
-                        offlineModeActive: widget.offlineModeActive,
                         gpuAccelerationActive: widget.gpuAccelerationActive,
                         gpuBackend: widget.gpuBackend,
+                        runtimeModeName: widget.runtimeModeName,
                       ),
                     ),
                   ),
@@ -580,16 +580,16 @@ class _RuntimeDebugOverlay extends StatefulWidget {
   const _RuntimeDebugOverlay({
     required this.runtimeState,
     required this.voiceEngineActive,
-    required this.offlineModeActive,
     required this.gpuAccelerationActive,
     required this.gpuBackend,
+    required this.runtimeModeName,
   });
 
   final LocalRuntimeState runtimeState;
   final bool voiceEngineActive;
-  final bool offlineModeActive;
   final bool gpuAccelerationActive;
   final String gpuBackend;
+  final String runtimeModeName;
 
   @override
   State<_RuntimeDebugOverlay> createState() => _RuntimeDebugOverlayState();
@@ -762,7 +762,7 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Mode: ${widget.offlineModeActive ? 'local' : 'cloud/hybrid'}',
+            'Mode: ${widget.runtimeModeName}',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 4),
