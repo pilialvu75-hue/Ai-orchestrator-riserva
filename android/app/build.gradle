@@ -150,7 +150,10 @@ android {
             debuggable true
         }
         release {
-            signingConfig signingConfigs.release
+            // Temporary signing recovery fallback: force debug signing on
+            // release builds to validate APK installability while release
+            // keystore integrity is investigated in CI diagnostics.
+            signingConfig signingConfigs.debug
             minifyEnabled false
             shrinkResources false
         }
