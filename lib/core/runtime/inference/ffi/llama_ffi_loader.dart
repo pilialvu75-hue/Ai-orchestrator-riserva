@@ -32,25 +32,56 @@ abstract final class LlamaFfiLoader {
   static LlamaFfiLibraryHandle? tryLoadBridgeLibrary({
     void Function(String message)? log,
   }) {
+    final abi = currentAbiName;
+    log?.call(
+      '[FFI_LOAD_BEGIN] library=$bridgeLibraryName abi=$abi'
+      ' platform=${Platform.operatingSystem}'
+      ' supported_abis=$_supportedAbiNames',
+    );
+
     if (!isCurrentPlatformSupported) {
       log?.call(
-        'Unsupported Android ABI: $currentAbiName. Supported: $_supportedAbiNames.',
+        '[FFI_LOAD_FAILURE] reason=unsupported_abi abi=$abi'
+        ' supported=$_supportedAbiNames',
       );
       return null;
     }
 
+    DynamicLibrary lib;
     try {
-      final lib = DynamicLibrary.open(bridgeLibraryName);
-      log?.call('[FFI_INIT] Opened $bridgeLibraryName for ABI $currentAbiName.');
-      return LlamaFfiLibraryHandle(
-        library: lib,
-        bindings: LlamaBridgeBindings(lib),
-      );
-    } catch (error) {
+      lib = DynamicLibrary.open(bridgeLibraryName);
+      log?.call('[FFI_LOAD_SUCCESS] library=$bridgeLibraryName abi=$abi');
+    } catch (error, stackTrace) {
       log?.call(
-        '[FFI_INIT] Could not open $bridgeLibraryName for ABI $currentAbiName: $error',
+        '[FFI_LOAD_FAILURE] reason=open_exception'
+        ' library=$bridgeLibraryName abi=$abi'
+        ' error=$error',
       );
+      log?.call('[FFI_LOAD_FAILURE] stackTrace=$stackTrace');
       return null;
     }
+
+    LlamaBridgeBindings bindings;
+    try {
+      bindings = LlamaBridgeBindings(lib);
+      log?.call(
+        '[FFI_SYMBOLS_OK] library=$bridgeLibraryName abi=$abi'
+        ' symbols=[llb_load_model,llb_start_gen,llb_poll_token,'
+        'llb_cancel,llb_free_model,llb_last_error,llb_is_loaded]',
+      );
+    } catch (error, stackTrace) {
+      log?.call(
+        '[FFI_LOAD_FAILURE] reason=symbol_bind_exception'
+        ' library=$bridgeLibraryName abi=$abi'
+        ' error=$error',
+      );
+      log?.call('[FFI_LOAD_FAILURE] stackTrace=$stackTrace');
+      return null;
+    }
+
+    return LlamaFfiLibraryHandle(
+      library: lib,
+      bindings: bindings,
+    );
   }
 }
