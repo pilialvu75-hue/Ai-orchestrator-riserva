@@ -153,12 +153,13 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
     } catch (error) {
+      _log('send_message error session=${event.sessionId}: $error');
+      // Emit the real persisted message list (_messages) without the ephemeral
+      // optimistic message so no ghost messages appear in the UI for requests
+      // that were never persisted to the database.
       emit(
         ChatLoaded(
-          messages: List.unmodifiable(<ChatMessage>[
-            ..._messages,
-            optimisticUserMessage,
-          ]),
+          messages: List.unmodifiable(_messages),
           runtimeMessage: _extractErrorMessage(error),
           suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
         ),

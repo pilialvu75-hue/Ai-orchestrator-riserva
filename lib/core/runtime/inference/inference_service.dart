@@ -149,9 +149,10 @@ class InferenceService {
     AiModel? selected;
     try {
       selected = await _loadSelectedModel();
-    } catch (_) {
-      // Model selection load failures are treated as "no local model" so
-      // inference can continue via cloud fallback.
+    } on Exception catch (e) {
+      // Model selection exceptions are logged and treated as "no local model"
+      // so inference can continue via cloud fallback rather than crashing.
+      _log('model selection exception – falling back to cloud: $e');
       return null;
     }
 
