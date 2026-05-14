@@ -76,6 +76,12 @@ import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
 import 'package:ai_orchestrator/native/runtime/local_runtime_provider_factory.dart';
 import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.dart';
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_feature_flags_service.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_remote_config_service.dart';
+import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.dart';
+import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
+import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
 
 final sl = GetIt.instance;
 
@@ -104,6 +110,17 @@ Future<void> initDependencies({
       LanguageService(configRepository: sl<ConfigRepository>());
   await languageService.loadSavedLanguage();
   sl.registerSingleton<LanguageService>(languageService);
+
+  // ── App Health / Observability Foundation ────────────────────────────────
+  sl.registerLazySingleton<AbstractTelemetryService>(
+    () => const MockTelemetryService(),
+  );
+  sl.registerLazySingleton<AbstractFeatureFlagsService>(
+    () => const DefaultFeatureFlagsService(),
+  );
+  sl.registerLazySingleton<AbstractRemoteConfigService>(
+    () => const NoopRemoteConfigService(),
+  );
 
   // ── AppLegalCore ──────────────────────────────────────────────────────────
   sl.registerLazySingleton<LegalStorageService>(
