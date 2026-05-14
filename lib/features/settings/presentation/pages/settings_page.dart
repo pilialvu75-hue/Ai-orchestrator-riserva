@@ -127,7 +127,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final accessibleNavigation = MediaQuery.accessibleNavigationOf(context);
+    final accessibleNavigation = MediaQuery.of(context).accessibleNavigation;
 
     return BlocListener<ModelDownloadBloc, ModelDownloadState>(
       listenWhen: (previous, current) {

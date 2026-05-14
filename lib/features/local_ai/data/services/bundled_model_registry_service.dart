@@ -26,7 +26,7 @@ class BundledModelRegistryService {
               (key, value) => MapEntry(key.toString(), value),
             ),
           };
-        }).toList(growable: false);
+        }).toList();
       }
       debugPrint(
         '[MODEL_LOAD] Asset manifest did not contain a keyed object; falling back to AppConstants.availableModels.',

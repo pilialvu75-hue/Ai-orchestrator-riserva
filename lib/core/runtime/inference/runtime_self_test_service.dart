@@ -62,11 +62,14 @@ class RuntimeSelfTestService {
       await _chatRepository.clearSession(selfTestSessionId);
 
       var streamedPartialCount = 0;
+      var lastPartialLength = 0;
       await _chatRepository.sendMessage(
         sessionId: selfTestSessionId,
         userPrompt: 'Say hello',
         onPartialResponse: (partialText) {
-          if (partialText.trim().isNotEmpty) {
+          final trimmed = partialText.trim();
+          if (trimmed.isNotEmpty && partialText.length > lastPartialLength) {
+            lastPartialLength = partialText.length;
             streamedPartialCount++;
           }
         },
