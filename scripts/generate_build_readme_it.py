@@ -90,7 +90,7 @@ AI Orchestrator è un'app Flutter multipiattaforma orientata alla produttività 
 ### 5) Risoluzione problemi base
 - Se non arrivano risposte: verifica API key e connessione.
 - Se usi runtime locale: controlla download completo del modello.
-- Se la build/distribuzione Android fallisce: verificare firma, allineamento e artifact prodotti.
+- Se la build/distribuzione Android fallisce: verificare firma, allineamento e artefatti prodotti.
 
 ## Documentazione completa
 
