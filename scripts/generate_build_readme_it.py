@@ -11,7 +11,7 @@ def parse_pubspec_version(pubspec_path: Path) -> str:
     content = pubspec_path.read_text(encoding="utf-8")
     match = re.search(r"^version:\s*([^\s]+)\s*$", content, re.MULTILINE)
     if not match:
-        return "non disponibile"
+        return "not available"
     return match.group(1)
 
 
