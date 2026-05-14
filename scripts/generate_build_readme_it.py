@@ -69,7 +69,7 @@ AI Orchestrator è un'app Flutter multipiattaforma orientata alla produttività 
 
 ### 1) Primo avvio
 1. Apri l'app.
-2. Completa onboarding e controlla il modello/provider predefinito.
+2. Completa l'onboarding e controlla il modello/provider predefinito.
 3. Inserisci le eventuali API key nelle Impostazioni.
 
 ### 2) Avviare una chat

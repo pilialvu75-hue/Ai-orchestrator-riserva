@@ -190,7 +190,7 @@ jobs:
           if ! python3 scripts/generate_build_readme_it.py \
             --output BUILD_README_IT.md \
             --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"; then
-            echo "::error::README/manual generation failed during build"
+            echo "::error::README/manual generation failed (scripts/generate_build_readme_it.py). Check Python setup and script logs above."
             exit 1
           fi
 
