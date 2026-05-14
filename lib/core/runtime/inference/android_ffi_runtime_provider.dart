@@ -53,6 +53,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
   static const Duration _generationTimeout = Duration(seconds: 90);
+  // Hard pre-inference watchdog: if no first token arrives within this
+  // window the failure is almost certainly in FFI open / symbol binding /
+  // GGUF path resolution or native context creation — not generation itself.
+  // Fires before _stalledInferenceTimeout to surface stalled_pre_inference
+  // conclusively.
+  static const Duration _preInferenceTimeout = Duration(seconds: 15);
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
@@ -482,6 +488,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               notice:
                   'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
               partialTerminalState: InferenceTerminalState.timeout,
+            );
+            break;
+          }
+          // Hard pre-inference watchdog (15 s): fires before the broader
+          // _stalledInferenceTimeout so the exact failure stage is conclusively
+          // logged before any generation loop timeout occurs.
+          if (firstTokenAt == null && elapsed > _preInferenceTimeout) {
+            _safeCancel(bindings);
+            clearRuntimeVerification();
+            runtimeNeedsReset = true;
+            runtimeResetReason = 'stalled_pre_inference';
+            _log(
+              '[TERMINAL_STATE] state=stalled_pre_inference'
+              ' elapsed_ms=${elapsed.inMilliseconds}'
+              ' no_token_produced=true'
+              ' modelId=$modelId'
+              ' modelPath=$modelPath',
+            );
+            monitor.update(
+              LocalRuntimeStatus.stalled,
+              message: 'Runtime stalled before first token',
+              tokensGenerated: estimatedTokens,
+              elapsed: elapsed,
+              startedAt: startedAt,
+            );
+            _logAi('stalled_pre_inference: no first token in ${_preInferenceTimeout.inSeconds}s');
+            _finishWithRuntimeError(
+              controller,
+              stage: 'stalled_pre_inference',
+              message:
+                  'No first token produced within ${_preInferenceTimeout.inSeconds}s '
+                  '(TERMINAL_STATE=stalled_pre_inference). '
+                  'Likely failure: FFI open / symbol binding / GGUF path / native context.',
             );
             break;
           }
