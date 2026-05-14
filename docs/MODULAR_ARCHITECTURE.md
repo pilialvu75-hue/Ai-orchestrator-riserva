@@ -1,256 +1,313 @@
-# Modular Architecture — AI Orchestrator Core
+# Modular Architecture
 
-## Overview
+This repository implements the stable architectural base of AI-Orchestrator as a **modular offline-first cognitive orchestration platform**.
 
-AI Orchestrator Core is structured as a **layered, modular AI operating system** built on Flutter. The goal is a stable set of architectural boundaries that allow each layer to evolve, be tested, and be replaced independently.
+## 1. Architectural purpose
 
-```
-┌─────────────────────────────────────────┐
-│               features/                 │  ← UI, BLoC, use-cases, feature data
-│  chat │ local_ai │ cloud_ai │ projects  │
-├─────────────────────────────────────────┤
-│                 core/                   │  ← Contracts, orchestration, domain
-│  ai/ │ memory/ │ plugins/ │ agents/    │
-│  tools/ │ runtime/ │ orchestrator/     │
-├─────────────────────────────────────────┤
-│                native/                  │  ← Platform-specific implementations
-│  runtime/ (Android, Windows executors) │
-│  platform/ (Intents, Bixby)            │
-└─────────────────────────────────────────┘
-```
+The architecture is designed to keep five concerns separable:
 
----
+1. **interaction** — UI, BLoC, workflows
+2. **reasoning/orchestration** — routing, planning, execution strategy
+3. **runtime execution** — local inference, cloud inference, platform execution
+4. **state and memory** — chat history, project memory, sync records, document chunks
+5. **platform integration** — Android bridges, native libraries, future desktop adapters
 
-## Layer Responsibilities
+The platform must remain evolvable without forcing every subsystem to depend on every other subsystem.
 
-### `lib/core/`
+## 2. Layer map
 
-The stable foundation. Contains **contracts (abstract classes/interfaces)** and **orchestration logic** that is platform-agnostic.
-
-| Sub-module | Responsibility |
-|---|---|
-| `core/ai/entities/` | Shared domain entities: `AiRequest`, `AiResponse`, `AiModel` |
-| `core/ai/providers/` | Provider contracts: `AiRepository`, `LocalAiRepository` |
-| `core/ai/` | Shared AI entities/contracts and model selection logic (`ModelManager`) |
-| `core/runtime/inference/` | Unified inference contracts and runtime routing (`InferenceRequest`, `InferenceResponse`, `RuntimeInferenceProvider`, `InferenceService`) |
-| `core/orchestrator/` | Central routing (`Orchestrator`), intent classification (`IntentAnalyzer`), execution contract (`ExecutionEngine`) |
-| `core/memory/` | Memory provider contract (`MemoryProvider`) and implementation (`ContextWindowManager`) |
-| `core/runtime/` | Runtime provider contract (`RuntimeProvider`) for platform command execution |
-| `core/plugins/` | Plugin lifecycle contract (`Plugin`) and registration (`PluginRegistry`) |
-| `core/agents/` | Agent contract (`Agent`, `AgentResult`) for autonomous task execution |
-| `core/tools/` | Tool contract (`Tool`, `ToolResult`) for discrete callable capabilities |
-| `core/database/` | SQLite persistence (`DatabaseHelper`) |
-| `core/error/` | Domain failures and exceptions |
-| `core/constants/` | Application-wide constants (`AppConstants`) |
-| `core/services/` | Utility services (e.g. `CacheManager`) |
-| `core/usecases/` | Base use-case contract (`UseCase`, `NoParams`) |
-
-### `lib/features/`
-
-Feature modules that implement Clean Architecture slices:
-`domain (entities → repositories → use-cases) → data → presentation (BLoC, pages, widgets)`
-
-| Feature | Responsibility |
-|---|---|
-| `chat/` | Conversation UI, message storage, ChatBloc |
-| `cloud_ai/` | Cloud provider data sources (OpenAI, Gemini, Grok, Copilot) |
-| `local_ai/` | GGUF model download, selection, offline inference UI |
-| `projects/` | Project memory persistence |
-| `onboarding/` | First-run setup, model registry update check |
-| `voice/` | Modular multimodal voice pipeline (ASR adapters, text normalization, TTS adapters) |
-| `multimodal/` | Image capture and processing |
-| `settings/` | User preference management |
-| `automation/` | Task automation flows |
-| `workflows/` | Multi-step workflow definitions |
-
-Each feature's `domain/entities/` and `domain/repositories/` files that are shared with core **re-export** the canonical definitions from `core/` instead of duplicating them.
-
-### `lib/native/`
-
-Low-level, platform-specific implementations that fulfil `core/` contracts.
-
-| Sub-module | Responsibility |
-|---|---|
-| `native/runtime/android/` | Android `ExecutionEngine` via `android_intent_plus` |
-| `native/runtime/windows/` | Windows / desktop no-op `ExecutionEngine` fallback |
-| `native/runtime/execution_engine_factory.dart` | Factory that selects the correct executor for the current platform |
-| `native/platform/android_intent_handler.dart` | Android Intent bridge (method channel) |
-| `native/platform/bixby_handler.dart` | Bixby integration (Android only) |
-
----
-
-## Dependency Flow
-
-```
-main.dart / injection_container.dart
-        │
-        ├──▶ features/  ──▶  core/  ◀──  native/
-        │        │               │
-        │        └── re-exports  └── defines contracts
-        │              from core
-        │
-        └── native/ ──▶ core/ (implements contracts, never imports features/)
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ UI / Presentation                                           │
+│ features/*/presentation, widgets, pages, blocs             │
+├─────────────────────────────────────────────────────────────┤
+│ Feature/Application Layer                                   │
+│ features/*/domain + data                                    │
+├─────────────────────────────────────────────────────────────┤
+│ Core Platform Logic                                         │
+│ core/orchestrator, core/runtime, core/memory, core/sync,   │
+│ core/voice, core/plugins, core/agents, core/config         │
+├─────────────────────────────────────────────────────────────┤
+│ Native / Platform Runtime                                   │
+│ lib/native/* + native/android/*                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Allowed imports:**
+## 3. Composition root
 
-| From | To | Notes |
-|---|---|---|
-| `features/` | `core/` | Features implement core contracts and use core use-cases |
-| `native/` | `core/` | Native code implements core contracts (ExecutionEngine, RuntimeProvider) |
-| `core/` | `core/` | Within-layer imports are unrestricted |
-| `features/` | `features/` | Only through `core/` as intermediary (see Forbidden section) |
+`lib/injection_container.dart` is the composition root.
+It wires together:
 
-**Forbidden imports:**
+- persistence and preferences
+- update/checking services
+- sync manager and local sync server/client
+- local runtime provider
+- cloud data sources
+- repositories and use cases
+- voice engine
+- plugin registry
+- orchestrator and planner services
 
-| ❌ From | ❌ To | Why forbidden |
-|---|---|---|
-| `core/` | `features/` | Would create circular dependency; core must be stable |
-| `core/` | `native/` | Core is platform-agnostic; native details must not leak up |
-| `features/` | `native/` | Features must use core contracts, not platform-specific code |
-| `native/` | `features/` | Native layer has no knowledge of feature-layer concerns |
+This file is critical because it makes the module boundaries visible in one place.
 
----
+## 4. Core modules
 
-## Provider Architecture
+### `core/orchestrator`
+Defines the routing brain of the system.
 
-### AI Providers
+Main responsibilities:
 
+- input classification through `IntentAnalyzer`
+- command routing through `ExecutionEngine`
+- planning through `PlannerService`
+- inference delegation through `InferenceService`
+
+### `core/runtime/inference`
+Defines runtime-neutral inference contracts and routing.
+
+Main components:
+
+- `InferenceRequest`
+- `InferenceResponse`
+- `RuntimeSession`
+- `LocalRuntimeProvider`
+- `CloudRuntimeProvider`
+- `InferenceService`
+
+This module is where local/cloud hybrid behavior is expressed.
+
+### `core/memory`
+Defines the memory abstraction and current context manager.
+
+Main component:
+
+- `ContextWindowManager`
+
+This layer is responsible for keeping recent context usable across inference and orchestration flows.
+
+### `core/sync`
+Implements local-first CRDT synchronization primitives.
+
+Main components:
+
+- `SyncManager`
+- `CrdtDocument`
+- `CrdtRecord`
+- `Hlc`
+- local sync discovery/client/server services
+
+This is the foundation for eventual peer sync and multi-device state propagation.
+
+### `core/voice`
+Defines a voice contract independent from the AI runtime.
+
+Main components:
+
+- `VoiceEngine`
+- `VoiceInputService`
+- `VoiceOutputService`
+- `VoiceTextNormalizer`
+
+### `core/plugins` and `core/agents`
+Prepare the system for extensibility.
+
+These modules allow the architecture to grow toward:
+
+- plugin-delivered capabilities
+- specialized agents
+- tool orchestration
+- future marketplace-like extensions
+
+## 5. Feature modules
+
+### `features/chat`
+Conversation UX, chat persistence, and message flow.
+
+### `features/projects`
+Structured project memory persistence and editing.
+
+### `features/local_ai`
+Offline model lifecycle:
+
+- download
+- selection
+- validation
+- runtime-facing metadata
+
+### `features/cloud_ai`
+Provider-specific integrations behind a shared abstraction.
+
+### `features/voice`
+Sherpa-ONNX adapter and voice presentation layer.
+
+### `features/document_intelligence`
+Offline indexing and retrieval service with plugin integration.
+
+### `features/coding_assistant`
+Early specialized task/coding assistance primitives.
+
+### Other supporting features
+- onboarding
+- settings
+- multimodal
+
+## 6. Native layer
+
+The native layer exists to satisfy contracts defined in `core/`.
+
+### Android runtime bridge
+`native/android/` builds:
+
+- `llama_bridge` for GGUF inference through `llama.cpp`
+- `mlc_native_bridge` as a future-oriented MLC hook
+
+### Platform bridges in `lib/native/`
+- Android intent handling
+- Bixby support
+- runtime provider factories
+- execution engine factories
+
+The native layer should implement contracts, never define business rules for the whole application.
+
+## 7. Data and control flow
+
+### Conversational flow
+```text
+UI -> ChatBloc -> Orchestrator / InferenceService
+   -> local runtime or cloud runtime
+   -> response stream
+   -> SQLite persistence
+   -> UI update
 ```
-InferenceService (core/runtime/inference/)
-    ├── LocalRuntimeProvider — on-device GGUF inference runtime
-    ├── CloudRuntimeProvider — cloud inference bridge
-    │     └── AiRepository (core/ai/providers/)
-    │           └── AiRepositoryImpl (features/cloud_ai/data/)
-    └── LocalAiRepository (core/ai/providers/)
-          └── LocalAiRepositoryImpl (features/local_ai/data/)
+
+### Project memory flow
+```text
+UI -> ProjectMemoryBloc -> repository -> local datasource -> SQLite
 ```
 
-The unified `InferenceService` implements **local-first hybrid routing**:
-1. **Local primary** — on-device GGUF inference if a validated model is selected.
-2. **Cloud API** — remote provider if no valid local model is available.
-3. **Auto-fallback** — retries cloud when local runtime fails before emitting output.
-
-### Memory Providers
-
-```
-MemoryProvider (core/memory/)
-    └── ContextWindowManager (core/memory/) — SQLite + in-memory window
+### Document indexing flow
+```text
+file -> LocalDocumentIndexService
+     -> chunking
+     -> hashed vector creation
+     -> SQLite storage
+     -> local similarity search
 ```
 
-### Runtime Providers
-
-```
-RuntimeProvider (core/runtime/)
-    └── ExecutionEngine (core/orchestrator/) — orchestrator-level contract
-          ├── AndroidExecutor (native/runtime/android/)
-          └── WindowsExecutor (native/runtime/windows/)
-```
-
-### Voice Providers
-
-```
-VoiceEngine (core/voice/)
-    └── SherpaOnnxAdapter (features/voice/, offline ONNX method/event channel)
-          ├── VoiceInputService (core/voice/)
-          ├── VoiceOutputService (core/voice/)
-          └── VoiceTextNormalizer (text normalization layer)
+### Sync flow
+```text
+local write -> SyncManager.recordChange()
+            -> SQLite sync_changes
+            -> export/import changesets
+            -> CRDT merge
 ```
 
-Voice remains isolated from `core/orchestrator` and `core/runtime/inference`: it only
-feeds normalized text into existing orchestration flows and consumes final assistant
-text for playback.
-
----
-
-## Plugin & Extension Architecture
-
-### Plugins (`core/plugins/`)
-
-```dart
-abstract class Plugin {
-  String get id;
-  String get displayName;
-  String get version;
-  Future<void> initialize();
-  Future<void> dispose();
-}
+### Voice flow
+```text
+voice input -> SherpaOnnxAdapter -> normalized text -> orchestration
+orchestration output -> voice output service -> TTS
 ```
 
-Plugins are registered via `PluginRegistry.instance.register(plugin)`. Future providers, tools, and agent types should be delivered as plugins.
+## 8. Import and dependency rules
 
-### Agents (`core/agents/`)
+### Allowed direction
+- presentation -> domain/data/core
+- features -> core
+- native -> core
+- composition root -> all modules
 
-```dart
-abstract class Agent {
-  String get id;
-  String get name;
-  bool get isRunning;
-  Future<AgentResult> run(String instruction);
-}
-```
+### Forbidden direction
+- core -> features
+- core -> native implementation details
+- native -> features
+- feature A directly owning feature B internals
 
-Agents orchestrate tools, memory, and AI providers to execute multi-step tasks autonomously. Future specialisations: `CodingAgent`, `ResearchAgent`, `TaskAgent`.
+The goal is to preserve dependency inversion and keep the core reusable.
 
-### Tools (`core/tools/`)
+## 9. Offline-first architecture in practice
 
-```dart
-abstract class Tool {
-  String get id;
-  String get name;
-  String get description;
-  Future<ToolResult> execute(Map<String, dynamic> params);
-}
-```
+This codebase is offline-first in architecture, not only in marketing.
 
-Tools are atomic capabilities available to agents and workflows. Planned tools: `FileTool`, `WebSearchTool`, `ShellTool`, `CodeRunnerTool`.
+Evidence in the repository:
 
----
+- SQLite as local state foundation
+- local sync change journal
+- local document chunk/vector storage
+- local runtime provider and GGUF path
+- voice pipeline designed for offline ONNX use
+- app-health services wired as mock/no-op defaults rather than mandatory telemetry infrastructure
 
-## Module Interaction Summary
+## 10. Local vs cloud execution model
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  injection_container.dart (composition root)                 │
-│  Wires: features → core contracts ← native implementations  │
-└──────────────────────────────────────────────────────────────┘
-         │                    │                    │
-    features/            core/ (stable)        native/
-    - BLoC               - Contracts           - Platform impls
-    - UI                 - Orchestration       - No feature deps
-    - Use-cases          - Domain entities     - Only core deps
-    - Data sources       - Plugin registry
-    ↓                    ↑                    ↑
-    implements/uses  ←───┴────────────────────┘
-                      (Dependency Inversion)
-```
+The architecture treats local and cloud execution as peers behind routing logic.
 
----
+### Local path
+- validated model required
+- native runtime availability required
+- best for privacy and offline continuity
 
-## Future Scalability Strategy
+### Cloud path
+- selected provider required
+- network required
+- useful for capability extension and fallback
 
-1. **New AI providers** — extend `AiRepositoryImpl` with a new data source and route through `CloudRuntimeProvider`.
+### Hybrid path
+- `InferenceService` decides based on runtime mode, connectivity, model availability, and runtime errors
 
-2. **New platforms** — add a new `RuntimeProvider` implementation in `native/`. Register it in `injection_container.dart` via the factory pattern.
+## 11. Vector memory model
 
-3. **Agent marketplace** — implement `Agent` in a plugin. Register via `PluginRegistry`. The orchestrator can discover and delegate tasks to registered agents.
+The current vector memory implementation is intentionally lightweight.
 
-4. **Tool ecosystem** — implement `Tool` in feature modules or plugins. Agents discover available tools through the registry.
+Characteristics:
 
-5. **Memory backends** — implement `MemoryProvider` for cloud storage, vector databases, etc. Swap the implementation in DI without touching features or native.
+- embedded in app storage
+- no external vector service required
+- deterministic hashed embeddings
+- cosine search over stored vectors
+- suitable for offline retrieval and later replacement
 
-6. **Edge / on-premise providers** — add a new repository-backed provider and route it through `CloudRuntimeProvider`.
+This is an architectural stepping stone toward richer semantic memory.
 
-7. **Federated / multi-agent orchestration** — the `Agent` contract supports inter-agent communication through the orchestrator. Future `MultiAgentOrchestrator` can coordinate specialist agents without coupling their implementations.
+## 12. Android constraints as an architectural concern
 
----
+Android is not just a deployment target; it shapes the runtime architecture.
 
-## Barrel Exports
+Important constraints:
 
-| Barrel | Exports |
-|---|---|
-| `lib/core/core.dart` | All core contracts, entities, orchestration, services |
-| `lib/features/features.dart` | All feature module barrels |
-| `lib/native/native.dart` | All native platform implementations |
+- ABI support must remain explicit
+- Flutter engine packaging must remain intact
+- native `.so` packaging must be verified
+- release signing must be correct
+- local inference must use safe on-device model/runtime combinations
 
-Consumers should import from barrel files (`package:ai_orchestrator_core/core/core.dart`) rather than reaching into subdirectories, to maintain stable import surfaces.
+Because of this, Android packaging and CI validation are part of the system architecture, not merely build mechanics.
+
+## 13. MLC evolution path
+
+The codebase already includes MLC-oriented native hooks, but they are disabled by default.
+This means:
+
+- the architecture anticipates GPU/accelerated local runtimes
+- the current production path is still the llama.cpp bridge
+- future acceleration can be introduced without redesigning the full app
+
+## 14. Future extensibility
+
+The current module boundaries are suitable for:
+
+- additional local runtimes
+- new cloud providers
+- better vector memory backends
+- richer sync transports
+- specialized agents and tools
+- MobileIDE workflows
+- Windows/Linux/macOS runtime adapters
+
+## 15. Architectural north star
+
+AI-Orchestrator should continue evolving as a **portable cognitive orchestration substrate**:
+
+- local-first by default
+- modular by design
+- runtime-agnostic where possible
+- explicit about platform constraints where necessary
