@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
@@ -33,9 +36,16 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
   final _scrollController = ScrollController();
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
+  late final AiRuntimeSettingsService _runtimeSettings;
+  late final VoiceEngine _voiceEngine;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
+  bool _voiceEngineActive = false;
+  bool _offlineModeActive = false;
+  bool _gpuAccelerationActive = false;
+  String _gpuBackend = 'cpu';
 
   @override
   void initState() {
@@ -44,8 +54,11 @@ class _ChatPageState extends State<ChatPage> {
         .read<OrchestratorStateEngine>()
         .add(const LoadMessagesEvent(sessionId: _kDefaultSessionId));
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
+    _runtimeSettings = di.sl<AiRuntimeSettingsService>();
+    _voiceEngine = di.sl<VoiceEngine>();
     _runtimeState = _runtimeDiagnostics.monitor.state;
     _runtimeDiagnostics.monitor.addListener(_handleRuntimeStateChanged);
+    unawaited(_refreshRuntimeIndicators());
     final modelBloc = context.read<ModelDownloadBloc>();
     if (modelBloc.state is ModelDownloadInitial) {
       modelBloc.add(const LoadAvailableModels());
@@ -55,6 +68,40 @@ class _ChatPageState extends State<ChatPage> {
   void _handleRuntimeStateChanged(LocalRuntimeState state) {
     if (!mounted) return;
     setState(() => _runtimeState = state);
+    unawaited(_refreshRuntimeIndicators());
+  }
+
+  Future<void> _refreshRuntimeIndicators() async {
+    final runtimeMode = await _runtimeSettings.loadRuntimeMode();
+    final voiceStatus = await _voiceEngine.inspect();
+    var gpuActive = false;
+    var gpuBackend = 'cpu';
+    try {
+      final nativeAvailable =
+          await _mlcNativeChannel.invokeMethod<bool>('isMlcNativeAvailable');
+      final backend =
+          await _mlcNativeChannel.invokeMethod<String>('getMlcBackend');
+      gpuBackend = (backend ?? 'cpu').trim();
+      final normalizedBackend = gpuBackend.toLowerCase();
+      gpuActive = nativeAvailable == true &&
+          normalizedBackend.isNotEmpty &&
+          normalizedBackend != 'cpu' &&
+          normalizedBackend != 'fallback-llama';
+    } on PlatformException {
+      gpuActive = false;
+      gpuBackend = 'unavailable';
+    } on MissingPluginException {
+      gpuActive = false;
+      gpuBackend = 'unavailable';
+    }
+    if (!mounted) return;
+    setState(() {
+      _offlineModeActive = runtimeMode == AiRuntimeMode.local;
+      _voiceEngineActive =
+          voiceStatus.offlineAsrAvailable && voiceStatus.readyForInput;
+      _gpuAccelerationActive = gpuActive;
+      _gpuBackend = gpuBackend;
+    });
   }
 
   @override
@@ -124,6 +171,10 @@ class _ChatPageState extends State<ChatPage> {
                   onSettings: _openSettings,
                   scrollToBottom: _scrollToBottom,
                   runtimeState: _runtimeState,
+                  voiceEngineActive: _voiceEngineActive,
+                  offlineModeActive: _offlineModeActive,
+                  gpuAccelerationActive: _gpuAccelerationActive,
+                  gpuBackend: _gpuBackend,
                 )
               : _NarrowLayout(
                   scrollController: _scrollController,
@@ -131,6 +182,10 @@ class _ChatPageState extends State<ChatPage> {
                   onSettings: _openSettings,
                   scrollToBottom: _scrollToBottom,
                   runtimeState: _runtimeState,
+                  voiceEngineActive: _voiceEngineActive,
+                  offlineModeActive: _offlineModeActive,
+                  gpuAccelerationActive: _gpuAccelerationActive,
+                  gpuBackend: _gpuBackend,
                 );
         },
       ),
@@ -147,6 +202,10 @@ class _NarrowLayout extends StatelessWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.voiceEngineActive,
+    required this.offlineModeActive,
+    required this.gpuAccelerationActive,
+    required this.gpuBackend,
   });
 
   final ScrollController scrollController;
@@ -154,6 +213,10 @@ class _NarrowLayout extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
+  final bool voiceEngineActive;
+  final bool offlineModeActive;
+  final bool gpuAccelerationActive;
+  final String gpuBackend;
 
   @override
   Widget build(BuildContext context) {
@@ -163,6 +226,10 @@ class _NarrowLayout extends StatelessWidget {
       onSettings: onSettings,
       scrollToBottom: scrollToBottom,
       runtimeState: runtimeState,
+      voiceEngineActive: voiceEngineActive,
+      offlineModeActive: offlineModeActive,
+      gpuAccelerationActive: gpuAccelerationActive,
+      gpuBackend: gpuBackend,
     );
   }
 }
@@ -176,6 +243,10 @@ class _WideLayout extends StatelessWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.voiceEngineActive,
+    required this.offlineModeActive,
+    required this.gpuAccelerationActive,
+    required this.gpuBackend,
   });
 
   final ScrollController scrollController;
@@ -183,6 +254,10 @@ class _WideLayout extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
+  final bool voiceEngineActive;
+  final bool offlineModeActive;
+  final bool gpuAccelerationActive;
+  final String gpuBackend;
 
   @override
   Widget build(BuildContext context) {
@@ -231,10 +306,14 @@ class _WideLayout extends StatelessWidget {
           child: _ChatBody(
             scrollController: scrollController,
             onSend: onSend,
-            onSettings: onSettings,
-            scrollToBottom: scrollToBottom,
-            runtimeState: runtimeState,
-          ),
+             onSettings: onSettings,
+             scrollToBottom: scrollToBottom,
+             runtimeState: runtimeState,
+             voiceEngineActive: voiceEngineActive,
+             offlineModeActive: offlineModeActive,
+             gpuAccelerationActive: gpuAccelerationActive,
+             gpuBackend: gpuBackend,
+           ),
         ),
       ],
     );
@@ -248,6 +327,10 @@ class _ChatBody extends StatefulWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.voiceEngineActive,
+    required this.offlineModeActive,
+    required this.gpuAccelerationActive,
+    required this.gpuBackend,
   });
 
   final ScrollController scrollController;
@@ -255,6 +338,10 @@ class _ChatBody extends StatefulWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
+  final bool voiceEngineActive;
+  final bool offlineModeActive;
+  final bool gpuAccelerationActive;
+  final String gpuBackend;
 
   @override
   State<_ChatBody> createState() => _ChatBodyState();
@@ -366,8 +453,14 @@ class _ChatBodyState extends State<_ChatBody> {
                   Positioned(
                     top: 10,
                     right: 10,
-                    child: IgnorePointer(
-                      child: _RuntimeDebugOverlay(runtimeState: widget.runtimeState),
+                     child: IgnorePointer(
+                      child: _RuntimeDebugOverlay(
+                        runtimeState: widget.runtimeState,
+                        voiceEngineActive: widget.voiceEngineActive,
+                        offlineModeActive: widget.offlineModeActive,
+                        gpuAccelerationActive: widget.gpuAccelerationActive,
+                        gpuBackend: widget.gpuBackend,
+                      ),
                     ),
                   ),
                 ],
@@ -484,9 +577,19 @@ class _HighPerformanceChatList extends StatelessWidget {
 }
 
 class _RuntimeDebugOverlay extends StatefulWidget {
-  const _RuntimeDebugOverlay({required this.runtimeState});
+  const _RuntimeDebugOverlay({
+    required this.runtimeState,
+    required this.voiceEngineActive,
+    required this.offlineModeActive,
+    required this.gpuAccelerationActive,
+    required this.gpuBackend,
+  });
 
   final LocalRuntimeState runtimeState;
+  final bool voiceEngineActive;
+  final bool offlineModeActive;
+  final bool gpuAccelerationActive;
+  final String gpuBackend;
 
   @override
   State<_RuntimeDebugOverlay> createState() => _RuntimeDebugOverlayState();
@@ -634,8 +737,60 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
             'Time ${elapsed.inSeconds}s',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
+          const SizedBox(height: 8),
+          _statusPill(
+            icon: Icons.memory_rounded,
+            label: 'Local runtime',
+            active: widget.runtimeState.status != LocalRuntimeStatus.missingLibrary &&
+                widget.runtimeState.status != LocalRuntimeStatus.modelMissing &&
+                widget.runtimeState.status != LocalRuntimeStatus.runtimeFailed,
+          ),
+          const SizedBox(height: 4),
+          _statusPill(
+            icon: Icons.mic_rounded,
+            label: 'Voice engine',
+            active: widget.voiceEngineActive,
+          ),
+          const SizedBox(height: 4),
+          _statusPill(
+            icon: Icons.cloud_off_rounded,
+            label: 'Offline mode',
+            active: widget.offlineModeActive,
+          ),
+          const SizedBox(height: 4),
+          _statusPill(
+            icon: Icons.developer_board_rounded,
+            label: 'GPU ${widget.gpuBackend}',
+            active: widget.gpuAccelerationActive,
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _statusPill({
+    required IconData icon,
+    required String label,
+    required bool active,
+  }) {
+    final color = active ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80);
+    return Row(
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            '$label ${active ? 'ON' : 'OFF'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

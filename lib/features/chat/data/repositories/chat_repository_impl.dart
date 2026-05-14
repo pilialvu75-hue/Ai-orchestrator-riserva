@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
@@ -11,6 +12,9 @@ import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_dataso
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 
 class ChatRepositoryImpl implements ChatRepository {
+  static const _logTag = 'CHAT_PIPELINE';
+  static const _maxContextLines = 24;
+
   ChatRepositoryImpl({
     required this.localDataSource,
     required this.orchestrator,
@@ -44,6 +48,9 @@ class ChatRepositoryImpl implements ChatRepository {
   }) async {
     try {
       final normalizedPrompt = userPrompt.trim();
+      _log(
+        'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',
+      );
       final userMsg = ChatMessageModel(
         id: _uuid.v4(),
         sessionId: sessionId,
@@ -53,16 +60,17 @@ class ChatRepositoryImpl implements ChatRepository {
         attachments: attachments,
       );
       await localDataSource.insertMessage(userMsg);
+      _log('message persistence session=$sessionId role=user id=${userMsg.id}');
 
       if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
         return userMsg;
       }
 
       final sessionMessages = await localDataSource.getMessages(sessionId);
-      final context = sessionMessages
-          .where((m) => m.id != userMsg.id)
-          .map((m) => '${m.role}: ${m.content}')
-          .toList(growable: false);
+      final context = _buildContext(sessionMessages, excludedMessageId: userMsg.id);
+      _log(
+        'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
+      );
 
       final streamedResponse = StringBuffer();
       String responseProvider = 'local';
@@ -74,6 +82,7 @@ class ChatRepositoryImpl implements ChatRepository {
         systemPrompt: systemPrompt,
       )) {
         if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+          _log('streaming callbacks session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
           onRuntimeNotice?.call(chunk.runtimeNotice!);
           continue;
         }
@@ -97,8 +106,14 @@ class ChatRepositoryImpl implements ChatRepository {
           if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
             responseProvider = chunk.model!;
           }
+          _log(
+            'response parsing session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
+          );
         } else {
           streamedResponse.write(chunk.text);
+          _log(
+            'streaming callbacks session=$sessionId partial_chars=${streamedResponse.length}',
+          );
           onPartialResponse?.call(streamedResponse.toString());
         }
       }
@@ -117,6 +132,7 @@ class ChatRepositoryImpl implements ChatRepository {
         provider: responseProvider,
       );
       await localDataSource.insertMessage(assistantMsg);
+      _log('message persistence session=$sessionId role=assistant id=${assistantMsg.id}');
       return assistantMsg;
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
@@ -191,5 +207,28 @@ class ChatRepositoryImpl implements ChatRepository {
       buffer.write('\nStage: $stage');
     }
     return buffer.toString();
+  }
+
+  static List<String> _buildContext(
+    List<ChatMessage> messages, {
+    required String excludedMessageId,
+  }) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final message in messages) {
+      if (message.id == excludedMessageId) continue;
+      final line = '${message.role}: ${message.content}'.trim();
+      if (line.isEmpty) continue;
+      if (!seen.add(line)) continue;
+      out.add(line);
+    }
+    // Keep the most recent context lines for prompt construction so the active
+    // turn stays grounded in latest conversation state after deduplication.
+    if (out.length <= _maxContextLines) return out;
+    return out.sublist(out.length - _maxContextLines);
+  }
+
+  static void _log(String message) {
+    debugPrint('[$_logTag] $message');
   }
 }
