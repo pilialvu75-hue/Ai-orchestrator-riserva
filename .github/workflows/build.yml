@@ -76,25 +76,41 @@ jobs:
 
       - name: Validate Android signing secrets
         env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=()
-          for secret_name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [ -z "${!secret_name:-}" ]; then
-              missing+=("$secret_name")
-            fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required Android signing secrets: ${missing[*]}"
-            exit 1
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_BASE64 is configured"
+          elif [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
+            echo "::warning::Using legacy KEYSTORE_BASE64 secret; migrate to ANDROID_KEYSTORE_BASE64."
+          else
+            echo "HAS_RELEASE_KEYSTORE=false" >> "$GITHUB_ENV"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            echo "::warning::No release keystore secret configured (ANDROID_KEYSTORE_BASE64/KEYSTORE_BASE64). Release outputs will be debug-signed for temporary installability validation only."
+          fi
+          if [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::warning::KEYSTORE_PASSWORD is missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+          if [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::warning::KEY_ALIAS is missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+          if [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::warning::KEY_PASSWORD is missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
           fi
 
       - name: Prepare runtime Android signing files
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
         env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
@@ -103,26 +119,79 @@ jobs:
           mkdir -p "$SIGNING_DIR"
           KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
           export KEYSTORE_PATH
-          python - <<'PY'
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            export EFFECTIVE_KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
+          else
+            export EFFECTIVE_KEYSTORE_BASE64="$KEYSTORE_BASE64"
+          fi
+          if ! python - <<'PY'
           import base64
           import os
           import pathlib
           import sys
 
-          raw = os.environ["KEYSTORE_BASE64"]
+          raw = os.environ["EFFECTIVE_KEYSTORE_BASE64"]
           path = pathlib.Path(os.environ["KEYSTORE_PATH"])
-
+ 
           try:
               path.write_bytes(base64.b64decode(raw))
           except Exception as exc:
-              print(f"::error::KEYSTORE_BASE64 is not valid base64 data: {exc}", file=sys.stderr)
+              print(f"::error::Release keystore base64 data is not valid: {exc}", file=sys.stderr)
               raise SystemExit(1)
           PY
-          if [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "::error::Decoded Android keystore is empty"
-            exit 1
+          then
+            echo "::warning::Failed to decode release keystore. Falling back to debug signing for temporary installability validation."
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            rm -f "$KEYSTORE_PATH"
+            exit 0
           fi
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::warning::Decoded Android keystore is empty. Falling back to debug signing for temporary installability validation."
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            rm -f "$KEYSTORE_PATH"
+            exit 0
+          fi
+          echo "decoded_keystore_size_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Audit runtime release keystore
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : > keystore_validation.log
+          if [ -z "${KEYSTORE_FILE:-}" ] || [ ! -s "${KEYSTORE_FILE:-}" ]; then
+            echo "Release keystore file unavailable; using debug signing fallback." | tee -a keystore_validation.log
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            {
+              echo "Release keystore validation skipped due to missing credentials."
+              echo "KEYSTORE_PASSWORD present: $([ -n "${KEYSTORE_PASSWORD:-}" ] && echo yes || echo no)"
+              echo "KEY_ALIAS present: $([ -n "${KEY_ALIAS:-}" ] && echo yes || echo no)"
+              echo "KEY_PASSWORD present: $([ -n "${KEY_PASSWORD:-}" ] && echo yes || echo no)"
+            } | tee -a keystore_validation.log
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_PASSWORD"
+          if keytool -list -v \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass:env KEYSTORE_PASSWORD \
+            -alias "$KEY_ALIAS" \
+            -keypass:env KEY_PASSWORD | tee -a keystore_validation.log; then
+            echo "FORCE_DEBUG_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
+            echo "Release keystore validation passed." | tee -a keystore_validation.log
+          else
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            echo "::warning::Release keystore validation failed. Falling back to debug signing for temporary installability validation."
+            echo "Release keystore validation failed. Falling back to debug signing." | tee -a keystore_validation.log
+          fi
 
       - name: Flutter pub get
         run: flutter pub get
@@ -199,6 +268,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          FORCE_DEBUG_RELEASE_SIGNING: ${{ env.FORCE_DEBUG_RELEASE_SIGNING }}
         run: |
           set -euo pipefail
           flutter build apk \
@@ -213,6 +283,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          FORCE_DEBUG_RELEASE_SIGNING: ${{ env.FORCE_DEBUG_RELEASE_SIGNING }}
         run: |
           set -euo pipefail
           flutter build appbundle \
@@ -308,6 +379,8 @@ jobs:
             release_apk_build.log
             release_aab_build.log
             release_outputs.log
+            keystore_decode.log
+            keystore_validation.log
             sensitive_files_audit.log
             apk_signature.log
             apk_zipalign.log

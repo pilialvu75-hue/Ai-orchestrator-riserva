@@ -43,6 +43,11 @@ def requestedTargetPlatforms = requestedTargetPlatformsRaw
     .collect { it.trim() }
     .findAll { !it.isEmpty() }
 def requestedGradleTasks = gradle.startParameter.taskNames.collect { it.toLowerCase(Locale.ROOT) }
+def forceDebugReleaseSigning = (
+    project.findProperty("forceDebugReleaseSigning")
+        ?: System.getenv("FORCE_DEBUG_RELEASE_SIGNING")
+        ?: "false"
+).toString().toBoolean()
 def requiresReleaseSigning = requestedGradleTasks.any { taskName ->
     taskName.contains("assemblerelease")
         || taskName.contains("bundlerelease")
@@ -150,7 +155,7 @@ android {
             debuggable true
         }
         release {
-            signingConfig signingConfigs.release
+            signingConfig forceDebugReleaseSigning ? signingConfigs.debug : signingConfigs.release
             minifyEnabled false
             shrinkResources false
         }
