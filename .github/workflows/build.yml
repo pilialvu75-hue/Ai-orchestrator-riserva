@@ -151,7 +151,7 @@ jobs:
             rm -f "$KEYSTORE_PATH"
             exit 0
           fi
-          stat --format='decoded_keystore_bytes=%s' "$KEYSTORE_PATH" | tee keystore_decode.log
+          echo "decoded_keystore_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Audit runtime release keystore
