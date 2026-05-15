@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.content.Intent
+import android.content.ClipData
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -107,10 +108,12 @@ class MainActivity : FlutterActivity() {
                     }
                     try {
                         Log.i(logTag, "[INSTALL] openApkInstaller requested path=$apkPath")
+                        Log.i(logTag, "[UPDATE_INSTALL_START] path=$apkPath")
                         val apkFile = File(apkPath)
                         if (!apkFile.exists()) {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "APK file not found at $apkPath"
+                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=apk_file_missing")
                             result.error("FILE_NOT_FOUND", "APK file not found", null)
                             return@setMethodCallHandler
                         }
@@ -126,6 +129,7 @@ class MainActivity : FlutterActivity() {
                             openUnknownAppsSettingsInternal()
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "Unknown apps install permission denied"
+                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=unknown_apps_permission_denied")
                             result.error(
                                 "UNKNOWN_APPS_PERMISSION_DENIED",
                                 "Allow install from unknown apps for AI Orchestrator, then retry.",
@@ -140,16 +144,21 @@ class MainActivity : FlutterActivity() {
                             apkFile
                         )
                         Log.i(logTag, "[APK] Using FileProvider content URI: $apkUri")
-                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                        val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                            data = apkUri
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                            putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                            clipData = ClipData.newRawUri("apk", apkUri)
                         }
                         val resolved = installIntent.resolveActivity(packageManager)
                         Log.i(logTag, "[INSTALL] Installer resolveActivity=${resolved?.flattenToShortString()}")
                         if (resolved == null) {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "No package installer activity found"
+                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=installer_not_found")
                             result.error("INSTALLER_NOT_FOUND", "No package installer available", null)
                             return@setMethodCallHandler
                         }
@@ -157,11 +166,13 @@ class MainActivity : FlutterActivity() {
                         lastInstallerLaunchSuccess = true
                         lastInstallerException = null
                         Log.i(logTag, "[INSTALL] Installer intent launched successfully")
+                        Log.i(logTag, "[UPDATE_INSTALL_SUCCESS] launched=true")
                         result.success(true)
                     } catch (e: Exception) {
                         lastInstallerLaunchSuccess = false
                         lastInstallerException = "Failed to launch installer: ${e.message}"
                         Log.e(logTag, "[INSTALL] Failed to launch installer", e)
+                        Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=exception message=${e.message}")
                         result.error(
                             "INSTALL_ERROR",
                             "Failed to create FileProvider URI or launch installer: ${e.message}",

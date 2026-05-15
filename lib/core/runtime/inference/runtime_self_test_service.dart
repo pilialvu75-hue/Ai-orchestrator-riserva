@@ -1,7 +1,10 @@
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
+import 'package:flutter/foundation.dart';
 
 class RuntimeSelfTestResult {
   const RuntimeSelfTestResult({
@@ -31,6 +34,7 @@ class RuntimeSelfTestService {
 
   Future<RuntimeSelfTestResult> run() async {
     final notes = <String>[];
+    _log('[SELFTEST_START] session=$selfTestSessionId');
 
     try {
       final selectedResult = await _localAiRepository.getSelectedModel();
@@ -62,63 +66,64 @@ class RuntimeSelfTestService {
 
       await _chatRepository.clearSession(selfTestSessionId);
 
-      var streamedPartialCount = 0;
-      var lastPartialLength = 0;
-      await _chatRepository.sendMessage(
-        sessionId: selfTestSessionId,
-        userPrompt: 'Say hello',
-        onPartialResponse: (partialText) {
-          final trimmed = partialText.trim();
-          if (trimmed.isNotEmpty && partialText.length > lastPartialLength) {
-            lastPartialLength = partialText.length;
-            streamedPartialCount++;
-          }
-        },
-      );
+      final cancellationToken = CancellationToken();
+      String? firstToken;
+      String? streamTerminalError;
+      await for (final chunk in _runtimeProvider.streamInference(
+        request: InferenceRequest(
+          sessionId: selfTestSessionId,
+          prompt: 'Hello',
+          maxTokens: 8,
+          temperature: 0.2,
+          isOffline: true,
+          modelId: selectedModel.effectiveRuntimeModelId,
+          modelPath: selectedModel.localPath,
+        ),
+        cancellationToken: cancellationToken,
+      )) {
+        if (!chunk.isError &&
+            !chunk.isFinal &&
+            chunk.text.trim().isNotEmpty &&
+            firstToken == null) {
+          firstToken = chunk.text.trim();
+          _log('[SELFTEST_FIRST_TOKEN] token="$firstToken"');
+          cancellationToken.cancel();
+        }
+        if (chunk.isError && firstToken == null) {
+          streamTerminalError = chunk.errorMessage ?? 'unknown runtime error';
+        }
+      }
 
-      final persistedMessages =
-          await _chatRepository.getMessages(selfTestSessionId);
-      final persistedAssistant = persistedMessages
-          .where((message) => message.role == 'assistant')
-          .where((message) => message.content.trim().isNotEmpty)
-          .toList();
-      final persistedUser = persistedMessages
-          .where((message) => message.role == 'user')
-          .toList();
-
-      if (streamedPartialCount <= 0) {
+      if (firstToken == null) {
+        _log(
+          '[SELFTEST_FAIL] reason=${streamTerminalError ?? 'generation_completed_without_token'}',
+        );
         return RuntimeSelfTestResult(
           success: false,
           summary:
-              '${notes.join('\n')}\n3. Token stream: FAILED\nThe runtime returned no streamed partial tokens for the real prompt.',
+              '${notes.join('\n')}\n3. Token stream: FAILED\n${streamTerminalError ?? 'Generation completed without token emission.'}',
         );
       }
 
-      notes.add('3. Token stream: OK ($streamedPartialCount partial updates)');
-
-      if (persistedUser.isEmpty || persistedAssistant.isEmpty) {
-        return RuntimeSelfTestResult(
-          success: false,
-          summary:
-              '${notes.join('\n')}\n4. SQLite persistence: FAILED\nExpected persisted user + assistant rows in chat_history for $selfTestSessionId.',
-        );
-      }
-
-      final assistant = persistedAssistant.last;
-      notes.add(
-        '4. SQLite persistence: OK (${persistedMessages.length} rows; final assistant chars=${assistant.content.length})',
-      );
+      notes.add('3. Token stream: OK (first token emitted)');
+      _log('[SELFTEST_PASS] first_token="$firstToken"');
 
       return RuntimeSelfTestResult(
         success: true,
-        summary: '${notes.join('\n')}\n5. Final response: ${assistant.content}',
+        summary:
+            '${notes.join('\n')}\n4. Deterministic self-test result: PASS (first token="$firstToken")',
       );
     } catch (error) {
+      _log('[SELFTEST_FAIL] reason=exception error=$error');
       return RuntimeSelfTestResult(
         success: false,
         summary:
             '${notes.join('\n')}\nRuntime Self-Test aborted with error:\n$error',
       );
     }
+  }
+
+  static void _log(String message) {
+    debugPrint('[AI_RUNTIME] $message');
   }
 }

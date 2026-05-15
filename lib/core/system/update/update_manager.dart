@@ -76,6 +76,7 @@ class UpdateManager {
   }
 
   Future<void> checkForUpdates() async {
+    _logUpdateTag('check_start');
     if (state.value.status == UpdateStatus.downloading) {
       _logUpdate('Skipping check while download is in progress');
       return;
@@ -92,6 +93,7 @@ class UpdateManager {
 
     final manifest = result.manifest;
     if (manifest == null) {
+      _logUpdateTag('check_fail error=${result.errorMessage}');
       _logUpdate('Update check failed: ${result.errorMessage}');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -106,6 +108,9 @@ class UpdateManager {
 
     _logVersion(
       'Latest remote version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
+    );
+    _logUpdateTag(
+      'check_result remote_version=${manifest.version} url=${manifest.apkUrl}',
     );
 
     if (!manifest.isCompatibleWith(
@@ -182,6 +187,7 @@ class UpdateManager {
       return false;
     }
 
+    _logUpdateDownload('start url=${manifest.apkUrl}');
     _logApk('Starting APK download from ${manifest.apkUrl}');
     state.value = state.value.copyWith(
       status: UpdateStatus.downloading,
@@ -229,7 +235,29 @@ class UpdateManager {
 
       final apkFile = File(filePath);
       final exists = await apkFile.exists();
-      _logApk('Download finished. apkPath=$filePath exists=$exists');
+      final fileSize = exists ? await apkFile.length() : 0;
+      final hasApkExt = p.extension(filePath).toLowerCase() == '.apk';
+      _logApk(
+        'Download finished. apkPath=$filePath exists=$exists size_bytes=$fileSize has_apk_ext=$hasApkExt',
+      );
+      if (!exists || fileSize <= 0 || !hasApkExt) {
+        _logUpdateDownload(
+          'fail_integrity exists=$exists size_bytes=$fileSize has_apk_ext=$hasApkExt',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: 'Downloaded APK failed integrity checks.',
+          diagnostics: state.value.diagnostics.copyWith(
+            apkDownloaded: false,
+            apkPath: filePath,
+            apkFileExists: exists,
+            lastException:
+                'APK integrity failed: exists=$exists size=$fileSize ext_ok=$hasApkExt',
+          ),
+        );
+        return false;
+      }
+      _logUpdateDownload('complete path=$filePath size_bytes=$fileSize');
 
       state.value = state.value.copyWith(
         status: UpdateStatus.readyToInstall,
@@ -244,6 +272,7 @@ class UpdateManager {
       );
       return true;
     } catch (e, st) {
+      _logUpdateDownload('fail error=$e');
       _logApk('Download failed: $e');
       _logApk('Download stack: $st');
       state.value = state.value.copyWith(
@@ -260,9 +289,11 @@ class UpdateManager {
   }
 
   Future<bool> prepareInstallIntent() async {
+    _logUpdateInstallStart();
     await _syncAndroidInstallDiagnostics();
     final apkPath = state.value.tempApkPath;
     if (apkPath == null || apkPath.isEmpty) {
+      _logUpdateInstallFail('No downloaded APK available');
       _logInstall('Install requested without downloaded APK');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -279,6 +310,7 @@ class UpdateManager {
     final exists = await apkFile.exists();
     _logInstall('Preparing installer launch. apkPath=$apkPath exists=$exists');
     if (!exists) {
+      _logUpdateInstallFail('Downloaded APK file is missing');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
         errorMessage: 'Downloaded APK file is missing',
@@ -296,6 +328,7 @@ class UpdateManager {
     final result = await _intentHandler.openApkInstaller(apkPath);
     if (result.isLeft()) {
       final failure = result.swap().getOrElse(() => throw StateError('Unexpected empty failure'));
+      _logUpdateInstallFail(failure.message);
       _logInstall('Installer launch failed: ${failure.message}');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -313,7 +346,19 @@ class UpdateManager {
     final success = result.getOrElse(() => false);
     _logInstall('Installer launch result: success=$success');
     await _syncAndroidInstallDiagnostics();
+    if (!success) {
+      _logUpdateInstallFail('installer_launch_returned_false');
+      state.value = state.value.copyWith(
+        status: UpdateStatus.error,
+        errorMessage: 'Installer launch failed.',
+      );
+      return false;
+    }
+    _logUpdateInstallSuccess();
     state.value = state.value.copyWith(
+      status: UpdateStatus.idle,
+      clearTempApkPath: true,
+      downloadProgress: 0,
       diagnostics: state.value.diagnostics.copyWith(
         installerLaunchSuccess: success,
         apkDownloaded: true,
@@ -393,6 +438,12 @@ class UpdateManager {
   void _logApk(String message) => debugPrint('[APK] $message');
   void _logVersion(String message) => debugPrint('[VERSION] $message');
   void _logInstall(String message) => debugPrint('[INSTALL] $message');
+  void _logUpdateTag(String message) => debugPrint('[UPDATE_CHECK] $message');
+  void _logUpdateDownload(String message) => debugPrint('[UPDATE_DOWNLOAD] $message');
+  void _logUpdateInstallStart() => debugPrint('[UPDATE_INSTALL_START] begin');
+  void _logUpdateInstallFail(String reason) =>
+      debugPrint('[UPDATE_INSTALL_FAIL] reason=$reason');
+  void _logUpdateInstallSuccess() => debugPrint('[UPDATE_INSTALL_SUCCESS] launched=true');
 
   void dispose() {
     stopBackgroundChecks();

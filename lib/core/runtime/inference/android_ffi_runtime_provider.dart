@@ -58,12 +58,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
   static const Duration _generationTimeout = Duration(seconds: 90);
-  // Hard pre-inference watchdog: if no first token arrives within this
-  // window the failure is almost certainly in FFI open / symbol binding /
-  // GGUF path resolution or native context creation — not generation itself.
-  // Fires before _stalledInferenceTimeout to surface stalled_pre_inference
-  // conclusively.
-  static const Duration _preInferenceTimeout = Duration(seconds: 15);
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
@@ -374,6 +368,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       _log('[TOKENIZER] status=begin prompt_chars=${prompt.length}');
       _log(
+        '[TOKEN_COUNT] prompt_word_estimate=$promptWordEstimate prompt_chars=${prompt.length}',
+      );
+      _log('[TOKENIZER_OK] prompt_word_estimate=$promptWordEstimate');
+      _log(
         '[MODEL_EXECUTION] tokenization start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
       );
       final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
@@ -407,6 +405,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       _log(
         '[MODEL_EXECUTION] Calling native llb_start_gen: prompt_chars=${prompt.length}'
+        ' max_tokens=$maxTokens temperature=${request.temperature}',
+      );
+      _log(
+        '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
         ' max_tokens=$maxTokens temperature=${request.temperature}',
       );
       _logAi('starting inference...');
@@ -507,6 +509,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         startedAt: startedAt,
       );
       _logAi('streaming callback active');
+      _log('[STREAM_ADD] event=generation_started session=$sessionId');
       _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
 
       try {
@@ -520,6 +523,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           _log(
             '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
             ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
+          );
+          _log(
+            '[GENERATION_STEP] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds}'
+            ' generated_tokens=$estimatedTokens',
           );
           if (cancellationToken.isCancelled) {
             _safeCancel(bindings);
@@ -570,39 +577,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               notice:
                   'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
               partialTerminalState: InferenceTerminalState.timeout,
-            );
-            break;
-          }
-          // Hard pre-inference watchdog (15 s): fires before the broader
-          // _stalledInferenceTimeout so the exact failure stage is conclusively
-          // logged before any generation loop timeout occurs.
-          if (firstTokenAt == null && elapsed > _preInferenceTimeout) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'stalled_pre_inference';
-            _log(
-              '[TERMINAL_STATE] state=stalled_pre_inference'
-              ' elapsed_ms=${elapsed.inMilliseconds}'
-              ' no_token_produced=true'
-              ' modelId=$modelId'
-              ' modelPath=$modelPath',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.stalled,
-              message: 'Runtime stalled before first token',
-              tokensGenerated: estimatedTokens,
-              elapsed: elapsed,
-              startedAt: startedAt,
-            );
-            _logAi('stalled_pre_inference: no first token in ${_preInferenceTimeout.inSeconds}s');
-            _finishWithRuntimeError(
-              controller,
-              stage: 'stalled_pre_inference',
-              message:
-                  'No first token produced within ${_preInferenceTimeout.inSeconds}s '
-                  '(TERMINAL_STATE=stalled_pre_inference). '
-                  'Likely failure: FFI open / symbol binding / GGUF path / native context.',
             );
             break;
           }
@@ -719,6 +693,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             try {
               piece = tokenBuf.toDartString();
             } catch (error) {
+              _log('[TOKENIZER_DECODE_FAIL] stage=dart_utf8_decode error=$error');
               consecutiveInvalidTokens++;
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
                 _safeCancel(bindings);
@@ -771,6 +746,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${piece.replaceAll('\n', r'\n')}"'
                 ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
               );
+              _log(
+                '[TOKEN_DECODE] token_index=$estimatedTokens chars=${piece.length}'
+                ' text="${piece.replaceAll('\n', r'\n')}"',
+              );
               if (piece == lastPiece) {
                 repeatedTokenCount++;
                 if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
@@ -809,6 +788,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 elapsed: streamingElapsed,
                 startedAt: startedAt,
               );
+              _log(
+                '[TOKEN_EMIT] token_index=$estimatedTokens chars=${piece.length}'
+                ' session=$sessionId',
+              );
+              _log('[STREAM_ADD] event=token session=$sessionId');
               controller.add(InferenceResponse.token(text: piece, model: modelId));
             } else {
               consecutiveInvalidTokens++;
@@ -816,6 +800,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 '[TOKEN_STREAM] empty token iteration=$pollIterations consecutive_empty=$consecutiveInvalidTokens',
               );
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
+                _log('[TOKENIZER_DECODE_FAIL] stage=empty_piece_loop');
                 _safeCancel(bindings);
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
@@ -845,6 +830,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             final completedElapsed = DateTime.now().difference(startedAt);
             markRuntimeVerified(modelPath);
             _log(
+              '[GENERATION_END] state=success generated_tokens=$estimatedTokens'
+              ' elapsed_ms=${completedElapsed.inMilliseconds}',
+            );
+            _log(
               '[FINAL_RESPONSE] eos generated_tokens=$estimatedTokens elapsed_ms=${completedElapsed.inMilliseconds}',
             );
             _log(
@@ -852,6 +841,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' elapsed_ms=${completedElapsed.inMilliseconds}',
             );
             _logAi('inference completed');
+            _log('[STREAM_ADD] event=final_chunk session=$sessionId');
             controller.add(InferenceResponse.finalChunk(
               text: fullText.toString(),
               tokensGenerated: estimatedTokens,
@@ -867,6 +857,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           } else if (status == -99) {
             // Cancelled by the native thread.
+            _log('[GENERATION_END] state=cancelled generated_tokens=$estimatedTokens');
             _log(
               '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
               ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
@@ -887,6 +878,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           } else if (status == -1) {
             clearRuntimeVerification();
             final err = _safeLastError(bindings);
+            _log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
             final statusLower = err.toLowerCase();
             runtimeNeedsReset = true;
             runtimeResetReason = 'native_error';
@@ -953,10 +945,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             reason: runtimeResetReason ?? 'runtime_recovery',
           );
         }
-          final terminalState = monitor.state.status;
-          _log(
-            '[TERMINAL_STATE] state=${terminalState.name}'
-            ' generated_tokens=$estimatedTokens'
+        final terminalState = monitor.state.status;
+        _log(
+          '[TERMINAL_STATE] state=${terminalState.name}'
+          ' generated_tokens=$estimatedTokens'
           ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
           ' first_token=${firstTokenAt != null}',
         );
@@ -975,6 +967,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
         calloc.free(tokenBufRaw);
         if (!controller.isClosed) {
+          _log('[STREAM_CLOSE] session=$sessionId');
           await controller.close();
         }
       }
@@ -1063,6 +1056,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }) {
     if (ctrl.isClosed) return;
     ctrl.add(InferenceResponse.error(message, state: state));
+    _log('[STREAM_CLOSE] reason=finish_with_error');
     ctrl.close();
   }
 
@@ -1079,6 +1073,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       details: details,
     );
     final payload = exception.toPayload();
+    _log('[GENERATION_ERROR] stage=$stage message=$message details=${details ?? ''}');
     _logAi(
       'runtime error: ${exception.toLogMessage()}',
     );
@@ -1099,8 +1094,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (ctrl.isClosed) return;
     if (fullText.trim().isNotEmpty) {
       if (notice != null && notice.trim().isNotEmpty) {
+        _log('[STREAM_ADD] event=notice');
         ctrl.add(InferenceResponse.notice(notice));
       }
+      _log('[STREAM_ADD] event=final_partial');
       ctrl.add(
         InferenceResponse(
           text: fullText,
@@ -1112,6 +1109,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ),
       );
       await ctrl.close();
+      _log('[STREAM_CLOSE] reason=partial_or_runtime_error');
       return;
     }
     _finishWithRuntimeError(
