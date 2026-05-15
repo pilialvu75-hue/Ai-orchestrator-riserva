@@ -20,7 +20,40 @@ class RuntimeStateMachine {
   final List<void Function(RuntimeLifecycleState state)> _listeners =
       <void Function(RuntimeLifecycleState state)>[];
 
+  static const Map<RuntimeLifecycleState, Set<RuntimeLifecycleEvent>>
+      _allowedTransitions = <RuntimeLifecycleState, Set<RuntimeLifecycleEvent>>{
+    RuntimeLifecycleState.uninitialized: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadCompleted,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    RuntimeLifecycleState.ready: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.inferenceStarted,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    RuntimeLifecycleState.inferencing: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.inferenceCompleted,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    RuntimeLifecycleState.failed: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+  };
+
   RuntimeLifecycleState get state => _state;
+
+  Map<RuntimeLifecycleState, Set<RuntimeLifecycleEvent>> get transitionMap =>
+      _allowedTransitions;
 
   void addListener(void Function(RuntimeLifecycleState state) listener) {
     _listeners.add(listener);
@@ -31,6 +64,8 @@ class RuntimeStateMachine {
   }
 
   RuntimeLifecycleState transition(RuntimeLifecycleEvent event) {
+    final allowed = _allowedTransitions[_state];
+    if (allowed != null && !allowed.contains(event)) return _state;
     final nextState = _resolveNextState(_state, event);
     if (nextState == _state) return _state;
     _state = nextState;

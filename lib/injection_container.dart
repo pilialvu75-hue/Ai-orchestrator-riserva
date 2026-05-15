@@ -70,6 +70,15 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/get_project_me
 import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
+import 'package:ai_orchestrator/features/project_memory/workspace_project_memory_service.dart';
+import 'package:ai_orchestrator/features/code_context/code_chunker.dart';
+import 'package:ai_orchestrator/features/code_context/context_retrieval_service.dart';
+import 'package:ai_orchestrator/features/semantic_index/project_indexer.dart';
+import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
+import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
+import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
+import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
+import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
 import 'package:ai_orchestrator/features/voice/sherpa_onnx_adapter.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
@@ -173,6 +182,34 @@ Future<void> initDependencies({
   );
   sl.registerLazySingleton<ContextWindowManager>(
     () => ContextWindowManager(databaseHelper: sl<DatabaseHelper>()),
+  );
+  sl.registerLazySingleton<WorkspaceManager>(
+    () => WorkspaceManager(preferencesService: sl<PreferencesService>()),
+  );
+  sl.registerLazySingleton<FileTreeService>(() => FileTreeService());
+  sl.registerLazySingleton<AgentTaskRouter>(() => AgentTaskRouter());
+  sl.registerLazySingleton<CodeChunker>(() => const CodeChunker());
+  sl.registerLazySingleton<WorkspaceEmbeddingService>(
+    () => const WorkspaceEmbeddingService(),
+  );
+  sl.registerLazySingleton<SemanticWorkspaceIndex>(
+    () => SemanticWorkspaceIndex(databaseHelper: sl<DatabaseHelper>()),
+  );
+  sl.registerLazySingleton<ProjectIndexer>(
+    () => ProjectIndexer(
+      codeChunker: sl<CodeChunker>(),
+      embeddingService: sl<WorkspaceEmbeddingService>(),
+      semanticIndex: sl<SemanticWorkspaceIndex>(),
+    ),
+  );
+  sl.registerLazySingleton<ContextRetrievalService>(
+    () => ContextRetrievalService(
+      index: sl<SemanticWorkspaceIndex>(),
+      embeddingService: sl<WorkspaceEmbeddingService>(),
+    ),
+  );
+  sl.registerLazySingleton<WorkspaceProjectMemoryService>(
+    () => WorkspaceProjectMemoryService(databaseHelper: sl<DatabaseHelper>()),
   );
 
   // ── Sync / Local-First (CRDT) ─────────────────────────────────────────────
