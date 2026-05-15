@@ -55,6 +55,8 @@
 #include <queue>
 #include <algorithm>
 #include <new>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define LOG_TAG "AI_RUNTIME"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -518,11 +520,25 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
     LOGI("[AI] loading model...");
     LOGI("[LOAD] model path=%s n_ctx=%d n_threads=%d",
          model_path ? model_path : "(null)", n_ctx, n_threads);
+    LOGI("[NATIVE_MODEL_LOAD_BEGIN] path=%s n_ctx=%d n_threads=%d",
+         model_path ? model_path : "(null)", n_ctx, n_threads);
     if (!model_path || std::strlen(model_path) == 0) {
         set_error("Model path is empty");
         LOGE("[LOAD] failed: empty path");
+        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-3");
+        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-3 reason=empty_model_path");
         return -3;
     }
+
+    struct stat model_stat;
+    const bool model_exists = stat(model_path, &model_stat) == 0;
+    const bool model_readable = access(model_path, R_OK) == 0;
+    const int64_t model_size = model_exists ? static_cast<int64_t>(model_stat.st_size) : -1;
+    LOGI("[MODEL_PATH] path=%s", model_path);
+    LOGI("[MODEL_EXISTS] path=%s exists=%s", model_path, model_exists ? "true" : "false");
+    LOGI("[MODEL_SIZE] path=%s size_bytes=%" PRId64, model_path, model_size);
+    LOGI("[MODEL_READABLE] path=%s readable=%s", model_path, model_readable ? "true" : "false");
+
     // Free any previously loaded model (non-blocking via cleanup thread).
     llb_free_model();
 
@@ -538,6 +554,8 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
     if (!g_model) {
         LOGE("[LOAD] llama_model_load_from_file failed: %s", model_path);
         set_error("Failed to load model from file (invalid/corrupted model or out of memory)");
+        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-1");
+        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-1 reason=llama_model_load_from_file_failed");
         return -1;
     }
     LOGI("[AI] model loaded");
@@ -552,12 +570,17 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
     cparams.n_ubatch         = kSafeNBatch;
     cparams.embeddings       = false;
 
+    LOGI("[NATIVE_CONTEXT_CREATE] path=%s n_ctx=%d n_threads=%d n_batch=%d",
+         model_path, n_ctx, n_threads, kSafeNBatch);
     LOGI("[LOAD] calling llama_init_from_model: n_ctx=%d n_batch=%d n_threads=%d",
          n_ctx, kSafeNBatch, n_threads);
     g_ctx = llama_init_from_model(g_model, cparams);
     if (!g_ctx) {
         LOGE("[LOAD] llama_init_from_model failed");
         set_error("Failed to create llama context (out of memory or incompatible model)");
+        LOGE("[NATIVE_CONTEXT_FAILURE] path=%s reason=llama_init_from_model_failed", model_path);
+        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-2");
+        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-2 reason=context_creation_failed");
         llama_model_free(g_model);
         g_model = nullptr;
         return -2;
@@ -567,6 +590,8 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
          n_ctx, kSafeNBatch, mparams.n_gpu_layers);
 
     g_last_error.clear();
+    LOGI("[NATIVE_MODEL_LOAD_RESULT] code=0");
+    LOGI("[NATIVE_MODEL_LOAD_SUCCESS] path=%s", model_path);
     return 0;
 }
 

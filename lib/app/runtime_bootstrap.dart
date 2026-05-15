@@ -13,7 +13,7 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 class RuntimeBootstrap {
   const RuntimeBootstrap();
 
-  static const String _versionFallback = '1.0.12';
+  static const String _versionFallback = '1.0.12+12';
 
   Future<void> initialize() async {
     final appVersion = await _resolveAppVersion();
@@ -33,17 +33,21 @@ class RuntimeBootstrap {
   Future<String> _resolveAppVersion() async {
     try {
       final info = await PackageInfo.fromPlatform();
-      final version =
-          info.version.isNotEmpty ? info.version : _versionFallback;
-      debugPrint('[OTA] PackageInfo version: ${info.version}+${info.buildNumber}');
-      return version;
+      final rawVersion = info.version.isNotEmpty ? info.version : _versionFallback;
+      final normalizedVersion = rawVersion.contains('+')
+          ? rawVersion
+          : (info.buildNumber.isNotEmpty ? '$rawVersion+${info.buildNumber}' : rawVersion);
+      debugPrint('[OTA] PackageInfo version resolved: $normalizedVersion');
+      debugPrint('[OTA] PackageInfo raw: version=${info.version} buildNumber=${info.buildNumber}');
+      return normalizedVersion;
     } catch (error) {
       final version = const String.fromEnvironment(
         'APP_VERSION',
         defaultValue: _versionFallback,
       );
-      debugPrint('[OTA] PackageInfo failed ($error), using fallback: $version');
-      return version;
+      final normalizedVersion = version.contains('+') ? version : '$version+0';
+      debugPrint('[OTA] PackageInfo failed ($error), using fallback: $normalizedVersion');
+      return normalizedVersion;
     }
   }
 

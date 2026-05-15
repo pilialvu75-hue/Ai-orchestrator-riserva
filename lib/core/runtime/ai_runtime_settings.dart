@@ -10,14 +10,21 @@ enum AiRuntimeMode {
   String get storageValue => name;
 
   static AiRuntimeMode fromStoredValue(String? value) {
-    switch (value) {
+    final normalized = (value ?? '').trim().toLowerCase();
+    switch (normalized) {
       case 'local':
+      case 'local_ai':
+      case 'on_device':
+      case 'ai_runtime_mode_local':
       case 'fast':
         return AiRuntimeMode.local;
       case 'cloud':
+      case 'remote':
+      case 'ai_runtime_mode_cloud':
       case 'deep':
         return AiRuntimeMode.cloud;
       case 'hybrid':
+      case 'ai_runtime_mode_hybrid':
       case 'balanced':
       default:
         return AiRuntimeMode.hybrid;

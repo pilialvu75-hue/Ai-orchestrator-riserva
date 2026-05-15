@@ -256,6 +256,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         loadResult = bindings.loadModel(modelPath);
       } catch (error) {
         _log('[NATIVE_MODEL_LOAD_FAILURE] path=$modelPath exception=$error');
+        _log('[NATIVE_CONTEXT_FAILURE] path=$modelPath reason=ffi_exception');
         _log('[TERMINAL_STATE] state=failed reason=model_load_exception');
         clearRuntimeVerification();
         monitor.update(
@@ -276,6 +277,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       if (loadResult != 0) {
         final errMsg = _safeLastError(bindings);
+        final lowerErr = errMsg.toLowerCase();
+        if (lowerErr.contains('context')) {
+          _log(
+            '[NATIVE_CONTEXT_FAILURE] path=$modelPath code=$loadResult error=$errMsg',
+          );
+        }
         _log('[NATIVE_MODEL_LOAD_FAILURE] code=$loadResult error=$errMsg'
             ' path=$modelPath');
         _log('[TERMINAL_STATE] state=failed reason=model_load_error code=$loadResult');
@@ -291,6 +298,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _log('[NATIVE_MODEL_LOAD_SUCCESS] path=$modelPath modelId=$modelId'
           ' llb_is_loaded=$loadedAfterLoad');
+      _log('[NATIVE_CONTEXT_CREATE] path=$modelPath status=ok');
       _logAi('model loaded');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────

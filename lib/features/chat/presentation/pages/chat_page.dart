@@ -37,11 +37,15 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
+  static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
+  Timer? _uiDeadlockTimer;
+  DateTime? _uiSendBeganAt;
+  bool _uiStreamStarted = false;
   bool _voiceEngineActive = false;
   bool _gpuAccelerationActive = false;
   String _gpuBackend = 'cpu';
@@ -106,6 +110,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _cancelUiDeadlockGuard();
     _runtimeDiagnostics.monitor.removeListener(_handleRuntimeStateChanged);
     _scrollController.dispose();
     super.dispose();
@@ -124,11 +129,67 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onSend(String text, List<ChatAttachment> attachments) {
+    _uiSendBeganAt = DateTime.now();
+    _uiStreamStarted = false;
+    _startUiDeadlockGuard();
+    _uiLog('[UI_SEND_BEGIN] session=$_kDefaultSessionId chars=${text.length} attachments=${attachments.length}');
     context.read<OrchestratorStateEngine>().add(SendMessageEvent(
           sessionId: _kDefaultSessionId,
           userPrompt: text,
           attachments: attachments,
         ));
+  }
+
+  bool _isRuntimeInferencing() {
+    return _runtimeState.status == LocalRuntimeStatus.inferencing ||
+        _runtimeState.status == LocalRuntimeStatus.streaming;
+  }
+
+  void _startUiDeadlockGuard() {
+    _cancelUiDeadlockGuard();
+    _uiDeadlockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final startedAt = _uiSendBeganAt;
+      if (startedAt == null || !mounted || _uiStreamStarted) return;
+      final chatState = context.read<OrchestratorStateEngine>().state;
+      final waiting = chatState is ChatSending;
+      final elapsed = DateTime.now().difference(startedAt);
+      if (waiting && !_isRuntimeInferencing() && elapsed > _uiDeadlockTimeout) {
+        _uiLog('[UI_WAITING_STUCK] session=$_kDefaultSessionId elapsed_ms=${elapsed.inMilliseconds} runtime=${_runtimeState.status.name}');
+        _uiLog('[inference_loop_detected] session=$_kDefaultSessionId waiting=true no_token=true runtime_inferencing=false');
+        _uiLog('[UI_SEND_CANCEL] session=$_kDefaultSessionId reason=deadlock_breaker');
+        context.read<OrchestratorStateEngine>().add(
+              const RecoverFromStuckUiEvent(
+                sessionId: _kDefaultSessionId,
+                runtimeMessage:
+                    'Local runtime stalled before first token. Request cancelled and UI recovered.',
+              ),
+            );
+        _cancelUiDeadlockGuard();
+      }
+    });
+  }
+
+  void _cancelUiDeadlockGuard() {
+    _uiDeadlockTimer?.cancel();
+    _uiDeadlockTimer = null;
+    _uiSendBeganAt = null;
+    _uiStreamStarted = false;
+  }
+
+  void _handleOrchestratorState(ChatState state) {
+    if (_uiSendBeganAt == null) return;
+    if (state is ChatSending) {
+      final hasAssistantToken = state.messages.any(
+        (message) => message.role == 'assistant' && message.content.trim().isNotEmpty,
+      );
+      if (hasAssistantToken && !_uiStreamStarted) {
+        _uiStreamStarted = true;
+        _uiLog('[UI_STREAM_BEGIN] session=$_kDefaultSessionId');
+      }
+      return;
+    }
+    _uiLog('[UI_STREAM_END] session=$_kDefaultSessionId state=${state.runtimeType}');
+    _cancelUiDeadlockGuard();
   }
 
   void _openSettings() {
@@ -144,52 +205,62 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<ModelDownloadBloc, ModelDownloadState>(
-      listener: (context, state) {
-        final l10n = context.l10n;
-        if (state is ModelDownloadError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Models: ${state.message}'),
-              backgroundColor: Theme.of(context).colorScheme.error,
-              action: SnackBarAction(
-                label: l10n.t('settings'),
-                textColor: Colors.white,
-                onPressed: _openSettings,
-              ),
-            ),
-          );
-        }
-      },
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<ModelDownloadBloc, ModelDownloadState>(
+          listener: (context, state) {
+            final l10n = context.l10n;
+            if (state is ModelDownloadError) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Models: ${state.message}'),
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  action: SnackBarAction(
+                    label: l10n.t('settings'),
+                    textColor: Colors.white,
+                    onPressed: _openSettings,
+                  ),
+                ),
+              );
+            }
+          },
+        ),
+        BlocListener<OrchestratorStateEngine, ChatState>(
+          listener: (context, state) => _handleOrchestratorState(state),
+        ),
+      ],
       child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= _kSidebarBreakpoint;
-          return isWide
-              ? _WideLayout(
-                  scrollController: _scrollController,
-                  onSend: _onSend,
-                  onSettings: _openSettings,
-                  scrollToBottom: _scrollToBottom,
-                  runtimeState: _runtimeState,
-                  voiceEngineActive: _voiceEngineActive,
-                  gpuAccelerationActive: _gpuAccelerationActive,
-                  gpuBackend: _gpuBackend,
-                  runtimeModeName: _runtimeModeName,
-                )
-              : _NarrowLayout(
-                  scrollController: _scrollController,
-                  onSend: _onSend,
-                  onSettings: _openSettings,
-                  scrollToBottom: _scrollToBottom,
-                  runtimeState: _runtimeState,
-                  voiceEngineActive: _voiceEngineActive,
-                  gpuAccelerationActive: _gpuAccelerationActive,
-                  gpuBackend: _gpuBackend,
-                  runtimeModeName: _runtimeModeName,
-                );
-        },
-      ),
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= _kSidebarBreakpoint;
+            return isWide
+                ? _WideLayout(
+                    scrollController: _scrollController,
+                    onSend: _onSend,
+                    onSettings: _openSettings,
+                    scrollToBottom: _scrollToBottom,
+                    runtimeState: _runtimeState,
+                    voiceEngineActive: _voiceEngineActive,
+                    gpuAccelerationActive: _gpuAccelerationActive,
+                    gpuBackend: _gpuBackend,
+                    runtimeModeName: _runtimeModeName,
+                  )
+                : _NarrowLayout(
+                    scrollController: _scrollController,
+                    onSend: _onSend,
+                    onSettings: _openSettings,
+                    scrollToBottom: _scrollToBottom,
+                    runtimeState: _runtimeState,
+                    voiceEngineActive: _voiceEngineActive,
+                    gpuAccelerationActive: _gpuAccelerationActive,
+                    gpuBackend: _gpuBackend,
+                    runtimeModeName: _runtimeModeName,
+                  );
+          }),
     );
+  }
+
+  static void _uiLog(String message) {
+    debugPrint('[CHAT_UI] $message');
   }
 }
 
@@ -610,36 +681,37 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
     });
   }
 
-  String get _title {
+  String _title(BuildContext context) {
+    final l10n = context.l10n;
     final message = (widget.runtimeState.message ?? '').toLowerCase();
     switch (widget.runtimeState.status) {
       case LocalRuntimeStatus.uninitialized:
-        return 'Runtime idle';
+        return l10n.t('runtime_idle');
       case LocalRuntimeStatus.loading:
-        return 'Loading model';
+        return l10n.t('runtime_loading');
       case LocalRuntimeStatus.runtimeUnavailable:
-        return 'Runtime unverified';
+        return l10n.t('runtime_unverified');
       case LocalRuntimeStatus.tokenizing:
-        return 'Tokenizing';
+        return l10n.t('runtime_tokenizing');
       case LocalRuntimeStatus.inferencing:
-        return 'Generating';
+        return l10n.t('runtime_generating');
       case LocalRuntimeStatus.streaming:
-        return 'Streaming';
+        return l10n.t('runtime_streaming');
       case LocalRuntimeStatus.completed:
-        return 'Completed';
+        return l10n.t('runtime_completed');
       case LocalRuntimeStatus.timedOut:
-        return 'Timed out';
+        return l10n.t('runtime_timed_out');
       case LocalRuntimeStatus.stalled:
-        return 'Runtime stalled';
+        return l10n.t('runtime_stalled');
       case LocalRuntimeStatus.ready:
-        return 'Runtime ready';
+        return l10n.t('runtime_ready');
       case LocalRuntimeStatus.ffiMissing:
       case LocalRuntimeStatus.modelMissing:
       case LocalRuntimeStatus.failed:
         if (message.startsWith('out of memory') || message.contains('out of memory')) {
-          return 'Runtime error';
+          return l10n.t('runtime_error');
         }
-        return 'Runtime error';
+        return l10n.t('runtime_error');
     }
   }
 
@@ -684,6 +756,7 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
   Widget build(BuildContext context) {
     final color = _color;
     final elapsed = _displayElapsed;
+    final l10n = context.l10n;
     return Container(
       width: 180,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -712,7 +785,7 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  _title,
+                  _title(context),
                   style: TextStyle(
                     color: color,
                     fontSize: 12,
@@ -737,18 +810,18 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
           ],
           const SizedBox(height: 8),
           Text(
-            'Tokens ${widget.runtimeState.tokensGenerated}',
+            '${l10n.t('tokens')} ${widget.runtimeState.tokensGenerated}',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 4),
           Text(
-            'Time ${elapsed.inSeconds}s',
+            '${l10n.t('time')} ${elapsed.inSeconds}s',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 8),
           _statusPill(
             icon: Icons.memory_rounded,
-            label: 'Local runtime',
+            label: l10n.t('local_runtime'),
             active: widget.runtimeState.status != LocalRuntimeStatus.ffiMissing &&
                 widget.runtimeState.status != LocalRuntimeStatus.runtimeUnavailable &&
                 widget.runtimeState.status != LocalRuntimeStatus.modelMissing &&
@@ -757,12 +830,12 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
           const SizedBox(height: 4),
           _statusPill(
             icon: Icons.mic_rounded,
-            label: 'Voice engine',
+            label: l10n.t('voice_engine'),
             active: widget.voiceEngineActive,
           ),
           const SizedBox(height: 4),
           Text(
-            'Mode: ${widget.runtimeModeName}',
+            '${l10n.t('mode')}: ${widget.runtimeModeName}',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 4),
