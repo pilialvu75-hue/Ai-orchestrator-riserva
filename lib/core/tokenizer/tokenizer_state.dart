@@ -18,15 +18,19 @@ class TokenizerState {
 
   TokenizerState copyWith({
     TokenizerLifecycleState? state,
-    String? modelPath,
-    String? errorMessage,
+    Object? modelPath = _sentinel,
+    Object? errorMessage = _sentinel,
   }) {
     return TokenizerState(
       state: state ?? this.state,
-      modelPath: modelPath ?? this.modelPath,
-      errorMessage: errorMessage ?? this.errorMessage,
+      modelPath: modelPath == _sentinel ? this.modelPath : modelPath as String?,
+      errorMessage: errorMessage == _sentinel
+          ? this.errorMessage
+          : errorMessage as String?,
     );
   }
+
+  static const Object _sentinel = Object();
 
   @override
   String toString() =>

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -44,14 +42,17 @@ class FilesystemPaths {
     if (path.isEmpty) return false;
     if (path.contains('\x00')) return false;
 
-    // Reject paths that attempt to escape with ".." sequences
+    // Reject any path segment equal to '..' after normalisation.
+    // p.normalize handles both forward- and back-slash separators.
     final normalized = p.normalize(path);
     final parts = p.split(normalized);
     if (parts.contains('..')) return false;
 
-    // Catch raw ".." in original path that normalize may not fully collapse
-    if (path.contains('..${Platform.pathSeparator}') ||
-        path.contains('${Platform.pathSeparator}..') ||
+    // Guard against raw traversal sequences before normalization on any OS.
+    if (path.contains('../') ||
+        path.contains('..\\') ||
+        path.endsWith('/..') ||
+        path.endsWith('\\..') ||
         path == '..') {
       return false;
     }

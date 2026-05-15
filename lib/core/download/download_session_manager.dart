@@ -46,9 +46,9 @@ class DownloadSession {
     int? bytesDownloaded,
     int? totalBytes,
     DownloadSessionStatus? status,
-    String? error,
-    DateTime? startedAt,
-    DateTime? completedAt,
+    Object? error = _sentinel,
+    Object? startedAt = _sentinel,
+    Object? completedAt = _sentinel,
   }) {
     return DownloadSession(
       id: id ?? this.id,
@@ -58,11 +58,14 @@ class DownloadSession {
       bytesDownloaded: bytesDownloaded ?? this.bytesDownloaded,
       totalBytes: totalBytes ?? this.totalBytes,
       status: status ?? this.status,
-      error: error ?? this.error,
-      startedAt: startedAt ?? this.startedAt,
-      completedAt: completedAt ?? this.completedAt,
+      error: error == _sentinel ? this.error : error as String?,
+      startedAt: startedAt == _sentinel ? this.startedAt : startedAt as DateTime?,
+      completedAt:
+          completedAt == _sentinel ? this.completedAt : completedAt as DateTime?,
     );
   }
+
+  static const Object _sentinel = Object();
 
   @override
   String toString() =>
