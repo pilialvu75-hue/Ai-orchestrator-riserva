@@ -100,13 +100,9 @@ class BackgroundDownloadService {
     });
   }
 
-  Future<DownloadSession> _currentSession(String id) async {
-    final session = _sessionManager.getSession(id);
-    if (session == null) {
-      throw StateError('Download session not found: $id');
-    }
-    return session;
-  }
+  Future<DownloadSession> _currentSession(String id) async =>
+      _sessionManager.getSession(id) ??
+      DownloadSession(id: id, url: '', destinationPath: '');
 
   void cancelDownload(String sessionId) {
     _sessionManager.cancelSession(sessionId);

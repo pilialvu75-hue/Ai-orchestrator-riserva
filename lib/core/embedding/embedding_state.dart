@@ -18,20 +18,15 @@ class EmbeddingState {
 
   EmbeddingState copyWith({
     EmbeddingLifecycleState? state,
-    Object? providerName = _sentinel,
-    Object? errorMessage = _sentinel,
+    String? providerName,
+    String? errorMessage,
   }) {
     return EmbeddingState(
       state: state ?? this.state,
-      providerName:
-          providerName == _sentinel ? this.providerName : providerName as String?,
-      errorMessage: errorMessage == _sentinel
-          ? this.errorMessage
-          : errorMessage as String?,
+      providerName: providerName ?? this.providerName,
+      errorMessage: errorMessage ?? this.errorMessage,
     );
   }
-
-  static const Object _sentinel = Object();
 
   @override
   String toString() =>
