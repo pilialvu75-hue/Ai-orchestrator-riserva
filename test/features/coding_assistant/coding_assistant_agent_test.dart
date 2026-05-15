@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
@@ -59,6 +60,7 @@ InferenceService _buildInference(String fakeResponse) => InferenceService(
       loadRuntimeMode: () async => AiRuntimeMode.local,
       runtimeProvider: _FakeLocal(fakeResponse),
       cloudRuntimeProvider: _noCloud(),
+      sessionManager: RuntimeSessionManager(),
     );
 
 CodingAssistantAgentImpl _buildAgent({String planResponse = '1. Only step'}) {

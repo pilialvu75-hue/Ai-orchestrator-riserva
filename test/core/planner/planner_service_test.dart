@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
@@ -58,6 +59,7 @@ InferenceService _buildInferenceService(String fakeResponse) {
     loadRuntimeMode: () async => AiRuntimeMode.local,
     runtimeProvider: _FakeLocalRuntime(fakeResponse),
     cloudRuntimeProvider: _buildCloudProvider(),
+    sessionManager: RuntimeSessionManager(),
   );
 }
 

@@ -7,7 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart'
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_session.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -19,39 +19,28 @@ class InferenceService {
   static const Duration _streamIdleTimeout = Duration(seconds: 75);
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
-  static const Duration _duplicatePromptWindow = Duration(seconds: 3);
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
     required Future<AiRuntimeMode> Function() loadRuntimeMode,
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
+    required RuntimeSessionManager sessionManager,
   })  : _loadSelectedModel = loadSelectedModel,
         _loadRuntimeMode = loadRuntimeMode,
         _runtimeProvider = runtimeProvider,
-        _cloudRuntimeProvider = cloudRuntimeProvider;
+        _cloudRuntimeProvider = cloudRuntimeProvider,
+        _sessionManager = sessionManager;
 
   final Future<AiModel?> Function() _loadSelectedModel;
   final Future<AiRuntimeMode> Function() _loadRuntimeMode;
   final LocalRuntimeProvider _runtimeProvider;
   final CloudRuntimeProvider _cloudRuntimeProvider;
-
-  final Map<String, RuntimeSession> _sessions = <String, RuntimeSession>{};
-  final Set<String> _activeSessionIds = <String>{};
-  final Map<String, _PromptFingerprint> _lastPromptBySession =
-      <String, _PromptFingerprint>{};
-
-  RuntimeSession createSession(String sessionId) {
-    return _sessions.putIfAbsent(
-      sessionId,
-      () => RuntimeSession(sessionId: sessionId),
-    );
-  }
+  final RuntimeSessionManager _sessionManager;
 
   void cancel(String sessionId) {
     _log('cancel requested session=$sessionId');
-    _sessions[sessionId]?.cancellationToken.cancel();
-    _sessions.remove(sessionId);
+    _sessionManager.cancel(sessionId);
   }
 
   TokenStream stream(InferenceRequest request) async* {
@@ -64,20 +53,8 @@ class InferenceService {
       'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
       'context_lines=${request.context.length} offline=${request.isOffline}',
     );
-    if (!_tryAcquirePromptGuard(
-      sessionId: request.sessionId,
-      promptHash: promptHash,
-    )) {
-      _log(
-        'duplicate prompt guard blocked session=${request.sessionId} prompt_hash=$promptHash',
-      );
-      yield InferenceResponse.error(
-        'Duplicate prompt detected; previous inference is still active.',
-      );
-      return;
-    }
 
-    final session = createSession(request.sessionId);
+    final session = _sessionManager.startSession(request.sessionId);
     try {
       final runtimeMode = await _loadRuntimeMode();
       _log(
@@ -99,8 +76,7 @@ class InferenceService {
         cancellationToken: session.cancellationToken,
       );
     } finally {
-      _sessions.remove(request.sessionId);
-      _activeSessionIds.remove(request.sessionId);
+      _sessionManager.complete(session);
       _log('async listener cleanup session=${request.sessionId}');
       _log('stream end session=${request.sessionId}');
       _log('[ORCHESTRATOR_END] session=${request.sessionId}');
@@ -394,23 +370,6 @@ class InferenceService {
     }
   }
 
-  bool _tryAcquirePromptGuard({
-    required String sessionId,
-    required String promptHash,
-  }) {
-    final now = DateTime.now();
-    final last = _lastPromptBySession[sessionId];
-    final isRapidDuplicate = last != null &&
-        last.hash == promptHash &&
-        now.difference(last.at) <= _duplicatePromptWindow;
-    if (_activeSessionIds.contains(sessionId) || isRapidDuplicate) {
-      return false;
-    }
-    _activeSessionIds.add(sessionId);
-    _lastPromptBySession[sessionId] = _PromptFingerprint(promptHash, now);
-    return true;
-  }
-
   bool _isRetryableError(String? errorMessage) {
     final normalized = (errorMessage ?? '').toLowerCase();
     return normalized.contains('timeout') ||
@@ -426,8 +385,6 @@ class InferenceService {
         normalized.contains('stalled_pre_inference');
   }
 
-  // Stable request fingerprint used only for rapid duplicate suppression inside
-  // `_duplicatePromptWindow` to prevent auto-retriggered inference loops.
   String _promptHash(InferenceRequest request) {
     return Object.hash(
       request.sessionId,
@@ -512,12 +469,4 @@ class InferenceService {
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
   }
-
-}
-
-class _PromptFingerprint {
-  const _PromptFingerprint(this.hash, this.at);
-
-  final String hash;
-  final DateTime at;
 }
