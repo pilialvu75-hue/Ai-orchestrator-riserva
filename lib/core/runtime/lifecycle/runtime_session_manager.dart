@@ -34,7 +34,7 @@ class InferenceSession {
     );
   }
 
-  /// Unique identifier for this session (UUID v4).
+  /// Unique identifier for this session (microsecond epoch as string).
   final String sessionId;
 
   /// Absolute path to the model file used by this session.
