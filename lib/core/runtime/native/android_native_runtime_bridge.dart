@@ -73,8 +73,8 @@ class AndroidNativeRuntimeBridge implements NativeRuntimeBridge {
 
   /// Loads the GGUF model at [modelPath] into the native context.
   ///
-  /// [nCtx] and [nThreads] default to the safe mobile values defined in
-  /// [LlamaNativeDefaults].
+  /// Context size and thread count are governed by the native bridge defaults
+  /// ([LlamaNativeDefaults]) which are baked into [LlamaBridgeBindings.loadModel].
   ///
   /// Throws [NativeModelLoadException] when the native bridge returns a
   /// non-zero error code.

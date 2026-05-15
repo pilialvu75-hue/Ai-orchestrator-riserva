@@ -52,6 +52,9 @@ class BackgroundDownloadService {
         fileSink = file.openWrite();
 
         int bytesDownloaded = 0;
+        // Cache the current session once to avoid repeated map lookups
+        // on every received chunk.
+        var currentSession = await _currentSession(session.id);
         await for (final chunk in response) {
           fileSink.add(chunk);
           bytesDownloaded += chunk.length;
@@ -60,14 +63,12 @@ class BackgroundDownloadService {
               ? (bytesDownloaded / totalBytes).clamp(0.0, 1.0)
               : 0.0;
 
-          _sessionManager.updateSession(
-            session.id,
-            (await _currentSession(session.id)).copyWith(
-              bytesDownloaded: bytesDownloaded,
-              totalBytes: totalBytes,
-              progress: progress,
-            ),
+          currentSession = currentSession.copyWith(
+            bytesDownloaded: bytesDownloaded,
+            totalBytes: totalBytes,
+            progress: progress,
           );
+          _sessionManager.updateSession(session.id, currentSession);
         }
 
         await fileSink.flush();
@@ -76,7 +77,7 @@ class BackgroundDownloadService {
 
         _sessionManager.updateSession(
           session.id,
-          (await _currentSession(session.id)).copyWith(
+          currentSession.copyWith(
             status: DownloadSessionStatus.completed,
             progress: 1.0,
             completedAt: DateTime.now(),
@@ -85,8 +86,8 @@ class BackgroundDownloadService {
         debugPrint('[DOWNLOAD] Completed: ${session.id}');
       } catch (e) {
         await fileSink?.close();
-        final current = await _currentSession(session.id);
-        if (current.status != DownloadSessionStatus.cancelled) {
+        final current = _sessionManager.getSession(session.id);
+        if (current != null && current.status != DownloadSessionStatus.cancelled) {
           _sessionManager.updateSession(
             session.id,
             current.copyWith(

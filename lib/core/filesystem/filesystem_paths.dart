@@ -40,6 +40,9 @@ class FilesystemPaths {
 
   static bool isValidPath(String path) {
     if (path.isEmpty) return false;
+    // Reject paths containing null bytes. Null bytes can be used for path
+    // truncation attacks in languages that use C-style null-terminated strings
+    // (e.g. native FFI targets), so we sanitise at the Dart layer as well.
     if (path.contains('\x00')) return false;
 
     // Reject any path segment equal to '..' after normalisation.
