@@ -82,24 +82,6 @@ import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.
 import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
 
-// ── New runtime architecture modules ─────────────────────────────────────────
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_state_machine.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_boot_manager.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_ready_verifier.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_warmup_service.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_healthcheck_service.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_session_manager.dart';
-import 'package:ai_orchestrator/core/runtime/lifecycle/runtime_recovery_manager.dart';
-import 'package:ai_orchestrator/core/tokenizer/tokenizer_runtime.dart';
-import 'package:ai_orchestrator/core/tokenizer/tokenizer_validator.dart';
-import 'package:ai_orchestrator/core/tokenizer/tokenizer_service.dart';
-import 'package:ai_orchestrator/core/embedding/embedding_service.dart';
-import 'package:ai_orchestrator/core/filesystem/model_path_resolver.dart';
-import 'package:ai_orchestrator/core/filesystem/runtime_storage_layout.dart';
-import 'package:ai_orchestrator/core/download/download_session_manager.dart';
-import 'package:ai_orchestrator/core/download/background_download_service.dart';
-import 'package:ai_orchestrator/core/download/download_integrity_verifier.dart';
-
 final sl = GetIt.instance;
 
 Future<void> initDependencies({
@@ -222,45 +204,6 @@ Future<void> initDependencies({
   // ── Core AI ────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ModelManager>(() => const ModelManager());
   sl.registerLazySingleton<LocalRuntimeProvider>(() => createLocalRuntimeProvider());
-
-  // ── Runtime Lifecycle Architecture ────────────────────────────────────────
-  sl.registerLazySingleton<RuntimeStateMachine>(() => RuntimeStateMachine());
-  sl.registerLazySingleton<RuntimeReadyVerifier>(() => const RuntimeReadyVerifier());
-  sl.registerLazySingleton<RuntimeWarmupService>(() => const RuntimeWarmupService());
-  sl.registerLazySingleton<RuntimeHealthcheckService>(
-    () => RuntimeHealthcheckService(stateMachine: sl<RuntimeStateMachine>()),
-  );
-  sl.registerLazySingleton<RuntimeBootManager>(() => const RuntimeBootManager());
-  sl.registerLazySingleton<RuntimeSessionManager>(() => RuntimeSessionManager());
-  sl.registerLazySingleton<RuntimeRecoveryManager>(() => const RuntimeRecoveryManager());
-
-  // ── Tokenizer Runtime ──────────────────────────────────────────────────────
-  sl.registerLazySingleton<TokenizerRuntime>(() => TokenizerRuntime());
-  sl.registerLazySingleton<TokenizerValidator>(() => TokenizerValidator());
-  sl.registerLazySingleton<TokenizerService>(
-    () => TokenizerService(
-      runtime: sl<TokenizerRuntime>(),
-      validator: sl<TokenizerValidator>(),
-    ),
-  );
-
-  // ── Embedding Subsystem ────────────────────────────────────────────────────
-  sl.registerLazySingleton<EmbeddingService>(() => EmbeddingService());
-
-  // ── Filesystem Canonicalization ───────────────────────────────────────────
-  sl.registerLazySingleton<ModelPathResolver>(() => ModelPathResolver());
-  sl.registerLazySingleton<RuntimeStorageLayout>(
-    () => RuntimeStorageLayout(),
-  );
-
-  // ── Download Management ────────────────────────────────────────────────────
-  sl.registerLazySingleton<DownloadSessionManager>(() => DownloadSessionManager());
-  sl.registerLazySingleton<BackgroundDownloadService>(
-    () => BackgroundDownloadService(sessionManager: sl<DownloadSessionManager>()),
-  );
-  sl.registerLazySingleton<DownloadIntegrityVerifier>(
-    () => DownloadIntegrityVerifier(),
-  );
 
   // ── AI data sources ────────────────────────────────────────────────────────
   sl.registerLazySingleton<OpenAiDataSource>(
