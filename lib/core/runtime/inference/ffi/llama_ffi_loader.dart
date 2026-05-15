@@ -18,7 +18,6 @@ abstract final class LlamaFfiLoader {
 
   static const Map<Abi, String> _supportedAndroidAbis = <Abi, String>{
     Abi.androidArm64: 'arm64-v8a',
-    Abi.androidX64: 'x86_64',
   };
   static String get _supportedAbiNames =>
       _supportedAndroidAbis.values.join(', ');
