@@ -17,8 +17,10 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
@@ -203,7 +205,13 @@ Future<void> initDependencies({
 
   // ── Core AI ────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ModelManager>(() => const ModelManager());
-  sl.registerLazySingleton<LocalRuntimeProvider>(() => createLocalRuntimeProvider());
+  sl.registerLazySingleton<RuntimeSessionManager>(() => RuntimeSessionManager());
+  sl.registerLazySingleton<RuntimeStateMachine>(() => RuntimeStateMachine());
+  sl.registerLazySingleton<LocalRuntimeProvider>(
+    () => createLocalRuntimeProvider(
+      runtimeStateMachine: sl<RuntimeStateMachine>(),
+    ),
+  );
 
   // ── AI data sources ────────────────────────────────────────────────────────
   sl.registerLazySingleton<OpenAiDataSource>(
@@ -368,6 +376,7 @@ Future<void> initDependencies({
       loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
       runtimeProvider: sl<LocalRuntimeProvider>(),
       cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+      sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
   sl.registerLazySingleton<Orchestrator>(

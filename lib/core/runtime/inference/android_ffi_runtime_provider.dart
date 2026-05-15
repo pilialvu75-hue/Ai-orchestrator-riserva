@@ -15,6 +15,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.da
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -48,6 +49,10 @@ import 'package:flutter/foundation.dart';
 /// `externalNativeBuild` in `android/app/build.gradle` to compile it
 /// automatically during `flutter build apk`.
 class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
+  AndroidFfiRuntimeProvider({
+    RuntimeStateMachine? runtimeStateMachine,
+  }) : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine();
+
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 128;
   // Keep local mobile generations bounded so stalled native loops surface
@@ -82,6 +87,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
+  final RuntimeStateMachine runtimeStateMachine;
 
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
@@ -108,22 +114,28 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
     if (!LlamaFfiLoader.isCurrentPlatformSupported) {
-      return LocalRuntimeState(
+      final snapshot = LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message:
             'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}). '
             'Only ${LlamaFfiLoader.supportedAbiNames} builds are supported.',
       );
+      _syncLifecycleState(snapshot.status);
+      return snapshot;
     }
     if (!_ensureLibraryLoaded()) {
-      return const LocalRuntimeState(
+      const snapshot = LocalRuntimeState(
         status: LocalRuntimeStatus.ffiMissing,
         message:
             'libllama_bridge.so is missing for this Android build. Rebuild the native runtime for arm64-v8a or x86_64.',
       );
+      _syncLifecycleState(snapshot.status);
+      return snapshot;
     }
 
-    return super.validateRuntime(selectedModel: selectedModel);
+    final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+    _syncLifecycleState(snapshot.status);
+    return snapshot;
   }
 
   // ── Inference ────────────────────────────────────────────────────────────────
@@ -157,7 +169,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
         clearRuntimeVerification();
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.modelMissing,
           message: 'No validated local model is selected.',
         );
@@ -196,7 +208,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
             'gemma-2-2b-it, llama_1b, or gemma_2b.';
         _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
           message: unsupportedAndroidModelMessage,
         );
@@ -215,7 +227,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[TERMINAL_STATE] state=failed reason=model_validation'
             ' path=$modelPath error=$modelValidationError');
         clearRuntimeVerification();
-        monitor.update(LocalRuntimeStatus.failed, message: modelValidationError);
+        _updateRuntimeStatus(
+          LocalRuntimeStatus.failed,
+          message: modelValidationError,
+        );
         _finishWithRuntimeError(
           controller,
           stage: 'model_validation',
@@ -227,7 +242,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       if (!_ensureLibraryLoaded()) {
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
         clearRuntimeVerification();
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.ffiMissing,
           message:
               'libllama_bridge.so is missing for this Android build.',
@@ -243,7 +258,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final bindings = _bindings!;
 
       // ── Step 1: Load model ───────────────────────────────────────────────────
-      monitor.update(LocalRuntimeStatus.loading,
+      _updateRuntimeStatus(LocalRuntimeStatus.loading,
           message: 'Loading model: $modelId', resetProgress: true);
       // Let UI observers process the loading state before the blocking FFI load.
       await Future<void>.delayed(Duration.zero);
@@ -259,7 +274,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[NATIVE_CONTEXT_FAILURE] path=$modelPath reason=ffi_exception');
         _log('[TERMINAL_STATE] state=failed reason=model_load_exception');
         clearRuntimeVerification();
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
           message: 'Model load failed: $error',
         );
@@ -287,7 +302,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             ' path=$modelPath');
         _log('[TERMINAL_STATE] state=failed reason=model_load_error code=$loadResult');
         clearRuntimeVerification();
-        monitor.update(LocalRuntimeStatus.failed, message: errMsg);
+        _updateRuntimeStatus(LocalRuntimeStatus.failed, message: errMsg);
         _finishWithRuntimeError(
           controller,
           stage: 'model_load',
@@ -308,7 +323,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           .split(RegExp(r'\s+'))
           .where((token) => token.isNotEmpty)
           .length;
-      monitor.update(
+      _updateRuntimeStatus(
         LocalRuntimeStatus.tokenizing,
         message: 'Tokenizing...',
         resetProgress: true,
@@ -331,7 +346,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       if (loadedCheck != 1) {
         clearRuntimeVerification();
         final nativeErr = _safeLastError(bindings);
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
           message: 'Model not loaded (llb_is_loaded=$loadedCheck).',
         );
@@ -362,7 +377,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         startupWatch.stop();
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
-        monitor.update(LocalRuntimeStatus.failed,
+        _updateRuntimeStatus(LocalRuntimeStatus.failed,
             message: 'Native start_generation failed: $error');
         _finishWithRuntimeError(
           controller,
@@ -379,7 +394,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _safeCancel(bindings);
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_timeout');
-        monitor.update(
+        _updateRuntimeStatus(
           LocalRuntimeStatus.timedOut,
           message:
               'Inference startup timed out after ${_startGenerationTimeout.inSeconds}s.',
@@ -398,7 +413,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         clearRuntimeVerification();
         final err = _safeLastError(bindings);
         _safeResetRuntime(bindings, reason: 'start_generation_failed');
-        monitor.update(LocalRuntimeStatus.failed, message: err);
+        _updateRuntimeStatus(LocalRuntimeStatus.failed, message: err);
         _finishWithRuntimeError(
           controller,
           stage: 'start_generation',
@@ -425,7 +440,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       var consecutiveIdlePolls = 0;
       var runtimeNeedsReset = false;
       String? runtimeResetReason;
-      monitor.update(
+      _updateRuntimeStatus(
         LocalRuntimeStatus.inferencing,
         message: 'Generating',
         tokensGenerated: 0,
@@ -460,7 +475,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               message: 'Inference cancelled.',
               state: InferenceTerminalState.cancelled,
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.runtimeUnavailable,
               message: 'Cancelled',
               tokensGenerated: estimatedTokens,
@@ -478,7 +493,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[TERMINAL_STATE] state=timedOut reason=generation_timeout'
               ' generated_tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.timedOut,
               message: 'Timed out',
               tokensGenerated: estimatedTokens,
@@ -514,7 +529,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' modelId=$modelId'
               ' modelPath=$modelPath',
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
               message: 'Runtime stalled before first token',
               tokensGenerated: estimatedTokens,
@@ -541,7 +556,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
               ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
               message: 'Runtime stalled',
               tokensGenerated: estimatedTokens,
@@ -568,7 +583,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' elapsed_ms=${elapsed.inMilliseconds}'
               ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
               message: 'Token stream stalled',
               tokensGenerated: estimatedTokens,
@@ -598,7 +613,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
               ' elapsed_ms=${elapsed.inMilliseconds}',
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
               message: 'Polling loop stalled',
               tokensGenerated: estimatedTokens,
@@ -626,7 +641,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_token_exception';
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.failed,
               message: 'Native poll_token failed: $error',
             );
@@ -656,7 +671,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   ' generated_tokens=$estimatedTokens'
                   ' error=$error',
                 );
-                monitor.update(
+                _updateRuntimeStatus(
                   LocalRuntimeStatus.failed,
                   message: 'Invalid generated token stream.',
                   tokensGenerated: estimatedTokens,
@@ -709,7 +724,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     ' generated_tokens=$estimatedTokens'
                     ' elapsed_ms=${streamingElapsed.inMilliseconds}',
                   );
-                  monitor.update(
+                  _updateRuntimeStatus(
                     LocalRuntimeStatus.failed,
                     message: 'Repeated-token loop detected.',
                     tokensGenerated: estimatedTokens,
@@ -728,7 +743,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 lastPiece = piece;
                 repeatedTokenCount = 0;
               }
-              monitor.update(
+              _updateRuntimeStatus(
                 LocalRuntimeStatus.streaming,
                 message: 'Streaming',
                 tokensGenerated: estimatedTokens,
@@ -751,7 +766,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   ' generated_tokens=$estimatedTokens'
                   ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
                 );
-                monitor.update(
+                _updateRuntimeStatus(
                   LocalRuntimeStatus.failed,
                   message: 'Invalid empty token stream.',
                   tokensGenerated: estimatedTokens,
@@ -783,7 +798,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               tokensGenerated: estimatedTokens,
               model: modelId,
             ));
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.completed,
               message: 'Completed',
               tokensGenerated: estimatedTokens,
@@ -804,7 +819,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               message: 'Inference cancelled.',
               state: InferenceTerminalState.cancelled,
             );
-            monitor.update(
+            _updateRuntimeStatus(
               LocalRuntimeStatus.runtimeUnavailable,
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
@@ -824,13 +839,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             if (statusLower.contains('out of memory') ||
                 statusLower.contains('oom') ||
                 statusLower.contains('memory')) {
-              monitor.update(LocalRuntimeStatus.failed,
+              _updateRuntimeStatus(LocalRuntimeStatus.failed,
                   message: 'Out of memory: $err',
                   tokensGenerated: estimatedTokens,
                   elapsed: DateTime.now().difference(startedAt),
                   startedAt: startedAt);
             } else {
-              monitor.update(
+              _updateRuntimeStatus(
                 LocalRuntimeStatus.failed,
                 message: err,
                 tokensGenerated: estimatedTokens,
@@ -879,10 +894,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             reason: runtimeResetReason ?? 'runtime_recovery',
           );
         }
-        final terminalState = monitor.state.status;
-        _log(
-          '[TERMINAL_STATE] state=${terminalState.name}'
-          ' generated_tokens=$estimatedTokens'
+          final terminalState = monitor.state.status;
+          _log(
+            '[TERMINAL_STATE] state=${terminalState.name}'
+            ' generated_tokens=$estimatedTokens'
           ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
           ' first_token=${firstTokenAt != null}',
         );
@@ -891,7 +906,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             terminalState == LocalRuntimeStatus.inferencing ||
             terminalState == LocalRuntimeStatus.streaming ||
             terminalState == LocalRuntimeStatus.completed) {
-          monitor.update(
+          _updateRuntimeStatus(
             LocalRuntimeStatus.ready,
             message: 'Runtime verified and ready for the next prompt.',
             tokensGenerated: 0,
@@ -1069,6 +1084,55 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _logAi(String message) {
     debugPrint('[AI] $message');
+  }
+
+  void _updateRuntimeStatus(
+    LocalRuntimeStatus status, {
+    String? message,
+    int? tokensGenerated,
+    Duration? elapsed,
+    DateTime? startedAt,
+    bool resetProgress = false,
+  }) {
+    monitor.update(
+      status,
+      message: message,
+      tokensGenerated: tokensGenerated,
+      elapsed: elapsed,
+      startedAt: startedAt,
+      resetProgress: resetProgress,
+    );
+    _syncLifecycleState(status);
+  }
+
+  void _syncLifecycleState(LocalRuntimeStatus status) {
+    switch (status) {
+      case LocalRuntimeStatus.uninitialized:
+      case LocalRuntimeStatus.runtimeUnavailable:
+      case LocalRuntimeStatus.modelMissing:
+        runtimeStateMachine.reset();
+        return;
+      case LocalRuntimeStatus.loading:
+      case LocalRuntimeStatus.tokenizing:
+        runtimeStateMachine.markLoading();
+        return;
+      case LocalRuntimeStatus.ready:
+        runtimeStateMachine.markReady();
+        return;
+      case LocalRuntimeStatus.completed:
+        runtimeStateMachine.markInferenceCompleted();
+        return;
+      case LocalRuntimeStatus.inferencing:
+      case LocalRuntimeStatus.streaming:
+        runtimeStateMachine.markInferencing();
+        return;
+      case LocalRuntimeStatus.timedOut:
+      case LocalRuntimeStatus.stalled:
+      case LocalRuntimeStatus.ffiMissing:
+      case LocalRuntimeStatus.failed:
+        runtimeStateMachine.markFailed();
+        return;
+    }
   }
 
 }

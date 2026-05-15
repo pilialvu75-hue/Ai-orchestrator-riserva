@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 
 void main() {
@@ -37,6 +38,7 @@ void main() {
       loadRuntimeMode: () async => mode,
       runtimeProvider: localRuntimeProvider,
       cloudRuntimeProvider: cloudRuntimeProvider,
+      sessionManager: RuntimeSessionManager(),
     );
   }
 
@@ -117,6 +119,47 @@ void main() {
 
       final chunks = await streamFuture;
       expect(chunks.any((chunk) => chunk.isError), true);
+    });
+
+    test('starting a new inference cancels the previous session', () async {
+      final startedSessions = <String>[];
+      final cancelledSessions = <String>[];
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, cancellationToken) async* {
+            startedSessions.add(request.sessionId);
+            cancellationToken.onCancel(() {
+              cancelledSessions.add(request.sessionId);
+            });
+            yield InferenceResponse.token(
+              text: request.sessionId,
+              model: 'gemma_2b',
+            );
+            while (!cancellationToken.isCancelled) {
+              await Future<void>.delayed(const Duration(milliseconds: 2));
+            }
+            yield InferenceResponse.error('Inference cancelled.');
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final firstStream = service
+          .stream(const InferenceRequest(sessionId: 'session-1', prompt: 'hello'))
+          .toList();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      final secondChunks = await service
+          .stream(const InferenceRequest(sessionId: 'session-2', prompt: 'world'))
+          .take(1)
+          .toList();
+      final firstChunks = await firstStream;
+
+      expect(startedSessions, <String>['session-1', 'session-2']);
+      expect(cancelledSessions, <String>['session-1']);
+      expect(firstChunks.any((chunk) => chunk.isError), true);
+      expect(secondChunks.single.text, 'session-2');
     });
 
     test('returns error when cloud mode has no API key and no local model',
