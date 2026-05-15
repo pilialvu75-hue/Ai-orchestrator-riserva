@@ -90,6 +90,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _showUpdateDialog(UpdateManifest manifest) async {
+    final l10n = context.l10n;
     final currentVersion = _updateManager.currentVersion;
     final preview = manifest.changelog.trim().isEmpty
         ? 'No changelog available.'
@@ -98,8 +99,8 @@ class _AppShellState extends State<AppShell> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF121212),
-        title: const Text(
-          'New version available',
+        title: Text(
+          l10n.t('new_version_available'),
           style: TextStyle(color: Colors.white),
         ),
         content: Column(
@@ -107,12 +108,12 @@ class _AppShellState extends State<AppShell> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Current: $currentVersion',
+              '${l10n.t('current_version')}: $currentVersion',
               style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 4),
             Text(
-              'Latest: ${manifest.version}',
+              '${l10n.t('latest_version')}: ${manifest.version}',
               style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 12),
@@ -131,8 +132,8 @@ class _AppShellState extends State<AppShell> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'Dismiss',
+            child: Text(
+              l10n.t('dismiss'),
               style: TextStyle(color: Colors.white54),
             ),
           ),
@@ -145,7 +146,7 @@ class _AppShellState extends State<AppShell> {
               backgroundColor: const Color(0xFF8AB4F8),
               foregroundColor: const Color(0xFF0D0D0D),
             ),
-            child: const Text('Update'),
+            child: Text(l10n.t('update')),
           ),
         ],
       ),
@@ -153,6 +154,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _showDownloadDialog() async {
+    final l10n = context.l10n;
     unawaited(_updateManager.downloadLatestApk());
     await showDialog<void>(
       context: context,
@@ -165,8 +167,8 @@ class _AppShellState extends State<AppShell> {
           final hasError = state.status == UpdateStatus.error;
           return AlertDialog(
             backgroundColor: const Color(0xFF121212),
-            title: const Text(
-              'Update download',
+            title: Text(
+              l10n.t('update_download_title'),
               style: TextStyle(color: Colors.white),
             ),
             content: Column(
@@ -205,8 +207,8 @@ class _AppShellState extends State<AppShell> {
             actions: [
               TextButton(
                 onPressed: isDownloading ? null : () => Navigator.pop(ctx),
-                child: const Text(
-                  'Close',
+                child: Text(
+                  l10n.t('close'),
                   style: TextStyle(color: Colors.white54),
                 ),
               ),
@@ -222,7 +224,7 @@ class _AppShellState extends State<AppShell> {
                     backgroundColor: const Color(0xFF8AB4F8),
                     foregroundColor: const Color(0xFF0D0D0D),
                   ),
-                  child: const Text('Install'),
+                  child: Text(l10n.t('install')),
                 ),
             ],
           );

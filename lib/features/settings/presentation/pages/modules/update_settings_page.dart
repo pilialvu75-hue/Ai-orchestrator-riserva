@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
@@ -35,12 +36,13 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
     await _updateManager.checkForUpdates();
     unawaited(_updateManager.refreshDiagnostics());
     if (!mounted) return;
+    final l10n = context.l10n;
     final state = _updateManager.state.value;
     final message = switch (state.status) {
-      UpdateStatus.updateAvailable => 'Update found: v${state.latestManifest?.version ?? '-'}',
-      UpdateStatus.upToDate => 'Already up to date',
+      UpdateStatus.updateAvailable => '${l10n.t('new_version_available')}: v${state.latestManifest?.version ?? '-'}',
+      UpdateStatus.upToDate => l10n.t('already_up_to_date'),
       UpdateStatus.error => state.errorMessage ?? 'Update check failed',
-      _ => 'Update check completed',
+      _ => l10n.t('update_check_completed'),
     };
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -79,6 +81,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0D),
         appBar: AppBar(
@@ -87,9 +90,9 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
           iconTheme: const IconThemeData(color: Colors.white),
         title: GestureDetector(
           onTap: _unlockDiagnostics,
-          child: const Text(
-            'System updates',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+          child: Text(
+            l10n.t('updates'),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
           ),
         ),
       ),
@@ -99,8 +102,8 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
             children: [
-              const Text(
-                'Preferred release channel',
+              Text(
+                l10n.t('preferred_release_channel'),
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 10),
@@ -130,13 +133,13 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
               const SizedBox(height: 28),
               // ── Version info ──────────────────────────────────────────────
               _InfoRow(
-                label: 'Current version',
+                label: l10n.t('current_version'),
                 value: 'v${state.currentVersion}',
                 valueColor: Colors.white,
               ),
               const SizedBox(height: 8),
               _InfoRow(
-                label: 'Latest known',
+                label: l10n.t('latest_known'),
                 value: state.latestManifest != null
                     ? 'v${state.latestManifest!.version}'
                     : '–',
@@ -147,7 +150,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
               if (state.lastCheckedAt != null) ...[
                 const SizedBox(height: 8),
                 _InfoRow(
-                  label: 'Last checked',
+                  label: l10n.t('last_checked'),
                   value: _lastCheckFormat.format(state.lastCheckedAt!.toLocal()),
                   valueColor: Colors.white54,
                   small: true,
@@ -367,7 +370,7 @@ class _ActionRow extends StatelessWidget {
         FilledButton.icon(
           onPressed: (isChecking || isDownloading) ? null : onCheckNow,
           icon: const Icon(Icons.refresh),
-          label: Text(isChecking ? 'Checking…' : 'Check now'),
+          label: Text(isChecking ? '${context.l10n.t('check_updates_now')}…' : context.l10n.t('check_updates_now')),
         ),
       ],
     );
