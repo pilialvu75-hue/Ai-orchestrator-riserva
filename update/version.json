@@ -1,12 +1,12 @@
 {
-  "version": "1.0.14",
-  "versionName": "1.0.14",
-  "versionCode": 14,
+  "version": "1.0.12+84",
+  "versionName": "1.0.12+84",
+  "versionCode": 12+84,
   "channel": "stable",
   "min_supported": "1.0.0",
-  "apk_url": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.14/app-release.apk",
-  "apkUrl": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.14/app-release.apk",
-  "changelog": "v1.0.14 – OTA latest-release sync hardening and local runtime watchdog/recovery diagnostics improvements.",
+  "apk_url": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.12+84/app-release.apk",
+  "apkUrl": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.12+84/app-release.apk",
+  "changelog": "v1.0.12+84 – OTA latest-release sync hardening and local runtime watchdog/recovery diagnostics improvements.",
   "forceUpdate": false,
   "critical": false
 }
