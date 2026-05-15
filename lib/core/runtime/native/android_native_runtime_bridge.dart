@@ -143,13 +143,14 @@ class AndroidNativeRuntimeBridge implements NativeRuntimeBridge {
   Future<String?> pollToken() async {
     _assertInitialized('pollToken');
 
-    final buf = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+    final rawBuf = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+    final buf = rawBuf.cast<Utf8>();
     try {
-      final result = _bindings!.pollToken(buf.cast());
+      final result = _bindings!.pollToken(buf);
       if (result <= 0) return null; // EOS or nothing available
-      return buf.cast<Utf8>().toDartString();
+      return buf.toDartString();
     } finally {
-      calloc.free(buf);
+      calloc.free(rawBuf);
     }
   }
 
