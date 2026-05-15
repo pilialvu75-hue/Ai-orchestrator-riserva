@@ -52,9 +52,10 @@ class BackgroundDownloadService {
         fileSink = file.openWrite();
 
         int bytesDownloaded = 0;
-        // Cache the current session once to avoid repeated map lookups
-        // on every received chunk.
+        double lastReportedProgress = 0.0;
+        // Cache the current session once to avoid repeated map lookups.
         var currentSession = await _currentSession(session.id);
+
         await for (final chunk in response) {
           fileSink.add(chunk);
           bytesDownloaded += chunk.length;
@@ -63,12 +64,18 @@ class BackgroundDownloadService {
               ? (bytesDownloaded / totalBytes).clamp(0.0, 1.0)
               : 0.0;
 
-          currentSession = currentSession.copyWith(
-            bytesDownloaded: bytesDownloaded,
-            totalBytes: totalBytes,
-            progress: progress,
-          );
-          _sessionManager.updateSession(session.id, currentSession);
+          // Throttle progress updates: only emit when progress has advanced
+          // by at least 1 percentage point to reduce event pressure on
+          // listeners for large files with many small chunks.
+          if (progress - lastReportedProgress >= 0.01 || progress >= 1.0) {
+            lastReportedProgress = progress;
+            currentSession = currentSession.copyWith(
+              bytesDownloaded: bytesDownloaded,
+              totalBytes: totalBytes,
+              progress: progress,
+            );
+            _sessionManager.updateSession(session.id, currentSession);
+          }
         }
 
         await fileSink.flush();

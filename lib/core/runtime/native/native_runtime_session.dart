@@ -1,3 +1,5 @@
+import 'package:uuid/uuid.dart';
+
 /// Tracks the state of a single native inference session.
 ///
 /// One [NativeRuntimeSession] corresponds to one call to
@@ -11,16 +13,17 @@ class NativeRuntimeSession {
     required this.startedAt,
   });
 
+  static const _uuid = Uuid();
+
   /// Creates a new session for the given [modelPath].
   ///
-  /// The [sessionId] is derived from the microsecond timestamp at the moment
-  /// of creation, giving a monotonically-increasing unique identifier.
+  /// Session IDs use UUID v4 to guarantee uniqueness across concurrent or
+  /// rapid back-to-back session creations.
   static NativeRuntimeSession create(String modelPath) {
-    final now = DateTime.now();
     return NativeRuntimeSession._(
-      sessionId: now.microsecondsSinceEpoch.toString(),
+      sessionId: _uuid.v4(),
       modelPath: modelPath,
-      startedAt: now,
+      startedAt: DateTime.now(),
     );
   }
 
