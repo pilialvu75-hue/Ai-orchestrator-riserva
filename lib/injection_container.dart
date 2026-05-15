@@ -46,6 +46,9 @@ import 'package:ai_orchestrator/features/cloud_ai/domain/usecases/send_ai_query.
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
+import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
+import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
 import 'package:ai_orchestrator/features/coding_assistant/coding_assistant_agent_impl.dart';
 import 'package:ai_orchestrator/features/coding_assistant/sequential_planning_strategy.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
@@ -189,6 +192,14 @@ Future<void> initDependencies({
   sl.registerLazySingleton<FileTreeService>(() => FileTreeService());
   sl.registerLazySingleton<AgentTaskRouter>(() => AgentTaskRouter());
   sl.registerLazySingleton<CodeChunker>(() => const CodeChunker());
+  sl.registerLazySingleton<MemoryWindowManager>(
+    () => const MemoryWindowManager(),
+  );
+  sl.registerLazySingleton<RollingContextBuilder>(
+    () => RollingContextBuilder(
+      windowManager: sl<MemoryWindowManager>(),
+    ),
+  );
   sl.registerLazySingleton<WorkspaceEmbeddingService>(
     () => const WorkspaceEmbeddingService(),
   );
@@ -205,6 +216,13 @@ Future<void> initDependencies({
   sl.registerLazySingleton<ContextRetrievalService>(
     () => ContextRetrievalService(
       index: sl<SemanticWorkspaceIndex>(),
+      embeddingService: sl<WorkspaceEmbeddingService>(),
+    ),
+  );
+  sl.registerLazySingleton<ConversationMemoryService>(
+    () => ConversationMemoryService(
+      rollingContextBuilder: sl<RollingContextBuilder>(),
+      semanticWorkspaceIndex: sl<SemanticWorkspaceIndex>(),
       embeddingService: sl<WorkspaceEmbeddingService>(),
     ),
   );
@@ -428,6 +446,7 @@ Future<void> initDependencies({
     () => ChatRepositoryImpl(
       localDataSource: sl<ChatLocalDataSource>(),
       orchestrator: sl<Orchestrator>(),
+      conversationMemoryService: sl<ConversationMemoryService>(),
     ),
   );
 

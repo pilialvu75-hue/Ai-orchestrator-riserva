@@ -374,6 +374,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[MODEL_EXECUTION] tokenization start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
       );
+      _log(
+        '[CONTEXT_SIZE] session=$sessionId context_lines=${request.context.length} system_chars=${(request.systemPrompt ?? '').length} prompt_chars=${request.prompt.length} composed_prompt_chars=${prompt.length}',
+      );
+      _log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
+      _log(
+        '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
+      );
       final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
       if (request.maxTokens > _safeMaxTokens) {
         _log(
@@ -483,6 +490,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _log('[WARMUP] inference_startup_ok session=$sessionId'
           ' startup_ms=${startupWatch.elapsed.inMilliseconds}');
+      _log(
+        '[PROMPT_EVAL] stage=ready startup_ms=${startupWatch.elapsed.inMilliseconds}',
+      );
 
       cancellationToken.onCancel(() => _safeCancel(bindings));
 
@@ -511,6 +521,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _logAi('streaming callback active');
       _log('[STREAM_ADD] event=generation_started session=$sessionId');
       _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
+      _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
 
       try {
         while (true) {
@@ -525,9 +536,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
           );
           _log(
+            '[TOKEN_LOOP] iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
+          );
+          _log(
             '[GENERATION_STEP] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds}'
             ' generated_tokens=$estimatedTokens',
           );
+          _log(
+            '[GENERATION_ALIVE] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds} first_token=${firstTokenAt != null}',
+          );
+          if (firstTokenAt == null && pollIterations % 25 == 0) {
+            _log(
+              '[FIRST_TOKEN_WAIT] iteration=$pollIterations waited_ms=${elapsed.inMilliseconds}',
+            );
+          }
           if (cancellationToken.isCancelled) {
             _safeCancel(bindings);
             clearRuntimeVerification();
@@ -585,6 +607,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
+            _log(
+              '[FIRST_TOKEN_TIMEOUT] waited_ms=${elapsed.inMilliseconds} timeout_ms=${_stalledInferenceTimeout.inMilliseconds}',
+            );
             _log(
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
               ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
@@ -747,6 +772,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
               );
               _log(
+                '[TOKEN_EVAL] token_index=$estimatedTokens elapsed_ms=${streamingElapsed.inMilliseconds}',
+              );
+              _log(
                 '[TOKEN_DECODE] token_index=$estimatedTokens chars=${piece.length}'
                 ' text="${piece.replaceAll('\n', r'\n')}"',
               );
@@ -793,7 +821,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 ' session=$sessionId',
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
+              final flushWatch = Stopwatch()..start();
               controller.add(InferenceResponse.token(text: piece, model: modelId));
+              flushWatch.stop();
+              _log(
+                '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
+              );
             } else {
               consecutiveInvalidTokens++;
               _log(
@@ -842,11 +875,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             _logAi('inference completed');
             _log('[STREAM_ADD] event=final_chunk session=$sessionId');
+            final flushWatch = Stopwatch()..start();
             controller.add(InferenceResponse.finalChunk(
               text: fullText.toString(),
               tokensGenerated: estimatedTokens,
               model: modelId,
             ));
+            flushWatch.stop();
+            _log(
+              '[STREAM_FLUSH] event=final_chunk session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
+            );
             _updateRuntimeStatus(
               LocalRuntimeStatus.completed,
               message: 'Completed',
@@ -933,6 +971,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               _log(
                 '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
                 'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
+              );
+              _log(
+                '[GENERATION_IDLE] idle_polls=$consecutiveIdlePolls idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
               );
             }
             await Future<void>.delayed(const Duration(milliseconds: 24));

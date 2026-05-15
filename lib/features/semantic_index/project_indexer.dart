@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/features/code_context/code_chunker.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
@@ -44,13 +45,16 @@ class ProjectIndexer {
         content: content,
       );
       for (final chunk in chunks) {
-        final embedding = _embeddingService.embedText(chunk.text);
+        final embedding = await _embeddingService.embedTextAsync(chunk.text);
         await _semanticIndex.upsertChunk(
           workspaceId: workspaceId,
           documentPath: chunk.documentPath,
           chunkIndex: chunk.chunkIndex,
           chunkText: chunk.text,
           vector: embedding,
+        );
+        debugPrint(
+          '[EMBEDDING_STORE] scope=workspace workspace_id=$workspaceId path=${chunk.documentPath} chunk=${chunk.chunkIndex} dims=${embedding.length}',
         );
       }
     }
@@ -61,4 +65,3 @@ class ProjectIndexer {
     return allowedExtensions.any((ext) => lower.endsWith(ext));
   }
 }
-

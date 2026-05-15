@@ -236,6 +236,7 @@ static void generation_thread(GenArgs args) {
     // Prefill: decode the prompt batch.
     // Clear memory (KV cache) before starting a new generation.
     LOGI("[THREAD] clearing KV cache");
+    LOGI("[KV_CACHE] action=clear scope=context");
     llama_memory_clear(llama_get_memory(args.ctx), /*data=*/true);
 
     llama_batch batch = llama_batch_init(
@@ -263,8 +264,15 @@ static void generation_thread(GenArgs args) {
     batch.n_tokens = static_cast<int32_t>(tokens.size());
 
     LOGI("[THREAD] starting prefill decode for %d prompt tokens", n_tokens);
+    LOGI("[PROMPT_EVAL] stage=start prompt_tokens=%d", n_tokens);
+    const auto prompt_eval_start = std::chrono::steady_clock::now();
     const int prefill_decode_status = llama_decode(args.ctx, batch);
+    const auto prompt_eval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - prompt_eval_start
+    ).count();
     LOGI("[THREAD] prefill decode status: %d", prefill_decode_status);
+    LOGI("[PROMPT_EVAL] stage=end status=%d elapsed_ms=%lld",
+         prefill_decode_status, static_cast<long long>(prompt_eval_ms));
     if (prefill_decode_status != 0) {
         llama_batch_free(batch);
         LOGE("[THREAD] prefill decode failed with status %d", prefill_decode_status);
@@ -359,6 +367,8 @@ static void generation_thread(GenArgs args) {
         }
         if (n_decode == 0 && since_last_token_ms >= kNoTokenStallMillis) {
             LOGE("[THREAD] no-first-token stall after %lld ms (limit: %d ms) — aborting",
+                 static_cast<long long>(since_last_token_ms), kNoTokenStallMillis);
+            LOGE("[FIRST_TOKEN_TIMEOUT] waited_ms=%lld timeout_ms=%d",
                  static_cast<long long>(since_last_token_ms), kNoTokenStallMillis);
             set_error("Local model stalled during inference.");
             llama_sampler_free(sampler);
@@ -487,6 +497,8 @@ static void generation_thread(GenArgs args) {
         step.n_tokens       = 1;
 
         const int decode_status = llama_decode(args.ctx, step);
+        LOGI("[TOKEN_EVAL] token_index=%d status=%d",
+             static_cast<int>(n_decode + 1), decode_status);
         LOGI("[THREAD] step decode status=%d token_id=%d pos=%d",
              decode_status, static_cast<int>(new_tok), static_cast<int>(n_cur));
         if (decode_status != 0) {
