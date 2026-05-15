@@ -16,10 +16,11 @@ class NativeRuntimeSession {
   /// The [sessionId] is derived from the microsecond timestamp at the moment
   /// of creation, giving a monotonically-increasing unique identifier.
   static NativeRuntimeSession create(String modelPath) {
+    final now = DateTime.now();
     return NativeRuntimeSession._(
-      sessionId: DateTime.now().microsecondsSinceEpoch.toString(),
+      sessionId: now.microsecondsSinceEpoch.toString(),
       modelPath: modelPath,
-      startedAt: DateTime.now(),
+      startedAt: now,
     );
   }
 

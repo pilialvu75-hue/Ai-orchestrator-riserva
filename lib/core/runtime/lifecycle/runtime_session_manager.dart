@@ -23,12 +23,13 @@ class InferenceSession {
     required String modelPath,
     required String prompt,
   }) {
+    final now = DateTime.now();
     return InferenceSession._(
-      sessionId: DateTime.now().microsecondsSinceEpoch.toString(),
+      sessionId: now.microsecondsSinceEpoch.toString(),
       modelPath: modelPath,
       prompt: prompt,
       cancellationToken: CancellationToken(),
-      startedAt: DateTime.now(),
+      startedAt: now,
     );
   }
 
