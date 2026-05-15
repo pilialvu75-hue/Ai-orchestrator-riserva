@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
-import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
+import 'package:ai_orchestrator_riserva/lib/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator_riserva/lib/core/runtime/inference/local_runtime_provider.dart';
 
 /// Returns the [LocalRuntimeProvider] appropriate for the current platform.
