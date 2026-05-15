@@ -1,13 +1,8 @@
-import 'dart:collection';
-
 class EmbeddingCacheService {
   EmbeddingCacheService({int maxSize = 1024}) : _maxSize = maxSize;
 
   final int _maxSize;
-  // LinkedHashMap preserves insertion order, which guarantees that
-  // `_cache.keys.first` always returns the oldest entry for FIFO eviction.
-  final LinkedHashMap<String, List<double>> _cache =
-      LinkedHashMap<String, List<double>>();
+  final Map<String, List<double>> _cache = {};
 
   List<double>? get(String text) => _cache[text];
 

@@ -1,11 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:uuid/uuid.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
 /// Represents one active inference session.
+///
+/// The [sessionId] is derived from the microsecond timestamp at creation
+/// time, which gives a unique, monotonically-increasing identifier without
+/// requiring a UUID package.
 class InferenceSession {
   InferenceSession._({
     required this.sessionId,
@@ -15,22 +18,18 @@ class InferenceSession {
     required this.startedAt,
   });
 
-  static const _uuid = Uuid();
-
   /// Creates a new [InferenceSession] for [modelPath] with [prompt].
-  ///
-  /// Session IDs are generated with UUIDs (v4) to guarantee uniqueness even
-  /// when multiple sessions are created within the same microsecond.
   factory InferenceSession.create({
     required String modelPath,
     required String prompt,
   }) {
+    final now = DateTime.now();
     return InferenceSession._(
-      sessionId: _uuid.v4(),
+      sessionId: now.microsecondsSinceEpoch.toString(),
       modelPath: modelPath,
       prompt: prompt,
       cancellationToken: CancellationToken(),
-      startedAt: DateTime.now(),
+      startedAt: now,
     );
   }
 
