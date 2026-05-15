@@ -71,6 +71,9 @@ abstract final class LlamaFfiLoader {
       );
     } catch (error, stackTrace) {
       log?.call(
+        '[FFI_SYMBOLS_FAILURE] library=$bridgeLibraryName abi=$abi error=$error',
+      );
+      log?.call(
         '[FFI_LOAD_FAILURE] reason=symbol_bind_exception'
         ' library=$bridgeLibraryName abi=$abi'
         ' error=$error',

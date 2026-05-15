@@ -39,3 +39,16 @@ class SendMessageEvent extends ChatEvent {
 class PruneHistoryEvent extends ChatEvent {
   const PruneHistoryEvent();
 }
+
+class RecoverFromStuckUiEvent extends ChatEvent {
+  const RecoverFromStuckUiEvent({
+    required this.sessionId,
+    required this.runtimeMessage,
+  });
+
+  final String sessionId;
+  final String runtimeMessage;
+
+  @override
+  List<Object?> get props => [sessionId, runtimeMessage];
+}

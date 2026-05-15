@@ -55,6 +55,7 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
+    _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
     _log(
       '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
     );
@@ -102,6 +103,7 @@ class InferenceService {
       _activeSessionIds.remove(request.sessionId);
       _log('async listener cleanup session=${request.sessionId}');
       _log('stream end session=${request.sessionId}');
+      _log('[ORCHESTRATOR_END] session=${request.sessionId}');
     }
   }
 
@@ -206,6 +208,14 @@ class InferenceService {
         'isFinal=${chunk.isFinal} isError=${chunk.isError} text_len=${chunk.text.length} '
         'tokens=${chunk.tokensGenerated} notice=${chunk.runtimeNotice}',
       );
+      if (chunk.isError &&
+          _isStalledPreInferenceError(chunk.errorMessage)) {
+        cancellationToken.cancel();
+        _log(
+          '[TERMINAL_STATE] state=stalled_pre_inference session=${localRequest.sessionId}'
+          ' stage=local_stream_guard',
+        );
+      }
       if (chunk.isError &&
           allowCloudFallback &&
           !emittedLocalToken &&
@@ -408,6 +418,12 @@ class InferenceService {
         normalized.contains('stalled') ||
         normalized.contains('tempor') ||
         normalized.contains('network');
+  }
+
+  bool _isStalledPreInferenceError(String? errorMessage) {
+    final normalized = (errorMessage ?? '').toLowerCase();
+    return normalized.contains('stage=stalled_pre_inference') ||
+        normalized.contains('stalled_pre_inference');
   }
 
   // Stable request fingerprint used only for rapid duplicate suppression inside

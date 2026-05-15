@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'package:ai_orchestrator/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
@@ -23,6 +24,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static const _logTag = 'ORCHESTRATOR_STATE';
+  static const Duration _preInferenceUiTimeout = Duration(seconds: 15);
 
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
@@ -31,6 +33,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     on<LoadMessagesEvent>(_onLoadMessages);
     on<SendMessageEvent>(_onSendMessage);
     on<PruneHistoryEvent>(_onPruneHistory);
+    on<RecoverFromStuckUiEvent>(_onRecoverFromStuckUi);
   }
 
   final IChatRepository _chatRepository;
@@ -52,6 +55,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
+    _log('[ORCHESTRATOR_BEGIN] session=${event.sessionId}');
     _log(
       'listener send_message session=${event.sessionId} prompt_chars=${event.userPrompt.length} attachments=${event.attachments.length}',
     );
@@ -89,13 +93,18 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     );
 
     try {
-      await _chatRepository.sendMessage(
+      var streamStarted = false;
+      final sendFuture = _chatRepository.sendMessage(
         sessionId: event.sessionId,
         userPrompt: event.userPrompt,
         systemPrompt: event.systemPrompt,
         attachments: event.attachments,
         onPartialResponse: (partialText) {
           if (emit.isDone) return;
+          if (partialText.trim().isNotEmpty && !streamStarted) {
+            streamStarted = true;
+            _log('[UI_STREAM_BEGIN] session=${event.sessionId}');
+          }
           _log(
             'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
           );
@@ -143,6 +152,17 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           );
         },
       );
+      await sendFuture.timeout(
+        _preInferenceUiTimeout,
+        onTimeout: () {
+          if (!streamStarted) {
+            throw TimeoutException(
+              '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}',
+            );
+          }
+          return sendFuture;
+        },
+      );
       final messages = await _chatRepository.getMessages(event.sessionId);
       _messages = List<ChatMessage>.from(messages);
       _log('message persistence send_complete session=${event.sessionId} count=${_messages.length}');
@@ -152,8 +172,15 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           runtimeMessage: runtimeNotice,
         ),
       );
+      _log('[UI_STREAM_END] session=${event.sessionId}');
     } catch (error) {
       _log('send_message error session=${event.sessionId}: $error');
+      if (error is TimeoutException) {
+        _log(
+          '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
+          ' reason=orchestrator_timeout_15s',
+        );
+      }
       // Emit the real persisted message list (_messages) without the ephemeral
       // optimistic message so no ghost messages appear in the UI for requests
       // that were never persisted to the database.
@@ -164,6 +191,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
         ),
       );
+    } finally {
+      _log('[ORCHESTRATOR_END] session=${event.sessionId}');
     }
   }
 
@@ -173,6 +202,20 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       maxAgeDays: AppConstants.chatHistoryMaxAgeDays,
       maxRows: AppConstants.chatHistoryMaxRows,
     );
+  }
+
+  Future<void> _onRecoverFromStuckUi(
+    RecoverFromStuckUiEvent event,
+    Emitter<ChatState> emit,
+  ) async {
+    _log('[inference_loop_detected] session=${event.sessionId} source=orchestrator');
+    emit(
+      ChatLoaded(
+        messages: List.unmodifiable(_messages),
+        runtimeMessage: event.runtimeMessage,
+      ),
+    );
+    _log('[ORCHESTRATOR_END] session=${event.sessionId} recovery=forced_ui_unlock');
   }
 
   String _extractErrorMessage(Object error) {
