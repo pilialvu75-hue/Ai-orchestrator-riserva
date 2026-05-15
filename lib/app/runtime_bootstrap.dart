@@ -16,6 +16,7 @@ class RuntimeBootstrap {
   static const String _versionFallback = '1.0.12+12';
 
   Future<void> initialize() async {
+    debugPrint('[BOOT] init begin');
     final appVersion = await _resolveAppVersion();
 
     await di.initDependencies(
@@ -28,6 +29,7 @@ class RuntimeBootstrap {
     );
 
     await _runWarmupChecks();
+    debugPrint('[BOOT] init complete');
   }
 
   Future<String> _resolveAppVersion() async {
@@ -52,6 +54,7 @@ class RuntimeBootstrap {
   }
 
   Future<void> _runWarmupChecks() async {
+    debugPrint('[WARMUP] startup checks begin');
     await Future.wait<void>([
       _critical('database', () async {
         final _ = await di.sl<DatabaseHelper>().database;
@@ -102,6 +105,7 @@ class RuntimeBootstrap {
         );
       }
     });
+    debugPrint('[WARMUP] startup checks complete');
   }
 
   Future<void> _guarded(String label, Future<void> Function() task) async {

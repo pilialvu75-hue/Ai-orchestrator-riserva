@@ -1,8 +1,17 @@
 export 'chat/chat.dart';
 export 'cloud_ai/cloud_ai.dart';
+export 'code_context/code_chunker.dart';
+export 'code_context/context_retrieval_service.dart';
 export 'local_ai/local_ai.dart';
 export 'multimodal/multimodal.dart';
 export 'onboarding/onboarding.dart';
+export 'project_memory/workspace_project_memory_service.dart';
 export 'projects/projects.dart';
+export 'semantic_index/project_indexer.dart';
+export 'semantic_index/semantic_workspace_index.dart';
+export 'semantic_index/workspace_embedding_service.dart';
 export 'settings/settings.dart';
 export 'voice/voice.dart';
+export 'workspace/agent_task_router.dart';
+export 'workspace/file_tree_service.dart';
+export 'workspace/workspace_manager.dart';

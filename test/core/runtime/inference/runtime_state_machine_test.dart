@@ -48,5 +48,13 @@ void main() {
 
       expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
     });
+
+    test('ignores invalid transition from uninitialized to inferencing', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.markInferencing();
+
+      expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
+    });
   });
 }

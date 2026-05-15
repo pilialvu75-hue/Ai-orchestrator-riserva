@@ -70,6 +70,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const Duration _stalledInferenceTimeout = Duration(seconds: 45);
   static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
+  static const Duration _modelLoadTimeout = Duration(seconds: 60);
   // 2400 polls × 24ms delay ~= 57.6s without token progress.
   // This caps idle polling so llb_poll_token() cannot spin forever.
   static const int _maxIdlePollIterations = 2400;
@@ -93,6 +94,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   LlamaBridgeBindings? _bindings;
   bool _loadAttempted = false;
   Future<void> _inferenceTail = Future<void>.value();
+  Future<void>? _warmupFuture;
+  final Set<String> _activeInferenceSessions = <String>{};
 
   // ── Library loading ──────────────────────────────────────────────────────────
 
@@ -149,6 +152,22 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     () async {
       await _runInferenceSerially(() async {
+      final sessionId = request.sessionId.trim().isEmpty
+          ? 'unknown'
+          : request.sessionId.trim();
+      _log('[SESSION] begin session=$sessionId');
+      if (!_claimInferenceSlot(sessionId)) {
+        _log('[SESSION] recursive_guard_triggered session=$sessionId');
+        _finishWithRuntimeError(
+          controller,
+          stage: 'recursive_inference_guard',
+          message: 'Recursive inference call blocked for session $sessionId.',
+        );
+        return;
+      }
+      try {
+      await _ensureWarmup(controller: controller, sessionId: sessionId);
+      if (controller.isClosed) return;
       if (cancellationToken.isCancelled) {
         _finishWithRuntimeError(
           controller,
@@ -160,6 +179,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       final modelPath = request.modelPath;
       final modelId = request.modelId;
+      _log('[CONTEXT] session=$sessionId lines=${request.context.length}'
+          ' system_prompt=${(request.systemPrompt ?? '').trim().isNotEmpty}');
 
       // ── MODEL PATH FORENSICS ─────────────────────────────────────────────────
       _log('[MODEL_PATH] modelId=$modelId path=${modelPath ?? "(null)"}'
@@ -224,6 +245,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final modelValidationError =
           await Isolate.run(() => _validateModelFileForRuntime(modelPath));
       if (modelValidationError != null) {
+        _log('[GGUF] validation=failed path=$modelPath reason=$modelValidationError');
         _log('[TERMINAL_STATE] state=failed reason=model_validation'
             ' path=$modelPath error=$modelValidationError');
         clearRuntimeVerification();
@@ -238,6 +260,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
+      _log('[GGUF] validation=ok path=$modelPath');
 
       if (!_ensureLibraryLoaded()) {
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
@@ -268,15 +291,23 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       int loadResult;
       try {
-        loadResult = bindings.loadModel(modelPath);
+        loadResult = await _runNativeCallWithTimeout<int>(
+          stage: 'model_load',
+          timeout: _modelLoadTimeout,
+          call: () => bindings.loadModel(modelPath),
+        );
       } catch (error) {
         _log('[NATIVE_MODEL_LOAD_FAILURE] path=$modelPath exception=$error');
         _log('[NATIVE_CONTEXT_FAILURE] path=$modelPath reason=ffi_exception');
         _log('[TERMINAL_STATE] state=failed reason=model_load_exception');
         clearRuntimeVerification();
         _updateRuntimeStatus(
-          LocalRuntimeStatus.failed,
-          message: 'Model load failed: $error',
+          error is TimeoutException
+              ? LocalRuntimeStatus.timedOut
+              : LocalRuntimeStatus.failed,
+          message: error is TimeoutException
+              ? 'Model load timed out.'
+              : 'Model load failed: $error',
         );
         _finishWithRuntimeError(
           controller,
@@ -323,11 +354,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           .split(RegExp(r'\s+'))
           .where((token) => token.isNotEmpty)
           .length;
+      if (promptWordEstimate <= 0) {
+        clearRuntimeVerification();
+        _updateRuntimeStatus(
+          LocalRuntimeStatus.failed,
+          message: 'Tokenizer readiness check failed: prompt has no tokens.',
+        );
+        _finishWithRuntimeError(
+          controller,
+          stage: 'tokenizer_readiness',
+          message: 'Tokenizer readiness check failed before inference.',
+        );
+        return;
+      }
       _updateRuntimeStatus(
         LocalRuntimeStatus.tokenizing,
         message: 'Tokenizing...',
         resetProgress: true,
       );
+      _log('[TOKENIZER] status=begin prompt_chars=${prompt.length}');
       _log(
         '[MODEL_EXECUTION] tokenization start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
       );
@@ -368,21 +413,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
-        startResult = bindings.startGeneration(
-          prompt,
-          maxTokens,
-          request.temperature,
+        startResult = await _runNativeCallWithTimeout<int>(
+          stage: 'start_generation',
+          timeout: _startGenerationTimeout,
+          call: () => bindings.startGeneration(
+            prompt,
+            maxTokens,
+            request.temperature,
+          ),
         );
       } catch (error) {
         startupWatch.stop();
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
-        _updateRuntimeStatus(LocalRuntimeStatus.failed,
-            message: 'Native start_generation failed: $error');
+        _updateRuntimeStatus(
+          error is TimeoutException
+              ? LocalRuntimeStatus.timedOut
+              : LocalRuntimeStatus.failed,
+          message: error is TimeoutException
+              ? 'Native start_generation timed out.'
+              : 'Native start_generation failed: $error',
+        );
         _finishWithRuntimeError(
           controller,
           stage: 'start_generation',
-          message: 'Native generation start failed.',
+          message: error is TimeoutException
+              ? 'Native generation start timed out.'
+              : 'Native generation start failed.',
           details: error.toString(),
         );
         return;
@@ -422,6 +479,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
+      _log('[WARMUP] inference_startup_ok session=$sessionId'
+          ' startup_ms=${startupWatch.elapsed.inMilliseconds}');
 
       cancellationToken.onCancel(() => _safeCancel(bindings));
 
@@ -904,8 +963,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         if (terminalState == LocalRuntimeStatus.loading ||
             terminalState == LocalRuntimeStatus.tokenizing ||
             terminalState == LocalRuntimeStatus.inferencing ||
-            terminalState == LocalRuntimeStatus.streaming ||
-            terminalState == LocalRuntimeStatus.completed) {
+            terminalState == LocalRuntimeStatus.streaming) {
           _updateRuntimeStatus(
             LocalRuntimeStatus.ready,
             message: 'Runtime verified and ready for the next prompt.',
@@ -920,6 +978,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           await controller.close();
         }
       }
+      } finally {
+        _releaseInferenceSlot(sessionId);
+        _log('[SESSION] end session=$sessionId');
+      }
       });
     }();
 
@@ -932,6 +994,66 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final next = _inferenceTail.then((_) => action());
     _inferenceTail = next.catchError((_) {});
     return next;
+  }
+
+  Future<T> _runNativeCallWithTimeout<T>({
+    required String stage,
+    required Duration timeout,
+    required T Function() call,
+  }) async {
+    _log('[WARMUP] native_call stage=$stage timeout_ms=${timeout.inMilliseconds}');
+    return Future<T>.sync(call).timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException(
+        'Native call timed out at stage=$stage after ${timeout.inSeconds}s.',
+      ),
+    );
+  }
+
+  bool _claimInferenceSlot(String sessionId) {
+    if (_activeInferenceSessions.contains(sessionId)) return false;
+    _activeInferenceSessions.add(sessionId);
+    return true;
+  }
+
+  void _releaseInferenceSlot(String sessionId) {
+    _activeInferenceSessions.remove(sessionId);
+  }
+
+  Future<void> _ensureWarmup({
+    required StreamController<InferenceResponse> controller,
+    required String sessionId,
+  }) async {
+    _warmupFuture ??= _runWarmup();
+    _log('[WARMUP] await session=$sessionId');
+    try {
+      await _warmupFuture!;
+      _log('[WARMUP] complete session=$sessionId');
+    } catch (error) {
+      _warmupFuture = null;
+      _finishWithRuntimeError(
+        controller,
+        stage: 'warmup',
+        message: 'Runtime warmup failed.',
+        details: error.toString(),
+      );
+    }
+  }
+
+  Future<void> _runWarmup() async {
+    _log('[BOOT] runtime warmup begin');
+    _updateRuntimeStatus(
+      LocalRuntimeStatus.loading,
+      message: 'Runtime warmup in progress...',
+      resetProgress: true,
+    );
+    if (!LlamaFfiLoader.isCurrentPlatformSupported) {
+      throw StateError('Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).');
+    }
+    if (!_ensureLibraryLoaded()) {
+      throw StateError('libllama_bridge.so is missing for this Android build.');
+    }
+    _log('[BOOT] runtime warmup library ready');
   }
 
   static void _finishWithError(
