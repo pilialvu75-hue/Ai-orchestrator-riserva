@@ -72,21 +72,17 @@ class NativeRuntimeBridgeState {
   /// no error has occurred.
   final String? lastError;
 
-  /// Returns a copy with the specified fields replaced.
-  ///
-  /// To explicitly clear [lastError], pass `clearLastError: true`.
   NativeRuntimeBridgeState copyWith({
     bool? isLibraryLoaded,
     bool? isModelLoaded,
     bool? isGenerating,
     String? lastError,
-    bool clearLastError = false,
   }) {
     return NativeRuntimeBridgeState(
       isLibraryLoaded: isLibraryLoaded ?? this.isLibraryLoaded,
       isModelLoaded: isModelLoaded ?? this.isModelLoaded,
       isGenerating: isGenerating ?? this.isGenerating,
-      lastError: clearLastError ? null : (lastError ?? this.lastError),
+      lastError: lastError ?? this.lastError,
     );
   }
 
