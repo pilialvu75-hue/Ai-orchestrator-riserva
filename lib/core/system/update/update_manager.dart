@@ -14,6 +14,10 @@ import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 
 class UpdateManager {
+  static const String _prefPendingApkPath = 'update_pending_apk_path';
+  static const String _prefPendingVersion = 'update_pending_version';
+  static const String _prefPendingSavedAt = 'update_pending_saved_at';
+
   UpdateManager({
     required UpdateChecker updateChecker,
     required VersionComparator comparator,
@@ -51,6 +55,7 @@ class UpdateManager {
     bool checkOnStartup = true,
     Duration interval = const Duration(hours: 12),
   }) async {
+    await _resumePendingInstallerState();
     if (checkOnStartup) {
       unawaited(checkForUpdates());
     }
@@ -270,6 +275,10 @@ class UpdateManager {
           clearLastException: true,
         ),
       );
+      await _persistPendingInstallerState(
+        apkPath: filePath,
+        version: manifest.version,
+      );
       return true;
     } catch (e, st) {
       _logUpdateDownload('fail error=$e');
@@ -290,9 +299,11 @@ class UpdateManager {
 
   Future<bool> prepareInstallIntent() async {
     _logUpdateInstallStart();
+    _logUpdateApply('begin');
     await _syncAndroidInstallDiagnostics();
     final apkPath = state.value.tempApkPath;
     if (apkPath == null || apkPath.isEmpty) {
+      _logUpdateApply('fail reason=missing_apk_path');
       _logUpdateInstallFail('No downloaded APK available');
       _logInstall('Install requested without downloaded APK');
       state.value = state.value.copyWith(
@@ -310,6 +321,7 @@ class UpdateManager {
     final exists = await apkFile.exists();
     _logInstall('Preparing installer launch. apkPath=$apkPath exists=$exists');
     if (!exists) {
+      _logUpdateApply('fail reason=apk_missing');
       _logUpdateInstallFail('Downloaded APK file is missing');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -328,6 +340,7 @@ class UpdateManager {
     final result = await _intentHandler.openApkInstaller(apkPath);
     if (result.isLeft()) {
       final failure = result.swap().getOrElse(() => throw StateError('Unexpected empty failure'));
+      _logUpdateApply('fail reason=${failure.message}');
       _logUpdateInstallFail(failure.message);
       _logInstall('Installer launch failed: ${failure.message}');
       state.value = state.value.copyWith(
@@ -347,6 +360,7 @@ class UpdateManager {
     _logInstall('Installer launch result: success=$success');
     await _syncAndroidInstallDiagnostics();
     if (!success) {
+      _logUpdateApply('fail reason=installer_launch_returned_false');
       _logUpdateInstallFail('installer_launch_returned_false');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -355,6 +369,7 @@ class UpdateManager {
       return false;
     }
     _logUpdateInstallSuccess();
+    _logUpdateApply('success installer_launched=true');
     state.value = state.value.copyWith(
       status: UpdateStatus.idle,
       clearTempApkPath: true,
@@ -367,6 +382,8 @@ class UpdateManager {
         clearLastException: success,
       ),
     );
+    await _cleanupInstallerArtifacts(apkPath);
+    await _clearPendingInstallerState();
     return success;
   }
 
@@ -434,6 +451,67 @@ class UpdateManager {
     );
   }
 
+  Future<void> _resumePendingInstallerState() async {
+    final pendingPath = _preferences.getString(_prefPendingApkPath);
+    if (pendingPath == null || pendingPath.trim().isEmpty) {
+      return;
+    }
+    final apkFile = File(pendingPath);
+    final exists = await apkFile.exists();
+    if (!exists) {
+      _logUpdateResume('stale_pending_path_missing path=$pendingPath');
+      await _clearPendingInstallerState();
+      return;
+    }
+    final version = _preferences.getString(_prefPendingVersion);
+    _logUpdateResume(
+      'ready_to_resume path=$pendingPath version=${version ?? 'unknown'}',
+    );
+    state.value = state.value.copyWith(
+      status: UpdateStatus.readyToInstall,
+      tempApkPath: pendingPath,
+      diagnostics: state.value.diagnostics.copyWith(
+        apkDownloaded: true,
+        apkPath: pendingPath,
+        apkFileExists: true,
+      ),
+    );
+  }
+
+  Future<void> _persistPendingInstallerState({
+    required String apkPath,
+    required String version,
+  }) async {
+    await _preferences.setString(_prefPendingApkPath, apkPath);
+    await _preferences.setString(_prefPendingVersion, version);
+    await _preferences.setInt(
+      _prefPendingSavedAt,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    _logUpdateResume('persisted_pending_installer path=$apkPath version=$version');
+  }
+
+  Future<void> _clearPendingInstallerState() async {
+    await _preferences.remove(_prefPendingApkPath);
+    await _preferences.remove(_prefPendingVersion);
+    await _preferences.remove(_prefPendingSavedAt);
+    _logUpdateCleanup('pending_state_cleared');
+  }
+
+  Future<void> _cleanupInstallerArtifacts(String apkPath) async {
+    final file = File(apkPath);
+    if (!await file.exists()) {
+      _logUpdateCleanup('apk_missing path=$apkPath');
+      return;
+    }
+    try {
+      await file.delete();
+      _logUpdateCleanup('apk_deleted path=$apkPath');
+    } catch (error) {
+      _logUpdateCleanup('apk_delete_failed path=$apkPath error=$error');
+    }
+  }
+
   void _logUpdate(String message) => debugPrint('[UPDATE] $message');
   void _logApk(String message) => debugPrint('[APK] $message');
   void _logVersion(String message) => debugPrint('[VERSION] $message');
@@ -444,6 +522,9 @@ class UpdateManager {
   void _logUpdateInstallFail(String reason) =>
       debugPrint('[UPDATE_INSTALL_FAIL] reason=$reason');
   void _logUpdateInstallSuccess() => debugPrint('[UPDATE_INSTALL_SUCCESS] launched=true');
+  void _logUpdateResume(String message) => debugPrint('[UPDATE_RESUME] $message');
+  void _logUpdateApply(String message) => debugPrint('[UPDATE_APPLY] $message');
+  void _logUpdateCleanup(String message) => debugPrint('[UPDATE_CLEANUP] $message');
 
   void dispose() {
     stopBackgroundChecks();

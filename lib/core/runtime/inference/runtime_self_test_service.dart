@@ -34,7 +34,7 @@ class RuntimeSelfTestService {
 
   Future<RuntimeSelfTestResult> run() async {
     final notes = <String>[];
-    _log('[SELFTEST_START] session=$selfTestSessionId');
+    _log('[COMM_TEST_START] session=$selfTestSessionId');
 
     try {
       final selectedResult = await _localAiRepository.getSelectedModel();
@@ -67,13 +67,18 @@ class RuntimeSelfTestService {
       await _chatRepository.clearSession(selfTestSessionId);
 
       final cancellationToken = CancellationToken();
+      final responseBuffer = StringBuffer();
       String? firstToken;
       String? streamTerminalError;
+      var emittedTokenChunks = 0;
+      var streamAliveTicks = 0;
+      var completed = false;
       await for (final chunk in _runtimeProvider.streamInference(
         request: InferenceRequest(
           sessionId: selfTestSessionId,
-          prompt: 'Hello',
-          maxTokens: 8,
+          prompt:
+              'Write one short, readable sentence with at least twelve words about offline local AI assistants.',
+          maxTokens: 64,
           temperature: 0.2,
           isOffline: true,
           modelId: selectedModel.effectiveRuntimeModelId,
@@ -81,13 +86,27 @@ class RuntimeSelfTestService {
         ),
         cancellationToken: cancellationToken,
       )) {
+        streamAliveTicks++;
+        if (!chunk.isError && !chunk.isFinal && chunk.text.isNotEmpty) {
+          responseBuffer.write(chunk.text);
+          emittedTokenChunks++;
+          _log(
+            '[COMM_TEST_TOKEN] chunk=$emittedTokenChunks chars=${chunk.text.length}',
+          );
+        }
         if (!chunk.isError &&
             !chunk.isFinal &&
             chunk.text.trim().isNotEmpty &&
             firstToken == null) {
           firstToken = chunk.text.trim();
-          _log('[SELFTEST_FIRST_TOKEN] token="$firstToken"');
-          cancellationToken.cancel();
+          _log('[COMM_TEST_TOKEN] first_token="$firstToken"');
+        }
+        if (chunk.isFinal) {
+          completed = true;
+          if (chunk.text.isNotEmpty) {
+            responseBuffer.clear();
+            responseBuffer.write(chunk.text);
+          }
         }
         if (chunk.isError && firstToken == null) {
           streamTerminalError = chunk.errorMessage ?? 'unknown runtime error';
@@ -96,25 +115,60 @@ class RuntimeSelfTestService {
 
       if (firstToken == null) {
         _log(
-          '[SELFTEST_FAIL] reason=${streamTerminalError ?? 'generation_completed_without_token'}',
+          '[COMM_TEST_FAIL] reason=${streamTerminalError ?? 'generation_completed_without_token'}',
         );
         return RuntimeSelfTestResult(
           success: false,
           summary:
-              '${notes.join('\n')}\n3. Token stream: FAILED\n${streamTerminalError ?? 'Generation completed without token emission.'}',
+            '${notes.join('\n')}\n3. Token stream: FAILED\n${streamTerminalError ?? 'Generation completed without token emission.'}',
         );
       }
 
+      final finalText = responseBuffer.toString().trim();
+      final meaningfulTokenCount = finalText
+          .split(RegExp(r'\s+'))
+          .where((token) => token.trim().isNotEmpty)
+          .length;
+      final looksReadable = finalText.contains(RegExp(r'[A-Za-z]')) &&
+          finalText.contains(RegExp(r'[.!?]'));
+
       notes.add('3. Token stream: OK (first token emitted)');
-      _log('[SELFTEST_PASS] first_token="$firstToken"');
+      notes.add(
+        '4. Stream liveness: ${streamAliveTicks > 1 ? 'OK' : 'FAILED'} (ticks=$streamAliveTicks)',
+      );
+      notes.add(
+        '5. Meaningful tokens: ${meaningfulTokenCount >= 12 ? 'OK' : 'FAILED'} (count=$meaningfulTokenCount)',
+      );
+      notes.add(
+        '6. Completion: ${completed && looksReadable ? 'OK' : 'FAILED'}',
+      );
+
+      final pass = streamAliveTicks > 1 &&
+          meaningfulTokenCount >= 12 &&
+          completed &&
+          looksReadable;
+      if (!pass) {
+        _log(
+          '[COMM_TEST_FAIL] stream_alive=$streamAliveTicks token_count=$meaningfulTokenCount completed=$completed readable=$looksReadable',
+        );
+        return RuntimeSelfTestResult(
+          success: false,
+          summary:
+              '${notes.join('\n')}\nGenerated text:\n$finalText',
+        );
+      }
+
+      _log(
+        '[COMM_TEST_PASS] token_count=$meaningfulTokenCount first_token="$firstToken"',
+      );
 
       return RuntimeSelfTestResult(
-        success: true,
+        success: pass,
         summary:
-            '${notes.join('\n')}\n4. Deterministic self-test result: PASS (first token="$firstToken")',
+            '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\n$finalText',
       );
     } catch (error) {
-      _log('[SELFTEST_FAIL] reason=exception error=$error');
+      _log('[COMM_TEST_FAIL] reason=exception error=$error');
       return RuntimeSelfTestResult(
         success: false,
         summary:

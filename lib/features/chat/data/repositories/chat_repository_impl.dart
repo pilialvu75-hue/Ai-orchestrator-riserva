@@ -10,18 +10,20 @@ import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart'
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
+import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 
 class ChatRepositoryImpl implements ChatRepository {
   static const _logTag = 'CHAT_PIPELINE';
-  static const _maxContextLines = 24;
 
   ChatRepositoryImpl({
     required this.localDataSource,
     required this.orchestrator,
+    required this.conversationMemoryService,
   });
 
   final ChatLocalDataSource localDataSource;
   final Orchestrator orchestrator;
+  final ConversationMemoryService conversationMemoryService;
 
   static const _uuid = Uuid();
 
@@ -61,13 +63,26 @@ class ChatRepositoryImpl implements ChatRepository {
       );
       await localDataSource.insertMessage(userMsg);
       _log('message persistence session=$sessionId role=user id=${userMsg.id}');
+      await conversationMemoryService.storeMessageEmbedding(
+        sessionId: sessionId,
+        messageId: userMsg.id,
+        role: userMsg.role,
+        content: userMsg.content,
+        timestamp: userMsg.timestamp,
+      );
 
       if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
         return userMsg;
       }
 
       final sessionMessages = await localDataSource.getMessages(sessionId);
-      final context = _buildContext(sessionMessages, excludedMessageId: userMsg.id);
+      final context = await conversationMemoryService.buildContext(
+        sessionId: sessionId,
+        messages: sessionMessages,
+        userPrompt: normalizedPrompt,
+        systemPrompt: systemPrompt,
+        excludedMessageId: userMsg.id,
+      );
       _log(
         'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
       );
@@ -132,6 +147,13 @@ class ChatRepositoryImpl implements ChatRepository {
         provider: responseProvider,
       );
       await localDataSource.insertMessage(assistantMsg);
+      await conversationMemoryService.storeMessageEmbedding(
+        sessionId: sessionId,
+        messageId: assistantMsg.id,
+        role: assistantMsg.role,
+        content: assistantMsg.content,
+        timestamp: assistantMsg.timestamp,
+      );
       _log('[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}');
       return assistantMsg;
     } on DatabaseException catch (e) {
@@ -207,25 +229,6 @@ class ChatRepositoryImpl implements ChatRepository {
       buffer.write('\nStage: $stage');
     }
     return buffer.toString();
-  }
-
-  static List<String> _buildContext(
-    List<ChatMessage> messages, {
-    required String excludedMessageId,
-  }) {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final message in messages) {
-      if (message.id == excludedMessageId) continue;
-      final line = '${message.role}: ${message.content}'.trim();
-      if (line.isEmpty) continue;
-      if (!seen.add(line)) continue;
-      out.add(line);
-    }
-    // Keep the most recent context lines for prompt construction so the active
-    // turn stays grounded in latest conversation state after deduplication.
-    if (out.length <= _maxContextLines) return out;
-    return out.sublist(out.length - _maxContextLines);
   }
 
   static void _log(String message) {
