@@ -461,6 +461,29 @@ class UpdateManager {
     if (!exists) {
       _logUpdateResume('stale_pending_path_missing path=$pendingPath');
       await _clearPendingInstallerState();
+      state.value = state.value.copyWith(
+        status: UpdateStatus.idle,
+        clearTempApkPath: true,
+      );
+      return;
+    }
+    final hasValidApkExtension = p.extension(pendingPath).toLowerCase() == '.apk';
+    final fileSize = await apkFile.length();
+    if (!hasValidApkExtension || fileSize <= 0) {
+      _logUpdateResume(
+        'stale_pending_path_invalid path=$pendingPath size_bytes=$fileSize has_apk_ext=$hasValidApkExtension',
+      );
+      try {
+        await apkFile.delete();
+        _logUpdateCleanup('stale_apk_deleted path=$pendingPath');
+      } catch (error) {
+        _logUpdateCleanup('stale_apk_delete_failed path=$pendingPath error=$error');
+      }
+      await _clearPendingInstallerState();
+      state.value = state.value.copyWith(
+        status: UpdateStatus.idle,
+        clearTempApkPath: true,
+      );
       return;
     }
     final version = _preferences.getString(_prefPendingVersion);

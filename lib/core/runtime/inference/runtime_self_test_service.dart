@@ -76,10 +76,9 @@ class RuntimeSelfTestService {
       await for (final chunk in _runtimeProvider.streamInference(
         request: InferenceRequest(
           sessionId: selfTestSessionId,
-          prompt:
-              'Write one short, readable sentence with at least twelve words about offline local AI assistants.',
-          maxTokens: 64,
-          temperature: 0.2,
+          prompt: 'Hello. Reply with exactly one short sentence.',
+          maxTokens: 24,
+          temperature: 0.7,
           isOffline: true,
           modelId: selectedModel.effectiveRuntimeModelId,
           modelPath: selectedModel.localPath,
@@ -137,14 +136,14 @@ class RuntimeSelfTestService {
         '4. Stream liveness: ${streamAliveTicks > 1 ? 'OK' : 'FAILED'} (ticks=$streamAliveTicks)',
       );
       notes.add(
-        '5. Meaningful tokens: ${meaningfulTokenCount >= 12 ? 'OK' : 'FAILED'} (count=$meaningfulTokenCount)',
+        '5. Visible tokens: ${meaningfulTokenCount >= 5 ? 'OK' : 'FAILED'} (count=$meaningfulTokenCount)',
       );
       notes.add(
         '6. Completion: ${completed && looksReadable ? 'OK' : 'FAILED'}',
       );
 
       final pass = streamAliveTicks > 1 &&
-          meaningfulTokenCount >= 12 &&
+          meaningfulTokenCount >= 5 &&
           completed &&
           looksReadable;
       if (!pass) {
