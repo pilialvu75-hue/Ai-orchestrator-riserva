@@ -80,6 +80,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     LocalInferenceModelIds.deepSeekR1_1_5b,
     LocalInferenceModelIds.qwen3_1_7b,
   };
+  static const String _forensicSelfTestSessionId = 'runtime_self_test';
 
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
@@ -350,7 +351,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _logAi('model loaded');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────
-      final isForensicSelfTest = request.sessionId.trim() == 'runtime_self_test';
+      final isForensicSelfTest =
+          request.sessionId.trim() == _forensicSelfTestSessionId;
       final prompt = _composePrompt(
         request,
         modelId: modelId,

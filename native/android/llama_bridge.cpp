@@ -122,9 +122,8 @@ static constexpr int32_t kNoTokenStallMillis        = 45000;
 static constexpr int32_t kMaxGeneratedTokens        = 256;
 static constexpr int32_t kRepeatedTokenLimit        = 96;
 static constexpr int32_t kEmptyTokenLimit           = 32;
-static constexpr int32_t kInvalidSampleLimit        = 8;
+static constexpr int32_t kInvalidSampleLimit        = 1;
 static constexpr int32_t kNoProgressLoopLimit       = 320;
-static constexpr char    kForensicSelfTestPrompt[]  = "Reply with the single word: OK";
 
 // Maximum time llb_start_gen will spin-wait for a previous thread to finish
 // before forcibly detaching it.
@@ -445,7 +444,7 @@ static void generation_thread(GenArgs args) {
     }
 
     // Build sampler chain.
-    const bool is_forensic_self_test = args.prompt == kForensicSelfTestPrompt;
+    const bool is_forensic_self_test = args.max_tokens <= 4 && args.temperature <= 0.11f;
     const int32_t sampler_top_k = is_forensic_self_test ? 1 : kSafeTopK;
     const float sampler_top_p = is_forensic_self_test ? 0.1f : kSafeTopP;
     LOGI("[THREAD] creating sampler chain (temp=%.3f top_k=%d top_p=%.3f)",
@@ -600,8 +599,13 @@ static void generation_thread(GenArgs args) {
             }
             LOGE("[THREAD] invalid token sampled: %d at iteration=%d",
                  static_cast<int>(new_tok), static_cast<int>(iteration));
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
+            set_error("Invalid generated token");
+            llama_sampler_free(sampler);
+            gen_update_state(-1, my_epoch);
+            gen_mark_finished(my_epoch);
+            generation_exit_reason = "invalid_sample";
+            LOGI("[THREAD] generation thread exited (invalid sample)");
+            return;
         }
         invalid_sample_count = 0;
         LOGI("[THREAD] sampled token_id=%d iteration=%d",
@@ -902,7 +906,7 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
         if (desc_len > 0) {
             LOGI("[GGUF_METADATA] field=model_desc value=%s", model_desc);
         } else {
-            LOGE("[GGUF_METADATA_UNSUPPORTED] field=model_desc reason=llama_model_desc_unavailable");
+            LOGI("[GGUF_METADATA_UNSUPPORTED] field=model_desc reason=llama_model_desc_unavailable");
         }
         LOGI("[GGUF_METADATA] field=context_size value=%d", n_ctx);
         const llama_vocab* vocab = llama_model_get_vocab(g_model);
@@ -912,11 +916,11 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
             LOGI("[GGUF_METADATA] field=bos_token_id value=%d", bos_id);
             LOGI("[GGUF_METADATA] field=eos_token_id value=%d", eos_id);
         } else {
-            LOGE("[GGUF_METADATA_UNSUPPORTED] field=bos_eos_token_ids reason=vocab_unavailable");
+            LOGI("[GGUF_METADATA_UNSUPPORTED] field=bos_eos_token_ids reason=vocab_unavailable");
         }
-        LOGE("[GGUF_METADATA_UNSUPPORTED] field=architecture reason=llama_model_meta_api_not_exposed_in_bridge");
-        LOGE("[GGUF_METADATA_UNSUPPORTED] field=tokenizer_type reason=llama_model_meta_api_not_exposed_in_bridge");
-        LOGE("[GGUF_METADATA_UNSUPPORTED] field=quantization reason=llama_model_meta_api_not_exposed_in_bridge");
+        LOGI("[GGUF_METADATA_UNSUPPORTED] field=architecture reason=llama_model_meta_api_not_exposed_in_bridge");
+        LOGI("[GGUF_METADATA_UNSUPPORTED] field=tokenizer_type reason=llama_model_meta_api_not_exposed_in_bridge");
+        LOGI("[GGUF_METADATA_UNSUPPORTED] field=quantization reason=llama_model_meta_api_not_exposed_in_bridge");
     }
 
     g_last_error.clear();
