@@ -25,8 +25,12 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static const _logTag = 'ORCHESTRATOR_STATE';
+  // Keep UI pre-inference watchdog strictly above runtime first-token watchdogs
+  // (debug: 120s, release: 45s) to avoid closing a still-active token stream.
+  static const Duration _preInferenceUiTimeoutDebug = Duration(seconds: 140);
+  static const Duration _preInferenceUiTimeoutRelease = Duration(seconds: 55);
   static Duration get _preInferenceUiTimeout =>
-      kDebugMode ? const Duration(seconds: 140) : const Duration(seconds: 55);
+      kDebugMode ? _preInferenceUiTimeoutDebug : _preInferenceUiTimeoutRelease;
 
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
