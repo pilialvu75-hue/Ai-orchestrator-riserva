@@ -80,6 +80,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     LocalInferenceModelIds.deepSeekR1_1_5b,
     LocalInferenceModelIds.qwen3_1_7b,
   };
+  static const String _forensicSelfTestSessionId = 'runtime_self_test';
 
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
@@ -350,7 +351,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _logAi('model loaded');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────
-      final prompt = _composePrompt(request, modelId: modelId);
+      final isForensicSelfTest =
+          request.sessionId.trim() == _forensicSelfTestSessionId;
+      final prompt = _composePrompt(
+        request,
+        modelId: modelId,
+        bypassNonessentialLayers: isForensicSelfTest,
+      );
       final promptWordEstimate = prompt
           .trim()
           .split(RegExp(r'\s+'))
@@ -389,7 +396,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
       );
-      final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
+      final requestedMaxTokens = isForensicSelfTest ? 4 : request.maxTokens;
+      final maxTokens = requestedMaxTokens.clamp(1, _safeMaxTokens);
+      final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
+      final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
+      final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
       if (request.maxTokens > _safeMaxTokens) {
         _log(
           '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
@@ -420,16 +431,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       _log(
         '[MODEL_EXECUTION] Calling native llb_start_gen: prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=${LlamaNativeDefaults.temperature}',
+        ' max_tokens=$maxTokens temperature=$effectiveTemperature',
       );
       _log(
         '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=${LlamaNativeDefaults.temperature}'
+        ' max_tokens=$maxTokens temperature=$effectiveTemperature'
         ' n_threads=${LlamaNativeDefaults.nThreads}'
         ' n_batch=${LlamaNativeDefaults.nBatch}'
         ' n_ctx=${LlamaNativeDefaults.nCtx}'
-        ' top_k=${LlamaNativeDefaults.topK}'
-        ' top_p=${LlamaNativeDefaults.topP}',
+        ' top_k=$effectiveTopK'
+        ' top_p=$effectiveTopP',
       );
       _logAi('starting inference...');
       int startResult;
@@ -441,7 +452,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           call: () => bindings.startGeneration(
             prompt,
             maxTokens,
-            LlamaNativeDefaults.temperature,
+            effectiveTemperature,
           ),
         );
       } catch (error) {
@@ -707,6 +718,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
           int status;
           try {
+            _log(
+              '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
+            );
             status = bindings.pollToken(tokenBuf);
           } catch (error) {
             clearRuntimeVerification();
@@ -725,6 +739,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           }
           _log('[TOKEN_STREAM] poll status iteration=$pollIterations status=$status');
+          _log(
+            '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations status=$status',
+          );
 
           if (status == 1) {
             String piece;
@@ -770,6 +787,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               estimatedTokens++;
               markRuntimeVerified(modelPath);
               final streamingElapsed = DateTime.now().difference(startedAt);
+              _log(
+                '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations status=$status',
+              );
+              _log(
+                '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
+              );
               if (isFirstToken) {
                 _log(
                   '[FIRST_TOKEN_REAL] elapsed_ms=${streamingElapsed.inMilliseconds}'
@@ -838,7 +861,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 ' session=$sessionId',
               );
               _log(
-                '[DART_TOKEN_RENDER] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations',
+                '[DART_STREAM_RENDER] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
@@ -1193,7 +1216,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _composePrompt(
     InferenceRequest request, {
     required String modelId,
+    bool bypassNonessentialLayers = false,
   }) {
+    if (bypassNonessentialLayers) {
+      _log(
+        '[FORENSIC_BYPASS] session=${request.sessionId} mode=raw_prompt_only semantic_memory=false embeddings=false workspace_indexing=false retrieval_augmentation=false conversation_rebuild=false',
+      );
+      return request.prompt.trim();
+    }
     return LocalPromptTemplates.compose(
       modelId: modelId,
       prompt: request.prompt,
