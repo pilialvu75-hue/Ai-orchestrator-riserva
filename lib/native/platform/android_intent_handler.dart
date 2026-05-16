@@ -100,6 +100,26 @@ class AndroidIntentHandler {
     }
   }
 
+  Future<Either<Failure, Map<String, dynamic>>> verifyApk(String apkPath) async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'verifyApk',
+        {'apkPath': apkPath},
+      );
+      if (result == null) {
+        return const Right(<String, dynamic>{});
+      }
+      return Right(Map<String, dynamic>.from(result));
+    } on MissingPluginException {
+      return const Left(
+        IntentFailure('Android Intents not available on this platform'),
+      );
+    } on PlatformException catch (e) {
+      debugPrint('[INSTALL] verifyApk PlatformException: ${e.message}');
+      return Left(IntentFailure(e.message ?? 'PlatformException'));
+    }
+  }
+
   // ── Incoming Intents ────────────────────────────────────────────────────────
 
   /// Retrieves the payload forwarded from an incoming Intent, if any.

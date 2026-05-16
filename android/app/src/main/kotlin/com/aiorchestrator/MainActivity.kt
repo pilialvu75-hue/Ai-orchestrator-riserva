@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.Locale
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -145,13 +146,12 @@ class MainActivity : FlutterActivity() {
                         )
                         Log.i(logTag, "[APK] Using FileProvider content URI: $apkUri")
                         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-                            data = apkUri
+                            setDataAndType(apkUri, "application/vnd.android.package-archive")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
                             putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                            clipData = ClipData.newRawUri("apk", apkUri)
+                            clipData = ClipData.newUri(contentResolver, "apk", apkUri)
                         }
                         val resolved = installIntent.resolveActivity(packageManager)
                         Log.i(logTag, "[INSTALL] Installer resolveActivity=${resolved?.flattenToShortString()}")
@@ -162,6 +162,18 @@ class MainActivity : FlutterActivity() {
                             result.error("INSTALLER_NOT_FOUND", "No package installer available", null)
                             return@setMethodCallHandler
                         }
+                        val resolvedActivities = packageManager.queryIntentActivities(
+                            installIntent,
+                            PackageManager.MATCH_DEFAULT_ONLY
+                        )
+                        resolvedActivities.forEach { activityInfo ->
+                            grantUriPermission(
+                                activityInfo.activityInfo.packageName,
+                                apkUri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+                        lastInstallerResultCode = null
                         startActivityForResult(installIntent, apkInstallRequestCode)
                         lastInstallerLaunchSuccess = true
                         lastInstallerException = null
@@ -210,6 +222,15 @@ class MainActivity : FlutterActivity() {
                             "lastInstallerResultCode" to lastInstallerResultCode,
                         )
                     )
+                }
+
+                "verifyApk" -> {
+                    val apkPath = call.argument<String>("apkPath")
+                    if (apkPath.isNullOrBlank()) {
+                        result.error("INVALID_ARGUMENT", "apkPath is required", null)
+                        return@setMethodCallHandler
+                    }
+                    result.success(verifyApkInternal(apkPath))
                 }
 
                 "persistDocumentUriPermission" -> {
@@ -423,6 +444,44 @@ class MainActivity : FlutterActivity() {
         }
         Log.i(logTag, "[INSTALL] Opening unknown-apps settings for package=$packageName")
         startActivity(settingsIntent)
+    }
+
+    private fun verifyApkInternal(apkPath: String): Map<String, Any?> {
+        val apkFile = File(apkPath)
+        val exists = apkFile.exists()
+        val sizeBytes = if (exists) apkFile.length() else 0L
+        val readable = exists && apkFile.canRead()
+        val hasApkExtension = apkFile.name.lowercase(Locale.ROOT).endsWith(".apk")
+        val packageInfo = if (exists && readable && hasApkExtension) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageArchiveInfo(
+                    apkPath,
+                    PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageArchiveInfo(apkPath, 0)
+            }
+        } else {
+            null
+        }
+        val packageName = packageInfo?.packageName
+        return mapOf(
+            "valid" to (exists && readable && hasApkExtension && sizeBytes > 0 && packageName != null),
+            "exists" to exists,
+            "readable" to readable,
+            "hasApkExtension" to hasApkExtension,
+            "sizeBytes" to sizeBytes,
+            "packageName" to packageName,
+            "reason" to when {
+                !exists -> "missing"
+                !readable -> "not_readable"
+                !hasApkExtension -> "invalid_extension"
+                sizeBytes <= 0 -> "empty_file"
+                packageName == null -> "package_parse_failed"
+                else -> "ok"
+            }
+        )
     }
 
     @Deprecated("Deprecated in Java")
