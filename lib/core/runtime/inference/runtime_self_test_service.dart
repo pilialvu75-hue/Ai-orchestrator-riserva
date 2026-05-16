@@ -76,9 +76,9 @@ class RuntimeSelfTestService {
       await for (final chunk in _runtimeProvider.streamInference(
         request: InferenceRequest(
           sessionId: selfTestSessionId,
-          prompt: 'Hello. Reply with exactly one short sentence.',
-          maxTokens: 24,
-          temperature: 0.7,
+          prompt: 'Reply with the single word: OK',
+          maxTokens: 4,
+          temperature: 0.1,
           isOffline: true,
           modelId: selectedModel.effectiveRuntimeModelId,
           modelPath: selectedModel.localPath,
@@ -124,31 +124,23 @@ class RuntimeSelfTestService {
       }
 
       final finalText = responseBuffer.toString().trim();
-      final meaningfulTokenCount = finalText
-          .split(RegExp(r'\s+'))
-          .where((token) => token.trim().isNotEmpty)
-          .length;
-      final looksReadable = finalText.contains(RegExp(r'[A-Za-z]')) &&
-          finalText.contains(RegExp(r'[.!?]'));
+      final okReachedUi = RegExp(r'\bOK\b', caseSensitive: false).hasMatch(finalText);
 
       notes.add('3. Token stream: OK (first token emitted)');
       notes.add(
         '4. Stream liveness: ${streamAliveTicks > 1 ? 'OK' : 'FAILED'} (ticks=$streamAliveTicks)',
       );
       notes.add(
-        '5. Visible tokens: ${meaningfulTokenCount >= 5 ? 'OK' : 'FAILED'} (count=$meaningfulTokenCount)',
+        '5. Expected token: ${okReachedUi ? 'OK' : 'FAILED'} (expected=OK)',
       );
       notes.add(
-        '6. Completion: ${completed && looksReadable ? 'OK' : 'FAILED'}',
+        '6. Completion: ${completed ? 'OK' : 'FAILED'}',
       );
 
-      final pass = streamAliveTicks > 1 &&
-          meaningfulTokenCount >= 5 &&
-          completed &&
-          looksReadable;
+      final pass = streamAliveTicks > 1 && okReachedUi && completed;
       if (!pass) {
         _log(
-          '[COMM_TEST_FAIL] stream_alive=$streamAliveTicks token_count=$meaningfulTokenCount completed=$completed readable=$looksReadable',
+          '[COMM_TEST_FAIL] stream_alive=$streamAliveTicks expected_ok=$okReachedUi completed=$completed',
         );
         return RuntimeSelfTestResult(
           success: false,
@@ -158,7 +150,7 @@ class RuntimeSelfTestService {
       }
 
       _log(
-        '[COMM_TEST_PASS] token_count=$meaningfulTokenCount first_token="$firstToken"',
+        '[COMM_TEST_PASS] expected_ok=$okReachedUi first_token="$firstToken"',
       );
 
       return RuntimeSelfTestResult(

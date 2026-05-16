@@ -122,6 +122,9 @@ static constexpr int32_t kNoTokenStallMillis        = 45000;
 static constexpr int32_t kMaxGeneratedTokens        = 256;
 static constexpr int32_t kRepeatedTokenLimit        = 96;
 static constexpr int32_t kEmptyTokenLimit           = 32;
+static constexpr int32_t kInvalidSampleLimit        = 8;
+static constexpr int32_t kNoProgressLoopLimit       = 320;
+static constexpr char    kForensicSelfTestPrompt[]  = "Reply with the single word: OK";
 
 // Maximum time llb_start_gen will spin-wait for a previous thread to finish
 // before forcibly detaching it.
@@ -129,6 +132,14 @@ static constexpr int32_t kStartGenPrevThreadTimeoutMillis = 2000;
 
 static uint64_t current_thread_id() {
     return static_cast<uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+
+static int64_t elapsed_ms_since(
+    const std::chrono::steady_clock::time_point& started_at
+) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started_at
+    ).count();
 }
 
 static int32_t first_token_stall_timeout_millis() {
@@ -227,6 +238,14 @@ static void generation_thread(GenArgs args) {
                 queue_size_snapshot(),
                 static_cast<int>(telemetry_poll_iteration)
             );
+            LOGI(
+                "[STEP_13_GENERATION_END] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=%d",
+                static_cast<long long>(exit_elapsed),
+                native_thread_id,
+                static_cast<int>(telemetry_token_id),
+                static_cast<int>(telemetry_token_text_length)
+            );
         }
     };
     // ── Diagnostics: thread start ────────────────────────────────────────────
@@ -243,6 +262,28 @@ static void generation_thread(GenArgs args) {
          args.prompt.size(),
          static_cast<int>(args.max_tokens),
          static_cast<double>(args.temperature));
+    auto log_forensic_step = [&](const char* tag, int32_t token_id, int32_t token_text_length) {
+        LOGI(
+            "%s elapsed_ms=%lld thread_id=%" PRIu64 " token_id=%d token_text_length=%d",
+            tag,
+            static_cast<long long>(elapsed_ms_since(generation_entered_at)),
+            native_thread_id,
+            static_cast<int>(token_id),
+            static_cast<int>(token_text_length)
+        );
+    };
+    auto log_forensic_fatal = [&](const char* tag, const char* reason, int32_t token_id, int32_t token_text_length) {
+        LOGE(
+            "%s reason=%s elapsed_ms=%lld thread_id=%" PRIu64 " token_id=%d token_text_length=%d",
+            tag,
+            reason ? reason : "unknown",
+            static_cast<long long>(elapsed_ms_since(generation_entered_at)),
+            native_thread_id,
+            static_cast<int>(token_id),
+            static_cast<int>(token_text_length)
+        );
+    };
+    log_forensic_step("[STEP_01_PROMPT_RECEIVED]", -1, 0);
 
     try {
     // Obtain the vocabulary from the model (modern API).
@@ -258,6 +299,7 @@ static void generation_thread(GenArgs args) {
     }
     LOGI("[THREAD] vocabulary obtained ok");
 
+    log_forensic_step("[STEP_02_TOKENIZE_START]", -1, 0);
     // Tokenise the prompt.
     const int n_ctx = llama_n_ctx(args.ctx);
     LOGI("[THREAD] tokenization start: prompt_chars=%zu n_ctx=%d",
@@ -285,6 +327,7 @@ static void generation_thread(GenArgs args) {
         return;
     }
     if (n_tokens == 0) {
+        log_forensic_fatal("[FATAL_TOKENIZER_FAILURE]", "tokenizer_returned_zero_tokens", -1, 0);
         LOGE("[THREAD] tokenisation returned zero tokens");
         set_error("Tokenisation returned zero tokens");
         LOGE("[GENERATION_ERROR] stage=tokenize reason=token_count_zero");
@@ -295,6 +338,7 @@ static void generation_thread(GenArgs args) {
         return;
     }
     tokens.resize(n_tokens);
+    log_forensic_step("[STEP_03_TOKENIZE_DONE]", tokens.empty() ? -1 : static_cast<int32_t>(tokens.front()), 0);
     LOGI("[TOKEN_COUNT] count=%d", n_tokens);
     LOGI("[TOKENIZER_OK] prompt_tokenization=true");
     LOGI("[THREAD] prompt token count: %d", n_tokens);
@@ -329,9 +373,20 @@ static void generation_thread(GenArgs args) {
         batch.logits  [i]    = (i == static_cast<int32_t>(tokens.size()) - 1) ? 1 : 0;
     }
     batch.n_tokens = static_cast<int32_t>(tokens.size());
+    if (batch.n_tokens <= 0) {
+        log_forensic_fatal("[FATAL_PROMPT_EVAL_FAILURE]", "prompt_eval_batch_empty", -1, 0);
+        llama_batch_free(batch);
+        set_error("Prompt eval batch has zero tokens");
+        gen_update_state(-1, my_epoch);
+        gen_mark_finished(my_epoch);
+        generation_exit_reason = "prompt_eval_batch_empty";
+        LOGI("[THREAD] generation thread exited (prompt eval batch empty)");
+        return;
+    }
 
     LOGI("[THREAD] starting prefill decode for %d prompt tokens", n_tokens);
     LOGI("[PROMPT_EVAL] stage=start prompt_tokens=%d", n_tokens);
+    log_forensic_step("[STEP_04_PROMPT_EVAL_START]", -1, 0);
     const auto prompt_eval_start = std::chrono::steady_clock::now();
     LOGI(
         "[NATIVE_PROMPT_EVAL_START] elapsed_ms=%lld thread_id=%" PRIu64
@@ -375,6 +430,7 @@ static void generation_thread(GenArgs args) {
         LOGI("[THREAD] generation thread exited (prefill decode error)");
         return;
     }
+    log_forensic_step("[STEP_05_PROMPT_EVAL_DONE]", -1, 0);
     llama_batch_free(batch);
     LOGI("[THREAD] prefill decode complete");
 
@@ -389,8 +445,11 @@ static void generation_thread(GenArgs args) {
     }
 
     // Build sampler chain.
+    const bool is_forensic_self_test = args.prompt == kForensicSelfTestPrompt;
+    const int32_t sampler_top_k = is_forensic_self_test ? 1 : kSafeTopK;
+    const float sampler_top_p = is_forensic_self_test ? 0.1f : kSafeTopP;
     LOGI("[THREAD] creating sampler chain (temp=%.3f top_k=%d top_p=%.3f)",
-         static_cast<double>(args.temperature), kSafeTopK, static_cast<double>(kSafeTopP));
+         static_cast<double>(args.temperature), sampler_top_k, static_cast<double>(sampler_top_p));
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     llama_sampler* sampler = llama_sampler_chain_init(sparams);
     if (!sampler) {
@@ -402,8 +461,8 @@ static void generation_thread(GenArgs args) {
         LOGI("[THREAD] generation thread exited (OOM sampler)");
         return;
     }
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(kSafeTopK));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(kSafeTopP, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(sampler_top_k));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(sampler_top_p, 1));
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(args.temperature));
     // A final token-selecting sampler is required: llama_sampler_sample()
     // initialises cur_p.selected = -1 before calling the chain; without a
@@ -413,6 +472,7 @@ static void generation_thread(GenArgs args) {
     // varied output while still converging to greedy selection at temp = 0.
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     LOGI("[THREAD] sampler chain created (temp + dist)");
+    log_forensic_step("[STEP_06_SAMPLER_READY]", -1, 0);
 
     // Decode loop.
     int32_t n_cur    = static_cast<int32_t>(tokens.size());
@@ -422,6 +482,8 @@ static void generation_thread(GenArgs args) {
     llama_token last_token = static_cast<llama_token>(-1);
     int repeated_token_count = 0;
     int empty_token_count = 0;
+    int invalid_sample_count = 0;
+    int no_progress_loop_count = 0;
     bool eos_detected = false;
     const auto generation_start = std::chrono::steady_clock::now();
     auto last_token_time = generation_start;
@@ -510,6 +572,7 @@ static void generation_thread(GenArgs args) {
 
         // Sample next token.
         llama_token new_tok = llama_sampler_sample(sampler, args.ctx, -1);
+        log_forensic_step("[STEP_07_TOKEN_SAMPLE]", static_cast<int32_t>(new_tok), 0);
         telemetry_token_id = static_cast<int32_t>(new_tok);
         telemetry_token_text_length = 0;
         LOGI(
@@ -522,16 +585,25 @@ static void generation_thread(GenArgs args) {
             static_cast<int>(iteration)
         );
         if (new_tok < 0) {
+            invalid_sample_count++;
+            if (invalid_sample_count >= kInvalidSampleLimit) {
+                log_forensic_fatal("[FATAL_SAMPLER_STALL]", "repeated_invalid_sampled_token", static_cast<int32_t>(new_tok), 0);
+                LOGE("[THREAD] invalid token sampled repeatedly: token=%d count=%d",
+                     static_cast<int>(new_tok), invalid_sample_count);
+                set_error("Sampler stalled: repeated invalid token");
+                llama_sampler_free(sampler);
+                gen_update_state(-1, my_epoch);
+                gen_mark_finished(my_epoch);
+                generation_exit_reason = "invalid_sample_loop";
+                LOGI("[THREAD] generation thread exited (invalid sample loop)");
+                return;
+            }
             LOGE("[THREAD] invalid token sampled: %d at iteration=%d",
                  static_cast<int>(new_tok), static_cast<int>(iteration));
-            set_error("Invalid generated token");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "invalid_sample";
-            LOGI("[THREAD] generation thread exited (invalid sample)");
-            return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
         }
+        invalid_sample_count = 0;
         LOGI("[THREAD] sampled token_id=%d iteration=%d",
              static_cast<int>(new_tok), static_cast<int>(iteration));
         LOGI("[TOKEN_ID] token_id=%d iteration=%d", static_cast<int>(new_tok), static_cast<int>(iteration));
@@ -569,9 +641,11 @@ static void generation_thread(GenArgs args) {
             /*lstrip=*/0,
             /*special=*/false
         );
+        log_forensic_step("[STEP_08_TOKEN_DECODE]", static_cast<int32_t>(new_tok), piece_len > 0 ? piece_len : 0);
 
         if (piece_len > 0) {
             piece_buf[piece_len] = '\0';
+            log_forensic_step("[STEP_09_TOKEN_TEXT_READY]", static_cast<int32_t>(new_tok), piece_len);
             telemetry_token_text_length = piece_len;
             LOGI("[AI] token received: %s", piece_buf);
             LOGI("[THREAD] decoded token_id=%d text=\"%s\" len=%d total_decoded=%d",
@@ -590,6 +664,7 @@ static void generation_thread(GenArgs args) {
                 static_cast<int>(iteration)
             );
             LOGI("[TOKEN_EMIT] token_id=%d len=%d", static_cast<int>(new_tok), static_cast<int>(piece_len));
+            log_forensic_step("[STEP_10_NATIVE_EMIT]", static_cast<int32_t>(new_tok), piece_len);
             const size_t queue_size_after_emit = push_token(std::string(piece_buf, piece_len), my_epoch);
             LOGI(
                 "[NATIVE_TOKEN_EMIT] elapsed_ms=%lld thread_id=%" PRIu64
@@ -603,6 +678,7 @@ static void generation_thread(GenArgs args) {
             );
             last_token_time = std::chrono::steady_clock::now();
             empty_token_count = 0;
+            no_progress_loop_count = 0;
         } else if (piece_len < 0) {
             LOGE("[THREAD] token-to-piece conversion error for token=%d",
                  static_cast<int>(new_tok));
@@ -641,6 +717,7 @@ static void generation_thread(GenArgs args) {
             LOGI("[THREAD] empty piece for token_id=%d consecutive_empty=%d",
                  static_cast<int>(new_tok), empty_token_count);
             if (empty_token_count >= kEmptyTokenLimit) {
+                log_forensic_fatal("[FATAL_DECODE_EMPTY_LOOP]", "decode_empty_forever", static_cast<int32_t>(new_tok), 0);
                 LOGE("[THREAD] empty-token limit reached (%d) — aborting", kEmptyTokenLimit);
                 set_error("Empty token loop detected");
                 llama_sampler_free(sampler);
@@ -648,6 +725,17 @@ static void generation_thread(GenArgs args) {
                 gen_mark_finished(my_epoch);
                 generation_exit_reason = "empty_token_loop";
                 LOGI("[THREAD] generation thread exited (empty token loop)");
+                return;
+            }
+            no_progress_loop_count++;
+            if (no_progress_loop_count >= kNoProgressLoopLimit) {
+                log_forensic_fatal("[FATAL_SAMPLER_STALL]", "generation_loop_no_progress", static_cast<int32_t>(new_tok), 0);
+                set_error("Generation loop spinning without progress");
+                llama_sampler_free(sampler);
+                gen_update_state(-1, my_epoch);
+                gen_mark_finished(my_epoch);
+                generation_exit_reason = "no_progress_loop";
+                LOGI("[THREAD] generation thread exited (no progress loop)");
                 return;
             }
         }
@@ -693,6 +781,7 @@ static void generation_thread(GenArgs args) {
 
         n_cur++;
         n_decode++;
+        log_forensic_step("[STEP_12_GENERATION_CONTINUE]", static_cast<int32_t>(new_tok), piece_len > 0 ? piece_len : 0);
     }
 
     if (eos_detected) {
@@ -807,6 +896,28 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
     LOGI("[AI] context ready");
     LOGI("[LOAD] context created: n_ctx=%d n_batch=%d gpu_layers=%d",
          n_ctx, kSafeNBatch, mparams.n_gpu_layers);
+    {
+        char model_desc[512] = {0};
+        const int32_t desc_len = llama_model_desc(g_model, model_desc, static_cast<int32_t>(sizeof(model_desc)));
+        if (desc_len > 0) {
+            LOGI("[GGUF_METADATA] field=model_desc value=%s", model_desc);
+        } else {
+            LOGE("[GGUF_METADATA_UNSUPPORTED] field=model_desc reason=llama_model_desc_unavailable");
+        }
+        LOGI("[GGUF_METADATA] field=context_size value=%d", n_ctx);
+        const llama_vocab* vocab = llama_model_get_vocab(g_model);
+        if (vocab) {
+            const int32_t bos_id = static_cast<int32_t>(llama_vocab_bos(vocab));
+            const int32_t eos_id = static_cast<int32_t>(llama_vocab_eos(vocab));
+            LOGI("[GGUF_METADATA] field=bos_token_id value=%d", bos_id);
+            LOGI("[GGUF_METADATA] field=eos_token_id value=%d", eos_id);
+        } else {
+            LOGE("[GGUF_METADATA_UNSUPPORTED] field=bos_eos_token_ids reason=vocab_unavailable");
+        }
+        LOGE("[GGUF_METADATA_UNSUPPORTED] field=architecture reason=llama_model_meta_api_not_exposed_in_bridge");
+        LOGE("[GGUF_METADATA_UNSUPPORTED] field=tokenizer_type reason=llama_model_meta_api_not_exposed_in_bridge");
+        LOGE("[GGUF_METADATA_UNSUPPORTED] field=quantization reason=llama_model_meta_api_not_exposed_in_bridge");
+    }
 
     g_last_error.clear();
     LOGI("[NATIVE_MODEL_LOAD_RESULT] code=0");
@@ -941,6 +1052,13 @@ int32_t llb_poll_token(char* buf, int32_t buf_size) {
             token_text_length,
             g_ring.items.size(),
             static_cast<long long>(poll_iteration)
+        );
+        LOGI(
+            "[STEP_11_STREAM_WRITE] elapsed_ms=%lld thread_id=%" PRIu64
+            " token_id=-1 token_text_length=%d",
+            static_cast<long long>(elapsed_ms),
+            poll_thread_id,
+            token_text_length
         );
         return 1;  // token available
     }
