@@ -25,7 +25,14 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static const _logTag = 'ORCHESTRATOR_STATE';
-  static const Duration _preInferenceUiTimeout = Duration(seconds: 15);
+  // Keep UI pre-inference watchdog strictly above runtime first-token watchdogs
+  // to avoid closing a still-active token stream:
+  // - debug: 120s native/Dart watchdog + 20s safety buffer = 140s
+  // - release: 45s native/Dart watchdog + 10s safety buffer = 55s
+  static const Duration _preInferenceUiTimeoutDebug = Duration(seconds: 140);
+  static const Duration _preInferenceUiTimeoutRelease = Duration(seconds: 55);
+  static Duration get _preInferenceUiTimeout =>
+      kDebugMode ? _preInferenceUiTimeoutDebug : _preInferenceUiTimeoutRelease;
 
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
@@ -174,14 +181,14 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
       _log('[UI_STREAM_END] session=${event.sessionId}');
-    } catch (error) {
-      _log('send_message error session=${event.sessionId}: $error');
-      if (error is TimeoutException) {
-        _log(
-          '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
-          ' reason=orchestrator_timeout_15s',
-        );
-      }
+      } catch (error) {
+        _log('send_message error session=${event.sessionId}: $error');
+        if (error is TimeoutException) {
+          _log(
+            '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
+            ' reason=orchestrator_timeout_${_preInferenceUiTimeout.inSeconds}s',
+          );
+        }
       // Emit the real persisted message list (_messages) without the ephemeral
       // optimistic message so no ghost messages appear in the UI for requests
       // that were never persisted to the database.
