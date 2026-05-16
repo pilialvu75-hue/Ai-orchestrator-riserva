@@ -24,10 +24,14 @@ typedef LlbIsLoadedNative = Int32 Function();
 typedef LlbIsLoadedDart = int Function();
 
 abstract final class LlamaNativeDefaults {
-  // Bounded mobile context to reduce memory pressure/OOM risk on Android.
-  static const int nCtx = 512;
+  // Conservative mobile runtime context for stable local generation.
+  static const int nCtx = 2048;
   // Keep Android runtime thread usage bounded for thermals/stability.
   // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
+  static const int nBatch = 32;
+  static const double temperature = 0.7;
+  static const int topK = 40;
+  static const double topP = 0.9;
   static const int tokenBufferSize = 256;
 }

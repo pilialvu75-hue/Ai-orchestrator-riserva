@@ -55,6 +55,7 @@
 #include <queue>
 #include <algorithm>
 #include <new>
+#include <functional>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -108,8 +109,12 @@ static std::atomic<uint64_t> g_gen_epoch{0};
 static std::atomic<bool> g_gen_finished{true};
 
 static std::thread g_gen_thread;
+static std::atomic<int64_t> g_poll_iteration_counter{0};
 
 static constexpr int32_t kSafeNBatch              = 32;
+static constexpr float   kSafeTemperature         = 0.7f;
+static constexpr int32_t kSafeTopK                = 40;
+static constexpr float   kSafeTopP                = 0.9f;
 static constexpr int32_t kGenerationTimeoutMillis  = 180000;
 static constexpr int32_t kNoTokenStallMillis        = 45000;
 static constexpr int32_t kMaxGeneratedTokens        = 256;
@@ -120,6 +125,18 @@ static constexpr int32_t kEmptyTokenLimit           = 32;
 // before forcibly detaching it.
 static constexpr int32_t kStartGenPrevThreadTimeoutMillis = 2000;
 
+static uint64_t current_thread_id() {
+    return static_cast<uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+
+static int32_t first_token_stall_timeout_millis() {
+#ifndef NDEBUG
+    return 120000;
+#else
+    return kNoTokenStallMillis;
+#endif
+}
+
 static void set_error(const char* msg) {
     g_last_error = msg ? msg : "";
     LOGE("[AI] runtime error: %s", g_last_error.c_str());
@@ -127,7 +144,8 @@ static void set_error(const char* msg) {
 
 // Push a token piece into the ring buffer tagged with the calling generation's
 // epoch so that llb_poll_token can discard stale entries.
-static void push_token(const std::string& piece, uint64_t epoch) {
+static size_t push_token(const std::string& piece, uint64_t epoch) {
+    size_t queue_size = 0;
     {
         std::unique_lock<std::mutex> lock(g_ring.mtx);
         // Drop oldest token if ring is exactly full to avoid unbounded memory use.
@@ -135,8 +153,15 @@ static void push_token(const std::string& piece, uint64_t epoch) {
             g_ring.items.pop();
         }
         g_ring.items.push({piece, epoch});
+        queue_size = g_ring.items.size();
     }
     g_ring.cv.notify_one();
+    return queue_size;
+}
+
+static size_t queue_size_snapshot() {
+    std::unique_lock<std::mutex> lock(g_ring.mtx);
+    return g_ring.items.size();
 }
 
 // ── Epoch-safe generation-state helpers ───────────────────────────────────────
@@ -173,8 +198,44 @@ struct GenArgs {
 static void generation_thread(GenArgs args) {
     // Capture the generation epoch for all state-update guards in this thread.
     const uint64_t my_epoch = args.epoch;
+    const uint64_t native_thread_id = current_thread_id();
+    const auto generation_entered_at = std::chrono::steady_clock::now();
+    int32_t telemetry_poll_iteration = 0;
+    int32_t telemetry_token_id = -1;
+    int32_t telemetry_token_text_length = 0;
+    std::string generation_exit_reason = "normal";
+    struct GenerationExitTelemetry {
+        std::function<void()> fn;
+        ~GenerationExitTelemetry() {
+            if (fn) fn();
+        }
+    } generation_exit_telemetry{
+        [&]() {
+            const auto exit_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - generation_entered_at
+            ).count();
+            LOGI(
+                "[NATIVE_GENERATION_EXIT] reason=%s elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
+                generation_exit_reason.c_str(),
+                static_cast<long long>(exit_elapsed),
+                native_thread_id,
+                static_cast<int>(telemetry_token_id),
+                static_cast<int>(telemetry_token_text_length),
+                queue_size_snapshot(),
+                static_cast<int>(telemetry_poll_iteration)
+            );
+        }
+    };
     // ── Diagnostics: thread start ────────────────────────────────────────────
     LOGI("[THREAD] generation thread started (epoch=%" PRIu64 ")", my_epoch);
+    LOGI(
+        "[NATIVE_GENERATION_ENTER] elapsed_ms=0 thread_id=%" PRIu64
+        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 epoch=%" PRIu64,
+        native_thread_id,
+        queue_size_snapshot(),
+        my_epoch
+    );
     LOGI("[GENERATION_START] epoch=%" PRIu64 " prompt_chars=%zu max_tokens=%d temp=%.3f",
          my_epoch,
          args.prompt.size(),
@@ -189,6 +250,7 @@ static void generation_thread(GenArgs args) {
         set_error("Vocabulary unavailable");
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "vocab_unavailable";
         LOGI("[THREAD] generation thread exited (vocab null)");
         return;
     }
@@ -216,6 +278,7 @@ static void generation_thread(GenArgs args) {
         LOGE("[GENERATION_ERROR] stage=tokenize reason=tokenisation_failed code=%d", n_tokens);
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "tokenization_failed";
         LOGI("[THREAD] generation thread exited (tokenise error)");
         return;
     }
@@ -225,6 +288,7 @@ static void generation_thread(GenArgs args) {
         LOGE("[GENERATION_ERROR] stage=tokenize reason=token_count_zero");
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "tokenization_zero_tokens";
         LOGI("[THREAD] generation thread exited (zero tokens)");
         return;
     }
@@ -249,6 +313,7 @@ static void generation_thread(GenArgs args) {
         set_error("Out of memory while allocating prefill batch");
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "oom_prefill_batch";
         LOGI("[THREAD] generation thread exited (OOM prefill batch)");
         return;
     }
@@ -266,6 +331,18 @@ static void generation_thread(GenArgs args) {
     LOGI("[THREAD] starting prefill decode for %d prompt tokens", n_tokens);
     LOGI("[PROMPT_EVAL] stage=start prompt_tokens=%d", n_tokens);
     const auto prompt_eval_start = std::chrono::steady_clock::now();
+    LOGI(
+        "[NATIVE_PROMPT_EVAL_START] elapsed_ms=%lld thread_id=%" PRIu64
+        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 prompt_tokens=%d",
+        static_cast<long long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                prompt_eval_start - generation_entered_at
+            ).count()
+        ),
+        native_thread_id,
+        queue_size_snapshot(),
+        n_tokens
+    );
     const int prefill_decode_status = llama_decode(args.ctx, batch);
     const auto prompt_eval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - prompt_eval_start
@@ -273,12 +350,26 @@ static void generation_thread(GenArgs args) {
     LOGI("[THREAD] prefill decode status: %d", prefill_decode_status);
     LOGI("[PROMPT_EVAL] stage=end status=%d elapsed_ms=%lld",
          prefill_decode_status, static_cast<long long>(prompt_eval_ms));
+    LOGI(
+        "[NATIVE_PROMPT_EVAL_END] elapsed_ms=%lld thread_id=%" PRIu64
+        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 status=%d prompt_eval_ms=%lld",
+        static_cast<long long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - generation_entered_at
+            ).count()
+        ),
+        native_thread_id,
+        queue_size_snapshot(),
+        prefill_decode_status,
+        static_cast<long long>(prompt_eval_ms)
+    );
     if (prefill_decode_status != 0) {
         llama_batch_free(batch);
         LOGE("[THREAD] prefill decode failed with status %d", prefill_decode_status);
         set_error("Decode failed during prompt prefill");
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "prefill_decode_error";
         LOGI("[THREAD] generation thread exited (prefill decode error)");
         return;
     }
@@ -290,12 +381,14 @@ static void generation_thread(GenArgs args) {
         LOGI("[THREAD] cancelled before generation loop");
         gen_update_state(2, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "cancelled_pre_loop";
         LOGI("[THREAD] generation thread exited (pre-loop cancel)");
         return;
     }
 
     // Build sampler chain.
-    LOGI("[THREAD] creating sampler chain (temp=%.3f)", static_cast<double>(args.temperature));
+    LOGI("[THREAD] creating sampler chain (temp=%.3f top_k=%d top_p=%.3f)",
+         static_cast<double>(args.temperature), kSafeTopK, static_cast<double>(kSafeTopP));
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     llama_sampler* sampler = llama_sampler_chain_init(sparams);
     if (!sampler) {
@@ -303,9 +396,12 @@ static void generation_thread(GenArgs args) {
         set_error("Out of memory while creating sampler");
         gen_update_state(-1, my_epoch);
         gen_mark_finished(my_epoch);
+        generation_exit_reason = "oom_sampler";
         LOGI("[THREAD] generation thread exited (OOM sampler)");
         return;
     }
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(kSafeTopK));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(kSafeTopP, 1));
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(args.temperature));
     // A final token-selecting sampler is required: llama_sampler_sample()
     // initialises cur_p.selected = -1 before calling the chain; without a
@@ -333,6 +429,7 @@ static void generation_thread(GenArgs args) {
 
     while (n_decode < capped_max_tokens) {
         iteration++;
+        telemetry_poll_iteration = iteration;
         const auto now = std::chrono::steady_clock::now();
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - generation_start
@@ -354,6 +451,17 @@ static void generation_thread(GenArgs args) {
                  static_cast<long long>(elapsed_ms),
                  static_cast<long long>(since_last_token_ms));
         }
+        LOGI(
+            "[NATIVE_TOKEN_LOOP] elapsed_ms=%lld thread_id=%" PRIu64
+            " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d generated_tokens=%d",
+            static_cast<long long>(elapsed_ms),
+            native_thread_id,
+            static_cast<int>(telemetry_token_id),
+            static_cast<int>(telemetry_token_text_length),
+            queue_size_snapshot(),
+            static_cast<int>(iteration),
+            static_cast<int>(n_decode)
+        );
 
         if (elapsed_ms >= kGenerationTimeoutMillis) {
             LOGE("[THREAD] generation timeout at %lld ms (limit: %d ms) — aborting",
@@ -362,18 +470,28 @@ static void generation_thread(GenArgs args) {
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "generation_timeout";
             LOGI("[THREAD] generation thread exited (generation timeout)");
             return;
         }
-        if (n_decode == 0 && since_last_token_ms >= kNoTokenStallMillis) {
+        const int32_t first_token_timeout_ms = first_token_stall_timeout_millis();
+        if (n_decode == 0 && since_last_token_ms >= first_token_timeout_ms) {
             LOGE("[THREAD] no-first-token stall after %lld ms (limit: %d ms) — aborting",
-                 static_cast<long long>(since_last_token_ms), kNoTokenStallMillis);
-            LOGE("[FIRST_TOKEN_TIMEOUT] waited_ms=%lld timeout_ms=%d",
-                 static_cast<long long>(since_last_token_ms), kNoTokenStallMillis);
+                 static_cast<long long>(since_last_token_ms), first_token_timeout_ms);
+            LOGE(
+                "[FIRST_TOKEN_TIMEOUT] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=%d timeout_ms=%d",
+                static_cast<long long>(since_last_token_ms),
+                native_thread_id,
+                queue_size_snapshot(),
+                static_cast<int>(iteration),
+                first_token_timeout_ms
+            );
             set_error("Local model stalled during inference.");
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "first_token_timeout";
             LOGI("[THREAD] generation thread exited (stall timeout)");
             return;
         }
@@ -383,12 +501,24 @@ static void generation_thread(GenArgs args) {
             llama_sampler_free(sampler);
             gen_update_state(2, my_epoch);  // cancelled
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "cancelled";
             LOGI("[THREAD] generation thread exited (cancelled)");
             return;
         }
 
         // Sample next token.
         llama_token new_tok = llama_sampler_sample(sampler, args.ctx, -1);
+        telemetry_token_id = static_cast<int32_t>(new_tok);
+        telemetry_token_text_length = 0;
+        LOGI(
+            "[NATIVE_TOKEN_SAMPLE] elapsed_ms=%lld thread_id=%" PRIu64
+            " token_id=%d token_text_length=0 queue_size=%zu poll_iteration=%d",
+            static_cast<long long>(elapsed_ms),
+            native_thread_id,
+            static_cast<int>(new_tok),
+            queue_size_snapshot(),
+            static_cast<int>(iteration)
+        );
         if (new_tok < 0) {
             LOGE("[THREAD] invalid token sampled: %d at iteration=%d",
                  static_cast<int>(new_tok), static_cast<int>(iteration));
@@ -396,6 +526,7 @@ static void generation_thread(GenArgs args) {
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "invalid_sample";
             LOGI("[THREAD] generation thread exited (invalid sample)");
             return;
         }
@@ -413,6 +544,7 @@ static void generation_thread(GenArgs args) {
                 llama_sampler_free(sampler);
                 gen_update_state(-1, my_epoch);
                 gen_mark_finished(my_epoch);
+                generation_exit_reason = "repeated_token_loop";
                 LOGI("[THREAD] generation thread exited (repeated token loop)");
                 return;
             }
@@ -438,14 +570,35 @@ static void generation_thread(GenArgs args) {
 
         if (piece_len > 0) {
             piece_buf[piece_len] = '\0';
+            telemetry_token_text_length = piece_len;
             LOGI("[AI] token received: %s", piece_buf);
             LOGI("[THREAD] decoded token_id=%d text=\"%s\" len=%d total_decoded=%d",
                  static_cast<int>(new_tok), piece_buf,
                  static_cast<int>(piece_len), n_decode + 1);
             LOGI("[TOKEN_DECODE] token_id=%d len=%d text=\"%s\"",
                  static_cast<int>(new_tok), static_cast<int>(piece_len), piece_buf);
+            LOGI(
+                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
+                static_cast<long long>(elapsed_ms),
+                native_thread_id,
+                static_cast<int>(new_tok),
+                static_cast<int>(piece_len),
+                queue_size_snapshot(),
+                static_cast<int>(iteration)
+            );
             LOGI("[TOKEN_EMIT] token_id=%d len=%d", static_cast<int>(new_tok), static_cast<int>(piece_len));
-            push_token(std::string(piece_buf, piece_len), my_epoch);
+            const size_t queue_size_after_emit = push_token(std::string(piece_buf, piece_len), my_epoch);
+            LOGI(
+                "[NATIVE_TOKEN_EMIT] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
+                static_cast<long long>(elapsed_ms),
+                native_thread_id,
+                static_cast<int>(new_tok),
+                static_cast<int>(piece_len),
+                queue_size_after_emit,
+                static_cast<int>(iteration)
+            );
             last_token_time = std::chrono::steady_clock::now();
             empty_token_count = 0;
         } else if (piece_len < 0) {
@@ -454,9 +607,19 @@ static void generation_thread(GenArgs args) {
             set_error("Invalid generated token piece");
             LOGE("[TOKENIZER_DECODE_FAIL] token_id=%d", static_cast<int>(new_tok));
             LOGE("[GENERATION_ERROR] stage=token_decode reason=token_to_piece_failed");
+            LOGE(
+                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=-1 queue_size=%zu poll_iteration=%d",
+                static_cast<long long>(elapsed_ms),
+                native_thread_id,
+                static_cast<int>(new_tok),
+                queue_size_snapshot(),
+                static_cast<int>(iteration)
+            );
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "token_decode_error";
             LOGI("[THREAD] generation thread exited (piece conversion error)");
             return;
         } else {
@@ -464,6 +627,15 @@ static void generation_thread(GenArgs args) {
             // boundary tokens in Llama 3, Qwen thinking control tokens).
             // Allow a limited run before treating it as a stall.
             empty_token_count++;
+            LOGI(
+                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
+                " token_id=%d token_text_length=0 queue_size=%zu poll_iteration=%d",
+                static_cast<long long>(elapsed_ms),
+                native_thread_id,
+                static_cast<int>(new_tok),
+                queue_size_snapshot(),
+                static_cast<int>(iteration)
+            );
             LOGI("[THREAD] empty piece for token_id=%d consecutive_empty=%d",
                  static_cast<int>(new_tok), empty_token_count);
             if (empty_token_count >= kEmptyTokenLimit) {
@@ -472,6 +644,7 @@ static void generation_thread(GenArgs args) {
                 llama_sampler_free(sampler);
                 gen_update_state(-1, my_epoch);
                 gen_mark_finished(my_epoch);
+                generation_exit_reason = "empty_token_loop";
                 LOGI("[THREAD] generation thread exited (empty token loop)");
                 return;
             }
@@ -486,6 +659,7 @@ static void generation_thread(GenArgs args) {
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "oom_step_batch";
             LOGI("[THREAD] generation thread exited (OOM step batch)");
             return;
         }
@@ -509,6 +683,7 @@ static void generation_thread(GenArgs args) {
             llama_sampler_free(sampler);
             gen_update_state(-1, my_epoch);
             gen_mark_finished(my_epoch);
+            generation_exit_reason = "step_decode_error";
             LOGI("[THREAD] generation thread exited (step decode error)");
             return;
         }
@@ -529,21 +704,25 @@ static void generation_thread(GenArgs args) {
     LOGI("[AI] inference completed");
     llama_sampler_free(sampler);
     gen_update_state(1, my_epoch);  // done
+    generation_exit_reason = eos_detected ? "success_eos" : "success_max_tokens";
     } catch (const std::bad_alloc&) {
         LOGE("[THREAD] std::bad_alloc in generation thread");
         set_error("Out of memory during generation");
         LOGE("[GENERATION_ERROR] stage=generation_thread reason=bad_alloc");
         gen_update_state(-1, my_epoch);
+        generation_exit_reason = "bad_alloc";
     } catch (const std::exception& e) {
         LOGE("[THREAD] unhandled exception: %s", e.what());
         set_error(e.what());
         LOGE("[GENERATION_ERROR] stage=generation_thread reason=exception message=%s", e.what());
         gen_update_state(-1, my_epoch);
+        generation_exit_reason = "exception";
     } catch (...) {
         LOGE("[THREAD] unhandled unknown exception");
         set_error("Unhandled generation exception");
         LOGE("[GENERATION_ERROR] stage=generation_thread reason=unknown_exception");
         gen_update_state(-1, my_epoch);
+        generation_exit_reason = "unknown_exception";
     }
 
     gen_mark_finished(my_epoch);
@@ -683,17 +862,18 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
     g_last_error.clear();
 
     const int32_t capped_max_tokens = std::min(max_tokens, kMaxGeneratedTokens);
+    const float forced_temperature = kSafeTemperature;
     LOGI("[AI] starting inference...");
     LOGI("[AI] streaming callback active");
     LOGI("[START_GEN] epoch=%" PRIu64 " prompt_chars=%zu requested_max=%d capped_max=%d temp=%.3f",
          new_epoch,
          prompt ? std::strlen(prompt) : static_cast<size_t>(0),
          max_tokens, capped_max_tokens,
-         static_cast<double>(temperature));
+         static_cast<double>(forced_temperature));
     GenArgs args{
         prompt ? prompt : "",
         capped_max_tokens,
-        temperature,
+        forced_temperature,
         new_epoch,
         g_model,
         g_ctx
@@ -713,6 +893,9 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
 }
 
 int32_t llb_poll_token(char* buf, int32_t buf_size) {
+    const auto poll_started_at = std::chrono::steady_clock::now();
+    const uint64_t poll_thread_id = current_thread_id();
+    const int64_t poll_iteration = ++g_poll_iteration_counter;
     if (!buf || buf_size <= 0) {
         set_error("Invalid token buffer");
         return -1;
@@ -741,9 +924,22 @@ int32_t llb_poll_token(char* buf, int32_t buf_size) {
         const RingEntry& entry = g_ring.items.front();
         int32_t copy_len = static_cast<int32_t>(
             std::min(entry.piece.size(), static_cast<size_t>(buf_size - 1)));
+        const int token_text_length = copy_len;
         std::memcpy(buf, entry.piece.data(), copy_len);
         buf[copy_len] = '\0';
         g_ring.items.pop();
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - poll_started_at
+        ).count();
+        LOGI(
+            "[NATIVE_STREAM_FLUSH] elapsed_ms=%lld thread_id=%" PRIu64
+            " token_id=-1 token_text_length=%d queue_size=%zu poll_iteration=%lld",
+            static_cast<long long>(elapsed_ms),
+            poll_thread_id,
+            token_text_length,
+            g_ring.items.size(),
+            static_cast<long long>(poll_iteration)
+        );
         return 1;  // token available
     }
 
