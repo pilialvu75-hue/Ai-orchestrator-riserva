@@ -39,7 +39,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
     final l10n = context.l10n;
     final state = _updateManager.state.value;
     final message = switch (state.status) {
-      UpdateStatus.updateAvailable => '${l10n.t('new_version_available')}: v${state.latestManifest?.version ?? '-'}',
+      UpdateStatus.updateAvailable => '${l10n.t('new_version_available')}: ${state.latestManifest?.version ?? '-'}',
       UpdateStatus.upToDate => l10n.t('already_up_to_date'),
       UpdateStatus.error => state.errorMessage ?? 'Update check failed',
       _ => l10n.t('update_check_completed'),
@@ -134,14 +134,14 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
               // ── Version info ──────────────────────────────────────────────
               _InfoRow(
                 label: l10n.t('current_version'),
-                value: 'v${state.currentVersion}',
+                value: state.currentVersion,
                 valueColor: Colors.white,
               ),
               const SizedBox(height: 8),
               _InfoRow(
                 label: l10n.t('latest_known'),
                 value: state.latestManifest != null
-                    ? 'v${state.latestManifest!.version}'
+                    ? state.latestManifest!.version
                     : '–',
                 valueColor: state.status == UpdateStatus.updateAvailable
                     ? const Color(0xFF69F0AE)
@@ -298,7 +298,7 @@ class _UpdateBanner extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                critical ? 'Critical update — v$version' : 'Update available — v$version',
+                critical ? 'Critical update — $version' : 'Update available — $version',
                 style: TextStyle(
                   color: critical ? const Color(0xFFFF8A80) : const Color(0xFF69F0AE),
                   fontWeight: FontWeight.w600,

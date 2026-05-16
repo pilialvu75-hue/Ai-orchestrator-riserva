@@ -9,14 +9,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_checker.dart';
+import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
+
+class _ApkVerificationResult {
+  const _ApkVerificationResult({
+    required this.valid,
+    required this.exists,
+    required this.readable,
+    required this.hasApkExtension,
+    required this.sizeBytes,
+    required this.reason,
+  });
+
+  final bool valid;
+  final bool exists;
+  final bool readable;
+  final bool hasApkExtension;
+  final int sizeBytes;
+  final String reason;
+}
 
 class UpdateManager {
   static const String _prefPendingApkPath = 'update_pending_apk_path';
   static const String _prefPendingVersion = 'update_pending_version';
   static const String _prefPendingSavedAt = 'update_pending_saved_at';
+  static const String _prefDownloadPartialPath = 'update_download_partial_path';
+  static const String _prefDownloadVersion = 'update_download_version';
+  static const String _prefDownloadProgress = 'update_download_progress';
+  static const String _prefDownloadReceivedBytes =
+      'update_download_received_bytes';
+  static const String _prefDownloadTotalBytes = 'update_download_total_bytes';
+  static const int _minValidApkBytes = 64 * 1024;
+  static const Duration _downloadTimeout = Duration(minutes: 10);
+  static const String _updatesDirectoryName = 'app_updates';
+  static const String _defaultApkFileName = 'ai_orchestrator_update.apk';
 
   UpdateManager({
     required UpdateChecker updateChecker,
@@ -29,11 +58,11 @@ class UpdateManager {
         _comparator = comparator,
         _preferences = preferences,
         _intentHandler = intentHandler,
-        _currentVersion = currentVersion,
+        _currentVersion = comparator.normalize(currentVersion) ?? currentVersion,
         _dio = dio ?? Dio(),
         state = ValueNotifier<UpdateState>(
           UpdateState.initial(
-            currentVersion: currentVersion,
+            currentVersion: comparator.normalize(currentVersion) ?? currentVersion,
             preferredChannel: ReleaseChannel.fromString(
               preferences.getString(AppConstants.prefReleaseChannel),
             ),
@@ -56,7 +85,7 @@ class UpdateManager {
     Duration interval = const Duration(hours: 12),
   }) async {
     await _resumePendingInstallerState();
-    if (checkOnStartup) {
+    if (checkOnStartup && state.value.status != UpdateStatus.readyToInstall) {
       unawaited(checkForUpdates());
     }
 
@@ -81,12 +110,21 @@ class UpdateManager {
   }
 
   Future<void> checkForUpdates() async {
-    _logUpdateTag('check_start');
+    _logUpdateCheck('check_start');
     if (state.value.status == UpdateStatus.downloading) {
       _logUpdate('Skipping check while download is in progress');
       return;
     }
-    _logVersion('Current installed version: $_currentVersion');
+    if (state.value.status == UpdateStatus.readyToInstall &&
+        state.value.tempApkPath != null &&
+        state.value.tempApkPath!.isNotEmpty) {
+      _logUpdateInstallResume(
+        'skip_check_ready_to_install path=${state.value.tempApkPath}',
+      );
+      return;
+    }
+
+    _logVersionLocal('version=$_currentVersion');
     state.value = state.value.copyWith(
       status: UpdateStatus.checking,
       clearErrorMessage: true,
@@ -98,7 +136,7 @@ class UpdateManager {
 
     final manifest = result.manifest;
     if (manifest == null) {
-      _logUpdateTag('check_fail error=${result.errorMessage}');
+      _logUpdateCheck('check_fail error=${result.errorMessage}');
       _logUpdate('Update check failed: ${result.errorMessage}');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -111,10 +149,10 @@ class UpdateManager {
       return;
     }
 
-    _logVersion(
-      'Latest remote version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
+    _logVersionRemote(
+      'version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
     );
-    _logUpdateTag(
+    _logUpdateCheck(
       'check_result remote_version=${manifest.version} url=${manifest.apkUrl}',
     );
 
@@ -122,8 +160,8 @@ class UpdateManager {
       currentVersion: _currentVersion,
       comparator: _comparator,
     )) {
-      _logVersion(
-        'Current version $_currentVersion is below min_supported ${manifest.minSupported}',
+      _logVersionCompare(
+        'local=$_currentVersion remote=${manifest.version} compatible=false',
       );
       state.value = state.value.copyWith(
         status: UpdateStatus.upToDate,
@@ -140,12 +178,10 @@ class UpdateManager {
       return;
     }
 
-    final hasNewer = _comparator.isNewer(
-      latest: manifest.version,
-      current: _currentVersion,
-    );
-    _logVersion(
-      'Version compare latest=${manifest.version} current=$_currentVersion hasNewer=$hasNewer',
+    final compareResult = _comparator.compare(manifest.version, _currentVersion);
+    final hasNewer = compareResult > 0;
+    _logVersionCompare(
+      'local=$_currentVersion remote=${manifest.version} compare=$compareResult has_newer=$hasNewer',
     );
 
     state.value = state.value.copyWith(
@@ -192,8 +228,15 @@ class UpdateManager {
       return false;
     }
 
-    _logUpdateDownload('start url=${manifest.apkUrl}');
-    _logApk('Starting APK download from ${manifest.apkUrl}');
+    await _cleanupObsoleteDownloadedApks(activeVersion: manifest.version);
+    final updatesDirectory = await _ensureVersionScopedUpdateDirectory(
+      manifest.version,
+    );
+    final fileName = _resolveApkFileName(manifest, uri);
+    final finalPath = p.join(updatesDirectory.path, fileName);
+    final partialPath = '$finalPath.part';
+    var activePath = partialPath;
+
     state.value = state.value.copyWith(
       status: UpdateStatus.downloading,
       downloadProgress: 0,
@@ -210,87 +253,117 @@ class UpdateManager {
     );
 
     try {
-      final tempDirectory = await getTemporaryDirectory();
-      final updatesDirectory = Directory('${tempDirectory.path}/app_updates');
-      if (!await updatesDirectory.exists()) {
-        await updatesDirectory.create(recursive: true);
+      final finalFile = File(finalPath);
+      if (await finalFile.exists()) {
+        final verified = await _verifyApkFile(
+          finalPath,
+          expectedSizeBytes: manifest.apkSizeBytes,
+        );
+        if (verified.valid) {
+          _logUpdateDownloadComplete(
+            'reuse_existing path=$finalPath size_bytes=${verified.sizeBytes}',
+          );
+          await _clearDownloadState();
+          await _persistPendingInstallerState(
+            apkPath: finalPath,
+            version: manifest.version,
+          );
+          state.value = state.value.copyWith(
+            status: UpdateStatus.readyToInstall,
+            tempApkPath: finalPath,
+            downloadProgress: 1,
+            diagnostics: state.value.diagnostics.copyWith(
+              apkDownloaded: true,
+              apkPath: finalPath,
+              apkFileExists: true,
+              clearLastException: true,
+            ),
+          );
+          return true;
+        }
+        await _cleanupInstallerArtifacts(finalPath);
       }
 
-      final extension = p.extension(uri.path).isEmpty ? '.apk' : p.extension(uri.path);
-      final fileName = 'ai_orchestrator_update_${DateTime.now().millisecondsSinceEpoch}$extension';
-      final filePath = '${updatesDirectory.path}/$fileName';
-      _logApk('Saving APK to: $filePath');
-
-      await _dio.download(
-        manifest.apkUrl,
-        filePath,
-        options: Options(
-          followRedirects: true,
-          receiveTimeout: const Duration(minutes: 10),
-        ),
-        onReceiveProgress: (received, total) {
-          final progress = total <= 0 ? 0.0 : (received / total).clamp(0.0, 1.0);
-          _logApk('Download progress received=$received total=$total progress=${(progress * 100).toStringAsFixed(1)}%');
-          state.value = state.value.copyWith(
-            status: UpdateStatus.downloading,
-            downloadProgress: progress,
-          );
-        },
+      final partialFile = File(partialPath);
+      final existingPartialBytes =
+          await partialFile.exists() ? await partialFile.length() : 0;
+      await _persistDownloadState(
+        partialPath: partialPath,
+        version: manifest.version,
+        progress: 0,
+        receivedBytes: existingPartialBytes,
+        totalBytes: manifest.apkSizeBytes,
+      );
+      _logUpdateDownloadStart(
+        'url=${manifest.apkUrl} path=$partialPath resume_bytes=$existingPartialBytes',
+      );
+      await _downloadApkToPartialFile(
+        manifest: manifest,
+        partialFile: partialFile,
+        existingPartialBytes: existingPartialBytes,
       );
 
-      final apkFile = File(filePath);
-      final exists = await apkFile.exists();
-      final fileSize = exists ? await apkFile.length() : 0;
-      final hasApkExt = p.extension(filePath).toLowerCase() == '.apk';
-      _logApk(
-        'Download finished. apkPath=$filePath exists=$exists size_bytes=$fileSize has_apk_ext=$hasApkExt',
+      if (await finalFile.exists()) {
+        await finalFile.delete();
+      }
+      await partialFile.rename(finalPath);
+      activePath = finalPath;
+
+      final verification = await _verifyApkFile(
+        finalPath,
+        expectedSizeBytes: manifest.apkSizeBytes,
       );
-      if (!exists || fileSize <= 0 || !hasApkExt) {
-        _logUpdateDownload(
-          'fail_integrity exists=$exists size_bytes=$fileSize has_apk_ext=$hasApkExt',
+      if (!verification.valid) {
+        await _cleanupInstallerArtifacts(finalPath);
+        await _clearDownloadState();
+        _logUpdateDownloadFail(
+          'reason=${verification.reason} path=$finalPath size_bytes=${verification.sizeBytes}',
         );
         state.value = state.value.copyWith(
           status: UpdateStatus.error,
-          errorMessage: 'Downloaded APK failed integrity checks.',
+          errorMessage: 'Downloaded APK failed verification: ${verification.reason}',
           diagnostics: state.value.diagnostics.copyWith(
             apkDownloaded: false,
-            apkPath: filePath,
-            apkFileExists: exists,
-            lastException:
-                'APK integrity failed: exists=$exists size=$fileSize ext_ok=$hasApkExt',
+            apkPath: finalPath,
+            apkFileExists: verification.exists,
+            lastException: 'APK verification failed: ${verification.reason}',
           ),
         );
         return false;
       }
-      _logUpdateDownload('complete path=$filePath size_bytes=$fileSize');
 
+      await _clearDownloadState();
+      await _persistPendingInstallerState(
+        apkPath: finalPath,
+        version: manifest.version,
+      );
+      _logUpdateDownloadComplete(
+        'path=$finalPath size_bytes=${verification.sizeBytes}',
+      );
       state.value = state.value.copyWith(
         status: UpdateStatus.readyToInstall,
-        tempApkPath: filePath,
+        tempApkPath: finalPath,
         downloadProgress: 1,
         diagnostics: state.value.diagnostics.copyWith(
           apkDownloaded: true,
-          apkPath: filePath,
-          apkFileExists: exists,
+          apkPath: finalPath,
+          apkFileExists: true,
           clearLastException: true,
         ),
       );
-      await _persistPendingInstallerState(
-        apkPath: filePath,
-        version: manifest.version,
-      );
       return true;
-    } catch (e, st) {
-      _logUpdateDownload('fail error=$e');
-      _logApk('Download failed: $e');
-      _logApk('Download stack: $st');
+    } catch (error, stackTrace) {
+      _logUpdateDownloadFail('error=$error path=$activePath');
+      _logApk('Download failed: $error');
+      _logApk('Download stack: $stackTrace');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
-        errorMessage: 'Download failed: $e',
+        errorMessage: 'Download failed: $error',
         diagnostics: state.value.diagnostics.copyWith(
           apkDownloaded: false,
-          apkFileExists: false,
-          lastException: 'Download failed: $e',
+          apkPath: activePath,
+          apkFileExists: await File(activePath).exists(),
+          lastException: 'Download failed: $error',
         ),
       );
       return false;
@@ -299,11 +372,9 @@ class UpdateManager {
 
   Future<bool> prepareInstallIntent() async {
     _logUpdateInstallStart();
-    _logUpdateApply('begin');
     await _syncAndroidInstallDiagnostics();
     final apkPath = state.value.tempApkPath;
     if (apkPath == null || apkPath.isEmpty) {
-      _logUpdateApply('fail reason=missing_apk_path');
       _logUpdateInstallFail('No downloaded APK available');
       _logInstall('Install requested without downloaded APK');
       state.value = state.value.copyWith(
@@ -317,21 +388,24 @@ class UpdateManager {
       return false;
     }
 
-    final apkFile = File(apkPath);
-    final exists = await apkFile.exists();
-    _logInstall('Preparing installer launch. apkPath=$apkPath exists=$exists');
-    if (!exists) {
-      _logUpdateApply('fail reason=apk_missing');
-      _logUpdateInstallFail('Downloaded APK file is missing');
+    final verification = await _verifyApkFile(
+      apkPath,
+      expectedSizeBytes: state.value.latestManifest?.apkSizeBytes,
+    );
+    if (!verification.valid) {
+      _logUpdateInstallFail(verification.reason);
+      await _cleanupInstallerArtifacts(apkPath);
+      await _clearPendingInstallerState();
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
-        errorMessage: 'Downloaded APK file is missing',
+        clearTempApkPath: true,
+        errorMessage: 'Downloaded APK is no longer valid: ${verification.reason}',
         diagnostics: state.value.diagnostics.copyWith(
-          apkDownloaded: true,
+          apkDownloaded: false,
           apkPath: apkPath,
-          apkFileExists: false,
+          apkFileExists: verification.exists,
           installerLaunchSuccess: false,
-          lastException: 'Downloaded APK file is missing',
+          lastException: 'APK invalid before install: ${verification.reason}',
         ),
       );
       return false;
@@ -339,8 +413,9 @@ class UpdateManager {
 
     final result = await _intentHandler.openApkInstaller(apkPath);
     if (result.isLeft()) {
-      final failure = result.swap().getOrElse(() => throw StateError('Unexpected empty failure'));
-      _logUpdateApply('fail reason=${failure.message}');
+      final failure = result.swap().getOrElse(
+            () => throw StateError('Unexpected empty failure'),
+          );
       _logUpdateInstallFail(failure.message);
       _logInstall('Installer launch failed: ${failure.message}');
       state.value = state.value.copyWith(
@@ -360,7 +435,6 @@ class UpdateManager {
     _logInstall('Installer launch result: success=$success');
     await _syncAndroidInstallDiagnostics();
     if (!success) {
-      _logUpdateApply('fail reason=installer_launch_returned_false');
       _logUpdateInstallFail('installer_launch_returned_false');
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
@@ -368,22 +442,30 @@ class UpdateManager {
       );
       return false;
     }
+
+    final persistedVersion = state.value.latestManifest?.version ??
+        _preferences.getString(_prefPendingVersion) ??
+        _currentVersion;
+    await _persistPendingInstallerState(
+      apkPath: apkPath,
+      version: persistedVersion,
+    );
+    _logUpdateInstallResume(
+      'installer_ready path=$apkPath version=$persistedVersion',
+    );
     _logUpdateInstallSuccess();
-    _logUpdateApply('success installer_launched=true');
     state.value = state.value.copyWith(
-      status: UpdateStatus.idle,
-      clearTempApkPath: true,
-      downloadProgress: 0,
+      status: UpdateStatus.readyToInstall,
+      tempApkPath: apkPath,
+      downloadProgress: 1,
       diagnostics: state.value.diagnostics.copyWith(
         installerLaunchSuccess: success,
         apkDownloaded: true,
         apkPath: apkPath,
         apkFileExists: true,
-        clearLastException: success,
+        clearLastException: true,
       ),
     );
-    await _cleanupInstallerArtifacts(apkPath);
-    await _clearPendingInstallerState();
     return success;
   }
 
@@ -456,10 +538,14 @@ class UpdateManager {
     if (pendingPath == null || pendingPath.trim().isEmpty) {
       return;
     }
-    final apkFile = File(pendingPath);
-    final exists = await apkFile.exists();
-    if (!exists) {
-      _logUpdateResume('stale_pending_path_missing path=$pendingPath');
+
+    final pendingVersion = _preferences.getString(_prefPendingVersion);
+    if (pendingVersion != null &&
+        _comparator.compare(_currentVersion, pendingVersion) >= 0) {
+      _logUpdateInstallCleanup(
+        'installed_version_reached current=$_currentVersion pending=$pendingVersion',
+      );
+      await _cleanupInstallerArtifacts(pendingPath);
       await _clearPendingInstallerState();
       state.value = state.value.copyWith(
         status: UpdateStatus.idle,
@@ -467,18 +553,13 @@ class UpdateManager {
       );
       return;
     }
-    final hasValidApkExtension = p.extension(pendingPath).toLowerCase() == '.apk';
-    final fileSize = await apkFile.length();
-    if (!hasValidApkExtension || fileSize <= 0) {
-      _logUpdateResume(
-        'stale_pending_path_invalid path=$pendingPath size_bytes=$fileSize has_apk_ext=$hasValidApkExtension',
+
+    final verification = await _verifyApkFile(pendingPath);
+    if (!verification.valid) {
+      _logUpdateInstallCleanup(
+        'stale_pending_path_invalid path=$pendingPath reason=${verification.reason}',
       );
-      try {
-        await apkFile.delete();
-        _logUpdateCleanup('stale_apk_deleted path=$pendingPath');
-      } catch (error) {
-        _logUpdateCleanup('stale_apk_delete_failed path=$pendingPath error=$error');
-      }
+      await _cleanupInstallerArtifacts(pendingPath);
       await _clearPendingInstallerState();
       state.value = state.value.copyWith(
         status: UpdateStatus.idle,
@@ -486,13 +567,14 @@ class UpdateManager {
       );
       return;
     }
-    final version = _preferences.getString(_prefPendingVersion);
-    _logUpdateResume(
-      'ready_to_resume path=$pendingPath version=${version ?? 'unknown'}',
+
+    _logUpdateInstallResume(
+      'ready_to_resume path=$pendingPath version=${pendingVersion ?? 'unknown'}',
     );
     state.value = state.value.copyWith(
       status: UpdateStatus.readyToInstall,
       tempApkPath: pendingPath,
+      downloadProgress: 1,
       diagnostics: state.value.diagnostics.copyWith(
         apkDownloaded: true,
         apkPath: pendingPath,
@@ -511,43 +593,295 @@ class UpdateManager {
       _prefPendingSavedAt,
       DateTime.now().millisecondsSinceEpoch,
     );
-    _logUpdateResume('persisted_pending_installer path=$apkPath version=$version');
+    _logUpdateInstallResume(
+      'persisted_pending_installer path=$apkPath version=$version',
+    );
   }
 
   Future<void> _clearPendingInstallerState() async {
     await _preferences.remove(_prefPendingApkPath);
     await _preferences.remove(_prefPendingVersion);
     await _preferences.remove(_prefPendingSavedAt);
-    _logUpdateCleanup('pending_state_cleared');
+    _logUpdateInstallCleanup('pending_state_cleared');
+  }
+
+  Future<void> _persistDownloadState({
+    required String partialPath,
+    required String version,
+    required double progress,
+    required int receivedBytes,
+    int? totalBytes,
+  }) async {
+    await _preferences.setString(_prefDownloadPartialPath, partialPath);
+    await _preferences.setString(_prefDownloadVersion, version);
+    await _preferences.setDouble(_prefDownloadProgress, progress);
+    await _preferences.setInt(_prefDownloadReceivedBytes, receivedBytes);
+    if (totalBytes != null) {
+      await _preferences.setInt(_prefDownloadTotalBytes, totalBytes);
+    } else {
+      await _preferences.remove(_prefDownloadTotalBytes);
+    }
+  }
+
+  Future<void> _clearDownloadState() async {
+    await _preferences.remove(_prefDownloadPartialPath);
+    await _preferences.remove(_prefDownloadVersion);
+    await _preferences.remove(_prefDownloadProgress);
+    await _preferences.remove(_prefDownloadReceivedBytes);
+    await _preferences.remove(_prefDownloadTotalBytes);
+  }
+
+  Future<Directory> _ensureVersionScopedUpdateDirectory(String version) async {
+    final tempDirectory = await getTemporaryDirectory();
+    final updateDirectory = Directory(
+      p.join(
+        tempDirectory.path,
+        _updatesDirectoryName,
+        _sanitizeVersionForPath(version),
+      ),
+    );
+    if (!await updateDirectory.exists()) {
+      await updateDirectory.create(recursive: true);
+    }
+    return updateDirectory;
+  }
+
+  Future<void> _cleanupObsoleteDownloadedApks({
+    required String activeVersion,
+  }) async {
+    final tempDirectory = await getTemporaryDirectory();
+    final updatesRoot = Directory(
+      p.join(tempDirectory.path, _updatesDirectoryName),
+    );
+    if (!await updatesRoot.exists()) {
+      return;
+    }
+
+    final activeKey = _sanitizeVersionForPath(activeVersion);
+    await for (final entity in updatesRoot.list()) {
+      if (entity is! Directory) {
+        continue;
+      }
+      if (p.basename(entity.path) == activeKey) {
+        continue;
+      }
+      try {
+        await entity.delete(recursive: true);
+        _logUpdateInstallCleanup('deleted_stale_directory path=${entity.path}');
+      } catch (error) {
+        _logUpdateInstallCleanup(
+          'delete_stale_directory_failed path=${entity.path} error=$error',
+        );
+      }
+    }
+
+    final persistedDownloadVersion = _preferences.getString(_prefDownloadVersion);
+    if (persistedDownloadVersion != null && persistedDownloadVersion != activeVersion) {
+      final stalePartialPath = _preferences.getString(_prefDownloadPartialPath);
+      if (stalePartialPath != null && stalePartialPath.isNotEmpty) {
+        await _cleanupInstallerArtifacts(stalePartialPath);
+      }
+      await _clearDownloadState();
+    }
+  }
+
+  Future<void> _downloadApkToPartialFile({
+    required UpdateManifest manifest,
+    required File partialFile,
+    required int existingPartialBytes,
+  }) async {
+    final headers = <String, dynamic>{};
+    if (existingPartialBytes > 0) {
+      headers[HttpHeaders.rangeHeader] = 'bytes=$existingPartialBytes-';
+    }
+
+    final response = await _dio.get<ResponseBody>(
+      manifest.apkUrl,
+      options: Options(
+        responseType: ResponseType.stream,
+        followRedirects: true,
+        receiveTimeout: _downloadTimeout,
+        headers: headers,
+        validateStatus: (status) =>
+            status != null &&
+            (status == HttpStatus.ok || status == HttpStatus.partialContent),
+      ),
+    );
+
+    final supportsResume =
+        existingPartialBytes > 0 && response.statusCode == HttpStatus.partialContent;
+    final sink = partialFile.openWrite(
+      mode: supportsResume ? FileMode.append : FileMode.write,
+    );
+    final reportedLength =
+        int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
+    final totalBytes = supportsResume
+        ? existingPartialBytes + (reportedLength ?? 0)
+        : (reportedLength ?? manifest.apkSizeBytes ?? 0);
+
+    var receivedBytes = supportsResume ? existingPartialBytes : 0;
+    var lastPersistedProgress = -1.0;
+    try {
+      await for (final chunk in response.data!.stream) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        final progress = totalBytes > 0
+            ? (receivedBytes / totalBytes).clamp(0.0, 1.0)
+            : 0.0;
+        if (progress == 0 ||
+            (progress - lastPersistedProgress).abs() >= 0.01 ||
+            progress >= 1) {
+          lastPersistedProgress = progress;
+          _logUpdateDownloadProgress(
+            'received=$receivedBytes total=${totalBytes > 0 ? totalBytes : -1} progress=${(progress * 100).toStringAsFixed(1)}%',
+          );
+          state.value = state.value.copyWith(
+            status: UpdateStatus.downloading,
+            downloadProgress: progress,
+          );
+          await _persistDownloadState(
+            partialPath: partialFile.path,
+            version: manifest.version,
+            progress: progress,
+            receivedBytes: receivedBytes,
+            totalBytes: totalBytes > 0 ? totalBytes : manifest.apkSizeBytes,
+          );
+        }
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+  }
+
+  Future<_ApkVerificationResult> _verifyApkFile(
+    String apkPath, {
+    int? expectedSizeBytes,
+  }) async {
+    final apkFile = File(apkPath);
+    final exists = await apkFile.exists();
+    final readable = exists && await apkFile.stat().then((_) => true).catchError((_) => false);
+    final sizeBytes = exists ? await apkFile.length() : 0;
+    final hasApkExtension = p.extension(apkPath).toLowerCase() == '.apk';
+    final minimumRequiredBytes = expectedSizeBytes != null &&
+            expectedSizeBytes > _minValidApkBytes
+        ? expectedSizeBytes
+        : _minValidApkBytes;
+
+    var nativeValid = true;
+    var reason = 'ok';
+    final nativeResult = await _intentHandler.verifyApk(apkPath);
+    nativeResult.fold(
+      (failure) {
+        if (!failure.message.toLowerCase().contains('not available on this platform')) {
+          nativeValid = false;
+          reason = failure.message;
+        }
+      },
+      (payload) {
+        nativeValid = payload['valid'] == true;
+        reason = (payload['reason'] as String?) ?? (nativeValid ? 'ok' : 'unknown');
+      },
+    );
+
+    if (!exists) {
+      reason = 'missing';
+    } else if (!readable) {
+      reason = 'not_readable';
+    } else if (!hasApkExtension) {
+      reason = 'invalid_extension';
+    } else if (sizeBytes < minimumRequiredBytes) {
+      reason = 'below_minimum_size';
+    } else if (!nativeValid) {
+      reason = reason == 'ok' ? 'package_parse_failed' : reason;
+    }
+
+    final valid = exists &&
+        readable &&
+        hasApkExtension &&
+        sizeBytes >= minimumRequiredBytes &&
+        nativeValid;
+    _logUpdateApkVerify(
+      'path=$apkPath valid=$valid exists=$exists readable=$readable size_bytes=$sizeBytes reason=$reason',
+    );
+    return _ApkVerificationResult(
+      valid: valid,
+      exists: exists,
+      readable: readable,
+      hasApkExtension: hasApkExtension,
+      sizeBytes: sizeBytes,
+      reason: reason,
+    );
+  }
+
+  String _resolveApkFileName(UpdateManifest manifest, Uri uri) {
+    final manifestName = manifest.apkFileName?.trim();
+    if (manifestName != null &&
+        manifestName.isNotEmpty &&
+        !manifestName.contains('/') &&
+        manifestName.toLowerCase().endsWith('.apk')) {
+      return manifestName;
+    }
+
+    if (uri.pathSegments.isNotEmpty) {
+      final uriName = uri.pathSegments.last.trim();
+      if (uriName.isNotEmpty &&
+          !uriName.contains('/') &&
+          uriName.toLowerCase().endsWith('.apk')) {
+        return uriName;
+      }
+    }
+
+    return _defaultApkFileName;
+  }
+
+  String _sanitizeVersionForPath(String version) {
+    return version.toLowerCase().replaceAll(RegExp(r'[^a-z0-9._-]+'), '_');
   }
 
   Future<void> _cleanupInstallerArtifacts(String apkPath) async {
     final file = File(apkPath);
     if (!await file.exists()) {
-      _logUpdateCleanup('apk_missing path=$apkPath');
+      _logUpdateInstallCleanup('apk_missing path=$apkPath');
       return;
     }
     try {
       await file.delete();
-      _logUpdateCleanup('apk_deleted path=$apkPath');
+      _logUpdateInstallCleanup('apk_deleted path=$apkPath');
     } catch (error) {
-      _logUpdateCleanup('apk_delete_failed path=$apkPath error=$error');
+      _logUpdateInstallCleanup('apk_delete_failed path=$apkPath error=$error');
     }
   }
 
   void _logUpdate(String message) => debugPrint('[UPDATE] $message');
   void _logApk(String message) => debugPrint('[APK] $message');
-  void _logVersion(String message) => debugPrint('[VERSION] $message');
   void _logInstall(String message) => debugPrint('[INSTALL] $message');
-  void _logUpdateTag(String message) => debugPrint('[UPDATE_CHECK] $message');
-  void _logUpdateDownload(String message) => debugPrint('[UPDATE_DOWNLOAD] $message');
+  void _logUpdateCheck(String message) => debugPrint('[UPDATE_CHECK] $message');
+  void _logVersionLocal(String message) =>
+      debugPrint('[UPDATE_VERSION_LOCAL] $message');
+  void _logVersionRemote(String message) =>
+      debugPrint('[UPDATE_VERSION_REMOTE] $message');
+  void _logVersionCompare(String message) =>
+      debugPrint('[UPDATE_VERSION_COMPARE] $message');
+  void _logUpdateDownloadStart(String message) =>
+      debugPrint('[UPDATE_DOWNLOAD_START] $message');
+  void _logUpdateDownloadProgress(String message) =>
+      debugPrint('[UPDATE_DOWNLOAD_PROGRESS] $message');
+  void _logUpdateDownloadComplete(String message) =>
+      debugPrint('[UPDATE_DOWNLOAD_COMPLETE] $message');
+  void _logUpdateDownloadFail(String message) =>
+      debugPrint('[UPDATE_DOWNLOAD_FAIL] $message');
+  void _logUpdateApkVerify(String message) =>
+      debugPrint('[UPDATE_APK_VERIFY] $message');
   void _logUpdateInstallStart() => debugPrint('[UPDATE_INSTALL_START] begin');
   void _logUpdateInstallFail(String reason) =>
       debugPrint('[UPDATE_INSTALL_FAIL] reason=$reason');
-  void _logUpdateInstallSuccess() => debugPrint('[UPDATE_INSTALL_SUCCESS] launched=true');
-  void _logUpdateResume(String message) => debugPrint('[UPDATE_RESUME] $message');
-  void _logUpdateApply(String message) => debugPrint('[UPDATE_APPLY] $message');
-  void _logUpdateCleanup(String message) => debugPrint('[UPDATE_CLEANUP] $message');
+  void _logUpdateInstallResume(String message) =>
+      debugPrint('[UPDATE_INSTALL_RESUME] $message');
+  void _logUpdateInstallSuccess() =>
+      debugPrint('[UPDATE_INSTALL_SUCCESS] launched=true');
+  void _logUpdateInstallCleanup(String message) =>
+      debugPrint('[UPDATE_INSTALL_CLEANUP] $message');
 
   void dispose() {
     stopBackgroundChecks();

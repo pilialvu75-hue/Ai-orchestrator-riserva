@@ -19,6 +19,18 @@ class UpdateCheckResult {
   final String? errorMessage;
 }
 
+class _ReleaseApkAsset {
+  const _ReleaseApkAsset({
+    required this.name,
+    required this.url,
+    required this.sizeBytes,
+  });
+
+  final String name;
+  final String url;
+  final int sizeBytes;
+}
+
 class UpdateChecker {
   UpdateChecker({
     required http.Client httpClient,
@@ -45,7 +57,7 @@ class UpdateChecker {
   Future<UpdateCheckResult> checkLatestManifest({
     required ReleaseChannel preferredChannel,
   }) async {
-    _logUpdate('Starting manifest check. preferredChannel=$preferredChannel');
+    _logUpdateCheck('start preferred_channel=$preferredChannel');
     _logVersion('version.json url: $manifestUrl');
     final errors = <String>[];
     try {
@@ -150,6 +162,9 @@ class UpdateChecker {
     _logVersion(
       'Comparing remote versions: first=${first.version} second=${second.version} compare=$comparison',
     );
+    _logVersionCompare(
+      'first=${first.version} second=${second.version} result=$comparison',
+    );
     if (comparison >= 0) {
       _logVersion(
         'Selecting second manifest (GitHub tie-break or newer): ${second.version}',
@@ -237,18 +252,32 @@ class UpdateChecker {
       if (!preferredChannel.allows(channel)) continue;
 
       final tagName = (release['tag_name'] as String?)?.trim() ?? '';
-      final version = _normalizeVersionFromTag(tagName);
-      if (_comparator.parse(version) == null) continue;
+      if (tagName.isEmpty) {
+        _logApkInvalid('reason=missing_tag');
+        continue;
+      }
 
-      final apkUrl = _extractApkAssetUrl(release);
-      if (apkUrl == null) continue;
+      final version = _normalizeVersionFromTag(tagName);
+      if (version == null) {
+        _logApkInvalid('reason=invalid_version tag=$tagName');
+        continue;
+      }
+      _logVersionRemote('tag=$tagName normalized=$version');
+
+      final apkAsset = _extractApkAsset(release);
+      if (apkAsset == null) continue;
+      _logApkFound(
+        'tag=$tagName file=${apkAsset.name} size_bytes=${apkAsset.sizeBytes}',
+      );
 
       final manifest = UpdateManifest(
         version: version,
         versionCode: null,
         channel: channel,
         minSupported: version,
-        apkUrl: apkUrl,
+        apkUrl: apkAsset.url,
+        apkFileName: apkAsset.name,
+        apkSizeBytes: apkAsset.sizeBytes,
         changelog: (release['body'] as String?)?.trim() ?? '',
         critical: false,
       );
@@ -271,42 +300,71 @@ class UpdateChecker {
     return ReleaseChannel.stable;
   }
 
-  String _normalizeVersionFromTag(String tag) {
+  String? _normalizeVersionFromTag(String tag) {
     final normalized = tag.replaceFirst(RegExp(r'^v'), '');
-    if (_comparator.parse(normalized) != null) return normalized;
-    final match = RegExp(r'(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)')
+    final directMatch = _comparator.normalize(normalized);
+    if (directMatch != null) return directMatch;
+    final match = RegExp(r'(\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?)')
         .firstMatch(normalized);
-    return match?.group(1) ?? normalized;
+    return match == null ? null : _comparator.normalize(match.group(1)!);
   }
 
-  String? _extractApkAssetUrl(Map<String, dynamic> release) {
+  _ReleaseApkAsset? _extractApkAsset(Map<String, dynamic> release) {
     final assets = release['assets'];
-    if (assets is! List) return null;
+    if (assets is! List) {
+      _logApkInvalid('reason=assets_missing');
+      return null;
+    }
 
-    String? fallbackApkUrl;
+    _ReleaseApkAsset? fallbackAsset;
     for (final rawAsset in assets) {
       if (rawAsset is! Map) continue;
       final asset = Map<String, dynamic>.from(rawAsset);
-      final name = ((asset['name'] as String?) ?? '').toLowerCase();
+      final rawName = ((asset['name'] as String?) ?? '').trim();
+      final name = rawName.toLowerCase();
       final url = (asset['browser_download_url'] as String?)?.trim();
-      if (url == null || url.isEmpty) continue;
-      if (!name.endsWith('.apk')) continue;
+      final sizeBytes = switch (asset['size']) {
+        int value => value,
+        String value => int.tryParse(value.trim()) ?? 0,
+        _ => 0,
+      };
+      if (rawName.isEmpty || rawName.contains('/') || !name.endsWith('.apk')) {
+        _logApkInvalid('reason=invalid_apk_name name=$rawName');
+        continue;
+      }
+      if (url == null || url.isEmpty) {
+        _logApkInvalid('reason=missing_apk_url name=$rawName');
+        continue;
+      }
+      if (sizeBytes <= 0) {
+        _logApkInvalid('reason=invalid_apk_size name=$rawName size_bytes=$sizeBytes');
+        continue;
+      }
       final uri = Uri.tryParse(url);
       if (uri == null ||
           !(uri.scheme == 'https' || uri.scheme == 'http') ||
           uri.host.isEmpty) {
+        _logApkInvalid('reason=invalid_apk_url name=$rawName');
         continue;
       }
 
+      final candidate = _ReleaseApkAsset(
+        name: rawName,
+        url: url,
+        sizeBytes: sizeBytes,
+      );
       final looksLikePrimaryRelease = name.contains('app-release') ||
           name.contains('app-arm64-v8a-release');
       if (looksLikePrimaryRelease) {
-        return url;
+        return candidate;
       }
-      fallbackApkUrl ??= url;
+      fallbackAsset ??= candidate;
     }
 
-    return fallbackApkUrl;
+    if (fallbackAsset == null) {
+      _logApkInvalid('reason=apk_asset_not_found');
+    }
+    return fallbackAsset;
   }
 
   String _cacheKeyForChannel(ReleaseChannel channel) =>
@@ -349,4 +407,9 @@ class UpdateChecker {
 
   void _logUpdate(String message) => debugPrint('[UPDATE] $message');
   void _logVersion(String message) => debugPrint('[VERSION] $message');
+  void _logUpdateCheck(String message) => debugPrint('[UPDATE_CHECK] $message');
+  void _logVersionRemote(String message) => debugPrint('[UPDATE_VERSION_REMOTE] $message');
+  void _logVersionCompare(String message) => debugPrint('[UPDATE_VERSION_COMPARE] $message');
+  void _logApkFound(String message) => debugPrint('[UPDATE_APK_FOUND] $message');
+  void _logApkInvalid(String message) => debugPrint('[UPDATE_APK_INVALID] $message');
 }

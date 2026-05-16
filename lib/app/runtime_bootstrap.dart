@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
@@ -14,6 +15,7 @@ class RuntimeBootstrap {
   const RuntimeBootstrap();
 
   static const String _versionFallback = '1.0.12+12';
+  static const VersionParser _versionParser = VersionParser();
 
   Future<void> initialize() async {
     debugPrint('[BOOT] init begin');
@@ -36,9 +38,11 @@ class RuntimeBootstrap {
     try {
       final info = await PackageInfo.fromPlatform();
       final rawVersion = info.version.isNotEmpty ? info.version : _versionFallback;
-      final normalizedVersion = rawVersion.contains('+')
+      final rawPackageVersion = rawVersion.contains('+')
           ? rawVersion
           : (info.buildNumber.isNotEmpty ? '$rawVersion+${info.buildNumber}' : rawVersion);
+      final normalizedVersion =
+          _versionParser.normalize(rawPackageVersion) ?? rawPackageVersion;
       debugPrint('[OTA] PackageInfo version resolved: $normalizedVersion');
       debugPrint('[OTA] PackageInfo raw: version=${info.version} buildNumber=${info.buildNumber}');
       return normalizedVersion;
@@ -47,7 +51,9 @@ class RuntimeBootstrap {
         'APP_VERSION',
         defaultValue: _versionFallback,
       );
-      final normalizedVersion = version.contains('+') ? version : '$version+0';
+      final fallbackVersion = version.contains('+') ? version : '$version+0';
+      final normalizedVersion =
+          _versionParser.normalize(fallbackVersion) ?? fallbackVersion;
       debugPrint('[OTA] PackageInfo failed ($error), using fallback: $normalizedVersion');
       return normalizedVersion;
     }
