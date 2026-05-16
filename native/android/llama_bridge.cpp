@@ -109,9 +109,11 @@ static std::atomic<uint64_t> g_gen_epoch{0};
 static std::atomic<bool> g_gen_finished{true};
 
 static std::thread g_gen_thread;
-static std::atomic<int64_t> g_poll_iteration_counter{0};
+static std::atomic<int64_t> g_dart_poll_counter{0};
 
 static constexpr int32_t kSafeNBatch              = 32;
+// Keep these conservative sampler/runtime defaults aligned with
+// lib/core/runtime/inference/ffi/llama_native_types.dart.
 static constexpr float   kSafeTemperature         = 0.7f;
 static constexpr int32_t kSafeTopK                = 40;
 static constexpr float   kSafeTopP                = 0.9f;
@@ -895,7 +897,7 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
 int32_t llb_poll_token(char* buf, int32_t buf_size) {
     const auto poll_started_at = std::chrono::steady_clock::now();
     const uint64_t poll_thread_id = current_thread_id();
-    const int64_t poll_iteration = ++g_poll_iteration_counter;
+    const int64_t poll_iteration = ++g_dart_poll_counter;
     if (!buf || buf_size <= 0) {
         set_error("Invalid token buffer");
         return -1;

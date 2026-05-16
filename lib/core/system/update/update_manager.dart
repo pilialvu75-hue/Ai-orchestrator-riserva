@@ -467,11 +467,11 @@ class UpdateManager {
       );
       return;
     }
-    final hasApkExt = p.extension(pendingPath).toLowerCase() == '.apk';
+    final hasValidApkExtension = p.extension(pendingPath).toLowerCase() == '.apk';
     final fileSize = await apkFile.length();
-    if (!hasApkExt || fileSize <= 0) {
+    if (!hasValidApkExtension || fileSize <= 0) {
       _logUpdateResume(
-        'stale_pending_path_invalid path=$pendingPath size_bytes=$fileSize has_apk_ext=$hasApkExt',
+        'stale_pending_path_invalid path=$pendingPath size_bytes=$fileSize has_apk_ext=$hasValidApkExtension',
       );
       try {
         await apkFile.delete();
