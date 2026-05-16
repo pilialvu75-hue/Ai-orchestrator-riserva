@@ -25,7 +25,8 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static const _logTag = 'ORCHESTRATOR_STATE';
-  static const Duration _preInferenceUiTimeout = Duration(seconds: 15);
+  static Duration get _preInferenceUiTimeout =>
+      kDebugMode ? const Duration(seconds: 140) : const Duration(seconds: 55);
 
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
@@ -174,14 +175,14 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
       _log('[UI_STREAM_END] session=${event.sessionId}');
-    } catch (error) {
-      _log('send_message error session=${event.sessionId}: $error');
-      if (error is TimeoutException) {
-        _log(
-          '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
-          ' reason=orchestrator_timeout_15s',
-        );
-      }
+      } catch (error) {
+        _log('send_message error session=${event.sessionId}: $error');
+        if (error is TimeoutException) {
+          _log(
+            '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
+            ' reason=orchestrator_timeout_${_preInferenceUiTimeout.inSeconds}s',
+          );
+        }
       // Emit the real persisted message list (_messages) without the ephemeral
       // optimistic message so no ghost messages appear in the UI for requests
       // that were never persisted to the database.
