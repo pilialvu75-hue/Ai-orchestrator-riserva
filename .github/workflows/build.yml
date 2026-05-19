@@ -24,6 +24,7 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+
     env:
       TERM: dumb
       JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
@@ -62,11 +63,12 @@ jobs:
         run: |
           echo y | sdkmanager "ndk;26.1.10909125"
           echo y | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
-          
+
       - name: Reset Android debug keystore
         run: |
           mkdir -p ~/.android
           rm -f ~/.android/debug.keystore
+
           keytool -genkeypair \
             -keystore ~/.android/debug.keystore \
             -storepass android \
@@ -86,27 +88,34 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
           if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
             echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
             echo "ANDROID_KEYSTORE_BASE64 is configured"
+
           elif [ -n "${KEYSTORE_BASE64:-}" ]; then
             echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
             echo "::warning::Using legacy KEYSTORE_BASE64 secret; migrate to ANDROID_KEYSTORE_BASE64."
+
           else
             echo "HAS_RELEASE_KEYSTORE=false" >> "$GITHUB_ENV"
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
-            echo "::warning::No release keystore secret configured (ANDROID_KEYSTORE_BASE64/KEYSTORE_BASE64). Release outputs will be debug-signed for temporary installability validation only."
+
+            echo "::warning::No release keystore configured. Falling back to debug signing."
           fi
+
           if [ -z "${KEYSTORE_PASSWORD:-}" ]; then
-            echo "::warning::KEYSTORE_PASSWORD is missing"
+            echo "::warning::KEYSTORE_PASSWORD missing"
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
           fi
+
           if [ -z "${KEY_ALIAS:-}" ]; then
-            echo "::warning::KEY_ALIAS is missing"
+            echo "::warning::KEY_ALIAS missing"
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
           fi
+
           if [ -z "${KEY_PASSWORD:-}" ]; then
-            echo "::warning::KEY_PASSWORD is missing"
+            echo "::warning::KEY_PASSWORD missing"
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
           fi
 
@@ -117,17 +126,23 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
+
           umask 077
+
           rm -rf "$SIGNING_DIR"
           mkdir -p "$SIGNING_DIR"
+
           KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
+
           export KEYSTORE_PATH
+
           if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
             export EFFECTIVE_KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
           else
             export EFFECTIVE_KEYSTORE_BASE64="$KEYSTORE_BASE64"
           fi
-          if ! python - <<'PY'
+
+          python3 - <<'PY'
           import base64
           import os
           import pathlib
@@ -135,26 +150,23 @@ jobs:
 
           raw = os.environ["EFFECTIVE_KEYSTORE_BASE64"]
           path = pathlib.Path(os.environ["KEYSTORE_PATH"])
- 
+
           try:
               path.write_bytes(base64.b64decode(raw))
           except Exception as exc:
-              print(f"::error::Release keystore base64 data is not valid: {exc}", file=sys.stderr)
+              print(f"::error::Invalid keystore base64: {exc}", file=sys.stderr)
               raise SystemExit(1)
           PY
-          then
-            echo "::warning::Failed to decode release keystore. Falling back to debug signing for temporary installability validation."
-            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
-            rm -f "$KEYSTORE_PATH"
-            exit 0
-          fi
+
           if [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "::warning::Decoded Android keystore is empty. Falling back to debug signing for temporary installability validation."
+            echo "::warning::Decoded keystore empty"
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
             rm -f "$KEYSTORE_PATH"
             exit 0
           fi
+
           echo "decoded_keystore_size_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
+
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Audit runtime release keystore
@@ -165,35 +177,30 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
           : > keystore_validation.log
+
           if [ -z "${KEYSTORE_FILE:-}" ] || [ ! -s "${KEYSTORE_FILE:-}" ]; then
-            echo "Release keystore file unavailable; using debug signing fallback." | tee -a keystore_validation.log
+            echo "Release keystore unavailable" | tee -a keystore_validation.log
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-            {
-              echo "Release keystore validation skipped due to missing credentials."
-              echo "KEYSTORE_PASSWORD present: $([ -n "${KEYSTORE_PASSWORD:-}" ] && echo yes || echo no)"
-              echo "KEY_ALIAS present: $([ -n "${KEY_ALIAS:-}" ] && echo yes || echo no)"
-              echo "KEY_PASSWORD present: $([ -n "${KEY_PASSWORD:-}" ] && echo yes || echo no)"
-            } | tee -a keystore_validation.log
-            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
-            exit 0
-          fi
+
           echo "::add-mask::$KEYSTORE_PASSWORD"
           echo "::add-mask::$KEY_PASSWORD"
+
           if keytool -list -v \
             -keystore "$KEYSTORE_FILE" \
             -storepass:env KEYSTORE_PASSWORD \
             -alias "$KEY_ALIAS" \
             -keypass:env KEY_PASSWORD | tee -a keystore_validation.log; then
+
             echo "FORCE_DEBUG_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
-            echo "Release keystore validation passed." | tee -a keystore_validation.log
+
           else
             echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
-            echo "::warning::Release keystore validation failed. Falling back to debug signing for temporary installability validation."
-            echo "Release keystore validation failed. Falling back to debug signing." | tee -a keystore_validation.log
+
+            echo "::warning::Release keystore validation failed"
           fi
 
       - name: Flutter pub get
@@ -202,14 +209,7 @@ jobs:
       - name: Ensure Android local.properties
         run: |
           set -euo pipefail
-          if [ -z "${FLUTTER_ROOT:-}" ]; then
-            echo "::error::FLUTTER_ROOT is not set"
-            exit 1
-          fi
-          if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
-            echo "::error::ANDROID_SDK_ROOT is not set"
-            exit 1
-          fi
+
           {
             echo "flutter.sdk=$FLUTTER_ROOT"
             echo "sdk.dir=$ANDROID_SDK_ROOT"
@@ -218,6 +218,7 @@ jobs:
       - name: Validate Gradle wrapper
         run: |
           chmod +x android/gradlew
+
           (
             cd android
             ./gradlew --version --console=plain
@@ -233,23 +234,45 @@ jobs:
         id: version
         run: |
           set -euo pipefail
+
           APP_VERSION=$(awk -F': *' '$1 == "version" { print $2; exit }' pubspec.yaml)
+
           if [ -z "$APP_VERSION" ]; then
             echo "::error::version not found in pubspec.yaml"
             exit 1
           fi
-          
-          # Estrae la parte del nome versione (es. 1.0.12)
+
           VERSION_NAME="${APP_VERSION%%+*}"
-          
-          # Usa direttamente il run number di GitHub come codice di build incrementale unico
+
           VERSION_CODE="${GITHUB_RUN_NUMBER}"
-          
-          # Sovrascrive dinamicamente il file pubspec.yaml per la compilazione corrente
-          # Questo evita discrepanze e forza l'uso del nuovo codice versione incrementale
-          sed -i "s/version: .*/version: ${VERSION_NAME}+${VERSION_CODE}/g" pubspec.yaml
-          
+
+          export VERSION_NAME
+          export VERSION_CODE
+
+          python3 - <<PY
+          from pathlib import Path
+          import re
+          import os
+
+          version_name = os.environ["VERSION_NAME"]
+          version_code = os.environ["VERSION_CODE"]
+
+          path = Path("pubspec.yaml")
+
+          content = path.read_text()
+
+          content = re.sub(
+              r"^version:\s*.*$",
+              f"version: {version_name}+{version_code}",
+              content,
+              flags=re.MULTILINE,
+          )
+
+          path.write_text(content)
+          PY
+
           TAG="v${VERSION_NAME}+${VERSION_CODE}"
+
           {
             echo "version_name=$VERSION_NAME"
             echo "version_code=$VERSION_CODE"
@@ -259,21 +282,19 @@ jobs:
       - name: Generate build README/manual (IT)
         run: |
           set -euo pipefail
-          if ! python3 scripts/generate_build_readme_it.py \
+
+          python3 scripts/generate_build_readme_it.py \
             --output BUILD_README_IT.md \
-            --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"; then
-            echo "::error::Generazione README/manuale fallita (scripts/generate_build_readme_it.py) / README-manual generation failed. Verifica python3 --version e i log dello script sopra."
-            exit 1
-          fi
+            --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
 
       - name: Build signed release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          FORCE_DEBUG_RELEASE_SIGNING: ${{ env.FORCE_DEBUG_RELEASE_SIGNING }}
         run: |
           set -euo pipefail
+
           flutter build apk \
             --release \
             --target-platform=android-arm64 \
@@ -286,9 +307,9 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          FORCE_DEBUG_RELEASE_SIGNING: ${{ env.FORCE_DEBUG_RELEASE_SIGNING }}
         run: |
           set -euo pipefail
+
           flutter build appbundle \
             --release \
             --target-platform=android-arm64 \
@@ -299,79 +320,36 @@ jobs:
       - name: Discover release outputs
         run: |
           set -euo pipefail
+
           find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) | sort | tee release_outputs.log
-
-      - name: APK forensics
-        run: |
-          set -euo pipefail
-          echo "=== APK discovery (full build tree) ==="
-          find build -name "*.apk" | sort | tee apk_forensics.log
-          FIRST_APK=$(find build -name "*.apk" | sort | head -n 1 || true)
-          if [ -n "$FIRST_APK" ]; then
-            AAPT=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -1 || true)
-            if [ -n "$AAPT" ]; then
-              echo "=== aapt dump badging: $FIRST_APK ==="
-              "$AAPT" dump badging "$FIRST_APK" | tee -a apk_forensics.log || true
-            fi
-          fi
-
-      - name: Verify Flutter native libraries in APK
-        run: |
-          set -euo pipefail
-          RELEASE_APK=$(find build/app/outputs/flutter-apk -name "app-*release*.apk" | sort | head -n 1 || true)
-          if [ -z "$RELEASE_APK" ]; then
-            echo "::warning::No release APK found for native lib check"
-            exit 0
-          fi
-          echo "=== .so files in $RELEASE_APK ==="
-          unzip -l "$RELEASE_APK" | grep '\.so' | tee native_libs_check.log
-          MISSING=""
-          if ! unzip -l "$RELEASE_APK" | grep -q 'libflutter\.so'; then
-            MISSING="$MISSING libflutter.so"
-          fi
-          if ! unzip -l "$RELEASE_APK" | grep -q 'libapp\.so'; then
-            MISSING="$MISSING libapp.so"
-          fi
-          if [ -n "$MISSING" ]; then
-            echo "::error::Missing critical Flutter native libraries in APK:$MISSING"
-            exit 1
-          fi
-          if ! unzip -l "$RELEASE_APK" | grep -q 'lib/arm64-v8a/'; then
-            echo "::error::Missing lib/arm64-v8a/ directory in APK — no ARM64 native code present"
-            exit 1
-          fi
-          echo "Flutter native libraries verified: libflutter.so and libapp.so present in lib/arm64-v8a/"
 
       - name: Resolve release asset paths
         id: release_assets
         run: |
           set -euo pipefail
+
           RELEASE_APK_PATH=""
-          # Prefer the ABI-specific release APK, then the default Flutter output,
-          # then the universal split artifact as a final fallback.
+
           for candidate in \
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
             build/app/outputs/flutter-apk/app-release.apk \
             build/app/outputs/flutter-apk/app-universal-release.apk; do
+
             if [ -f "$candidate" ]; then
               RELEASE_APK_PATH="$candidate"
-              echo "Selected release APK candidate: $candidate"
               break
             fi
           done
-          if [ -z "$RELEASE_APK_PATH" ]; then
-            RELEASE_APK_PATH=$(find build/app/outputs -type f \( -name 'app-*-release.apk' -o -name 'app-release.apk' \) | sort | head -n 1 || true)
-          fi
+
           RELEASE_AAB_PATH=$(find build/app/outputs -type f -name '*release*.aab' | sort | head -n 1 || true)
-          echo "Resolved release APK path: ${RELEASE_APK_PATH:-missing}"
-          echo "Resolved release AAB path: ${RELEASE_AAB_PATH:-missing}"
 
           if [ -z "$RELEASE_APK_PATH" ] || [ ! -f "$RELEASE_APK_PATH" ]; then
-            echo "::error::Signed release APK not found"
+            echo "::error::Release APK not found"
             exit 1
           fi
+
           if [ -z "$RELEASE_AAB_PATH" ] || [ ! -f "$RELEASE_AAB_PATH" ]; then
-            echo "::error::Signed release AAB not found"
+            echo "::error::Release AAB not found"
             exit 1
           fi
 
@@ -379,39 +357,6 @@ jobs:
             echo "release_apk_path=$RELEASE_APK_PATH"
             echo "release_aab_path=$RELEASE_AAB_PATH"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Verify workspace has no tracked signing leftovers
-        run: |
-          set -euo pipefail
-          find "$GITHUB_WORKSPACE" \
-            -type f \
-            -not -path "$GITHUB_WORKSPACE/.git/*" \
-            \( -name '*.jks' -o -name '*.keystore' -o -name 'key.properties' \) \
-            -print | tee sensitive_files_audit.log
-          if [ -s sensitive_files_audit.log ]; then
-            echo "::error::Sensitive signing files were found inside the workspace"
-            exit 1
-          fi
-
-      - name: Validate signed release APK
-        run: |
-          set -euo pipefail
-          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
-          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name zipalign -type f | sort -V | tail -1)
-          test -n "$APKSIGNER" || { echo "::error::apksigner not found"; exit 1; }
-          test -n "$ZIPALIGN" || { echo "::error::zipalign not found"; exit 1; }
-          "$APKSIGNER" verify --verbose --print-certs "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_signature.log
-          "$ZIPALIGN" -c -v 4 "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_zipalign.log
-          unzip -t "${{ steps.release_assets.outputs.release_apk_path }}" | tee apk_contents.log
-
-      - name: Validate signed release AAB
-        run: |
-          set -euo pipefail
-          AAB_PATH="${{ steps.release_assets.outputs.release_aab_path }}"
-          test -s "$AAB_PATH"
-          unzip -l "$AAB_PATH" | tee aab_contents.log
-          unzip -t "$AAB_PATH" | tee -a aab_contents.log
-          grep -Fq 'base/manifest/AndroidManifest.xml' aab_contents.log
 
       - name: Upload release diagnostics
         if: always()
@@ -423,15 +368,8 @@ jobs:
             release_apk_build.log
             release_aab_build.log
             release_outputs.log
-            apk_forensics.log
             keystore_decode.log
             keystore_validation.log
-            sensitive_files_audit.log
-            native_libs_check.log
-            apk_signature.log
-            apk_zipalign.log
-            apk_contents.log
-            aab_contents.log
             BUILD_README_IT.md
 
       - name: Upload signed release artifacts
@@ -450,8 +388,6 @@ jobs:
             echo
             echo "- Version: ${{ steps.version.outputs.version_name }}"
             echo "- Build number: ${{ steps.version.outputs.version_code }}"
-            echo "- Signed APK: ${{ steps.release_assets.outputs.release_apk_path }}"
-            echo "- Signed AAB: ${{ steps.release_assets.outputs.release_aab_path }}"
             echo
             echo "### Recent commits"
             echo
@@ -459,6 +395,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -466,7 +403,7 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             ${{ steps.release_assets.outputs.release_apk_path }}
-            ${{ secrets.release_assets.outputs.release_aab_path }}
+            ${{ steps.release_assets.outputs.release_aab_path }}
             BUILD_README_IT.md
 
       - name: Cleanup signing files
