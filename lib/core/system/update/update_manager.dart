@@ -1296,6 +1296,13 @@ class UpdateManager {
     String? detectedVersion,
     int? comparisonResult,
   }) {
+    _logUpdate(
+      'check current_version=$_currentVersion '
+      'detected_version=${detectedVersion ?? '-'} '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=${comparisonResult ?? 'n/a'} '
+      'final_decision_state=$finalDecisionState',
+    );
     debugPrint(
       '[UPDATE_CHECK] current_version=$_currentVersion '
       'detected_version=${detectedVersion ?? '-'} '
@@ -1312,6 +1319,14 @@ class UpdateManager {
     required bool compatible,
     required String finalDecisionState,
   }) {
+    _logVersionCompare(
+      'current_version=$_currentVersion '
+      'detected_version=$detectedVersion '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=$comparisonResult '
+      'compatible=$compatible '
+      'final_decision_state=$finalDecisionState',
+    );
     debugPrint(
       '[VERSION_COMPARE] current_version=$_currentVersion '
       'detected_version=$detectedVersion '

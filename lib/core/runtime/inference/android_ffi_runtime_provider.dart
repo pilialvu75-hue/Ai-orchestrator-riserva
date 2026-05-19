@@ -54,6 +54,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     RuntimeStateMachine? runtimeStateMachine,
     bool Function()? developerModeProvider,
   })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
+        _developerModeProvider = developerModeProvider ?? (() => false),
         super(developerModeProvider: developerModeProvider);
 
   static const _logTag = 'AI_RUNTIME';
@@ -88,6 +89,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
   final RuntimeStateMachine runtimeStateMachine;
+  final bool Function() _developerModeProvider;
+
+  bool get _isDeveloperMode => _developerModeProvider();
 
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;

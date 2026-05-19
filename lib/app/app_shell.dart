@@ -273,12 +273,12 @@ class _AppShellAppBar extends StatelessWidget implements PreferredSizeWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              const Color(0xFF171E33).withOpacity(0.96),
-              const Color(0xFF0D0D0D).withOpacity(0.94),
+              const Color(0xFF171E33).withValues(alpha: 0.96),
+              const Color(0xFF0D0D0D).withValues(alpha: 0.94),
             ],
           ),
           border: Border(
-            bottom: BorderSide(color: Colors.white.withOpacity(0.05)),
+            bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
           ),
           boxShadow: const [
             BoxShadow(
@@ -370,17 +370,17 @@ class _AnimatedModelChipState extends State<_AnimatedModelChip>
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  const Color(0xFF202B45).withOpacity(0.98),
-                  const Color(0xFF131C2A).withOpacity(0.97),
+                  const Color(0xFF202B45).withValues(alpha: 0.98),
+                  const Color(0xFF131C2A).withValues(alpha: 0.97),
                 ],
               ),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: const Color(0xFF8AB4F8).withOpacity(0.34 + glow),
+                color: const Color(0xFF8AB4F8).withValues(alpha: 0.34 + glow),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF60A5FA).withOpacity(glow),
+                  color: const Color(0xFF60A5FA).withValues(alpha: glow),
                   blurRadius: 20,
                   spreadRadius: 0.6,
                 ),
@@ -436,9 +436,9 @@ class _GlassIconButton extends StatelessWidget {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.06),
+            color: Colors.white.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x1A8AB4F8),
