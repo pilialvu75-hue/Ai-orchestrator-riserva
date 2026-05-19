@@ -30,6 +30,7 @@ abstract final class LlamaNativeDefaults {
   // Conservative mobile runtime context for stable local generation.
   static const int nCtx = 2048;
   // Keep Android runtime thread usage bounded for thermals/stability.
+  // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
   static const int nBatch = 32;
   static const double temperature = 0.7;

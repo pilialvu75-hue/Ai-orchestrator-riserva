@@ -1351,7 +1351,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
+  static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
     try {
       final value = bindings.sessionLastError(sessionId);
       if (value.trim().isEmpty) return 'Unknown native runtime error.';
