@@ -65,8 +65,9 @@ abstract final class LlamaFfiLoader {
       bindings = LlamaBridgeBindings(lib);
       log?.call(
         '[FFI_SYMBOLS_OK] library=$bridgeLibraryName abi=$abi'
-        ' symbols=[llb_load_model,llb_start_gen,llb_poll_token,'
-        'llb_cancel,llb_free_model,llb_last_error,llb_is_loaded]',
+        ' symbols=[llb_init_backend,llb_create_session,llb_session_start_gen,'
+        'llb_session_poll_token,llb_session_cancel,llb_release_session,'
+        'llb_session_last_error,llb_session_is_active]',
       );
     } catch (error, stackTrace) {
       log?.call(
