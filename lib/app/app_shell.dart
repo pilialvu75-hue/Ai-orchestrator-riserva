@@ -101,7 +101,7 @@ class _AppShellState extends State<AppShell> {
         backgroundColor: const Color(0xFF121212),
         title: Text(
           l10n.t('new_version_available'),
-          style: TextStyle(color: Colors.white),
+          style: const TextStyle(color: Colors.white),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -134,7 +134,7 @@ class _AppShellState extends State<AppShell> {
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               l10n.t('dismiss'),
-              style: TextStyle(color: Colors.white54),
+              style: const TextStyle(color: Colors.white54),
             ),
           ),
           FilledButton(
@@ -169,7 +169,7 @@ class _AppShellState extends State<AppShell> {
             backgroundColor: const Color(0xFF121212),
             title: Text(
               l10n.t('update_download_title'),
-              style: TextStyle(color: Colors.white),
+              style: const TextStyle(color: Colors.white),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -209,7 +209,7 @@ class _AppShellState extends State<AppShell> {
                 onPressed: isDownloading ? null : () => Navigator.pop(ctx),
                 child: Text(
                   l10n.t('close'),
-                  style: TextStyle(color: Colors.white54),
+                  style: const TextStyle(color: Colors.white54),
                 ),
               ),
               if (ready)
