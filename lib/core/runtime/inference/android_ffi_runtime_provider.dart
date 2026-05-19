@@ -1126,6 +1126,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (_nativeSessionId != null &&
         _nativeSessionModelPath == modelPath &&
         bindings.sessionIsActive(_nativeSessionId!) == 1) {
+      _log('[SESSION_CREATE_OK] reusing session=$_nativeSessionId path=$modelPath');
       return _nativeSessionId!;
     }
 
