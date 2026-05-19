@@ -35,7 +35,7 @@ constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr int64_t kDecodeStallLogMillis = 5000;
 // Keep native first-token waits aligned with the Dart-side 24ms polling cadence so
 // llb_session_poll_token can block briefly on the first-token latch without
-// adding extra end-to-end latency or a second timing regime to debug.
+// adding extra end-to-end latency or a second timing pattern to debug.
 constexpr int64_t kFirstTokenPollWaitMillis = 24;
 constexpr int32_t kMaxInitialSampleRetries = 4;
 constexpr const char* kFallbackPrompt = "Hello";
@@ -296,7 +296,7 @@ void run_generation(
     const auto generation_started_at = std::chrono::steady_clock::now();
     auto last_decode_progress_at = generation_started_at;
     auto last_token_emitted_at = generation_started_at;
-    int32_t initial_sample_retries = 0;
+    int32_t initial_sample_retry_count = 0;
 
     session->worker_running.store(true, std::memory_order_release);
     session->first_token_emitted.store(false, std::memory_order_release);
@@ -498,17 +498,17 @@ void run_generation(
         llama_token next_token = llama_sampler_sample(sampler.get(), ctx, -1);
         if (next_token < 0) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
-                initial_sample_retries < kMaxInitialSampleRetries) {
-                ++initial_sample_retries;
+                initial_sample_retry_count < kMaxInitialSampleRetries) {
+                ++initial_sample_retry_count;
                 LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
                      " reason=invalid_sample retry=%d",
                      session->id,
                      owner_epoch,
-                     initial_sample_retries);
+                     initial_sample_retry_count);
                 std::this_thread::yield();
                 continue;
             }
-            session->set_error("FIRST_TOKEN_TIMEOUT");
+            session->set_error("FIRST_TOKEN_TIMEOUT: invalid sample after max retries");
             set_state_if_epoch(session, kStateFailed, owner_epoch, "invalid_sample_before_first_token");
             notify_first_token_waiters(session);
             return;
@@ -518,17 +518,17 @@ void run_generation(
 
         if (llama_vocab_is_eog(vocab, next_token)) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
-                initial_sample_retries < kMaxInitialSampleRetries) {
-                ++initial_sample_retries;
+                initial_sample_retry_count < kMaxInitialSampleRetries) {
+                ++initial_sample_retry_count;
                 LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
                      " reason=immediate_eos retry=%d",
                      session->id,
                      owner_epoch,
-                     initial_sample_retries);
+                     initial_sample_retry_count);
                 continue;
             }
             if (!session->first_token_emitted.load(std::memory_order_acquire)) {
-                session->set_error("FIRST_TOKEN_TIMEOUT");
+                session->set_error("FIRST_TOKEN_TIMEOUT: EOS reached after max retries");
                 set_state_if_epoch(session, kStateFailed, owner_epoch, "eos_before_first_token");
                 notify_first_token_waiters(session);
                 return;
@@ -948,7 +948,6 @@ int32_t llb_session_poll_token(
                        session->epoch.load(std::memory_order_acquire) != current_epoch;
             }
         );
-        wait_lock.unlock();
         if (try_pop_token() == 1) {
             return 1;
         }
