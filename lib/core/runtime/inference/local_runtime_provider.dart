@@ -18,7 +18,13 @@ import 'package:flutter/foundation.dart';
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
-  }) : _developerModeProvider = developerModeProvider ?? () => false;
+  }) : _developerModeProvider =
+            developerModeProvider ?? (() => kDebugMode);
+
+  static const String _localProviderTag = 'LOCAL_RUNTIME';
+
+  static const int _maxModelFileSizeBytes =
+      12 * 1024 * 1024 * 1024; // 12GB safety cap
 
   static const Set<String> _mobileValidatedModelIds = <String>{
     LocalInferenceModelIds.gemma2b,
@@ -50,69 +56,98 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   @protected
   bool hasVerifiedRuntimeForModel(String modelPath) =>
-      _verifiedModelPath != null && _verifiedModelPath == modelPath;
+      _verifiedModelPath != null &&
+      _verifiedModelPath == modelPath;
 
   bool supportsModel(AiModel model) {
-    if (!_isModelAllowedOnPlatform(model.effectiveRuntimeModelId)) {
-      // In developer mode, allow unrecognised model IDs with a warning rather
-      // than a hard reject.
+    final modelId = model.effectiveRuntimeModelId;
+
+    final allowed = _isModelAllowedOnPlatform(modelId);
+
+    if (!allowed) {
       if (_isDeveloperMode) {
-        const msg =
-            '[VALIDATION] developer_mode=true: allowing unvalidated model';
-        debugPrint('[LOCAL_RUNTIME] $msg'
-            ' modelId=${model.effectiveRuntimeModelId}'
-            ' – runtime compatibility not guaranteed.');
-        RuntimeEventLog.instance.emit(
-          '$msg modelId=${model.effectiveRuntimeModelId}'
-          ' – runtime compatibility not guaranteed.',
+        final msg =
+            '[VALIDATION] developer_mode=true: allowing custom/unvalidated model';
+
+        debugPrint(
+          '[$_localProviderTag] $msg modelId=$modelId',
         );
-        // Still require the file to be present and at least partially valid.
-        return model.validationStatus == ModelValidationStatus.validatedOk ||
+
+        RuntimeEventLog.instance.emit(
+          '$msg modelId=$modelId',
+        );
+
+        return model.localPath != null &&
+            model.localPath!.isNotEmpty &&
             model.isDownloaded;
       }
+
       return false;
     }
-    return model.validationStatus == ModelValidationStatus.validatedOk;
+
+    return model.validationStatus ==
+            ModelValidationStatus.validatedOk ||
+        (_isDeveloperMode && model.isDownloaded);
   }
 
-  Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
-    if (selectedModel == null ||
-        !selectedModel.isDownloaded ||
-        selectedModel.localPath == null ||
-        selectedModel.localPath!.trim().isEmpty) {
+  Future<LocalRuntimeState> validateRuntime({
+    AiModel? selectedModel,
+  }) async {
+    if (selectedModel == null) {
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
-        message: 'Download and select a local model to enable on-device AI.',
+        message: 'No local model selected.',
       );
     }
 
-    if (selectedModel.validationStatus == ModelValidationStatus.downloading) {
+    if (!selectedModel.isDownloaded) {
       return const LocalRuntimeState(
-        status: LocalRuntimeStatus.loading,
-        message: 'Local model is still downloading.',
+        status: LocalRuntimeStatus.modelMissing,
+        message: 'Model is not downloaded.',
       );
     }
 
-    if (selectedModel.validationStatus == ModelValidationStatus.invalidModel) {
+    final modelPath = selectedModel.localPath;
+
+    if (modelPath == null || modelPath.trim().isEmpty) {
+      return const LocalRuntimeState(
+        status: LocalRuntimeStatus.modelMissing,
+        message: 'Model path is empty.',
+      );
+    }
+
+    final exists = await Isolate.run(
+      () => File(modelPath).existsSync(),
+    );
+
+    if (!exists) {
+      return const LocalRuntimeState(
+        status: LocalRuntimeStatus.modelMissing,
+        message: 'Model file missing from storage.',
+      );
+    }
+
+    final fileSize = await Isolate.run(
+      () => File(modelPath).lengthSync(),
+    );
+
+    if (fileSize <= 0 ||
+        fileSize > _maxModelFileSizeBytes) {
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
-        message: 'Selected model file is not a valid GGUF runtime model.',
-      );
-    }
-
-    if (selectedModel.validationStatus == ModelValidationStatus.missingFile) {
-      return const LocalRuntimeState(
-        status: LocalRuntimeStatus.modelMissing,
-        message: 'Selected model file is missing from device storage.',
+        message: 'Invalid model file size.',
       );
     }
 
     final hasValidGgufHeader =
-        await Isolate.run(() => _hasGgufHeader(selectedModel.localPath!));
+        await Isolate.run(
+      () => _hasGgufHeader(modelPath),
+    );
+
     if (!hasValidGgufHeader) {
       return const LocalRuntimeState(
-        status: LocalRuntimeStatus.modelMissing,
-        message: 'Selected model file is missing from device storage.',
+        status: LocalRuntimeStatus.failed,
+        message: 'Invalid GGUF model header.',
       );
     }
 
@@ -121,28 +156,29 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         return LocalRuntimeState(
           status: LocalRuntimeStatus.runtimeUnavailable,
           message:
-              '[DEVELOPER_MODE] ${selectedModel.displayName} is not in the validated model list. '
-              'Runtime compatibility is not guaranteed – proceed with caution.',
+              '[DEVELOPER_MODE] Unvalidated model accepted.',
         );
       }
+
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
-        message: 'Selected model is not supported by the local runtime.',
+        message:
+            'Selected model is not supported.',
       );
     }
 
-    if (hasVerifiedRuntimeForModel(selectedModel.localPath!)) {
+    if (hasVerifiedRuntimeForModel(modelPath)) {
       return LocalRuntimeState(
         status: LocalRuntimeStatus.ready,
-        message: '${selectedModel.displayName} verified for local inference.',
+        message:
+            '${selectedModel.displayName} ready.',
       );
     }
 
     return LocalRuntimeState(
       status: LocalRuntimeStatus.runtimeUnavailable,
       message:
-          '${selectedModel.displayName} is present, but local inference is not proven yet. '
-          'Open Settings and activate Runtime Self-Test, or send a prompt to verify token streaming.',
+          '${selectedModel.displayName} detected but runtime not yet verified.',
     );
   }
 
@@ -151,74 +187,101 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    final controller = StreamController<InferenceResponse>();
+    final controller =
+        StreamController<InferenceResponse>();
 
     () async {
       try {
         final modelPath = request.modelPath;
         final modelId = request.modelId;
 
-        if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        debugPrint(
+          '[$_localProviderTag] streamInference start model=$modelId',
+        );
+
+        if (modelPath == null ||
+            modelPath.isEmpty ||
+            modelId == null) {
           clearRuntimeVerification();
-          controller.add(InferenceResponse.error('Missing local model path.'));
+
+          controller.add(
+            InferenceResponse.error(
+              'Missing local model path.',
+            ),
+          );
+
           await controller.close();
           return;
         }
 
-        if (!_isModelAllowedOnPlatform(modelId)) {
-          if (_isDeveloperMode) {
-            final msg =
-                '[VALIDATION] developer_mode=true: allowing unvalidated'
-                ' modelId=$modelId on desktop – proceeding.';
-            debugPrint('[LOCAL_RUNTIME] $msg');
-            RuntimeEventLog.instance.emit(msg);
-          } else {
-            clearRuntimeVerification();
-            controller.add(
-              InferenceResponse.error(
-                'Selected model is not validated for runtime execution on this platform.',
-              ),
-            );
-            await controller.close();
-            return;
-          }
+        final modelExists = await Isolate.run(
+          () => File(modelPath).existsSync(),
+        );
+
+        if (!modelExists) {
+          clearRuntimeVerification();
+
+          controller.add(
+            InferenceResponse.error(
+              'Model file not found.',
+            ),
+          );
+
+          await controller.close();
+          return;
         }
 
         final isValidModelFile =
-            await Isolate.run(() => _hasGgufHeader(modelPath));
+            await Isolate.run(
+          () => _hasGgufHeader(modelPath),
+        );
+
         if (!isValidModelFile) {
           clearRuntimeVerification();
-          controller.add(InferenceResponse.error(
-            'Selected model file is missing or invalid GGUF.',
-          ));
+
+          controller.add(
+            InferenceResponse.error(
+              'Invalid GGUF model.',
+            ),
+          );
+
           await controller.close();
           return;
         }
 
-        final executable = _resolveLlamaExecutable();
+        final executable =
+            _resolveLlamaExecutable();
+
         final args = _buildArgs(request);
+
+        debugPrint(
+          '[$_localProviderTag] executable=$executable',
+        );
+
         final stderrBuffer = StringBuffer();
         final fullText = StringBuffer();
 
         Process? process;
+
         StreamSubscription<String>? stdoutSub;
         StreamSubscription<String>? stderrSub;
+
         var estimatedTokenCount = 0;
 
         try {
-          process = await Process.start(executable, args);
+          process = await Process.start(
+            executable,
+            args,
+          );
         } on ProcessException catch (e) {
           clearRuntimeVerification();
+
           controller.add(
             InferenceResponse.error(
-              'Failed to start llama.cpp runtime process: ${e.message}',
+              'Failed to start llama.cpp: ${e.message}',
             ),
           );
-          await controller.close();
-          return;
-        } catch (e) {
-          clearRuntimeVerification();
-          controller.add(InferenceResponse.error('Failed to start inference: $e'));
+
           await controller.close();
           return;
         }
@@ -231,16 +294,24 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
             .transform(utf8.decoder)
             .listen(
           (chunk) {
-            // Stream callbacks run sequentially on this isolate event loop.
             if (chunk.isEmpty) return;
+
             fullText.write(chunk);
-            estimatedTokenCount += _estimateTokenCount(chunk);
-            controller.add(InferenceResponse.token(text: chunk, model: modelId));
+
+            estimatedTokenCount +=
+                _estimateTokenCount(chunk);
+
+            controller.add(
+              InferenceResponse.token(
+                text: chunk,
+                model: modelId,
+              ),
+            );
           },
           onError: (Object error) {
-            // Log stdout decode errors (e.g. malformed UTF-8) but keep the
-            // stream alive; the process exit code will handle final state.
-            debugPrint('[$_localProviderTag] stdout decode error: $error');
+            debugPrint(
+              '[$_localProviderTag] stdout error: $error',
+            );
           },
           cancelOnError: false,
         );
@@ -248,59 +319,90 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         stderrSub = process.stderr
             .transform(utf8.decoder)
             .listen(
-          stderrBuffer.write,
+          (chunk) {
+            stderrBuffer.write(chunk);
+
+            debugPrint(
+              '[$_localProviderTag][stderr] $chunk',
+            );
+          },
           onError: (Object error) {
-            debugPrint('[$_localProviderTag] stderr decode error: $error');
+            debugPrint(
+              '[$_localProviderTag] stderr error: $error',
+            );
           },
           cancelOnError: false,
         );
 
         final exitCode = await process.exitCode;
+
         await stdoutSub.cancel();
         await stderrSub.cancel();
 
+        debugPrint(
+          '[$_localProviderTag] process exitCode=$exitCode',
+        );
+
         if (cancellationToken.isCancelled) {
           clearRuntimeVerification();
-          controller.add(InferenceResponse.error(
-            'Inference cancelled.',
-            state: InferenceTerminalState.cancelled,
-          ));
+
+          controller.add(
+            InferenceResponse.error(
+              'Inference cancelled.',
+              state:
+                  InferenceTerminalState.cancelled,
+            ),
+          );
+
           await controller.close();
           return;
         }
 
-        if (exitCode != 0 && fullText.isEmpty) {
+        if (exitCode != 0 &&
+            fullText.isEmpty) {
           clearRuntimeVerification();
-          final stderr = stderrBuffer.toString().trim();
+
+          final stderr =
+              stderrBuffer.toString().trim();
+
           controller.add(
             InferenceResponse.error(
               stderr.isEmpty
-                  ? 'llama.cpp runtime failed with exit code $exitCode.'
+                  ? 'llama.cpp failed with exit code $exitCode'
                   : stderr,
             ),
           );
+
           await controller.close();
           return;
         }
 
         markRuntimeVerified(modelPath);
+
         controller.add(
           InferenceResponse.finalChunk(
             text: fullText.toString(),
-            tokensGenerated: estimatedTokenCount,
+            tokensGenerated:
+                estimatedTokenCount,
             model: modelId,
           ),
         );
+
         await controller.close();
       } catch (error, stackTrace) {
         clearRuntimeVerification();
-        // Unexpected exception: ensure the StreamController is always closed
-        // so consumers are never left waiting indefinitely.
-        debugPrint('[$_localProviderTag] unexpected inference error: $error\n$stackTrace');
+
+        debugPrint(
+          '[$_localProviderTag] fatal error: $error\n$stackTrace',
+        );
+
         if (!controller.isClosed) {
           controller.add(
-            InferenceResponse.error('Local runtime internal error: $error'),
+            InferenceResponse.error(
+              'Local runtime internal error: $error',
+            ),
           );
+
           await controller.close();
         }
       }
@@ -309,25 +411,35 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return controller.stream;
   }
 
-  static const String _localProviderTag = 'LOCAL_RUNTIME';
+  bool _isModelAllowedOnPlatform(
+    String modelId,
+  ) {
+    final allowed =
+        _isDesktopPlatform()
+            ? _desktopValidatedModelIds
+            : _mobileValidatedModelIds;
 
-  bool _isModelAllowedOnPlatform(String modelId) {
-    final allowed = _isDesktopPlatform()
-        ? _desktopValidatedModelIds
-        : _mobileValidatedModelIds;
     return allowed.contains(modelId);
   }
 
   String _resolveLlamaExecutable() {
-    final envPath = Platform.environment['LLAMA_CPP_EXECUTABLE'];
-    if (envPath != null && envPath.trim().isNotEmpty) {
+    final envPath =
+        Platform.environment[
+            'LLAMA_CPP_EXECUTABLE'];
+
+    if (envPath != null &&
+        envPath.trim().isNotEmpty) {
       return envPath.trim();
     }
+
     return 'llama-cli';
   }
 
-  List<String> _buildArgs(InferenceRequest request) {
+  List<String> _buildArgs(
+    InferenceRequest request,
+  ) {
     final prompt = _composePrompt(request);
+
     return <String>[
       '-m',
       request.modelPath!,
@@ -338,11 +450,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       '--temp',
       request.temperature.toString(),
       '--no-display-prompt',
-      '--log-disable', // suppress llama.cpp verbose logging to stderr
+      '--log-disable',
     ];
   }
 
-  String _composePrompt(InferenceRequest request) {
+  String _composePrompt(
+    InferenceRequest request,
+  ) {
     return LocalPromptTemplates.compose(
       modelId: request.modelId ?? '',
       prompt: request.prompt,
@@ -351,14 +465,29 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
   }
 
-  static bool _hasGgufHeader(String modelPath) {
+  static bool _hasGgufHeader(
+    String modelPath,
+  ) {
     final file = File(modelPath);
-    if (!file.existsSync()) return false;
+
+    if (!file.existsSync()) {
+      return false;
+    }
+
     RandomAccessFile? accessFile;
+
     try {
-      accessFile = file.openSync(mode: FileMode.read);
-      final header = accessFile.readSync(4);
-      if (header.length < 4) return false;
+      accessFile = file.openSync(
+        mode: FileMode.read,
+      );
+
+      final header =
+          accessFile.readSync(4);
+
+      if (header.length < 4) {
+        return false;
+      }
+
       return header[0] == 0x47 &&
           header[1] == 0x47 &&
           header[2] == 0x55 &&
@@ -368,12 +497,23 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }
   }
 
-  int _estimateTokenCount(String text) {
+  int _estimateTokenCount(
+    String text,
+  ) {
     final cleaned = text.trim();
-    if (cleaned.isEmpty) return 0;
-    return cleaned.split(RegExp(r'\s+')).length;
+
+    if (cleaned.isEmpty) {
+      return 0;
+    }
+
+    return cleaned
+        .split(RegExp(r'\s+'))
+        .length;
   }
 
-  static bool _isDesktopPlatform() =>
-      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  static bool _isDesktopPlatform() {
+    return Platform.isWindows ||
+        Platform.isLinux ||
+        Platform.isMacOS;
+  }
 }
