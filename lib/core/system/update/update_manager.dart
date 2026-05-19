@@ -79,7 +79,7 @@ class UpdateManager {
   final ValueNotifier<UpdateState> state;
 
   Timer? _periodicTimer;
-  // These guards keep update transitions deterministic across async UI actions.
+  // These guards prevent concurrent update operations and race conditions from async UI actions.
   bool _isCheckingForUpdates = false;
   bool _isPreparingInstall = false;
 

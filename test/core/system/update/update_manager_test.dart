@@ -58,7 +58,7 @@ void main() {
     expect(updateManager.hasDetectedNewerVersion(updateManager.state.value), isTrue);
   });
 
-  test('keeps explicit min_supported gating when current version is too old', () async {
+  test('blocks update via min_supported even when a newer version is detected', () async {
     final manifest = UpdateManifest.fromJson(const {
       'versionName': '1.12.120',
       'min_supported': '1.12.120',
