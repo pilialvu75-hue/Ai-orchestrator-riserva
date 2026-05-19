@@ -15,20 +15,34 @@ void main() {
     });
 
     test('returns failed for invalid model metadata', () async {
-      const model = AiModel(
+      // Create a real temp file with a valid GGUF magic header so that the
+      // file-existence and GGUF-header checks pass.  The model carries
+      // `invalidModel` validation status, which must cause `failed` when
+      // developer mode is disabled.
+      final tempDir =
+          await Directory.systemTemp.createTemp('runtime-test-invalid-');
+      addTearDown(() async => tempDir.delete(recursive: true));
+      final file = File('${tempDir.path}/model.gguf');
+      await file.writeAsBytes(const [0x47, 0x47, 0x55, 0x46, 0x00, 0x01]);
+
+      final model = AiModel(
         id: 'llama_1b',
         displayName: 'Llama 3.2 1B',
         fileName: 'model.gguf',
         downloadUrl: 'https://example.com/model.gguf',
         version: '1.0.0',
-        sizeBytes: 4,
+        sizeBytes: 6,
         description: 'test',
         isDownloaded: true,
-        localPath: '/tmp/invalid.gguf',
+        localPath: file.path,
         validationStatus: ModelValidationStatus.invalidModel,
       );
 
-      final state = await provider.validateRuntime(selectedModel: model);
+      // Developer mode must be disabled so the invalid status is not bypassed.
+      final providerNoDev =
+          LocalRuntimeProvider(developerModeProvider: () => false);
+      final state =
+          await providerNoDev.validateRuntime(selectedModel: model);
       expect(state.status, LocalRuntimeStatus.failed);
     });
 

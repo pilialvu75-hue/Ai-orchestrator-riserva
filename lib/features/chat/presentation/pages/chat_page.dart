@@ -508,8 +508,8 @@ class _ChatBodyState extends State<_ChatBody> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          const Color(0xFF101526).withOpacity(0.65),
-                          const Color(0xFF11192B).withOpacity(0.9),
+                          const Color(0xFF101526).withValues(alpha: 0.65),
+                          const Color(0xFF11192B).withValues(alpha: 0.9),
                           const Color(0xFF0B0F17),
                         ],
                       ),
@@ -560,11 +560,11 @@ class _ChatBodyState extends State<_ChatBody> {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  const Color(0xFF8AB4F8).withOpacity(0.28),
+                  const Color(0xFF8AB4F8).withValues(alpha: 0.28),
                   Colors.transparent,
                 ],
               ),
-              border: Border.all(color: const Color(0xFF8AB4F8).withOpacity(0.14)),
+              border: Border.all(color: const Color(0xFF8AB4F8).withValues(alpha: 0.14)),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x3315B6FF),
@@ -588,19 +588,19 @@ class _ChatBodyState extends State<_ChatBody> {
           const SizedBox(height: 8),
           Text(l10n.t('start_conversation'),
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.35), fontSize: 14)),
+                  color: Colors.white.withValues(alpha: 0.35), fontSize: 14)),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF151A29).withOpacity(0.82),
+              color: const Color(0xFF151A29).withValues(alpha: 0.82),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Text(
               l10n.t('chat_surface_tagline'),
               style: TextStyle(
-                color: Colors.white.withOpacity(0.52),
+                color: Colors.white.withValues(alpha: 0.52),
                 fontSize: 12,
                 letterSpacing: 0.2,
               ),
@@ -761,12 +761,12 @@ class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
       width: 180,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F131A).withOpacity(0.92),
+        color: const Color(0xFF0F131A).withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.35)),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.14),
+            color: color.withValues(alpha: 0.14),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),

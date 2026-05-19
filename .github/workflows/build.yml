@@ -61,8 +61,8 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          echo y | sdkmanager "ndk;26.1.10909125"
-          echo y | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "ndk;26.1.10909125"
 
       - name: Reset Android debug keystore
         run: |
