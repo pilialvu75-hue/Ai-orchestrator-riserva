@@ -385,6 +385,9 @@ jobs:
             exit 1
           fi
 
+          REQUIRED_SYMBOLS_PATTERN="llb_create_session|llb_session_start_gen|llb_session_poll_token"
+          LEGACY_SYMBOLS_PATTERN="llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded"
+
           echo "inspected_so=$SO_PATH" | tee runtime_bridge_package_summary.log
 
           # Verify native RuntimeSession lifecycle tags emitted by native/android/llama_bridge.cpp.
@@ -394,7 +397,7 @@ jobs:
             exit 1
           fi
 
-          readelf -Ws "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token" | tee runtime_bridge_exports_required.log || true
+          readelf -Ws "$SO_PATH" | grep -nE "$REQUIRED_SYMBOLS_PATTERN" | tee runtime_bridge_exports_required.log || true
           for symbol in llb_create_session llb_session_start_gen llb_session_poll_token; do
             if ! grep -q "$symbol" runtime_bridge_exports_required.log; then
               echo "::error::required RuntimeSession symbol missing from packaged libllama_bridge.so: $symbol"
@@ -402,7 +405,7 @@ jobs:
             fi
           done
 
-          LEGACY_EXPORTS=$(readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" || true)
+          LEGACY_EXPORTS=$(readelf -Ws "$SO_PATH" | grep -nE "$LEGACY_SYMBOLS_PATTERN" || true)
           printf '%s\n' "$LEGACY_EXPORTS" | tee runtime_bridge_exports_legacy.log >/dev/null
           if [ -n "$LEGACY_EXPORTS" ]; then
             echo "::error::legacy global bridge exports found in packaged APK"
@@ -410,7 +413,7 @@ jobs:
           fi
 
           # Diagnostic-only logs for artifact inspection after validation has passed.
-          nm -D --defined-only "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token|llb_load_model|llb_start_gen|llb_poll_token" | tee runtime_bridge_nm_exports.log || true
+          nm -D --defined-only "$SO_PATH" | grep -nE "$REQUIRED_SYMBOLS_PATTERN|llb_load_model|llb_start_gen|llb_poll_token" | tee runtime_bridge_nm_exports.log || true
 
       - name: Upload release diagnostics
         if: always()
