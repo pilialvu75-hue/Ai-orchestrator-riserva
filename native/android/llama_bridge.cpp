@@ -33,6 +33,9 @@ constexpr size_t kRingCapacity = 256;
 constexpr int32_t kSafeNBatch = 32;
 constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr int64_t kDecodeStallLogMillis = 5000;
+// Keep native first-token waits aligned with the Dart-side 24ms polling cadence so
+// llb_session_poll_token can block briefly on the first-token latch without
+// adding extra end-to-end latency or a second timing regime to debug.
 constexpr int64_t kFirstTokenPollWaitMillis = 24;
 constexpr int32_t kMaxInitialSampleRetries = 4;
 constexpr const char* kFallbackPrompt = "Hello";
@@ -511,6 +514,8 @@ void run_generation(
             return;
         }
 
+        llama_sampler_accept(sampler.get(), next_token);
+
         if (llama_vocab_is_eog(vocab, next_token)) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
                 initial_sample_retries < kMaxInitialSampleRetries) {
@@ -535,8 +540,6 @@ void run_generation(
                  n_decode);
             break;
         }
-
-        llama_sampler_accept(sampler.get(), next_token);
 
         char piece_buf[256];
         const int32_t piece_len = llama_token_to_piece(
@@ -887,8 +890,14 @@ int32_t llb_session_poll_token(
     auto try_pop_token = [&]() -> int32_t {
         std::lock_guard<std::mutex> lock(session->queue_mutex);
 
-        while (!session->token_queue.empty() &&
-               session->token_queue.front().epoch < current_epoch) {
+        while (!session->token_queue.empty()) {
+            const uint64_t entry_epoch = session->token_queue.front().epoch;
+            if (entry_epoch == current_epoch) {
+                break;
+            }
+            if (entry_epoch > current_epoch) {
+                return 0;
+            }
             session->token_queue.pop_front();
             const auto dropped = ++session->stale_drop_count;
             LOGI("[QUEUE_DROP_OLD_EPOCH] session=%" PRId64 " stale_drop_count=%" PRId64,
