@@ -67,6 +67,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
   static const Duration _stalledInferenceTimeoutRelease = Duration(seconds: 45);
   static const Duration _stalledInferenceTimeoutDebug = Duration(seconds: 120);
+  static const Duration _verificationFirstTokenTimeout = Duration(seconds: 5);
   static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
   static const Duration _modelLoadTimeout = Duration(seconds: 60);
@@ -295,12 +296,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _log('[GGUF] validation=ok path=$modelPath');
 
-      await _ensureWarmup(
-        controller: controller,
-        sessionId: sessionId,
-        modelPath: modelPath,
-      );
-      if (controller.isClosed) return;
+      final isForensicSelfTest =
+          request.sessionId.trim() == _forensicSelfTestSessionId;
+      if (!isForensicSelfTest) {
+        await _ensureWarmup(
+          controller: controller,
+          sessionId: sessionId,
+          modelPath: modelPath,
+        );
+        if (controller.isClosed) return;
+      } else {
+        _log('[WARMUP] skip session=$sessionId reason=self_test_owns_first_token_contract');
+      }
 
       if (!_ensureLibraryLoaded()) {
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
@@ -382,8 +389,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _logAi('native session ready');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────
-      final isForensicSelfTest =
-          request.sessionId.trim() == _forensicSelfTestSessionId;
       final prompt = _composePrompt(
         request,
         modelId: modelId,
@@ -432,6 +437,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
       final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
       final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
+      final firstTokenDeadline =
+          isForensicSelfTest ? _verificationFirstTokenTimeout : _firstTokenTimeout;
       if (request.maxTokens > _safeMaxTokens) {
         _log(
           '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
@@ -658,21 +665,21 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
-          if (firstTokenAt == null && elapsed > _firstTokenTimeout) {
+          if (firstTokenAt == null && elapsed > firstTokenDeadline) {
             _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
             _log(
               '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
-              ' timeout_ms=${_firstTokenTimeout.inMilliseconds} session=$sessionId',
+              ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionId',
             );
             _log(
               '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
               ' no_token_produced=true session=$sessionId',
             );
             _log(
-              '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${_firstTokenTimeout.inMilliseconds}',
+              '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${firstTokenDeadline.inMilliseconds}',
             );
             _log(
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
@@ -689,7 +696,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             _finishWithRuntimeError(
               controller,
               stage: 'stalled',
-              message: 'Local model stalled during inference.',
+              message: isForensicSelfTest
+                  ? 'FIRST_TOKEN_TIMEOUT'
+                  : 'Local model stalled during inference.',
             );
             break;
           }
@@ -1297,7 +1306,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           'Warmup generation start failed: ${_safeLastError(bindings, warmupSessionId)}',
         );
       }
-      while (stopwatch.elapsed < _firstTokenTimeout) {
+      while (stopwatch.elapsed < _verificationFirstTokenTimeout) {
         _log('[FFI_POLL_BEGIN] entering pollToken session=$warmupSessionId warmup=true');
         final status = bindings.pollToken(warmupSessionId, tokenBuf);
         if (status == 1) {
@@ -1321,9 +1330,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         await Future<void>.delayed(const Duration(milliseconds: 24));
       }
       if (!firstTokenSeen) {
-        throw StateError(
-          'Warmup generation produced no first token within ${_firstTokenTimeout.inSeconds}s.',
-        );
+        throw StateError('FIRST_TOKEN_TIMEOUT');
       }
     } finally {
       calloc.free(tokenBufRaw);

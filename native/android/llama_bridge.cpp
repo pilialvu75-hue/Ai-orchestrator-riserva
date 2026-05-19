@@ -33,6 +33,9 @@ constexpr size_t kRingCapacity = 256;
 constexpr int32_t kSafeNBatch = 32;
 constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr int64_t kDecodeStallLogMillis = 5000;
+constexpr int64_t kFirstTokenPollWaitMillis = 24;
+constexpr int32_t kMaxInitialSampleRetries = 4;
+constexpr const char* kFallbackPrompt = "Hello";
 
 constexpr int kStateGenerating = 0;
 constexpr int kStateCompleted = 1;
@@ -100,6 +103,8 @@ struct RuntimeSession {
     mutable std::mutex queue_mutex;
     mutable std::mutex error_mutex;
     mutable std::mutex native_mutex;
+    mutable std::mutex first_token_mutex;
+    std::condition_variable first_token_cv;
 
     llama_model* model{nullptr};
     llama_context* ctx{nullptr};
@@ -107,6 +112,7 @@ struct RuntimeSession {
     std::thread gen_thread;
     std::atomic<bool> worker_running{false};
     std::atomic<bool> cancel_requested{false};
+    std::atomic<bool> first_token_emitted{false};
     std::atomic<int> gen_state{kStateCompleted};
     std::atomic<uint64_t> epoch{0};
 
@@ -169,6 +175,27 @@ struct RuntimeSession {
         return {model, ctx};
     }
 };
+
+std::string sanitize_prompt_for_generation(const char* prompt) {
+    if (prompt == nullptr) {
+        return std::string(kFallbackPrompt);
+    }
+    std::string sanitized(prompt);
+    const auto first_non_ws = sanitized.find_first_not_of(" \t\r\n");
+    if (first_non_ws == std::string::npos) {
+        return std::string(kFallbackPrompt);
+    }
+    const auto last_non_ws = sanitized.find_last_not_of(" \t\r\n");
+    sanitized = sanitized.substr(first_non_ws, last_non_ws - first_non_ws + 1);
+    if (sanitized.size() < 2) {
+        return std::string(kFallbackPrompt);
+    }
+    return sanitized;
+}
+
+void notify_first_token_waiters(const std::shared_ptr<RuntimeSession>& session) {
+    session->first_token_cv.notify_all();
+}
 
 std::once_flag g_backend_init_once;
 std::atomic<bool> g_backend_initialized{false};
@@ -266,9 +293,10 @@ void run_generation(
     const auto generation_started_at = std::chrono::steady_clock::now();
     auto last_decode_progress_at = generation_started_at;
     auto last_token_emitted_at = generation_started_at;
-    bool first_token_emitted = false;
+    int32_t initial_sample_retries = 0;
 
     session->worker_running.store(true, std::memory_order_release);
+    session->first_token_emitted.store(false, std::memory_order_release);
 
     struct ThreadGuard {
         std::shared_ptr<RuntimeSession> session;
@@ -278,6 +306,7 @@ void run_generation(
 
         ~ThreadGuard() {
             session->worker_running.store(false, std::memory_order_release);
+            notify_first_token_waiters(session);
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at
             ).count();
@@ -323,24 +352,43 @@ void run_generation(
         return;
     }
 
-    std::vector<llama_token> tokens(static_cast<size_t>(n_ctx));
-    const int n_tokens = llama_tokenize(
-        vocab,
-        prompt.c_str(),
-        static_cast<int32_t>(prompt.size()),
-        tokens.data(),
-        static_cast<int32_t>(tokens.size()),
-        true,
-        false
-    );
+    auto tokenize_prompt = [&](const std::string& text, std::vector<llama_token>* out_tokens) {
+        std::vector<llama_token> local_tokens(static_cast<size_t>(n_ctx));
+        const int token_count = llama_tokenize(
+            vocab,
+            text.c_str(),
+            static_cast<int32_t>(text.size()),
+            local_tokens.data(),
+            static_cast<int32_t>(local_tokens.size()),
+            true,
+            false
+        );
+        if (token_count > 0) {
+            local_tokens.resize(static_cast<size_t>(token_count));
+            *out_tokens = std::move(local_tokens);
+        }
+        return token_count;
+    };
+
+    std::vector<llama_token> tokens;
+    int n_tokens = tokenize_prompt(prompt, &tokens);
+
+    if (n_tokens <= 1) {
+        LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
+             " reason=short_or_empty_prompt original_chars=%zu fallback=%s",
+             session->id,
+             owner_epoch,
+             prompt.size(),
+             kFallbackPrompt);
+        prompt = kFallbackPrompt;
+        n_tokens = tokenize_prompt(prompt, &tokens);
+    }
 
     if (n_tokens <= 0) {
         session->set_error("Tokenisation failed");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "tokenize_failed");
         return;
     }
-
-    tokens.resize(static_cast<size_t>(n_tokens));
 
     LOGI("[THREAD_PREFILL_BEGIN] session=%" PRId64 " epoch=%" PRIu64 " prompt_tokens=%d",
          session->id,
@@ -446,14 +494,40 @@ void run_generation(
 
         llama_token next_token = llama_sampler_sample(sampler.get(), ctx, -1);
         if (next_token < 0) {
-            session->set_error("Invalid sampled token");
-            set_state_if_epoch(session, kStateFailed, owner_epoch, "invalid_sample");
+            if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+                initial_sample_retries < kMaxInitialSampleRetries) {
+                ++initial_sample_retries;
+                LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
+                     " reason=invalid_sample retry=%d",
+                     session->id,
+                     owner_epoch,
+                     initial_sample_retries);
+                std::this_thread::yield();
+                continue;
+            }
+            session->set_error("FIRST_TOKEN_TIMEOUT");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "invalid_sample_before_first_token");
+            notify_first_token_waiters(session);
             return;
         }
 
-        llama_sampler_accept(sampler.get(), next_token);
-
         if (llama_vocab_is_eog(vocab, next_token)) {
+            if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+                initial_sample_retries < kMaxInitialSampleRetries) {
+                ++initial_sample_retries;
+                LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
+                     " reason=immediate_eos retry=%d",
+                     session->id,
+                     owner_epoch,
+                     initial_sample_retries);
+                continue;
+            }
+            if (!session->first_token_emitted.load(std::memory_order_acquire)) {
+                session->set_error("FIRST_TOKEN_TIMEOUT");
+                set_state_if_epoch(session, kStateFailed, owner_epoch, "eos_before_first_token");
+                notify_first_token_waiters(session);
+                return;
+            }
             eos_reached = true;
             LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " eos_reached=true generated=%d",
                  session->id,
@@ -461,6 +535,8 @@ void run_generation(
                  n_decode);
             break;
         }
+
+        llama_sampler_accept(sampler.get(), next_token);
 
         char piece_buf[256];
         const int32_t piece_len = llama_token_to_piece(
@@ -490,8 +566,7 @@ void run_generation(
                 owner_epoch
             );
             last_token_emitted_at = emit_now;
-            if (!first_token_emitted) {
-                first_token_emitted = true;
+            if (!session->first_token_emitted.exchange(true, std::memory_order_acq_rel)) {
                 const auto first_token_latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     emit_now - generation_started_at
                 ).count();
@@ -499,6 +574,7 @@ void run_generation(
                      session->id,
                      owner_epoch,
                      static_cast<long long>(first_token_latency_ms));
+                notify_first_token_waiters(session);
             }
             LOGI("[TOKEN_LATENCY] session=%" PRId64 " epoch=%" PRIu64 " token_interval_ms=%lld",
                  session->id,
@@ -729,12 +805,6 @@ int32_t llb_session_start_gen(
         return -2;
     }
 
-    if (prompt == nullptr || std::strlen(prompt) == 0) {
-        session->set_error("Prompt is empty");
-        LOGE("[ERROR] [GEN_START] prompt_empty session=%" PRId64, session_id);
-        return -3;
-    }
-
     if (max_tokens <= 0) {
         session->set_error("max_tokens must be > 0");
         LOGE("[ERROR] [GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
@@ -754,10 +824,19 @@ int32_t llb_session_start_gen(
 
     session->clear_queue();
     session->cancel_requested.store(false, std::memory_order_release);
+    session->first_token_emitted.store(false, std::memory_order_release);
     session->clear_error();
 
     const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     session->gen_state.store(kStateGenerating, std::memory_order_release);
+    notify_first_token_waiters(session);
+
+    const std::string sanitized_prompt = sanitize_prompt_for_generation(prompt);
+    if (prompt == nullptr || sanitized_prompt != std::string(prompt)) {
+        LOGI("[PROMPT_FALLBACK] session=%" PRId64 " reason=start_gen_sanitized fallback=%s",
+             session_id,
+             sanitized_prompt.c_str());
+    }
 
     LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f",
          session_id,
@@ -769,7 +848,7 @@ int32_t llb_session_start_gen(
         session->gen_thread = std::thread(
             run_generation,
             session,
-            std::string(prompt),
+            sanitized_prompt,
             max_tokens,
             temperature,
             owner_epoch
@@ -805,11 +884,11 @@ int32_t llb_session_poll_token(
 
     const uint64_t current_epoch = session->epoch.load(std::memory_order_acquire);
 
-    {
+    auto try_pop_token = [&]() -> int32_t {
         std::lock_guard<std::mutex> lock(session->queue_mutex);
 
         while (!session->token_queue.empty() &&
-               session->token_queue.front().epoch != current_epoch) {
+               session->token_queue.front().epoch < current_epoch) {
             session->token_queue.pop_front();
             const auto dropped = ++session->stale_drop_count;
             LOGI("[QUEUE_DROP_OLD_EPOCH] session=%" PRId64 " stale_drop_count=%" PRId64,
@@ -838,6 +917,30 @@ int32_t llb_session_poll_token(
                  session->token_queue.size(),
                  static_cast<long long>(queued_ms),
                  session->queue_overflow_count.load(std::memory_order_acquire));
+            return 1;
+        }
+        return 0;
+    };
+
+    if (try_pop_token() == 1) {
+        return 1;
+    }
+
+    if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+        session->gen_state.load(std::memory_order_acquire) == kStateGenerating &&
+        session->epoch.load(std::memory_order_acquire) == current_epoch) {
+        std::unique_lock<std::mutex> wait_lock(session->first_token_mutex);
+        session->first_token_cv.wait_for(
+            wait_lock,
+            std::chrono::milliseconds(kFirstTokenPollWaitMillis),
+            [&]() {
+                return session->first_token_emitted.load(std::memory_order_acquire) ||
+                       session->gen_state.load(std::memory_order_acquire) != kStateGenerating ||
+                       session->epoch.load(std::memory_order_acquire) != current_epoch;
+            }
+        );
+        wait_lock.unlock();
+        if (try_pop_token() == 1) {
             return 1;
         }
     }
@@ -872,6 +975,7 @@ void llb_session_cancel(int64_t session_id) {
     session->cancel_requested.store(true, std::memory_order_release);
     const uint64_t owner_epoch = session->epoch.load(std::memory_order_acquire);
     set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_requested_api");
+    notify_first_token_waiters(session);
     LOGI("[CANCEL] session=%" PRId64 " requested=true epoch=%" PRIu64,
          session_id,
          owner_epoch);
