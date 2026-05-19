@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runtime lifecycle states for the local GGUF inference engine.
 ///
@@ -133,6 +134,11 @@ class LocalRuntimeMonitor {
     final nextElapsed = elapsed ?? previousState.elapsed;
     final nextTokens = tokensGenerated ?? previousState.tokensGenerated;
     debugPrint(
+      '[AI_RUNTIME_MONITOR] ${previousState.status.name} -> ${status.name}'
+      ' tokens=$nextTokens elapsed_ms=${nextElapsed.inMilliseconds}'
+      ' message="${message ?? ''}"',
+    );
+    RuntimeEventLog.instance.emit(
       '[AI_RUNTIME_MONITOR] ${previousState.status.name} -> ${status.name}'
       ' tokens=$nextTokens elapsed_ms=${nextElapsed.inMilliseconds}'
       ' message="${message ?? ''}"',

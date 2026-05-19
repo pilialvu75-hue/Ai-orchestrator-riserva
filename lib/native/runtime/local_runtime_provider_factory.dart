@@ -16,13 +16,17 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dar
 ///   Spawns the llama.cpp CLI executable via [Process.start] as before.
 LocalRuntimeProvider createLocalRuntimeProvider({
   RuntimeStateMachine? runtimeStateMachine,
+  bool Function()? developerModeProvider,
 }) {
   if (Platform.isAndroid) {
     debugPrint('[RUNTIME_PATH] platform=android provider=AndroidFfiRuntimeProvider');
     return AndroidFfiRuntimeProvider(
       runtimeStateMachine: runtimeStateMachine,
+      developerModeProvider: developerModeProvider,
     );
   }
   debugPrint('[RUNTIME_PATH] platform=desktop provider=LocalRuntimeProvider');
-  return LocalRuntimeProvider();
+  return LocalRuntimeProvider(
+    developerModeProvider: developerModeProvider,
+  );
 }

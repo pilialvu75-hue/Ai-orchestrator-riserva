@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart'
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -132,25 +133,94 @@ class InferenceService {
     try {
       selected = await _loadSelectedModel();
     } on Exception catch (e) {
-      // Model selection exceptions are logged and treated as "no local model"
-      // so inference can continue via cloud fallback rather than crashing.
-      _log('model selection exception – falling back to cloud: $e');
+      _log(
+        '[VALIDATION] reason=model_selection_exception detail=$e – falling back to cloud',
+      );
       return null;
     }
 
-    if (selected == null ||
-        !selected.isDownloaded ||
-        selected.localPath == null ||
-        selected.validationStatus == ModelValidationStatus.invalidModel ||
-        selected.validationStatus == ModelValidationStatus.missingFile ||
-        selected.validationStatus == ModelValidationStatus.notDownloaded ||
-        selected.validationStatus == ModelValidationStatus.downloading ||
-        !_runtimeProvider.supportsModel(selected)) {
-      _log('memory retrieval/model validation local model unavailable');
+    if (selected == null) {
+      _log('[VALIDATION] reason=selected_null – no model has been chosen');
       return null;
     }
+
+    if (!selected.isDownloaded) {
+      _log(
+        '[VALIDATION] reason=model_not_downloaded'
+        ' modelId=${selected.id} displayName="${selected.displayName}"',
+      );
+      return null;
+    }
+
+    if (selected.localPath == null || selected.localPath!.trim().isEmpty) {
+      _log(
+        '[VALIDATION] reason=localPath_missing'
+        ' modelId=${selected.id} localPath=${selected.localPath}',
+      );
+      return null;
+    }
+
+    if (selected.validationStatus == ModelValidationStatus.invalidModel) {
+      _log(
+        '[VALIDATION] reason=invalidModel'
+        ' modelId=${selected.id} path=${selected.localPath}',
+      );
+      return null;
+    }
+
+    if (selected.validationStatus == ModelValidationStatus.missingFile) {
+      _log(
+        '[VALIDATION] reason=missingFile'
+        ' modelId=${selected.id} path=${selected.localPath}',
+      );
+      return null;
+    }
+
+    if (selected.validationStatus == ModelValidationStatus.notDownloaded) {
+      _log(
+        '[VALIDATION] reason=notDownloaded'
+        ' modelId=${selected.id}',
+      );
+      return null;
+    }
+
+    if (selected.validationStatus == ModelValidationStatus.downloading) {
+      _log(
+        '[VALIDATION] reason=downloading – model transfer in progress'
+        ' modelId=${selected.id}',
+      );
+      return null;
+    }
+
+    if (!_runtimeProvider.supportsModel(selected)) {
+      // Infer the precise reason for the runtime rejection so the log is
+      // actionable rather than a generic "unavailable" message.
+      final effectiveId = selected.effectiveRuntimeModelId;
+      final vs = selected.validationStatus;
+      String rejectionReason;
+      if (vs != ModelValidationStatus.validatedOk) {
+        rejectionReason = 'unsupported_quantization_or_validation_status'
+            ' (validationStatus=$vs)';
+      } else {
+        rejectionReason =
+            'runtime_provider_incompatibility – modelId="$effectiveId"'
+            ' not in validated set; possible unsupported architecture'
+            ' or tokenizer mismatch';
+      }
+      _log(
+        '[VALIDATION] reason=$rejectionReason'
+        ' modelId=${selected.id}'
+        ' effectiveRuntimeModelId=$effectiveId'
+        ' validationStatus=$vs'
+        ' path=${selected.localPath}',
+      );
+      return null;
+    }
+
     _log(
-      'memory retrieval/model validation local model ready id=${selected.id} path=${selected.localPath}',
+      '[VALIDATION] status=ok modelId=${selected.id}'
+      ' effectiveRuntimeModelId=${selected.effectiveRuntimeModelId}'
+      ' path=${selected.localPath}',
     );
     return selected;
   }
@@ -468,5 +538,6 @@ class InferenceService {
 
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
+    RuntimeEventLog.instance.emit(message);
   }
 }
