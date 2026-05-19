@@ -179,6 +179,9 @@ struct RuntimeSession {
     }
 };
 
+// Trims prompt whitespace and guarantees a minimally usable prompt for the
+// first-token liveness path, falling back to kFallbackPrompt when input is
+// null, blank, or too short to reliably drive a decode step.
 std::string sanitize_prompt_for_generation(const char* prompt) {
     if (prompt == nullptr) {
         return std::string(kFallbackPrompt);
@@ -196,6 +199,7 @@ std::string sanitize_prompt_for_generation(const char* prompt) {
     return sanitized;
 }
 
+// Wakes any pollers waiting for the first token or an early terminal state.
 void notify_first_token_waiters(const std::shared_ptr<RuntimeSession>& session) {
     session->first_token_cv.notify_all();
 }
@@ -508,7 +512,7 @@ void run_generation(
                 std::this_thread::yield();
                 continue;
             }
-            session->set_error("FIRST_TOKEN_TIMEOUT: invalid sample after max retries");
+            session->set_error("Invalid sample after max retries before first token");
             set_state_if_epoch(session, kStateFailed, owner_epoch, "invalid_sample_before_first_token");
             notify_first_token_waiters(session);
             return;
@@ -528,7 +532,7 @@ void run_generation(
                 continue;
             }
             if (!session->first_token_emitted.load(std::memory_order_acquire)) {
-                session->set_error("FIRST_TOKEN_TIMEOUT: EOS reached after max retries");
+                session->set_error("EOS reached after max retries before first token");
                 set_state_if_epoch(session, kStateFailed, owner_epoch, "eos_before_first_token");
                 notify_first_token_waiters(session);
                 return;
