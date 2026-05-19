@@ -171,7 +171,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final dartThreadId = _currentThreadId();
       _log(
         '[RUNTIME_PROVIDER_BRANCH] provider=${runtimeType} runtime_mode=local '
-        'branch=session_api session_api_path_executed=true session=$sessionId',
+        'branch=session_api local_request_available=true session=$sessionId',
       );
       _log('[SESSION] begin session=$sessionId');
       _log(
