@@ -306,7 +306,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         if (controller.isClosed) return;
       } else {
-        _log('[WARMUP] skip session=$sessionId reason=self test owns first token contract');
+        _log('[WARMUP] skip session=$sessionId reason=self-test owns first token contract');
       }
 
       if (!_ensureLibraryLoaded()) {

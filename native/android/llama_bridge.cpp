@@ -32,6 +32,7 @@ namespace {
 constexpr size_t kRingCapacity = 256;
 constexpr int32_t kSafeNBatch = 32;
 constexpr int32_t kMaxGeneratedTokens = 256;
+constexpr size_t kMinPromptLength = 2;
 constexpr int64_t kDecodeStallLogMillis = 5000;
 // Keep native first-token waits aligned with the Dart-side 24ms polling cadence so
 // llb_session_poll_token can block briefly on the first-token latch without
@@ -193,7 +194,7 @@ std::string sanitize_prompt_for_generation(const char* prompt) {
     }
     const auto last_non_ws = sanitized.find_last_not_of(" \t\r\n");
     sanitized = sanitized.substr(first_non_ws, last_non_ws - first_non_ws + 1);
-    if (sanitized.size() < 2) {
+    if (sanitized.size() < kMinPromptLength) {
         return std::string(kFallbackPrompt);
     }
     return sanitized;
@@ -509,7 +510,7 @@ void run_generation(
                      session->id,
                      owner_epoch,
                      initial_sample_retry_count);
-                std::this_thread::yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
             session->set_error("Invalid sample after max retries before first token");
