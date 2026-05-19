@@ -45,7 +45,6 @@ class Orchestrator {
         return _executePlan(input, isOffline: isOffline);
       case TaskType.chat:
       case TaskType.system:
-      default:
         return _inferenceService.infer(
           InferenceRequest(
             sessionId: 'default',

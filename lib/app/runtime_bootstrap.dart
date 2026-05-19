@@ -47,7 +47,7 @@ class RuntimeBootstrap {
       debugPrint('[OTA] PackageInfo raw: version=${info.version} buildNumber=${info.buildNumber}');
       return normalizedVersion;
     } catch (error) {
-      final version = const String.fromEnvironment(
+      const version = String.fromEnvironment(
         'APP_VERSION',
         defaultValue: _versionFallback,
       );
