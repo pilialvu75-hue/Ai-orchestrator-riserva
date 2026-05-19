@@ -459,7 +459,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: AI-Orchestrator Android ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
