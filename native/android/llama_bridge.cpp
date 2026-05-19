@@ -65,7 +65,7 @@
 
 // ── Global state ──────────────────────────────────────────────────────────────
 
-static llama_model*   g_model   = nullptr;
+static llama_model* g_model   = nullptr;
 static llama_context* g_ctx     = nullptr;
 static std::string    g_last_error;
 
@@ -118,7 +118,7 @@ static constexpr float   kSafeTemperature         = 0.7f;
 static constexpr int32_t kSafeTopK                = 40;
 static constexpr float   kSafeTopP                = 0.9f;
 static constexpr int32_t kGenerationTimeoutMillis  = 180000;
-static constexpr int32_t kNoTokenStallMillis        = 45000;
+static constexpr int32_t kNoTokenStallMillis        = 120000; // Ottimizzazione: Alzato a 120s per evitare timeout in prefill su CPU lenti
 static constexpr int32_t kMaxGeneratedTokens        = 256;
 static constexpr int32_t kRepeatedTokenLimit        = 96;
 static constexpr int32_t kEmptyTokenLimit           = 32;
@@ -144,7 +144,7 @@ static int64_t elapsed_ms_since(
 static int32_t first_token_stall_timeout_millis() {
 #ifndef NDEBUG
     return 120000;
-#else
+#define NDEBUG
     return kNoTokenStallMillis;
 #endif
 }
@@ -856,10 +856,11 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
 
     llama_backend_init();
 
+    // Ottimizzazione RAM: Esplicitazione dei parametri nativi di llama.cpp per ambiente Android mobile
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;  // CPU-only; GPU (Vulkan/OpenCL) can be enabled
-                               // by setting n_gpu_layers > 0 when the ggml
-                               // backend is compiled with GPU support.
+    mparams.n_gpu_layers = 0;      // CPU-only
+    mparams.use_mmap     = true;   // Memory mapping attivo per alleggerire la RAM heap iniziale
+    mparams.use_mlock    = false;  // Disabilitato per evitare terminazioni forzate dell'OS (OOM killer)
 
     LOGI("[LOAD] calling llama_model_load_from_file");
     g_model = llama_model_load_from_file(model_path, mparams);
@@ -881,6 +882,7 @@ int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads)
     cparams.n_batch          = kSafeNBatch;
     cparams.n_ubatch         = kSafeNBatch;
     cparams.embeddings       = false;
+    cparams.offload_kqv      = true; // Ottimizzazione: Forza l'offload delle matrici KV per preservare memoria volatile
 
     LOGI("[NATIVE_CONTEXT_CREATE] path=%s n_ctx=%d n_threads=%d n_batch=%d",
          model_path, n_ctx, n_threads, kSafeNBatch);
@@ -979,7 +981,11 @@ int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature)
     g_last_error.clear();
 
     const int32_t capped_max_tokens = std::min(max_tokens, kMaxGeneratedTokens);
-    const float forced_temperature = kSafeTemperature;
+    
+    // Ottimizzazione: Sbloccato il campionamento nativo. Usa la temperatura reale passata dall'interfaccia Dart
+    // per permettere computazioni deterministiche più leggere ed evitare calcoli sampler superflui.
+    const float forced_temperature = temperature; 
+    
     LOGI("[AI] starting inference...");
     LOGI("[AI] streaming callback active");
     LOGI("[START_GEN] epoch=%" PRIu64 " prompt_chars=%zu requested_max=%d capped_max=%d temp=%.3f",
@@ -1100,7 +1106,7 @@ void llb_free_model(void) {
         //
         // llama_backend_free() is intentionally omitted here — see file header.
         llama_context* ctx_to_free   = g_ctx;
-        llama_model*   model_to_free = g_model;
+        llama_model* model_to_free = g_model;
         g_ctx   = nullptr;
         g_model = nullptr;
 
