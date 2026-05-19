@@ -401,14 +401,14 @@ jobs:
             fi
           done
 
-          if readelf -Ws "$SO_PATH" | grep -qE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded"; then
+          LEGACY_EXPORTS=$(readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" || true)
+          printf '%s\n' "$LEGACY_EXPORTS" | tee runtime_bridge_exports_legacy.log >/dev/null
+          if [ -n "$LEGACY_EXPORTS" ]; then
             echo "::error::legacy global bridge exports found in packaged APK"
-            readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" | tee runtime_bridge_exports_legacy.log
             exit 1
           fi
 
           # Diagnostic-only logs for artifact inspection after validation has passed.
-          readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" | tee runtime_bridge_exports_legacy.log || true
           nm -D --defined-only "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token|llb_load_model|llb_start_gen|llb_poll_token" | tee runtime_bridge_nm_exports.log || true
 
       - name: Upload release diagnostics
