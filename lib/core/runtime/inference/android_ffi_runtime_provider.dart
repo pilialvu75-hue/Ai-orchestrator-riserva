@@ -100,6 +100,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   bool _loadAttempted = false;
   Future<void> _inferenceTail = Future<void>.value();
   Future<void>? _warmupFuture;
+  String? _warmupModelPath;
   final Set<String> _activeInferenceSessions = <String>{};
 
   static Duration get _firstTokenTimeout =>
@@ -179,8 +180,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
       try {
-      await _ensureWarmup(controller: controller, sessionId: sessionId);
-      if (controller.isClosed) return;
       if (cancellationToken.isCancelled) {
         _finishWithRuntimeError(
           controller,
@@ -289,6 +288,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _log('[GGUF] validation=ok path=$modelPath');
 
+      await _ensureWarmup(
+        controller: controller,
+        sessionId: sessionId,
+        modelPath: modelPath,
+      );
+      if (controller.isClosed) return;
+
       if (!_ensureLibraryLoaded()) {
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
         clearRuntimeVerification();
@@ -318,6 +324,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       int nativeSessionId;
       try {
+        _log('[FFI_CREATE_SESSION] path=$modelPath');
         nativeSessionId = await _runNativeCallWithTimeout<int>(
           stage: 'session_create',
           timeout: _modelLoadTimeout,
@@ -344,6 +351,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
       _log('[SESSION_CREATE_OK] session=$nativeSessionId path=$modelPath');
+      _log('[FFI_CREATE_SESSION_OK] session=$nativeSessionId path=$modelPath');
       final activeAfterCreate = bindings.sessionIsActive(nativeSessionId);
       _log('[NATIVE_MODEL_LOAD_RESULT] llb_session_is_active after create: $activeAfterCreate');
 
@@ -835,6 +843,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               if (isFirstToken) {
                 _log(
+                  '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
+                );
+                _log(
                   '[FIRST_TOKEN] elapsed_ms=${streamingElapsed.inMilliseconds}'
                   ' token_text_length=${piece.length}'
                   ' poll_iteration=$pollIterations session=$sessionId',
@@ -1127,6 +1138,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _nativeSessionModelPath == modelPath &&
         bindings.sessionIsActive(_nativeSessionId!) == 1) {
       _log('[SESSION_CREATE_OK] reusing session=$_nativeSessionId path=$modelPath');
+      _log('[FFI_CREATE_SESSION_OK] reusing=true session=$_nativeSessionId path=$modelPath');
       return _nativeSessionId!;
     }
 
@@ -1147,6 +1159,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _nativeSessionId = created;
     _nativeSessionModelPath = modelPath;
     _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
+    _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
     return created;
   }
 
@@ -1198,14 +1211,23 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<void> _ensureWarmup({
     required StreamController<InferenceResponse> controller,
     required String sessionId,
+    required String modelPath,
   }) async {
-    _warmupFuture ??= _runWarmup();
+    if (_warmupFuture == null || _warmupModelPath != modelPath) {
+      _warmupModelPath = modelPath;
+      _warmupFuture = _runWarmup(modelPath: modelPath);
+    }
     _log('[WARMUP] await session=$sessionId');
     try {
       await _warmupFuture!;
       _log('[WARMUP] complete session=$sessionId');
     } catch (error) {
       _warmupFuture = null;
+      clearRuntimeVerification();
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.runtimeUnavailable,
+        message: 'Runtime warmup failed: $error',
+      );
       _finishWithRuntimeError(
         controller,
         stage: 'warmup',
@@ -1215,7 +1237,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  Future<void> _runWarmup() async {
+  Future<void> _runWarmup({required String modelPath}) async {
     _log('[BOOT] runtime warmup begin');
     _updateRuntimeStatus(
       LocalRuntimeStatus.loading,
@@ -1228,7 +1250,72 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (!_ensureLibraryLoaded()) {
       throw StateError('libllama_bridge.so is missing for this Android build.');
     }
+    final bindings = _bindings!;
     _log('[BOOT] runtime warmup library ready');
+    _log('[FFI_CREATE_SESSION] warmup path=$modelPath');
+    final warmupSessionId = bindings.createSession(modelPath);
+    if (warmupSessionId <= 0) {
+      throw StateError(
+        'Warmup session creation failed: ${_safeLastError(bindings, warmupSessionId)}',
+      );
+    }
+    if (bindings.sessionIsActive(warmupSessionId) != 1) {
+      bindings.releaseSession(warmupSessionId);
+      throw StateError(
+        'Warmup session inactive: ${_safeLastError(bindings, warmupSessionId)}',
+      );
+    }
+    _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId');
+    final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+    final tokenBuf = tokenBufRaw.cast<Utf8>();
+    var firstTokenSeen = false;
+    final stopwatch = Stopwatch()..start();
+    try {
+      final start = bindings.startGeneration(
+        warmupSessionId,
+        'Reply with the single word: OK',
+        4,
+        0.1,
+      );
+      if (start != 0) {
+        throw StateError(
+          'Warmup generation start failed: ${_safeLastError(bindings, warmupSessionId)}',
+        );
+      }
+      while (stopwatch.elapsed < _firstTokenTimeout) {
+        final status = bindings.pollToken(warmupSessionId, tokenBuf);
+        if (status == 1) {
+          final token = tokenBuf.toDartString();
+          if (token.trim().isNotEmpty) {
+            firstTokenSeen = true;
+            _log(
+              '[FFI_FIRST_TOKEN] warmup session=$warmupSessionId elapsed_ms=${stopwatch.elapsedMilliseconds}',
+            );
+            break;
+          }
+        } else if (status == 2) {
+          break;
+        } else if (status == -1) {
+          throw StateError(
+            'Warmup generation failed: ${_safeLastError(bindings, warmupSessionId)}',
+          );
+        } else if (status == -99) {
+          throw StateError('Warmup generation cancelled before first token.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 24));
+      }
+      if (!firstTokenSeen) {
+        throw StateError(
+          'Warmup generation produced no first token within ${_firstTokenTimeout.inSeconds}s.',
+        );
+      }
+    } finally {
+      calloc.free(tokenBufRaw);
+      _log('[FFI_CANCEL] warmup session=$warmupSessionId');
+      bindings.cancelSession(warmupSessionId);
+      _log('[FFI_RELEASE] warmup session=$warmupSessionId');
+      bindings.releaseSession(warmupSessionId);
+    }
   }
 
   static void _finishWithError(

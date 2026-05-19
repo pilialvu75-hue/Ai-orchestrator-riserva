@@ -49,6 +49,19 @@ uint64_t current_thread_id() {
         std::hash<std::thread::id>{}(std::this_thread::get_id()));
 }
 
+std::mutex g_global_error_mutex;
+std::string g_global_last_error;
+
+void set_global_error(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_global_error_mutex);
+    g_global_last_error = message;
+}
+
+std::string get_global_error_copy() {
+    std::lock_guard<std::mutex> lock(g_global_error_mutex);
+    return g_global_last_error;
+}
+
 struct BatchGuard {
     llama_batch batch{};
     bool initialized{false};
@@ -108,6 +121,7 @@ struct RuntimeSession {
             std::lock_guard<std::mutex> lock(error_mutex);
             last_error = message;
         }
+        set_global_error(message);
         LOGE("[ERROR] session=%" PRId64 " message=%s", id, message.c_str());
     }
 
@@ -196,7 +210,7 @@ void set_state_if_epoch(
         return;
     }
     if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
-        LOGI("[DECODE] session=%" PRId64 " epoch_mismatch owner=%" PRIu64 " current=%" PRIu64
+        LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch_mismatch owner=%" PRIu64 " current=%" PRIu64
              " state_skip=%d reason=%s",
              session->id,
              owner_epoch,
@@ -223,7 +237,7 @@ size_t enqueue_token(
     if (session->token_queue.size() >= kRingCapacity) {
         session->token_queue.pop_front();
         const auto dropped = ++session->queue_overflow_count;
-        LOGE("[TOKEN] session=%" PRId64 " queue_overflow drop_oldest=true overflow_count=%" PRId64,
+        LOGE("[QUEUE_OVERFLOW] session=%" PRId64 " drop_oldest=true overflow_count=%" PRId64,
              session->id,
              dropped);
         LOGI("[DECODE] session=%" PRId64 " backpressure queue_size=%zu capacity=%zu",
@@ -252,6 +266,7 @@ void run_generation(
     const auto generation_started_at = std::chrono::steady_clock::now();
     auto last_decode_progress_at = generation_started_at;
     auto last_token_emitted_at = generation_started_at;
+    bool first_token_emitted = false;
 
     session->worker_running.store(true, std::memory_order_release);
 
@@ -266,7 +281,7 @@ void run_generation(
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at
             ).count();
-            LOGI("[THREAD_STOP] session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64
+            LOGI("[THREAD_FINISH] session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64
                  " elapsed_ms=%lld state=%d",
                  session->id,
                  epoch,
@@ -280,7 +295,7 @@ void run_generation(
          session->id,
          owner_epoch,
          thread_id);
-    LOGI("[GEN_START] session=%" PRId64 " epoch=%" PRIu64 " prompt_chars=%zu max_tokens=%d temp=%.3f",
+    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " prompt_chars=%zu max_tokens=%d temp=%.3f",
          session->id,
          owner_epoch,
          prompt.size(),
@@ -327,7 +342,7 @@ void run_generation(
 
     tokens.resize(static_cast<size_t>(n_tokens));
 
-    LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " prefill_begin prompt_tokens=%d",
+    LOGI("[THREAD_PREFILL_BEGIN] session=%" PRId64 " epoch=%" PRIu64 " prompt_tokens=%d",
          session->id,
          owner_epoch,
          n_tokens);
@@ -351,6 +366,7 @@ void run_generation(
     }
     prefill_batch.batch.n_tokens = static_cast<int32_t>(tokens.size());
 
+    const auto prefill_started_at = std::chrono::steady_clock::now();
     const int prefill_status = llama_decode(ctx, prefill_batch.batch);
     if (prefill_status != 0) {
         session->set_error("Prompt prefill decode failed");
@@ -358,13 +374,23 @@ void run_generation(
         return;
     }
 
-    LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " prefill_end status=%d",
+    const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - prefill_started_at
+    ).count();
+    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64 " status=%d prefill_ms=%lld",
          session->id,
          owner_epoch,
-         prefill_status);
+         prefill_status,
+         static_cast<long long>(prefill_ms));
 
-    if (session->cancel_requested.load(std::memory_order_acquire) ||
-        session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+    if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+        LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch=%" PRIu64 " reason=pre_loop_epoch_mismatch",
+             session->id,
+             owner_epoch);
+        set_state_if_epoch(session, kStateCancelled, owner_epoch, "stale_worker_pre_loop");
+        return;
+    }
+    if (session->cancel_requested.load(std::memory_order_acquire)) {
         set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_before_decode_loop");
         return;
     }
@@ -387,8 +413,14 @@ void run_generation(
     bool eos_reached = false;
 
     while (n_decode < std::min(max_tokens, kMaxGeneratedTokens)) {
-        if (session->cancel_requested.load(std::memory_order_acquire) ||
-            session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+        if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+            LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch=%" PRIu64 " reason=decode_loop_epoch_mismatch",
+                 session->id,
+                 owner_epoch);
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "stale_worker_decode_loop");
+            return;
+        }
+        if (session->cancel_requested.load(std::memory_order_acquire)) {
             set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_decode_loop");
             LOGI("[CANCEL] session=%" PRId64 " epoch=%" PRIu64 " token_count=%d",
                  session->id,
@@ -402,7 +434,7 @@ void run_generation(
             now - last_decode_progress_at
         ).count();
         if (stall_ms > kDecodeStallLogMillis) {
-            LOGE("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " stall_detected=true stall_ms=%lld"
+            LOGE("[STALL_WARNING] session=%" PRId64 " epoch=%" PRIu64 " stall_detected=true stall_ms=%lld"
                  " queue_size=%zu tokens=%d",
                  session->id,
                  owner_epoch,
@@ -458,6 +490,32 @@ void run_generation(
                 owner_epoch
             );
             last_token_emitted_at = emit_now;
+            if (!first_token_emitted) {
+                first_token_emitted = true;
+                const auto first_token_latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    emit_now - generation_started_at
+                ).count();
+                LOGI("[THREAD_FIRST_TOKEN] session=%" PRId64 " epoch=%" PRIu64 " latency_ms=%lld",
+                     session->id,
+                     owner_epoch,
+                     static_cast<long long>(first_token_latency_ms));
+            }
+            LOGI("[TOKEN_LATENCY] session=%" PRId64 " epoch=%" PRIu64 " token_interval_ms=%lld",
+                 session->id,
+                 owner_epoch,
+                 static_cast<long long>(emit_interval_ms));
+            const auto total_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                emit_now - generation_started_at
+            ).count();
+            const double throughput = total_elapsed_ms > 0
+                ? ((static_cast<double>(n_decode) + 1.0) * 1000.0 / static_cast<double>(total_elapsed_ms))
+                : 0.0;
+            LOGI("[TOKEN_THROUGHPUT] session=%" PRId64 " epoch=%" PRIu64 " tokens=%d elapsed_ms=%lld tokens_per_sec=%.3f",
+                 session->id,
+                 owner_epoch,
+                 n_decode + 1,
+                 static_cast<long long>(total_elapsed_ms),
+                 throughput);
             LOGI("[TOKEN] session=%" PRId64 " epoch=%" PRIu64 " token_id=%d chars=%d"
                  " queue_size=%zu emit_interval_ms=%lld overflow_count=%" PRId64,
                  session->id,
@@ -517,7 +575,7 @@ void release_session_async(const std::shared_ptr<RuntimeSession>& session) {
         {
             std::lock_guard<std::mutex> lock(session->generation_mutex);
             if (session->gen_thread.joinable()) {
-                LOGI("[CLEANUP] session=%" PRId64 " joining_worker=true", session->id);
+                LOGI("[CLEANUP_JOIN] session=%" PRId64 " joining_worker=true", session->id);
                 session->gen_thread.join();
             }
         }
@@ -539,7 +597,7 @@ void llb_init_backend(void) {
     std::call_once(g_backend_init_once, []() {
         llama_backend_init();
         g_backend_initialized.store(true, std::memory_order_release);
-        LOGI("[SESSION_CREATE] backend_initialized=true");
+        LOGI("[SESSION_CREATE_BEGIN] backend_initialized=true");
     });
 }
 
@@ -549,9 +607,11 @@ int64_t llb_create_session(
     int32_t n_threads
 ) {
     llb_init_backend();
+    set_global_error("");
 
     if (model_path == nullptr || std::strlen(model_path) == 0) {
-        LOGE("[ERROR] [SESSION_CREATE] model_path_empty");
+        set_global_error("Model path is empty");
+        LOGE("[ERROR] [SESSION_CREATE_BEGIN] model_path_empty");
         return -1;
     }
 
@@ -560,7 +620,7 @@ int64_t llb_create_session(
     const bool model_readable = access(model_path, R_OK) == 0;
     const int64_t model_size = model_exists ? static_cast<int64_t>(model_stat.st_size) : -1;
 
-    LOGI("[SESSION_CREATE] model_path=%s n_ctx=%d n_threads=%d",
+    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d",
          model_path,
          n_ctx,
          n_threads);
@@ -570,8 +630,9 @@ int64_t llb_create_session(
          model_size);
 
     if (!model_exists || !model_readable || model_size <= 0) {
+        set_global_error("Invalid model file path or unreadable file");
         LOGE("[ERROR] [SESSION_LOAD] invalid_model_file path=%s", model_path);
-        return -1;
+        return -2;
     }
 
     const int64_t session_id = g_next_session_id.fetch_add(1, std::memory_order_acq_rel);
@@ -590,7 +651,7 @@ int64_t llb_create_session(
     if (session->model == nullptr) {
         session->set_error("Failed to load model");
         LOGE("[ERROR] [SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
-        return -1;
+        return -3;
     }
 
     llama_context_params cparams = llama_context_default_params();
@@ -611,7 +672,7 @@ int64_t llb_create_session(
         session->set_error("Failed to create context");
         session->destroy_native_resources();
         LOGE("[ERROR] [SESSION_LOAD] llama_init_from_model_failed");
-        return -1;
+        return -4;
     }
 
     const llama_vocab* vocab = llama_model_get_vocab(session->model);
@@ -628,7 +689,7 @@ int64_t llb_create_session(
         session->set_error("Bootstrap verification failed");
         session->destroy_native_resources();
         LOGE("[ERROR] [SESSION_LOAD] bootstrap_verification_failed");
-        return -1;
+        return -5;
     }
 
     LOGI("[SESSION_LOAD] model_desc=%s", model_desc);
@@ -644,7 +705,7 @@ int64_t llb_create_session(
         g_sessions[session_id] = session;
     }
 
-    LOGI("[SESSION_CREATE] session=%" PRId64 " created=true", session_id);
+    LOGI("[SESSION_CREATE_OK] session=%" PRId64 " created=true", session_id);
     return session_id;
 }
 
@@ -654,8 +715,10 @@ int32_t llb_session_start_gen(
     int32_t max_tokens,
     float temperature
 ) {
+    set_global_error("");
     auto session = find_session(session_id);
     if (session == nullptr) {
+        set_global_error("Session not found");
         LOGE("[ERROR] [GEN_START] session_not_found session=%" PRId64, session_id);
         return -1;
     }
@@ -681,9 +744,10 @@ int32_t llb_session_start_gen(
 
     std::lock_guard<std::mutex> lock(session->generation_mutex);
 
+    LOGI("[CANCEL_REQUEST] session=%" PRId64 " reason=restart_generation", session_id);
     session->cancel_requested.store(true, std::memory_order_release);
     if (session->gen_thread.joinable()) {
-        LOGI("[CLEANUP] session=%" PRId64 " join_previous_generation=true", session_id);
+        LOGI("[CLEANUP_JOIN] session=%" PRId64 " join_previous_generation=true", session_id);
         session->gen_thread.join();
     }
 
@@ -694,7 +758,7 @@ int32_t llb_session_start_gen(
     const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     session->gen_state.store(kStateGenerating, std::memory_order_release);
 
-    LOGI("[GEN_START] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f",
+    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f",
          session_id,
          owner_epoch,
          max_tokens,
@@ -728,6 +792,7 @@ int32_t llb_session_poll_token(
 ) {
     auto session = find_session(session_id);
     if (session == nullptr) {
+        set_global_error("Session not found");
         LOGE("[ERROR] [TOKEN] session_not_found session=%" PRId64, session_id);
         return -1;
     }
@@ -746,7 +811,7 @@ int32_t llb_session_poll_token(
                session->token_queue.front().epoch != current_epoch) {
             session->token_queue.pop_front();
             const auto dropped = ++session->stale_drop_count;
-            LOGI("[TOKEN] session=%" PRId64 " stale_drop=true stale_drop_count=%" PRId64,
+            LOGI("[QUEUE_DROP_OLD_EPOCH] session=%" PRId64 " stale_drop_count=%" PRId64,
                  session_id,
                  dropped);
         }
@@ -802,6 +867,7 @@ void llb_session_cancel(int64_t session_id) {
         return;
     }
 
+    LOGI("[CANCEL_REQUEST] session=%" PRId64 " requested=true", session_id);
     session->cancel_requested.store(true, std::memory_order_release);
     const uint64_t owner_epoch = session->epoch.load(std::memory_order_acquire);
     set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_requested_api");
@@ -832,7 +898,10 @@ int32_t llb_session_is_active(int64_t session_id) {
 const char* llb_session_last_error(int64_t session_id) {
     auto session = find_session(session_id);
     if (session == nullptr) {
-        g_tls_error = "Session not found";
+        g_tls_error = get_global_error_copy();
+        if (g_tls_error.empty()) {
+            g_tls_error = "Session not found";
+        }
         return g_tls_error.c_str();
     }
 
