@@ -387,8 +387,19 @@ jobs:
 
           echo "inspected_so=$SO_PATH" | tee runtime_bridge_package_summary.log
 
-          strings "$SO_PATH" | grep -nE "SESSION_CREATE_BEGIN|THREAD_START|THREAD_FIRST_TOKEN" | tee runtime_bridge_package_tags.log
-          readelf -Ws "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token" | tee runtime_bridge_exports_required.log
+          strings "$SO_PATH" | grep -nE "SESSION_CREATE_BEGIN|THREAD_START|THREAD_FIRST_TOKEN" | tee runtime_bridge_package_tags.log || true
+          if [ ! -s runtime_bridge_package_tags.log ]; then
+            echo "::error::required RuntimeSession log tags not found in packaged libllama_bridge.so"
+            exit 1
+          fi
+
+          readelf -Ws "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token" | tee runtime_bridge_exports_required.log || true
+          for symbol in llb_create_session llb_session_start_gen llb_session_poll_token; do
+            if ! grep -q "$symbol" runtime_bridge_exports_required.log; then
+              echo "::error::required RuntimeSession symbol missing from packaged libllama_bridge.so: $symbol"
+              exit 1
+            fi
+          done
 
           if readelf -Ws "$SO_PATH" | grep -qE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded"; then
             echo "::error::legacy global bridge exports found in packaged APK"
@@ -396,6 +407,7 @@ jobs:
             exit 1
           fi
 
+          # Diagnostic-only logs for artifact inspection after validation has passed.
           readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" | tee runtime_bridge_exports_legacy.log || true
           nm -D --defined-only "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token|llb_load_model|llb_start_gen|llb_poll_token" | tee runtime_bridge_nm_exports.log || true
 
