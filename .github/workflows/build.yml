@@ -387,6 +387,7 @@ jobs:
 
           echo "inspected_so=$SO_PATH" | tee runtime_bridge_package_summary.log
 
+          # Verify native RuntimeSession lifecycle tags emitted by native/android/llama_bridge.cpp.
           strings "$SO_PATH" | grep -nE "SESSION_CREATE_BEGIN|THREAD_START|THREAD_FIRST_TOKEN" | tee runtime_bridge_package_tags.log || true
           if [ ! -s runtime_bridge_package_tags.log ]; then
             echo "::error::required RuntimeSession log tags not found in packaged libllama_bridge.so"

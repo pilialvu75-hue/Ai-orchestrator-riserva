@@ -1158,7 +1158,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
     final created = bindings.createSession(modelPath);
-    _log('[FFI_CREATE_SESSION_OK] returned_session_id=$created path=$modelPath');
+    _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath');
     if (created <= 0) {
       _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
       final err = _safeLastError(bindings, created);
