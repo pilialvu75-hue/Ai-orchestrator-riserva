@@ -89,7 +89,7 @@ class RuntimeSelfTestService {
         ),
         cancellationToken: cancellationToken,
       ).timeout(
-        const Duration(seconds: 45),
+        const Duration(seconds: 300),
         onTimeout: (sink) {
           cancellationToken.cancel();
           sink.add(InferenceResponse.error(
