@@ -287,6 +287,16 @@ jobs:
             --output BUILD_README_IT.md \
             --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
 
+      - name: Force clean Android native rebuild
+        run: |
+          set -euo pipefail
+
+          flutter clean
+          rm -rf android/.cxx
+          rm -rf android/build
+          rm -rf build
+          rm -rf android/app/build/intermediates
+
       - name: Build signed release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -358,6 +368,37 @@ jobs:
             echo "release_aab_path=$RELEASE_AAB_PATH"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Verify packaged RuntimeSession bridge ABI in APK
+        run: |
+          set -euo pipefail
+
+          RELEASE_APK_PATH="${{ steps.release_assets.outputs.release_apk_path }}"
+          EXTRACT_DIR="/tmp/apk-lib-verify"
+          rm -rf "$EXTRACT_DIR"
+          mkdir -p "$EXTRACT_DIR"
+
+          unzip -o "$RELEASE_APK_PATH" "lib/*/libllama_bridge.so" -d "$EXTRACT_DIR" >/dev/null
+
+          SO_PATH=$(find "$EXTRACT_DIR" -type f -name "libllama_bridge.so" | sort | head -n 1 || true)
+          if [ -z "$SO_PATH" ] || [ ! -f "$SO_PATH" ]; then
+            echo "::error::libllama_bridge.so not found in packaged APK"
+            exit 1
+          fi
+
+          echo "inspected_so=$SO_PATH" | tee runtime_bridge_package_summary.log
+
+          strings "$SO_PATH" | grep -nE "SESSION_CREATE_BEGIN|THREAD_START|THREAD_FIRST_TOKEN" | tee runtime_bridge_package_tags.log
+          readelf -Ws "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token" | tee runtime_bridge_exports_required.log
+
+          if readelf -Ws "$SO_PATH" | grep -qE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded"; then
+            echo "::error::legacy global bridge exports found in packaged APK"
+            readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" | tee runtime_bridge_exports_legacy.log
+            exit 1
+          fi
+
+          readelf -Ws "$SO_PATH" | grep -nE "llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded" | tee runtime_bridge_exports_legacy.log || true
+          nm -D --defined-only "$SO_PATH" | grep -nE "llb_create_session|llb_session_start_gen|llb_session_poll_token|llb_load_model|llb_start_gen|llb_poll_token" | tee runtime_bridge_nm_exports.log || true
+
       - name: Upload release diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -371,6 +412,11 @@ jobs:
             keystore_decode.log
             keystore_validation.log
             BUILD_README_IT.md
+            runtime_bridge_package_summary.log
+            runtime_bridge_package_tags.log
+            runtime_bridge_exports_required.log
+            runtime_bridge_exports_legacy.log
+            runtime_bridge_nm_exports.log
 
       - name: Upload signed release artifacts
         uses: actions/upload-artifact@v4

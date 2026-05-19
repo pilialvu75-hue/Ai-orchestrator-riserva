@@ -362,6 +362,11 @@ class InferenceService {
         _log(
           '[RUNTIME_PATH] mode=local session=${cloudRequest.sessionId} local_request=${localRequest != null}',
         );
+        _log(
+          '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} branch=local '
+          'session_api_path_executed=${localRequest != null}',
+        );
         if (localRequest != null) {
           return _streamLocalInference(
             localRequest: localRequest,
@@ -377,6 +382,10 @@ class InferenceService {
         );
       case AiRuntimeMode.cloud:
         _log('[RUNTIME_PATH] mode=cloud session=${cloudRequest.sessionId}');
+        _log(
+          '[RUNTIME_PROVIDER_BRANCH] provider=${_cloudRuntimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} branch=cloud session_api_path_executed=false',
+        );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
@@ -385,6 +394,11 @@ class InferenceService {
         );
       case AiRuntimeMode.hybrid:
         _log('[RUNTIME_PATH] mode=hybrid session=${cloudRequest.sessionId}');
+        _log(
+          '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType}|${_cloudRuntimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} branch=hybrid '
+          'session_api_path_executed=${localRequest != null}',
+        );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,

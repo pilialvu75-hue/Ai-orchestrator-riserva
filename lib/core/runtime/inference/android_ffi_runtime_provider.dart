@@ -169,6 +169,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ? 'unknown'
           : request.sessionId.trim();
       final dartThreadId = _currentThreadId();
+      _log(
+        '[RUNTIME_PROVIDER_BRANCH] provider=${runtimeType} runtime_mode=local '
+        'branch=session_api session_api_path_executed=true session=$sessionId',
+      );
       _log('[SESSION] begin session=$sessionId');
       _log(
         '[DART_STREAM_LISTEN] elapsed_ms=0 thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=0 session=$sessionId',
@@ -455,8 +459,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       _log(
-        '[FFI_START_GEN] Calling native llb_session_start_gen: prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=$effectiveTemperature',
+        '[FFI_START_GEN] entering startGeneration session=$nativeSessionId '
+        'prompt_chars=${prompt.length} max_tokens=$maxTokens '
+        'temperature=$effectiveTemperature',
       );
       _log(
         '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
@@ -769,6 +774,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
           int status;
           try {
+            _log(
+              '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId '
+              'iteration=$pollIterations',
+            );
             _log(
               '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
             );
@@ -1147,7 +1156,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     _releaseNativeSessionIfPresent(bindings);
 
+    _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
     final created = bindings.createSession(modelPath);
+    _log('[FFI_CREATE_SESSION_OK] returned_session_id=$created path=$modelPath');
     if (created <= 0) {
       _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
       final err = _safeLastError(bindings, created);
@@ -1274,6 +1285,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     var firstTokenSeen = false;
     final stopwatch = Stopwatch()..start();
     try {
+      _log('[FFI_START_GEN] entering startGeneration session=$warmupSessionId warmup=true');
       final start = bindings.startGeneration(
         warmupSessionId,
         _warmupPrompt,
@@ -1286,6 +1298,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
       }
       while (stopwatch.elapsed < _firstTokenTimeout) {
+        _log('[FFI_POLL_BEGIN] entering pollToken session=$warmupSessionId warmup=true');
         final status = bindings.pollToken(warmupSessionId, tokenBuf);
         if (status == 1) {
           final token = tokenBuf.toDartString();
