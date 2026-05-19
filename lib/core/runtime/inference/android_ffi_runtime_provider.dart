@@ -1132,10 +1132,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _releaseNativeSessionIfPresent(bindings);
 
     final created = bindings.createSession(modelPath);
-    if (created <= 0 || bindings.sessionIsActive(created) != 1) {
+    if (created <= 0) {
       _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
       final err = _safeLastError(bindings, created);
       throw StateError('Native session creation failed: $err');
+    }
+    if (bindings.sessionIsActive(created) != 1) {
+      _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
+      final err = _safeLastError(bindings, created);
+      throw StateError('Native session inactive after create: $err');
     }
 
     _nativeSessionId = created;
@@ -1148,6 +1153,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final sessionId = _nativeSessionId;
     if (sessionId == null) return;
     try {
+      // Native release is intentionally non-blocking; cleanup continues in C++.
       _log('[FFI_RELEASE] session=$sessionId');
       bindings.releaseSession(sessionId);
     } catch (error) {
