@@ -101,8 +101,10 @@ class RuntimeEventLog {
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
+  static final _tagRegExp = RegExp(r'^\[([A-Z0-9_]+)\]');
+
   static String _extractTag(String message) {
-    final match = RegExp(r'^\[([A-Z0-9_]+)\]').firstMatch(message.trim());
+    final match = _tagRegExp.firstMatch(message.trim());
     return match?.group(1) ?? 'LOG';
   }
 
