@@ -75,6 +75,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const String _warmupPrompt = 'Reply with the single word: OK';
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
   static const Set<String> _androidSafeModelIds = <String>{
@@ -1273,7 +1274,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     try {
       final start = bindings.startGeneration(
         warmupSessionId,
-        'Reply with the single word: OK',
+        _warmupPrompt,
         4,
         0.1,
       );

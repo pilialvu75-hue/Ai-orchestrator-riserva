@@ -507,13 +507,14 @@ void run_generation(
             const auto total_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 emit_now - generation_started_at
             ).count();
+            const int total_tokens = n_decode + 1;
             const double throughput = total_elapsed_ms > 0
-                ? ((static_cast<double>(n_decode) + 1.0) * 1000.0 / static_cast<double>(total_elapsed_ms))
+                ? (static_cast<double>(total_tokens) * 1000.0 / static_cast<double>(total_elapsed_ms))
                 : 0.0;
             LOGI("[TOKEN_THROUGHPUT] session=%" PRId64 " epoch=%" PRIu64 " tokens=%d elapsed_ms=%lld tokens_per_sec=%.3f",
                  session->id,
                  owner_epoch,
-                 n_decode + 1,
+                 total_tokens,
                  static_cast<long long>(total_elapsed_ms),
                  throughput);
             LOGI("[TOKEN] session=%" PRId64 " epoch=%" PRIu64 " token_id=%d chars=%d"
