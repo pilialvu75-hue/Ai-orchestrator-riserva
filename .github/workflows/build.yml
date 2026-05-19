@@ -1,4 +1,4 @@
-name: Build & Release APK
+Name: Build & Release APK
 
 on:
   push:
@@ -238,17 +238,17 @@ jobs:
             echo "::error::version not found in pubspec.yaml"
             exit 1
           fi
+          
+          # Estrae la parte del nome versione (es. 1.0.12)
           VERSION_NAME="${APP_VERSION%%+*}"
-          if [[ "$APP_VERSION" == *+* ]]; then
-            PUBSPEC_VERSION_CODE="${APP_VERSION##*+}"
-          else
-            PUBSPEC_VERSION_CODE="${GITHUB_RUN_NUMBER}"
-          fi
-          if [ "$GITHUB_RUN_NUMBER" -gt "$PUBSPEC_VERSION_CODE" ]; then
-            VERSION_CODE="$GITHUB_RUN_NUMBER"
-          else
-            VERSION_CODE="$PUBSPEC_VERSION_CODE"
-          fi
+          
+          # Usa direttamente il run number di GitHub come codice di build incrementale unico
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          
+          # Sovrascrive dinamicamente il file pubspec.yaml per la compilazione corrente
+          # Questo evita discrepanze e forza l'uso del nuovo codice versione incrementale
+          sed -i "s/version: .*/version: ${VERSION_NAME}+${VERSION_CODE}/g" pubspec.yaml
+          
           TAG="v${VERSION_NAME}+${VERSION_CODE}"
           {
             echo "version_name=$VERSION_NAME"
@@ -466,7 +466,7 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             ${{ steps.release_assets.outputs.release_apk_path }}
-            ${{ steps.release_assets.outputs.release_aab_path }}
+            ${{ secrets.release_assets.outputs.release_aab_path }}
             BUILD_README_IT.md
 
       - name: Cleanup signing files
