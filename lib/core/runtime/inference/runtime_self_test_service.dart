@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart'; // Importato per gestire l'errore di timeout
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -73,7 +75,9 @@ class RuntimeSelfTestService {
       var emittedTokenChunks = 0;
       var streamAliveTicks = 0;
       var completed = false;
-      await for (final chunk in _runtimeProvider.streamInference(
+
+      // Iniezione della protezione da timeout per evitare il blocco sincrono nativo
+      final testStream = _runtimeProvider.streamInference(
         request: InferenceRequest(
           sessionId: selfTestSessionId,
           prompt: 'Reply with the single word: OK',
@@ -84,7 +88,18 @@ class RuntimeSelfTestService {
           modelPath: selectedModel.localPath,
         ),
         cancellationToken: cancellationToken,
-      )) {
+      ).timeout(
+        const Duration(seconds: 45),
+        onTimeout: (sink) {
+          cancellationToken.cancel();
+          sink.add(InferenceResponse.error(
+            'Runtime self-test timed out waiting for local engine initialization.',
+          ));
+          sink.close();
+        },
+      );
+
+      await for (final chunk in testStream) {
         streamAliveTicks++;
         if (!chunk.isError && !chunk.isFinal && chunk.text.isNotEmpty) {
           responseBuffer.write(chunk.text);
