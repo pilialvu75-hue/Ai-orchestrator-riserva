@@ -20,12 +20,20 @@ LocalRuntimeProvider createLocalRuntimeProvider({
 }) {
   if (Platform.isAndroid) {
     debugPrint('[RUNTIME_PATH] platform=android provider=AndroidFfiRuntimeProvider');
+    debugPrint(
+      '[RUNTIME_PROVIDER_BRANCH] provider=AndroidFfiRuntimeProvider '
+      'runtime_mode=local branch=session_api provider_path_selected=android',
+    );
     return AndroidFfiRuntimeProvider(
       runtimeStateMachine: runtimeStateMachine,
       developerModeProvider: developerModeProvider,
     );
   }
   debugPrint('[RUNTIME_PATH] platform=desktop provider=LocalRuntimeProvider');
+  debugPrint(
+    '[RUNTIME_PROVIDER_BRANCH] provider=LocalRuntimeProvider '
+    'runtime_mode=desktop branch=cli_process provider_path_selected=desktop',
+  );
   return LocalRuntimeProvider(
     developerModeProvider: developerModeProvider,
   );

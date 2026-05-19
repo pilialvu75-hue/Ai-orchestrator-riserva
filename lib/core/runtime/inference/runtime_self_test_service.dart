@@ -29,6 +29,7 @@ class RuntimeSelfTestService {
 
   /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
+  static const Duration _selfTestFirstTokenTimeout = Duration(seconds: 5);
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
@@ -89,11 +90,11 @@ class RuntimeSelfTestService {
         ),
         cancellationToken: cancellationToken,
       ).timeout(
-        const Duration(seconds: 300),
+        _selfTestFirstTokenTimeout,
         onTimeout: (sink) {
           cancellationToken.cancel();
           sink.add(InferenceResponse.error(
-            'Runtime self-test timed out waiting for local engine initialization.',
+            'FIRST_TOKEN_TIMEOUT',
           ));
           sink.close();
         },
@@ -134,7 +135,7 @@ class RuntimeSelfTestService {
         return RuntimeSelfTestResult(
           success: false,
           summary:
-            '${notes.join('\n')}\n3. Token stream: FAILED\n${streamTerminalError ?? 'Generation completed without token emission.'}',
+            '${notes.join('\n')}\n3. Token stream: FAILED\n${streamTerminalError ?? 'FIRST_TOKEN_TIMEOUT'}',
         );
       }
 

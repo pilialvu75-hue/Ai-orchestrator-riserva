@@ -1,1163 +1,1030 @@
-/**
- * llama_bridge.cpp
- *
- * Implementation of the llama_bridge.h C API.
- *
- * Compilation
- * ───────────
- * Link against llama.cpp (third_party/llama.cpp) built as a shared or
- * static library.  See native/android/CMakeLists.txt for the full build
- * configuration.
- *
- * Architecture
- * ─────────────
- * llb_start_gen spawns a POSIX background thread that runs the llama.cpp
- * decode loop.  Each generated token piece is pushed into a fixed-size ring
- * buffer protected by a mutex + condition variable.  Dart calls
- * llb_poll_token() from its async event loop (with a Future.delayed(Duration.zero)
- * yield between polls) to drain the buffer without blocking the UI thread.
- *
- * Status codes written to g_gen_state communicate EOS, cancellation, and
- * error conditions to the polling side.
- *
- * Thread-safety notes
- * ────────────────────
- * llb_free_model() MUST NOT block the caller (Dart main isolate / UI thread).
- * On Android, llama_decode() can take many seconds under thermal throttling.
- * If the Dart-side stall watchdog fires and calls freeModel() while the
- * native thread is still inside llama_decode(), a naive join() would freeze
- * the Flutter event loop indefinitely.
- *
- * Fix: llb_free_model() immediately moves the generation thread and the
- * model/context pointers into a detached background "cleanup thread" and
- * returns to the caller instantly.  The cleanup thread performs the join
- * and frees the resources when the generation thread actually exits.
- *
- * llama_backend_init() is intentionally NOT paired with llama_backend_free()
- * inside llb_free_model() because the cleanup thread may race with the next
- * llb_load_model() call that re-initialises the backend.  The backend is
- * process-lifetime state; Android reclaims all memory on process exit.
- */
-
 #include "llama_bridge.h"
+
 #include "llama.h"
 
 #include <android/log.h>
+
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cinttypes>
-#include <cstring>
-#include <mutex>
 #include <condition_variable>
-#include <thread>
-#include <string>
-#include <vector>
-#include <queue>
-#include <algorithm>
-#include <new>
+#include <cstring>
+#include <deque>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include <sys/stat.h>
 #include <unistd.h>
 
 #define LOG_TAG "AI_RUNTIME"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ── Global state ──────────────────────────────────────────────────────────────
+namespace {
 
-static llama_model* g_model   = nullptr;
-static llama_context* g_ctx     = nullptr;
-static std::string    g_last_error;
+constexpr size_t kRingCapacity = 256;
+constexpr int32_t kSafeNBatch = 32;
+constexpr int32_t kMaxGeneratedTokens = 256;
+constexpr size_t kMinPromptLength = 2;
+constexpr int64_t kDecodeStallLogMillis = 5000;
+// Keep native first-token waits aligned with the Dart-side 24ms polling cadence so
+// llb_session_poll_token can block briefly on the first-token latch without
+// adding extra end-to-end latency or a second timing pattern to debug.
+constexpr int64_t kFirstTokenPollWaitMillis = 24;
+constexpr int32_t kMaxInitialSampleRetries = 4;
+constexpr const char* kFallbackPrompt = "Hello";
 
-// ── Token ring buffer ─────────────────────────────────────────────────────────
+constexpr int kStateGenerating = 0;
+constexpr int kStateCompleted = 1;
+constexpr int kStateCancelled = 2;
+constexpr int kStateFailed = -1;
 
-static constexpr size_t kRingCapacity = 256;
+bool is_valid_state(const int state) {
+    return state == kStateGenerating || state == kStateCompleted ||
+           state == kStateCancelled || state == kStateFailed;
+}
 
-// Each token entry carries the epoch of the generation that produced it.
-// llb_poll_token discards entries whose epoch does not match the current
-// g_gen_epoch, preventing stale tokens from a previous (cancelled or timed-out)
-// generation from contaminating the next inference run.
-struct RingEntry {
+uint64_t current_thread_id() {
+    return static_cast<uint64_t>(
+        std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+
+std::mutex g_global_error_mutex;
+std::string g_global_last_error;
+
+void set_global_error(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_global_error_mutex);
+    g_global_last_error = message;
+}
+
+std::string get_global_error_copy() {
+    std::lock_guard<std::mutex> lock(g_global_error_mutex);
+    return g_global_last_error;
+}
+
+struct BatchGuard {
+    llama_batch batch{};
+    bool initialized{false};
+
+    BatchGuard(const int32_t n_tokens, const int32_t embd, const int32_t n_seq_max) {
+        batch = llama_batch_init(n_tokens, embd, n_seq_max);
+        initialized = batch.token != nullptr && batch.pos != nullptr &&
+                      batch.n_seq_id != nullptr && batch.seq_id != nullptr &&
+                      batch.logits != nullptr;
+    }
+
+    ~BatchGuard() {
+        if (initialized) {
+            llama_batch_free(batch);
+        }
+    }
+
+    BatchGuard(const BatchGuard&) = delete;
+    BatchGuard& operator=(const BatchGuard&) = delete;
+};
+
+using SamplerPtr = std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)>;
+
+struct TokenEntry {
     std::string piece;
-    uint64_t    epoch;
+    uint64_t epoch;
+    std::chrono::steady_clock::time_point emitted_at;
 };
 
-struct TokenRing {
-    std::queue<RingEntry> items;
-    std::mutex mtx;
-    std::condition_variable cv;
+struct RuntimeSession {
+    explicit RuntimeSession(int64_t id_in) : id(id_in) {}
+
+    const int64_t id;
+
+    mutable std::mutex generation_mutex;
+    mutable std::mutex queue_mutex;
+    mutable std::mutex error_mutex;
+    mutable std::mutex native_mutex;
+    mutable std::mutex first_token_mutex;
+    std::condition_variable first_token_cv;
+
+    llama_model* model{nullptr};
+    llama_context* ctx{nullptr};
+
+    std::thread gen_thread;
+    std::atomic<bool> worker_running{false};
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<bool> first_token_emitted{false};
+    std::atomic<int> gen_state{kStateCompleted};
+    std::atomic<uint64_t> epoch{0};
+
+    std::deque<TokenEntry> token_queue;
+    std::atomic<int64_t> queue_overflow_count{0};
+    std::atomic<int64_t> stale_drop_count{0};
+
+    std::string last_error;
+
+    void set_error(const std::string& message) {
+        {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            last_error = message;
+        }
+        set_global_error(message);
+        LOGE("[ERROR] session=%" PRId64 " message=%s", id, message.c_str());
+    }
+
+    std::string get_error_copy() const {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        return last_error;
+    }
+
+    void clear_error() {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        last_error.clear();
+    }
+
+    void clear_queue() {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        token_queue.clear();
+    }
+
+    size_t queue_size_snapshot() const {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        return token_queue.size();
+    }
+
+    bool has_native_resources() const {
+        std::lock_guard<std::mutex> lock(native_mutex);
+        return model != nullptr && ctx != nullptr;
+    }
+
+    void destroy_native_resources() {
+        std::lock_guard<std::mutex> lock(native_mutex);
+        if (ctx != nullptr) {
+            LOGI("[CLEANUP] session=%" PRId64 " freeing context", id);
+            llama_free(ctx);
+            ctx = nullptr;
+        }
+        if (model != nullptr) {
+            LOGI("[CLEANUP] session=%" PRId64 " freeing model", id);
+            llama_model_free(model);
+            model = nullptr;
+        }
+    }
+
+    std::pair<llama_model*, llama_context*> snapshot_native_handles() const {
+        std::lock_guard<std::mutex> lock(native_mutex);
+        return {model, ctx};
+    }
 };
 
-static TokenRing g_ring;
-
-// Generation state values:
-//   0  generating
-//   1  done (EOS / max_tokens)
-//   2  cancelled
-//  -1  error
-static std::atomic<int>      g_gen_state{0};
-static std::atomic<bool>     g_cancel_flag{false};
-
-// Monotonically-increasing generation epoch.  Incremented on every
-// llb_start_gen() call.  Generation threads embed their epoch in every ring
-// push and in every g_gen_state update so that stale threads cannot corrupt
-// a subsequent inference run.
-static std::atomic<uint64_t> g_gen_epoch{0};
-
-// Set to true once the generation thread exits (or was never started).
-// Used for a non-blocking "is the thread done?" check without calling join().
-static std::atomic<bool> g_gen_finished{true};
-
-static std::thread g_gen_thread;
-static std::atomic<int64_t> g_dart_poll_counter{0};
-
-static constexpr int32_t kSafeNBatch              = 32;
-// Keep these conservative sampler/runtime defaults aligned with
-// lib/core/runtime/inference/ffi/llama_native_types.dart.
-static constexpr float   kSafeTemperature         = 0.7f;
-static constexpr int32_t kSafeTopK                = 40;
-static constexpr float   kSafeTopP                = 0.9f;
-static constexpr int32_t kGenerationTimeoutMillis  = 180000;
-static constexpr int32_t kNoTokenStallMillis        = 120000; // Ottimizzazione: Alzato a 120s per evitare timeout in prefill su CPU lenti
-static constexpr int32_t kMaxGeneratedTokens        = 256;
-static constexpr int32_t kRepeatedTokenLimit        = 96;
-static constexpr int32_t kEmptyTokenLimit           = 32;
-static constexpr int32_t kInvalidSampleLimit        = 1;
-static constexpr int32_t kNoProgressLoopLimit       = 320;
-
-// Maximum time llb_start_gen will spin-wait for a previous thread to finish
-// before forcibly detaching it.
-static constexpr int32_t kStartGenPrevThreadTimeoutMillis = 2000;
-
-static uint64_t current_thread_id() {
-    return static_cast<uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+// Trims prompt whitespace and guarantees a minimally usable prompt for the
+// first-token liveness path, falling back to kFallbackPrompt when input is
+// null, blank, or too short to reliably drive a decode step.
+std::string sanitize_prompt_for_generation(const char* prompt) {
+    if (prompt == nullptr) {
+        return std::string(kFallbackPrompt);
+    }
+    std::string sanitized(prompt);
+    const auto first_non_ws = sanitized.find_first_not_of(" \t\r\n");
+    if (first_non_ws == std::string::npos) {
+        return std::string(kFallbackPrompt);
+    }
+    const auto last_non_ws = sanitized.find_last_not_of(" \t\r\n");
+    sanitized = sanitized.substr(first_non_ws, last_non_ws - first_non_ws + 1);
+    if (sanitized.size() < kMinPromptLength) {
+        return std::string(kFallbackPrompt);
+    }
+    return sanitized;
 }
 
-static int64_t elapsed_ms_since(
-    const std::chrono::steady_clock::time_point& started_at
+// Wakes any pollers waiting for the first token or an early terminal state.
+void notify_first_token_waiters(const std::shared_ptr<RuntimeSession>& session) {
+    session->first_token_cv.notify_all();
+}
+
+std::once_flag g_backend_init_once;
+std::atomic<bool> g_backend_initialized{false};
+
+std::mutex g_registry_mutex;
+std::unordered_map<int64_t, std::shared_ptr<RuntimeSession>> g_sessions;
+std::atomic<int64_t> g_next_session_id{1};
+
+thread_local std::string g_tls_error;
+
+std::shared_ptr<RuntimeSession> find_session(const int64_t session_id) {
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    const auto it = g_sessions.find(session_id);
+    if (it == g_sessions.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+std::shared_ptr<RuntimeSession> remove_session(const int64_t session_id) {
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    const auto it = g_sessions.find(session_id);
+    if (it == g_sessions.end()) {
+        return nullptr;
+    }
+    auto session = it->second;
+    g_sessions.erase(it);
+    return session;
+}
+
+void set_state_if_epoch(
+    const std::shared_ptr<RuntimeSession>& session,
+    const int desired_state,
+    const uint64_t owner_epoch,
+    const char* reason
 ) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - started_at
-    ).count();
-}
-
-static int32_t first_token_stall_timeout_millis() {
-#ifndef NDEBUG
-    return 120000;
-#define NDEBUG
-    return kNoTokenStallMillis;
-#endif
-}
-
-static void set_error(const char* msg) {
-    g_last_error = msg ? msg : "";
-    LOGE("[AI] runtime error: %s", g_last_error.c_str());
-}
-
-// Push a token piece into the ring buffer tagged with the calling generation's
-// epoch so that llb_poll_token can discard stale entries.
-static size_t push_token(const std::string& piece, uint64_t epoch) {
-    size_t queue_size = 0;
-    {
-        std::unique_lock<std::mutex> lock(g_ring.mtx);
-        // Drop oldest token if ring is exactly full to avoid unbounded memory use.
-        while (g_ring.items.size() == kRingCapacity) {
-            g_ring.items.pop();
-        }
-        g_ring.items.push({piece, epoch});
-        queue_size = g_ring.items.size();
+    if (!is_valid_state(desired_state)) {
+        LOGE("[ERROR] session=%" PRId64 " invalid_state=%d", session->id, desired_state);
+        return;
     }
-    g_ring.cv.notify_one();
-    return queue_size;
-}
-
-static size_t queue_size_snapshot() {
-    std::unique_lock<std::mutex> lock(g_ring.mtx);
-    return g_ring.items.size();
-}
-
-// ── Epoch-safe generation-state helpers ───────────────────────────────────────
-//
-// A stale generation thread (one that has been superseded by a newer
-// llb_start_gen() call but has not yet been joined/detached) must not
-// overwrite g_gen_state with its own terminal status.  These helpers gate
-// every state write on a current-epoch check so that only the active thread
-// can transition the shared state machine.
-
-static void gen_update_state(int new_state, uint64_t my_epoch) {
-    if (g_gen_epoch.load(std::memory_order_relaxed) == my_epoch) {
-        g_gen_state.store(new_state, std::memory_order_release);
+    if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+        LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch_mismatch owner=%" PRIu64 " current=%" PRIu64
+             " state_skip=%d reason=%s",
+             session->id,
+             owner_epoch,
+             session->epoch.load(std::memory_order_acquire),
+             desired_state,
+             reason ? reason : "none");
+        return;
     }
+    session->gen_state.store(desired_state, std::memory_order_release);
+    LOGI("[DECODE] session=%" PRId64 " state=%d epoch=%" PRIu64 " reason=%s",
+         session->id,
+         desired_state,
+         owner_epoch,
+         reason ? reason : "none");
 }
 
-static void gen_mark_finished(uint64_t my_epoch) {
-    if (g_gen_epoch.load(std::memory_order_relaxed) == my_epoch) {
-        g_gen_finished.store(true, std::memory_order_release);
+size_t enqueue_token(
+    const std::shared_ptr<RuntimeSession>& session,
+    std::string piece,
+    const uint64_t epoch
+) {
+    std::lock_guard<std::mutex> lock(session->queue_mutex);
+
+    if (session->token_queue.size() >= kRingCapacity) {
+        session->token_queue.pop_front();
+        const auto dropped = ++session->queue_overflow_count;
+        LOGE("[QUEUE_OVERFLOW] session=%" PRId64 " drop_oldest=true overflow_count=%" PRId64,
+             session->id,
+             dropped);
+        LOGI("[DECODE] session=%" PRId64 " backpressure queue_size=%zu capacity=%zu",
+             session->id,
+             session->token_queue.size(),
+             kRingCapacity);
     }
+
+    session->token_queue.push_back(TokenEntry{
+        std::move(piece),
+        epoch,
+        std::chrono::steady_clock::now(),
+    });
+
+    return session->token_queue.size();
 }
 
-// ── Generation thread ─────────────────────────────────────────────────────────
+void run_generation(
+    const std::shared_ptr<RuntimeSession>& session,
+    std::string prompt,
+    int32_t max_tokens,
+    float temperature,
+    const uint64_t owner_epoch
+) {
+    const auto thread_id = current_thread_id();
+    const auto generation_started_at = std::chrono::steady_clock::now();
+    auto last_decode_progress_at = generation_started_at;
+    auto last_token_emitted_at = generation_started_at;
+    int32_t initial_sample_retry_count = 0;
 
-struct GenArgs {
-    std::string prompt;
-    int32_t     max_tokens;
-    float       temperature;
-    uint64_t    epoch;   // generation epoch; used to gate state updates
-    llama_model* model;
-    llama_context* ctx;
-};
+    session->worker_running.store(true, std::memory_order_release);
+    session->first_token_emitted.store(false, std::memory_order_release);
 
-static void generation_thread(GenArgs args) {
-    // Capture the generation epoch for all state-update guards in this thread.
-    const uint64_t my_epoch = args.epoch;
-    const uint64_t native_thread_id = current_thread_id();
-    const auto generation_entered_at = std::chrono::steady_clock::now();
-    int32_t telemetry_poll_iteration = 0;
-    int32_t telemetry_token_id = -1;
-    int32_t telemetry_token_text_length = 0;
-    std::string generation_exit_reason = "normal";
-    struct GenerationExitTelemetry {
-        std::function<void()> fn;
-        ~GenerationExitTelemetry() {
-            if (fn) fn();
-        }
-    } generation_exit_telemetry{
-        [&]() {
-            const auto exit_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - generation_entered_at
+    struct ThreadGuard {
+        std::shared_ptr<RuntimeSession> session;
+        uint64_t epoch;
+        uint64_t thread_id;
+        std::chrono::steady_clock::time_point started_at;
+
+        ~ThreadGuard() {
+            session->worker_running.store(false, std::memory_order_release);
+            notify_first_token_waiters(session);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started_at
             ).count();
-            LOGI(
-                "[NATIVE_GENERATION_EXIT] reason=%s elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
-                generation_exit_reason.c_str(),
-                static_cast<long long>(exit_elapsed),
-                native_thread_id,
-                static_cast<int>(telemetry_token_id),
-                static_cast<int>(telemetry_token_text_length),
-                queue_size_snapshot(),
-                static_cast<int>(telemetry_poll_iteration)
-            );
-            LOGI(
-                "[STEP_13_GENERATION_END] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=%d",
-                static_cast<long long>(exit_elapsed),
-                native_thread_id,
-                static_cast<int>(telemetry_token_id),
-                static_cast<int>(telemetry_token_text_length)
-            );
+            LOGI("[THREAD_FINISH] session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64
+                 " elapsed_ms=%lld state=%d",
+                 session->id,
+                 epoch,
+                 thread_id,
+                 static_cast<long long>(elapsed),
+                 session->gen_state.load(std::memory_order_acquire));
         }
-    };
-    // ── Diagnostics: thread start ────────────────────────────────────────────
-    LOGI("[THREAD] generation thread started (epoch=%" PRIu64 ")", my_epoch);
-    LOGI(
-        "[NATIVE_GENERATION_ENTER] elapsed_ms=0 thread_id=%" PRIu64
-        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 epoch=%" PRIu64,
-        native_thread_id,
-        queue_size_snapshot(),
-        my_epoch
-    );
-    LOGI("[GENERATION_START] epoch=%" PRIu64 " prompt_chars=%zu max_tokens=%d temp=%.3f",
-         my_epoch,
-         args.prompt.size(),
-         static_cast<int>(args.max_tokens),
-         static_cast<double>(args.temperature));
-    auto log_forensic_step = [&](const char* tag, int32_t token_id, int32_t token_text_length) {
-        LOGI(
-            "%s elapsed_ms=%lld thread_id=%" PRIu64 " token_id=%d token_text_length=%d",
-            tag,
-            static_cast<long long>(elapsed_ms_since(generation_entered_at)),
-            native_thread_id,
-            static_cast<int>(token_id),
-            static_cast<int>(token_text_length)
+    } guard{session, owner_epoch, thread_id, generation_started_at};
+
+    LOGI("[THREAD_START] session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64,
+         session->id,
+         owner_epoch,
+         thread_id);
+    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " prompt_chars=%zu max_tokens=%d temp=%.3f",
+         session->id,
+         owner_epoch,
+         prompt.size(),
+         max_tokens,
+         static_cast<double>(temperature));
+
+    auto [model, ctx] = session->snapshot_native_handles();
+    if (model == nullptr || ctx == nullptr) {
+        session->set_error("Session native resources unavailable");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "missing_native_resources");
+        return;
+    }
+
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    if (vocab == nullptr) {
+        session->set_error("Vocabulary unavailable");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "vocab_unavailable");
+        return;
+    }
+
+    const int n_ctx = llama_n_ctx(ctx);
+    if (n_ctx <= 0) {
+        session->set_error("Invalid context size");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "ctx_size_invalid");
+        return;
+    }
+
+    auto tokenize_prompt = [&](const std::string& text, std::vector<llama_token>* out_tokens) {
+        std::vector<llama_token> local_tokens(static_cast<size_t>(n_ctx));
+        const int token_count = llama_tokenize(
+            vocab,
+            text.c_str(),
+            static_cast<int32_t>(text.size()),
+            local_tokens.data(),
+            static_cast<int32_t>(local_tokens.size()),
+            true,
+            false
         );
+        if (token_count > 0) {
+            local_tokens.resize(static_cast<size_t>(token_count));
+            *out_tokens = std::move(local_tokens);
+        }
+        return token_count;
     };
-    auto log_forensic_fatal = [&](const char* tag, const char* reason, int32_t token_id, int32_t token_text_length) {
-        LOGE(
-            "%s reason=%s elapsed_ms=%lld thread_id=%" PRIu64 " token_id=%d token_text_length=%d",
-            tag,
-            reason ? reason : "unknown",
-            static_cast<long long>(elapsed_ms_since(generation_entered_at)),
-            native_thread_id,
-            static_cast<int>(token_id),
-            static_cast<int>(token_text_length)
-        );
-    };
-    log_forensic_step("[STEP_01_PROMPT_RECEIVED]", -1, 0);
 
-    try {
-    // Obtain the vocabulary from the model (modern API).
-    const llama_vocab* vocab = llama_model_get_vocab(args.model);
-    if (!vocab) {
-        LOGE("[THREAD] vocabulary is null — aborting");
-        set_error("Vocabulary unavailable");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "vocab_unavailable";
-        LOGI("[THREAD] generation thread exited (vocab null)");
+    std::vector<llama_token> tokens;
+    int n_tokens = tokenize_prompt(prompt, &tokens);
+
+    if (n_tokens <= 1) {
+        LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
+             " reason=short_or_empty_prompt original_chars=%zu fallback=%s",
+             session->id,
+             owner_epoch,
+             prompt.size(),
+             kFallbackPrompt);
+        prompt = kFallbackPrompt;
+        n_tokens = tokenize_prompt(prompt, &tokens);
+    }
+
+    if (n_tokens <= 0) {
+        session->set_error("Tokenisation failed");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "tokenize_failed");
         return;
     }
-    LOGI("[THREAD] vocabulary obtained ok");
 
-    log_forensic_step("[STEP_02_TOKENIZE_START]", -1, 0);
-    // Tokenise the prompt.
-    const int n_ctx = llama_n_ctx(args.ctx);
-    LOGI("[THREAD] tokenization start: prompt_chars=%zu n_ctx=%d",
-         args.prompt.size(), n_ctx);
-    std::vector<llama_token> tokens(n_ctx);
+    LOGI("[THREAD_PREFILL_BEGIN] session=%" PRId64 " epoch=%" PRIu64 " prompt_tokens=%d",
+         session->id,
+         owner_epoch,
+         n_tokens);
 
-    int n_tokens = llama_tokenize(
-        vocab,
-        args.prompt.c_str(),
-        static_cast<int32_t>(args.prompt.length()),
-        tokens.data(),
-        static_cast<int32_t>(tokens.size()),
-        /*add_special=*/true,
-        /*parse_special=*/false
-    );
+    llama_memory_clear(llama_get_memory(ctx), true);
 
-    if (n_tokens < 0) {
-        LOGE("[THREAD] tokenisation failed (error %d)", n_tokens);
-        set_error("Tokenisation failed");
-        LOGE("[GENERATION_ERROR] stage=tokenize reason=tokenisation_failed code=%d", n_tokens);
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "tokenization_failed";
-        LOGI("[THREAD] generation thread exited (tokenise error)");
-        return;
-    }
-    if (n_tokens == 0) {
-        log_forensic_fatal("[FATAL_TOKENIZER_FAILURE]", "tokenizer_returned_zero_tokens", -1, 0);
-        LOGE("[THREAD] tokenisation returned zero tokens");
-        set_error("Tokenisation returned zero tokens");
-        LOGE("[GENERATION_ERROR] stage=tokenize reason=token_count_zero");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "tokenization_zero_tokens";
-        LOGI("[THREAD] generation thread exited (zero tokens)");
-        return;
-    }
-    tokens.resize(n_tokens);
-    log_forensic_step("[STEP_03_TOKENIZE_DONE]", tokens.empty() ? -1 : static_cast<int32_t>(tokens.front()), 0);
-    LOGI("[TOKEN_COUNT] count=%d", n_tokens);
-    LOGI("[TOKENIZER_OK] prompt_tokenization=true");
-    LOGI("[THREAD] prompt token count: %d", n_tokens);
-
-    // Prefill: decode the prompt batch.
-    // Clear memory (KV cache) before starting a new generation.
-    LOGI("[THREAD] clearing KV cache");
-    LOGI("[KV_CACHE] action=clear scope=context");
-    llama_memory_clear(llama_get_memory(args.ctx), /*data=*/true);
-
-    llama_batch batch = llama_batch_init(
-        static_cast<int32_t>(tokens.size()),
-        /*embd=*/0,
-        /*n_seq_max=*/1
-    );
-    if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
-        LOGE("[THREAD] OOM: prefill batch allocation failed");
-        set_error("Out of memory while allocating prefill batch");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "oom_prefill_batch";
-        LOGI("[THREAD] generation thread exited (OOM prefill batch)");
+    BatchGuard prefill_batch(static_cast<int32_t>(tokens.size()), 0, 1);
+    if (!prefill_batch.initialized) {
+        session->set_error("Failed to allocate prefill batch");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_batch_alloc_failed");
         return;
     }
 
     for (int32_t i = 0; i < static_cast<int32_t>(tokens.size()); ++i) {
-        batch.token   [i]    = tokens[i];
-        batch.pos     [i]    = i;
-        batch.n_seq_id[i]    = 1;
-        batch.seq_id  [i][0] = 0;
-        // Only request logits for the last prompt token.
-        batch.logits  [i]    = (i == static_cast<int32_t>(tokens.size()) - 1) ? 1 : 0;
+        prefill_batch.batch.token[i] = tokens[static_cast<size_t>(i)];
+        prefill_batch.batch.pos[i] = i;
+        prefill_batch.batch.n_seq_id[i] = 1;
+        prefill_batch.batch.seq_id[i][0] = 0;
+        prefill_batch.batch.logits[i] =
+            (i == static_cast<int32_t>(tokens.size()) - 1) ? 1 : 0;
     }
-    batch.n_tokens = static_cast<int32_t>(tokens.size());
-    if (batch.n_tokens <= 0) {
-        log_forensic_fatal("[FATAL_PROMPT_EVAL_FAILURE]", "prompt_eval_batch_empty", -1, 0);
-        llama_batch_free(batch);
-        set_error("Prompt eval batch has zero tokens");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "prompt_eval_batch_empty";
-        LOGI("[THREAD] generation thread exited (prompt eval batch empty)");
+    prefill_batch.batch.n_tokens = static_cast<int32_t>(tokens.size());
+
+    const auto prefill_started_at = std::chrono::steady_clock::now();
+    const int prefill_status = llama_decode(ctx, prefill_batch.batch);
+    if (prefill_status != 0) {
+        session->set_error("Prompt prefill decode failed");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_decode_failed");
         return;
     }
 
-    LOGI("[THREAD] starting prefill decode for %d prompt tokens", n_tokens);
-    LOGI("[PROMPT_EVAL] stage=start prompt_tokens=%d", n_tokens);
-    log_forensic_step("[STEP_04_PROMPT_EVAL_START]", -1, 0);
-    const auto prompt_eval_start = std::chrono::steady_clock::now();
-    LOGI(
-        "[NATIVE_PROMPT_EVAL_START] elapsed_ms=%lld thread_id=%" PRIu64
-        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 prompt_tokens=%d",
-        static_cast<long long>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                prompt_eval_start - generation_entered_at
-            ).count()
-        ),
-        native_thread_id,
-        queue_size_snapshot(),
-        n_tokens
-    );
-    const int prefill_decode_status = llama_decode(args.ctx, batch);
-    const auto prompt_eval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - prompt_eval_start
+    const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - prefill_started_at
     ).count();
-    LOGI("[THREAD] prefill decode status: %d", prefill_decode_status);
-    LOGI("[PROMPT_EVAL] stage=end status=%d elapsed_ms=%lld",
-         prefill_decode_status, static_cast<long long>(prompt_eval_ms));
-    LOGI(
-        "[NATIVE_PROMPT_EVAL_END] elapsed_ms=%lld thread_id=%" PRIu64
-        " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=0 status=%d prompt_eval_ms=%lld",
-        static_cast<long long>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - generation_entered_at
-            ).count()
-        ),
-        native_thread_id,
-        queue_size_snapshot(),
-        prefill_decode_status,
-        static_cast<long long>(prompt_eval_ms)
-    );
-    if (prefill_decode_status != 0) {
-        llama_batch_free(batch);
-        LOGE("[THREAD] prefill decode failed with status %d", prefill_decode_status);
-        set_error("Decode failed during prompt prefill");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "prefill_decode_error";
-        LOGI("[THREAD] generation thread exited (prefill decode error)");
+    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64 " status=%d prefill_ms=%lld",
+         session->id,
+         owner_epoch,
+         prefill_status,
+         static_cast<long long>(prefill_ms));
+
+    if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+        LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch=%" PRIu64 " reason=pre_loop_epoch_mismatch",
+             session->id,
+             owner_epoch);
+        set_state_if_epoch(session, kStateCancelled, owner_epoch, "stale_worker_pre_loop");
         return;
     }
-    log_forensic_step("[STEP_05_PROMPT_EVAL_DONE]", -1, 0);
-    llama_batch_free(batch);
-    LOGI("[THREAD] prefill decode complete");
-
-    // Check cancel before entering the generation loop.
-    if (g_cancel_flag.load()) {
-        LOGI("[THREAD] cancelled before generation loop");
-        gen_update_state(2, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "cancelled_pre_loop";
-        LOGI("[THREAD] generation thread exited (pre-loop cancel)");
+    if (session->cancel_requested.load(std::memory_order_acquire)) {
+        set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_before_decode_loop");
         return;
     }
 
-    // Build sampler chain.
-    const bool is_forensic_self_test = args.max_tokens <= 4 && args.temperature <= 0.11f;
-    const int32_t sampler_top_k = is_forensic_self_test ? 1 : kSafeTopK;
-    const float sampler_top_p = is_forensic_self_test ? 0.1f : kSafeTopP;
-    LOGI("[THREAD] creating sampler chain (temp=%.3f top_k=%d top_p=%.3f)",
-         static_cast<double>(args.temperature), sampler_top_k, static_cast<double>(sampler_top_p));
-    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
-    llama_sampler* sampler = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
+    SamplerPtr sampler(llama_sampler_chain_init(sampler_params), &llama_sampler_free);
     if (!sampler) {
-        LOGE("[THREAD] OOM: sampler chain allocation failed");
-        set_error("Out of memory while creating sampler");
-        gen_update_state(-1, my_epoch);
-        gen_mark_finished(my_epoch);
-        generation_exit_reason = "oom_sampler";
-        LOGI("[THREAD] generation thread exited (OOM sampler)");
+        session->set_error("Failed to allocate sampler");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "sampler_alloc_failed");
         return;
     }
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(sampler_top_k));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(sampler_top_p, 1));
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(args.temperature));
-    // A final token-selecting sampler is required: llama_sampler_sample()
-    // initialises cur_p.selected = -1 before calling the chain; without a
-    // selector the field is never set, causing UB in NDEBUG builds (accessing
-    // cur_p.data[-1]) and an assertion failure in debug builds.  Using
-    // llama_sampler_init_dist instead of greedy lets temperature > 0 produce
-    // varied output while still converging to greedy selection at temp = 0.
-    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-    LOGI("[THREAD] sampler chain created (temp + dist)");
-    log_forensic_step("[STEP_06_SAMPLER_READY]", -1, 0);
 
-    // Decode loop.
-    int32_t n_cur    = static_cast<int32_t>(tokens.size());
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_p(0.9f, 1));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    int32_t n_cur = n_tokens;
     int32_t n_decode = 0;
-    int32_t iteration = 0;
-    char    piece_buf[256];
-    llama_token last_token = static_cast<llama_token>(-1);
-    int repeated_token_count = 0;
-    int empty_token_count = 0;
-    int invalid_sample_count = 0;
-    int no_progress_loop_count = 0;
-    bool eos_detected = false;
-    const auto generation_start = std::chrono::steady_clock::now();
-    auto last_token_time = generation_start;
-    const int32_t capped_max_tokens = std::min(args.max_tokens, kMaxGeneratedTokens);
-    LOGI("[THREAD] inference loop start: requested_max=%d capped_max=%d",
-         args.max_tokens, capped_max_tokens);
+    bool eos_reached = false;
 
-    while (n_decode < capped_max_tokens) {
-        iteration++;
-        telemetry_poll_iteration = iteration;
+    while (n_decode < std::min(max_tokens, kMaxGeneratedTokens)) {
+        if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+            LOGI("[STALE_WORKER_EXIT] session=%" PRId64 " epoch=%" PRIu64 " reason=decode_loop_epoch_mismatch",
+                 session->id,
+                 owner_epoch);
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "stale_worker_decode_loop");
+            return;
+        }
+        if (session->cancel_requested.load(std::memory_order_acquire)) {
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_decode_loop");
+            LOGI("[CANCEL] session=%" PRId64 " epoch=%" PRIu64 " token_count=%d",
+                 session->id,
+                 owner_epoch,
+                 n_decode);
+            return;
+        }
+
         const auto now = std::chrono::steady_clock::now();
-        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - generation_start
+        const auto stall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_decode_progress_at
         ).count();
-        const auto since_last_token_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - last_token_time
-        ).count();
+        if (stall_ms > kDecodeStallLogMillis) {
+            LOGE("[STALL_WARNING] session=%" PRId64 " epoch=%" PRIu64 " stall_detected=true stall_ms=%lld"
+                 " queue_size=%zu tokens=%d",
+                 session->id,
+                 owner_epoch,
+                 static_cast<long long>(stall_ms),
+                 session->queue_size_snapshot(),
+                 n_decode);
+            last_decode_progress_at = now;
+        }
 
-        if (iteration % 8 == 1) {
-            // Log every 8 iterations to avoid flooding logcat.
-            LOGI("[THREAD] loop iteration=%d tokens=%d elapsed_ms=%lld since_last_ms=%lld",
-                 static_cast<int>(iteration),
-                 static_cast<int>(n_decode),
-                 static_cast<long long>(elapsed_ms),
-                 static_cast<long long>(since_last_token_ms));
-            LOGI("[GENERATION_STEP] iteration=%d generated_tokens=%d elapsed_ms=%lld since_last_ms=%lld",
-                 static_cast<int>(iteration),
-                 static_cast<int>(n_decode),
-                 static_cast<long long>(elapsed_ms),
-                 static_cast<long long>(since_last_token_ms));
-        }
-        LOGI(
-            "[NATIVE_TOKEN_LOOP] elapsed_ms=%lld thread_id=%" PRIu64
-            " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d generated_tokens=%d",
-            static_cast<long long>(elapsed_ms),
-            native_thread_id,
-            static_cast<int>(telemetry_token_id),
-            static_cast<int>(telemetry_token_text_length),
-            queue_size_snapshot(),
-            static_cast<int>(iteration),
-            static_cast<int>(n_decode)
-        );
-
-        if (elapsed_ms >= kGenerationTimeoutMillis) {
-            LOGE("[THREAD] generation timeout at %lld ms (limit: %d ms) — aborting",
-                 static_cast<long long>(elapsed_ms), kGenerationTimeoutMillis);
-            set_error("Generation timeout");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "generation_timeout";
-            LOGI("[THREAD] generation thread exited (generation timeout)");
-            return;
-        }
-        const int32_t first_token_timeout_ms = first_token_stall_timeout_millis();
-        if (n_decode == 0 && since_last_token_ms >= first_token_timeout_ms) {
-            LOGE("[THREAD] no-first-token stall after %lld ms (limit: %d ms) — aborting",
-                 static_cast<long long>(since_last_token_ms), first_token_timeout_ms);
-            LOGE(
-                "[FIRST_TOKEN_TIMEOUT] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=-1 token_text_length=0 queue_size=%zu poll_iteration=%d timeout_ms=%d",
-                static_cast<long long>(since_last_token_ms),
-                native_thread_id,
-                queue_size_snapshot(),
-                static_cast<int>(iteration),
-                first_token_timeout_ms
-            );
-            set_error("Local model stalled during inference.");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "first_token_timeout";
-            LOGI("[THREAD] generation thread exited (stall timeout)");
-            return;
-        }
-        if (g_cancel_flag.load()) {
-            LOGI("[THREAD] cancel flag set — stopping generation loop at iteration=%d",
-                 static_cast<int>(iteration));
-            llama_sampler_free(sampler);
-            gen_update_state(2, my_epoch);  // cancelled
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "cancelled";
-            LOGI("[THREAD] generation thread exited (cancelled)");
+        llama_token next_token = llama_sampler_sample(sampler.get(), ctx, -1);
+        if (next_token < 0) {
+            if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+                initial_sample_retry_count < kMaxInitialSampleRetries) {
+                ++initial_sample_retry_count;
+                LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
+                     " reason=invalid_sample retry=%d",
+                     session->id,
+                     owner_epoch,
+                     initial_sample_retry_count);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            session->set_error("Invalid sample after max retries before first token");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "invalid_sample_before_first_token");
+            notify_first_token_waiters(session);
             return;
         }
 
-        // Sample next token.
-        llama_token new_tok = llama_sampler_sample(sampler, args.ctx, -1);
-        log_forensic_step("[STEP_07_TOKEN_SAMPLE]", static_cast<int32_t>(new_tok), 0);
-        telemetry_token_id = static_cast<int32_t>(new_tok);
-        telemetry_token_text_length = 0;
-        LOGI(
-            "[NATIVE_TOKEN_SAMPLE] elapsed_ms=%lld thread_id=%" PRIu64
-            " token_id=%d token_text_length=0 queue_size=%zu poll_iteration=%d",
-            static_cast<long long>(elapsed_ms),
-            native_thread_id,
-            static_cast<int>(new_tok),
-            queue_size_snapshot(),
-            static_cast<int>(iteration)
-        );
-        if (new_tok < 0) {
-            invalid_sample_count++;
-            if (invalid_sample_count >= kInvalidSampleLimit) {
-                log_forensic_fatal("[FATAL_SAMPLER_STALL]", "repeated_invalid_sampled_token", static_cast<int32_t>(new_tok), 0);
-                LOGE("[THREAD] invalid token sampled repeatedly: token=%d count=%d",
-                     static_cast<int>(new_tok), invalid_sample_count);
-                set_error("Sampler stalled: repeated invalid token");
-                llama_sampler_free(sampler);
-                gen_update_state(-1, my_epoch);
-                gen_mark_finished(my_epoch);
-                generation_exit_reason = "invalid_sample_loop";
-                LOGI("[THREAD] generation thread exited (invalid sample loop)");
+        llama_sampler_accept(sampler.get(), next_token);
+
+        if (llama_vocab_is_eog(vocab, next_token)) {
+            if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+                initial_sample_retry_count < kMaxInitialSampleRetries) {
+                ++initial_sample_retry_count;
+                LOGI("[FIRST_TOKEN_RETRY] session=%" PRId64 " epoch=%" PRIu64
+                     " reason=immediate_eos retry=%d",
+                     session->id,
+                     owner_epoch,
+                     initial_sample_retry_count);
+                continue;
+            }
+            if (!session->first_token_emitted.load(std::memory_order_acquire)) {
+                session->set_error("EOS reached after max retries before first token");
+                set_state_if_epoch(session, kStateFailed, owner_epoch, "eos_before_first_token");
+                notify_first_token_waiters(session);
                 return;
             }
-            LOGE("[THREAD] invalid token sampled: %d at iteration=%d",
-                 static_cast<int>(new_tok), static_cast<int>(iteration));
-            set_error("Invalid generated token");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "invalid_sample";
-            LOGI("[THREAD] generation thread exited (invalid sample)");
-            return;
-        }
-        invalid_sample_count = 0;
-        LOGI("[THREAD] sampled token_id=%d iteration=%d",
-             static_cast<int>(new_tok), static_cast<int>(iteration));
-        LOGI("[TOKEN_ID] token_id=%d iteration=%d", static_cast<int>(new_tok), static_cast<int>(iteration));
-        llama_sampler_accept(sampler, new_tok);
-
-        if (new_tok == last_token) {
-            repeated_token_count++;
-            if (repeated_token_count >= kRepeatedTokenLimit) {
-                LOGE("[THREAD] repeated-token loop: token=%d count=%d — aborting",
-                     static_cast<int>(new_tok), repeated_token_count);
-                set_error("Repeated token loop detected");
-                llama_sampler_free(sampler);
-                gen_update_state(-1, my_epoch);
-                gen_mark_finished(my_epoch);
-                generation_exit_reason = "repeated_token_loop";
-                LOGI("[THREAD] generation thread exited (repeated token loop)");
-                return;
-            }
-        } else {
-            last_token = new_tok;
-            repeated_token_count = 0;
-        }
-
-        if (llama_vocab_is_eog(vocab, new_tok)) {
-            LOGI("[THREAD] EOS token detected after %d tokens (iteration=%d) — done",
-                 n_decode, static_cast<int>(iteration));
-            eos_detected = true;
+            eos_reached = true;
+            LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " eos_reached=true generated=%d",
+                 session->id,
+                 owner_epoch,
+                 n_decode);
             break;
         }
 
-        // Convert token to UTF-8 text piece.
-        int32_t piece_len = llama_token_to_piece(
-            vocab, new_tok,
-            piece_buf, static_cast<int32_t>(sizeof(piece_buf)) - 1,
-            /*lstrip=*/0,
-            /*special=*/false
+        char piece_buf[256];
+        const int32_t piece_len = llama_token_to_piece(
+            vocab,
+            next_token,
+            piece_buf,
+            static_cast<int32_t>(sizeof(piece_buf)) - 1,
+            0,
+            false
         );
-        log_forensic_step("[STEP_08_TOKEN_DECODE]", static_cast<int32_t>(new_tok), piece_len > 0 ? piece_len : 0);
+
+        if (piece_len < 0) {
+            session->set_error("Failed to decode token piece");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "token_to_piece_failed");
+            return;
+        }
 
         if (piece_len > 0) {
             piece_buf[piece_len] = '\0';
-            log_forensic_step("[STEP_09_TOKEN_TEXT_READY]", static_cast<int32_t>(new_tok), piece_len);
-            telemetry_token_text_length = piece_len;
-            LOGI("[AI] token received: %s", piece_buf);
-            LOGI("[THREAD] decoded token_id=%d text=\"%s\" len=%d total_decoded=%d",
-                 static_cast<int>(new_tok), piece_buf,
-                 static_cast<int>(piece_len), n_decode + 1);
-            LOGI("[TOKEN_DECODE] token_id=%d len=%d text=\"%s\"",
-                 static_cast<int>(new_tok), static_cast<int>(piece_len), piece_buf);
-            LOGI(
-                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
-                static_cast<long long>(elapsed_ms),
-                native_thread_id,
-                static_cast<int>(new_tok),
-                static_cast<int>(piece_len),
-                queue_size_snapshot(),
-                static_cast<int>(iteration)
+            const auto emit_now = std::chrono::steady_clock::now();
+            const auto emit_interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                emit_now - last_token_emitted_at
+            ).count();
+            const size_t queue_size = enqueue_token(
+                session,
+                std::string(piece_buf, static_cast<size_t>(piece_len)),
+                owner_epoch
             );
-            LOGI("[TOKEN_EMIT] token_id=%d len=%d", static_cast<int>(new_tok), static_cast<int>(piece_len));
-            log_forensic_step("[STEP_10_NATIVE_EMIT]", static_cast<int32_t>(new_tok), piece_len);
-            const size_t queue_size_after_emit = push_token(std::string(piece_buf, piece_len), my_epoch);
-            LOGI(
-                "[NATIVE_TOKEN_EMIT] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=%d queue_size=%zu poll_iteration=%d",
-                static_cast<long long>(elapsed_ms),
-                native_thread_id,
-                static_cast<int>(new_tok),
-                static_cast<int>(piece_len),
-                queue_size_after_emit,
-                static_cast<int>(iteration)
-            );
-            last_token_time = std::chrono::steady_clock::now();
-            empty_token_count = 0;
-            no_progress_loop_count = 0;
-        } else if (piece_len < 0) {
-            LOGE("[THREAD] token-to-piece conversion error for token=%d",
-                 static_cast<int>(new_tok));
-            set_error("Invalid generated token piece");
-            LOGE("[TOKENIZER_DECODE_FAIL] token_id=%d", static_cast<int>(new_tok));
-            LOGE("[GENERATION_ERROR] stage=token_decode reason=token_to_piece_failed");
-            LOGE(
-                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=-1 queue_size=%zu poll_iteration=%d",
-                static_cast<long long>(elapsed_ms),
-                native_thread_id,
-                static_cast<int>(new_tok),
-                queue_size_snapshot(),
-                static_cast<int>(iteration)
-            );
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "token_decode_error";
-            LOGI("[THREAD] generation thread exited (piece conversion error)");
-            return;
-        } else {
-            // piece_len == 0: special token with no visible text (e.g., role
-            // boundary tokens in Llama 3, Qwen thinking control tokens).
-            // Allow a limited run before treating it as a stall.
-            empty_token_count++;
-            LOGI(
-                "[NATIVE_TOKEN_DECODE] elapsed_ms=%lld thread_id=%" PRIu64
-                " token_id=%d token_text_length=0 queue_size=%zu poll_iteration=%d",
-                static_cast<long long>(elapsed_ms),
-                native_thread_id,
-                static_cast<int>(new_tok),
-                queue_size_snapshot(),
-                static_cast<int>(iteration)
-            );
-            LOGI("[THREAD] empty piece for token_id=%d consecutive_empty=%d",
-                 static_cast<int>(new_tok), empty_token_count);
-            if (empty_token_count >= kEmptyTokenLimit) {
-                log_forensic_fatal("[FATAL_DECODE_EMPTY_LOOP]", "decode_empty_forever", static_cast<int32_t>(new_tok), 0);
-                LOGE("[THREAD] empty-token limit reached (%d) — aborting", kEmptyTokenLimit);
-                set_error("Empty token loop detected");
-                llama_sampler_free(sampler);
-                gen_update_state(-1, my_epoch);
-                gen_mark_finished(my_epoch);
-                generation_exit_reason = "empty_token_loop";
-                LOGI("[THREAD] generation thread exited (empty token loop)");
-                return;
+            last_token_emitted_at = emit_now;
+            if (!session->first_token_emitted.exchange(true, std::memory_order_acq_rel)) {
+                const auto first_token_latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    emit_now - generation_started_at
+                ).count();
+                LOGI("[THREAD_FIRST_TOKEN] session=%" PRId64 " epoch=%" PRIu64 " latency_ms=%lld",
+                     session->id,
+                     owner_epoch,
+                     static_cast<long long>(first_token_latency_ms));
+                notify_first_token_waiters(session);
             }
-            no_progress_loop_count++;
-            if (no_progress_loop_count >= kNoProgressLoopLimit) {
-                log_forensic_fatal("[FATAL_SAMPLER_STALL]", "generation_loop_no_progress", static_cast<int32_t>(new_tok), 0);
-                set_error("Generation loop spinning without progress");
-                llama_sampler_free(sampler);
-                gen_update_state(-1, my_epoch);
-                gen_mark_finished(my_epoch);
-                generation_exit_reason = "no_progress_loop";
-                LOGI("[THREAD] generation thread exited (no progress loop)");
-                return;
-            }
+            LOGI("[TOKEN_LATENCY] session=%" PRId64 " epoch=%" PRIu64 " token_interval_ms=%lld",
+                 session->id,
+                 owner_epoch,
+                 static_cast<long long>(emit_interval_ms));
+            const auto total_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                emit_now - generation_started_at
+            ).count();
+            const int emitted_tokens = n_decode + 1;
+            const double throughput = total_elapsed_ms > 0
+                ? (static_cast<double>(emitted_tokens) * 1000.0 / static_cast<double>(total_elapsed_ms))
+                : 0.0;
+            LOGI("[TOKEN_THROUGHPUT] session=%" PRId64 " epoch=%" PRIu64 " tokens=%d elapsed_ms=%lld tokens_per_sec=%.3f",
+                 session->id,
+                 owner_epoch,
+                 emitted_tokens,
+                 static_cast<long long>(total_elapsed_ms),
+                 throughput);
+            LOGI("[TOKEN] session=%" PRId64 " epoch=%" PRIu64 " token_id=%d chars=%d"
+                 " queue_size=%zu emit_interval_ms=%lld overflow_count=%" PRId64,
+                 session->id,
+                 owner_epoch,
+                 static_cast<int>(next_token),
+                 static_cast<int>(piece_len),
+                 queue_size,
+                 static_cast<long long>(emit_interval_ms),
+                 session->queue_overflow_count.load(std::memory_order_acquire));
         }
 
-        // Decode the newly generated token.
-        llama_batch step = llama_batch_init(1, 0, 1);
-        if (!step.token || !step.pos || !step.n_seq_id || !step.seq_id || !step.logits) {
-            LOGE("[THREAD] OOM: step batch allocation failed at iteration=%d",
-                 static_cast<int>(iteration));
-            set_error("Out of memory while allocating decode batch");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "oom_step_batch";
-            LOGI("[THREAD] generation thread exited (OOM step batch)");
+        BatchGuard step_batch(1, 0, 1);
+        if (!step_batch.initialized) {
+            session->set_error("Failed to allocate decode batch");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "decode_batch_alloc_failed");
             return;
         }
-        step.token   [0]    = new_tok;
-        step.pos     [0]    = n_cur;
-        step.n_seq_id[0]    = 1;
-        step.seq_id  [0][0] = 0;
-        step.logits  [0]    = 1;
-        step.n_tokens       = 1;
 
-        const int decode_status = llama_decode(args.ctx, step);
-        LOGI("[TOKEN_EVAL] token_index=%d status=%d",
-             static_cast<int>(n_decode + 1), decode_status);
-        LOGI("[THREAD] step decode status=%d token_id=%d pos=%d",
-             decode_status, static_cast<int>(new_tok), static_cast<int>(n_cur));
+        step_batch.batch.token[0] = next_token;
+        step_batch.batch.pos[0] = n_cur;
+        step_batch.batch.n_seq_id[0] = 1;
+        step_batch.batch.seq_id[0][0] = 0;
+        step_batch.batch.logits[0] = 1;
+        step_batch.batch.n_tokens = 1;
+
+        const int decode_status = llama_decode(ctx, step_batch.batch);
         if (decode_status != 0) {
-            llama_batch_free(step);
-            LOGE("[THREAD] step decode failed (status=%d) at token %d",
-                 decode_status, n_decode);
-            set_error("Decode failed during token generation");
-            llama_sampler_free(sampler);
-            gen_update_state(-1, my_epoch);
-            gen_mark_finished(my_epoch);
-            generation_exit_reason = "step_decode_error";
-            LOGI("[THREAD] generation thread exited (step decode error)");
+            session->set_error("Token decode step failed");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "decode_step_failed");
             return;
         }
-        llama_batch_free(step);
 
-        n_cur++;
-        n_decode++;
-        log_forensic_step("[STEP_12_GENERATION_CONTINUE]", static_cast<int32_t>(new_tok), piece_len > 0 ? piece_len : 0);
+        ++n_cur;
+        ++n_decode;
+        last_decode_progress_at = std::chrono::steady_clock::now();
+        LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " decode_step_ok token_index=%d",
+             session->id,
+             owner_epoch,
+             n_decode);
     }
 
-    if (eos_detected) {
-        LOGI("[THREAD] generation complete (EOS): %d tokens generated", n_decode);
-    } else {
-        LOGI("[THREAD] generation complete (max tokens): %d tokens generated", n_decode);
-    }
-    LOGI("[GENERATION_END] state=success generated_tokens=%d eos=%s",
-         static_cast<int>(n_decode),
-         eos_detected ? "true" : "false");
-    LOGI("[AI] inference completed");
-    llama_sampler_free(sampler);
-    gen_update_state(1, my_epoch);  // done
-    generation_exit_reason = eos_detected ? "success_eos" : "success_max_tokens";
-    } catch (const std::bad_alloc&) {
-        LOGE("[THREAD] std::bad_alloc in generation thread");
-        set_error("Out of memory during generation");
-        LOGE("[GENERATION_ERROR] stage=generation_thread reason=bad_alloc");
-        gen_update_state(-1, my_epoch);
-        generation_exit_reason = "bad_alloc";
-    } catch (const std::exception& e) {
-        LOGE("[THREAD] unhandled exception: %s", e.what());
-        set_error(e.what());
-        LOGE("[GENERATION_ERROR] stage=generation_thread reason=exception message=%s", e.what());
-        gen_update_state(-1, my_epoch);
-        generation_exit_reason = "exception";
-    } catch (...) {
-        LOGE("[THREAD] unhandled unknown exception");
-        set_error("Unhandled generation exception");
-        LOGE("[GENERATION_ERROR] stage=generation_thread reason=unknown_exception");
-        gen_update_state(-1, my_epoch);
-        generation_exit_reason = "unknown_exception";
-    }
-
-    gen_mark_finished(my_epoch);
-    LOGI("[THREAD] generation thread exited (end of function)");
+    set_state_if_epoch(session, kStateCompleted, owner_epoch, "generation_completed");
+    LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64 " decode_loop_end eos=%s generated=%d",
+         session->id,
+         owner_epoch,
+         eos_reached ? "true" : "false",
+         n_decode);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+void release_session_async(const std::shared_ptr<RuntimeSession>& session) {
+    std::thread cleanup_worker([session]() {
+        LOGI("[CLEANUP] session=%" PRId64 " release_worker_start", session->id);
+
+        session->cancel_requested.store(true, std::memory_order_release);
+        session->gen_state.store(kStateCancelled, std::memory_order_release);
+
+        {
+            std::lock_guard<std::mutex> lock(session->generation_mutex);
+            if (session->gen_thread.joinable()) {
+                LOGI("[CLEANUP_JOIN] session=%" PRId64 " joining_worker=true", session->id);
+                session->gen_thread.join();
+            }
+        }
+
+        session->clear_queue();
+        session->destroy_native_resources();
+
+        LOGI("[SESSION_DESTROY] session=%" PRId64 " destroyed=true", session->id);
+    });
+
+    cleanup_worker.detach();
+}
+
+}  // namespace
 
 extern "C" {
 
-int32_t llb_load_model(const char* model_path, int32_t n_ctx, int32_t n_threads) {
-    LOGI("[AI] loading model...");
-    LOGI("[LOAD] model path=%s n_ctx=%d n_threads=%d",
-         model_path ? model_path : "(null)", n_ctx, n_threads);
-    LOGI("[NATIVE_MODEL_LOAD_BEGIN] path=%s n_ctx=%d n_threads=%d",
-         model_path ? model_path : "(null)", n_ctx, n_threads);
-    if (!model_path || std::strlen(model_path) == 0) {
-        set_error("Model path is empty");
-        LOGE("[LOAD] failed: empty path");
-        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-3");
-        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-3 reason=empty_model_path");
-        return -3;
+void llb_init_backend(void) {
+    std::call_once(g_backend_init_once, []() {
+        llama_backend_init();
+        g_backend_initialized.store(true, std::memory_order_release);
+        LOGI("[SESSION_CREATE_BEGIN] backend_initialized=true");
+    });
+}
+
+int64_t llb_create_session(
+    const char* model_path,
+    int32_t n_ctx,
+    int32_t n_threads
+) {
+    llb_init_backend();
+    set_global_error("");
+
+    if (model_path == nullptr || std::strlen(model_path) == 0) {
+        set_global_error("Model path is empty");
+        LOGE("[ERROR] [SESSION_CREATE_BEGIN] model_path_empty");
+        return -1;
     }
 
     struct stat model_stat;
     const bool model_exists = stat(model_path, &model_stat) == 0;
     const bool model_readable = access(model_path, R_OK) == 0;
     const int64_t model_size = model_exists ? static_cast<int64_t>(model_stat.st_size) : -1;
-    LOGI("[MODEL_PATH] path=%s", model_path);
-    LOGI("[MODEL_EXISTS] path=%s exists=%s", model_path, model_exists ? "true" : "false");
-    LOGI("[MODEL_SIZE] path=%s size_bytes=%" PRId64, model_path, model_size);
-    LOGI("[MODEL_READABLE] path=%s readable=%s", model_path, model_readable ? "true" : "false");
 
-    // Free any previously loaded model (non-blocking via cleanup thread).
-    llb_free_model();
+    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d",
+         model_path,
+         n_ctx,
+         n_threads);
+    LOGI("[SESSION_LOAD] model_exists=%s model_readable=%s model_size=%" PRId64,
+         model_exists ? "true" : "false",
+         model_readable ? "true" : "false",
+         model_size);
 
-    llama_backend_init();
-
-    // Ottimizzazione RAM: Esplicitazione dei parametri nativi di llama.cpp per ambiente Android mobile
-    llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;      // CPU-only
-    mparams.use_mmap     = true;   // Memory mapping attivo per alleggerire la RAM heap iniziale
-    mparams.use_mlock    = false;  // Disabilitato per evitare terminazioni forzate dell'OS (OOM killer)
-
-    LOGI("[LOAD] calling llama_model_load_from_file");
-    g_model = llama_model_load_from_file(model_path, mparams);
-    if (!g_model) {
-        LOGE("[LOAD] llama_model_load_from_file failed: %s", model_path);
-        set_error("Failed to load model from file (invalid/corrupted model or out of memory)");
-        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-1");
-        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-1 reason=llama_model_load_from_file_failed");
-        return -1;
-    }
-    LOGI("[AI] model loaded");
-    LOGI("[LOAD] model loaded successfully: %s", model_path);
-
-    LOGI("[AI] creating context...");
-    llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx            = static_cast<uint32_t>(n_ctx);
-    cparams.n_threads        = n_threads;
-    cparams.n_threads_batch  = n_threads;
-    cparams.n_batch          = kSafeNBatch;
-    cparams.n_ubatch         = kSafeNBatch;
-    cparams.embeddings       = false;
-    cparams.offload_kqv      = true; // Ottimizzazione: Forza l'offload delle matrici KV per preservare memoria volatile
-
-    LOGI("[NATIVE_CONTEXT_CREATE] path=%s n_ctx=%d n_threads=%d n_batch=%d",
-         model_path, n_ctx, n_threads, kSafeNBatch);
-    LOGI("[LOAD] calling llama_init_from_model: n_ctx=%d n_batch=%d n_threads=%d",
-         n_ctx, kSafeNBatch, n_threads);
-    g_ctx = llama_init_from_model(g_model, cparams);
-    if (!g_ctx) {
-        LOGE("[LOAD] llama_init_from_model failed");
-        set_error("Failed to create llama context (out of memory or incompatible model)");
-        LOGE("[NATIVE_CONTEXT_FAILURE] path=%s reason=llama_init_from_model_failed", model_path);
-        LOGE("[NATIVE_MODEL_LOAD_RESULT] code=-2");
-        LOGE("[NATIVE_MODEL_LOAD_FAILURE] code=-2 reason=context_creation_failed");
-        llama_model_free(g_model);
-        g_model = nullptr;
+    if (!model_exists || !model_readable || model_size <= 0) {
+        set_global_error("Invalid model file path or unreadable file");
+        LOGE("[ERROR] [SESSION_LOAD] invalid_model_file path=%s", model_path);
         return -2;
     }
-    LOGI("[AI] context ready");
-    LOGI("[LOAD] context created: n_ctx=%d n_batch=%d gpu_layers=%d",
-         n_ctx, kSafeNBatch, mparams.n_gpu_layers);
+
+    const int64_t session_id = g_next_session_id.fetch_add(1, std::memory_order_acq_rel);
+    auto session = std::make_shared<RuntimeSession>(session_id);
+
+    llama_model_params mparams = llama_model_default_params();
+    mparams.n_gpu_layers = 0;
+    mparams.use_mmap = true;
+    mparams.use_mlock = false;
+
     {
-        char model_desc[512] = {0};
-        const int32_t desc_len = llama_model_desc(g_model, model_desc, static_cast<int32_t>(sizeof(model_desc)));
-        if (desc_len > 0) {
-            LOGI("[GGUF_METADATA] field=model_desc value=%s", model_desc);
-        } else {
-            LOGI("[GGUF_METADATA_UNSUPPORTED] field=model_desc reason=llama_model_desc_unavailable");
-        }
-        LOGI("[GGUF_METADATA] field=context_size value=%d", n_ctx);
-        const llama_vocab* vocab = llama_model_get_vocab(g_model);
-        if (vocab) {
-            const int32_t bos_id = static_cast<int32_t>(llama_vocab_bos(vocab));
-            const int32_t eos_id = static_cast<int32_t>(llama_vocab_eos(vocab));
-            LOGI("[GGUF_METADATA] field=bos_token_id value=%d", bos_id);
-            LOGI("[GGUF_METADATA] field=eos_token_id value=%d", eos_id);
-        } else {
-            LOGI("[GGUF_METADATA_UNSUPPORTED] field=bos_eos_token_ids reason=vocab_unavailable");
-        }
-        LOGI("[GGUF_METADATA_UNSUPPORTED] field=architecture reason=llama_model_meta_api_not_exposed_in_bridge");
-        LOGI("[GGUF_METADATA_UNSUPPORTED] field=tokenizer_type reason=llama_model_meta_api_not_exposed_in_bridge");
-        LOGI("[GGUF_METADATA_UNSUPPORTED] field=quantization reason=llama_model_meta_api_not_exposed_in_bridge");
+        std::lock_guard<std::mutex> lock(session->native_mutex);
+        session->model = llama_model_load_from_file(model_path, mparams);
     }
 
-    g_last_error.clear();
-    LOGI("[NATIVE_MODEL_LOAD_RESULT] code=0");
-    LOGI("[NATIVE_MODEL_LOAD_SUCCESS] path=%s", model_path);
-    return 0;
-}
-
-int32_t llb_start_gen(const char* prompt, int32_t max_tokens, float temperature) {
-    if (!g_model || !g_ctx) {
-        set_error("No model loaded");
-        return -1;
-    }
-
-    // If a previous generation thread is still joinable (edge case: llb_start_gen
-    // called without an intervening llb_free_model), spin-wait briefly with a
-    // timeout and detach if the thread does not finish in time.  This prevents
-    // blocking the caller when the thread is stuck inside llama_decode.
-    // NOTE: In the normal flow, llb_load_model calls llb_free_model which moves
-    // g_gen_thread into a cleanup thread, so g_gen_thread will not be joinable here.
-    if (g_gen_thread.joinable()) {
-        g_cancel_flag.store(true);
-        LOGI("[START_GEN] previous thread still joinable — spin-waiting up to %d ms",
-             kStartGenPrevThreadTimeoutMillis);
-        bool prev_detached = false;
-        const auto deadline = std::chrono::steady_clock::now() +
-                              std::chrono::milliseconds(kStartGenPrevThreadTimeoutMillis);
-        while (!g_gen_finished.load()) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                LOGE("[START_GEN] previous thread did not finish in %d ms — detaching",
-                     kStartGenPrevThreadTimeoutMillis);
-                g_gen_thread.detach();
-                prev_detached = true;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        }
-        if (!prev_detached && g_gen_thread.joinable()) {
-            LOGI("[START_GEN] previous thread finished — joining");
-            g_gen_thread.join();
-        }
-    }
-
-    // Clear ring buffer and reset state.
-    // Increment g_gen_epoch BEFORE resetting g_gen_state so that any stale
-    // generation thread racing here sees the new epoch and stops updating
-    // the shared state machine (see gen_update_state / gen_mark_finished).
-    const uint64_t new_epoch = ++g_gen_epoch;
-    {
-        std::unique_lock<std::mutex> lock(g_ring.mtx);
-        while (!g_ring.items.empty()) g_ring.items.pop();
-    }
-    g_gen_state.store(0);
-    g_gen_finished.store(false);
-    g_cancel_flag.store(false);
-    g_last_error.clear();
-
-    const int32_t capped_max_tokens = std::min(max_tokens, kMaxGeneratedTokens);
-    
-    // Ottimizzazione: Sbloccato il campionamento nativo. Usa la temperatura reale passata dall'interfaccia Dart
-    // per permettere computazioni deterministiche più leggere ed evitare calcoli sampler superflui.
-    const float forced_temperature = temperature; 
-    
-    LOGI("[AI] starting inference...");
-    LOGI("[AI] streaming callback active");
-    LOGI("[START_GEN] epoch=%" PRIu64 " prompt_chars=%zu requested_max=%d capped_max=%d temp=%.3f",
-         new_epoch,
-         prompt ? std::strlen(prompt) : static_cast<size_t>(0),
-         max_tokens, capped_max_tokens,
-         static_cast<double>(forced_temperature));
-    GenArgs args{
-        prompt ? prompt : "",
-        capped_max_tokens,
-        forced_temperature,
-        new_epoch,
-        g_model,
-        g_ctx
-    };
-
-    try {
-        g_gen_thread = std::thread(generation_thread, std::move(args));
-    } catch (const std::exception& e) {
-        g_gen_finished.store(true);
-        set_error(e.what());
-        LOGE("[START_GEN] failed to spawn generation thread: %s", e.what());
+    if (session->model == nullptr) {
+        session->set_error("Failed to load model");
+        LOGE("[ERROR] [SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
         return -3;
     }
 
-    LOGI("[START_GEN] generation thread spawned (epoch=%" PRIu64 ")", new_epoch);
-    return 0;
+    llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
+    cparams.n_threads = n_threads > 0 ? n_threads : 2;
+    cparams.n_threads_batch = n_threads > 0 ? n_threads : 2;
+    cparams.n_batch = kSafeNBatch;
+    cparams.n_ubatch = kSafeNBatch;
+    cparams.embeddings = false;
+    cparams.offload_kqv = true;
+
+    {
+        std::lock_guard<std::mutex> lock(session->native_mutex);
+        session->ctx = llama_init_from_model(session->model, cparams);
+    }
+
+    if (session->ctx == nullptr) {
+        session->set_error("Failed to create context");
+        session->destroy_native_resources();
+        LOGE("[ERROR] [SESSION_LOAD] llama_init_from_model_failed");
+        return -4;
+    }
+
+    const llama_vocab* vocab = llama_model_get_vocab(session->model);
+    const int ctx_size = llama_n_ctx(session->ctx);
+    char model_desc[512] = {0};
+    const int model_desc_len = llama_model_desc(session->model, model_desc, static_cast<int32_t>(sizeof(model_desc)));
+
+    LOGI("[SESSION_LOAD] bootstrap_vocab=%s ctx_size=%d model_desc_len=%d",
+         vocab != nullptr ? "ok" : "null",
+         ctx_size,
+         model_desc_len);
+
+    if (vocab == nullptr || ctx_size <= 0 || model_desc_len <= 0) {
+        session->set_error("Bootstrap verification failed");
+        session->destroy_native_resources();
+        LOGE("[ERROR] [SESSION_LOAD] bootstrap_verification_failed");
+        return -5;
+    }
+
+    LOGI("[SESSION_LOAD] model_desc=%s", model_desc);
+    LOGI("[SESSION_LOAD] bos_id=%d eos_id=%d",
+         static_cast<int>(llama_vocab_bos(vocab)),
+         static_cast<int>(llama_vocab_eos(vocab)));
+
+    session->clear_error();
+    session->gen_state.store(kStateCompleted, std::memory_order_release);
+
+    {
+        std::lock_guard<std::mutex> lock(g_registry_mutex);
+        g_sessions[session_id] = session;
+    }
+
+    LOGI("[SESSION_CREATE_OK] session=%" PRId64 " created=true", session_id);
+    return session_id;
 }
 
-int32_t llb_poll_token(char* buf, int32_t buf_size) {
-    const auto poll_started_at = std::chrono::steady_clock::now();
-    const uint64_t poll_thread_id = current_thread_id();
-    const int64_t poll_iteration = ++g_dart_poll_counter;
-    if (!buf || buf_size <= 0) {
-        set_error("Invalid token buffer");
+int32_t llb_session_start_gen(
+    int64_t session_id,
+    const char* prompt,
+    int32_t max_tokens,
+    float temperature
+) {
+    set_global_error("");
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        set_global_error("Session not found");
+        LOGE("[ERROR] [GEN_START] session_not_found session=%" PRId64, session_id);
         return -1;
     }
 
-    // Acquire the ring mutex and hold it through the generation-state check.
-    //
-    // This closes the EOS-token race: without the combined lock, the sequence
-    //   [Dart] ring empty? yes → [Gen] push_token(last) → [Gen] state=1 → [Dart] state==1 → return 2
-    // would cause the last token to be lost.  By holding the lock through the
-    // state read we guarantee:
-    //   • If the gen thread is mid-push_token it is blocked; we see state < 1
-    //     and return 0 so the next poll retrieves the token.
-    //   • If state == 1 while we hold the lock, all tokens that could ever be
-    //     pushed have already been pushed (push_token needs the same lock), so
-    //     an empty ring + state==1 correctly means "done, no more tokens".
-    std::unique_lock<std::mutex> lock(g_ring.mtx);
-
-    // Discard any stale entries from previous generation epochs.
-    const uint64_t cur_epoch = g_gen_epoch.load(std::memory_order_relaxed);
-    while (!g_ring.items.empty() && g_ring.items.front().epoch != cur_epoch) {
-        g_ring.items.pop();
+    if (!session->has_native_resources()) {
+        session->set_error("Session native resources not active");
+        return -2;
     }
 
-    if (!g_ring.items.empty()) {
-        const RingEntry& entry = g_ring.items.front();
-        int32_t copy_len = static_cast<int32_t>(
-            std::min(entry.piece.size(), static_cast<size_t>(buf_size - 1)));
-        const int token_text_length = copy_len;
-        std::memcpy(buf, entry.piece.data(), copy_len);
-        buf[copy_len] = '\0';
-        g_ring.items.pop();
-        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - poll_started_at
-        ).count();
-        LOGI(
-            "[NATIVE_STREAM_FLUSH] elapsed_ms=%lld thread_id=%" PRIu64
-            " token_id=-1 token_text_length=%d queue_size=%zu poll_iteration=%lld",
-            static_cast<long long>(elapsed_ms),
-            poll_thread_id,
-            token_text_length,
-            g_ring.items.size(),
-            static_cast<long long>(poll_iteration)
-        );
-        LOGI(
-            "[STEP_11_STREAM_WRITE] elapsed_ms=%lld thread_id=%" PRIu64
-            " token_id=-1 token_text_length=%d",
-            static_cast<long long>(elapsed_ms),
-            poll_thread_id,
-            token_text_length
-        );
-        return 1;  // token available
+    if (max_tokens <= 0) {
+        session->set_error("max_tokens must be > 0");
+        LOGE("[ERROR] [GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
+             session_id,
+             max_tokens);
+        return -4;
     }
 
-    // Ring is empty — check generation state while still holding the ring lock.
-    int state = g_gen_state.load(std::memory_order_acquire);
-    if (state == 1) return 2;   // done
-    if (state == 2) return -99; // cancelled
-    if (state == -1) return -1; // error
+    std::lock_guard<std::mutex> lock(session->generation_mutex);
 
-    return 0;  // still generating; caller should yield and retry
+    LOGI("[CANCEL_REQUEST] session=%" PRId64 " reason=restart_generation", session_id);
+    session->cancel_requested.store(true, std::memory_order_release);
+    if (session->gen_thread.joinable()) {
+        LOGI("[CLEANUP_JOIN] session=%" PRId64 " join_previous_generation=true", session_id);
+        session->gen_thread.join();
+    }
+
+    session->clear_queue();
+    session->cancel_requested.store(false, std::memory_order_release);
+    session->first_token_emitted.store(false, std::memory_order_release);
+    session->clear_error();
+
+    const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+    session->gen_state.store(kStateGenerating, std::memory_order_release);
+    notify_first_token_waiters(session);
+
+    const std::string sanitized_prompt = sanitize_prompt_for_generation(prompt);
+    if (prompt == nullptr || sanitized_prompt != std::string(prompt)) {
+        LOGI("[PROMPT_FALLBACK] session=%" PRId64 " reason=start_gen_sanitized fallback=%s",
+             session_id,
+             sanitized_prompt.c_str());
+    }
+
+    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f",
+         session_id,
+         owner_epoch,
+         max_tokens,
+         static_cast<double>(temperature));
+
+    try {
+        session->gen_thread = std::thread(
+            run_generation,
+            session,
+            sanitized_prompt,
+            max_tokens,
+            temperature,
+            owner_epoch
+        );
+    } catch (const std::exception& error) {
+        session->set_error(error.what());
+        session->gen_state.store(kStateFailed, std::memory_order_release);
+        LOGE("[ERROR] [THREAD_START] session=%" PRId64 " spawn_failed=%s",
+             session_id,
+             error.what());
+        return -5;
+    }
+
+    return 0;
 }
 
-void llb_cancel(void) {
-    LOGI("[AI] llb_cancel called");
-    g_cancel_flag.store(true);
-}
+int32_t llb_session_poll_token(
+    int64_t session_id,
+    char* buf,
+    int32_t buf_size
+) {
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        set_global_error("Session not found");
+        LOGE("[ERROR] [TOKEN] session_not_found session=%" PRId64, session_id);
+        return -1;
+    }
 
-void llb_free_model(void) {
-    LOGI("[AI] llb_free_model called");
-    g_cancel_flag.store(true);
+    if (buf == nullptr || buf_size <= 0) {
+        session->set_error("Invalid token buffer");
+        return -1;
+    }
 
-    if (g_gen_thread.joinable()) {
-        // ── Non-blocking cleanup ─────────────────────────────────────────────
-        //
-        // Move the generation thread and the model/context pointers into a
-        // detached background "cleanup thread" so that the caller (the Dart
-        // main isolate / Flutter event loop) is NEVER blocked by a slow or
-        // stalled llama_decode() call inside the generation thread.
-        //
-        // The cleanup thread performs the join() and then frees the resources
-        // once the generation thread actually exits.  The global pointers are
-        // nulled immediately so that any subsequent llb_load_model() call sees
-        // a clean state and does not double-free.
-        //
-        // llama_backend_free() is intentionally omitted here — see file header.
-        llama_context* ctx_to_free   = g_ctx;
-        llama_model* model_to_free = g_model;
-        g_ctx   = nullptr;
-        g_model = nullptr;
+    const uint64_t current_epoch = session->epoch.load(std::memory_order_acquire);
 
-        std::thread cleanup(
-            [gen_thread  = std::move(g_gen_thread),
-             ctx_to_free,
-             model_to_free]() mutable {
-                LOGI("[CLEANUP_THREAD] waiting for generation thread to exit...");
-                if (gen_thread.joinable()) {
-                    gen_thread.join();
-                }
-                LOGI("[CLEANUP_THREAD] generation thread joined — freeing model/ctx");
-                if (ctx_to_free)   { llama_free(ctx_to_free);        }
-                if (model_to_free) { llama_model_free(model_to_free); }
-                LOGI("[CLEANUP_THREAD] model/ctx freed — cleanup complete");
+    auto try_pop_token = [&]() -> int32_t {
+        std::lock_guard<std::mutex> lock(session->queue_mutex);
+
+        while (!session->token_queue.empty()) {
+            const uint64_t entry_epoch = session->token_queue.front().epoch;
+            if (entry_epoch == current_epoch) {
+                break;
+            }
+            if (entry_epoch > current_epoch) {
+                return 0;
+            }
+            session->token_queue.pop_front();
+            const auto dropped = ++session->stale_drop_count;
+            LOGI("[QUEUE_DROP_OLD_EPOCH] session=%" PRId64 " stale_drop_count=%" PRId64,
+                 session_id,
+                 dropped);
+        }
+
+        if (!session->token_queue.empty()) {
+            TokenEntry entry = std::move(session->token_queue.front());
+            session->token_queue.pop_front();
+
+            const auto copy_len = static_cast<int32_t>(std::min(
+                static_cast<size_t>(buf_size - 1),
+                entry.piece.size()
+            ));
+            std::memcpy(buf, entry.piece.data(), static_cast<size_t>(copy_len));
+            buf[copy_len] = '\0';
+
+            const auto queued_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - entry.emitted_at
+            ).count();
+            LOGI("[TOKEN] session=%" PRId64 " polled=true chars=%d queue_size=%zu queued_ms=%lld"
+                 " overflow_count=%" PRId64,
+                 session_id,
+                 copy_len,
+                 session->token_queue.size(),
+                 static_cast<long long>(queued_ms),
+                 session->queue_overflow_count.load(std::memory_order_acquire));
+            return 1;
+        }
+        return 0;
+    };
+
+    if (try_pop_token() == 1) {
+        return 1;
+    }
+
+    if (!session->first_token_emitted.load(std::memory_order_acquire) &&
+        session->gen_state.load(std::memory_order_acquire) == kStateGenerating &&
+        session->epoch.load(std::memory_order_acquire) == current_epoch) {
+        std::unique_lock<std::mutex> wait_lock(session->first_token_mutex);
+        session->first_token_cv.wait_for(
+            wait_lock,
+            std::chrono::milliseconds(kFirstTokenPollWaitMillis),
+            [&]() {
+                return session->first_token_emitted.load(std::memory_order_acquire) ||
+                       session->gen_state.load(std::memory_order_acquire) != kStateGenerating ||
+                       session->epoch.load(std::memory_order_acquire) != current_epoch;
             }
         );
-        cleanup.detach();
+        if (try_pop_token() == 1) {
+            return 1;
+        }
+    }
 
-        // NOTE: g_cancel_flag is intentionally NOT cleared here.
-        // The old gen thread must see cancel=true and exit cleanly.
-        // The next llb_start_gen() call will clear g_cancel_flag
-        // (via g_cancel_flag.store(false) in llb_start_gen) AFTER it increments
-        // g_gen_epoch, ensuring the new gen thread starts with a clean state.
-        // Any state updates the old thread tries to make after that point will
-        // be suppressed by the epoch check in gen_update_state / gen_mark_finished.
-        LOGI("[AI] llb_free_model: cleanup delegated to background thread");
+    const int state = session->gen_state.load(std::memory_order_acquire);
+    if (state == kStateCompleted) {
+        LOGI("[DECODE] session=%" PRId64 " poll_state=completed", session_id);
+        return 2;
+    }
+    if (state == kStateCancelled) {
+        LOGI("[CANCEL] session=%" PRId64 " poll_state=cancelled", session_id);
+        return -99;
+    }
+    if (state == kStateFailed) {
+        LOGE("[ERROR] [DECODE] session=%" PRId64 " poll_state=failed error=%s",
+             session_id,
+             session->get_error_copy().c_str());
+        return -1;
+    }
+
+    return 0;
+}
+
+void llb_session_cancel(int64_t session_id) {
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        LOGE("[ERROR] [CANCEL] session_not_found session=%" PRId64, session_id);
         return;
     }
 
-    // No generation thread running — free resources immediately.
-    if (g_ctx) {
-        LOGI("[AI] freeing context");
-        llama_free(g_ctx);
-        g_ctx = nullptr;
-    }
-    if (g_model) {
-        LOGI("[AI] freeing model");
-        llama_model_free(g_model);
-        g_model = nullptr;
-    }
-    g_cancel_flag.store(false);
-    LOGI("[AI] llb_free_model complete");
+    LOGI("[CANCEL_REQUEST] session=%" PRId64 " requested=true", session_id);
+    session->cancel_requested.store(true, std::memory_order_release);
+    const uint64_t owner_epoch = session->epoch.load(std::memory_order_acquire);
+    set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_requested_api");
+    notify_first_token_waiters(session);
+    LOGI("[CANCEL] session=%" PRId64 " requested=true epoch=%" PRIu64,
+         session_id,
+         owner_epoch);
 }
 
-const char* llb_last_error(void) {
-    return g_last_error.c_str();
+void llb_release_session(int64_t session_id) {
+    auto session = remove_session(session_id);
+    if (session == nullptr) {
+        LOGI("[SESSION_DESTROY] session=%" PRId64 " already_released=true", session_id);
+        return;
+    }
+
+    LOGI("[SESSION_DESTROY] session=%" PRId64 " releasing=true", session_id);
+    release_session_async(session);
 }
 
-int32_t llb_is_loaded(void) {
-    return (g_model != nullptr && g_ctx != nullptr) ? 1 : 0;
+int32_t llb_session_is_active(int64_t session_id) {
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        return 0;
+    }
+    return session->has_native_resources() ? 1 : 0;
+}
+
+const char* llb_session_last_error(int64_t session_id) {
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        g_tls_error = get_global_error_copy();
+        if (g_tls_error.empty()) {
+            g_tls_error = "Session not found";
+        }
+        return g_tls_error.c_str();
+    }
+
+    g_tls_error = session->get_error_copy();
+    return g_tls_error.c_str();
 }
 
 }  // extern "C"

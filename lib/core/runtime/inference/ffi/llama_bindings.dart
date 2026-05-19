@@ -5,62 +5,79 @@ import 'package:ffi/ffi.dart';
 
 class LlamaBridgeBindings {
   LlamaBridgeBindings(DynamicLibrary lib)
-      : _loadModel = lib.lookupFunction<LlbLoadModelNative, LlbLoadModelDart>(
-          'llb_load_model',
+      : _initBackend =
+            lib.lookupFunction<LlbInitBackendNative, LlbInitBackendDart>(
+          'llb_init_backend',
         ),
-        _startGen = lib.lookupFunction<LlbStartGenNative, LlbStartGenDart>(
-          'llb_start_gen',
+        _createSession =
+            lib.lookupFunction<LlbCreateSessionNative, LlbCreateSessionDart>(
+          'llb_create_session',
         ),
-        _pollToken = lib.lookupFunction<LlbPollTokenNative, LlbPollTokenDart>(
-          'llb_poll_token',
+        _sessionStartGen =
+            lib.lookupFunction<LlbSessionStartGenNative, LlbSessionStartGenDart>(
+          'llb_session_start_gen',
         ),
-        _cancel = lib.lookupFunction<LlbCancelNative, LlbCancelDart>(
-          'llb_cancel',
+        _sessionPollToken =
+            lib.lookupFunction<LlbSessionPollTokenNative, LlbSessionPollTokenDart>(
+          'llb_session_poll_token',
         ),
-        _freeModel = lib.lookupFunction<LlbFreeModelNative, LlbFreeModelDart>(
-          'llb_free_model',
+        _sessionCancel =
+            lib.lookupFunction<LlbSessionCancelNative, LlbSessionCancelDart>(
+          'llb_session_cancel',
         ),
-        _lastError =
-            lib.lookupFunction<LlbLastErrorNative, LlbLastErrorDart>(
-          'llb_last_error',
+        _releaseSession =
+            lib.lookupFunction<LlbReleaseSessionNative, LlbReleaseSessionDart>(
+          'llb_release_session',
         ),
-        _isLoaded = lib.lookupFunction<LlbIsLoadedNative, LlbIsLoadedDart>(
-          'llb_is_loaded',
-        );
+        _sessionIsActive =
+            lib.lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
+          'llb_session_is_active',
+        ),
+        _sessionLastError = lib.lookupFunction<
+            LlbSessionLastErrorNative,
+            LlbSessionLastErrorDart>('llb_session_last_error');
 
-  final LlbLoadModelDart _loadModel;
-  final LlbStartGenDart _startGen;
-  final LlbPollTokenDart _pollToken;
-  final LlbCancelDart _cancel;
-  final LlbFreeModelDart _freeModel;
-  final LlbLastErrorDart _lastError;
-  final LlbIsLoadedDart _isLoaded;
+  final LlbInitBackendDart _initBackend;
+  final LlbCreateSessionDart _createSession;
+  final LlbSessionStartGenDart _sessionStartGen;
+  final LlbSessionPollTokenDart _sessionPollToken;
+  final LlbSessionCancelDart _sessionCancel;
+  final LlbReleaseSessionDart _releaseSession;
+  final LlbSessionIsActiveDart _sessionIsActive;
+  final LlbSessionLastErrorDart _sessionLastError;
 
-  int loadModel(String modelPath) {
+  void initBackend() => _initBackend();
+
+  int createSession(String modelPath) {
     final pathPtr = modelPath.toNativeUtf8();
     try {
-      return _loadModel(pathPtr, LlamaNativeDefaults.nCtx, LlamaNativeDefaults.nThreads);
+      return _createSession(
+        pathPtr,
+        LlamaNativeDefaults.nCtx,
+        LlamaNativeDefaults.nThreads,
+      );
     } finally {
       calloc.free(pathPtr);
     }
   }
 
-  int startGeneration(String prompt, int maxTokens, double temperature) {
+  int startGeneration(int sessionId, String prompt, int maxTokens, double temperature) {
     final promptPtr = prompt.toNativeUtf8();
     try {
-      return _startGen(promptPtr, maxTokens, temperature);
+      return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
     } finally {
       calloc.free(promptPtr);
     }
   }
 
-  int pollToken(Pointer<Utf8> buf) => _pollToken(buf, LlamaNativeDefaults.tokenBufferSize);
+  int pollToken(int sessionId, Pointer<Utf8> buf) =>
+      _sessionPollToken(sessionId, buf, LlamaNativeDefaults.tokenBufferSize);
 
-  void cancel() => _cancel();
+  void cancelSession(int sessionId) => _sessionCancel(sessionId);
 
-  void freeModel() => _freeModel();
+  void releaseSession(int sessionId) => _releaseSession(sessionId);
 
-  String lastError() => _lastError().toDartString();
+  int sessionIsActive(int sessionId) => _sessionIsActive(sessionId);
 
-  int isLoaded() => _isLoaded();
+  String sessionLastError(int sessionId) => _sessionLastError(sessionId).toDartString();
 }
