@@ -32,8 +32,7 @@ void main() {
 
     expect(manifest.version, 'v1.0.12.105');
     expect(manifest.apkUrl, 'https://example.com/app-release.apk');
-    // min_supported defaults to version when absent
-    expect(manifest.minSupported, 'v1.0.12.105');
+    expect(manifest.minSupported, 'v0.0.0');
     expect(manifest.apkFileName, 'app-release.apk');
     expect(manifest.critical, isFalse);
   });

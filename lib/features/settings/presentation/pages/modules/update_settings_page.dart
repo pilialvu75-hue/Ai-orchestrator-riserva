@@ -54,6 +54,17 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
     unawaited(_updateManager.refreshDiagnostics());
   }
 
+  Future<void> _forceUpdate() async {
+    final ok = await _updateManager.forceUpdate();
+    unawaited(_updateManager.refreshDiagnostics());
+    if (!mounted) return;
+    final state = _updateManager.state.value;
+    final message = ok
+        ? context.l10n.t('force_update_started')
+        : (state.errorMessage ?? context.l10n.t('force_update_failed'));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _installReady() async {
     await _updateManager.prepareInstallIntent();
     unawaited(_updateManager.refreshDiagnostics());
@@ -99,6 +110,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
       body: ValueListenableBuilder<UpdateState>(
         valueListenable: _updateManager.state,
         builder: (context, state, _) {
+          final canForceUpdate = _updateManager.hasDetectedNewerVersion(state);
           return ListView(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
             children: [
@@ -212,9 +224,11 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
               // ── Action buttons ────────────────────────────────────────────
               _ActionRow(
                 state: state,
+                canForceUpdate: canForceUpdate,
                 onCheckNow: _checkNow,
                 onDownloadAndInstall: _downloadAndInstall,
                 onInstallReady: _installReady,
+                onForceUpdate: _forceUpdate,
               ),
               if (_showDiagnostics) ...[
                 const SizedBox(height: 22),
@@ -325,15 +339,19 @@ class _UpdateBanner extends StatelessWidget {
 class _ActionRow extends StatelessWidget {
   const _ActionRow({
     required this.state,
+    required this.canForceUpdate,
     required this.onCheckNow,
     required this.onDownloadAndInstall,
     required this.onInstallReady,
+    required this.onForceUpdate,
   });
 
   final UpdateState state;
+  final bool canForceUpdate;
   final VoidCallback onCheckNow;
   final VoidCallback onDownloadAndInstall;
   final VoidCallback onInstallReady;
+  final VoidCallback onForceUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -342,35 +360,52 @@ class _ActionRow extends StatelessWidget {
     final hasUpdate = state.status == UpdateStatus.updateAvailable;
     final readyToInstall = state.status == UpdateStatus.readyToInstall;
 
-    return Wrap(
-      alignment: WrapAlignment.end,
-      spacing: 10,
-      runSpacing: 10,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (readyToInstall)
-          FilledButton.icon(
-            onPressed: onInstallReady,
-            icon: const Icon(Icons.install_mobile_rounded),
-            label: const Text('Install now'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF69F0AE),
-              foregroundColor: Colors.black,
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            if (readyToInstall)
+              FilledButton.icon(
+                onPressed: onInstallReady,
+                icon: const Icon(Icons.install_mobile_rounded),
+                label: const Text('Install now'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF69F0AE),
+                  foregroundColor: Colors.black,
+                ),
+              )
+            else if (hasUpdate)
+              FilledButton.icon(
+                onPressed: isDownloading ? null : onDownloadAndInstall,
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('Download & install'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF8AB4F8),
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            FilledButton.icon(
+              onPressed: (isChecking || isDownloading) ? null : onCheckNow,
+              icon: const Icon(Icons.refresh),
+              label: Text(
+                isChecking
+                    ? '${context.l10n.t('check_updates_now')}…'
+                    : context.l10n.t('check_updates_now'),
+              ),
             ),
-          )
-        else if (hasUpdate)
-          FilledButton.icon(
-            onPressed: isDownloading ? null : onDownloadAndInstall,
-            icon: const Icon(Icons.download_rounded),
-            label: const Text('Download & install'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8AB4F8),
-              foregroundColor: Colors.black,
-            ),
-          ),
+          ],
+        ),
+        const SizedBox(height: 10),
         FilledButton.icon(
-          onPressed: (isChecking || isDownloading) ? null : onCheckNow,
-          icon: const Icon(Icons.refresh),
-          label: Text(isChecking ? '${context.l10n.t('check_updates_now')}…' : context.l10n.t('check_updates_now')),
+          onPressed: (isChecking || isDownloading || !canForceUpdate)
+              ? null
+              : onForceUpdate,
+          icon: const Icon(Icons.system_update_alt_rounded),
+          label: Text(context.l10n.t('force_update')),
         ),
       ],
     );

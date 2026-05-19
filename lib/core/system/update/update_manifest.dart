@@ -3,6 +3,8 @@ import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
 import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 
 class UpdateManifest {
+  static const String defaultMinSupportedVersion = '0.0.0';
+
   const UpdateManifest({
     required this.version,
     this.versionCode,
@@ -91,11 +93,11 @@ class UpdateManifest {
       );
     }
 
-    // min_supported defaults to the release version itself when absent.
+    // Missing min_supported must never block updates by default.
     final rawResolvedMinSupported =
         (rawMinSupported != null && rawMinSupported.isNotEmpty)
             ? rawMinSupported
-            : rawVersion;
+            : defaultMinSupportedVersion;
     final parsedMinSupported = parser.parse(rawResolvedMinSupported);
     if (parsedMinSupported == null) {
       throw FormatException(

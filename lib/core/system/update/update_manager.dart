@@ -79,6 +79,9 @@ class UpdateManager {
   final ValueNotifier<UpdateState> state;
 
   Timer? _periodicTimer;
+  // These guards prevent concurrent update operations and race conditions from async UI actions.
+  bool _isCheckingForUpdates = false;
+  bool _isPreparingInstall = false;
 
   Future<void> startBackgroundChecks({
     bool checkOnStartup = true,
@@ -109,114 +112,222 @@ class UpdateManager {
     unawaited(checkForUpdates());
   }
 
-  Future<void> checkForUpdates() async {
-    _logUpdateCheck('check_start');
+  Future<void> checkForUpdates({
+    bool allowCachedFallback = true,
+  }) async {
+    final selectedChannel = state.value.preferredChannel;
+    _logStructuredUpdateCheck(
+      selectedChannel: selectedChannel,
+      finalDecisionState: 'request_received',
+    );
+    if (_isCheckingForUpdates) {
+      _logStructuredUpdateCheck(
+        selectedChannel: selectedChannel,
+        finalDecisionState: 'skipped_already_checking',
+      );
+      return;
+    }
     if (state.value.status == UpdateStatus.downloading) {
-      _logUpdate('Skipping check while download is in progress');
+      _logStructuredUpdateCheck(
+        selectedChannel: selectedChannel,
+        detectedVersion: state.value.latestManifest?.version,
+        comparisonResult: _comparisonResultFor(state.value.latestManifest?.version),
+        finalDecisionState: 'skipped_downloading',
+      );
       return;
     }
-    if (state.value.status == UpdateStatus.readyToInstall &&
-        state.value.tempApkPath != null &&
-        state.value.tempApkPath!.isNotEmpty) {
-      _logUpdateInstallResume(
-        'skip_check_ready_to_install path=${state.value.tempApkPath}',
+    if (_isPreparingInstall) {
+      _logStructuredUpdateCheck(
+        selectedChannel: selectedChannel,
+        detectedVersion: state.value.latestManifest?.version,
+        comparisonResult: _comparisonResultFor(state.value.latestManifest?.version),
+        finalDecisionState: 'skipped_install_in_progress',
       );
       return;
     }
 
-    _logVersionLocal('version=$_currentVersion');
-    state.value = state.value.copyWith(
-      status: UpdateStatus.checking,
-      clearErrorMessage: true,
-    );
-
-    final result = await _updateChecker.checkLatestManifest(
-      preferredChannel: state.value.preferredChannel,
-    );
-
-    final manifest = result.manifest;
-    if (manifest == null) {
-      _logUpdateCheck('check_fail error=${result.errorMessage}');
-      _logUpdate('Update check failed: ${result.errorMessage}');
+    _isCheckingForUpdates = true;
+    try {
+      await _invalidateStalePersistedState();
+      _logVersionLocal('version=$_currentVersion');
       state.value = state.value.copyWith(
-        status: UpdateStatus.error,
-        errorMessage: result.errorMessage ?? 'Update check failed',
-        lastCheckedAt: DateTime.now(),
-        diagnostics: state.value.diagnostics.copyWith(
-          lastException: result.errorMessage ?? 'Update check failed',
-        ),
+        status: UpdateStatus.checking,
+        clearErrorMessage: true,
       );
-      return;
-    }
 
-    _logVersionRemote(
-      'version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
-    );
-    _logUpdateCheck(
-      'check_result remote_version=${manifest.version} url=${manifest.apkUrl}',
-    );
-
-    if (!manifest.isCompatibleWith(
-      currentVersion: _currentVersion,
-      comparator: _comparator,
-    )) {
-      _logVersionCompare(
-        'local=$_currentVersion remote=${manifest.version} compatible=false',
+      final result = await _updateChecker.checkLatestManifest(
+        preferredChannel: selectedChannel,
+        allowCachedFallback: allowCachedFallback,
       );
+
+      final manifest = result.manifest;
+      if (manifest == null) {
+        final message = result.errorMessage ?? 'Update check failed';
+        _logUpdateCheck('check_fail error=$message');
+        _logStructuredUpdateError(
+          action: 'check_for_updates',
+          selectedChannel: selectedChannel,
+          finalDecisionState: 'error',
+          message: message,
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: message,
+          lastCheckedAt: DateTime.now(),
+          diagnostics: state.value.diagnostics.copyWith(
+            lastException: message,
+          ),
+        );
+        return;
+      }
+
+      final compareResult = _comparator.compare(manifest.version, _currentVersion);
+      final compatible = manifest.isCompatibleWith(
+        currentVersion: _currentVersion,
+        comparator: _comparator,
+      );
+      _logVersionRemote(
+        'version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
+      );
+      _logStructuredVersionCompare(
+        detectedVersion: manifest.version,
+        selectedChannel: selectedChannel,
+        comparisonResult: compareResult,
+        compatible: compatible,
+        finalDecisionState: compatible
+            ? (compareResult > 0 ? 'candidate_update' : 'up_to_date')
+            : 'blocked_by_min_supported',
+      );
+
+      if (!compatible) {
+        state.value = state.value.copyWith(
+          status: UpdateStatus.upToDate,
+          latestManifest: manifest,
+          lastCheckedAt: DateTime.now(),
+          usedCachedManifest: result.usedCache,
+          clearErrorMessage: true,
+          clearTempApkPath: true,
+          downloadProgress: 0,
+          diagnostics: state.value.diagnostics.copyWith(
+            remoteVersion: manifest.version,
+            remoteVersionCode: manifest.versionCode,
+            updateUrl: manifest.apkUrl,
+            apkDownloaded: false,
+            clearApkPath: true,
+            apkFileExists: false,
+            clearInstallerLaunchSuccess: true,
+            clearLastException: true,
+          ),
+        );
+        _logStructuredUpdateCheck(
+          selectedChannel: selectedChannel,
+          detectedVersion: manifest.version,
+          comparisonResult: compareResult,
+          finalDecisionState: 'up_to_date',
+        );
+        return;
+      }
+
+      if (compareResult > 0 &&
+          await _restoreReadyToInstallStateIfReusable(
+            manifest: manifest,
+            selectedChannel: selectedChannel,
+            comparisonResult: compareResult,
+            usedCachedManifest: result.usedCache,
+          )) {
+        return;
+      }
+
       state.value = state.value.copyWith(
-        status: UpdateStatus.upToDate,
+        status: compareResult > 0
+            ? UpdateStatus.updateAvailable
+            : UpdateStatus.upToDate,
         latestManifest: manifest,
         lastCheckedAt: DateTime.now(),
         usedCachedManifest: result.usedCache,
+        clearErrorMessage: true,
+        clearTempApkPath: true,
+        downloadProgress: 0,
         diagnostics: state.value.diagnostics.copyWith(
           remoteVersion: manifest.version,
           remoteVersionCode: manifest.versionCode,
           updateUrl: manifest.apkUrl,
+          apkDownloaded: false,
+          clearApkPath: true,
+          apkFileExists: false,
+          clearInstallerLaunchSuccess: true,
           clearLastException: true,
         ),
       );
-      return;
+      if (compareResult > 0) {
+        _logStructuredUpdateAvailable(
+          detectedVersion: manifest.version,
+          selectedChannel: selectedChannel,
+          comparisonResult: compareResult,
+          finalDecisionState: 'update_available',
+        );
+      }
+      _logStructuredUpdateCheck(
+        selectedChannel: selectedChannel,
+        detectedVersion: manifest.version,
+        comparisonResult: compareResult,
+        finalDecisionState: compareResult > 0 ? 'update_available' : 'up_to_date',
+      );
+    } finally {
+      _isCheckingForUpdates = false;
     }
-
-    final compareResult = _comparator.compare(manifest.version, _currentVersion);
-    final hasNewer = compareResult > 0;
-    _logVersionCompare(
-      'local=$_currentVersion remote=${manifest.version} compare=$compareResult has_newer=$hasNewer',
-    );
-
-    state.value = state.value.copyWith(
-      status: hasNewer ? UpdateStatus.updateAvailable : UpdateStatus.upToDate,
-      latestManifest: manifest,
-      lastCheckedAt: DateTime.now(),
-      usedCachedManifest: result.usedCache,
-      clearErrorMessage: true,
-      clearTempApkPath: true,
-      downloadProgress: 0,
-      diagnostics: state.value.diagnostics.copyWith(
-        remoteVersion: manifest.version,
-        remoteVersionCode: manifest.versionCode,
-        updateUrl: manifest.apkUrl,
-        apkDownloaded: false,
-        clearApkPath: true,
-        apkFileExists: false,
-        clearInstallerLaunchSuccess: true,
-        clearLastException: true,
-      ),
-    );
   }
 
   Future<bool> downloadLatestApk() async {
     final manifest = state.value.latestManifest;
     if (manifest == null) {
       _logApk('Download requested without latest manifest');
+      _logStructuredUpdateError(
+        action: 'download_latest_apk',
+        selectedChannel: state.value.preferredChannel,
+        finalDecisionState: state.value.status.name,
+        message: 'No latest manifest available',
+      );
       return false;
     }
+    if (state.value.status == UpdateStatus.downloading) {
+      _logStructuredDownloadTrigger(
+        detectedVersion: manifest.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        finalDecisionState: 'skipped_downloading',
+      );
+      return false;
+    }
+    if (_isPreparingInstall) {
+      _logStructuredDownloadTrigger(
+        detectedVersion: manifest.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        finalDecisionState: 'skipped_install_in_progress',
+      );
+      return false;
+    }
+    _logStructuredDownloadTrigger(
+      detectedVersion: manifest.version,
+      selectedChannel: state.value.preferredChannel,
+      comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+      finalDecisionState: 'download_requested',
+    );
 
     final uri = Uri.tryParse(manifest.apkUrl);
     if (uri == null ||
         !(uri.scheme == 'https' || uri.scheme == 'http') ||
         uri.host.isEmpty) {
       _logApk('Rejected invalid APK URL: ${manifest.apkUrl}');
+      _logStructuredUpdateError(
+        action: 'download_latest_apk',
+        detectedVersion: manifest.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        finalDecisionState: 'error',
+        message: 'Invalid APK URL: ${manifest.apkUrl}',
+      );
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
         errorMessage:
@@ -262,6 +373,12 @@ class UpdateManager {
         if (verified.valid) {
           _logUpdateDownloadComplete(
             'reuse_existing path=$finalPath size_bytes=${verified.sizeBytes}',
+          );
+          _logStructuredDownloadTrigger(
+            detectedVersion: manifest.version,
+            selectedChannel: state.value.preferredChannel,
+            comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+            finalDecisionState: 'ready_to_install',
           );
           await _clearDownloadState();
           await _persistPendingInstallerState(
@@ -319,6 +436,14 @@ class UpdateManager {
         _logUpdateDownloadFail(
           'reason=${verification.reason} path=$finalPath size_bytes=${verification.sizeBytes}',
         );
+        _logStructuredUpdateError(
+          action: 'download_latest_apk',
+          detectedVersion: manifest.version,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+          finalDecisionState: 'error',
+          message: 'Downloaded APK failed verification: ${verification.reason}',
+        );
         state.value = state.value.copyWith(
           status: UpdateStatus.error,
           errorMessage: 'Downloaded APK failed verification: ${verification.reason}',
@@ -340,6 +465,12 @@ class UpdateManager {
       _logUpdateDownloadComplete(
         'path=$finalPath size_bytes=${verification.sizeBytes}',
       );
+      _logStructuredDownloadTrigger(
+        detectedVersion: manifest.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        finalDecisionState: 'ready_to_install',
+      );
       state.value = state.value.copyWith(
         status: UpdateStatus.readyToInstall,
         tempApkPath: finalPath,
@@ -356,6 +487,14 @@ class UpdateManager {
       _logUpdateDownloadFail('error=$error path=$activePath');
       _logApk('Download failed: $error');
       _logApk('Download stack: $stackTrace');
+      _logStructuredUpdateError(
+        action: 'download_latest_apk',
+        detectedVersion: manifest.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        finalDecisionState: 'error',
+        message: 'Download failed: $error',
+      );
       state.value = state.value.copyWith(
         status: UpdateStatus.error,
         errorMessage: 'Download failed: $error',
@@ -371,105 +510,202 @@ class UpdateManager {
   }
 
   Future<bool> prepareInstallIntent() async {
+    if (_isPreparingInstall) {
+      _logStructuredInstallTrigger(
+        detectedVersion: state.value.latestManifest?.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparisonResultFor(state.value.latestManifest?.version),
+        finalDecisionState: 'skipped_install_in_progress',
+      );
+      return false;
+    }
+    _isPreparingInstall = true;
     _logUpdateInstallStart();
-    await _syncAndroidInstallDiagnostics();
-    final apkPath = state.value.tempApkPath;
-    if (apkPath == null || apkPath.isEmpty) {
-      _logUpdateInstallFail('No downloaded APK available');
-      _logInstall('Install requested without downloaded APK');
-      state.value = state.value.copyWith(
-        status: UpdateStatus.error,
-        errorMessage: 'No downloaded APK available',
-        diagnostics: state.value.diagnostics.copyWith(
-          lastException: 'No downloaded APK available',
-          installerLaunchSuccess: false,
-        ),
-      );
-      return false;
-    }
+    try {
+      await _syncAndroidInstallDiagnostics();
+      final apkPath = state.value.tempApkPath;
+      final detectedVersion = state.value.latestManifest?.version ??
+          _preferences.getString(_prefPendingVersion);
+      final comparisonResult = _comparisonResultFor(detectedVersion);
+      if (apkPath == null || apkPath.isEmpty) {
+        _logUpdateInstallFail('No downloaded APK available');
+        _logInstall('Install requested without downloaded APK');
+        _logStructuredUpdateError(
+          action: 'prepare_install_intent',
+          detectedVersion: detectedVersion,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: comparisonResult,
+          finalDecisionState: 'error',
+          message: 'No downloaded APK available',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: 'No downloaded APK available',
+          diagnostics: state.value.diagnostics.copyWith(
+            lastException: 'No downloaded APK available',
+            installerLaunchSuccess: false,
+          ),
+        );
+        return false;
+      }
 
-    final verification = await _verifyApkFile(
-      apkPath,
-      expectedSizeBytes: state.value.latestManifest?.apkSizeBytes,
-    );
-    if (!verification.valid) {
-      _logUpdateInstallFail(verification.reason);
-      await _cleanupInstallerArtifacts(apkPath);
-      await _clearPendingInstallerState();
-      state.value = state.value.copyWith(
-        status: UpdateStatus.error,
-        clearTempApkPath: true,
-        errorMessage: 'Downloaded APK is no longer valid: ${verification.reason}',
-        diagnostics: state.value.diagnostics.copyWith(
-          apkDownloaded: false,
-          apkPath: apkPath,
-          apkFileExists: verification.exists,
-          installerLaunchSuccess: false,
-          lastException: 'APK invalid before install: ${verification.reason}',
-        ),
+      _logStructuredInstallTrigger(
+        detectedVersion: detectedVersion,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: comparisonResult,
+        finalDecisionState: 'install_requested',
       );
-      return false;
-    }
 
-    final result = await _intentHandler.openApkInstaller(apkPath);
-    if (result.isLeft()) {
-      final failure = result.swap().getOrElse(
-            () => throw StateError('Unexpected empty failure'),
-          );
-      _logUpdateInstallFail(failure.message);
-      _logInstall('Installer launch failed: ${failure.message}');
+      final verification = await _verifyApkFile(
+        apkPath,
+        expectedSizeBytes: state.value.latestManifest?.apkSizeBytes,
+      );
+      if (!verification.valid) {
+        _logUpdateInstallFail(verification.reason);
+        _logStructuredUpdateError(
+          action: 'prepare_install_intent',
+          detectedVersion: detectedVersion,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: comparisonResult,
+          finalDecisionState: 'error',
+          message: 'Downloaded APK is no longer valid: ${verification.reason}',
+        );
+        await _cleanupInstallerArtifacts(apkPath);
+        await _clearPendingInstallerState();
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          clearTempApkPath: true,
+          errorMessage: 'Downloaded APK is no longer valid: ${verification.reason}',
+          diagnostics: state.value.diagnostics.copyWith(
+            apkDownloaded: false,
+            apkPath: apkPath,
+            apkFileExists: verification.exists,
+            installerLaunchSuccess: false,
+            lastException: 'APK invalid before install: ${verification.reason}',
+          ),
+        );
+        return false;
+      }
+
+      final result = await _intentHandler.openApkInstaller(apkPath);
+      if (result.isLeft()) {
+        final failure = result.swap().getOrElse(
+              () => throw StateError('Unexpected empty failure'),
+            );
+        _logUpdateInstallFail(failure.message);
+        _logInstall('Installer launch failed: ${failure.message}');
+        _logStructuredUpdateError(
+          action: 'prepare_install_intent',
+          detectedVersion: detectedVersion,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: comparisonResult,
+          finalDecisionState: 'error',
+          message: failure.message,
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: failure.message,
+          diagnostics: state.value.diagnostics.copyWith(
+            installerLaunchSuccess: false,
+            apkPath: apkPath,
+            apkFileExists: true,
+            lastException: failure.message,
+          ),
+        );
+        return false;
+      }
+
+      final success = result.getOrElse(() => false);
+      _logInstall('Installer launch result: success=$success');
+      await _syncAndroidInstallDiagnostics();
+      if (!success) {
+        _logUpdateInstallFail('installer_launch_returned_false');
+        _logStructuredUpdateError(
+          action: 'prepare_install_intent',
+          detectedVersion: detectedVersion,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: comparisonResult,
+          finalDecisionState: 'error',
+          message: 'Installer launch failed.',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: 'Installer launch failed.',
+        );
+        return false;
+      }
+
+      final persistedVersion = state.value.latestManifest?.version ??
+          _preferences.getString(_prefPendingVersion) ??
+          _currentVersion;
+      await _persistPendingInstallerState(
+        apkPath: apkPath,
+        version: persistedVersion,
+      );
+      _logUpdateInstallResume(
+        'installer_ready path=$apkPath version=$persistedVersion',
+      );
+      _logStructuredInstallTrigger(
+        detectedVersion: persistedVersion,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparisonResultFor(persistedVersion),
+        finalDecisionState: 'ready_to_install',
+      );
+      _logUpdateInstallSuccess();
       state.value = state.value.copyWith(
-        status: UpdateStatus.error,
-        errorMessage: failure.message,
+        status: UpdateStatus.readyToInstall,
+        tempApkPath: apkPath,
+        downloadProgress: 1,
         diagnostics: state.value.diagnostics.copyWith(
-          installerLaunchSuccess: false,
+          installerLaunchSuccess: success,
+          apkDownloaded: true,
           apkPath: apkPath,
           apkFileExists: true,
-          lastException: failure.message,
+          clearLastException: true,
         ),
       );
-      return false;
+      return success;
+    } finally {
+      _isPreparingInstall = false;
     }
-
-    final success = result.getOrElse(() => false);
-    _logInstall('Installer launch result: success=$success');
-    await _syncAndroidInstallDiagnostics();
-    if (!success) {
-      _logUpdateInstallFail('installer_launch_returned_false');
-      state.value = state.value.copyWith(
-        status: UpdateStatus.error,
-        errorMessage: 'Installer launch failed.',
-      );
-      return false;
-    }
-
-    final persistedVersion = state.value.latestManifest?.version ??
-        _preferences.getString(_prefPendingVersion) ??
-        _currentVersion;
-    await _persistPendingInstallerState(
-      apkPath: apkPath,
-      version: persistedVersion,
-    );
-    _logUpdateInstallResume(
-      'installer_ready path=$apkPath version=$persistedVersion',
-    );
-    _logUpdateInstallSuccess();
-    state.value = state.value.copyWith(
-      status: UpdateStatus.readyToInstall,
-      tempApkPath: apkPath,
-      downloadProgress: 1,
-      diagnostics: state.value.diagnostics.copyWith(
-        installerLaunchSuccess: success,
-        apkDownloaded: true,
-        apkPath: apkPath,
-        apkFileExists: true,
-        clearLastException: true,
-      ),
-    );
-    return success;
   }
 
   String get currentVersion => _currentVersion;
+
+  bool hasDetectedNewerVersion(UpdateState updateState) {
+    final manifest = updateState.latestManifest;
+    if (manifest == null) {
+      return false;
+    }
+    return _comparator.compare(manifest.version, _currentVersion) > 0;
+  }
+
+  Future<bool> forceUpdate() async {
+    if (state.value.status == UpdateStatus.downloading || _isPreparingInstall) {
+      return false;
+    }
+    await _invalidateStalePersistedState();
+    await _updateChecker.clearCachedManifest(
+      preferredChannel: state.value.preferredChannel,
+    );
+    await checkForUpdates(allowCachedFallback: false);
+    if (!hasDetectedNewerVersion(state.value)) {
+      _logStructuredUpdateError(
+        action: 'force_update',
+        detectedVersion: state.value.latestManifest?.version,
+        selectedChannel: state.value.preferredChannel,
+        comparisonResult: _comparisonResultFor(state.value.latestManifest?.version),
+        finalDecisionState: state.value.status.name,
+        message: 'No newer update detected',
+      );
+      return false;
+    }
+    final downloaded = await downloadLatestApk();
+    if (!downloaded) {
+      return false;
+    }
+    return prepareInstallIntent();
+  }
 
   Future<bool> openUnknownAppsSettings() async {
     _logInstall('Opening unknown apps permission settings');
@@ -531,6 +767,178 @@ class UpdateManager {
         );
       },
     );
+  }
+
+  int? _comparisonResultFor(String? detectedVersion) {
+    if (detectedVersion == null || detectedVersion.trim().isEmpty) {
+      return null;
+    }
+    return _comparator.compare(detectedVersion, _currentVersion);
+  }
+
+  Future<void> _invalidateStalePersistedState({
+    bool forceInvalidateMismatched = false,
+  }) async {
+    final pendingPath = _preferences.getString(_prefPendingApkPath);
+    final pendingVersion = _preferences.getString(_prefPendingVersion);
+    if (pendingPath != null && pendingPath.trim().isNotEmpty) {
+      if (pendingVersion == null || pendingVersion.trim().isEmpty) {
+        await _cleanupInstallerArtifacts(pendingPath);
+        await _clearPendingInstallerState();
+        if (state.value.tempApkPath == pendingPath ||
+            state.value.status == UpdateStatus.readyToInstall) {
+          state.value = state.value.copyWith(
+            status: UpdateStatus.idle,
+            clearTempApkPath: true,
+            downloadProgress: 0,
+          );
+        }
+      } else {
+        final shouldClearPending = forceInvalidateMismatched ||
+            _comparator.compare(_currentVersion, pendingVersion) >= 0;
+        if (shouldClearPending) {
+          await _cleanupInstallerArtifacts(pendingPath);
+          await _clearPendingInstallerState();
+          if (state.value.tempApkPath == pendingPath ||
+              state.value.status == UpdateStatus.readyToInstall) {
+            state.value = state.value.copyWith(
+              status: UpdateStatus.idle,
+              clearTempApkPath: true,
+              downloadProgress: 0,
+            );
+          }
+        } else {
+          final verification = await _verifyApkFile(pendingPath);
+          if (!verification.valid) {
+            await _cleanupInstallerArtifacts(pendingPath);
+            await _clearPendingInstallerState();
+            if (state.value.tempApkPath == pendingPath ||
+                state.value.status == UpdateStatus.readyToInstall) {
+              state.value = state.value.copyWith(
+                status: UpdateStatus.idle,
+                clearTempApkPath: true,
+                downloadProgress: 0,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    final partialPath = _preferences.getString(_prefDownloadPartialPath);
+    final downloadVersion = _preferences.getString(_prefDownloadVersion);
+    if (partialPath == null || partialPath.trim().isEmpty) {
+      if (state.value.status == UpdateStatus.downloading) {
+        state.value = state.value.copyWith(
+          status: UpdateStatus.idle,
+          downloadProgress: 0,
+        );
+      }
+      return;
+    }
+
+    final partialFile = File(partialPath);
+    final partialExists = await partialFile.exists();
+    final shouldClearDownload = forceInvalidateMismatched ||
+        !partialExists ||
+        downloadVersion == null ||
+        downloadVersion.trim().isEmpty ||
+        _comparator.compare(_currentVersion, downloadVersion) >= 0;
+    if (shouldClearDownload) {
+      await _cleanupInstallerArtifacts(partialPath);
+      await _clearDownloadState();
+      if (state.value.status == UpdateStatus.downloading) {
+        state.value = state.value.copyWith(
+          status: UpdateStatus.idle,
+          downloadProgress: 0,
+        );
+      }
+    }
+  }
+
+  Future<bool> _restoreReadyToInstallStateIfReusable({
+    required UpdateManifest manifest,
+    required ReleaseChannel selectedChannel,
+    required int comparisonResult,
+    required bool usedCachedManifest,
+  }) async {
+    final pendingPath = _preferences.getString(_prefPendingApkPath);
+    final pendingVersion = _preferences.getString(_prefPendingVersion);
+    if (pendingPath == null ||
+        pendingPath.trim().isEmpty ||
+        pendingVersion == null ||
+        pendingVersion.trim().isEmpty) {
+      return false;
+    }
+
+    if (_comparator.compare(_currentVersion, pendingVersion) >= 0 ||
+        _comparator.compare(pendingVersion, manifest.version) < 0) {
+      await _cleanupInstallerArtifacts(pendingPath);
+      await _clearPendingInstallerState();
+      if (state.value.tempApkPath == pendingPath ||
+          state.value.status == UpdateStatus.readyToInstall) {
+        state.value = state.value.copyWith(
+          status: UpdateStatus.idle,
+          clearTempApkPath: true,
+          downloadProgress: 0,
+        );
+      }
+      return false;
+    }
+
+    final verification = await _verifyApkFile(
+      pendingPath,
+      expectedSizeBytes: manifest.apkSizeBytes,
+    );
+    if (!verification.valid) {
+      await _cleanupInstallerArtifacts(pendingPath);
+      await _clearPendingInstallerState();
+      if (state.value.tempApkPath == pendingPath ||
+          state.value.status == UpdateStatus.readyToInstall) {
+        state.value = state.value.copyWith(
+          status: UpdateStatus.idle,
+          clearTempApkPath: true,
+          downloadProgress: 0,
+        );
+      }
+      return false;
+    }
+
+    _logUpdateInstallResume(
+      'reuse_pending_download path=$pendingPath version=$pendingVersion',
+    );
+    _logStructuredUpdateAvailable(
+      detectedVersion: manifest.version,
+      selectedChannel: selectedChannel,
+      comparisonResult: comparisonResult,
+      finalDecisionState: 'ready_to_install',
+    );
+    state.value = state.value.copyWith(
+      status: UpdateStatus.readyToInstall,
+      latestManifest: manifest,
+      lastCheckedAt: DateTime.now(),
+      usedCachedManifest: usedCachedManifest,
+      tempApkPath: pendingPath,
+      downloadProgress: 1,
+      clearErrorMessage: true,
+      diagnostics: state.value.diagnostics.copyWith(
+        remoteVersion: manifest.version,
+        remoteVersionCode: manifest.versionCode,
+        updateUrl: manifest.apkUrl,
+        apkDownloaded: true,
+        apkPath: pendingPath,
+        apkFileExists: true,
+        clearInstallerLaunchSuccess: true,
+        clearLastException: true,
+      ),
+    );
+    _logStructuredUpdateCheck(
+      selectedChannel: selectedChannel,
+      detectedVersion: manifest.version,
+      comparisonResult: comparisonResult,
+      finalDecisionState: 'ready_to_install',
+    );
+    return true;
   }
 
   Future<void> _resumePendingInstallerState() async {
@@ -882,6 +1290,100 @@ class UpdateManager {
       debugPrint('[UPDATE_INSTALL_SUCCESS] launched=true');
   void _logUpdateInstallCleanup(String message) =>
       debugPrint('[UPDATE_INSTALL_CLEANUP] $message');
+  void _logStructuredUpdateCheck({
+    required ReleaseChannel selectedChannel,
+    required String finalDecisionState,
+    String? detectedVersion,
+    int? comparisonResult,
+  }) {
+    debugPrint(
+      '[UPDATE_CHECK] current_version=$_currentVersion '
+      'detected_version=${detectedVersion ?? '-'} '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=${comparisonResult ?? 'n/a'} '
+      'final_decision_state=$finalDecisionState',
+    );
+  }
+
+  void _logStructuredVersionCompare({
+    required String detectedVersion,
+    required ReleaseChannel selectedChannel,
+    required int comparisonResult,
+    required bool compatible,
+    required String finalDecisionState,
+  }) {
+    debugPrint(
+      '[VERSION_COMPARE] current_version=$_currentVersion '
+      'detected_version=$detectedVersion '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=$comparisonResult '
+      'compatible=$compatible '
+      'final_decision_state=$finalDecisionState',
+    );
+  }
+
+  void _logStructuredUpdateAvailable({
+    required String detectedVersion,
+    required ReleaseChannel selectedChannel,
+    required int comparisonResult,
+    required String finalDecisionState,
+  }) {
+    debugPrint(
+      '[UPDATE_AVAILABLE] current_version=$_currentVersion '
+      'detected_version=$detectedVersion '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=$comparisonResult '
+      'final_decision_state=$finalDecisionState',
+    );
+  }
+
+  void _logStructuredDownloadTrigger({
+    required ReleaseChannel selectedChannel,
+    required String finalDecisionState,
+    String? detectedVersion,
+    int? comparisonResult,
+  }) {
+    debugPrint(
+      '[DOWNLOAD_TRIGGER] current_version=$_currentVersion '
+      'detected_version=${detectedVersion ?? '-'} '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=${comparisonResult ?? 'n/a'} '
+      'final_decision_state=$finalDecisionState',
+    );
+  }
+
+  void _logStructuredInstallTrigger({
+    required ReleaseChannel selectedChannel,
+    required String finalDecisionState,
+    String? detectedVersion,
+    int? comparisonResult,
+  }) {
+    debugPrint(
+      '[INSTALL_TRIGGER] current_version=$_currentVersion '
+      'detected_version=${detectedVersion ?? '-'} '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=${comparisonResult ?? 'n/a'} '
+      'final_decision_state=$finalDecisionState',
+    );
+  }
+
+  void _logStructuredUpdateError({
+    required String action,
+    required ReleaseChannel selectedChannel,
+    required String finalDecisionState,
+    required String message,
+    String? detectedVersion,
+    int? comparisonResult,
+  }) {
+    debugPrint(
+      '[UPDATE_ERROR] action=$action current_version=$_currentVersion '
+      'detected_version=${detectedVersion ?? '-'} '
+      'selected_channel=${selectedChannel.storageValue} '
+      'comparison_result=${comparisonResult ?? 'n/a'} '
+      'final_decision_state=$finalDecisionState '
+      'message=$message',
+    );
+  }
 
   void dispose() {
     stopBackgroundChecks();

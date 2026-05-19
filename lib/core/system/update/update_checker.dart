@@ -56,6 +56,7 @@ class UpdateChecker {
 
   Future<UpdateCheckResult> checkLatestManifest({
     required ReleaseChannel preferredChannel,
+    bool allowCachedFallback = true,
   }) async {
     _logUpdateCheck('start preferred_channel=$preferredChannel');
     _logVersion('version.json url: $manifestUrl');
@@ -81,6 +82,13 @@ class UpdateChecker {
     } catch (e) {
       _logUpdate('Update check error: $e');
       errors.add(e.toString());
+      if (!allowCachedFallback) {
+        return UpdateCheckResult(
+          manifest: null,
+          usedCache: false,
+          errorMessage: errors.join(' | '),
+        );
+      }
       final cached = await getCachedManifest(
         preferredChannel: preferredChannel,
       );
@@ -100,6 +108,13 @@ class UpdateChecker {
     }
 
     _logUpdate('No remote update data, falling back to cache');
+    if (!allowCachedFallback) {
+      return UpdateCheckResult(
+        manifest: null,
+        usedCache: false,
+        errorMessage: errors.isEmpty ? 'No update data available' : errors.join(' | '),
+      );
+    }
     final cached = await getCachedManifest(
       preferredChannel: preferredChannel,
     );
@@ -274,7 +289,7 @@ class UpdateChecker {
         version: version,
         versionCode: null,
         channel: channel,
-        minSupported: version,
+        minSupported: UpdateManifest.defaultMinSupportedVersion,
         apkUrl: apkAsset.url,
         apkFileName: apkAsset.name,
         apkSizeBytes: apkAsset.sizeBytes,
@@ -403,6 +418,22 @@ class UpdateChecker {
       key,
       jsonEncode(manifest.toJson()),
     );
+  }
+
+  Future<void> clearCachedManifest({
+    ReleaseChannel? preferredChannel,
+    bool clearLegacy = true,
+  }) async {
+    if (preferredChannel != null) {
+      await _preferences.remove(_cacheKeyForChannel(preferredChannel));
+    } else {
+      for (final channel in ReleaseChannel.values) {
+        await _preferences.remove(_cacheKeyForChannel(channel));
+      }
+    }
+    if (clearLegacy) {
+      await _preferences.remove(_cachedManifestLegacyKey);
+    }
   }
 
   void _logUpdate(String message) => debugPrint('[UPDATE] $message');

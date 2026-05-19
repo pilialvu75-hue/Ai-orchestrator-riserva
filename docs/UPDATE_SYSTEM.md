@@ -71,7 +71,10 @@ Expected JSON structure:
 
 Validation rules:
 
-- `version`, `min_supported`, `apk_url` are required.
+- `version` and `apk_url` are required.
+- `min_supported` is required for the full manifest format and defaults to `0.0.0`
+  for simplified `version.json` payloads so missing metadata never blocks OTA
+  updates accidentally.
 - `apk_url` must be a valid `http/https` URL.
 - malformed manifests are rejected safely.
 
