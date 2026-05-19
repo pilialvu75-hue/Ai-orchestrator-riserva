@@ -60,8 +60,8 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
     if (!mounted) return;
     final state = _updateManager.state.value;
     final message = ok
-        ? 'Force update started.'
-        : (state.errorMessage ?? 'Force update could not start.');
+        ? context.l10n.t('force_update_started')
+        : (state.errorMessage ?? context.l10n.t('force_update_failed'));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -405,7 +405,7 @@ class _ActionRow extends StatelessWidget {
               ? null
               : onForceUpdate,
           icon: const Icon(Icons.system_update_alt_rounded),
-          label: const Text('Force update'),
+          label: Text(context.l10n.t('force_update')),
         ),
       ],
     );

@@ -79,6 +79,7 @@ class UpdateManager {
   final ValueNotifier<UpdateState> state;
 
   Timer? _periodicTimer;
+  // These guards keep update transitions deterministic across async UI actions.
   bool _isCheckingForUpdates = false;
   bool _isPreparingInstall = false;
 
@@ -793,8 +794,8 @@ class UpdateManager {
           );
         }
       } else {
-      final shouldClearPending = forceInvalidateMismatched ||
-          _comparator.compare(_currentVersion, pendingVersion) >= 0;
+        final shouldClearPending = forceInvalidateMismatched ||
+            _comparator.compare(_currentVersion, pendingVersion) >= 0;
         if (shouldClearPending) {
           await _cleanupInstallerArtifacts(pendingPath);
           await _clearPendingInstallerState();
