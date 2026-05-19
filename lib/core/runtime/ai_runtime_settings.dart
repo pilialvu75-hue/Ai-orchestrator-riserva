@@ -63,6 +63,16 @@ class AiRuntimeSettingsService {
     );
   }
 
+  bool get developerMode =>
+      _configRepository.getBool(AppConstants.prefDeveloperMode) ?? false;
+
+  Future<void> setDeveloperMode(bool enabled) async {
+    await _configRepository.setBool(
+      AppConstants.prefDeveloperMode,
+      enabled,
+    );
+  }
+
   String normalizeProvider(String? provider) {
     if (provider != null && supportedProviders.contains(provider)) {
       return provider;

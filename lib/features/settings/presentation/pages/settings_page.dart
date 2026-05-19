@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/diagnostics_console_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/personal_data_page.dart';
@@ -32,6 +33,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
   bool _runningSelfTest = false;
+  bool _developerMode = false;
 
   @override
   void initState() {
@@ -46,6 +48,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _runtimeDiagnostics.monitor.addListener(
       _handleRuntimeStateChanged,
     );
+
+    _developerMode = _aiRuntimeSettingsService.developerMode;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshRuntimeDiagnostics();
@@ -320,6 +324,36 @@ class _SettingsPageState extends State<SettingsPage> {
                             const SystemPromptPage(),
                       ),
                     );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Developer Tools ────────────────────────────────────────────
+                _ModuleCard(
+                  icon: Icons.terminal_outlined,
+                  title: 'Runtime Diagnostics',
+                  subtitle: 'Live inference pipeline event log',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            const DiagnosticsConsolePage(),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _DeveloperModeCard(
+                  enabled: _developerMode,
+                  onChanged: (value) async {
+                    await _aiRuntimeSettingsService
+                        .setDeveloperMode(value);
+                    if (!mounted) return;
+                    setState(() => _developerMode = value);
                   },
                 ),
 
@@ -724,6 +758,89 @@ class _ModuleCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeveloperModeCard extends StatelessWidget {
+  const _DeveloperModeCard({
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final void Function(bool) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFFF59E0B); // amber
+    return Material(
+      color: const Color(0xFF151515),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: enabled
+                ? accent.withOpacity(0.35)
+                : Colors.white.withOpacity(0.08),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Icon(
+                Icons.science_outlined,
+                color: accent,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Developer Mode',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    enabled
+                        ? 'Experimental models allowed – '
+                            'compatibility not guaranteed'
+                        : 'Enable to load unvalidated '
+                            'models with runtime warnings',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: enabled,
+              onChanged: onChanged,
+              activeColor: accent,
+            ),
+          ],
         ),
       ),
     );

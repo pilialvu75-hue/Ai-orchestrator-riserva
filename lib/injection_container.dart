@@ -265,6 +265,7 @@ Future<void> initDependencies({
   sl.registerLazySingleton<LocalRuntimeProvider>(
     () => createLocalRuntimeProvider(
       runtimeStateMachine: sl<RuntimeStateMachine>(),
+      developerModeProvider: () => sl<AiRuntimeSettingsService>().developerMode,
     ),
   );
 

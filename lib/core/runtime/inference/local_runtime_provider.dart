@@ -10,11 +10,16 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
 
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
+  LocalRuntimeProvider({
+    bool Function()? developerModeProvider,
+  }) : _developerModeProvider = developerModeProvider ?? () => false;
+
   static const Set<String> _mobileValidatedModelIds = <String>{
     LocalInferenceModelIds.gemma2b,
     LocalInferenceModelIds.gemma2_2bIt,
@@ -26,6 +31,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const Set<String> _desktopValidatedModelIds = <String>{
     ..._mobileValidatedModelIds,
   };
+
+  final bool Function() _developerModeProvider;
+
+  bool get _isDeveloperMode => _developerModeProvider();
 
   String? _verifiedModelPath;
 
@@ -44,7 +53,25 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       _verifiedModelPath != null && _verifiedModelPath == modelPath;
 
   bool supportsModel(AiModel model) {
-    if (!_isModelAllowedOnPlatform(model.effectiveRuntimeModelId)) return false;
+    if (!_isModelAllowedOnPlatform(model.effectiveRuntimeModelId)) {
+      // In developer mode, allow unrecognised model IDs with a warning rather
+      // than a hard reject.
+      if (_isDeveloperMode) {
+        const msg =
+            '[VALIDATION] developer_mode=true: allowing unvalidated model';
+        debugPrint('[LOCAL_RUNTIME] $msg'
+            ' modelId=${model.effectiveRuntimeModelId}'
+            ' – runtime compatibility not guaranteed.');
+        RuntimeEventLog.instance.emit(
+          '$msg modelId=${model.effectiveRuntimeModelId}'
+          ' – runtime compatibility not guaranteed.',
+        );
+        // Still require the file to be present and at least partially valid.
+        return model.validationStatus == ModelValidationStatus.validatedOk ||
+            model.isDownloaded;
+      }
+      return false;
+    }
     return model.validationStatus == ModelValidationStatus.validatedOk;
   }
 
@@ -90,6 +117,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     if (!supportsModel(selectedModel)) {
+      if (_isDeveloperMode) {
+        return LocalRuntimeState(
+          status: LocalRuntimeStatus.runtimeUnavailable,
+          message:
+              '[DEVELOPER_MODE] ${selectedModel.displayName} is not in the validated model list. '
+              'Runtime compatibility is not guaranteed – proceed with caution.',
+        );
+      }
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message: 'Selected model is not supported by the local runtime.',
@@ -131,14 +166,22 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         if (!_isModelAllowedOnPlatform(modelId)) {
-          clearRuntimeVerification();
-          controller.add(
-            InferenceResponse.error(
-              'Selected model is not validated for runtime execution on this platform.',
-            ),
-          );
-          await controller.close();
-          return;
+          if (_isDeveloperMode) {
+            final msg =
+                '[VALIDATION] developer_mode=true: allowing unvalidated'
+                ' modelId=$modelId on desktop – proceeding.';
+            debugPrint('[LOCAL_RUNTIME] $msg');
+            RuntimeEventLog.instance.emit(msg);
+          } else {
+            clearRuntimeVerification();
+            controller.add(
+              InferenceResponse.error(
+                'Selected model is not validated for runtime execution on this platform.',
+              ),
+            );
+            await controller.close();
+            return;
+          }
         }
 
         final isValidModelFile =

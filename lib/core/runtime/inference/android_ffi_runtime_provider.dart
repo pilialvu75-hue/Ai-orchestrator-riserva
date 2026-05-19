@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -51,7 +52,9 @@ import 'package:flutter/foundation.dart';
 class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   AndroidFfiRuntimeProvider({
     RuntimeStateMachine? runtimeStateMachine,
-  }) : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine();
+    bool Function()? developerModeProvider,
+  })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
+        super(developerModeProvider: developerModeProvider);
 
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 128;
@@ -226,23 +229,37 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (!_androidSafeModelIds.contains(modelId)) {
-        clearRuntimeVerification();
-        const unsupportedAndroidModelMessage =
-            'Selected model is not enabled for Android local runtime. '
-            'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-            'gemma-2-2b-it, llama_1b, or gemma_2b.';
-        _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.failed,
-          message: unsupportedAndroidModelMessage,
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'model_guard',
-          message: unsupportedAndroidModelMessage,
-          details: 'modelId=$modelId',
-        );
-        return;
+        if (_isDeveloperMode) {
+          // Developer mode: warn but allow the run to proceed.
+          _log(
+            '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
+            'validated set – unsupported quantization or architecture possible. '
+            'Proceeding with experimental inference.',
+          );
+          _updateRuntimeStatus(
+            LocalRuntimeStatus.runtimeUnavailable,
+            message:
+                '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
+          );
+        } else {
+          clearRuntimeVerification();
+          const unsupportedAndroidModelMessage =
+              'Selected model is not enabled for Android local runtime. '
+              'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
+              'gemma-2-2b-it, llama_1b, or gemma_2b.';
+          _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
+          _updateRuntimeStatus(
+            LocalRuntimeStatus.failed,
+            message: unsupportedAndroidModelMessage,
+          );
+          _finishWithRuntimeError(
+            controller,
+            stage: 'model_guard',
+            message: unsupportedAndroidModelMessage,
+            details: 'modelId=$modelId',
+          );
+          return;
+        }
       }
 
       final modelValidationError =
@@ -632,6 +649,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
             _log(
+              '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
+              ' timeout_ms=${_firstTokenTimeout.inMilliseconds} session=$sessionId',
+            );
+            _log(
+              '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
+              ' no_token_produced=true session=$sessionId',
+            );
+            _log(
               '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${_firstTokenTimeout.inMilliseconds}',
             );
             _log(
@@ -659,6 +684,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'token_progress_watchdog';
+            _log(
+              '[STALL] reason=token_progress_watchdog'
+              ' generated_tokens=$estimatedTokens'
+              ' elapsed_ms=${elapsed.inMilliseconds}'
+              ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}'
+              ' session=$sessionId',
+            );
             _log(
               '[TERMINAL_STATE] state=stalled reason=token_progress_watchdog'
               ' generated_tokens=$estimatedTokens'
@@ -690,6 +722,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_loop_watchdog';
+            _log(
+              '[STREAM_TIMEOUT] reason=poll_loop_idle idle_polls=$consecutiveIdlePolls'
+              ' elapsed_ms=${elapsed.inMilliseconds} session=$sessionId',
+            );
+            _log(
+              '[STALL] reason=poll_loop_watchdog'
+              ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
+              ' elapsed_ms=${elapsed.inMilliseconds} session=$sessionId',
+            );
             _log(
               '[TERMINAL_STATE] state=stalled reason=poll_loop_watchdog'
               ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
@@ -795,6 +836,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               if (isFirstToken) {
                 _log(
+                  '[FIRST_TOKEN] elapsed_ms=${streamingElapsed.inMilliseconds}'
+                  ' token_text_length=${piece.length}'
+                  ' poll_iteration=$pollIterations session=$sessionId',
+                );
+                _log(
                   '[FIRST_TOKEN_REAL] elapsed_ms=${streamingElapsed.inMilliseconds}'
                   ' thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length}'
                   ' queue_size=-1 poll_iteration=$pollIterations'
@@ -825,6 +871,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   clearRuntimeVerification();
                   runtimeNeedsReset = true;
                   runtimeResetReason = 'repeated_token_loop';
+                  _log(
+                    '[STREAM_LOOP] reason=repeated_token'
+                    ' count=$repeatedTokenCount token="${piece.replaceAll('\n', r'\n')}"'
+                    ' generated_tokens=$estimatedTokens session=$sessionId',
+                  );
                   _log(
                     '[TERMINAL_STATE] state=failed reason=repeated_token_loop'
                     ' generated_tokens=$estimatedTokens'
@@ -1300,6 +1351,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
+    RuntimeEventLog.instance.emit(message);
   }
 
   static void _logAi(String message) {
