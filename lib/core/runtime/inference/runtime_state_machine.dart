@@ -41,7 +41,6 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.uninitialized: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
@@ -58,6 +57,7 @@ class RuntimeStateMachine {
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
       RuntimeLifecycleEvent.loadCompleted,
+      RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceStarted,
       RuntimeLifecycleEvent.inferenceFailed,
