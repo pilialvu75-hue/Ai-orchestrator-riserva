@@ -1714,8 +1714,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         runtimeStateMachine.reset();
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
-        // Not terminal: prerequisites can be present while verification has not
-        // yet been observed; keep lifecycle in a recoverable healthy stage.
+        // Not terminal: model/FFI prerequisites can be present while no
+        // successful first-token verification has been observed yet.
+        // Keep lifecycle recoverable (healthy) instead of reset/failed.
         runtimeStateMachine.markHealthy();
         return;
       case LocalRuntimeStatus.loading:

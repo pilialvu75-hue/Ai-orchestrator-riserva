@@ -89,7 +89,7 @@ class RuntimeStateMachine {
     RuntimeLifecycleState nextState;
     if (event == RuntimeLifecycleEvent.inferenceCompleted &&
         _state == RuntimeLifecycleState.inferencing) {
-      nextState = _stateBeforeInference ?? RuntimeLifecycleState.verified;
+      nextState = _stateBeforeInference ?? RuntimeLifecycleState.healthy;
       _stateBeforeInference = null;
     } else {
       nextState = _resolveNextState(_state, event);
