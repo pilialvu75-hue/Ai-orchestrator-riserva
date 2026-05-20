@@ -19,6 +19,7 @@ enum RuntimeLifecycleEvent {
 
 class RuntimeStateMachine {
   RuntimeLifecycleState _state = RuntimeLifecycleState.uninitialized;
+  RuntimeLifecycleState? _stateBeforeInference;
   final List<void Function(RuntimeLifecycleState state)> _listeners =
       <void Function(RuntimeLifecycleState state)>[];
 
@@ -82,7 +83,21 @@ class RuntimeStateMachine {
   RuntimeLifecycleState transition(RuntimeLifecycleEvent event) {
     final allowed = _allowedTransitions[_state];
     if (allowed != null && !allowed.contains(event)) return _state;
-    final nextState = _resolveNextState(_state, event);
+    if (event == RuntimeLifecycleEvent.inferenceStarted) {
+      _stateBeforeInference = _state;
+    }
+    RuntimeLifecycleState nextState;
+    if (event == RuntimeLifecycleEvent.inferenceCompleted &&
+        _state == RuntimeLifecycleState.inferencing) {
+      nextState = _stateBeforeInference ?? RuntimeLifecycleState.verified;
+      _stateBeforeInference = null;
+    } else {
+      nextState = _resolveNextState(_state, event);
+      if (event == RuntimeLifecycleEvent.reset ||
+          event == RuntimeLifecycleEvent.inferenceFailed) {
+        _stateBeforeInference = null;
+      }
+    }
     if (nextState == _state) return _state;
     _state = nextState;
     for (final listener in List<void Function(RuntimeLifecycleState state)>.of(
@@ -124,7 +139,6 @@ class RuntimeStateMachine {
       case RuntimeLifecycleEvent.inferenceStarted:
         return RuntimeLifecycleState.inferencing;
       case RuntimeLifecycleEvent.inferenceCompleted:
-        // Keep runtime in verified after a successful run.
         return RuntimeLifecycleState.verified;
       case RuntimeLifecycleEvent.inferenceFailed:
         return RuntimeLifecycleState.failed;

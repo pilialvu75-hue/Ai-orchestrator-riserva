@@ -1750,6 +1750,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final status = monitor.state.status;
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
         status == LocalRuntimeStatus.uninitialized) {
+      // Verification evidence arrived while runtime was still in pre-verified
+      // status; promote to ready/verified immediately.
       _updateRuntimeStatus(
         LocalRuntimeStatus.ready,
         message: 'Runtime verified and ready for inference.',
@@ -1764,7 +1766,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         message: 'Runtime re-verified and ready for inference.',
       );
     } else {
-      _syncLifecycleState(LocalRuntimeStatus.ready);
+      runtimeStateMachine.markVerified();
     }
   }
 
