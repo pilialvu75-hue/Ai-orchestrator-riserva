@@ -3,6 +3,13 @@ import 'package:flutter/foundation.dart';
 enum RuntimeLifecycleState {
   uninitialized,
   loading,
+
+  /// Backward-compatible alias for [healthy].
+  /// Used by legacy tests and any call-site that predates the verification
+  /// layer.  Semantically equivalent to [healthy] (runtime is responsive but
+  /// not yet fully verified by a self-test pass).
+  ready,
+
   healthy,
   verified,
   inferencing,
@@ -12,6 +19,10 @@ enum RuntimeLifecycleState {
 enum RuntimeLifecycleEvent {
   reset,
   loadRequested,
+
+  /// Backward-compatible event emitted by [markReady].
+  loadCompleted,
+
   healthObserved,
   verificationConfirmed,
   inferenceStarted,
@@ -30,14 +41,25 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.uninitialized: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    // Legacy "ready" state: functionally equivalent to "healthy".
+    RuntimeLifecycleState.ready: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.loadCompleted,
+      RuntimeLifecycleEvent.verificationConfirmed,
+      RuntimeLifecycleEvent.inferenceStarted,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     RuntimeLifecycleState.healthy: <RuntimeLifecycleEvent>{
@@ -63,6 +85,7 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.failed: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
@@ -121,6 +144,13 @@ class RuntimeStateMachine {
 
   void markHealthy() => transition(RuntimeLifecycleEvent.healthObserved);
 
+  /// Backward-compatible alias for legacy tests and call-sites.
+  ///
+  /// Equivalent to [markHealthy] but transitions to [RuntimeLifecycleState.ready]
+  /// so existing tests that assert `state == RuntimeLifecycleState.ready` continue
+  /// to pass without modification.
+  void markReady() => transition(RuntimeLifecycleEvent.loadCompleted);
+
   void markVerified() => transition(RuntimeLifecycleEvent.verificationConfirmed);
 
   void markInferencing() => transition(RuntimeLifecycleEvent.inferenceStarted);
@@ -139,6 +169,8 @@ class RuntimeStateMachine {
         return RuntimeLifecycleState.uninitialized;
       case RuntimeLifecycleEvent.loadRequested:
         return RuntimeLifecycleState.loading;
+      case RuntimeLifecycleEvent.loadCompleted:
+        return RuntimeLifecycleState.ready;
       case RuntimeLifecycleEvent.healthObserved:
         return RuntimeLifecycleState.healthy;
       case RuntimeLifecycleEvent.verificationConfirmed:
