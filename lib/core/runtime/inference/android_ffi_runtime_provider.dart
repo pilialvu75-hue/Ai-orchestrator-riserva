@@ -79,8 +79,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
+  // Soft suppression only: 600ms was chosen to collapse same-frame startup/UI
+  // revalidation bursts while still allowing user-driven retries immediately.
   static const Duration _runtimeCheckDebounce = Duration(milliseconds: 600);
+  // 1200ms captures tight runtimeUnavailable->loading churn seen in failing
+  // traces without flagging normal user pacing as a loop.
   static const Duration _reentryWarnThreshold = Duration(milliseconds: 1200);
+  // Emit loop-boundary blocked marker after the third rapid re-entry.
+  static const int _reentryLoopBlockThreshold = 3;
+  static const String _autoTransitionReason = 'status_update';
+  static const int _clearVerificationCallerFrameIndex = 2;
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
   static const Set<String> _androidSafeModelIds = <String>{
@@ -109,6 +117,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<void> _inferenceTail = Future<void>.value();
   Future<void>? _warmupFuture;
   String? _warmupModelPath;
+  // Soft lifecycle-tracking state used strictly for diagnostics:
+  // - transitions are monitor status changes (from -> to)
+  // - reentry means rapid runtimeUnavailable -> loading cycling
+  // - runtime-check flags debounce duplicate verification calls
+  // No hard transition blocking is enforced by these fields.
   LocalRuntimeState? _lastRuntimeValidationSnapshot;
   bool _runtimeCheckInProgress = false;
   DateTime? _lastRuntimeCheckAt;
@@ -127,7 +140,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
 
-  int get activeTransitionId => _activeTransitionId;
+  @override
+  int get activeLifecycleTransitionId => _activeTransitionId;
+
+  @override
+  String get lifecycleRuntimeStateName => monitor.state.status.name;
 
   // ── Library loading ──────────────────────────────────────────────────────────
 
@@ -1821,7 +1838,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   @protected
   void clearRuntimeVerification() {
-    final caller = _inferCallerFromStack();
+    final caller = kDebugMode
+        ? _inferCallerFromStack()
+        : 'AndroidFfiRuntimeProvider.clearRuntimeVerification';
     _emitStateReset(
       reason: 'verification_invalidated',
       origin: caller,
@@ -1836,12 +1855,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     Duration? elapsed,
     DateTime? startedAt,
     bool resetProgress = false,
-    String reason = 'status_update',
+    String reason = _autoTransitionReason,
     String origin = 'AndroidFfiRuntimeProvider',
   }) {
     final previous = monitor.state.status;
     final transitionReason =
-        reason == 'status_update' ? _defaultReasonFor(status) : reason;
+        reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
     monitor.update(
       status,
       message: message,
@@ -1867,8 +1886,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
       case LocalRuntimeStatus.modelMissing:
-        _emitStateReset(reason: reason, origin: origin);
         runtimeStateMachine.reset();
+        _emitStateReset(reason: reason, origin: origin);
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
         // Non-terminal state: model/FFI prerequisites can be present while no
@@ -1946,7 +1965,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _expectedNextFor(LocalRuntimeStatus status) {
     switch (status) {
       case LocalRuntimeStatus.loading:
-        return 'runtimeUnavailable_or_ready';
+        return 'runtime_unavailable_or_ready';
       case LocalRuntimeStatus.runtimeUnavailable:
         return 'ready_or_pre_stream_inference';
       case LocalRuntimeStatus.uninitialized:
@@ -1989,13 +2008,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     if (to == LocalRuntimeStatus.runtimeUnavailable && !_streamInferenceEntered) {
+      // Kept as separate markers intentionally so log parsers can key on both:
+      // interruption classification and first-response boundary reporting.
       _log(
         '[LIFECYCLE_INTERRUPTION] expected_next=PRE_STREAM_INFERENCE last_state=${to.name} last_transition_id=$_activeTransitionId reason=unexpected_reset_before_inference',
       );
       _log(
         '[FIRST_RESPONSE_BLOCKED] boundary=pre_stream_inference last_known_state=${to.name} last_transition_reason=$_lastTransitionReason last_transition_origin=$_lastTransitionOrigin',
       );
-      if (_reentryCount >= 3) {
+      if (_reentryCount >= _reentryLoopBlockThreshold) {
         _log(
           '[FIRST_RESPONSE_BLOCKED] boundary=runtime_verification_loop reentry_count=$_reentryCount elapsed_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
         );
@@ -2017,8 +2038,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   String _inferCallerFromStack() {
     final lines = StackTrace.current.toString().split('\n');
-    if (lines.length < 3) return 'unknown_caller';
-    final caller = lines[2].trim();
+    // 0=current helper frame, 1=clearRuntimeVerification frame, 2=actual caller.
+    if (lines.length <= _clearVerificationCallerFrameIndex) {
+      return 'unknown_caller';
+    }
+    final caller = lines[_clearVerificationCallerFrameIndex].trim();
     return caller.isEmpty ? 'unknown_caller' : caller;
   }
 

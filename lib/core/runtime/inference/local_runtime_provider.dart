@@ -79,6 +79,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return hasVerifiedRuntimeForModel(modelPath);
   }
 
+  int get activeLifecycleTransitionId => -1;
+
+  String get lifecycleRuntimeStateName => 'unknown';
+
   void recordVerificationSuccess({
     required String modelPath,
     String source = 'runtime',

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
-import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
@@ -265,16 +264,8 @@ class InferenceService {
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
-    final runtimeState = _runtimeProvider is AndroidFfiRuntimeProvider
-        ? (_runtimeProvider as AndroidFfiRuntimeProvider)
-            .monitor
-            .state
-            .status
-            .name
-        : 'unknown';
-    final activeTransitionId = _runtimeProvider is AndroidFfiRuntimeProvider
-        ? (_runtimeProvider as AndroidFfiRuntimeProvider).activeTransitionId
-        : -1;
+    final runtimeState = _runtimeProvider.lifecycleRuntimeStateName;
+    final activeTransitionId = _runtimeProvider.activeLifecycleTransitionId;
     final verificationState =
         _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
     _log(
