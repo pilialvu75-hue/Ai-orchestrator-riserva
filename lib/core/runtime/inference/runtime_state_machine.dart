@@ -31,6 +31,7 @@ enum RuntimeLifecycleEvent {
 }
 
 class RuntimeStateMachine {
+  static int _resetCount = 0;
   RuntimeLifecycleState _state = RuntimeLifecycleState.uninitialized;
   RuntimeLifecycleState? _stateBeforeInference;
   final List<void Function(RuntimeLifecycleState state)> _listeners =
@@ -108,6 +109,12 @@ class RuntimeStateMachine {
   }
 
   RuntimeLifecycleState transition(RuntimeLifecycleEvent event) {
+    if (event == RuntimeLifecycleEvent.reset) {
+      _resetCount++;
+      debugPrint(
+        '[STATE_RESET] type=RuntimeStateMachine hash=${hashCode.toRadixString(16)} reset_count=$_resetCount from=${_state.name}',
+      );
+    }
     final allowed = _allowedTransitions[_state];
     if (allowed != null && !allowed.contains(event)) return _state;
     if (event == RuntimeLifecycleEvent.inferenceStarted) {

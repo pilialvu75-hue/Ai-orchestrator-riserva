@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_state.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 
 /// Centralised runtime state engine for all chat + AI-response state.
 ///
@@ -25,6 +26,8 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository
 /// the same instance.
 class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static const _logTag = 'ORCHESTRATOR_STATE';
+  static int _instanceCreateCount = 0;
+  static int _instanceDisposeCount = 0;
   // Keep UI pre-inference watchdog strictly above runtime first-token watchdogs
   // to avoid closing a still-active token stream:
   // - debug: 120s native/Dart watchdog + 20s safety buffer = 140s
@@ -38,6 +41,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     required IChatRepository chatRepository,
   })  : _chatRepository = chatRepository,
         super(const ChatInitial()) {
+    _instanceCreateCount++;
+    _log(
+      '[PROVIDER_CREATE] type=OrchestratorStateEngine hash=${hashCode.toRadixString(16)} create_count=$_instanceCreateCount dispose_count=$_instanceDisposeCount',
+    );
     on<LoadMessagesEvent>(_onLoadMessages);
     on<SendMessageEvent>(_onSendMessage);
     on<PruneHistoryEvent>(_onPruneHistory);
@@ -46,6 +53,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   final IChatRepository _chatRepository;
   List<ChatMessage> _messages = [];
+  bool _sendInFlight = false;
 
   Future<void> _onLoadMessages(
       LoadMessagesEvent event, Emitter<ChatState> emit) async {
@@ -63,144 +71,176 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
-    _log('[ORCHESTRATOR_BEGIN] session=${event.sessionId}');
-    _log(
-      'listener send_message session=${event.sessionId} prompt_chars=${event.userPrompt.length} attachments=${event.attachments.length}',
-    );
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final optimisticUserMessage = ChatMessage(
-      id: 'pending-user-$now',
-      sessionId: event.sessionId,
-      role: 'user',
-      content: event.userPrompt,
-      timestamp: now,
-      attachments: event.attachments,
-    );
-    final shouldShowAssistantPlaceholder =
-        event.userPrompt.trim().isNotEmpty || event.attachments.isEmpty;
-    final optimisticAssistantMessage = ChatMessage(
-      id: 'pending-assistant-$now',
-      sessionId: event.sessionId,
-      role: 'assistant',
-      content: '',
-      // Keep assistant slightly after user so insertion-order rendering remains
-      // stable even if UI code later chooses timestamp-aware operations.
-      timestamp: now + 1,
-      provider: 'assistant',
-    );
-
-    String? runtimeNotice;
-    emit(
-      ChatSending(
-        messages: List.unmodifiable(<ChatMessage>[
-          ..._messages,
-          optimisticUserMessage,
-          if (shouldShowAssistantPlaceholder) optimisticAssistantMessage,
-        ]),
-      ),
-    );
-
-    try {
-      var streamStarted = false;
-      final sendFuture = _chatRepository.sendMessage(
-        sessionId: event.sessionId,
-        userPrompt: event.userPrompt,
-        systemPrompt: event.systemPrompt,
-        attachments: event.attachments,
-        onPartialResponse: (partialText) {
-          if (emit.isDone) return;
-          if (partialText.trim().isNotEmpty && !streamStarted) {
-            streamStarted = true;
-            _log('[UI_STREAM_BEGIN] session=${event.sessionId}');
-          }
-          _log(
-            'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
-          );
-          emit(
-            ChatSending(
-              messages: List.unmodifiable(<ChatMessage>[
-                ..._messages,
-                optimisticUserMessage,
-                ChatMessage(
-                  id: optimisticAssistantMessage.id,
-                  sessionId: optimisticAssistantMessage.sessionId,
-                  role: optimisticAssistantMessage.role,
-                  content: partialText,
-                  timestamp: optimisticAssistantMessage.timestamp,
-                  provider: optimisticAssistantMessage.provider,
-                ),
-              ]),
-              runtimeMessage: runtimeNotice,
-            ),
-          );
-        },
-        onRuntimeNotice: (notice) {
-          runtimeNotice = notice;
-          if (emit.isDone) return;
-          _log(
-            'streaming callbacks session=${event.sessionId} runtime_notice="$notice"',
-          );
-          emit(
-            ChatSending(
-              messages: List.unmodifiable(<ChatMessage>[
-                ..._messages,
-                optimisticUserMessage,
-                if (shouldShowAssistantPlaceholder)
-                  ChatMessage(
-                    id: optimisticAssistantMessage.id,
-                    sessionId: optimisticAssistantMessage.sessionId,
-                    role: optimisticAssistantMessage.role,
-                    content: optimisticAssistantMessage.content,
-                    timestamp: optimisticAssistantMessage.timestamp,
-                    provider: optimisticAssistantMessage.provider,
-                  ),
-              ]),
-              runtimeMessage: runtimeNotice,
-            ),
-          );
-        },
+    if (_sendInFlight) {
+      _log(
+        '[ENTRY_REENTRANCY_BLOCK] scope=OrchestratorStateEngine session=${event.sessionId} hash=${hashCode.toRadixString(16)}',
       );
-      await sendFuture.timeout(
-        _preInferenceUiTimeout,
-        onTimeout: () {
-          if (!streamStarted) {
-            throw TimeoutException(
-              '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}',
+      emit(
+        ChatLoaded(
+          messages: List.unmodifiable(_messages),
+          runtimeMessage: 'Another send is already running. Please wait.',
+        ),
+      );
+      return;
+    }
+    _sendInFlight = true;
+    try {
+      await runInferenceGuarded<void>(
+        scope: 'orchestrator_state_engine.send_message',
+        log: _log,
+        action: () async {
+        _log('[VM_SEND] session=${event.sessionId} hash=${hashCode.toRadixString(16)}');
+        _log('[ORCHESTRATOR_SEND] session=${event.sessionId} stage=state_engine_send');
+        _log('[ORCHESTRATOR_BEGIN] session=${event.sessionId}');
+        _log(
+          'listener send_message session=${event.sessionId} prompt_chars=${event.userPrompt.length} attachments=${event.attachments.length}',
+        );
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final optimisticUserMessage = ChatMessage(
+          id: 'pending-user-$now',
+          sessionId: event.sessionId,
+          role: 'user',
+          content: event.userPrompt,
+          timestamp: now,
+          attachments: event.attachments,
+        );
+        final shouldShowAssistantPlaceholder =
+            event.userPrompt.trim().isNotEmpty || event.attachments.isEmpty;
+        final optimisticAssistantMessage = ChatMessage(
+          id: 'pending-assistant-$now',
+          sessionId: event.sessionId,
+          role: 'assistant',
+          content: '',
+          timestamp: now + 1,
+          provider: 'assistant',
+        );
+
+        String? runtimeNotice;
+        emit(
+          ChatSending(
+            messages: List.unmodifiable(<ChatMessage>[
+              ..._messages,
+              optimisticUserMessage,
+              if (shouldShowAssistantPlaceholder) optimisticAssistantMessage,
+            ]),
+          ),
+        );
+
+        try {
+          var streamStarted = false;
+          final sendFuture = _chatRepository.sendMessage(
+            sessionId: event.sessionId,
+            userPrompt: event.userPrompt,
+            systemPrompt: event.systemPrompt,
+            attachments: event.attachments,
+            onPartialResponse: (partialText) {
+              if (emit.isDone) return;
+              if (partialText.trim().isNotEmpty && !streamStarted) {
+                streamStarted = true;
+                _log('[UI_STREAM_BEGIN] session=${event.sessionId}');
+              }
+              _log(
+                'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
+              );
+              emit(
+                ChatSending(
+                  messages: List.unmodifiable(<ChatMessage>[
+                    ..._messages,
+                    optimisticUserMessage,
+                    ChatMessage(
+                      id: optimisticAssistantMessage.id,
+                      sessionId: optimisticAssistantMessage.sessionId,
+                      role: optimisticAssistantMessage.role,
+                      content: partialText,
+                      timestamp: optimisticAssistantMessage.timestamp,
+                      provider: optimisticAssistantMessage.provider,
+                    ),
+                  ]),
+                  runtimeMessage: runtimeNotice,
+                ),
+              );
+            },
+            onRuntimeNotice: (notice) {
+              runtimeNotice = notice;
+              if (emit.isDone) return;
+              _log(
+                'streaming callbacks session=${event.sessionId} runtime_notice="$notice"',
+              );
+              emit(
+                ChatSending(
+                  messages: List.unmodifiable(<ChatMessage>[
+                    ..._messages,
+                    optimisticUserMessage,
+                    if (shouldShowAssistantPlaceholder)
+                      ChatMessage(
+                        id: optimisticAssistantMessage.id,
+                        sessionId: optimisticAssistantMessage.sessionId,
+                        role: optimisticAssistantMessage.role,
+                        content: optimisticAssistantMessage.content,
+                        timestamp: optimisticAssistantMessage.timestamp,
+                        provider: optimisticAssistantMessage.provider,
+                      ),
+                  ]),
+                  runtimeMessage: runtimeNotice,
+                ),
+              );
+            },
+          );
+          await sendFuture.timeout(
+            _preInferenceUiTimeout,
+            onTimeout: () {
+              if (!streamStarted) {
+                throw TimeoutException(
+                  '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}',
+                );
+              }
+              return sendFuture;
+            },
+          );
+          final messages = await _chatRepository.getMessages(event.sessionId);
+          _messages = List<ChatMessage>.from(messages);
+          _log('message persistence send_complete session=${event.sessionId} count=${_messages.length}');
+          emit(
+            ChatLoaded(
+              messages: List.unmodifiable(_messages),
+              runtimeMessage: runtimeNotice,
+            ),
+          );
+          _log('[UI_STREAM_END] session=${event.sessionId}');
+        } catch (error) {
+          _log('send_message error session=${event.sessionId}: $error');
+          if (error is TimeoutException) {
+            _log(
+              '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
+              ' reason=orchestrator_timeout_${_preInferenceUiTimeout.inSeconds}s',
             );
           }
-          return sendFuture;
+          emit(
+            ChatLoaded(
+              messages: List.unmodifiable(_messages),
+              runtimeMessage: _extractErrorMessage(error),
+              suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
+            ),
+          );
+        } finally {
+          _log('[ORCHESTRATOR_END] session=${event.sessionId}');
+        }
+      },
+        onError: (error, stackTrace) {
+          if (!emit.isDone) {
+            emit(
+              ChatLoaded(
+                messages: List.unmodifiable(_messages),
+                runtimeMessage: _extractErrorMessage(error),
+                suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
+              ),
+            );
+          }
+          _log('[ASYNC_FATAL] scope=orchestrator_state_engine.send_message error=$error stack=$stackTrace');
         },
       );
-      final messages = await _chatRepository.getMessages(event.sessionId);
-      _messages = List<ChatMessage>.from(messages);
-      _log('message persistence send_complete session=${event.sessionId} count=${_messages.length}');
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage: runtimeNotice,
-        ),
-      );
-      _log('[UI_STREAM_END] session=${event.sessionId}');
-      } catch (error) {
-        _log('send_message error session=${event.sessionId}: $error');
-        if (error is TimeoutException) {
-          _log(
-            '[TERMINAL_STATE] state=stalled_pre_inference session=${event.sessionId}'
-            ' reason=orchestrator_timeout_${_preInferenceUiTimeout.inSeconds}s',
-          );
-        }
-      // Emit the real persisted message list (_messages) without the ephemeral
-      // optimistic message so no ghost messages appear in the UI for requests
-      // that were never persisted to the database.
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage: _extractErrorMessage(error),
-          suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
-        ),
-      );
     } finally {
-      _log('[ORCHESTRATOR_END] session=${event.sessionId}');
+      _sendInFlight = false;
     }
   }
 
@@ -243,5 +283,17 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
+  }
+
+  @override
+  Future<void> close() {
+    _instanceDisposeCount++;
+    _log(
+      '[VM_DISPOSE] type=OrchestratorStateEngine hash=${hashCode.toRadixString(16)} create_count=$_instanceCreateCount dispose_count=$_instanceDisposeCount',
+    );
+    _log(
+      '[PROVIDER_DISPOSE] type=OrchestratorStateEngine hash=${hashCode.toRadixString(16)} create_count=$_instanceCreateCount dispose_count=$_instanceDisposeCount',
+    );
+    return super.close();
   }
 }

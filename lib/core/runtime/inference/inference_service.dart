@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -20,6 +21,7 @@ class InferenceService {
   static const Duration _streamIdleTimeout = Duration(seconds: 75);
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
+  bool _runtimeLookupInProgress = false;
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -45,43 +47,85 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
-    _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
-    _log(
-      '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
+    final outputController = StreamController<InferenceResponse>();
+    unawaited(
+      runInferenceGuarded<void>(
+      scope: 'inference_service.stream',
+      log: _log,
+      action: () async {
+        _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
+        _log(
+          '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
+        );
+        final promptHash = _promptHash(request);
+        _log(
+          'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
+          'context_lines=${request.context.length} offline=${request.isOffline}',
+        );
+        _log('[RUNTIME_LOOKUP] session=${request.sessionId} stage=runtime_mode_load');
+        if (_runtimeLookupInProgress) {
+          _log('[RUNTIME_INIT_RECURSION] session=${request.sessionId} scope=inference_service.runtime_lookup');
+        }
+        _runtimeLookupInProgress = true;
+        final session = _sessionManager.startSession(request.sessionId);
+        try {
+          final runtimeMode = await _loadRuntimeMode();
+          _log(
+            '[RUNTIME_LOOKUP] session=${request.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
+          );
+          _log(
+            '[RUNTIME_PATH] routing session=${request.sessionId} mode=${runtimeMode.name} '
+            'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
+          );
+
+          final selectedModel = await _resolveSelectedModelForLocalRuntime();
+          final localRequest = _buildLocalRequest(request, selectedModel);
+          _log(
+            '[RUNTIME_LOOKUP] session=${request.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
+          );
+          _log(
+            '[MODEL_LOAD] selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
+            'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
+          );
+          _log(
+            '[RUNTIME_LOOKUP] session=${request.sessionId} stage=request_construction local_request=${localRequest != null}',
+          );
+
+          await for (final chunk in _streamWithRetryAndGuards(
+            runtimeMode: runtimeMode,
+            cloudRequest: request,
+            localRequest: localRequest,
+            cancellationToken: session.cancellationToken,
+          )) {
+            if (!outputController.isClosed) {
+              outputController.add(chunk);
+            }
+          }
+        } finally {
+          _runtimeLookupInProgress = false;
+          _sessionManager.complete(session);
+          _log('async listener cleanup session=${request.sessionId}');
+          _log('stream end session=${request.sessionId}');
+          _log('[ORCHESTRATOR_END] session=${request.sessionId}');
+          if (!outputController.isClosed) {
+            await outputController.close();
+          }
+        }
+      },
+      onError: (error, stackTrace) {
+        _log('[ASYNC_FATAL] scope=inference_service.stream session=${request.sessionId} error=$error stack=$stackTrace');
+        if (!outputController.isClosed) {
+          outputController.add(
+            InferenceResponse.error(
+              'Inference service failed before runtime stream start: $error',
+            ),
+          );
+          outputController.close();
+        }
+      },
+    ),
     );
-    final promptHash = _promptHash(request);
-    _log(
-      'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
-      'context_lines=${request.context.length} offline=${request.isOffline}',
-    );
-
-    final session = _sessionManager.startSession(request.sessionId);
-    try {
-      final runtimeMode = await _loadRuntimeMode();
-      _log(
-        '[RUNTIME_PATH] routing session=${request.sessionId} mode=${runtimeMode.name} '
-        'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
-      );
-
-      final selectedModel = await _resolveSelectedModelForLocalRuntime();
-      final localRequest = _buildLocalRequest(request, selectedModel);
-      _log(
-        '[MODEL_LOAD] selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
-        'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
-      );
-
-      yield* _streamWithRetryAndGuards(
-        runtimeMode: runtimeMode,
-        cloudRequest: request,
-        localRequest: localRequest,
-        cancellationToken: session.cancellationToken,
-      );
-    } finally {
-      _sessionManager.complete(session);
-      _log('async listener cleanup session=${request.sessionId}');
-      _log('stream end session=${request.sessionId}');
-      _log('[ORCHESTRATOR_END] session=${request.sessionId}');
-    }
+    yield* outputController.stream;
   }
 
   Future<InferenceResponse> infer(InferenceRequest request) async {
@@ -244,6 +288,7 @@ class InferenceService {
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
+    _log('[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType}');
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: cancellationToken,
