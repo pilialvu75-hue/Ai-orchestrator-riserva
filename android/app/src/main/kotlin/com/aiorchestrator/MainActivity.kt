@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
 import java.util.Locale
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -38,6 +40,7 @@ class MainActivity : FlutterActivity() {
     private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
     private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
     private val logTag = "AO_UPDATE"
+    private val hashBufferSizeBytes = 32 * 1024
     private val apkInstallRequestCode = 9917
     // Native Sherpa/ONNX builds use different shared-library names depending on
     // packaging strategy; probe the most common combinations in priority order.
@@ -109,12 +112,14 @@ class MainActivity : FlutterActivity() {
                     }
                     try {
                         Log.i(logTag, "[INSTALL] openApkInstaller requested path=$apkPath")
+                        Log.i(logTag, "[UPDATE_INSTALL_BEGIN] apk_path=$apkPath")
                         Log.i(logTag, "[UPDATE_INSTALL_START] path=$apkPath")
                         val apkFile = File(apkPath)
                         if (!apkFile.exists()) {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "APK file not found at $apkPath"
                             Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=apk_file_missing")
+                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=apk_file_missing")
                             result.error("FILE_NOT_FOUND", "APK file not found", null)
                             return@setMethodCallHandler
                         }
@@ -131,6 +136,7 @@ class MainActivity : FlutterActivity() {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "Unknown apps install permission denied"
                             Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=unknown_apps_permission_denied")
+                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=unknown_apps_permission_denied")
                             result.error(
                                 "UNKNOWN_APPS_PERMISSION_DENIED",
                                 "Allow install from unknown apps for AI Orchestrator, then retry.",
@@ -159,6 +165,7 @@ class MainActivity : FlutterActivity() {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "No package installer activity found"
                             Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=installer_not_found")
+                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=installer_not_found")
                             result.error("INSTALLER_NOT_FOUND", "No package installer available", null)
                             return@setMethodCallHandler
                         }
@@ -179,12 +186,14 @@ class MainActivity : FlutterActivity() {
                         lastInstallerException = null
                         Log.i(logTag, "[INSTALL] Installer intent launched successfully")
                         Log.i(logTag, "[UPDATE_INSTALL_SUCCESS] launched=true")
+                        Log.i(logTag, "[UPDATE_INSTALL_RESULT] success=true launched=true")
                         result.success(true)
                     } catch (e: Exception) {
                         lastInstallerLaunchSuccess = false
                         lastInstallerException = "Failed to launch installer: ${e.message}"
                         Log.e(logTag, "[INSTALL] Failed to launch installer", e)
                         Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=exception message=${e.message}")
+                        Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=exception message=${e.message}")
                         result.error(
                             "INSTALL_ERROR",
                             "Failed to create FileProvider URI or launch installer: ${e.message}",
@@ -213,6 +222,7 @@ class MainActivity : FlutterActivity() {
                     } else {
                         true
                     }
+                    val installedPackageInfo = getInstalledPackageInfo()
                     result.success(
                         mapOf(
                             "sdkInt" to Build.VERSION.SDK_INT,
@@ -220,6 +230,11 @@ class MainActivity : FlutterActivity() {
                             "lastInstallerLaunchSuccess" to lastInstallerLaunchSuccess,
                             "lastInstallerException" to lastInstallerException,
                             "lastInstallerResultCode" to lastInstallerResultCode,
+                            "installerPackageName" to getInstallerPackageName(),
+                            "applicationId" to packageName,
+                            "installedVersionName" to installedPackageInfo.versionName,
+                            "installedVersionCode" to getVersionCode(installedPackageInfo),
+                            "installedSignatureSha256" to extractSignatureSha256(installedPackageInfo),
                         )
                     )
                 }
@@ -452,33 +467,59 @@ class MainActivity : FlutterActivity() {
         val sizeBytes = if (exists) apkFile.length() else 0L
         val readable = exists && apkFile.canRead()
         val hasApkExtension = apkFile.name.lowercase(Locale.ROOT).endsWith(".apk")
+        val inferredAbi = inferAbi(apkFile.name)
+        val fileSha256 = if (exists && readable) calculateFileSha256(apkFile) else null
         val packageInfo = if (exists && readable && hasApkExtension) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 packageManager.getPackageArchiveInfo(
                     apkPath,
-                    PackageManager.PackageInfoFlags.of(0)
+                    PackageManager.PackageInfoFlags.of(archiveInfoFlags().toLong())
                 )
             } else {
                 @Suppress("DEPRECATION")
-                packageManager.getPackageArchiveInfo(apkPath, 0)
+                packageManager.getPackageArchiveInfo(apkPath, archiveInfoFlags())
             }
         } else {
             null
         }
         val packageName = packageInfo?.packageName
+        val versionName = packageInfo?.versionName
+        val versionCode = packageInfo?.let { getVersionCode(it) }
+        val signatureSha256 = packageInfo?.let { extractSignatureSha256(it) }
+        val hasSplitConfig = hasSplitConfiguration(apkFile.name, packageInfo)
+        val archiveParsed = packageInfo != null
+        Log.i(
+            logTag,
+            "[UPDATE_APK_ANALYSIS] apk_filename=${apkFile.name} abi=${inferredAbi ?: "-"} split_config_present=$hasSplitConfig package_archive_info=$archiveParsed"
+        )
         return mapOf(
-            "valid" to (exists && readable && hasApkExtension && sizeBytes > 0 && packageName != null),
+            "valid" to (
+                exists &&
+                    readable &&
+                    hasApkExtension &&
+                    sizeBytes > 0 &&
+                    packageName != null &&
+                    !hasSplitConfig
+                ),
             "exists" to exists,
             "readable" to readable,
             "hasApkExtension" to hasApkExtension,
             "sizeBytes" to sizeBytes,
             "packageName" to packageName,
+            "versionName" to versionName,
+            "versionCode" to versionCode,
+            "signatureSha256" to signatureSha256,
+            "fileSha256" to fileSha256,
+            "hasSplitConfig" to hasSplitConfig,
+            "abi" to inferredAbi,
+            "archiveParsed" to archiveParsed,
             "reason" to when {
                 !exists -> "missing"
                 !readable -> "not_readable"
                 !hasApkExtension -> "invalid_extension"
                 sizeBytes <= 0 -> "empty_file"
                 packageName == null -> "package_parse_failed"
+                hasSplitConfig -> "split_apk_unsupported"
                 else -> "ok"
             }
         )
@@ -490,6 +531,105 @@ class MainActivity : FlutterActivity() {
         if (requestCode == apkInstallRequestCode) {
             lastInstallerResultCode = resultCode
             Log.i(logTag, "[INSTALL] Installer activity resultCode=$resultCode")
+            Log.i(logTag, "[UPDATE_INSTALL_RESULT] success=${resultCode == RESULT_OK} result_code=$resultCode")
+        }
+    }
+
+    private fun getInstalledPackageInfo() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager.getPackageInfo(
+            packageName,
+            PackageManager.PackageInfoFlags.of(archiveInfoFlags().toLong())
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        packageManager.getPackageInfo(packageName, archiveInfoFlags())
+    }
+
+    private fun getInstallerPackageName(): String? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            packageManager.getInstallSourceInfo(packageName).installingPackageName
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstallerPackageName(packageName)
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun archiveInfoFlags(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+    }
+
+    private fun getVersionCode(packageInfo: android.content.pm.PackageInfo): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+    }
+
+    private fun extractSignatureSha256(packageInfo: android.content.pm.PackageInfo): String? {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = packageInfo.signingInfo ?: return null
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures
+        }
+        val first = signatures?.firstOrNull() ?: return null
+        val digest = MessageDigest.getInstance("SHA-256").digest(first.toByteArray())
+        return digest.joinToString(":") { "%02X".format(it) }
+    }
+
+    private fun calculateFileSha256(file: File): String? = try {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { stream ->
+            val buffer = ByteArray(hashBufferSizeBytes)
+            while (true) {
+                val read = stream.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun hasSplitConfiguration(
+        fileName: String,
+        packageInfo: android.content.pm.PackageInfo?
+    ): Boolean {
+        val normalized = fileName.lowercase(Locale.ROOT)
+        val nameSignalsSplit =
+            normalized.startsWith("split_config.") ||
+                normalized.contains("-split_config.") ||
+                normalized.contains("_split_config.") ||
+                normalized.startsWith("config.")
+        val splitNames = packageInfo?.splitNames
+        val packageSignalsSplit = splitNames != null && splitNames.isNotEmpty()
+        return nameSignalsSplit || packageSignalsSplit
+    }
+
+    private fun inferAbi(fileName: String): String? {
+        val normalized = fileName.lowercase(Locale.ROOT)
+        return when {
+            normalized.contains("arm64-v8a") -> "arm64-v8a"
+            normalized.contains("armeabi-v7a") -> "armeabi-v7a"
+            normalized.contains("x86_64") -> "x86_64"
+            normalized.contains("x86") -> "x86"
+            normalized.contains("universal") -> "universal"
+            else -> null
         }
     }
 }

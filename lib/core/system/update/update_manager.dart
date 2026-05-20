@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
@@ -22,6 +23,14 @@ class _ApkVerificationResult {
     required this.hasApkExtension,
     required this.sizeBytes,
     required this.reason,
+    this.packageName,
+    this.versionName,
+    this.versionCode,
+    this.signatureSha256,
+    this.fileSha256,
+    this.hasSplitConfig,
+    this.abi,
+    this.archiveParsed = false,
   });
 
   final bool valid;
@@ -30,6 +39,30 @@ class _ApkVerificationResult {
   final bool hasApkExtension;
   final int sizeBytes;
   final String reason;
+  final String? packageName;
+  final String? versionName;
+  final int? versionCode;
+  final String? signatureSha256;
+  final String? fileSha256;
+  final bool? hasSplitConfig;
+  final String? abi;
+  final bool archiveParsed;
+}
+
+class _InstalledIdentity {
+  const _InstalledIdentity({
+    required this.versionName,
+    required this.versionCode,
+    required this.applicationId,
+    this.installerPackage,
+    this.signatureSha256,
+  });
+
+  final String versionName;
+  final int? versionCode;
+  final String applicationId;
+  final String? installerPackage;
+  final String? signatureSha256;
 }
 
 class UpdateManager {
@@ -44,6 +77,8 @@ class UpdateManager {
   static const String _prefDownloadTotalBytes = 'update_download_total_bytes';
   static const int _minValidApkBytes = 64 * 1024;
   static const Duration _downloadTimeout = Duration(minutes: 10);
+  static const Duration _postInstallVerifyPollInterval = Duration(seconds: 2);
+  static const int _postInstallVerifyMaxAttempts = 5;
   static const String _updatesDirectoryName = 'app_updates';
   static const String _defaultApkFileName = 'ai_orchestrator_update.apk';
 
@@ -186,6 +221,7 @@ class UpdateManager {
         currentVersion: _currentVersion,
         comparator: _comparator,
       );
+      await _logReleaseForensicsCheck(manifest);
       _logVersionRemote(
         'version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
       );
@@ -314,6 +350,12 @@ class UpdateManager {
       comparisonResult: _comparator.compare(manifest.version, _currentVersion),
       finalDecisionState: 'download_requested',
     );
+    _logUpdateDownload(
+      'release_tag=${manifest.version} '
+      'apk_filename=${manifest.apkFileName ?? '-'} '
+      'apk_size_bytes=${manifest.apkSizeBytes ?? -1} '
+      'apk_url=${manifest.apkUrl}',
+    );
 
     final uri = Uri.tryParse(manifest.apkUrl);
     if (uri == null ||
@@ -371,6 +413,21 @@ class UpdateManager {
           expectedSizeBytes: manifest.apkSizeBytes,
         );
         if (verified.valid) {
+          _logUpdateApkReady(
+            'release_tag=${manifest.version} '
+            'apk_filename=${p.basename(finalPath)} '
+            'apk_size_bytes=${verified.sizeBytes} '
+            'target_application_id=${verified.packageName ?? '-'} '
+            'target_version_name=${verified.versionName ?? '-'} '
+            'target_version_code=${verified.versionCode?.toString() ?? '-'} '
+            'sha256=${verified.fileSha256 ?? '-'}',
+          );
+          _logUpdateApkAnalysis(
+            'apk_filename=${p.basename(finalPath)} '
+            'abi=${verified.abi ?? '-'} '
+            'split_config_present=${verified.hasSplitConfig ?? false} '
+            'package_archive_info=${verified.archiveParsed}',
+          );
           _logUpdateDownloadComplete(
             'reuse_existing path=$finalPath size_bytes=${verified.sizeBytes}',
           );
@@ -456,6 +513,21 @@ class UpdateManager {
         );
         return false;
       }
+      _logUpdateApkReady(
+        'release_tag=${manifest.version} '
+        'apk_filename=${p.basename(finalPath)} '
+        'apk_size_bytes=${verification.sizeBytes} '
+        'target_application_id=${verification.packageName ?? '-'} '
+        'target_version_name=${verification.versionName ?? '-'} '
+        'target_version_code=${verification.versionCode?.toString() ?? '-'} '
+        'sha256=${verification.fileSha256 ?? '-'}',
+      );
+      _logUpdateApkAnalysis(
+        'apk_filename=${p.basename(finalPath)} '
+        'abi=${verification.abi ?? '-'} '
+        'split_config_present=${verification.hasSplitConfig ?? false} '
+        'package_archive_info=${verification.archiveParsed}',
+      );
 
       await _clearDownloadState();
       await _persistPendingInstallerState(
@@ -527,6 +599,7 @@ class UpdateManager {
       final detectedVersion = state.value.latestManifest?.version ??
           _preferences.getString(_prefPendingVersion);
       final comparisonResult = _comparisonResultFor(detectedVersion);
+      final installedIdentity = await _readInstalledIdentity();
       if (apkPath == null || apkPath.isEmpty) {
         _logUpdateInstallFail('No downloaded APK available');
         _logInstall('Install requested without downloaded APK');
@@ -554,6 +627,14 @@ class UpdateManager {
         selectedChannel: state.value.preferredChannel,
         comparisonResult: comparisonResult,
         finalDecisionState: 'install_requested',
+      );
+      _logUpdateInstallBegin(
+        'application_id=${installedIdentity.applicationId} '
+        'installed_version_name=${installedIdentity.versionName} '
+        'installed_version_code=${installedIdentity.versionCode?.toString() ?? '-'} '
+        'installer_package=${installedIdentity.installerPackage ?? '-'} '
+        'release_tag=${detectedVersion ?? '-'} '
+        'apk_filename=${p.basename(apkPath)}',
       );
 
       final verification = await _verifyApkFile(
@@ -586,6 +667,102 @@ class UpdateManager {
         );
         return false;
       }
+      _logUpdateApkAnalysis(
+        'apk_filename=${p.basename(apkPath)} '
+        'abi=${verification.abi ?? '-'} '
+        'split_config_present=${verification.hasSplitConfig ?? false} '
+        'package_archive_info=${verification.archiveParsed}',
+      );
+      _logSignatureCurrent(
+        'application_id=${installedIdentity.applicationId} sha256=${installedIdentity.signatureSha256 ?? '-'}',
+      );
+      _logSignatureNew(
+        'apk_filename=${p.basename(apkPath)} '
+        'application_id=${verification.packageName ?? '-'} '
+        'sha256=${verification.signatureSha256 ?? '-'}',
+      );
+      if (verification.hasSplitConfig == true) {
+        final message = 'Split APK artifact is not supported by current installer flow';
+        _logStructuredUpdateError(
+          action: 'prepare_install_intent',
+          detectedVersion: detectedVersion,
+          selectedChannel: state.value.preferredChannel,
+          comparisonResult: comparisonResult,
+          finalDecisionState: 'error',
+          message: message,
+        );
+        _logUpdateInstallResult(
+          'success=false reason=split_apk_unsupported apk_path=$apkPath',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: message,
+          diagnostics: state.value.diagnostics.copyWith(
+            installerLaunchSuccess: false,
+            apkPath: apkPath,
+            apkFileExists: verification.exists,
+            lastException: message,
+          ),
+        );
+        return false;
+      }
+
+      final targetVersionCode =
+          verification.versionCode ?? state.value.latestManifest?.versionCode;
+      final installedVersionCode = installedIdentity.versionCode;
+      if (targetVersionCode != null &&
+          installedVersionCode != null &&
+          targetVersionCode <= installedVersionCode) {
+        _logVersionRejected(
+          'installed_version_code=$installedVersionCode '
+          'target_version_code=$targetVersionCode '
+          'release_tag=${detectedVersion ?? '-'} '
+          'apk_filename=${p.basename(apkPath)}',
+        );
+        final message =
+            'Rejected update because APK versionCode ($targetVersionCode) <= installed versionCode ($installedVersionCode)';
+        _logUpdateInstallResult(
+          'success=false reason=version_code_rejected apk_path=$apkPath',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: message,
+          diagnostics: state.value.diagnostics.copyWith(
+            installerLaunchSuccess: false,
+            apkPath: apkPath,
+            apkFileExists: verification.exists,
+            lastException: message,
+          ),
+        );
+        return false;
+      }
+
+      final signaturesDiffer =
+          installedIdentity.signatureSha256 != null &&
+              verification.signatureSha256 != null &&
+              installedIdentity.signatureSha256 != verification.signatureSha256;
+      if (signaturesDiffer) {
+        final message = 'APK signature does not match installed app signature';
+        _logSignatureMismatch(
+          'reason=signature_fingerprint_mismatch '
+          'current=${installedIdentity.signatureSha256} '
+          'new=${verification.signatureSha256}',
+        );
+        _logUpdateInstallResult(
+          'success=false reason=signature_mismatch apk_path=$apkPath',
+        );
+        state.value = state.value.copyWith(
+          status: UpdateStatus.error,
+          errorMessage: message,
+          diagnostics: state.value.diagnostics.copyWith(
+            installerLaunchSuccess: false,
+            apkPath: apkPath,
+            apkFileExists: verification.exists,
+            lastException: message,
+          ),
+        );
+        return false;
+      }
 
       final result = await _intentHandler.openApkInstaller(apkPath);
       if (result.isLeft()) {
@@ -594,6 +771,9 @@ class UpdateManager {
             );
         _logUpdateInstallFail(failure.message);
         _logInstall('Installer launch failed: ${failure.message}');
+        _logUpdateInstallResult(
+          'success=false reason=installer_launch_failed message=${failure.message}',
+        );
         _logStructuredUpdateError(
           action: 'prepare_install_intent',
           detectedVersion: detectedVersion,
@@ -620,6 +800,9 @@ class UpdateManager {
       await _syncAndroidInstallDiagnostics();
       if (!success) {
         _logUpdateInstallFail('installer_launch_returned_false');
+        _logUpdateInstallResult(
+          'success=false reason=installer_launch_returned_false',
+        );
         _logStructuredUpdateError(
           action: 'prepare_install_intent',
           detectedVersion: detectedVersion,
@@ -652,6 +835,16 @@ class UpdateManager {
         finalDecisionState: 'ready_to_install',
       );
       _logUpdateInstallSuccess();
+      _logUpdateInstallResult(
+        'success=true launched=true apk_path=$apkPath',
+      );
+      await _runPostInstallVerification(
+        beforeInstallVersionCode: installedVersionCode,
+        expectedVersionCode: targetVersionCode,
+        expectedVersionName: verification.versionName ??
+            state.value.latestManifest?.version,
+        releaseTag: persistedVersion,
+      );
       state.value = state.value.copyWith(
         status: UpdateStatus.readyToInstall,
         tempApkPath: apkPath,
@@ -1178,6 +1371,14 @@ class UpdateManager {
 
     var nativeValid = true;
     var reason = 'ok';
+    String? packageName;
+    String? versionName;
+    int? versionCode;
+    String? signatureSha256;
+    String? fileSha256;
+    bool? hasSplitConfig;
+    String? abi;
+    var archiveParsed = false;
     final nativeResult = await _intentHandler.verifyApk(apkPath);
     nativeResult.fold(
       (failure) {
@@ -1189,6 +1390,14 @@ class UpdateManager {
       (payload) {
         nativeValid = payload['valid'] == true;
         reason = (payload['reason'] as String?) ?? (nativeValid ? 'ok' : 'unknown');
+        packageName = payload['packageName'] as String?;
+        versionName = payload['versionName'] as String?;
+        versionCode = _parseInt(payload['versionCode']);
+        signatureSha256 = payload['signatureSha256'] as String?;
+        fileSha256 = payload['fileSha256'] as String?;
+        hasSplitConfig = payload['hasSplitConfig'] as bool?;
+        abi = payload['abi'] as String?;
+        archiveParsed = payload['archiveParsed'] == true;
       },
     );
 
@@ -1219,7 +1428,130 @@ class UpdateManager {
       hasApkExtension: hasApkExtension,
       sizeBytes: sizeBytes,
       reason: reason,
+      packageName: packageName,
+      versionName: versionName,
+      versionCode: versionCode,
+      signatureSha256: signatureSha256,
+      fileSha256: fileSha256,
+      hasSplitConfig: hasSplitConfig,
+      abi: abi,
+      archiveParsed: archiveParsed,
     );
+  }
+
+  Future<_InstalledIdentity> _readInstalledIdentity({
+    bool includeDiagnostics = true,
+  }) async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    String? installerPackage;
+    String? signatureSha256;
+    int? installedVersionCode;
+    if (includeDiagnostics) {
+      final diagnosticsResult = await _intentHandler.getInstallDiagnostics();
+      diagnosticsResult.fold(
+        (_) {},
+        (map) {
+          installerPackage = map['installerPackageName'] as String?;
+          signatureSha256 = map['installedSignatureSha256'] as String?;
+          installedVersionCode = _parseInt(map['installedVersionCode']);
+        },
+      );
+    }
+    return _InstalledIdentity(
+      versionName: packageInfo.version,
+      versionCode: installedVersionCode ?? _parseInt(packageInfo.buildNumber),
+      applicationId: packageInfo.packageName,
+      installerPackage: installerPackage,
+      signatureSha256: signatureSha256,
+    );
+  }
+
+  Future<void> _runPostInstallVerification({
+    required int? beforeInstallVersionCode,
+    required int? expectedVersionCode,
+    required String? expectedVersionName,
+    required String? releaseTag,
+  }) async {
+    _logUpdatePostVerify(
+      'phase=begin '
+      'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
+      'expected_version_code=${expectedVersionCode?.toString() ?? '-'} '
+      'expected_version_name=${expectedVersionName ?? '-'} '
+      'release_tag=${releaseTag ?? '-'}',
+    );
+    _InstalledIdentity? post;
+    for (var attempt = 1; attempt <= _postInstallVerifyMaxAttempts; attempt++) {
+      post = await _readInstalledIdentity();
+      final changed = beforeInstallVersionCode != null &&
+          post.versionCode != null &&
+          post.versionCode != beforeInstallVersionCode;
+      if (changed) {
+        _logUpdatePostVerifyOk(
+          'attempt=$attempt '
+          'installed_after_version_code=${post.versionCode} '
+          'installed_after_version_name=${post.versionName} '
+          'application_id=${post.applicationId}',
+        );
+        return;
+      }
+      if (attempt < _postInstallVerifyMaxAttempts) {
+        await Future<void>.delayed(_postInstallVerifyPollInterval);
+      }
+    }
+    _logUpdatePostVerifyFailed(
+      'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
+      'installed_after_version_code=${post.versionCode?.toString() ?? '-'} '
+      'installed_after_version_name=${post.versionName} '
+      'expected_version_code=${expectedVersionCode?.toString() ?? '-'} '
+      'expected_version_name=${expectedVersionName ?? '-'} '
+      'application_id=${post.applicationId}',
+    );
+    _logStructuredUpdateError(
+      action: 'post_install_verify',
+      detectedVersion: releaseTag,
+      selectedChannel: state.value.preferredChannel,
+      comparisonResult: _comparisonResultFor(releaseTag),
+      finalDecisionState: state.value.status.name,
+      message: 'Post-install verification failed: installed version unchanged',
+    );
+  }
+
+  Future<void> _logReleaseForensicsCheck(UpdateManifest manifest) async {
+    _InstalledIdentity? installedIdentity;
+    try {
+      installedIdentity = await _readInstalledIdentity(includeDiagnostics: false);
+    } catch (_) {}
+    final localVersionName = installedIdentity?.versionName ?? _currentVersion;
+    final localVersionCode = installedIdentity?.versionCode ??
+        _parseBuildNumberFromVersion(_currentVersion);
+    _logUpdateCheck(
+      'application_id=${installedIdentity?.applicationId ?? '-'} '
+      'installed_version_name=$localVersionName '
+      'installed_version_code=${localVersionCode?.toString() ?? '-'} '
+      'target_version_name=${manifest.version} '
+      'target_version_code=${manifest.versionCode?.toString() ?? '-'} '
+      'apk_filename=${manifest.apkFileName ?? '-'} '
+      'apk_size_bytes=${manifest.apkSizeBytes ?? -1} '
+      'release_tag=${manifest.version} '
+      'sha256=${installedIdentity?.signatureSha256 ?? '-'} '
+      'installer_package=${installedIdentity?.installerPackage ?? '-'}',
+    );
+  }
+
+  int? _parseBuildNumberFromVersion(String version) {
+    final buildSeparatorIndex = version.lastIndexOf('+');
+    if (buildSeparatorIndex < 0) {
+      return null;
+    }
+    return int.tryParse(version.substring(buildSeparatorIndex + 1));
+  }
+
+  int? _parseInt(Object? value) {
+    return switch (value) {
+      int v => v,
+      String v => int.tryParse(v.trim()),
+      _ => null,
+    };
   }
 
   String _resolveApkFileName(UpdateManifest manifest, Uri uri) {
@@ -1265,6 +1597,28 @@ class UpdateManager {
   void _logApk(String message) => debugPrint('[APK] $message');
   void _logInstall(String message) => debugPrint('[INSTALL] $message');
   void _logUpdateCheck(String message) => debugPrint('[UPDATE_CHECK] $message');
+  void _logUpdateDownload(String message) => debugPrint('[UPDATE_DOWNLOAD] $message');
+  void _logUpdateApkReady(String message) => debugPrint('[UPDATE_APK_READY] $message');
+  void _logUpdateInstallBegin(String message) =>
+      debugPrint('[UPDATE_INSTALL_BEGIN] $message');
+  void _logUpdateInstallResult(String message) =>
+      debugPrint('[UPDATE_INSTALL_RESULT] $message');
+  void _logUpdatePostVerify(String message) =>
+      debugPrint('[UPDATE_POST_VERIFY] $message');
+  void _logVersionRejected(String message) =>
+      debugPrint('[UPDATE_VERSION_REJECTED] $message');
+  void _logSignatureCurrent(String message) =>
+      debugPrint('[UPDATE_SIGNATURE_CURRENT] $message');
+  void _logSignatureNew(String message) =>
+      debugPrint('[UPDATE_SIGNATURE_NEW] $message');
+  void _logSignatureMismatch(String message) =>
+      debugPrint('[UPDATE_SIGNATURE_MISMATCH] $message');
+  void _logUpdatePostVerifyFailed(String message) =>
+      debugPrint('[UPDATE_POST_VERIFY_FAILED] $message');
+  void _logUpdatePostVerifyOk(String message) =>
+      debugPrint('[UPDATE_POST_VERIFY_OK] $message');
+  void _logUpdateApkAnalysis(String message) =>
+      debugPrint('[UPDATE_APK_ANALYSIS] $message');
   void _logVersionLocal(String message) =>
       debugPrint('[UPDATE_VERSION_LOCAL] $message');
   void _logVersionRemote(String message) =>
