@@ -29,7 +29,7 @@ class RuntimeSelfTestService {
 
   /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
-  static const Duration _selfTestFirstTokenTimeout = Duration(seconds: 5);
+  static const Duration _selfTestStreamGuardTimeout = Duration(seconds: 300);
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
@@ -90,11 +90,11 @@ class RuntimeSelfTestService {
         ),
         cancellationToken: cancellationToken,
       ).timeout(
-        _selfTestFirstTokenTimeout,
+        _selfTestStreamGuardTimeout,
         onTimeout: (sink) {
           cancellationToken.cancel();
           sink.add(InferenceResponse.error(
-            'FIRST_TOKEN_TIMEOUT',
+            'Runtime self-test stream timed out before provider completion.',
           ));
           sink.close();
         },
