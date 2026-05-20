@@ -143,7 +143,7 @@ class RuntimeSelfTestService {
       }
 
       final finalText = responseBuffer.toString().trim();
-      final firstTokenReceived = firstToken != null;
+      final firstTokenReceived = firstToken?.isNotEmpty ?? false;
       final livenessOk = streamAliveTicks > 1;
 
       notes.add('3. Token stream: OK (first token emitted)');
@@ -164,7 +164,7 @@ class RuntimeSelfTestService {
       final pass = firstTokenReceived && livenessOk && completed;
       if (!pass) {
         _log(
-          '[COMM_TEST_FAIL] first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks liveness_ok=$livenessOk completed=$completed',
+          '[COMM_TEST_FAIL] first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks completed=$completed',
         );
         return RuntimeSelfTestResult(
           success: false,
