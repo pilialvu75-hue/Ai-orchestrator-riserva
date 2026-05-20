@@ -54,6 +54,7 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.inferencing: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.inferenceCompleted,
+      // First token can confirm runtime viability while inference is active.
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
@@ -124,6 +125,7 @@ class RuntimeStateMachine {
       case RuntimeLifecycleEvent.inferenceStarted:
         return RuntimeLifecycleState.inferencing;
       case RuntimeLifecycleEvent.inferenceCompleted:
+        // Keep runtime in verified after a successful run.
         return RuntimeLifecycleState.verified;
       case RuntimeLifecycleEvent.inferenceFailed:
         return RuntimeLifecycleState.failed;

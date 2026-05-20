@@ -1714,6 +1714,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         runtimeStateMachine.reset();
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
+        // Not terminal: prerequisites can be present while verification has not
+        // yet been observed; keep lifecycle in a recoverable healthy stage.
         runtimeStateMachine.markHealthy();
         return;
       case LocalRuntimeStatus.loading:
@@ -1747,12 +1749,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     super.recordVerificationSuccess(modelPath: modelPath, source: source);
     final status = monitor.state.status;
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
-        status == LocalRuntimeStatus.uninitialized ||
-        status == LocalRuntimeStatus.failed ||
-        status == LocalRuntimeStatus.completed) {
+        status == LocalRuntimeStatus.uninitialized) {
       _updateRuntimeStatus(
         LocalRuntimeStatus.ready,
         message: 'Runtime verified and ready for inference.',
+      );
+    } else if (status == LocalRuntimeStatus.failed ||
+        status == LocalRuntimeStatus.completed) {
+      // A fresh verification signal (first token / self-test pass) overrides
+      // stale terminal states from previous runs.
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.ready,
+        message: 'Runtime re-verified and ready for inference.',
       );
     } else {
       _syncLifecycleState(LocalRuntimeStatus.ready);
