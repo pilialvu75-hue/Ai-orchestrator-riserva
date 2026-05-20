@@ -1079,20 +1079,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
-              if (!controller.isClosed) {
-                scheduleMicrotask(() {
+              scheduleMicrotask(() {
+                try {
                   if (!controller.isClosed) {
-                    try {
-                      controller.add(
-                        InferenceResponse.token(
-                          text: piece,
-                          model: modelId,
-                        ),
-                      );
-                    } catch (_) {}
+                    controller.add(
+                      InferenceResponse.token(
+                        text: piece,
+                        model: modelId,
+                      ),
+                    );
                   }
-                });
-              }
+                } catch (_) {}
+              });
               flushWatch.stop();
               _log(
                 '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
