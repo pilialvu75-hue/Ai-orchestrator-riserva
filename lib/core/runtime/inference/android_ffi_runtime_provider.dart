@@ -1756,8 +1756,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
     } else if (status == LocalRuntimeStatus.failed ||
         status == LocalRuntimeStatus.completed) {
-      // A fresh verification signal (first token / self-test pass) overrides
-      // stale terminal states from previous runs.
+      // `completed` is a terminal snapshot of the last run; switch back to
+      // `ready` so diagnostics/UI do not stay pinned to terminal status after
+      // verification is reconfirmed by a new signal.
       _updateRuntimeStatus(
         LocalRuntimeStatus.ready,
         message: 'Runtime re-verified and ready for inference.',
