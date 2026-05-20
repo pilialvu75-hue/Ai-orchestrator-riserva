@@ -1260,6 +1260,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             message: 'Unhandled runtime exception.',
             details: '$error',
           );
+        } else {
+          _log(
+            '[FFI_EXCEPTION] session=$sessionId stage=stream_inference_post_ffi_controller_closed'
+            ' error=$error',
+          );
         }
       } finally {
         _log(

@@ -29,7 +29,7 @@ class RuntimeSelfTestService {
 
   /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
-  static const Duration _selfTestCompletionTimeout = Duration(seconds: 300);
+  static const Duration _selfTestCompletionTimeout = Duration(seconds: 60);
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
