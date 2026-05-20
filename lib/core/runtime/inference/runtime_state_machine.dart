@@ -1,7 +1,8 @@
 enum RuntimeLifecycleState {
   uninitialized,
   loading,
-  ready,
+  healthy,
+  verified,
   inferencing,
   failed,
 }
@@ -9,7 +10,8 @@ enum RuntimeLifecycleState {
 enum RuntimeLifecycleEvent {
   reset,
   loadRequested,
-  loadCompleted,
+  healthObserved,
+  verificationConfirmed,
   inferenceStarted,
   inferenceCompleted,
   inferenceFailed,
@@ -25,27 +27,41 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.uninitialized: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.healthObserved,
+      RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadCompleted,
+      RuntimeLifecycleEvent.healthObserved,
+      RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
-    RuntimeLifecycleState.ready: <RuntimeLifecycleEvent>{
+    RuntimeLifecycleState.healthy: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.verificationConfirmed,
+      RuntimeLifecycleEvent.inferenceStarted,
+      RuntimeLifecycleEvent.inferenceFailed,
+    },
+    RuntimeLifecycleState.verified: <RuntimeLifecycleEvent>{
+      RuntimeLifecycleEvent.reset,
+      RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.inferenceStarted,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     RuntimeLifecycleState.inferencing: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.inferenceCompleted,
+      RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     RuntimeLifecycleState.failed: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.healthObserved,
+      RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
   };
@@ -81,7 +97,9 @@ class RuntimeStateMachine {
 
   void markLoading() => transition(RuntimeLifecycleEvent.loadRequested);
 
-  void markReady() => transition(RuntimeLifecycleEvent.loadCompleted);
+  void markHealthy() => transition(RuntimeLifecycleEvent.healthObserved);
+
+  void markVerified() => transition(RuntimeLifecycleEvent.verificationConfirmed);
 
   void markInferencing() => transition(RuntimeLifecycleEvent.inferenceStarted);
 
@@ -99,12 +117,14 @@ class RuntimeStateMachine {
         return RuntimeLifecycleState.uninitialized;
       case RuntimeLifecycleEvent.loadRequested:
         return RuntimeLifecycleState.loading;
-      case RuntimeLifecycleEvent.loadCompleted:
-        return RuntimeLifecycleState.ready;
+      case RuntimeLifecycleEvent.healthObserved:
+        return RuntimeLifecycleState.healthy;
+      case RuntimeLifecycleEvent.verificationConfirmed:
+        return RuntimeLifecycleState.verified;
       case RuntimeLifecycleEvent.inferenceStarted:
         return RuntimeLifecycleState.inferencing;
       case RuntimeLifecycleEvent.inferenceCompleted:
-        return RuntimeLifecycleState.ready;
+        return RuntimeLifecycleState.verified;
       case RuntimeLifecycleEvent.inferenceFailed:
         return RuntimeLifecycleState.failed;
     }

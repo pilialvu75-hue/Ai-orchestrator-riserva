@@ -972,7 +972,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               lastTokenProgressAt = DateTime.now();
               fullText.write(piece);
               estimatedTokens++;
-              markRuntimeVerified(modelPath);
+              recordVerificationSuccess(
+                modelPath: modelPath,
+                source: 'first_token',
+              );
               final streamingElapsed = DateTime.now().difference(startedAt);
               _log(
                 '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations status=$status',
@@ -1105,7 +1108,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           } else if (status == 2) {
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
-            markRuntimeVerified(modelPath);
+            recordVerificationSuccess(
+              modelPath: modelPath,
+              source: 'eos',
+            );
             _log('[FFI_EOS] session=$nativeSessionId');
             _log(
               '[GENERATION_END] state=success generated_tokens=$estimatedTokens'
@@ -1704,16 +1710,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void _syncLifecycleState(LocalRuntimeStatus status) {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
-      case LocalRuntimeStatus.runtimeUnavailable:
       case LocalRuntimeStatus.modelMissing:
         runtimeStateMachine.reset();
+        return;
+      case LocalRuntimeStatus.runtimeUnavailable:
+        runtimeStateMachine.markHealthy();
         return;
       case LocalRuntimeStatus.loading:
       case LocalRuntimeStatus.tokenizing:
         runtimeStateMachine.markLoading();
         return;
       case LocalRuntimeStatus.ready:
-        runtimeStateMachine.markReady();
+        runtimeStateMachine.markVerified();
         return;
       case LocalRuntimeStatus.completed:
         runtimeStateMachine.markInferenceCompleted();
@@ -1731,5 +1739,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-}
+  @override
+  void recordVerificationSuccess({
+    required String modelPath,
+    String source = 'runtime',
+  }) {
+    super.recordVerificationSuccess(modelPath: modelPath, source: source);
+    final status = monitor.state.status;
+    if (status == LocalRuntimeStatus.runtimeUnavailable ||
+        status == LocalRuntimeStatus.uninitialized ||
+        status == LocalRuntimeStatus.failed ||
+        status == LocalRuntimeStatus.completed) {
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.ready,
+        message: 'Runtime verified and ready for inference.',
+      );
+    } else {
+      _syncLifecycleState(LocalRuntimeStatus.ready);
+    }
+  }
 
+}

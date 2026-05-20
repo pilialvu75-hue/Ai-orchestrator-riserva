@@ -176,6 +176,10 @@ class RuntimeSelfTestService {
       _log(
         '[WARMUP_VALIDATION_PASS] session=$selfTestSessionId first_token_received=$firstTokenReceived liveness_ok=$livenessOk completed=$completed',
       );
+      _runtimeProvider.recordVerificationSuccess(
+        modelPath: selectedModel.localPath!,
+        source: 'self_test_pass',
+      );
       _log(
         '[COMM_TEST_PASS] first_token_received=$firstTokenReceived first_token="$firstToken"',
       );
