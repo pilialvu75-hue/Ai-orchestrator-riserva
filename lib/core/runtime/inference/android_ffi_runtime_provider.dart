@@ -1082,12 +1082,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               if (!controller.isClosed) {
                 scheduleMicrotask(() {
                   if (!controller.isClosed) {
-                    controller.add(
-                      InferenceResponse.token(
-                        text: piece,
-                        model: modelId,
-                      ),
-                    );
+                    try {
+                      controller.add(
+                        InferenceResponse.token(
+                          text: piece,
+                          model: modelId,
+                        ),
+                      );
+                    } catch (_) {}
                   }
                 });
               }
