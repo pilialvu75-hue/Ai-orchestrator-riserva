@@ -1445,6 +1445,7 @@ class UpdateManager {
     final packageInfo = await PackageInfo.fromPlatform();
     String? installerPackage;
     String? signatureSha256;
+    int? installedVersionCode;
     if (includeDiagnostics) {
       final diagnosticsResult = await _intentHandler.getInstallDiagnostics();
       diagnosticsResult.fold(
@@ -1452,12 +1453,13 @@ class UpdateManager {
         (map) {
           installerPackage = map['installerPackageName'] as String?;
           signatureSha256 = map['installedSignatureSha256'] as String?;
+          installedVersionCode = _parseInt(map['installedVersionCode']);
         },
       );
     }
     return _InstalledIdentity(
       versionName: packageInfo.version,
-      versionCode: _parseInt(packageInfo.buildNumber),
+      versionCode: installedVersionCode ?? _parseInt(packageInfo.buildNumber),
       applicationId: packageInfo.packageName,
       installerPackage: installerPackage,
       signatureSha256: signatureSha256,
