@@ -132,6 +132,9 @@ class _ChatPageState extends State<ChatPage> {
     _uiSendBeganAt = DateTime.now();
     _uiStreamStarted = false;
     _startUiDeadlockGuard();
+    _uiLog(
+      '[UI_SEND] session=$_kDefaultSessionId page=${hashCode.toRadixString(16)} chars=${text.length} attachments=${attachments.length}',
+    );
     _uiLog('[UI_SEND_BEGIN] session=$_kDefaultSessionId chars=${text.length} attachments=${attachments.length}');
     context.read<OrchestratorStateEngine>().add(SendMessageEvent(
           sessionId: _kDefaultSessionId,

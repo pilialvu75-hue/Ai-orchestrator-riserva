@@ -100,6 +100,7 @@ class LocalRuntimeState {
 /// Thread-safety: all mutations are expected to occur on the Flutter main
 /// isolate.  Listeners are called synchronously within [update].
 class LocalRuntimeMonitor {
+  static int _resetCount = 0;
   LocalRuntimeState _state = const LocalRuntimeState();
   final List<void Function(LocalRuntimeState)> _listeners = [];
 
@@ -131,6 +132,12 @@ class LocalRuntimeMonitor {
     final previousState = resetProgress
         ? const LocalRuntimeState()
         : _state;
+    if (resetProgress) {
+      _resetCount++;
+      debugPrint(
+        '[MONITOR_RESET] type=LocalRuntimeMonitor hash=${hashCode.toRadixString(16)} reset_count=$_resetCount',
+      );
+    }
     final nextElapsed = elapsed ?? previousState.elapsed;
     final nextTokens = tokensGenerated ?? previousState.tokensGenerated;
     debugPrint(

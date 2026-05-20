@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:isolate';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -18,7 +22,32 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const StartupApp());
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrint(
+      '[FLUTTER_UNCAUGHT] error=${details.exceptionAsString()} stack=${details.stack}',
+    );
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
+    debugPrint('[PLATFORM_UNCAUGHT] error=$error stack=$stackTrace');
+    return false;
+  };
+  final isolateErrorPort = RawReceivePort((dynamic pair) {
+    if (pair is List<dynamic> && pair.length >= 2) {
+      debugPrint('[ASYNC_FATAL] isolate_error=${pair[0]} stack=${pair[1]}');
+      return;
+    }
+    debugPrint('[ASYNC_FATAL] isolate_error=$pair');
+  });
+  Isolate.current.addErrorListener(isolateErrorPort.sendPort);
+  await runZonedGuarded(
+    () async {
+      runApp(const StartupApp());
+    },
+    (Object error, StackTrace stackTrace) {
+      debugPrint('[ZONE_UNCAUGHT] scope=main error=$error stack=$stackTrace');
+    },
+  );
 }
 
 class StartupApp extends StatefulWidget {

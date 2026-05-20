@@ -20,6 +20,7 @@ class InferenceService {
   static const Duration _streamIdleTimeout = Duration(seconds: 75);
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
+  bool _runtimeLookupInProgress = false;
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -54,10 +55,17 @@ class InferenceService {
       'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
       'context_lines=${request.context.length} offline=${request.isOffline}',
     );
-
+    _log('[RUNTIME_LOOKUP] session=${request.sessionId} stage=runtime_mode_load');
+    if (_runtimeLookupInProgress) {
+      _log('[RUNTIME_INIT_RECURSION] session=${request.sessionId} scope=inference_service.runtime_lookup');
+    }
+    _runtimeLookupInProgress = true;
     final session = _sessionManager.startSession(request.sessionId);
     try {
       final runtimeMode = await _loadRuntimeMode();
+      _log(
+        '[RUNTIME_LOOKUP] session=${request.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
+      );
       _log(
         '[RUNTIME_PATH] routing session=${request.sessionId} mode=${runtimeMode.name} '
         'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
@@ -66,8 +74,14 @@ class InferenceService {
       final selectedModel = await _resolveSelectedModelForLocalRuntime();
       final localRequest = _buildLocalRequest(request, selectedModel);
       _log(
+        '[RUNTIME_LOOKUP] session=${request.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
+      );
+      _log(
         '[MODEL_LOAD] selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
         'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
+      );
+      _log(
+        '[RUNTIME_LOOKUP] session=${request.sessionId} stage=request_construction local_request=${localRequest != null}',
       );
 
       yield* _streamWithRetryAndGuards(
@@ -76,7 +90,13 @@ class InferenceService {
         localRequest: localRequest,
         cancellationToken: session.cancellationToken,
       );
+    } catch (error, stackTrace) {
+      _log('[ASYNC_FATAL] scope=inference_service.stream session=${request.sessionId} error=$error stack=$stackTrace');
+      yield InferenceResponse.error(
+        'Inference service failed before runtime stream start: $error',
+      );
     } finally {
+      _runtimeLookupInProgress = false;
       _sessionManager.complete(session);
       _log('async listener cleanup session=${request.sessionId}');
       _log('stream end session=${request.sessionId}');
@@ -244,6 +264,7 @@ class InferenceService {
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
+    _log('[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType}');
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: cancellationToken,

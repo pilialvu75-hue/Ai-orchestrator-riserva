@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
@@ -5,6 +7,8 @@ import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -26,6 +30,9 @@ class ChatRepositoryImpl implements ChatRepository {
   final ConversationMemoryService conversationMemoryService;
 
   static const _uuid = Uuid();
+  final Set<String> _activeSendSessions = <String>{};
+  StreamSubscription<InferenceResponse>? _activeInferenceSubscription;
+  String? _activeInferenceSubscriptionSessionId;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
@@ -49,113 +56,181 @@ class ChatRepositoryImpl implements ChatRepository {
     void Function(String notice)? onRuntimeNotice,
   }) async {
     try {
-      final normalizedPrompt = userPrompt.trim();
-      _log(
-        'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',
-      );
-      final userMsg = ChatMessageModel(
-        id: _uuid.v4(),
-        sessionId: sessionId,
-        role: 'user',
-        content: normalizedPrompt,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        attachments: attachments,
-      );
-      await localDataSource.insertMessage(userMsg);
-      _log('message persistence session=$sessionId role=user id=${userMsg.id}');
-      await conversationMemoryService.storeMessageEmbedding(
-        sessionId: sessionId,
-        messageId: userMsg.id,
-        role: userMsg.role,
-        content: userMsg.content,
-        timestamp: userMsg.timestamp,
-      );
-
-      if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
-        return userMsg;
-      }
-
-      final sessionMessages = await localDataSource.getMessages(sessionId);
-      final context = await conversationMemoryService.buildContext(
-        sessionId: sessionId,
-        messages: sessionMessages,
-        userPrompt: normalizedPrompt,
-        systemPrompt: systemPrompt,
-        excludedMessageId: userMsg.id,
-      );
-      _log(
-        'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
-      );
-
-      final streamedResponse = StringBuffer();
-      String responseProvider = 'local';
-
-      await for (final chunk in orchestrator.handleStream(
-        normalizedPrompt,
-        sessionId: sessionId,
-        context: context,
-        systemPrompt: systemPrompt,
-      )) {
-        if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
-          _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
-          onRuntimeNotice?.call(chunk.runtimeNotice!);
-          continue;
-        }
-        if (chunk.isError) {
-          throw ServerFailure(
-            _normalizeRuntimeErrorMessage(
-              chunk.errorMessage ?? 'Inference failed.',
-            ),
-          );
-        }
-        if (chunk.isFinal) {
-          if (chunk.text.isNotEmpty) {
-            final merged = mergeStreamedText(
-              currentText: streamedResponse.toString(),
-              incomingText: chunk.text,
-              isFinalChunk: true,
+      return await runInferenceGuarded<ChatMessage>(
+        scope: 'chat_repository.send_message',
+        log: _log,
+        action: () async {
+          if (!_activeSendSessions.add(sessionId)) {
+            _log(
+              '[ENTRY_REENTRANCY_BLOCK] scope=chat_repository session=$sessionId hash=${hashCode.toRadixString(16)}',
             );
-            streamedResponse.clear();
-            streamedResponse.write(merged);
+            throw const ServerFailure('A response is already in progress for this session.');
           }
-          if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
-            responseProvider = chunk.model!;
+          try {
+            final normalizedPrompt = userPrompt.trim();
+            _log(
+              'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',
+            );
+            final userMsg = ChatMessageModel(
+              id: _uuid.v4(),
+              sessionId: sessionId,
+              role: 'user',
+              content: normalizedPrompt,
+              timestamp: DateTime.now().millisecondsSinceEpoch,
+              attachments: attachments,
+            );
+            await localDataSource.insertMessage(userMsg);
+            _log('message persistence session=$sessionId role=user id=${userMsg.id}');
+            await conversationMemoryService.storeMessageEmbedding(
+              sessionId: sessionId,
+              messageId: userMsg.id,
+              role: userMsg.role,
+              content: userMsg.content,
+              timestamp: userMsg.timestamp,
+            );
+
+            if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
+              return userMsg;
+            }
+
+            final sessionMessages = await localDataSource.getMessages(sessionId);
+            final context = await conversationMemoryService.buildContext(
+              sessionId: sessionId,
+              messages: sessionMessages,
+              userPrompt: normalizedPrompt,
+              systemPrompt: systemPrompt,
+              excludedMessageId: userMsg.id,
+            );
+            _log(
+              'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
+            );
+
+            final streamedResponse = StringBuffer();
+            String responseProvider = 'local';
+
+            _log(
+              '[ORCHESTRATOR_SEND] session=$sessionId scope=chat_repository.handleStream',
+            );
+            _log(
+              '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
+            );
+            if (_activeInferenceSubscription != null) {
+              _log(
+                '[DUPLICATE_SUBSCRIPTION] session=$sessionId active_session=${_activeInferenceSubscriptionSessionId ?? "unknown"} action=cancel_previous',
+              );
+              await _activeInferenceSubscription!.cancel();
+              _activeInferenceSubscription = null;
+              _activeInferenceSubscriptionSessionId = null;
+            }
+            final stream = orchestrator.handleStream(
+              normalizedPrompt,
+              sessionId: sessionId,
+              context: context,
+              systemPrompt: systemPrompt,
+            );
+            final streamCompleter = Completer<void>();
+            _log(
+              '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
+            );
+            _activeInferenceSubscription = stream.listen(
+              (chunk) {
+                try {
+                  if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+                    _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
+                    onRuntimeNotice?.call(chunk.runtimeNotice!);
+                    return;
+                  }
+                  if (chunk.isError) {
+                    throw ServerFailure(
+                      _normalizeRuntimeErrorMessage(
+                        chunk.errorMessage ?? 'Inference failed.',
+                      ),
+                    );
+                  }
+                  if (chunk.isFinal) {
+                    if (chunk.text.isNotEmpty) {
+                      final merged = mergeStreamedText(
+                        currentText: streamedResponse.toString(),
+                        incomingText: chunk.text,
+                        isFinalChunk: true,
+                      );
+                      streamedResponse.clear();
+                      streamedResponse.write(merged);
+                    }
+                    if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
+                      responseProvider = chunk.model!;
+                    }
+                    _log(
+                      '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
+                    );
+                  } else {
+                    streamedResponse.write(chunk.text);
+                    _log(
+                      '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
+                    );
+                    onPartialResponse?.call(streamedResponse.toString());
+                  }
+                } catch (error, stackTrace) {
+                  if (!streamCompleter.isCompleted) {
+                    streamCompleter.completeError(error, stackTrace);
+                  }
+                }
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                _log(
+                  '[ASYNC_FATAL] scope=chat_repository.stream_listener session=$sessionId error=$error stack=$stackTrace',
+                );
+                if (!streamCompleter.isCompleted) {
+                  streamCompleter.completeError(error, stackTrace);
+                }
+              },
+              onDone: () {
+                if (!streamCompleter.isCompleted) {
+                  streamCompleter.complete();
+                }
+              },
+              cancelOnError: false,
+            );
+            _activeInferenceSubscriptionSessionId = sessionId;
+            try {
+              await streamCompleter.future;
+            } finally {
+              await _activeInferenceSubscription?.cancel();
+              _activeInferenceSubscription = null;
+              _activeInferenceSubscriptionSessionId = null;
+            }
+
+            final responseText = streamedResponse.toString().trim();
+            if (responseText.isEmpty) {
+              throw const ServerFailure('Inference returned an empty response.');
+            }
+
+            final assistantMsg = ChatMessageModel(
+              id: _uuid.v4(),
+              sessionId: sessionId,
+              role: 'assistant',
+              content: responseText,
+              timestamp: DateTime.now().millisecondsSinceEpoch,
+              provider: responseProvider,
+            );
+            await localDataSource.insertMessage(assistantMsg);
+            await conversationMemoryService.storeMessageEmbedding(
+              sessionId: sessionId,
+              messageId: assistantMsg.id,
+              role: assistantMsg.role,
+              content: assistantMsg.content,
+              timestamp: assistantMsg.timestamp,
+            );
+            _log('[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}');
+            return assistantMsg;
+          } finally {
+            _activeSendSessions.remove(sessionId);
           }
-          _log(
-            '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
-          );
-        } else {
-          streamedResponse.write(chunk.text);
-          _log(
-            '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
-          );
-          onPartialResponse?.call(streamedResponse.toString());
-        }
-      }
-
-      final responseText = streamedResponse.toString().trim();
-      if (responseText.isEmpty) {
-        throw const ServerFailure('Inference returned an empty response.');
-      }
-
-      final assistantMsg = ChatMessageModel(
-        id: _uuid.v4(),
-        sessionId: sessionId,
-        role: 'assistant',
-        content: responseText,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        provider: responseProvider,
+        },
+        onError: (error, stackTrace) {
+          _log('[ASYNC_FATAL] scope=chat_repository.send_message session=$sessionId error=$error stack=$stackTrace');
+        },
       );
-      await localDataSource.insertMessage(assistantMsg);
-      await conversationMemoryService.storeMessageEmbedding(
-        sessionId: sessionId,
-        messageId: assistantMsg.id,
-        role: assistantMsg.role,
-        content: assistantMsg.content,
-        timestamp: assistantMsg.timestamp,
-      );
-      _log('[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}');
-      return assistantMsg;
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
     } on ServerException catch (e) {

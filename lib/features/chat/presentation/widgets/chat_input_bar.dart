@@ -60,6 +60,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void _submit() {
     final text = _controller.text.trim();
     if (text.isEmpty && _attachments.isEmpty) return;
+    debugPrint(
+      '[UI_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
+    );
     final outgoingAttachments = List<ChatAttachment>.from(_attachments);
     _controller.clear();
     setState(_attachments.clear);

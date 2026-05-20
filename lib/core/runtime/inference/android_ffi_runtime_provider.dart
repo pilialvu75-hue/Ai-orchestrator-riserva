@@ -103,6 +103,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int? _nativeSessionId;
   String? _nativeSessionModelPath;
   bool _loadAttempted = false;
+  bool _libraryLoadInProgress = false;
   Future<void> _inferenceTail = Future<void>.value();
   Future<void>? _warmupFuture;
   String? _warmupModelPath;
@@ -117,19 +118,32 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // ── Library loading ──────────────────────────────────────────────────────────
 
   bool _ensureLibraryLoaded() {
-    if (_loadAttempted) return _bindings != null && _libraryHandle != null;
-    _loadAttempted = true;
-
-    final handle = LlamaFfiLoader.tryLoadBridgeLibrary(log: _log);
-    if (handle == null) return false;
-    _libraryHandle = handle;
-    _bindings = handle.bindings;
-    _bindings!.initBackend();
     _log(
-      '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
-      ' abi=${LlamaFfiLoader.currentAbiName}',
+      '[RUNTIME_LOOKUP] stage=ffi_library_load_enter provider=${runtimeType} hash=${hashCode.toRadixString(16)}',
     );
-    return true;
+    if (_libraryLoadInProgress) {
+      _log(
+        '[RUNTIME_INIT_RECURSION] scope=android_ffi_runtime_provider.ensureLibraryLoaded hash=${hashCode.toRadixString(16)}',
+      );
+      return true;
+    }
+    if (_loadAttempted) return _bindings != null && _libraryHandle != null;
+    _libraryLoadInProgress = true;
+    _loadAttempted = true;
+    try {
+      final handle = LlamaFfiLoader.tryLoadBridgeLibrary(log: _log);
+      if (handle == null) return false;
+      _libraryHandle = handle;
+      _bindings = handle.bindings;
+      _bindings!.initBackend();
+      _log(
+        '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
+        ' abi=${LlamaFfiLoader.currentAbiName}',
+      );
+      return true;
+    } finally {
+      _libraryLoadInProgress = false;
+    }
   }
 
   @override
@@ -166,6 +180,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
+    _log(
+      '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=${runtimeType} hash=${hashCode.toRadixString(16)}',
+    );
     final controller = StreamController<InferenceResponse>();
     var firstFfiInvocationAttempted = false;
     var firstFfiInvocationCompleted = false;
