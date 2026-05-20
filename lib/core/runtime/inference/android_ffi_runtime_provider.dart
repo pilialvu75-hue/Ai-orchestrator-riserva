@@ -175,8 +175,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       InferenceTerminalState state = InferenceTerminalState.failed,
     }) async {
       _log(
-        '[FFI_FATAL_EARLY_EXIT] session=$sessionId branch=$branch reason=$reason'
-        ' first_ffi_attempted=$firstFfiInvocationAttempted first_ffi_completed=$firstFfiInvocationCompleted',
+        '[FFI_FATAL_EARLY_EXIT] session=$sessionId branch=$branch reason=$reason',
       );
       _log(
         '[FFI_BRANCH_RETURN] session=$sessionId branch=$branch reason=$reason'
@@ -400,6 +399,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int nativeSessionId;
       try {
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
+        // This flag marks the first native entry point for this inference flow.
         firstFfiInvocationAttempted = true;
         _log('[FFI_CREATE_SESSION] path=$modelPath');
         nativeSessionId = await _runNativeCallWithTimeout<int>(
@@ -1245,6 +1245,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
         if (!firstFfiInvocationAttempted) {
+          // Classification is based on whether session_create has been attempted yet.
           await fatalEarlyExit(
             sessionId,
             branch: 'stream_inference_unhandled_pre_ffi',
