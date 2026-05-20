@@ -72,6 +72,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       _verifiedModelPath != null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
+  bool isRuntimeVerified({String? modelPath}) {
+    if (modelPath == null || modelPath.trim().isEmpty) {
+      return _verifiedModelPath != null;
+    }
+    return hasVerifiedRuntimeForModel(modelPath);
+  }
+
   void recordVerificationSuccess({
     required String modelPath,
     String source = 'runtime',
