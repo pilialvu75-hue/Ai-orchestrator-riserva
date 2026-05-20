@@ -40,6 +40,7 @@ class MainActivity : FlutterActivity() {
     private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
     private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
     private val logTag = "AO_UPDATE"
+    private val hashBufferSizeBytes = 32 * 1024
     private val apkInstallRequestCode = 9917
     // Native Sherpa/ONNX builds use different shared-library names depending on
     // packaging strategy; probe the most common combinations in priority order.
@@ -593,7 +594,7 @@ class MainActivity : FlutterActivity() {
     private fun calculateFileSha256(file: File): String? = try {
         val digest = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { stream ->
-            val buffer = ByteArray(32 * 1024)
+            val buffer = ByteArray(hashBufferSizeBytes)
             while (true) {
                 val read = stream.read(buffer)
                 if (read <= 0) break

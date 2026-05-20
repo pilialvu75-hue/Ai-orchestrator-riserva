@@ -1539,11 +1539,11 @@ class UpdateManager {
   }
 
   int? _parseBuildNumberFromVersion(String version) {
-    final buildIndex = version.lastIndexOf('+');
-    if (buildIndex < 0) {
+    final buildSeparatorIndex = version.lastIndexOf('+');
+    if (buildSeparatorIndex < 0) {
       return null;
     }
-    return int.tryParse(version.substring(buildIndex + 1));
+    return int.tryParse(version.substring(buildSeparatorIndex + 1));
   }
 
   int? _parseInt(Object? value) {
