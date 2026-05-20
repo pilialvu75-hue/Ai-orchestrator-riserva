@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:dartz/dartz.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,16 +19,29 @@ class MockUpdateChecker extends Mock implements UpdateChecker {}
 class MockAndroidIntentHandler extends Mock implements AndroidIntentHandler {}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late MockUpdateChecker mockUpdateChecker;
   late MockAndroidIntentHandler mockIntentHandler;
   late SharedPreferences preferences;
   late UpdateManager updateManager;
+  final packageInfoChannel =
+      const MethodChannel('dev.fluttercommunity.plus/package_info');
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     preferences = await SharedPreferences.getInstance();
     mockUpdateChecker = MockUpdateChecker();
     mockIntentHandler = MockAndroidIntentHandler();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(packageInfoChannel, (call) async {
+      return <String, dynamic>{
+        'appName': 'AI Orchestrator',
+        'packageName': 'com.aiorchestrator',
+        'version': '1.12.119',
+        'buildNumber': '119',
+        'buildSignature': 'test',
+      };
+    });
     updateManager = UpdateManager(
       updateChecker: mockUpdateChecker,
       comparator: const VersionComparator(),
@@ -31,6 +49,11 @@ void main() {
       intentHandler: mockIntentHandler,
       currentVersion: '1.12.119+119',
     );
+  });
+
+  tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(packageInfoChannel, null);
   });
 
   test('marks a newer simplified manifest as updateAvailable', () async {
@@ -82,5 +105,107 @@ void main() {
     expect(updateManager.state.value.status, UpdateStatus.upToDate);
     expect(updateManager.hasDetectedNewerVersion(updateManager.state.value), isTrue);
     expect(updateManager.state.value.preferredChannel, ReleaseChannel.stable);
+  });
+
+  test('rejects install when APK versionCode is not newer than installed', () async {
+    final tempDir = await Directory.systemTemp.createTemp('update-manager-test-');
+    final apkFile = File('${tempDir.path}/candidate.apk');
+    await apkFile.writeAsBytes(Uint8List(80 * 1024));
+
+    final manifest = UpdateManifest.fromJson(const {
+      'versionName': '1.12.120',
+      'versionCode': 120,
+      'apkUrl': 'https://example.com/app-release.apk',
+      'forceUpdate': false,
+    });
+    updateManager.state.value = updateManager.state.value.copyWith(
+      status: UpdateStatus.readyToInstall,
+      latestManifest: manifest,
+      tempApkPath: apkFile.path,
+    );
+
+    when(
+      () => mockIntentHandler.getInstallDiagnostics(),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'installerPackageName': 'com.android.packageinstaller',
+        'installedSignatureSha256': 'AA:BB',
+      }),
+    );
+    when(
+      () => mockIntentHandler.verifyApk(any()),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'valid': true,
+        'reason': 'ok',
+        'packageName': 'com.aiorchestrator',
+        'versionName': '1.12.119',
+        'versionCode': 119,
+        'signatureSha256': 'AA:BB',
+        'fileSha256': '1234',
+        'hasSplitConfig': false,
+        'abi': 'arm64-v8a',
+        'archiveParsed': true,
+      }),
+    );
+
+    final result = await updateManager.prepareInstallIntent();
+
+    expect(result, isFalse);
+    expect(updateManager.state.value.status, UpdateStatus.error);
+    expect(updateManager.state.value.errorMessage, contains('versionCode'));
+    verifyNever(() => mockIntentHandler.openApkInstaller(any()));
+    await tempDir.delete(recursive: true);
+  });
+
+  test('rejects install when APK signature differs from installed app', () async {
+    final tempDir = await Directory.systemTemp.createTemp('update-manager-test-');
+    final apkFile = File('${tempDir.path}/candidate.apk');
+    await apkFile.writeAsBytes(Uint8List(80 * 1024));
+
+    final manifest = UpdateManifest.fromJson(const {
+      'versionName': '1.12.120',
+      'versionCode': 120,
+      'apkUrl': 'https://example.com/app-release.apk',
+      'forceUpdate': false,
+    });
+    updateManager.state.value = updateManager.state.value.copyWith(
+      status: UpdateStatus.readyToInstall,
+      latestManifest: manifest,
+      tempApkPath: apkFile.path,
+    );
+
+    when(
+      () => mockIntentHandler.getInstallDiagnostics(),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'installerPackageName': 'com.android.packageinstaller',
+        'installedSignatureSha256': 'AA:BB',
+      }),
+    );
+    when(
+      () => mockIntentHandler.verifyApk(any()),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'valid': true,
+        'reason': 'ok',
+        'packageName': 'com.aiorchestrator',
+        'versionName': '1.12.120',
+        'versionCode': 120,
+        'signatureSha256': 'CC:DD',
+        'fileSha256': '1234',
+        'hasSplitConfig': false,
+        'abi': 'arm64-v8a',
+        'archiveParsed': true,
+      }),
+    );
+
+    final result = await updateManager.prepareInstallIntent();
+
+    expect(result, isFalse);
+    expect(updateManager.state.value.status, UpdateStatus.error);
+    expect(updateManager.state.value.errorMessage, contains('signature'));
+    verifyNever(() => mockIntentHandler.openApkInstaller(any()));
+    await tempDir.delete(recursive: true);
   });
 }
