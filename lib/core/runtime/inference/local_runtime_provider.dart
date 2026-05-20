@@ -49,7 +49,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     if (trimmed.isEmpty) return trimmed;
     try {
       return File(trimmed).absolute.path;
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        '[$_localProviderTag] modelPath normalization fallback for "$trimmed": $error',
+      );
       return trimmed;
     }
   }

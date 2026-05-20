@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 enum RuntimeLifecycleState {
   uninitialized,
   loading,
@@ -89,6 +91,11 @@ class RuntimeStateMachine {
     RuntimeLifecycleState nextState;
     if (event == RuntimeLifecycleEvent.inferenceCompleted &&
         _state == RuntimeLifecycleState.inferencing) {
+      if (_stateBeforeInference == null) {
+        debugPrint(
+          '[AI_RUNTIME_MONITOR] inference_completed without pre-inference state; defaulting to healthy',
+        );
+      }
       nextState = _stateBeforeInference ?? RuntimeLifecycleState.healthy;
       _stateBeforeInference = null;
     } else {
