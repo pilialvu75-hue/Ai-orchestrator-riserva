@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
-import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart'; // Importato per gestire l'errore di timeout
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -116,7 +116,7 @@ class RuntimeSelfTestService {
           firstToken = chunk.text.trim();
           _log('[COMM_TEST_TOKEN] first_token="$firstToken"');
           _log(
-            '[WARMUP_FIRST_TOKEN_OK] session=$selfTestSessionId chars=${firstToken!.length}',
+            '[WARMUP_FIRST_TOKEN_OK] session=$selfTestSessionId chars=${firstToken.length}',
           );
         }
         if (chunk.isFinal) {
@@ -143,7 +143,7 @@ class RuntimeSelfTestService {
       }
 
       final finalText = responseBuffer.toString().trim();
-      final firstTokenReceived = firstToken?.isNotEmpty ?? false;
+      final firstTokenReceived = firstToken.isNotEmpty;
       final livenessOk = streamAliveTicks > 1;
 
       notes.add('3. Token stream: OK (first token emitted)');
