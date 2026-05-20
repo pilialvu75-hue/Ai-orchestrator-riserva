@@ -77,6 +77,8 @@ class UpdateManager {
   static const String _prefDownloadTotalBytes = 'update_download_total_bytes';
   static const int _minValidApkBytes = 64 * 1024;
   static const Duration _downloadTimeout = Duration(minutes: 10);
+  static const Duration _postInstallVerifyPollInterval = Duration(seconds: 2);
+  static const int _postInstallVerifyMaxAttempts = 5;
   static const String _updatesDirectoryName = 'app_updates';
   static const String _defaultApkFileName = 'ai_orchestrator_update.apk';
 
@@ -1471,19 +1473,24 @@ class UpdateManager {
       'expected_version_name=${expectedVersionName ?? '-'} '
       'release_tag=${releaseTag ?? '-'}',
     );
-    await Future<void>.delayed(const Duration(seconds: 2));
-    final post = await _readInstalledIdentity();
-    final changed = beforeInstallVersionCode != null &&
-        post.versionCode != null &&
-        post.versionCode != beforeInstallVersionCode;
-    if (changed) {
-      _logUpdatePostVerifyOk(
-        'installed_after_version_code=${post.versionCode} '
-        'installed_after_version_name=${post.versionName} '
-        'application_id=${post.applicationId}',
-      );
-      return;
+    _InstalledIdentity? post;
+    for (var attempt = 1; attempt <= _postInstallVerifyMaxAttempts; attempt++) {
+      await Future<void>.delayed(_postInstallVerifyPollInterval);
+      post = await _readInstalledIdentity();
+      final changed = beforeInstallVersionCode != null &&
+          post.versionCode != null &&
+          post.versionCode != beforeInstallVersionCode;
+      if (changed) {
+        _logUpdatePostVerifyOk(
+          'attempt=$attempt '
+          'installed_after_version_code=${post.versionCode} '
+          'installed_after_version_name=${post.versionName} '
+          'application_id=${post.applicationId}',
+        );
+        return;
+      }
     }
+    post ??= await _readInstalledIdentity();
     _logUpdatePostVerifyFailed(
       'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
       'installed_after_version_code=${post.versionCode?.toString() ?? '-'} '
@@ -1520,7 +1527,7 @@ class UpdateManager {
 
   int? _extractVersionCodeFromVersion(String version) {
     final buildIndex = version.lastIndexOf('+');
-    if (buildIndex <= 0 || buildIndex == version.length - 1) {
+    if (buildIndex < 0 || buildIndex == version.length - 1) {
       return null;
     }
     return int.tryParse(version.substring(buildIndex + 1));

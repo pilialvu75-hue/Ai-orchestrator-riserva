@@ -610,9 +610,11 @@ class MainActivity : FlutterActivity() {
         packageInfo: android.content.pm.PackageInfo?
     ): Boolean {
         val normalized = fileName.lowercase(Locale.ROOT)
-        val nameSignalsSplit = normalized.contains("split_config") ||
-            normalized.contains("config.") ||
-            normalized.contains(".apks")
+        val nameSignalsSplit =
+            normalized.startsWith("split_config.") ||
+                normalized.contains("-split_config.") ||
+                normalized.contains("_split_config.") ||
+                normalized.startsWith("config.")
         val splitNames = packageInfo?.splitNames
         val packageSignalsSplit = splitNames != null && splitNames.isNotEmpty()
         return nameSignalsSplit || packageSignalsSplit
