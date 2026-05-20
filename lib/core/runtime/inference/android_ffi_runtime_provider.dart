@@ -89,6 +89,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     LocalInferenceModelIds.qwen3_1_7b,
   };
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
+  static int _printCounter = 0;
 
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
@@ -106,6 +107,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<void>? _warmupFuture;
   String? _warmupModelPath;
   final Set<String> _activeInferenceSessions = <String>{};
+  int _lastLoopLogAtMs = 0;
+  static const int _loopLogThrottleMs = 250;
+  int _idleBackoffMs = 24;
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -698,23 +702,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       try {
         while (true) {
           pollIterations++;
+          if (pollIterations % 50 == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 1));
+          }
           final now = DateTime.now();
           final elapsed = now.difference(startedAt);
           final sinceFirstToken =
               firstTokenAt == null ? null : now.difference(firstTokenAt);
           final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
-          _log(
+          _throttledLoopLog(
             '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
             ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
           );
-          _log(
+          _throttledLoopLog(
             '[TOKEN_LOOP] iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
           );
-          _log(
+          _throttledLoopLog(
             '[GENERATION_STEP] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds}'
             ' generated_tokens=$estimatedTokens',
           );
-          _log(
+          _throttledLoopLog(
             '[GENERATION_ALIVE] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds} first_token=${firstTokenAt != null}',
           );
           if (firstTokenAt == null && pollIterations % 25 == 0) {
@@ -901,7 +908,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
           int status;
           try {
-            _log(
+            _throttledLoopLog(
               '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId '
               'iteration=$pollIterations',
             );
@@ -925,7 +932,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
-          _log('[TOKEN_STREAM] poll status iteration=$pollIterations status=$status');
+          _throttledLoopLog(
+            '[TOKEN_STREAM] poll status iteration=$pollIterations status=$status',
+          );
           _log(
             '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations status=$status',
           );
@@ -965,6 +974,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               continue;
             }
             if (piece.isNotEmpty) {
+              _resetIdleBackoff();
               final isFirstToken = firstTokenAt == null;
               firstTokenAt ??= DateTime.now();
               consecutiveInvalidTokens = 0;
@@ -1069,7 +1079,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
-              controller.add(InferenceResponse.token(text: piece, model: modelId));
+              if (!controller.isClosed) {
+                scheduleMicrotask(() {
+                  if (!controller.isClosed) {
+                    controller.add(
+                      InferenceResponse.token(
+                        text: piece,
+                        model: modelId,
+                      ),
+                    );
+                  }
+                });
+              }
               flushWatch.stop();
               _log(
                 '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
@@ -1221,15 +1242,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             // periods when the generation thread has not yet produced output.
             consecutiveIdlePolls++;
             if (consecutiveIdlePolls % 120 == 0) {
-              _log(
+              _throttledLoopLog(
                 '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
                 'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
               );
-              _log(
+              _throttledLoopLog(
                 '[GENERATION_IDLE] idle_polls=$consecutiveIdlePolls idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
               );
             }
-            await Future<void>.delayed(const Duration(milliseconds: 24));
+            _increaseIdleBackoff();
+            await Future<void>.delayed(Duration(milliseconds: _idleBackoffMs));
           }
         }
       } finally {
@@ -1266,7 +1288,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[DART_STREAM_CLOSE] elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations session=$sessionId',
           );
           _log('[STREAM_CLOSE] session=$sessionId');
-          await controller.close();
+          if (!controller.isClosed) {
+            try {
+              await controller.close();
+            } catch (_) {}
+          }
         }
       }
       } catch (error, stackTrace) {
@@ -1368,9 +1394,32 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {
-    final next = _inferenceTail.then((_) => action());
+    final next = _inferenceTail.then((_) async {
+      try {
+        await action();
+      } catch (e, st) {
+        _log('[SERIAL_QUEUE_ERROR] $e $st');
+        rethrow;
+      }
+    });
     _inferenceTail = next.catchError((_) {});
     return next;
+  }
+
+  void _throttledLoopLog(String message) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastLoopLogAtMs >= _loopLogThrottleMs) {
+      _lastLoopLogAtMs = now;
+      _log(message);
+    }
+  }
+
+  void _increaseIdleBackoff() {
+    _idleBackoffMs = (_idleBackoffMs * 2).clamp(24, 200);
+  }
+
+  void _resetIdleBackoff() {
+    _idleBackoffMs = 24;
   }
 
   Future<T> _runNativeCallWithTimeout<T>({
@@ -1574,7 +1623,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ),
       );
       _log('[FFI_STREAM_CLOSE] reason=partial_or_runtime_error');
-      await ctrl.close();
+      if (!ctrl.isClosed) {
+        try {
+          await ctrl.close();
+        } catch (_) {}
+      }
       _log(
         '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=partial_or_runtime_error',
       );
@@ -1678,8 +1731,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   static void _log(String message) {
-    debugPrint('[$_logTag] $message');
     RuntimeEventLog.instance.emit(message);
+    _printCounter++;
+    if (_printCounter % 10 == 0) {
+      final safeMessage =
+          message.length > 220 ? message.substring(0, 220) : message;
+      debugPrint('[$_logTag] $safeMessage');
+    }
   }
 
   static void _logAi(String message) {
