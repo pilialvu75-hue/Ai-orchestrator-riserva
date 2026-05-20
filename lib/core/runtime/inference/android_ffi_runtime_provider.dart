@@ -331,8 +331,27 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
       }
 
-      final modelValidationError =
-          await Isolate.run(() => _validateModelFileForRuntime(modelPath));
+      _log('[ISOLATE_SPAWN_BEGIN] session=$sessionId task=model_validation');
+      String? modelValidationError;
+      try {
+        modelValidationError = await compute<String, String?>(
+          _validateModelFileForRuntimeIsolateEntry,
+          modelPath,
+          debugLabel: 'android_ffi_model_validation',
+        );
+        _log('[ISOLATE_SPAWN_OK] session=$sessionId task=model_validation');
+      } catch (error, stackTrace) {
+        _log('[ISOLATE_SPAWN_FAIL] session=$sessionId task=model_validation error=$error');
+        _log('[FFI_EXCEPTION] session=$sessionId stage=model_validation_isolate stack=$stackTrace');
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'model_validation_isolate_spawn_failure',
+          reason: 'Model validation isolate spawn failed before first FFI call: $error',
+          stage: 'model_validation_isolate',
+          details: '$stackTrace',
+        );
+        return;
+      }
       if (modelValidationError != null) {
         _log('[FFI_BRANCH] session=$sessionId name=model_validation_failed');
         _log('[GGUF] validation=failed path=$modelPath reason=$modelValidationError');
@@ -398,6 +417,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       int nativeSessionId;
       try {
+        _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
         // This flag marks the first native entry point for this inference flow.
         firstFfiInvocationAttempted = true;
@@ -1606,6 +1626,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       handle?.closeSync();
     }
   }
+
+  static String? _validateModelFileForRuntimeIsolateEntry(String modelPath) =>
+      _validateModelFileForRuntime(modelPath);
 
   static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
     try {
