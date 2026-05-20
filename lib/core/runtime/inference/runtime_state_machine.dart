@@ -45,6 +45,9 @@ class RuntimeStateMachine {
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
     },
+    // From loading, two separate transitions are valid:
+    //   loadCompleted → ready   (legacy path, via markReady())
+    //   healthObserved → healthy (new verification-layer path, via markHealthy())
     RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadCompleted,
@@ -53,10 +56,10 @@ class RuntimeStateMachine {
       RuntimeLifecycleEvent.inferenceFailed,
     },
     // Legacy "ready" state: functionally equivalent to "healthy".
+    // Allowed transitions match those of "healthy" exactly so the two states
+    // behave identically for routing purposes.
     RuntimeLifecycleState.ready: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceStarted,
@@ -85,7 +88,6 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.failed: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceFailed,
