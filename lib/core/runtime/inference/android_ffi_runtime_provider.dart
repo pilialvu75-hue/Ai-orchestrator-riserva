@@ -331,23 +331,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
       }
 
-      _log('[ISOLATE_SPAWN_BEGIN] session=$sessionId task=model_validation');
+      // Model file validation runs synchronously on the current isolate.
+      // Using compute()/Isolate.run here would require serialising a closure
+      // that transitively captures `this` (via _inferenceTail: Future<void>),
+      // which is not sendable and throws "Illegal argument in isolate message".
+      // The check reads only 4 bytes from a local file and is effectively
+      // instantaneous, so there is no benefit to offloading it.
+      _log('[MODEL_VALIDATION_BEGIN] session=$sessionId task=model_validation');
       String? modelValidationError;
       try {
-        modelValidationError = await compute<String, String?>(
-          _androidFfiValidateModelFileIsolateEntry,
-          modelPath,
-          debugLabel: 'android_ffi_model_validation',
-        );
-        _log('[ISOLATE_SPAWN_OK] session=$sessionId task=model_validation');
+        modelValidationError = _validateModelFileForRuntime(modelPath);
+        _log('[MODEL_VALIDATION_OK] session=$sessionId task=model_validation');
       } catch (error, stackTrace) {
-        _log('[ISOLATE_SPAWN_FAIL] session=$sessionId task=model_validation error=$error');
-        _log('[FFI_EXCEPTION] session=$sessionId stage=model_validation_isolate stack=$stackTrace');
+        _log('[MODEL_VALIDATION_FAIL] session=$sessionId task=model_validation error=$error');
+        _log('[FFI_EXCEPTION] session=$sessionId stage=model_validation stack=$stackTrace');
         await fatalEarlyExit(
           sessionId,
-          branch: 'model_validation_isolate_spawn_failure',
-          reason: 'Model validation isolate spawn failed before first FFI call: $error',
-          stage: 'model_validation_isolate',
+          branch: 'model_validation_failed_unexpected',
+          reason: 'Model validation threw unexpectedly before first FFI call: $error',
+          stage: 'model_validation',
           details: '$stackTrace',
         );
         return;
@@ -1731,6 +1733,3 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
 }
 
-/// Top-level isolate entry for model validation to guarantee zero instance capture.
-String? _androidFfiValidateModelFileIsolateEntry(String modelPath) =>
-    AndroidFfiRuntimeProvider._validateModelFileForRuntime(modelPath);
