@@ -1,58 +1,56 @@
 import 'dart:async';
 import 'dart:ffi';
-import 'dart:io';
 import 'dart:isolate';
 
-import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
-import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
-import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
-import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart';
-import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
-import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
-import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
-import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
-import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Statistiche memoria
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
+
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
+
+enum WorkerState { idle, ready, generating, degraded, recovering, failed }
+
 class MemoryStats {
-  final int dartHeapBytes;
   final int rssBytes;
-  final int systemTotalBytes;
-  final int systemAvailBytes;
+  final int kvCacheBytes;
+  final int mmapBytes;
   final bool isLowMemory;
+  final double fragmentationScore;
   final DateTime timestamp;
 
   const MemoryStats({
-    this.dartHeapBytes = 0,
     this.rssBytes = 0,
-    this.systemTotalBytes = 0,
-    this.systemAvailBytes = 0,
+    this.kvCacheBytes = 0,
+    this.mmapBytes = 0,
     this.isLowMemory = false,
+    this.fragmentationScore = 0.0,
     required this.timestamp,
   });
-
-  Map<String, dynamic> toJson() => {
-        'rssMB': (rssBytes / 1024 / 1024).toStringAsFixed(2),
-        'systemAvailMB': (systemAvailBytes / 1024 / 1024).toStringAsFixed(2),
-        'lowMemory': isLowMemory,
-      };
 }
 
-enum _WorkerCommand { loadModel, startGeneration, cancel, freeModel, dispose, heartbeat }
+enum _WorkerCommand {
+  loadModel,
+  startGeneration,
+  cancel,
+  freeModel,
+  dispose,
+  heartbeat
+}
 
 class _WorkerMessage {
   final _WorkerCommand command;
   final dynamic data;
   final SendPort? replyPort;
+
   const _WorkerMessage(this.command, {this.data, this.replyPort});
 }
 
@@ -64,52 +62,65 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _developerModeProvider = developerModeProvider ?? (() => false),
         super(developerModeProvider: developerModeProvider);
 
-  static const _logTag = 'AI_RUNTIME';
+  static const _logTag = 'AI_RUNTIME_V5_LITE';
+
   static const int _safeMaxTokens = 128;
-  static const int _maxOutputChars = 32000;
-  static const Duration _generationTimeout = Duration(seconds: 90);
-  static const Duration _modelLoadTimeout = Duration(seconds: 60);
-  static const Duration _heartbeatInterval = Duration(seconds: 10);
+  static const Duration _heartbeatInterval = Duration(seconds: 8);
 
-  static const MethodChannel _memoryChannel = MethodChannel('ai_orchestrator/memory');
+  static const MethodChannel _memoryChannel =
+      MethodChannel('ai_orchestrator/memory');
 
-  final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
   final RuntimeStateMachine runtimeStateMachine;
   final bool Function() _developerModeProvider;
 
-  bool get _isDeveloperMode => _developerModeProvider();
+  Isolate? _worker;
+  SendPort? _sendPort;
 
-  Isolate? _workerIsolate;
-  SendPort? _workerSendPort;
   String? _loadedModelPath;
-  bool _workerBusy = false;
-  Timer? _heartbeatTimer;
-  final Set<String> _activeSessions = <String>{};
-  Future<void> _inferenceTail = Future<void>.value();
 
-  static void _safeLog(String message) {
-    try {
-      debugPrint('[$_logTag] $message');
-      RuntimeEventLog.instance.emit(message);
-    } catch (_) {}
+  Timer? _heartbeat;
+
+  bool _isInferenceActive = false;
+  bool _isRestarting = false;
+
+  final Set<String> _activeSessions = {};
+
+  Future<void> _queue = Future.value();
+
+  WorkerState _state = WorkerState.idle;
+
+  // ─────────────────────────────────────────────────────────────
+  // LOG
+  // ─────────────────────────────────────────────────────────────
+  static void _log(String msg) {
+    debugPrint('[$_logTag] $msg');
+    RuntimeEventLog.instance.emit(msg);
   }
 
-  static void _safeAdd(StreamController<InferenceResponse> controller, InferenceResponse response) {
-    if (controller.isClosed) return;
-    try {
-      controller.add(response);
-    } catch (_) {}
+  static void _emit(StreamController<InferenceResponse> c, InferenceResponse r) {
+    if (!c.isClosed) c.add(r);
   }
 
-  // ── Monitoraggio Memoria ─────────────────────────────────────────────────
-  Future<MemoryStats> getMemoryStats() async {
+  // ─────────────────────────────────────────────────────────────
+  // MEMORY (SAFE)
+  // ─────────────────────────────────────────────────────────────
+  Future<MemoryStats> _memory() async {
     try {
-      final native = await _getNativeMemoryInfo();
+      final native =
+          await _memoryChannel.invokeMethod<Map>('getMemoryInfo') ?? {};
+
+      final kv = native['kvCache'] ?? 0;
+      final mmap = native['mmap'] ?? 0;
+      final rss = native['rss'] ?? 0;
+
+      final frag = kv > 0 ? (kv / (kv + mmap + 1)).clamp(0.0, 1.0) : 0.0;
+
       return MemoryStats(
-        rssBytes: native['rss'] ?? ProcessInfo.currentRss,
-        systemTotalBytes: native['total'] ?? 0,
-        systemAvailBytes: native['avail'] ?? 0,
+        rssBytes: rss,
+        kvCacheBytes: kv,
+        mmapBytes: mmap,
         isLowMemory: native['lowMemory'] ?? false,
+        fragmentationScore: frag,
         timestamp: DateTime.now(),
       );
     } catch (_) {
@@ -117,156 +128,243 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  Future<Map<String, dynamic>> _getNativeMemoryInfo() async {
-    try {
-      final result = await _memoryChannel.invokeMethod<Map>('getMemoryInfo');
-      return result ?? {};
-    } catch (_) {
-      return {};
+  void _policy(MemoryStats s) {
+    if (_isInferenceActive) return;
+
+    if (s.isLowMemory || s.fragmentationScore > 0.80) {
+      _log('[POLICY] degradation triggered');
+      _safeRestart();
     }
   }
 
-  void _logMemory(String context) async {
-    final stats = await getMemoryStats();
-    _safeLog('[MEMORY][$context] ${stats.toJson()}');
-    monitor.updateMemoryStats(stats);
-  }
+  // ─────────────────────────────────────────────────────────────
+  // WORKER LIFECYCLE
+  // ─────────────────────────────────────────────────────────────
+  Future<void> _ensureWorker() async {
+    if (_worker != null && _sendPort != null) return;
 
-  // ── Supervisor ───────────────────────────────────────────────────────────
-  void _startSupervisor() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) => _checkWorkerHealth());
-  }
+    final rp = ReceivePort();
 
-  Future<void> _checkWorkerHealth() async {
-    if (_workerSendPort == null || _workerBusy) return;
-    try {
-      final port = ReceivePort();
-      _workerSendPort!.send(_WorkerMessage(_WorkerCommand.heartbeat, replyPort: port.sendPort));
-      await port.first.timeout(const Duration(seconds: 6));
-      port.close();
-    } catch (_) {
-      _safeLog('[SUPERVISOR] Worker unresponsive - restarting');
-      await _restartWorker();
-    }
-  }
+    _worker = await Isolate.spawn(_entry, rp.sendPort);
 
-  Future<void> _restartWorker() async {
-    _disposeWorker();
-    await _ensureWorkerIsolate();
-  }
-
-  // ── Worker Management ────────────────────────────────────────────────────
-  Future<void> _ensureWorkerIsolate() async {
-    if (_workerIsolate != null && _workerSendPort != null) return;
-
-    final receivePort = ReceivePort();
-    _workerIsolate = await Isolate.spawn(
-      _runtimeWorkerEntryPoint,
-      receivePort.sendPort,
-      errorsAreFatal: false,
-    );
-
-    final completer = Completer<SendPort>();
-    receivePort.listen((msg) {
-      if (msg is SendPort) completer.complete(msg);
+    final c = Completer<SendPort>();
+    rp.listen((m) {
+      if (m is SendPort) c.complete(m);
     });
 
-    _workerSendPort = await completer.future.timeout(const Duration(seconds: 10));
-    _startSupervisor();
-    _safeLog('[WORKER] Isolate ready');
+    _sendPort = await c.future;
+    _state = WorkerState.ready;
+
+    _startHeartbeat();
   }
 
   void _disposeWorker() {
-    _heartbeatTimer?.cancel();
-    _workerSendPort?.send(_WorkerMessage(_WorkerCommand.dispose));
-    _workerIsolate?.kill(priority: Isolate.immediate);
-    _workerIsolate = null;
-    _workerSendPort = null;
+    _heartbeat?.cancel();
+
+    _sendPort?.send(_WorkerMessage(_WorkerCommand.dispose));
+
+    _worker?.kill(priority: Isolate.immediate);
+
+    _worker = null;
+    _sendPort = null;
     _loadedModelPath = null;
+
+    _state = WorkerState.idle;
   }
 
-  // ── Persistent Model + Inference ─────────────────────────────────────────
+  Future<void> _safeRestart() async {
+    if (_isRestarting || _isInferenceActive) return;
+
+    _isRestarting = true;
+
+    try {
+      _disposeWorker();
+      await _ensureWorker();
+    } finally {
+      _isRestarting = false;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // HEARTBEAT
+  // ─────────────────────────────────────────────────────────────
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+
+    _heartbeat = Timer.periodic(_heartbeatInterval, (_) async {
+      if (_sendPort == null || _isRestarting) return;
+
+      try {
+        final rp = ReceivePort();
+
+        _sendPort!.send(
+          _WorkerMessage(_WorkerCommand.heartbeat, replyPort: rp.sendPort),
+        );
+
+        await rp.first.timeout(const Duration(seconds: 5));
+
+        rp.close();
+      } catch (_) {
+        _log('[HEARTBEAT] worker lost');
+        _safeRestart();
+      }
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // INFERENCE (SAFE SERIALIZED)
+  // ─────────────────────────────────────────────────────────────
   @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
     final controller = StreamController<InferenceResponse>();
-    bool terminalSent = false;
 
     () async {
-      await _runInferenceSerially(() async {
-        final sessionId = request.sessionId.trim().isEmpty ? 'unknown' : request.sessionId.trim();
-        if (!_claimSession(sessionId)) return;
+      await _run(() async {
+        if (_isInferenceActive) return;
+        _isInferenceActive = true;
+
+        final session = request.sessionId.trim().isEmpty
+            ? 'default'
+            : request.sessionId;
+
+        if (!_activeSessions.add(session)) return;
 
         try {
-          await _ensureWorkerIsolate();
-          _logMemory('before_inference');
+          await _ensureWorker();
 
           final modelPath = request.modelPath!;
           final modelId = request.modelId!;
 
-          // Persistent Model
+          // load model only if needed
           if (_loadedModelPath != modelPath) {
-            _safeLog('[MODEL] Loading new model: $modelPath');
-            final loadPort = ReceivePort();
-            _workerSendPort!.send(_WorkerMessage(_WorkerCommand.loadModel,
-                data: modelPath, replyPort: loadPort.sendPort));
-            if (await loadPort.first != 0) throw Exception('Model load failed');
-            loadPort.close();
+            final rp = ReceivePort();
+
+            _sendPort!.send(
+              _WorkerMessage(
+                _WorkerCommand.loadModel,
+                data: modelPath,
+                replyPort: rp.sendPort,
+              ),
+            );
+
+            final res = await rp.first;
+
+            rp.close();
+
+            if (res != 0) throw Exception('model load failed');
+
             _loadedModelPath = modelPath;
           }
 
-          // Start Generation
-          final prompt = _composePrompt(request, modelId: modelId);
-          final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
-          final streamPort = ReceivePort();
+          final prompt = LocalPromptTemplates.compose(
+            modelId: modelId,
+            prompt: request.prompt,
+            systemPrompt: request.systemPrompt,
+            context: request.context,
+          );
 
+          final streamPort = ReceivePort();
           final startPort = ReceivePort();
-          _workerSendPort!.send(_WorkerMessage(_WorkerCommand.startGeneration,
+
+          _sendPort!.send(
+            _WorkerMessage(
+              _WorkerCommand.startGeneration,
               data: {
                 'prompt': prompt,
-                'maxTokens': maxTokens,
+                'maxTokens': request.maxTokens.clamp(1, _safeMaxTokens),
                 'temperature': request.temperature,
                 'streamPort': streamPort.sendPort,
               },
-              replyPort: startPort.sendPort));
+              replyPort: startPort.sendPort,
+            ),
+          );
 
-          if (await startPort.first != 0) throw Exception('Start generation failed');
+          if (await startPort.first != 0) {
+            throw Exception('generation failed');
+          }
+
           startPort.close();
 
-          cancellationToken.onCancel(() => _workerSendPort?.send(_WorkerMessage(_WorkerCommand.cancel)));
+          cancellationToken.onCancel(() {
+            _sendPort?.send(_WorkerMessage(_WorkerCommand.cancel));
+          });
 
-          await for (final event in streamPort) {
+          final buffer = <String>[];
+          Timer? timer;
+
+          void flush() {
+            if (buffer.isEmpty || controller.isClosed) return;
+            _emit(
+              controller,
+              InferenceResponse.token(
+                text: buffer.join(),
+                model: modelId,
+              ),
+            );
+            buffer.clear();
+          }
+
+          await for (final e in streamPort) {
             if (controller.isClosed) break;
-            if (event is! Map<String, dynamic>) continue;
+            if (e is! Map) continue;
 
-            if (event['type'] == 'token') {
-              _safeAdd(controller, InferenceResponse.token(text: event['text'], model: modelId));
-            } else if (event['type'] == 'final') {
-              if (!terminalSent) {
-                terminalSent = true;
-                _safeAdd(controller, InferenceResponse.finalChunk(
-                  text: event['text'] ?? '',
-                  tokensGenerated: event['tokens'] ?? 0,
-                  model: modelId,
-                ));
+            final type = e['type'];
+
+            if (type == 'token') {
+              buffer.add(e['text']);
+
+              timer ??= Timer(const Duration(milliseconds: 20), flush);
+
+              if (buffer.length >= 8) {
+                timer?.cancel();
+                flush();
               }
+            }
+
+            if (type == 'final') {
+              timer?.cancel();
+              flush();
+
+              _emit(
+                controller,
+                InferenceResponse.finalChunk(
+                  text: e['text'] ?? '',
+                  tokensGenerated: e['tokens'] ?? 0,
+                  model: modelId,
+                ),
+              );
+
               break;
-            } else if (event['type'] == 'error') {
-              if (!terminalSent) _safeAdd(controller, InferenceResponse.error(event['message'] ?? 'Error'));
+            }
+
+            if (type == 'error') {
+              timer?.cancel();
+              flush();
+
+              _emit(
+                controller,
+                InferenceResponse.error(e['message'] ?? 'error'),
+              );
+
               break;
             }
           }
         } catch (e) {
-          _safeLog('[INFERENCE_ERROR] $e');
-          if (!terminalSent) _safeAdd(controller, InferenceResponse.error(e.toString()));
+          _log('[ERROR] $e');
+
+          _emit(controller, InferenceResponse.error(e.toString()));
         } finally {
-          await _ackFreeModel(); // Solo cleanup leggero, model resta residente
-          _logMemory('after_inference');
-          _releaseSession(sessionId);
-          if (!controller.isClosed) await controller.close().catchError((_) {});
+          _isInferenceActive = false;
+          _activeSessions.remove(session);
+
+          await _memory().then(_policy);
+
+          if (!controller.isClosed) {
+            await controller.close();
+          }
         }
       });
     }();
@@ -274,43 +372,114 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     return controller.stream;
   }
 
-  Future<void> _ackFreeModel() async {
-    if (_workerSendPort == null) return;
-    final port = ReceivePort();
-    try {
-      _workerSendPort!.send(_WorkerMessage(_WorkerCommand.freeModel, replyPort: port.sendPort));
-      await port.first.timeout(const Duration(seconds: 4));
-    } catch (_) {} finally {
-      port.close();
+  Future<void> _run(Future<void> Function() fn) async {
+    final prev = _queue;
+    _queue = prev.then((_) => fn()).catchError((_) {});
+    await _queue;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // WORKER ENTRY
+  // ─────────────────────────────────────────────────────────────
+  static void _entry(SendPort main) {
+    final rp = ReceivePort();
+    main.send(rp.sendPort);
+
+    LlamaBridgeBindings? bindings;
+    Pointer<Uint8>? buf;
+
+    rp.listen((msg) async {
+      if (msg is! _WorkerMessage) return;
+
+      final reply = msg.replyPort;
+
+      try {
+        switch (msg.command) {
+          case _WorkerCommand.loadModel:
+            final lib = LlamaFfiLoader.tryLoadBridgeLibrary();
+            bindings = lib?.bindings;
+            reply?.send(bindings?.loadModel(msg.data) ?? -1);
+            break;
+
+          case _WorkerCommand.startGeneration:
+            final d = msg.data as Map;
+            final sp = d['streamPort'] as SendPort;
+
+            buf ??= calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+
+            final res = bindings?.startGeneration(
+                  d['prompt'],
+                  d['maxTokens'],
+                  d['temperature'],
+                ) ??
+                -1;
+
+            reply?.send(res);
+
+            if (res == 0) {
+              await _loop(bindings!, buf!, sp);
+            }
+            break;
+
+          case _WorkerCommand.cancel:
+            bindings?.cancel();
+            reply?.send(true);
+            break;
+
+          case _WorkerCommand.freeModel:
+            bindings?.freeModel();
+            reply?.send(true);
+            break;
+
+          case _WorkerCommand.heartbeat:
+            reply?.send(true);
+            break;
+
+          case _WorkerCommand.dispose:
+            bindings?.freeModel();
+            if (buf != null) calloc.free(buf!);
+            rp.close();
+            Isolate.exit();
+        }
+      } catch (_) {
+        reply?.send(-1);
+      }
+    });
+  }
+
+  static Future<void> _loop(
+    LlamaBridgeBindings b,
+    Pointer<Uint8> buf,
+    SendPort sp,
+  ) async {
+    final start = DateTime.now();
+    int tokens = 0;
+
+    while (true) {
+      if (DateTime.now().difference(start) >
+          const Duration(seconds: 90)) {
+        sp.send({'type': 'error', 'message': 'timeout'});
+        break;
+      }
+
+      final s = b.pollToken(buf);
+
+      if (s == 1) {
+        final text = buf.cast<Utf8>().toDartString();
+        tokens++;
+        sp.send({'type': 'token', 'text': text});
+      } else if (s == 2) {
+        sp.send({'type': 'final', 'tokens': tokens});
+        break;
+      } else {
+        await Future.delayed(const Duration(milliseconds: 8));
+      }
     }
-  }
-
-  Future<void> _runInferenceSerially(Future<void> Function() action) async {
-    final previous = _inferenceTail;
-    _inferenceTail = previous.then((_) => action()).catchError((_) {});
-    await _inferenceTail;
-  }
-
-  bool _claimSession(String id) {
-    if (_activeSessions.contains(id)) return false;
-    _activeSessions.add(id);
-    return true;
-  }
-
-  void _releaseSession(String id) => _activeSessions.remove(id);
-
-  String _composePrompt(InferenceRequest request, {required String modelId}) {
-    return LocalPromptTemplates.compose(
-      modelId: modelId,
-      prompt: request.prompt,
-      systemPrompt: request.systemPrompt,
-      context: request.context,
-    );
   }
 
   @override
   void dispose() {
-    _heartbeatTimer?.cancel();
+    _heartbeat?.cancel();
     _disposeWorker();
     super.dispose();
   }
