@@ -335,7 +335,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       String? modelValidationError;
       try {
         modelValidationError = await compute<String, String?>(
-          _validateModelFileIsolateEntry,
+          _androidFfiValidateModelFileIsolateEntry,
           modelPath,
           debugLabel: 'android_ffi_model_validation',
         );
@@ -1296,6 +1296,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[FFI_FATAL_EARLY_EXIT] session=$sessionId reason=stream_exit_before_first_ffi'
             ' controller_closed=${controller.isClosed}',
           );
+          _log(
+            '[PRE_FFI_ISOLATE_FAILURE_ASSERT] session=$sessionId first_ffi_attempted=false'
+            ' fatal=true',
+          );
         }
         _releaseInferenceSlot(sessionId);
         _log('[SESSION] end session=$sessionId');
@@ -1627,10 +1631,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  /// Static isolate entry for `compute()` to avoid capturing unsendable async context.
-  static String? _validateModelFileIsolateEntry(String modelPath) =>
-      _validateModelFileForRuntime(modelPath);
-
   static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
     try {
       final value = bindings.sessionLastError(sessionId);
@@ -1730,3 +1730,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
 }
+
+/// Top-level isolate entry for model validation to guarantee zero instance capture.
+String? _androidFfiValidateModelFileIsolateEntry(String modelPath) =>
+    AndroidFfiRuntimeProvider._validateModelFileForRuntime(modelPath);
