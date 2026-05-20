@@ -682,7 +682,7 @@ class UpdateManager {
         'sha256=${verification.signatureSha256 ?? '-'}',
       );
       if (verification.hasSplitConfig == true) {
-        final message = 'Split APK artifact is not supported by current installer flow';
+        const message = 'Split APK artifact is not supported by current installer flow';
         _logStructuredUpdateError(
           action: 'prepare_install_intent',
           detectedVersion: detectedVersion,
@@ -742,7 +742,7 @@ class UpdateManager {
               verification.signatureSha256 != null &&
               installedIdentity.signatureSha256 != verification.signatureSha256;
       if (signaturesDiffer) {
-        final message = 'APK signature does not match installed app signature';
+        const message = 'APK signature does not match installed app signature';
         _logSignatureMismatch(
           'reason=signature_fingerprint_mismatch '
           'current=${installedIdentity.signatureSha256} '

@@ -213,7 +213,7 @@ class _ModelsPageState extends State<ModelsPage> {
             Text(
               l10n.t('new_model_version_body'),
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.7), fontSize: 13),
+                  color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
             ),
             const SizedBox(height: 10),
             for (final model in updatableModels)
@@ -246,7 +246,7 @@ class _ModelsPageState extends State<ModelsPage> {
             Text(
               l10n.t('update_model_confirm'),
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.6), fontSize: 12),
+                  color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
             ),
           ],
         ),
@@ -423,7 +423,7 @@ class _ModelsPageState extends State<ModelsPage> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
               children: [
-                _ModelSectionHeader(
+                const _ModelSectionHeader(
                   title: 'Mobile models (Android / iOS)',
                   subtitle:
                       'Lightweight quantized GGUF models filtered for mobile runtime compatibility.',
@@ -459,7 +459,7 @@ class _ModelsPageState extends State<ModelsPage> {
                         : null,
                   ),
                 const SizedBox(height: 10),
-                _ModelSectionHeader(
+                const _ModelSectionHeader(
                   title: 'Desktop models (Windows / Linux / macOS)',
                   subtitle:
                       'Large/high-context models filtered for desktop-class runtime capacity.',
@@ -541,7 +541,7 @@ class _ModelSectionHeader extends StatelessWidget {
           Text(
             subtitle,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.56),
+              color: Colors.white.withValues(alpha: 0.56),
               fontSize: 11,
             ),
           ),
@@ -617,7 +617,7 @@ class _ModelConfigTile extends StatelessWidget {
         border: Border.all(
           color: isSelected
               ? const Color(0xFF8AB4F8)
-              : Colors.white.withOpacity(0.08),
+              : Colors.white.withValues(alpha: 0.08),
           width: isSelected ? 1.5 : 1,
         ),
       ),
@@ -643,7 +643,7 @@ class _ModelConfigTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.15),
+                    color: statusColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -661,7 +661,7 @@ class _ModelConfigTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8AB4F8).withOpacity(0.18),
+                    color: const Color(0xFF8AB4F8).withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -679,7 +679,7 @@ class _ModelConfigTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF6ECBF5).withOpacity(0.15),
+                    color: const Color(0xFF6ECBF5).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -697,7 +697,7 @@ class _ModelConfigTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF81C784).withOpacity(0.15),
+                    color: const Color(0xFF81C784).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -715,14 +715,14 @@ class _ModelConfigTile extends StatelessWidget {
           Text(
             model.description,
             style: TextStyle(
-                color: Colors.white.withOpacity(0.5), fontSize: 12),
+                color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
           ),
           if (model.isImportedModel && model.localPath != null) ...[
             const SizedBox(height: 6),
             Text(
               '${l10n.t('local_model_path')}: ${model.localPath}',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.38),
+                color: Colors.white.withValues(alpha: 0.38),
                 fontSize: 11,
               ),
             ),

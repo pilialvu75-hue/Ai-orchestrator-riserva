@@ -56,7 +56,7 @@ class _ModelsPageState extends State<ModelsPage> {
                 'Paste a direct download URL from Hugging Face, Ollama Hub '
                 'or any other GGUF host.',
                 style:
-                    TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13),
+                    TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -107,9 +107,9 @@ class _ModelsPageState extends State<ModelsPage> {
 
   InputDecoration _inputDecoration(String label) => InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+        labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
         enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
           borderRadius: BorderRadius.circular(8),
         ),
         focusedBorder: const OutlineInputBorder(
@@ -341,7 +341,7 @@ class _ModelSectionHeader extends StatelessWidget {
           Text(
             subtitle,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.56),
+              color: Colors.white.withValues(alpha: 0.56),
               fontSize: 11,
             ),
           ),

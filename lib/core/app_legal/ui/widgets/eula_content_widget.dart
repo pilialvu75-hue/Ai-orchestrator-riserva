@@ -41,7 +41,7 @@ class _EulaText extends StatelessWidget {
       height: 1.5,
     );
 
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(

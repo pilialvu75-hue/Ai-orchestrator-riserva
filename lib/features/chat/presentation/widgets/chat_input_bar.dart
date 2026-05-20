@@ -165,12 +165,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                const Color(0xFF171F32).withOpacity(0.98),
-                const Color(0xFF0F131D).withOpacity(0.98),
+                const Color(0xFF171F32).withValues(alpha: 0.98),
+                const Color(0xFF0F131D).withValues(alpha: 0.98),
               ],
             ),
             borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: const Color(0xFF8AB4F8).withOpacity(0.24)),
+            border: Border.all(color: const Color(0xFF8AB4F8).withValues(alpha: 0.24)),
             boxShadow: const <BoxShadow>[
               BoxShadow(
                 color: Color(0x1F60A5FA),
@@ -258,11 +258,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             style: IconButton.styleFrom(
                               backgroundColor: _canSubmit
                                   ? const Color(0xFF8AB4F8)
-                                  : Colors.white.withOpacity(0.08),
+                                  : Colors.white.withValues(alpha: 0.08),
                               foregroundColor:
                                   _canSubmit ? Colors.black : Colors.white30,
                               shadowColor:
-                                  const Color(0xFF8AB4F8).withOpacity(0.34),
+                                  const Color(0xFF8AB4F8).withValues(alpha: 0.34),
                               elevation: _canSubmit ? 12 : 0,
                             ),
                             onPressed: _canSubmit ? _submit : null,
@@ -295,12 +295,12 @@ class _MultimodalMenuButton extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF1D2740).withOpacity(0.98),
-              const Color(0xFF151B28).withOpacity(0.98),
+              const Color(0xFF1D2740).withValues(alpha: 0.98),
+              const Color(0xFF151B28).withValues(alpha: 0.98),
             ],
           ),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF8AB4F8).withOpacity(0.22)),
+          border: Border.all(color: const Color(0xFF8AB4F8).withValues(alpha: 0.22)),
         ),
         child: const Icon(Icons.add, color: Colors.white70),
       ),
@@ -323,9 +323,9 @@ class _AttachmentPreviewCard extends StatelessWidget {
       width: 164,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFF111827).withOpacity(0.96),
+        color: const Color(0xFF111827).withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         children: [
@@ -350,7 +350,7 @@ class _AttachmentPreviewCard extends StatelessWidget {
                 Text(
                   _uploadLabel(attachment.uploadState),
                   style: TextStyle(
-                    color: const Color(0xFF8AB4F8).withOpacity(0.88),
+                    color: const Color(0xFF8AB4F8).withValues(alpha: 0.88),
                     fontSize: 11,
                   ),
                 ),
@@ -454,9 +454,9 @@ class _AttachmentPickerSheet extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 18),
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
       decoration: BoxDecoration(
-        color: const Color(0xFF10141D).withOpacity(0.98),
+        color: const Color(0xFF10141D).withValues(alpha: 0.98),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x2915B6FF),
@@ -474,7 +474,7 @@ class _AttachmentPickerSheet extends StatelessWidget {
               width: 44,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
+                color: Colors.white.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -543,12 +543,12 @@ class _AttachmentActionTile extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF172134).withOpacity(0.96),
-              const Color(0xFF111827).withOpacity(0.96),
+              const Color(0xFF172134).withValues(alpha: 0.96),
+              const Color(0xFF111827).withValues(alpha: 0.96),
             ],
           ),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withOpacity(0.06)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

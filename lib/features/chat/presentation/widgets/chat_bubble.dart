@@ -54,7 +54,7 @@ class ChatBubble extends StatelessWidget {
                       bottomLeft: Radius.circular(_isUser ? 22 : 8),
                       bottomRight: Radius.circular(_isUser ? 8 : 22),
                     ),
-                    border: Border.all(color: Colors.white.withOpacity(0.06)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -119,9 +119,9 @@ class _AttachmentBubbleCard extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.04),
+        color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         children: [
@@ -145,7 +145,7 @@ class _AttachmentBubbleCard extends StatelessWidget {
                 Text(
                   _uploadLabel(attachment.uploadState),
                   style: TextStyle(
-                    color: const Color(0xFF8AB4F8).withOpacity(0.88),
+                    color: const Color(0xFF8AB4F8).withValues(alpha: 0.88),
                     fontSize: 11,
                   ),
                 ),
@@ -223,8 +223,8 @@ class _Avatar extends StatelessWidget {
         shape: BoxShape.circle,
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF1A2235).withOpacity(0.98),
-            const Color(0xFF10131A).withOpacity(0.98),
+            const Color(0xFF1A2235).withValues(alpha: 0.98),
+            const Color(0xFF10131A).withValues(alpha: 0.98),
           ],
         ),
       ),

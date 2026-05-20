@@ -116,7 +116,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
             children: [
               Text(
                 l10n.t('preferred_release_channel'),
-                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -127,7 +127,7 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
                     label: Text(channel.name),
                     selected: state.preferredChannel == channel,
                     onSelected: (_) => _updateManager.setPreferredChannel(channel),
-                    selectedColor: const Color(0xFF8AB4F8).withOpacity(0.25),
+                    selectedColor: const Color(0xFF8AB4F8).withValues(alpha: 0.25),
                     labelStyle: TextStyle(
                       color: state.preferredChannel == channel
                           ? const Color(0xFF8AB4F8)
@@ -292,8 +292,8 @@ class _UpdateBanner extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: critical
-            ? const Color(0xFFFF8A80).withOpacity(0.12)
-            : const Color(0xFF69F0AE).withOpacity(0.10),
+            ? const Color(0xFFFF8A80).withValues(alpha: 0.12)
+            : const Color(0xFF69F0AE).withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: critical ? const Color(0xFFFF8A80) : const Color(0xFF69F0AE),

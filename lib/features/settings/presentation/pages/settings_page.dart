@@ -170,8 +170,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  const Color(0xFF171E33).withOpacity(0.96),
-                  const Color(0xFF0D0D0D).withOpacity(0.94),
+                  const Color(0xFF171E33).withValues(alpha: 0.96),
+                  const Color(0xFF0D0D0D).withValues(alpha: 0.94),
                 ],
               ),
             ),
@@ -191,7 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  const Color(0xFF101526).withOpacity(0.5),
+                  const Color(0xFF101526).withValues(alpha: 0.5),
                   const Color(0xFF0D0D0D),
                 ],
               ),
@@ -364,7 +364,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     'Editor by Roby P.',
                     style: TextStyle(
                       color:
-                          Colors.white.withOpacity(0.4),
+                          Colors.white.withValues(alpha: 0.4),
                       fontSize: 12,
                       letterSpacing: 0.3,
                     ),
@@ -499,18 +499,18 @@ class _SettingsHero extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             const Color(0xFF161D2F)
-                .withOpacity(0.98),
+                .withValues(alpha: 0.98),
             const Color(0xFF101116)
-                .withOpacity(0.96),
+                .withValues(alpha: 0.96),
           ],
         ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: accent.withOpacity(0.22),
+          color: accent.withValues(alpha: 0.22),
         ),
         boxShadow: [
           BoxShadow(
-            color: accent.withOpacity(0.12),
+            color: accent.withValues(alpha: 0.12),
             blurRadius: 28,
             spreadRadius: 1,
           ),
@@ -526,7 +526,7 @@ class _SettingsHero extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: accent.withOpacity(0.14),
+                  color: accent.withValues(alpha: 0.14),
                   borderRadius:
                       BorderRadius.circular(14),
                 ),
@@ -563,7 +563,7 @@ class _SettingsHero extends StatelessWidget {
                           ),
                       style: TextStyle(
                         color: Colors.white
-                            .withOpacity(0.6),
+                            .withValues(alpha: 0.6),
                         fontSize: 12,
                         height: 1.35,
                       ),
@@ -574,7 +574,7 @@ class _SettingsHero extends StatelessWidget {
                           ? 'Running Runtime Self-Test...'
                           : 'Hidden action: long-press this card to run Runtime Self-Test.',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 11,
                       ),
                     ),
@@ -594,12 +594,12 @@ class _SettingsHero extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color:
-                  accent.withOpacity(0.12),
+                  accent.withValues(alpha: 0.12),
               borderRadius:
                   BorderRadius.circular(16),
               border: Border.all(
                 color:
-                    accent.withOpacity(0.2),
+                    accent.withValues(alpha: 0.2),
               ),
             ),
             child: Row(
@@ -615,7 +615,7 @@ class _SettingsHero extends StatelessWidget {
                     boxShadow: [
                       BoxShadow(
                         color: accent
-                            .withOpacity(0.5),
+                            .withValues(alpha: 0.5),
                         blurRadius: 12,
                         spreadRadius: 1,
                       ),
@@ -647,7 +647,7 @@ class _SettingsHero extends StatelessWidget {
               'elapsed=${_formatElapsed(runtimeState.elapsed)}',
             ].join(' · '),
             style: TextStyle(
-              color: Colors.white.withOpacity(0.62),
+              color: Colors.white.withValues(alpha: 0.62),
               fontSize: 11,
               height: 1.3,
             ),
@@ -682,19 +682,14 @@ class _ModuleCard extends StatelessWidget {
             BorderRadius.circular(14),
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(
+          padding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 16,
           ),
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color:
-                  Colors.white.withOpacity(
-                0.08,
-              ),
+              color: Colors.white.withValues(alpha: 0.08),
             ),
           ),
           child: Row(
@@ -705,7 +700,7 @@ class _ModuleCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(
                     0xFF8AB4F8,
-                  ).withOpacity(0.12),
+                  ).withValues(alpha: 0.12),
                   borderRadius:
                       BorderRadius.circular(
                     11,
@@ -742,7 +737,7 @@ class _ModuleCard extends StatelessWidget {
                       subtitle,
                       style: TextStyle(
                         color: Colors.white
-                            .withOpacity(0.5),
+                            .withValues(alpha: 0.5),
                         fontSize: 12,
                       ),
                     ),
@@ -753,7 +748,7 @@ class _ModuleCard extends StatelessWidget {
               Icon(
                 Icons.chevron_right,
                 color: Colors.white
-                    .withOpacity(0.3),
+                    .withValues(alpha: 0.3),
                 size: 20,
               ),
             ],
@@ -788,8 +783,8 @@ class _DeveloperModeCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: enabled
-                ? accent.withOpacity(0.35)
-                : Colors.white.withOpacity(0.08),
+                ? accent.withValues(alpha: 0.35)
+                : Colors.white.withValues(alpha: 0.08),
           ),
         ),
         child: Row(
@@ -798,7 +793,7 @@ class _DeveloperModeCard extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.12),
+                color: accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(11),
               ),
               child: const Icon(
@@ -828,7 +823,7 @@ class _DeveloperModeCard extends StatelessWidget {
                         : 'Enable to load unvalidated '
                             'models with runtime warnings',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withValues(alpha: 0.5),
                       fontSize: 12,
                     ),
                   ),

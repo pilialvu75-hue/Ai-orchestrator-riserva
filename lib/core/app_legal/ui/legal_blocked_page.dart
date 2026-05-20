@@ -34,10 +34,10 @@ class LegalBlockedPage extends StatelessWidget {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF5252).withOpacity(0.12),
+                      color: const Color(0xFFFF5252).withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: const Color(0xFFFF5252).withOpacity(0.35),
+                        color: const Color(0xFFFF5252).withValues(alpha: 0.35),
                         width: 1.5,
                       ),
                     ),

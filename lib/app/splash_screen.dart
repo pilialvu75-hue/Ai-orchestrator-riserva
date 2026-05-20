@@ -146,7 +146,7 @@ class _SplashScreenState extends State<SplashScreen>
                             Text(
                               'Initializing local intelligence...',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.54),
+                                color: Colors.white.withValues(alpha: 0.54),
                                 fontSize: 13,
                                 fontFamily: 'monospace',
                                 letterSpacing: 0.2,
@@ -233,7 +233,7 @@ class _TerminalAtmosphere extends StatelessWidget {
               width: 220 - (index * 18),
               height: 1,
               color: const Color(0xFF8AB4F8)
-                  .withOpacity(0.14 - (index * 0.02)),
+                  .withValues(alpha: 0.14 - (index * 0.02)),
             ),
           ),
         ),

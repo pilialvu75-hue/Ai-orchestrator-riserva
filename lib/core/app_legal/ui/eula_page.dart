@@ -56,7 +56,7 @@ class _EulaPageState extends State<EulaPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Header(version: EulaService.currentEulaVersion),
+            const _Header(version: EulaService.currentEulaVersion),
             const Divider(color: Color(0xFF2A2A2A), height: 1),
             const Expanded(child: EulaContentWidget()),
             const Divider(color: Color(0xFF2A2A2A), height: 1),
@@ -90,7 +90,7 @@ class _Header extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF171E33).withOpacity(0.98),
+            const Color(0xFF171E33).withValues(alpha: 0.98),
             const Color(0xFF0D0D0D),
           ],
         ),
@@ -104,10 +104,10 @@ class _Header extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8AB4F8).withOpacity(0.15),
+                  color: const Color(0xFF8AB4F8).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: const Color(0xFF8AB4F8).withOpacity(0.35),
+                    color: const Color(0xFF8AB4F8).withValues(alpha: 0.35),
                   ),
                 ),
                 child: const Icon(
@@ -145,15 +145,15 @@ class _Header extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFB74D).withOpacity(0.12),
+              color: const Color(0xFFFFB74D).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: const Color(0xFFFFB74D).withOpacity(0.30),
+                color: const Color(0xFFFFB74D).withValues(alpha: 0.30),
               ),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.warning_amber_rounded,
                   color: Color(0xFFFFB74D),
                   size: 16,
