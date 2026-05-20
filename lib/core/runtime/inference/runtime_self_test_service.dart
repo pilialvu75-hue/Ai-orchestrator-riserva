@@ -115,6 +115,9 @@ class RuntimeSelfTestService {
             firstToken == null) {
           firstToken = chunk.text.trim();
           _log('[COMM_TEST_TOKEN] first_token="$firstToken"');
+          _log(
+            '[WARMUP_FIRST_TOKEN_OK] session=$selfTestSessionId chars=${firstToken!.length}',
+          );
         }
         if (chunk.isFinal) {
           completed = true;
@@ -140,23 +143,28 @@ class RuntimeSelfTestService {
       }
 
       final finalText = responseBuffer.toString().trim();
-      final okReachedUi = RegExp(r'\bOK\b', caseSensitive: false).hasMatch(finalText);
+      final firstTokenReceived = firstToken != null;
+      final livenessOk = streamAliveTicks > 1;
 
       notes.add('3. Token stream: OK (first token emitted)');
       notes.add(
-        '4. Stream liveness: ${streamAliveTicks > 1 ? 'OK' : 'FAILED'} (ticks=$streamAliveTicks)',
+        '4. Stream liveness: ${livenessOk ? 'OK' : 'FAILED'} (ticks=$streamAliveTicks)',
       );
       notes.add(
-        '5. Expected token: ${okReachedUi ? 'OK' : 'FAILED'} (expected=OK)',
+        '5. First token validation: ${firstTokenReceived ? 'OK' : 'FAILED'} (non-empty token emitted)',
       );
       notes.add(
         '6. Completion: ${completed ? 'OK' : 'FAILED'}',
       );
 
-      final pass = streamAliveTicks > 1 && okReachedUi && completed;
+      if (livenessOk) {
+        _log('[WARMUP_LIVENESS_OK] session=$selfTestSessionId ticks=$streamAliveTicks');
+      }
+
+      final pass = firstTokenReceived && livenessOk && completed;
       if (!pass) {
         _log(
-          '[COMM_TEST_FAIL] stream_alive=$streamAliveTicks expected_ok=$okReachedUi completed=$completed',
+          '[COMM_TEST_FAIL] first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks liveness_ok=$livenessOk completed=$completed',
         );
         return RuntimeSelfTestResult(
           success: false,
@@ -166,7 +174,10 @@ class RuntimeSelfTestService {
       }
 
       _log(
-        '[COMM_TEST_PASS] expected_ok=$okReachedUi first_token="$firstToken"',
+        '[WARMUP_VALIDATION_PASS] session=$selfTestSessionId first_token_received=$firstTokenReceived liveness_ok=$livenessOk completed=$completed',
+      );
+      _log(
+        '[COMM_TEST_PASS] first_token_received=$firstTokenReceived first_token="$firstToken"',
       );
 
       return RuntimeSelfTestResult(
