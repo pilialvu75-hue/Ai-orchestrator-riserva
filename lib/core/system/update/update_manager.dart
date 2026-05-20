@@ -1496,7 +1496,6 @@ class UpdateManager {
         await Future<void>.delayed(_postInstallVerifyPollInterval);
       }
     }
-    post ??= await _readInstalledIdentity();
     _logUpdatePostVerifyFailed(
       'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
       'installed_after_version_code=${post.versionCode?.toString() ?? '-'} '
