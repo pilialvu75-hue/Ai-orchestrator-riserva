@@ -221,7 +221,7 @@ class UpdateManager {
         currentVersion: _currentVersion,
         comparator: _comparator,
       );
-      _logReleaseForensicsCheck(manifest);
+      await _logReleaseForensicsCheck(manifest);
       _logVersionRemote(
         'version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} url=${manifest.apkUrl}',
       );
@@ -1439,18 +1439,22 @@ class UpdateManager {
     );
   }
 
-  Future<_InstalledIdentity> _readInstalledIdentity() async {
+  Future<_InstalledIdentity> _readInstalledIdentity({
+    bool includeDiagnostics = true,
+  }) async {
     final packageInfo = await PackageInfo.fromPlatform();
     String? installerPackage;
     String? signatureSha256;
-    final diagnosticsResult = await _intentHandler.getInstallDiagnostics();
-    diagnosticsResult.fold(
-      (_) {},
-      (map) {
-        installerPackage = map['installerPackageName'] as String?;
-        signatureSha256 = map['installedSignatureSha256'] as String?;
-      },
-    );
+    if (includeDiagnostics) {
+      final diagnosticsResult = await _intentHandler.getInstallDiagnostics();
+      diagnosticsResult.fold(
+        (_) {},
+        (map) {
+          installerPackage = map['installerPackageName'] as String?;
+          signatureSha256 = map['installedSignatureSha256'] as String?;
+        },
+      );
+    }
     return _InstalledIdentity(
       versionName: packageInfo.version,
       versionCode: _toInt(packageInfo.buildNumber),
@@ -1509,19 +1513,25 @@ class UpdateManager {
     );
   }
 
-  void _logReleaseForensicsCheck(UpdateManifest manifest) {
-    final localVersionCode = _extractVersionCodeFromVersion(_currentVersion);
+  Future<void> _logReleaseForensicsCheck(UpdateManifest manifest) async {
+    _InstalledIdentity? installedIdentity;
+    try {
+      installedIdentity = await _readInstalledIdentity(includeDiagnostics: false);
+    } catch (_) {}
+    final localVersionName = installedIdentity?.versionName ?? _currentVersion;
+    final localVersionCode = installedIdentity?.versionCode ??
+        _extractVersionCodeFromVersion(_currentVersion);
     _logUpdateCheck(
-      'application_id=- '
-      'installed_version_name=$_currentVersion '
+      'application_id=${installedIdentity?.applicationId ?? '-'} '
+      'installed_version_name=$localVersionName '
       'installed_version_code=${localVersionCode?.toString() ?? '-'} '
       'target_version_name=${manifest.version} '
       'target_version_code=${manifest.versionCode?.toString() ?? '-'} '
       'apk_filename=${manifest.apkFileName ?? '-'} '
       'apk_size_bytes=${manifest.apkSizeBytes ?? -1} '
       'release_tag=${manifest.version} '
-      'sha256=- '
-      'installer_package=-',
+      'sha256=${installedIdentity?.signatureSha256 ?? '-'} '
+      'installer_package=${installedIdentity?.installerPackage ?? '-'}',
     );
   }
 

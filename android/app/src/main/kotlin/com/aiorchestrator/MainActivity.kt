@@ -486,6 +486,7 @@ class MainActivity : FlutterActivity() {
         val versionCode = packageInfo?.let { getVersionCode(it) }
         val signatureSha256 = packageInfo?.let { signatureSha256(it) }
         val hasSplitConfig = hasSplitConfigArtifact(apkFile.name, packageInfo)
+        val isSplitUnsupported = hasSplitConfig
         val archiveParsed = packageInfo != null
         Log.i(
             logTag,
@@ -498,7 +499,7 @@ class MainActivity : FlutterActivity() {
                     hasApkExtension &&
                     sizeBytes > 0 &&
                     packageName != null &&
-                    !hasSplitConfig
+                    !isSplitUnsupported
                 ),
             "exists" to exists,
             "readable" to readable,
@@ -518,7 +519,7 @@ class MainActivity : FlutterActivity() {
                 !hasApkExtension -> "invalid_extension"
                 sizeBytes <= 0 -> "empty_file"
                 packageName == null -> "package_parse_failed"
-                hasSplitConfig -> "split_apk_unsupported"
+                isSplitUnsupported -> "split_apk_unsupported"
                 else -> "ok"
             }
         )
