@@ -44,9 +44,22 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   String? _verifiedModelPath;
 
+  String _normalizeModelPath(String modelPath) {
+    final trimmed = modelPath.trim();
+    if (trimmed.isEmpty) return trimmed;
+    try {
+      return File(trimmed).absolute.path;
+    } catch (error) {
+      debugPrint(
+        '[$_localProviderTag] modelPath normalization fallback for "$trimmed": $error',
+      );
+      return trimmed;
+    }
+  }
+
   @protected
   void markRuntimeVerified(String modelPath) {
-    _verifiedModelPath = modelPath;
+    _verifiedModelPath = _normalizeModelPath(modelPath);
   }
 
   @protected
@@ -57,7 +70,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   @protected
   bool hasVerifiedRuntimeForModel(String modelPath) =>
       _verifiedModelPath != null &&
-      _verifiedModelPath == modelPath;
+      _verifiedModelPath == _normalizeModelPath(modelPath);
+
+  void recordVerificationSuccess({
+    required String modelPath,
+    String source = 'runtime',
+  }) {
+    markRuntimeVerified(modelPath);
+    debugPrint(
+      '[$_localProviderTag] verification marked source=$source modelPath=${_normalizeModelPath(modelPath)}',
+    );
+  }
 
   bool supportsModel(AiModel model) {
     final modelId = model.effectiveRuntimeModelId;

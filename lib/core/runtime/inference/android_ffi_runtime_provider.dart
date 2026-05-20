@@ -30,12 +30,12 @@ import 'package:flutter/foundation.dart';
 /// ─────────────
 /// 1. [_ensureLibraryLoaded] opens the bridge library once and binds all
 ///    symbols into [LlamaBridgeBindings].
-/// 2. [streamInference] loads the GGUF model and starts the C background
-///    thread via `llb_start_gen` inside the same native runtime instance.
-/// 3. The Dart async loop calls `llb_poll_token` on each iteration, yielding
+/// 2. [streamInference] creates/uses a native RuntimeSession and starts the C
+///    background generation thread via `llb_session_start_gen`.
+/// 3. The Dart async loop calls `llb_session_poll_token` on each iteration, yielding
 ///    [Future.delayed(Duration.zero)] between empty polls so the Flutter UI
 ///    stays responsive.
-/// 4. [CancellationToken] is forwarded to `llb_cancel`, which signals the
+/// 4. [CancellationToken] is forwarded to `llb_session_cancel`, which signals the
 ///    native background thread to stop.
 ///
 /// Native library resolution order
@@ -67,14 +67,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
   static const Duration _stalledInferenceTimeoutRelease = Duration(seconds: 45);
   static const Duration _stalledInferenceTimeoutDebug = Duration(seconds: 120);
+  static const Duration _verificationFirstTokenTimeout = Duration(seconds: 5);
   static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
   static const Duration _modelLoadTimeout = Duration(seconds: 60);
   // 2400 polls × 24ms delay ~= 57.6s without token progress.
-  // This caps idle polling so llb_poll_token() cannot spin forever.
+  // This caps idle polling so llb_session_poll_token() cannot spin forever.
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const String _warmupPrompt = 'Reply with the single word: OK';
+  static const int _warmupMaxTokens = 4;
+  static const double _warmupTemperature = 0.1;
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
   static const Set<String> _androidSafeModelIds = <String>{
@@ -95,9 +99,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
+  int? _nativeSessionId;
+  String? _nativeSessionModelPath;
   bool _loadAttempted = false;
   Future<void> _inferenceTail = Future<void>.value();
   Future<void>? _warmupFuture;
+  String? _warmupModelPath;
   final Set<String> _activeInferenceSessions = <String>{};
 
   static Duration get _firstTokenTimeout =>
@@ -113,6 +120,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (handle == null) return false;
     _libraryHandle = handle;
     _bindings = handle.bindings;
+    _bindings!.initBackend();
     _log(
       '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
       ' abi=${LlamaFfiLoader.currentAbiName}',
@@ -155,6 +163,47 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required CancellationToken cancellationToken,
   }) {
     final controller = StreamController<InferenceResponse>();
+    var firstFfiInvocationAttempted = false;
+    var firstFfiInvocationCompleted = false;
+
+    Future<void> fatalEarlyExit(
+      String sessionId, {
+      required String branch,
+      required String reason,
+      required String stage,
+      String? details,
+      InferenceTerminalState state = InferenceTerminalState.failed,
+    }) async {
+      _log(
+        '[FFI_FATAL_EARLY_EXIT] session=$sessionId branch=$branch reason=$reason',
+      );
+      _log(
+        '[FFI_BRANCH_RETURN] session=$sessionId branch=$branch reason=$reason'
+        ' first_ffi_attempted=$firstFfiInvocationAttempted first_ffi_completed=$firstFfiInvocationCompleted',
+      );
+      if (!controller.isClosed) {
+        _finishWithRuntimeError(
+          controller,
+          stage: stage,
+          message: reason,
+          details: details,
+          state: state,
+        );
+      }
+    }
+
+    controller.onCancel = () {
+      if (!firstFfiInvocationAttempted) {
+        _log(
+          '[FFI_BRANCH_RETURN] session=${request.sessionId} branch=stream_listener_cancel'
+          ' reason=stream listener detached before first FFI call',
+        );
+      }
+      _log(
+        '[FFI_BRANCH] session=${request.sessionId} name=stream_listener_cancel'
+        ' first_ffi_attempted=$firstFfiInvocationAttempted',
+      );
+    };
 
     () async {
       await _runInferenceSerially(() async {
@@ -162,27 +211,38 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ? 'unknown'
           : request.sessionId.trim();
       final dartThreadId = _currentThreadId();
+      _log('[FFI_FLOW_ENTER] session=$sessionId thread_id=$dartThreadId');
+      _log(
+        '[RUNTIME_PROVIDER_BRANCH] provider=${runtimeType} runtime_mode=local '
+        'branch=session_api local_request_available=true session=$sessionId',
+      );
       _log('[SESSION] begin session=$sessionId');
       _log(
         '[DART_STREAM_LISTEN] elapsed_ms=0 thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=0 session=$sessionId',
       );
       if (!_claimInferenceSlot(sessionId)) {
+        _log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
         _log('[SESSION] recursive_guard_triggered session=$sessionId');
-        _finishWithRuntimeError(
-          controller,
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'recursive_inference_guard',
+          reason: 'Recursive inference call blocked for session $sessionId.',
           stage: 'recursive_inference_guard',
-          message: 'Recursive inference call blocked for session $sessionId.',
+        );
+        _log(
+          '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=$firstFfiInvocationAttempted'
+          ' first_ffi_completed=$firstFfiInvocationCompleted controller_closed=${controller.isClosed}',
         );
         return;
       }
       try {
-      await _ensureWarmup(controller: controller, sessionId: sessionId);
-      if (controller.isClosed) return;
       if (cancellationToken.isCancelled) {
-        _finishWithRuntimeError(
-          controller,
+        _log('[FFI_BRANCH] session=$sessionId name=preflight_cancellation');
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'preflight_cancellation',
+          reason: 'Inference cancelled before first FFI call.',
           stage: 'cancelled',
-          message: 'Inference cancelled.',
           state: InferenceTerminalState.cancelled,
         );
         return;
@@ -197,6 +257,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ' runtimeMode=android_ffi');
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
         clearRuntimeVerification();
@@ -204,10 +265,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           LocalRuntimeStatus.modelMissing,
           message: 'No validated local model is selected.',
         );
-        _finishWithRuntimeError(
-          controller,
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'request_validation_missing_path_or_id',
+          reason: 'Missing local model path.',
           stage: 'request_validation',
-          message: 'Missing local model path.',
         );
         return;
       }
@@ -245,7 +307,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             message:
                 '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
           );
+          _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=developer_mode_unvalidated_model modelId=$modelId');
         } else {
+          _log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
           clearRuntimeVerification();
           const unsupportedAndroidModelMessage =
               'Selected model is not enabled for Android local runtime. '
@@ -256,19 +320,42 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             LocalRuntimeStatus.failed,
             message: unsupportedAndroidModelMessage,
           );
-          _finishWithRuntimeError(
-            controller,
+          await fatalEarlyExit(
+            sessionId,
+            branch: 'unsupported_model_guard',
+            reason: unsupportedAndroidModelMessage,
             stage: 'model_guard',
-            message: unsupportedAndroidModelMessage,
             details: 'modelId=$modelId',
           );
           return;
         }
       }
 
-      final modelValidationError =
-          await Isolate.run(() => _validateModelFileForRuntime(modelPath));
+      // Model file validation runs synchronously on the current isolate.
+      // Using compute()/Isolate.run here would require serialising a closure
+      // that transitively captures `this` (via _inferenceTail: Future<void>),
+      // which is not sendable and throws "Illegal argument in isolate message".
+      // The check reads only 4 bytes from a local file and is effectively
+      // instantaneous, so there is no benefit to offloading it.
+      _log('[MODEL_VALIDATION_BEGIN] session=$sessionId task=model_validation');
+      String? modelValidationError;
+      try {
+        modelValidationError = _validateModelFileForRuntime(modelPath);
+        _log('[MODEL_VALIDATION_OK] session=$sessionId task=model_validation');
+      } catch (error, stackTrace) {
+        _log('[MODEL_VALIDATION_FAIL] session=$sessionId task=model_validation error=$error');
+        _log('[FFI_EXCEPTION] session=$sessionId stage=model_validation stack=$stackTrace');
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'model_validation_failed_unexpected',
+          reason: 'Model validation threw unexpectedly before first FFI call: $error',
+          stage: 'model_validation',
+          details: '$stackTrace',
+        );
+        return;
+      }
       if (modelValidationError != null) {
+        _log('[FFI_BRANCH] session=$sessionId name=model_validation_failed');
         _log('[GGUF] validation=failed path=$modelPath reason=$modelValidationError');
         _log('[TERMINAL_STATE] state=failed reason=model_validation'
             ' path=$modelPath error=$modelValidationError');
@@ -277,16 +364,32 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           LocalRuntimeStatus.failed,
           message: modelValidationError,
         );
-        _finishWithRuntimeError(
-          controller,
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'model_validation_failed',
+          reason: modelValidationError,
           stage: 'model_validation',
-          message: modelValidationError,
         );
         return;
       }
       _log('[GGUF] validation=ok path=$modelPath');
 
+      final isForensicSelfTest =
+          request.sessionId.trim() == _forensicSelfTestSessionId;
+      if (!isForensicSelfTest) {
+        final warmupReady = await _ensureWarmup(
+          sessionId: sessionId,
+          modelPath: modelPath,
+        );
+        if (!warmupReady) {
+          _log('[FFI_BRANCH] session=$sessionId name=warmup_failed_non_blocking_continue');
+        }
+      } else {
+        _log('[WARMUP] skip session=$sessionId reason=self-test owns first token contract');
+      }
+
       if (!_ensureLibraryLoaded()) {
+        _log('[FFI_BRANCH] session=$sessionId name=library_load_failed');
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
         clearRuntimeVerification();
         _updateRuntimeStatus(
@@ -294,86 +397,87 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           message:
               'libllama_bridge.so is missing for this Android build.',
         );
-        _finishWithRuntimeError(
-          controller,
+        await fatalEarlyExit(
+          sessionId,
+          branch: 'library_load_failed',
+          reason: 'Local AI runtime library (libllama_bridge.so) not found.',
           stage: 'library_load',
-          message: 'Local AI runtime library (libllama_bridge.so) not found.',
         );
         return;
       }
 
       final bindings = _bindings!;
 
-      // ── Step 1: Load model ───────────────────────────────────────────────────
+      // ── Step 1: Create/validate native session ───────────────────────────────
       _updateRuntimeStatus(LocalRuntimeStatus.loading,
           message: 'Loading model: $modelId', resetProgress: true);
-      // Let UI observers process the loading state before the blocking FFI load.
+      // Let UI observers process the loading state before the blocking FFI call.
       await Future<void>.delayed(Duration.zero);
-      _logAi('loading model...');
+      _logAi('creating native session...');
       _log('[NATIVE_MODEL_LOAD_BEGIN] path=$modelPath modelId=$modelId'
           ' n_ctx=512 n_threads=2 gpu_layers=0');
 
-      int loadResult;
+      int nativeSessionId;
       try {
-        loadResult = await _runNativeCallWithTimeout<int>(
-          stage: 'model_load',
+        _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
+        _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
+        // This flag marks the first native entry point for this inference flow.
+        firstFfiInvocationAttempted = true;
+        _log('[FFI_CREATE_SESSION] path=$modelPath');
+        nativeSessionId = await _runNativeCallWithTimeout<int>(
+          stage: 'session_create',
           timeout: _modelLoadTimeout,
-          call: () => bindings.loadModel(modelPath),
+          call: () => _ensureNativeSession(bindings, modelPath),
         );
+        firstFfiInvocationCompleted = true;
+        _log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
       } catch (error) {
-        _log('[NATIVE_MODEL_LOAD_FAILURE] path=$modelPath exception=$error');
-        _log('[NATIVE_CONTEXT_FAILURE] path=$modelPath reason=ffi_exception');
-        _log('[TERMINAL_STATE] state=failed reason=model_load_exception');
+        _log('[FFI_EXCEPTION] session=$sessionId stage=session_create error=$error');
+        _log('[SESSION_CREATE_FAIL] path=$modelPath exception=$error');
+        _log('[TERMINAL_STATE] state=failed reason=session_create_exception');
         clearRuntimeVerification();
         _updateRuntimeStatus(
           error is TimeoutException
               ? LocalRuntimeStatus.timedOut
               : LocalRuntimeStatus.failed,
           message: error is TimeoutException
-              ? 'Model load timed out.'
-              : 'Model load failed: $error',
+              ? 'Session create timed out.'
+              : 'Session create failed: $error',
         );
         _finishWithRuntimeError(
           controller,
-          stage: 'model_load',
-          message: 'Model load failed.',
+          stage: 'session_create',
+          message: 'Session create failed.',
           details: error.toString(),
         );
         return;
       }
-      _log('[NATIVE_MODEL_LOAD_RESULT] llb_load_model returned: $loadResult');
-      final loadedAfterLoad = bindings.isLoaded();
-      _log('[NATIVE_MODEL_LOAD_RESULT] llb_is_loaded after load: $loadedAfterLoad');
+      _log('[SESSION_CREATE_OK] session=$nativeSessionId path=$modelPath');
+      _log('[FFI_CREATE_SESSION_OK] session=$nativeSessionId path=$modelPath');
+      final activeAfterCreate = bindings.sessionIsActive(nativeSessionId);
+      _log('[NATIVE_MODEL_LOAD_RESULT] llb_session_is_active after create: $activeAfterCreate');
 
-      if (loadResult != 0) {
-        final errMsg = _safeLastError(bindings);
-        final lowerErr = errMsg.toLowerCase();
-        if (lowerErr.contains('context')) {
-          _log(
-            '[NATIVE_CONTEXT_FAILURE] path=$modelPath code=$loadResult error=$errMsg',
-          );
-        }
-        _log('[NATIVE_MODEL_LOAD_FAILURE] code=$loadResult error=$errMsg'
-            ' path=$modelPath');
-        _log('[TERMINAL_STATE] state=failed reason=model_load_error code=$loadResult');
+      if (nativeSessionId <= 0 || activeAfterCreate != 1) {
+        _log('[FFI_BRANCH] session=$sessionId name=session_create_invalid_or_inactive');
+        final errMsg = _safeLastError(bindings, nativeSessionId);
+        _log('[SESSION_CREATE_FAIL] code=$nativeSessionId error=$errMsg path=$modelPath');
+        _log('[TERMINAL_STATE] state=failed reason=session_create_error code=$nativeSessionId');
         clearRuntimeVerification();
         _updateRuntimeStatus(LocalRuntimeStatus.failed, message: errMsg);
         _finishWithRuntimeError(
           controller,
-          stage: 'model_load',
-          message: 'Failed to load model.',
-          details: 'Load failed with code $loadResult: $errMsg',
+          stage: 'session_create',
+          message: 'Failed to create runtime session.',
+          details: 'Create failed with code $nativeSessionId: $errMsg',
         );
         return;
       }
       _log('[NATIVE_MODEL_LOAD_SUCCESS] path=$modelPath modelId=$modelId'
-          ' llb_is_loaded=$loadedAfterLoad');
+          ' session=$nativeSessionId');
       _log('[NATIVE_CONTEXT_CREATE] path=$modelPath status=ok');
-      _logAi('model loaded');
+      _logAi('native session ready');
 
       // ── Step 2: Start generation ─────────────────────────────────────────────
-      final isForensicSelfTest =
-          request.sessionId.trim() == _forensicSelfTestSessionId;
       final prompt = _composePrompt(
         request,
         modelId: modelId,
@@ -385,6 +489,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           .where((token) => token.isNotEmpty)
           .length;
       if (promptWordEstimate <= 0) {
+        _log('[FFI_BRANCH] session=$sessionId name=tokenizer_readiness_failed');
         clearRuntimeVerification();
         _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
@@ -422,37 +527,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
       final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
       final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
+      final firstTokenDeadline =
+          isForensicSelfTest ? _verificationFirstTokenTimeout : _firstTokenTimeout;
       if (request.maxTokens > _safeMaxTokens) {
         _log(
           '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
         );
       }
 
-      // Verify that the native model is actually loaded before calling
-      // llb_start_gen so load failures are visible in logs before
-      // generation starts.
-      final loadedCheck = bindings.isLoaded();
-      _log('[MODEL_EXECUTION] llb_is_loaded before start_generation: $loadedCheck');
+      // Verify that the native session is active before starting generation.
+      final loadedCheck = bindings.sessionIsActive(nativeSessionId);
+      _log('[MODEL_EXECUTION] llb_session_is_active before start_generation: $loadedCheck');
       if (loadedCheck != 1) {
+        _log('[FFI_BRANCH] session=$sessionId name=session_inactive_before_start');
         clearRuntimeVerification();
-        final nativeErr = _safeLastError(bindings);
+        final nativeErr = _safeLastError(bindings, nativeSessionId);
         _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
-          message: 'Model not loaded (llb_is_loaded=$loadedCheck).',
+          message: 'Session inactive (llb_session_is_active=$loadedCheck).',
         );
         _finishWithRuntimeError(
           controller,
           stage: 'start_generation',
           message:
-              'Model is not loaded in the native runtime (llb_is_loaded=$loadedCheck).',
+              'Session is not active in the native runtime (llb_session_is_active=$loadedCheck).',
           details: nativeErr.isNotEmpty ? nativeErr : null,
         );
         return;
       }
 
       _log(
-        '[MODEL_EXECUTION] Calling native llb_start_gen: prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=$effectiveTemperature',
+        '[FFI_START_GEN] entering startGeneration session=$nativeSessionId '
+        'prompt_chars=${prompt.length} max_tokens=$maxTokens '
+        'temperature=$effectiveTemperature',
       );
       _log(
         '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
@@ -467,17 +574,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
+        _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
         startResult = await _runNativeCallWithTimeout<int>(
           stage: 'start_generation',
           timeout: _startGenerationTimeout,
           call: () => bindings.startGeneration(
+            nativeSessionId,
             prompt,
             maxTokens,
             effectiveTemperature,
           ),
         );
+        _log(
+          '[FFI_POST_START] session=$sessionId native_session=$nativeSessionId result=$startResult'
+          ' elapsed_ms=${startupWatch.elapsedMilliseconds}',
+        );
       } catch (error) {
         startupWatch.stop();
+        _log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
         _updateRuntimeStatus(
@@ -488,6 +602,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ? 'Native start_generation timed out.'
               : 'Native start_generation failed: $error',
         );
+        if (error is TimeoutException) {
+          _log(
+            '[FFI_TIMEOUT] session=$sessionId stage=start_generation'
+            ' timeout_ms=${_startGenerationTimeout.inMilliseconds}',
+          );
+        }
         _finishWithRuntimeError(
           controller,
           stage: 'start_generation',
@@ -499,10 +619,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
       startupWatch.stop();
-      _log('[MODEL_EXECUTION] llb_start_gen returned: $startResult');
+      _log('[MODEL_EXECUTION] llb_session_start_gen returned: $startResult');
 
       if (startupWatch.elapsed > _startGenerationTimeout) {
-        _safeCancel(bindings);
+        _log(
+          '[FFI_TIMEOUT] session=$sessionId stage=start_generation_postcheck'
+          ' timeout_ms=${_startGenerationTimeout.inMilliseconds}',
+        );
+        _safeCancel(bindings, nativeSessionId);
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_timeout');
         _updateRuntimeStatus(
@@ -521,8 +645,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (startResult != 0) {
+        _log('[FFI_BRANCH] session=$sessionId name=start_generation_failed_code');
         clearRuntimeVerification();
-        final err = _safeLastError(bindings);
+        final err = _safeLastError(bindings, nativeSessionId);
         _safeResetRuntime(bindings, reason: 'start_generation_failed');
         _updateRuntimeStatus(LocalRuntimeStatus.failed, message: err);
         _finishWithRuntimeError(
@@ -539,7 +664,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[PROMPT_EVAL] stage=ready startup_ms=${startupWatch.elapsed.inMilliseconds}',
       );
 
-      cancellationToken.onCancel(() => _safeCancel(bindings));
+      cancellationToken.onCancel(() => _safeCancel(bindings, nativeSessionId));
 
       // ── Step 3: Poll for tokens ──────────────────────────────────────────────
       final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
@@ -567,6 +692,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[STREAM_ADD] event=generation_started session=$sessionId');
       _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
       _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
+      _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
+      _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
 
       try {
         while (true) {
@@ -596,7 +723,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
           }
           if (cancellationToken.isCancelled) {
-            _safeCancel(bindings);
+            _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             _log(
               '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
@@ -614,11 +741,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
             );
+            _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=pre_poll_cancellation');
             break;
           }
 
           if (elapsed > _generationTimeout) {
-            _safeCancel(bindings);
+            _log(
+              '[FFI_TIMEOUT] session=$sessionId stage=generation_timeout'
+              ' timeout_ms=${_generationTimeout.inMilliseconds}',
+            );
+            _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'generation_timeout';
@@ -647,21 +779,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
-          if (firstTokenAt == null && elapsed > _firstTokenTimeout) {
-            _safeCancel(bindings);
+          if (firstTokenAt == null && elapsed > firstTokenDeadline) {
+            _log(
+              '[FFI_TIMEOUT] session=$sessionId stage=first_token_watchdog'
+              ' timeout_ms=${firstTokenDeadline.inMilliseconds}',
+            );
+            _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
             _log(
               '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
-              ' timeout_ms=${_firstTokenTimeout.inMilliseconds} session=$sessionId',
+              ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionId',
             );
             _log(
               '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
               ' no_token_produced=true session=$sessionId',
             );
             _log(
-              '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${_firstTokenTimeout.inMilliseconds}',
+              '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${firstTokenDeadline.inMilliseconds}',
             );
             _log(
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
@@ -678,13 +814,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             _finishWithRuntimeError(
               controller,
               stage: 'stalled',
-              message: 'Local model stalled during inference.',
+              message: isForensicSelfTest
+                  ? 'FIRST_TOKEN_TIMEOUT'
+                  : 'Local model stalled during inference.',
             );
             break;
           }
           if (firstTokenAt != null &&
               sinceLastTokenProgress > _noTokenProgressTimeout) {
-            _safeCancel(bindings);
+            _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'token_progress_watchdog';
@@ -722,7 +860,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           }
           if (consecutiveIdlePolls >= _maxIdlePollIterations) {
-            _safeCancel(bindings);
+            _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_loop_watchdog';
@@ -764,9 +902,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           int status;
           try {
             _log(
+              '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId '
+              'iteration=$pollIterations',
+            );
+            _log(
               '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
             );
-            status = bindings.pollToken(tokenBuf);
+            status = bindings.pollToken(nativeSessionId, tokenBuf);
           } catch (error) {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
@@ -796,7 +938,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               _log('[TOKENIZER_DECODE_FAIL] stage=dart_utf8_decode error=$error');
               consecutiveInvalidTokens++;
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
-                _safeCancel(bindings);
+                _safeCancel(bindings, nativeSessionId);
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'token_decode_exception';
@@ -830,7 +972,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               lastTokenProgressAt = DateTime.now();
               fullText.write(piece);
               estimatedTokens++;
-              markRuntimeVerified(modelPath);
+              recordVerificationSuccess(
+                modelPath: modelPath,
+                source: 'first_token',
+              );
               final streamingElapsed = DateTime.now().difference(startedAt);
               _log(
                 '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations status=$status',
@@ -839,6 +984,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
               );
               if (isFirstToken) {
+                _log(
+                  '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
+                );
                 _log(
                   '[FIRST_TOKEN] elapsed_ms=${streamingElapsed.inMilliseconds}'
                   ' token_text_length=${piece.length}'
@@ -854,6 +1002,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               _log(
                 '[DART_TOKEN_RECEIVED] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations',
               );
+              _log('[FFI_TOKEN] session=$nativeSessionId chars=${piece.length}');
               if (estimatedTokens % 16 == 0) {
                 _log('[TOKEN_STREAM] token_count=$estimatedTokens');
               }
@@ -871,7 +1020,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               if (piece == lastPiece) {
                 repeatedTokenCount++;
                 if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
-                  _safeCancel(bindings);
+                  _safeCancel(bindings, nativeSessionId);
                   clearRuntimeVerification();
                   runtimeNeedsReset = true;
                   runtimeResetReason = 'repeated_token_loop';
@@ -932,7 +1081,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
                 _log('[TOKENIZER_DECODE_FAIL] stage=empty_piece_loop');
-                _safeCancel(bindings);
+                _safeCancel(bindings, nativeSessionId);
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'empty_token_loop';
@@ -959,7 +1108,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           } else if (status == 2) {
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
-            markRuntimeVerified(modelPath);
+            recordVerificationSuccess(
+              modelPath: modelPath,
+              source: 'eos',
+            );
+            _log('[FFI_EOS] session=$nativeSessionId');
             _log(
               '[GENERATION_END] state=success generated_tokens=$estimatedTokens'
               ' elapsed_ms=${completedElapsed.inMilliseconds}',
@@ -1005,15 +1158,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               message: 'Inference cancelled.',
               state: InferenceTerminalState.cancelled,
             );
+            _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled');
             _updateRuntimeStatus(
               LocalRuntimeStatus.runtimeUnavailable,
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
             );
+            _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled_status');
             break;
           } else if (status == -1) {
             clearRuntimeVerification();
-            final err = _safeLastError(bindings);
+            final err = _safeLastError(bindings, nativeSessionId);
             _log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
             final statusLower = err.toLowerCase();
             runtimeNeedsReset = true;
@@ -1106,6 +1261,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
         calloc.free(tokenBufRaw);
         if (!controller.isClosed) {
+          _log('[FFI_STREAM_CLOSE] session=$sessionId reason=stream_finally_close');
           _log(
             '[DART_STREAM_CLOSE] elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations session=$sessionId',
           );
@@ -1113,7 +1269,46 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           await controller.close();
         }
       }
+      } catch (error, stackTrace) {
+        _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
+        _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
+        if (!firstFfiInvocationAttempted) {
+          // Classification is based on whether session_create has been attempted yet.
+          await fatalEarlyExit(
+            sessionId,
+            branch: 'stream_inference_unhandled_pre_ffi',
+            reason: 'Unhandled exception before first FFI call: $error',
+            stage: 'stream_inference',
+            details: '$stackTrace',
+          );
+        } else if (!controller.isClosed) {
+          _finishWithRuntimeError(
+            controller,
+            stage: 'stream_inference',
+            message: 'Unhandled runtime exception.',
+            details: '$error',
+          );
+        } else {
+          _log(
+            '[FFI_EXCEPTION] session=$sessionId stage=stream_inference_post_ffi_controller_closed'
+            ' error=$error',
+          );
+        }
       } finally {
+        _log(
+          '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=$firstFfiInvocationAttempted'
+          ' first_ffi_completed=$firstFfiInvocationCompleted controller_closed=${controller.isClosed}',
+        );
+        if (!firstFfiInvocationAttempted) {
+          _log(
+            '[FFI_FATAL_EARLY_EXIT] session=$sessionId reason=stream_exit_before_first_ffi'
+            ' controller_closed=${controller.isClosed}',
+          );
+          _log(
+            '[PRE_FFI_ISOLATE_FAILURE_ASSERT] session=$sessionId first_ffi_attempted=false'
+            ' fatal=true',
+          );
+        }
         _releaseInferenceSlot(sessionId);
         _log('[SESSION] end session=$sessionId');
       }
@@ -1124,6 +1319,53 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────────
+
+  int _ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) {
+    if (_nativeSessionId != null &&
+        _nativeSessionModelPath == modelPath &&
+        bindings.sessionIsActive(_nativeSessionId!) == 1) {
+      _log('[SESSION_CREATE_OK] reusing session=$_nativeSessionId path=$modelPath');
+      _log('[FFI_CREATE_SESSION_OK] reusing=true session=$_nativeSessionId path=$modelPath');
+      return _nativeSessionId!;
+    }
+
+    _releaseNativeSessionIfPresent(bindings);
+
+    _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
+    final created = bindings.createSession(modelPath);
+    _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath');
+    if (created <= 0) {
+      _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
+      final err = _safeLastError(bindings, created);
+      throw StateError('Native session creation failed: $err');
+    }
+    if (bindings.sessionIsActive(created) != 1) {
+      _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
+      final err = _safeLastError(bindings, created);
+      throw StateError('Native session inactive after create: $err');
+    }
+
+    _nativeSessionId = created;
+    _nativeSessionModelPath = modelPath;
+    _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
+    _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
+    return created;
+  }
+
+  void _releaseNativeSessionIfPresent(LlamaBridgeBindings bindings) {
+    final sessionId = _nativeSessionId;
+    if (sessionId == null) return;
+    try {
+      // Native release is intentionally non-blocking; cleanup continues in C++.
+      _log('[FFI_RELEASE] session=$sessionId');
+      bindings.releaseSession(sessionId);
+    } catch (error) {
+      _log('[FFI_RELEASE] session=$sessionId failed: $error');
+    } finally {
+      _nativeSessionId = null;
+      _nativeSessionModelPath = null;
+    }
+  }
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {
     final next = _inferenceTail.then((_) => action());
@@ -1155,27 +1397,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _activeInferenceSessions.remove(sessionId);
   }
 
-  Future<void> _ensureWarmup({
-    required StreamController<InferenceResponse> controller,
+  /// Returns true when warmup succeeds.
+  /// Returns false when warmup fails, but inference continues to createSession
+  /// so runtime verification remains observational instead of a hard gate.
+  Future<bool> _ensureWarmup({
     required String sessionId,
+    required String modelPath,
   }) async {
-    _warmupFuture ??= _runWarmup();
+    if (_warmupFuture == null || _warmupModelPath != modelPath) {
+      _warmupModelPath = modelPath;
+      _warmupFuture = _runWarmup(modelPath: modelPath);
+    }
     _log('[WARMUP] await session=$sessionId');
     try {
       await _warmupFuture!;
       _log('[WARMUP] complete session=$sessionId');
+      return true;
     } catch (error) {
       _warmupFuture = null;
-      _finishWithRuntimeError(
-        controller,
-        stage: 'warmup',
-        message: 'Runtime warmup failed.',
-        details: error.toString(),
+      clearRuntimeVerification();
+      _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=warmup_failed error=$error');
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.runtimeUnavailable,
+        message: 'Runtime warmup failed: $error',
       );
+      _log(
+        '[FFI_BRANCH] session=$sessionId name=warmup_failed_observational'
+        ' action=continue_to_create_session',
+      );
+      return false;
     }
   }
 
-  Future<void> _runWarmup() async {
+  Future<void> _runWarmup({required String modelPath}) async {
     _log('[BOOT] runtime warmup begin');
     _updateRuntimeStatus(
       LocalRuntimeStatus.loading,
@@ -1188,7 +1442,72 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (!_ensureLibraryLoaded()) {
       throw StateError('libllama_bridge.so is missing for this Android build.');
     }
+    final bindings = _bindings!;
     _log('[BOOT] runtime warmup library ready');
+    _log('[FFI_CREATE_SESSION] warmup path=$modelPath');
+    final warmupSessionId = bindings.createSession(modelPath);
+    if (warmupSessionId <= 0) {
+      throw StateError(
+        'Warmup session creation failed: ${_safeLastError(bindings, warmupSessionId)}',
+      );
+    }
+    if (bindings.sessionIsActive(warmupSessionId) != 1) {
+      bindings.releaseSession(warmupSessionId);
+      throw StateError(
+        'Warmup session inactive: ${_safeLastError(bindings, warmupSessionId)}',
+      );
+    }
+    _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId');
+    final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+    final tokenBuf = tokenBufRaw.cast<Utf8>();
+    var firstTokenSeen = false;
+    final stopwatch = Stopwatch()..start();
+    try {
+      _log('[FFI_START_GEN] entering startGeneration session=$warmupSessionId warmup=true');
+      final start = bindings.startGeneration(
+        warmupSessionId,
+        _warmupPrompt,
+        _warmupMaxTokens,
+        _warmupTemperature,
+      );
+      if (start != 0) {
+        throw StateError(
+          'Warmup generation start failed: ${_safeLastError(bindings, warmupSessionId)}',
+        );
+      }
+      while (stopwatch.elapsed < _verificationFirstTokenTimeout) {
+        _log('[FFI_POLL_BEGIN] entering pollToken session=$warmupSessionId warmup=true');
+        final status = bindings.pollToken(warmupSessionId, tokenBuf);
+        if (status == 1) {
+          final token = tokenBuf.toDartString();
+          if (token.trim().isNotEmpty) {
+            firstTokenSeen = true;
+            _log(
+              '[FFI_FIRST_TOKEN] warmup session=$warmupSessionId elapsed_ms=${stopwatch.elapsedMilliseconds}',
+            );
+            break;
+          }
+        } else if (status == 2) {
+          break;
+        } else if (status == -1) {
+          throw StateError(
+            'Warmup generation failed: ${_safeLastError(bindings, warmupSessionId)}',
+          );
+        } else if (status == -99) {
+          throw StateError('Warmup generation cancelled before first token.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 24));
+      }
+      if (!firstTokenSeen) {
+        throw StateError('FIRST_TOKEN_TIMEOUT');
+      }
+    } finally {
+      calloc.free(tokenBufRaw);
+      _log('[FFI_CANCEL] warmup session=$warmupSessionId');
+      bindings.cancelSession(warmupSessionId);
+      _log('[FFI_RELEASE] warmup session=$warmupSessionId');
+      bindings.releaseSession(warmupSessionId);
+    }
   }
 
   static void _finishWithError(
@@ -1198,6 +1517,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }) {
     if (ctrl.isClosed) return;
     ctrl.add(InferenceResponse.error(message, state: state));
+    _log('[FFI_STREAM_CLOSE] reason=finish_with_error');
     _log(
       '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=finish_with_error',
     );
@@ -1253,6 +1573,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           terminalState: partialTerminalState,
         ),
       );
+      _log('[FFI_STREAM_CLOSE] reason=partial_or_runtime_error');
       await ctrl.close();
       _log(
         '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=partial_or_runtime_error',
@@ -1318,36 +1639,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  static String _safeLastError(LlamaBridgeBindings bindings) {
+  static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
     try {
-      final value = bindings.lastError();
+      final value = bindings.sessionLastError(sessionId);
       if (value.trim().isEmpty) return 'Unknown native runtime error.';
       _log('[MODEL_EXECUTION] native error: $value');
       return value;
     } catch (error) {
-      _log('[MODEL_EXECUTION] llb_last_error failed: $error');
+      _log('[MODEL_EXECUTION] llb_session_last_error failed: $error');
       return 'Native runtime error (unable to read details).';
     }
   }
 
-  static void _safeCancel(LlamaBridgeBindings bindings) {
+  void _safeCancel(LlamaBridgeBindings bindings, int sessionId) {
     try {
-      bindings.cancel();
+      _log('[FFI_CANCEL] session=$sessionId');
+      bindings.cancelSession(sessionId);
     } catch (error) {
-      _log('[MODEL_EXECUTION] llb_cancel failed: $error');
+      _log('[MODEL_EXECUTION] llb_session_cancel failed: $error');
     }
   }
 
-  static void _safeResetRuntime(
+  void _safeResetRuntime(
     LlamaBridgeBindings bindings, {
     required String reason,
   }) {
     try {
       _log('[MODEL_EXECUTION] resetting native runtime: $reason');
-      _log('[MODEL_EXECUTION] llb_is_loaded before reset: ${bindings.isLoaded()}');
-      bindings.cancel();
-      bindings.freeModel();
-      _log('[MODEL_EXECUTION] llb_is_loaded after reset: ${bindings.isLoaded()}');
+      final sessionId = _nativeSessionId;
+      if (sessionId != null) {
+        _log('[MODEL_EXECUTION] llb_session_is_active before reset: ${bindings.sessionIsActive(sessionId)}');
+        _safeCancel(bindings, sessionId);
+      }
+      _releaseNativeSessionIfPresent(bindings);
     } catch (error) {
       _log('[MODEL_EXECUTION] runtime reset failed: $error');
     }
@@ -1386,16 +1710,21 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void _syncLifecycleState(LocalRuntimeStatus status) {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
-      case LocalRuntimeStatus.runtimeUnavailable:
       case LocalRuntimeStatus.modelMissing:
         runtimeStateMachine.reset();
+        return;
+      case LocalRuntimeStatus.runtimeUnavailable:
+        // Non-terminal state: model/FFI prerequisites can be present while no
+        // successful first-token verification has been observed yet.
+        // Keep lifecycle recoverable (healthy) instead of reset/failed.
+        runtimeStateMachine.markHealthy();
         return;
       case LocalRuntimeStatus.loading:
       case LocalRuntimeStatus.tokenizing:
         runtimeStateMachine.markLoading();
         return;
       case LocalRuntimeStatus.ready:
-        runtimeStateMachine.markReady();
+        runtimeStateMachine.markVerified();
         return;
       case LocalRuntimeStatus.completed:
         runtimeStateMachine.markInferenceCompleted();
@@ -1410,6 +1739,35 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       case LocalRuntimeStatus.failed:
         runtimeStateMachine.markFailed();
         return;
+    }
+  }
+
+  @override
+  void recordVerificationSuccess({
+    required String modelPath,
+    String source = 'runtime',
+  }) {
+    super.recordVerificationSuccess(modelPath: modelPath, source: source);
+    final status = monitor.state.status;
+    if (status == LocalRuntimeStatus.runtimeUnavailable ||
+        status == LocalRuntimeStatus.uninitialized) {
+      // Verification evidence arrived while runtime was still in pre-verified
+      // status; promote to ready/verified immediately.
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.ready,
+        message: 'Runtime verified and ready for inference.',
+      );
+    } else if (status == LocalRuntimeStatus.failed ||
+        status == LocalRuntimeStatus.completed) {
+      // `completed` is a terminal snapshot of the last run; switch back to
+      // `ready` so diagnostics/UI do not stay pinned to terminal status after
+      // verification is reconfirmed by a new signal.
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.ready,
+        message: 'Runtime re-verified and ready for inference.',
+      );
+    } else {
+      runtimeStateMachine.markVerified();
     }
   }
 

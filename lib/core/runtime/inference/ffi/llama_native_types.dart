@@ -2,26 +2,29 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-typedef LlbLoadModelNative = Int32 Function(Pointer<Utf8>, Int32, Int32);
-typedef LlbLoadModelDart = int Function(Pointer<Utf8>, int, int);
+typedef LlbInitBackendNative = Void Function();
+typedef LlbInitBackendDart = void Function();
 
-typedef LlbStartGenNative = Int32 Function(Pointer<Utf8>, Int32, Float);
-typedef LlbStartGenDart = int Function(Pointer<Utf8>, int, double);
+typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32);
+typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int);
 
-typedef LlbPollTokenNative = Int32 Function(Pointer<Utf8>, Int32);
-typedef LlbPollTokenDart = int Function(Pointer<Utf8>, int);
+typedef LlbSessionStartGenNative = Int32 Function(Int64, Pointer<Utf8>, Int32, Float);
+typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
 
-typedef LlbCancelNative = Void Function();
-typedef LlbCancelDart = void Function();
+typedef LlbSessionPollTokenNative = Int32 Function(Int64, Pointer<Utf8>, Int32);
+typedef LlbSessionPollTokenDart = int Function(int, Pointer<Utf8>, int);
 
-typedef LlbFreeModelNative = Void Function();
-typedef LlbFreeModelDart = void Function();
+typedef LlbSessionCancelNative = Void Function(Int64);
+typedef LlbSessionCancelDart = void Function(int);
 
-typedef LlbLastErrorNative = Pointer<Utf8> Function();
-typedef LlbLastErrorDart = Pointer<Utf8> Function();
+typedef LlbReleaseSessionNative = Void Function(Int64);
+typedef LlbReleaseSessionDart = void Function(int);
 
-typedef LlbIsLoadedNative = Int32 Function();
-typedef LlbIsLoadedDart = int Function();
+typedef LlbSessionIsActiveNative = Int32 Function(Int64);
+typedef LlbSessionIsActiveDart = int Function(int);
+
+typedef LlbSessionLastErrorNative = Pointer<Utf8> Function(Int64);
+typedef LlbSessionLastErrorDart = Pointer<Utf8> Function(int);
 
 abstract final class LlamaNativeDefaults {
   // Conservative mobile runtime context for stable local generation.
