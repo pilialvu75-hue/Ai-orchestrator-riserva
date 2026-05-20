@@ -1392,7 +1392,7 @@ class UpdateManager {
         reason = (payload['reason'] as String?) ?? (nativeValid ? 'ok' : 'unknown');
         packageName = payload['packageName'] as String?;
         versionName = payload['versionName'] as String?;
-        versionCode = _toInt(payload['versionCode']);
+        versionCode = _parseNullableInt(payload['versionCode']);
         signatureSha256 = payload['signatureSha256'] as String?;
         fileSha256 = payload['fileSha256'] as String?;
         hasSplitConfig = payload['hasSplitConfig'] as bool?;
@@ -1457,7 +1457,7 @@ class UpdateManager {
     }
     return _InstalledIdentity(
       versionName: packageInfo.version,
-      versionCode: _toInt(packageInfo.buildNumber),
+      versionCode: _parseNullableInt(packageInfo.buildNumber),
       applicationId: packageInfo.packageName,
       installerPackage: installerPackage,
       signatureSha256: signatureSha256,
@@ -1538,13 +1538,13 @@ class UpdateManager {
 
   int? _extractBuildNumberFromVersionString(String version) {
     final buildIndex = version.lastIndexOf('+');
-    if (buildIndex < 0 || buildIndex == version.length - 1) {
+    if (buildIndex < 0) {
       return null;
     }
     return int.tryParse(version.substring(buildIndex + 1));
   }
 
-  int? _toInt(Object? value) {
+  int? _parseNullableInt(Object? value) {
     return switch (value) {
       int v => v,
       String v => int.tryParse(v.trim()),

@@ -233,7 +233,7 @@ class MainActivity : FlutterActivity() {
                             "applicationId" to packageName,
                             "installedVersionName" to installedPackageInfo.versionName,
                             "installedVersionCode" to getVersionCode(installedPackageInfo),
-                            "installedSignatureSha256" to signatureSha256(installedPackageInfo),
+                            "installedSignatureSha256" to extractSignatureSha256(installedPackageInfo),
                         )
                     )
                 }
@@ -467,7 +467,7 @@ class MainActivity : FlutterActivity() {
         val readable = exists && apkFile.canRead()
         val hasApkExtension = apkFile.name.lowercase(Locale.ROOT).endsWith(".apk")
         val inferredAbi = inferAbi(apkFile.name)
-        val fileSha256 = if (exists && readable) sha256ForFile(apkFile) else null
+        val fileSha256 = if (exists && readable) calculateFileSha256(apkFile) else null
         val packageInfo = if (exists && readable && hasApkExtension) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 packageManager.getPackageArchiveInfo(
@@ -484,7 +484,7 @@ class MainActivity : FlutterActivity() {
         val packageName = packageInfo?.packageName
         val versionName = packageInfo?.versionName
         val versionCode = packageInfo?.let { getVersionCode(it) }
-        val signatureSha256 = packageInfo?.let { signatureSha256(it) }
+        val signatureSha256 = packageInfo?.let { extractSignatureSha256(it) }
         val hasSplitConfig = hasSplitConfigArtifact(apkFile.name, packageInfo)
         val archiveParsed = packageInfo != null
         Log.i(
@@ -573,7 +573,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun signatureSha256(packageInfo: android.content.pm.PackageInfo): String? {
+    private fun extractSignatureSha256(packageInfo: android.content.pm.PackageInfo): String? {
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val signingInfo = packageInfo.signingInfo ?: return null
             if (signingInfo.hasMultipleSigners()) {
@@ -590,7 +590,7 @@ class MainActivity : FlutterActivity() {
         return digest.joinToString(":") { "%02X".format(it) }
     }
 
-    private fun sha256ForFile(file: File): String? = try {
+    private fun calculateFileSha256(file: File): String? = try {
         val digest = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { stream ->
             val buffer = ByteArray(32 * 1024)
