@@ -682,19 +682,14 @@ class _ModuleCard extends StatelessWidget {
             BorderRadius.circular(14),
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(
+          padding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 16,
           ),
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color:
-                  Colors.white.withValues(alpha: 
-                0.08,
-              ),
+              color: Colors.white.withValues(alpha: 0.08),
             ),
           ),
           child: Row(

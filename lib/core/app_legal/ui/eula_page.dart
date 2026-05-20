@@ -153,7 +153,7 @@ class _Header extends StatelessWidget {
             ),
             child: const Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.warning_amber_rounded,
                   color: Color(0xFFFFB74D),
                   size: 16,
