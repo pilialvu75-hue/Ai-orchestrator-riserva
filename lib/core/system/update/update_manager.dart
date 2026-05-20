@@ -1498,13 +1498,16 @@ class UpdateManager {
         await Future<void>.delayed(_postInstallVerifyPollInterval);
       }
     }
+    final installedVersionCode = post?.versionCode;
+    final installedVersionName = post?.versionName;
+    final installedApplicationId = post?.applicationId;
     _logUpdatePostVerifyFailed(
       'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
-      'installed_after_version_code=${post.versionCode?.toString() ?? '-'} '
-      'installed_after_version_name=${post.versionName} '
+      'installed_after_version_code=${installedVersionCode?.toString() ?? '-'} '
+      'installed_after_version_name=${installedVersionName ?? 'unknown'} '
       'expected_version_code=${expectedVersionCode?.toString() ?? '-'} '
       'expected_version_name=${expectedVersionName ?? '-'} '
-      'application_id=${post.applicationId}',
+      'application_id=${installedApplicationId ?? 'unknown'}',
     );
     _logStructuredUpdateError(
       action: 'post_install_verify',
