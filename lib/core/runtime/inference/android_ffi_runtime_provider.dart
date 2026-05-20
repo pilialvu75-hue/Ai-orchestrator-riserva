@@ -1627,6 +1627,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
+  /// Static isolate entry for `compute()` to avoid capturing unsendable async context.
   static String? _validateModelFileIsolateEntry(String modelPath) =>
       _validateModelFileForRuntime(modelPath);
 
