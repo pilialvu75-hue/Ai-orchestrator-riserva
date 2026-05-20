@@ -158,8 +158,8 @@ class _Header extends StatelessWidget {
                   color: Color(0xFFFFB74D),
                   size: 16,
                 ),
-                const SizedBox(width: 8),
-                const Expanded(
+                SizedBox(width: 8),
+                Expanded(
                   child: Text(
                     'This is Beta software. You must accept these terms to use the app.',
                     style: TextStyle(
