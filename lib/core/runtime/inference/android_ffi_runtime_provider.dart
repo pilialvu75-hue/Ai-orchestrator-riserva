@@ -125,7 +125,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[RUNTIME_INIT_RECURSION] scope=android_ffi_runtime_provider.ensureLibraryLoaded hash=${hashCode.toRadixString(16)}',
       );
-      return _bindings != null && _libraryHandle != null;
+      return true;
     }
     if (_loadAttempted) return _bindings != null && _libraryHandle != null;
     _libraryLoadInProgress = true;

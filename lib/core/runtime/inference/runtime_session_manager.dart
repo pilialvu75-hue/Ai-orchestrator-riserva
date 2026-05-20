@@ -12,7 +12,7 @@ class RuntimeSessionManager {
   RuntimeSession startSession(String sessionId) {
     if (_activeSession != null && _activeSession!.sessionId == sessionId) {
       debugPrint(
-        '[ENTRY_REENTRANCY_BLOCK] scope=runtime_session_manager session=$sessionId existing=${_activeSession.hashCode.toRadixString(16)}',
+        '[RUNTIME_LOOKUP] scope=runtime_session_manager session=$sessionId reentry_detected existing=${_activeSession.hashCode.toRadixString(16)}',
       );
     }
     _activeSession?.cancellationToken.cancel();

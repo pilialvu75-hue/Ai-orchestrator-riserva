@@ -22,7 +22,6 @@ Future<T> runInferenceGuarded<T>({
         if (!completer.isCompleted) {
           completer.completeError(error, stackTrace);
         }
-        rethrow;
       }
     },
     (error, stackTrace) {
