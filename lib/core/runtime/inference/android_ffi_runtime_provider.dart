@@ -170,7 +170,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       String sessionId, {
       required String branch,
       required String reason,
-      String? stage,
+      required String stage,
       String? details,
       InferenceTerminalState state = InferenceTerminalState.failed,
     }) async {
@@ -182,7 +182,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[FFI_BRANCH_RETURN] session=$sessionId branch=$branch reason=$reason'
         ' first_ffi_attempted=$firstFfiInvocationAttempted first_ffi_completed=$firstFfiInvocationCompleted',
       );
-      if (!controller.isClosed && stage != null) {
+      if (!controller.isClosed) {
         _finishWithRuntimeError(
           controller,
           stage: stage,
@@ -196,7 +196,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     controller.onCancel = () {
       if (!firstFfiInvocationAttempted) {
         _log(
-          '[FFI_FATAL_EARLY_EXIT] session=${request.sessionId} branch=stream_listener_cancel'
+          '[FFI_BRANCH_RETURN] session=${request.sessionId} branch=stream_listener_cancel'
           ' reason=stream listener detached before first FFI call',
         );
       }
@@ -1359,6 +1359,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _activeInferenceSessions.remove(sessionId);
   }
 
+  /// Returns true when warmup succeeds.
+  /// Returns false when warmup fails, but inference continues to createSession
+  /// so runtime verification remains observational instead of a hard gate.
   Future<bool> _ensureWarmup({
     required String sessionId,
     required String modelPath,
