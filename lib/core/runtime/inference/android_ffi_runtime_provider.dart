@@ -335,7 +335,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       String? modelValidationError;
       try {
         modelValidationError = await compute<String, String?>(
-          _validateModelFileForRuntimeIsolateEntry,
+          _validateModelFileIsolateEntry,
           modelPath,
           debugLabel: 'android_ffi_model_validation',
         );
@@ -1627,7 +1627,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  static String? _validateModelFileForRuntimeIsolateEntry(String modelPath) =>
+  static String? _validateModelFileIsolateEntry(String modelPath) =>
       _validateModelFileForRuntime(modelPath);
 
   static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
