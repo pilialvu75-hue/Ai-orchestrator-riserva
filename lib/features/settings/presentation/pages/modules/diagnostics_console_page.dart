@@ -163,7 +163,7 @@ class _DiagnosticsConsolePageState extends State<DiagnosticsConsolePage> {
                   ),
                 ),
                 const Spacer(),
-                Text(
+                const Text(
                   'buffer max ${RuntimeEventLog.maxEntries}',
                   style: const TextStyle(
                     color: Color(0xFF374151),
@@ -302,7 +302,7 @@ class _FilterChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
           decoration: BoxDecoration(
-            color: selected ? color.withOpacity(0.2) : const Color(0xFF1F2937),
+            color: selected ? color.withValues(alpha: 0.2) : const Color(0xFF1F2937),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: selected ? color : const Color(0xFF374151),
@@ -364,7 +364,7 @@ class _EntryRow extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 96),
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             decoration: BoxDecoration(
-              color: tagColor.withOpacity(0.12),
+              color: tagColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(

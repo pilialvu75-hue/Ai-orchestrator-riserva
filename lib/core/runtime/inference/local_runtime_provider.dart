@@ -89,7 +89,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (!allowed) {
       if (_isDeveloperMode) {
-        final msg =
+        const msg =
             '[VALIDATION] developer_mode=true: allowing custom/unvalidated model';
 
         debugPrint(
@@ -176,7 +176,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (!supportsModel(selectedModel)) {
       if (_isDeveloperMode) {
-        return LocalRuntimeState(
+        return const LocalRuntimeState(
           status: LocalRuntimeStatus.runtimeUnavailable,
           message:
               '[DEVELOPER_MODE] Unvalidated model accepted.',

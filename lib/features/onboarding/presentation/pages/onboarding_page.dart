@@ -168,7 +168,7 @@ class _UserInfoPage extends StatelessWidget {
               l10n.t('personalize_experience'),
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.5),
+                  color: Colors.white.withValues(alpha: 0.5),
                   fontSize: 14,
                   height: 1.5),
             ),
@@ -249,7 +249,7 @@ class _WelcomePage extends StatelessWidget {
             l10n.t('welcome_subtitle'),
             textAlign: TextAlign.center,
             style: TextStyle(
-                color: Colors.white.withOpacity(0.55), fontSize: 15, height: 1.5),
+                color: Colors.white.withValues(alpha: 0.55), fontSize: 15, height: 1.5),
           ),
           const SizedBox(height: 48),
           _ContinueButton(onPressed: onContinue, label: l10n.t('get_started')),
@@ -347,7 +347,7 @@ class _ModelsPage extends StatelessWidget {
                 '${l10n.t('download_offline_model')}\n'
                 '${l10n.t('recommended_for_device')} ${_modelManager.platformModelLabel}',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.5), fontSize: 14),
+                    color: Colors.white.withValues(alpha: 0.5), fontSize: 14),
               ),
               const SizedBox(height: 24),
               if (isLoading)

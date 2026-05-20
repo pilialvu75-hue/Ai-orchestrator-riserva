@@ -122,7 +122,7 @@ class _ModeChip extends StatelessWidget {
       label: Text(label),
       selected: selected,
       onSelected: (_) => onTap(),
-      selectedColor: const Color(0xFF8AB4F8).withOpacity(0.25),
+      selectedColor: const Color(0xFF8AB4F8).withValues(alpha: 0.25),
       labelStyle: TextStyle(
         color: selected ? const Color(0xFF8AB4F8) : Colors.white70,
       ),

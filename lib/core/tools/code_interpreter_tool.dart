@@ -96,7 +96,7 @@ class CodeInterpreterTool implements Tool {
       )
       ..writeln();
 
-    final output = '${header}${code}\n\n$annotation';
+    final output = '$header$code\n\n$annotation';
 
     return ToolResult(
       toolId: id,

@@ -119,7 +119,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   bool _ensureLibraryLoaded() {
     _log(
-      '[RUNTIME_LOOKUP] stage=ffi_library_load_enter provider=${runtimeType} hash=${hashCode.toRadixString(16)}',
+      '[RUNTIME_LOOKUP] stage=ffi_library_load_enter provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
     if (_libraryLoadInProgress) {
       _log(
@@ -181,7 +181,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required CancellationToken cancellationToken,
   }) {
     _log(
-      '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=${runtimeType} hash=${hashCode.toRadixString(16)}',
+      '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
     final controller = StreamController<InferenceResponse>();
     var firstFfiInvocationAttempted = false;
@@ -234,7 +234,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final dartThreadId = _currentThreadId();
       _log('[FFI_FLOW_ENTER] session=$sessionId thread_id=$dartThreadId');
       _log(
-        '[RUNTIME_PROVIDER_BRANCH] provider=${runtimeType} runtime_mode=local '
+        '[RUNTIME_PROVIDER_BRANCH] provider=$runtimeType runtime_mode=local '
         'branch=session_api local_request_available=true session=$sessionId',
       );
       _log('[SESSION] begin session=$sessionId');

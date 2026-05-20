@@ -60,7 +60,7 @@ class _SplashPageState extends State<SplashPage>
                   width: 76,
                   height: 76,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8AB4F8).withOpacity(0.18),
+                    color: const Color(0xFF8AB4F8).withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(22),
                   ),
                   child: const Icon(
@@ -83,7 +83,7 @@ class _SplashPageState extends State<SplashPage>
                 Text(
                   l10n.t('starting_local_intelligence'),
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
+                    color: Colors.white.withValues(alpha: 0.55),
                     fontSize: 13,
                   ),
                 ),
