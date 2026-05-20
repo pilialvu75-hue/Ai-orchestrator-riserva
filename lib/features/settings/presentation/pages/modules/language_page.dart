@@ -41,7 +41,7 @@ class _LanguagePageState extends State<LanguagePage> {
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
         children: [
           DropdownButtonFormField<String>(
-            value: _language,
+            initialValue: _language,
             dropdownColor: const Color(0xFF1A1A1A),
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
