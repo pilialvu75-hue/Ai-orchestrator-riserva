@@ -20,35 +20,42 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dar
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
-// ── Provider ──────────────────────────────────────────────────────────────────
+/// Statistiche memoria
+class MemoryStats {
+  final int dartHeapBytes;
+  final int rssBytes;
+  final int systemTotalBytes;
+  final int systemAvailBytes;
+  final bool isLowMemory;
+  final DateTime timestamp;
 
-/// Android inference provider that drives GGUF model execution through the
-/// llama.cpp C bridge ([libllama_bridge.so]) via [dart:ffi].
-///
-/// Architecture
-/// ─────────────
-/// 1. [_ensureLibraryLoaded] opens the bridge library once and binds all
-///    symbols into [LlamaBridgeBindings].
-/// 2. [streamInference] loads the GGUF model and starts the C background
-///    thread via `llb_start_gen` inside the same native runtime instance.
-/// 3. The Dart async loop calls `llb_poll_token` on each iteration, yielding
-///    [Future.delayed(Duration.zero)] between empty polls so the Flutter UI
-///    stays responsive.
-/// 4. [CancellationToken] is forwarded to `llb_cancel`, which signals the
-///    native background thread to stop.
-///
-/// Native library resolution order
-/// ────────────────────────────────
-/// 1. `libllama_bridge.so` – preferred; thin wrapper built from
-///    [native/android/llama_bridge.cpp].
-///
-/// Build instructions
-/// ──────────────────
-/// Compile the bridge from `native/android/CMakeLists.txt` and place the
-/// resulting `.so` in `android/app/src/main/jniLibs/<abi>/`, or configure
-/// `externalNativeBuild` in `android/app/build.gradle` to compile it
-/// automatically during `flutter build apk`.
+  const MemoryStats({
+    this.dartHeapBytes = 0,
+    this.rssBytes = 0,
+    this.systemTotalBytes = 0,
+    this.systemAvailBytes = 0,
+    this.isLowMemory = false,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'rssMB': (rssBytes / 1024 / 1024).toStringAsFixed(2),
+        'systemAvailMB': (systemAvailBytes / 1024 / 1024).toStringAsFixed(2),
+        'lowMemory': isLowMemory,
+      };
+}
+
+enum _WorkerCommand { loadModel, startGeneration, cancel, freeModel, dispose, heartbeat }
+
+class _WorkerMessage {
+  final _WorkerCommand command;
+  final dynamic data;
+  final SendPort? replyPort;
+  const _WorkerMessage(this.command, {this.data, this.replyPort});
+}
+
 class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   AndroidFfiRuntimeProvider({
     RuntimeStateMachine? runtimeStateMachine,
@@ -59,1226 +66,240 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 128;
-  // Keep local mobile generations bounded so stalled native loops surface
-  // quickly and the UI can return partial text instead of hanging indefinitely.
+  static const int _maxOutputChars = 32000;
   static const Duration _generationTimeout = Duration(seconds: 90);
-  // If native polling produces no token at all within this window, treat the
-  // run as stalled rather than waiting for the full timeout budget.
-  // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
-  static const Duration _stalledInferenceTimeoutRelease = Duration(seconds: 45);
-  static const Duration _stalledInferenceTimeoutDebug = Duration(seconds: 120);
-  static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
-  static const Duration _startGenerationTimeout = Duration(seconds: 60);
   static const Duration _modelLoadTimeout = Duration(seconds: 60);
-  // 2400 polls × 24ms delay ~= 57.6s without token progress.
-  // This caps idle polling so llb_poll_token() cannot spin forever.
-  static const int _maxIdlePollIterations = 2400;
-  static const int _maxRepeatedTokenLoop = 96;
-  static const int _maxConsecutiveInvalidTokens = 24;
-  // Very small GGUF files are usually truncated/corrupted placeholders.
-  static const int _minValidModelSizeBytes = 4096;
-  static const Set<String> _androidSafeModelIds = <String>{
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
-  static const String _forensicSelfTestSessionId = 'runtime_self_test';
+  static const Duration _heartbeatInterval = Duration(seconds: 10);
 
-  /// Observable runtime status.  UI layers may register listeners here.
+  static const MethodChannel _memoryChannel = MethodChannel('ai_orchestrator/memory');
+
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
   final RuntimeStateMachine runtimeStateMachine;
   final bool Function() _developerModeProvider;
 
   bool get _isDeveloperMode => _developerModeProvider();
 
-  LlamaFfiLibraryHandle? _libraryHandle;
-  LlamaBridgeBindings? _bindings;
-  bool _loadAttempted = false;
+  Isolate? _workerIsolate;
+  SendPort? _workerSendPort;
+  String? _loadedModelPath;
+  bool _workerBusy = false;
+  Timer? _heartbeatTimer;
+  final Set<String> _activeSessions = <String>{};
   Future<void> _inferenceTail = Future<void>.value();
-  Future<void>? _warmupFuture;
-  final Set<String> _activeInferenceSessions = <String>{};
 
-  static Duration get _firstTokenTimeout =>
-      kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
+  static void _safeLog(String message) {
+    try {
+      debugPrint('[$_logTag] $message');
+      RuntimeEventLog.instance.emit(message);
+    } catch (_) {}
+  }
 
-  // ── Library loading ──────────────────────────────────────────────────────────
+  static void _safeAdd(StreamController<InferenceResponse> controller, InferenceResponse response) {
+    if (controller.isClosed) return;
+    try {
+      controller.add(response);
+    } catch (_) {}
+  }
 
-  bool _ensureLibraryLoaded() {
-    if (_loadAttempted) return _bindings != null && _libraryHandle != null;
-    _loadAttempted = true;
+  // ── Monitoraggio Memoria ─────────────────────────────────────────────────
+  Future<MemoryStats> getMemoryStats() async {
+    try {
+      final native = await _getNativeMemoryInfo();
+      return MemoryStats(
+        rssBytes: native['rss'] ?? ProcessInfo.currentRss,
+        systemTotalBytes: native['total'] ?? 0,
+        systemAvailBytes: native['avail'] ?? 0,
+        isLowMemory: native['lowMemory'] ?? false,
+        timestamp: DateTime.now(),
+      );
+    } catch (_) {
+      return MemoryStats(timestamp: DateTime.now());
+    }
+  }
 
-    final handle = LlamaFfiLoader.tryLoadBridgeLibrary(log: _log);
-    if (handle == null) return false;
-    _libraryHandle = handle;
-    _bindings = handle.bindings;
-    _log(
-      '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
-      ' abi=${LlamaFfiLoader.currentAbiName}',
+  Future<Map<String, dynamic>> _getNativeMemoryInfo() async {
+    try {
+      final result = await _memoryChannel.invokeMethod<Map>('getMemoryInfo');
+      return result ?? {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  void _logMemory(String context) async {
+    final stats = await getMemoryStats();
+    _safeLog('[MEMORY][$context] ${stats.toJson()}');
+    monitor.updateMemoryStats(stats);
+  }
+
+  // ── Supervisor ───────────────────────────────────────────────────────────
+  void _startSupervisor() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) => _checkWorkerHealth());
+  }
+
+  Future<void> _checkWorkerHealth() async {
+    if (_workerSendPort == null || _workerBusy) return;
+    try {
+      final port = ReceivePort();
+      _workerSendPort!.send(_WorkerMessage(_WorkerCommand.heartbeat, replyPort: port.sendPort));
+      await port.first.timeout(const Duration(seconds: 6));
+      port.close();
+    } catch (_) {
+      _safeLog('[SUPERVISOR] Worker unresponsive - restarting');
+      await _restartWorker();
+    }
+  }
+
+  Future<void> _restartWorker() async {
+    _disposeWorker();
+    await _ensureWorkerIsolate();
+  }
+
+  // ── Worker Management ────────────────────────────────────────────────────
+  Future<void> _ensureWorkerIsolate() async {
+    if (_workerIsolate != null && _workerSendPort != null) return;
+
+    final receivePort = ReceivePort();
+    _workerIsolate = await Isolate.spawn(
+      _runtimeWorkerEntryPoint,
+      receivePort.sendPort,
+      errorsAreFatal: false,
     );
-    return true;
+
+    final completer = Completer<SendPort>();
+    receivePort.listen((msg) {
+      if (msg is SendPort) completer.complete(msg);
+    });
+
+    _workerSendPort = await completer.future.timeout(const Duration(seconds: 10));
+    _startSupervisor();
+    _safeLog('[WORKER] Isolate ready');
   }
 
-  @override
-  Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
-    if (!LlamaFfiLoader.isCurrentPlatformSupported) {
-      final snapshot = LocalRuntimeState(
-        status: LocalRuntimeStatus.failed,
-        message:
-            'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}). '
-            'Only ${LlamaFfiLoader.supportedAbiNames} builds are supported.',
-      );
-      _syncLifecycleState(snapshot.status);
-      return snapshot;
-    }
-    if (!_ensureLibraryLoaded()) {
-      const snapshot = LocalRuntimeState(
-        status: LocalRuntimeStatus.ffiMissing,
-        message:
-            'libllama_bridge.so is missing for this Android build. Rebuild the native runtime for arm64-v8a or x86_64.',
-      );
-      _syncLifecycleState(snapshot.status);
-      return snapshot;
-    }
-
-    final snapshot = await super.validateRuntime(selectedModel: selectedModel);
-    _syncLifecycleState(snapshot.status);
-    return snapshot;
+  void _disposeWorker() {
+    _heartbeatTimer?.cancel();
+    _workerSendPort?.send(_WorkerMessage(_WorkerCommand.dispose));
+    _workerIsolate?.kill(priority: Isolate.immediate);
+    _workerIsolate = null;
+    _workerSendPort = null;
+    _loadedModelPath = null;
   }
 
-  // ── Inference ────────────────────────────────────────────────────────────────
-
+  // ── Persistent Model + Inference ─────────────────────────────────────────
   @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
     final controller = StreamController<InferenceResponse>();
+    bool terminalSent = false;
 
     () async {
       await _runInferenceSerially(() async {
-      final sessionId = request.sessionId.trim().isEmpty
-          ? 'unknown'
-          : request.sessionId.trim();
-      final dartThreadId = _currentThreadId();
-      _log('[SESSION] begin session=$sessionId');
-      _log(
-        '[DART_STREAM_LISTEN] elapsed_ms=0 thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=0 session=$sessionId',
-      );
-      if (!_claimInferenceSlot(sessionId)) {
-        _log('[SESSION] recursive_guard_triggered session=$sessionId');
-        _finishWithRuntimeError(
-          controller,
-          stage: 'recursive_inference_guard',
-          message: 'Recursive inference call blocked for session $sessionId.',
-        );
-        return;
-      }
-      try {
-      await _ensureWarmup(controller: controller, sessionId: sessionId);
-      if (controller.isClosed) return;
-      if (cancellationToken.isCancelled) {
-        _finishWithRuntimeError(
-          controller,
-          stage: 'cancelled',
-          message: 'Inference cancelled.',
-          state: InferenceTerminalState.cancelled,
-        );
-        return;
-      }
-      final modelPath = request.modelPath;
-      final modelId = request.modelId;
-      _log('[CONTEXT] session=$sessionId lines=${request.context.length}'
-          ' system_prompt=${(request.systemPrompt ?? '').trim().isNotEmpty}');
+        final sessionId = request.sessionId.trim().isEmpty ? 'unknown' : request.sessionId.trim();
+        if (!_claimSession(sessionId)) return;
 
-      // ── MODEL PATH FORENSICS ─────────────────────────────────────────────────
-      _log('[MODEL_PATH] modelId=$modelId path=${modelPath ?? "(null)"}'
-          ' runtimeMode=android_ffi');
-
-      if (modelPath == null || modelPath.isEmpty || modelId == null) {
-        _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
-        _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
-        clearRuntimeVerification();
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.modelMissing,
-          message: 'No validated local model is selected.',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'request_validation',
-          message: 'Missing local model path.',
-        );
-        return;
-      }
-
-      // Log file existence / size / readability before any guard.
-      final modelFile = File(modelPath);
-      final modelExists = modelFile.existsSync();
-      _log('[MODEL_EXISTS] path=$modelPath exists=$modelExists');
-      if (modelExists) {
-        int modelSizeBytes = -1;
-        bool modelReadable = false;
         try {
-          modelSizeBytes = modelFile.lengthSync();
-          modelReadable = modelSizeBytes > 0;
+          await _ensureWorkerIsolate();
+          _logMemory('before_inference');
+
+          final modelPath = request.modelPath!;
+          final modelId = request.modelId!;
+
+          // Persistent Model
+          if (_loadedModelPath != modelPath) {
+            _safeLog('[MODEL] Loading new model: $modelPath');
+            final loadPort = ReceivePort();
+            _workerSendPort!.send(_WorkerMessage(_WorkerCommand.loadModel,
+                data: modelPath, replyPort: loadPort.sendPort));
+            if (await loadPort.first != 0) throw Exception('Model load failed');
+            loadPort.close();
+            _loadedModelPath = modelPath;
+          }
+
+          // Start Generation
+          final prompt = _composePrompt(request, modelId: modelId);
+          final maxTokens = request.maxTokens.clamp(1, _safeMaxTokens);
+          final streamPort = ReceivePort();
+
+          final startPort = ReceivePort();
+          _workerSendPort!.send(_WorkerMessage(_WorkerCommand.startGeneration,
+              data: {
+                'prompt': prompt,
+                'maxTokens': maxTokens,
+                'temperature': request.temperature,
+                'streamPort': streamPort.sendPort,
+              },
+              replyPort: startPort.sendPort));
+
+          if (await startPort.first != 0) throw Exception('Start generation failed');
+          startPort.close();
+
+          cancellationToken.onCancel(() => _workerSendPort?.send(_WorkerMessage(_WorkerCommand.cancel)));
+
+          await for (final event in streamPort) {
+            if (controller.isClosed) break;
+            if (event is! Map<String, dynamic>) continue;
+
+            if (event['type'] == 'token') {
+              _safeAdd(controller, InferenceResponse.token(text: event['text'], model: modelId));
+            } else if (event['type'] == 'final') {
+              if (!terminalSent) {
+                terminalSent = true;
+                _safeAdd(controller, InferenceResponse.finalChunk(
+                  text: event['text'] ?? '',
+                  tokensGenerated: event['tokens'] ?? 0,
+                  model: modelId,
+                ));
+              }
+              break;
+            } else if (event['type'] == 'error') {
+              if (!terminalSent) _safeAdd(controller, InferenceResponse.error(event['message'] ?? 'Error'));
+              break;
+            }
+          }
         } catch (e) {
-          modelReadable = false;
+          _safeLog('[INFERENCE_ERROR] $e');
+          if (!terminalSent) _safeAdd(controller, InferenceResponse.error(e.toString()));
+        } finally {
+          await _ackFreeModel(); // Solo cleanup leggero, model resta residente
+          _logMemory('after_inference');
+          _releaseSession(sessionId);
+          if (!controller.isClosed) await controller.close().catchError((_) {});
         }
-        _log('[MODEL_SIZE] path=$modelPath size_bytes=$modelSizeBytes');
-        _log('[MODEL_READABLE] path=$modelPath readable=$modelReadable');
-      } else {
-        _log('[MODEL_SIZE] path=$modelPath size_bytes=N/A (file not found)');
-        _log('[MODEL_READABLE] path=$modelPath readable=false (file not found)');
-      }
-
-      if (!_androidSafeModelIds.contains(modelId)) {
-        if (_isDeveloperMode) {
-          // Developer mode: warn but allow the run to proceed.
-          _log(
-            '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
-            'validated set – unsupported quantization or architecture possible. '
-            'Proceeding with experimental inference.',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            message:
-                '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
-          );
-        } else {
-          clearRuntimeVerification();
-          const unsupportedAndroidModelMessage =
-              'Selected model is not enabled for Android local runtime. '
-              'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-              'gemma-2-2b-it, llama_1b, or gemma_2b.';
-          _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.failed,
-            message: unsupportedAndroidModelMessage,
-          );
-          _finishWithRuntimeError(
-            controller,
-            stage: 'model_guard',
-            message: unsupportedAndroidModelMessage,
-            details: 'modelId=$modelId',
-          );
-          return;
-        }
-      }
-
-      final modelValidationError =
-          await Isolate.run(() => _validateModelFileForRuntime(modelPath));
-      if (modelValidationError != null) {
-        _log('[GGUF] validation=failed path=$modelPath reason=$modelValidationError');
-        _log('[TERMINAL_STATE] state=failed reason=model_validation'
-            ' path=$modelPath error=$modelValidationError');
-        clearRuntimeVerification();
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.failed,
-          message: modelValidationError,
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'model_validation',
-          message: modelValidationError,
-        );
-        return;
-      }
-      _log('[GGUF] validation=ok path=$modelPath');
-
-      if (!_ensureLibraryLoaded()) {
-        _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
-        clearRuntimeVerification();
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.ffiMissing,
-          message:
-              'libllama_bridge.so is missing for this Android build.',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'library_load',
-          message: 'Local AI runtime library (libllama_bridge.so) not found.',
-        );
-        return;
-      }
-
-      final bindings = _bindings!;
-
-      // ── Step 1: Load model ───────────────────────────────────────────────────
-      _updateRuntimeStatus(LocalRuntimeStatus.loading,
-          message: 'Loading model: $modelId', resetProgress: true);
-      // Let UI observers process the loading state before the blocking FFI load.
-      await Future<void>.delayed(Duration.zero);
-      _logAi('loading model...');
-      _log('[NATIVE_MODEL_LOAD_BEGIN] path=$modelPath modelId=$modelId'
-          ' n_ctx=512 n_threads=2 gpu_layers=0');
-
-      int loadResult;
-      try {
-        loadResult = await _runNativeCallWithTimeout<int>(
-          stage: 'model_load',
-          timeout: _modelLoadTimeout,
-          call: () => bindings.loadModel(modelPath),
-        );
-      } catch (error) {
-        _log('[NATIVE_MODEL_LOAD_FAILURE] path=$modelPath exception=$error');
-        _log('[NATIVE_CONTEXT_FAILURE] path=$modelPath reason=ffi_exception');
-        _log('[TERMINAL_STATE] state=failed reason=model_load_exception');
-        clearRuntimeVerification();
-        _updateRuntimeStatus(
-          error is TimeoutException
-              ? LocalRuntimeStatus.timedOut
-              : LocalRuntimeStatus.failed,
-          message: error is TimeoutException
-              ? 'Model load timed out.'
-              : 'Model load failed: $error',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'model_load',
-          message: 'Model load failed.',
-          details: error.toString(),
-        );
-        return;
-      }
-      _log('[NATIVE_MODEL_LOAD_RESULT] llb_load_model returned: $loadResult');
-      final loadedAfterLoad = bindings.isLoaded();
-      _log('[NATIVE_MODEL_LOAD_RESULT] llb_is_loaded after load: $loadedAfterLoad');
-
-      if (loadResult != 0) {
-        final errMsg = _safeLastError(bindings);
-        final lowerErr = errMsg.toLowerCase();
-        if (lowerErr.contains('context')) {
-          _log(
-            '[NATIVE_CONTEXT_FAILURE] path=$modelPath code=$loadResult error=$errMsg',
-          );
-        }
-        _log('[NATIVE_MODEL_LOAD_FAILURE] code=$loadResult error=$errMsg'
-            ' path=$modelPath');
-        _log('[TERMINAL_STATE] state=failed reason=model_load_error code=$loadResult');
-        clearRuntimeVerification();
-        _updateRuntimeStatus(LocalRuntimeStatus.failed, message: errMsg);
-        _finishWithRuntimeError(
-          controller,
-          stage: 'model_load',
-          message: 'Failed to load model.',
-          details: 'Load failed with code $loadResult: $errMsg',
-        );
-        return;
-      }
-      _log('[NATIVE_MODEL_LOAD_SUCCESS] path=$modelPath modelId=$modelId'
-          ' llb_is_loaded=$loadedAfterLoad');
-      _log('[NATIVE_CONTEXT_CREATE] path=$modelPath status=ok');
-      _logAi('model loaded');
-
-      // ── Step 2: Start generation ─────────────────────────────────────────────
-      final isForensicSelfTest =
-          request.sessionId.trim() == _forensicSelfTestSessionId;
-      final prompt = _composePrompt(
-        request,
-        modelId: modelId,
-        bypassNonessentialLayers: isForensicSelfTest,
-      );
-      final promptWordEstimate = prompt
-          .trim()
-          .split(RegExp(r'\s+'))
-          .where((token) => token.isNotEmpty)
-          .length;
-      if (promptWordEstimate <= 0) {
-        clearRuntimeVerification();
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.failed,
-          message: 'Tokenizer readiness check failed: prompt has no tokens.',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'tokenizer_readiness',
-          message: 'Tokenizer readiness check failed before inference.',
-        );
-        return;
-      }
-      _updateRuntimeStatus(
-        LocalRuntimeStatus.tokenizing,
-        message: 'Tokenizing...',
-        resetProgress: true,
-      );
-      _log('[TOKENIZER] status=begin prompt_chars=${prompt.length}');
-      _log(
-        '[TOKEN_COUNT] prompt_word_estimate=$promptWordEstimate prompt_chars=${prompt.length}',
-      );
-      _log('[TOKENIZER_OK] prompt_word_estimate=$promptWordEstimate');
-      _log(
-        '[MODEL_EXECUTION] tokenization start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
-      );
-      _log(
-        '[CONTEXT_SIZE] session=$sessionId context_lines=${request.context.length} system_chars=${(request.systemPrompt ?? '').length} prompt_chars=${request.prompt.length} composed_prompt_chars=${prompt.length}',
-      );
-      _log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
-      _log(
-        '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate',
-      );
-      final requestedMaxTokens = isForensicSelfTest ? 4 : request.maxTokens;
-      final maxTokens = requestedMaxTokens.clamp(1, _safeMaxTokens);
-      final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
-      final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
-      final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
-      if (request.maxTokens > _safeMaxTokens) {
-        _log(
-          '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit; clamped to $maxTokens',
-        );
-      }
-
-      // Verify that the native model is actually loaded before calling
-      // llb_start_gen so load failures are visible in logs before
-      // generation starts.
-      final loadedCheck = bindings.isLoaded();
-      _log('[MODEL_EXECUTION] llb_is_loaded before start_generation: $loadedCheck');
-      if (loadedCheck != 1) {
-        clearRuntimeVerification();
-        final nativeErr = _safeLastError(bindings);
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.failed,
-          message: 'Model not loaded (llb_is_loaded=$loadedCheck).',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'start_generation',
-          message:
-              'Model is not loaded in the native runtime (llb_is_loaded=$loadedCheck).',
-          details: nativeErr.isNotEmpty ? nativeErr : null,
-        );
-        return;
-      }
-
-      _log(
-        '[MODEL_EXECUTION] Calling native llb_start_gen: prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=$effectiveTemperature',
-      );
-      _log(
-        '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
-        ' max_tokens=$maxTokens temperature=$effectiveTemperature'
-        ' n_threads=${LlamaNativeDefaults.nThreads}'
-        ' n_batch=${LlamaNativeDefaults.nBatch}'
-        ' n_ctx=${LlamaNativeDefaults.nCtx}'
-        ' top_k=$effectiveTopK'
-        ' top_p=$effectiveTopP',
-      );
-      _logAi('starting inference...');
-      int startResult;
-      final startupWatch = Stopwatch()..start();
-      try {
-        startResult = await _runNativeCallWithTimeout<int>(
-          stage: 'start_generation',
-          timeout: _startGenerationTimeout,
-          call: () => bindings.startGeneration(
-            prompt,
-            maxTokens,
-            effectiveTemperature,
-          ),
-        );
-      } catch (error) {
-        startupWatch.stop();
-        clearRuntimeVerification();
-        _safeResetRuntime(bindings, reason: 'start_generation_exception');
-        _updateRuntimeStatus(
-          error is TimeoutException
-              ? LocalRuntimeStatus.timedOut
-              : LocalRuntimeStatus.failed,
-          message: error is TimeoutException
-              ? 'Native start_generation timed out.'
-              : 'Native start_generation failed: $error',
-        );
-        _finishWithRuntimeError(
-          controller,
-          stage: 'start_generation',
-          message: error is TimeoutException
-              ? 'Native generation start timed out.'
-              : 'Native generation start failed.',
-          details: error.toString(),
-        );
-        return;
-      }
-      startupWatch.stop();
-      _log('[MODEL_EXECUTION] llb_start_gen returned: $startResult');
-
-      if (startupWatch.elapsed > _startGenerationTimeout) {
-        _safeCancel(bindings);
-        clearRuntimeVerification();
-        _safeResetRuntime(bindings, reason: 'start_generation_timeout');
-        _updateRuntimeStatus(
-          LocalRuntimeStatus.timedOut,
-          message:
-              'Inference startup timed out after ${_startGenerationTimeout.inSeconds}s.',
-        );
-        _logAi('inference timeout');
-        _finishWithRuntimeError(
-          controller,
-          stage: 'start_generation',
-          message:
-              'Inference startup timed out after ${_startGenerationTimeout.inSeconds}s.',
-        );
-        return;
-      }
-
-      if (startResult != 0) {
-        clearRuntimeVerification();
-        final err = _safeLastError(bindings);
-        _safeResetRuntime(bindings, reason: 'start_generation_failed');
-        _updateRuntimeStatus(LocalRuntimeStatus.failed, message: err);
-        _finishWithRuntimeError(
-          controller,
-          stage: 'start_generation',
-          message: 'Failed to start generation.',
-          details: err,
-        );
-        return;
-      }
-      _log('[WARMUP] inference_startup_ok session=$sessionId'
-          ' startup_ms=${startupWatch.elapsed.inMilliseconds}');
-      _log(
-        '[PROMPT_EVAL] stage=ready startup_ms=${startupWatch.elapsed.inMilliseconds}',
-      );
-
-      cancellationToken.onCancel(() => _safeCancel(bindings));
-
-      // ── Step 3: Poll for tokens ──────────────────────────────────────────────
-      final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
-      final tokenBuf = tokenBufRaw.cast<Utf8>();
-      var estimatedTokens = 0;
-      var repeatedTokenCount = 0;
-      var consecutiveInvalidTokens = 0;
-      var pollIterations = 0;
-      String? lastPiece;
-      final fullText = StringBuffer();
-      final startedAt = DateTime.now();
-      DateTime? firstTokenAt;
-      var lastTokenProgressAt = startedAt;
-      var consecutiveIdlePolls = 0;
-      var runtimeNeedsReset = false;
-      String? runtimeResetReason;
-      _updateRuntimeStatus(
-        LocalRuntimeStatus.inferencing,
-        message: 'Generating',
-        tokensGenerated: 0,
-        elapsed: Duration.zero,
-        startedAt: startedAt,
-      );
-      _logAi('streaming callback active');
-      _log('[STREAM_ADD] event=generation_started session=$sessionId');
-      _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
-      _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
-
-      try {
-        while (true) {
-          pollIterations++;
-          final now = DateTime.now();
-          final elapsed = now.difference(startedAt);
-          final sinceFirstToken =
-              firstTokenAt == null ? null : now.difference(firstTokenAt);
-          final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
-          _log(
-            '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
-            ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
-          );
-          _log(
-            '[TOKEN_LOOP] iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
-          );
-          _log(
-            '[GENERATION_STEP] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds}'
-            ' generated_tokens=$estimatedTokens',
-          );
-          _log(
-            '[GENERATION_ALIVE] iteration=$pollIterations elapsed_ms=${elapsed.inMilliseconds} first_token=${firstTokenAt != null}',
-          );
-          if (firstTokenAt == null && pollIterations % 25 == 0) {
-            _log(
-              '[FIRST_TOKEN_WAIT] iteration=$pollIterations waited_ms=${elapsed.inMilliseconds}',
-            );
-          }
-          if (cancellationToken.isCancelled) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            _log(
-              '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
-            );
-            _finishWithRuntimeError(
-              controller,
-              stage: 'cancelled',
-              message: 'Inference cancelled.',
-              state: InferenceTerminalState.cancelled,
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.runtimeUnavailable,
-              message: 'Cancelled',
-              tokensGenerated: estimatedTokens,
-              elapsed: DateTime.now().difference(startedAt),
-            );
-            break;
-          }
-
-          if (elapsed > _generationTimeout) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'generation_timeout';
-            _log(
-              '[TERMINAL_STATE] state=timedOut reason=generation_timeout'
-              ' generated_tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.timedOut,
-              message: 'Timed out',
-              tokensGenerated: estimatedTokens,
-              elapsed: elapsed,
-              startedAt: startedAt,
-            );
-            _logAi('inference timeout');
-            await _finishWithPartialOrRuntimeError(
-              controller,
-              stage: 'timeout',
-              message: 'Local generation timed out.',
-              modelId: modelId,
-              fullText: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              notice:
-                  'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
-              partialTerminalState: InferenceTerminalState.timeout,
-            );
-            break;
-          }
-          if (firstTokenAt == null && elapsed > _firstTokenTimeout) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'first_token_watchdog';
-            _log(
-              '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
-              ' timeout_ms=${_firstTokenTimeout.inMilliseconds} session=$sessionId',
-            );
-            _log(
-              '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
-              ' no_token_produced=true session=$sessionId',
-            );
-            _log(
-              '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${_firstTokenTimeout.inMilliseconds}',
-            );
-            _log(
-              '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
-              ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.stalled,
-              message: 'Runtime stalled',
-              tokensGenerated: estimatedTokens,
-              elapsed: elapsed,
-              startedAt: startedAt,
-            );
-            _logAi('inference timeout');
-            _finishWithRuntimeError(
-              controller,
-              stage: 'stalled',
-              message: 'Local model stalled during inference.',
-            );
-            break;
-          }
-          if (firstTokenAt != null &&
-              sinceLastTokenProgress > _noTokenProgressTimeout) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'token_progress_watchdog';
-            _log(
-              '[STALL] reason=token_progress_watchdog'
-              ' generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${elapsed.inMilliseconds}'
-              ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}'
-              ' session=$sessionId',
-            );
-            _log(
-              '[TERMINAL_STATE] state=stalled reason=token_progress_watchdog'
-              ' generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${elapsed.inMilliseconds}'
-              ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.stalled,
-              message: 'Token stream stalled',
-              tokensGenerated: estimatedTokens,
-              elapsed: elapsed,
-              startedAt: startedAt,
-            );
-            await _finishWithPartialOrRuntimeError(
-              controller,
-              stage: 'stalled',
-              message: 'Token stream stalled during local inference.',
-              modelId: modelId,
-              fullText: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              notice:
-                  'Token stream stalled after ${sinceLastTokenProgress.inSeconds}s. Returning partial response.',
-              partialTerminalState: InferenceTerminalState.timeout,
-            );
-            break;
-          }
-          if (consecutiveIdlePolls >= _maxIdlePollIterations) {
-            _safeCancel(bindings);
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'poll_loop_watchdog';
-            _log(
-              '[STREAM_TIMEOUT] reason=poll_loop_idle idle_polls=$consecutiveIdlePolls'
-              ' elapsed_ms=${elapsed.inMilliseconds} session=$sessionId',
-            );
-            _log(
-              '[STALL] reason=poll_loop_watchdog'
-              ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${elapsed.inMilliseconds} session=$sessionId',
-            );
-            _log(
-              '[TERMINAL_STATE] state=stalled reason=poll_loop_watchdog'
-              ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${elapsed.inMilliseconds}',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.stalled,
-              message: 'Polling loop stalled',
-              tokensGenerated: estimatedTokens,
-              elapsed: elapsed,
-              startedAt: startedAt,
-            );
-            await _finishWithPartialOrRuntimeError(
-              controller,
-              stage: 'poll_loop',
-              message: 'Token polling stalled in local runtime.',
-              modelId: modelId,
-              fullText: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              notice:
-                  'No token progress detected in polling loop. Returning partial response.',
-              partialTerminalState: InferenceTerminalState.timeout,
-            );
-            break;
-          }
-
-          int status;
-          try {
-            _log(
-              '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
-            );
-            status = bindings.pollToken(tokenBuf);
-          } catch (error) {
-            clearRuntimeVerification();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'poll_token_exception';
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.failed,
-              message: 'Native poll_token failed: $error',
-            );
-            _finishWithRuntimeError(
-              controller,
-              stage: 'poll_token',
-              message: 'Native poll_token failed.',
-              details: error.toString(),
-            );
-            break;
-          }
-          _log('[TOKEN_STREAM] poll status iteration=$pollIterations status=$status');
-          _log(
-            '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations status=$status',
-          );
-
-          if (status == 1) {
-            String piece;
-            try {
-              piece = tokenBuf.toDartString();
-            } catch (error) {
-              _log('[TOKENIZER_DECODE_FAIL] stage=dart_utf8_decode error=$error');
-              consecutiveInvalidTokens++;
-              if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
-                _safeCancel(bindings);
-                clearRuntimeVerification();
-                runtimeNeedsReset = true;
-                runtimeResetReason = 'token_decode_exception';
-                _log(
-                  '[TERMINAL_STATE] state=failed reason=token_decode_exception'
-                  ' generated_tokens=$estimatedTokens'
-                  ' error=$error',
-                );
-                _updateRuntimeStatus(
-                  LocalRuntimeStatus.failed,
-                  message: 'Invalid generated token stream.',
-                  tokensGenerated: estimatedTokens,
-                  elapsed: DateTime.now().difference(startedAt),
-                  startedAt: startedAt,
-                );
-                _finishWithRuntimeError(
-                  controller,
-                  stage: 'token_decode',
-                  message: 'Invalid generated token stream.',
-                  details: error.toString(),
-                );
-                break;
-              }
-              continue;
-            }
-            if (piece.isNotEmpty) {
-              final isFirstToken = firstTokenAt == null;
-              firstTokenAt ??= DateTime.now();
-              consecutiveInvalidTokens = 0;
-              consecutiveIdlePolls = 0;
-              lastTokenProgressAt = DateTime.now();
-              fullText.write(piece);
-              estimatedTokens++;
-              markRuntimeVerified(modelPath);
-              final streamingElapsed = DateTime.now().difference(startedAt);
-              _log(
-                '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations status=$status',
-              );
-              _log(
-                '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
-              );
-              if (isFirstToken) {
-                _log(
-                  '[FIRST_TOKEN] elapsed_ms=${streamingElapsed.inMilliseconds}'
-                  ' token_text_length=${piece.length}'
-                  ' poll_iteration=$pollIterations session=$sessionId',
-                );
-                _log(
-                  '[FIRST_TOKEN_REAL] elapsed_ms=${streamingElapsed.inMilliseconds}'
-                  ' thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length}'
-                  ' queue_size=-1 poll_iteration=$pollIterations'
-                  ' token="${piece.replaceAll('\n', r'\n')}" token_count=$estimatedTokens',
-                );
-              }
-              _log(
-                '[DART_TOKEN_RECEIVED] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations',
-              );
-              if (estimatedTokens % 16 == 0) {
-                _log('[TOKEN_STREAM] token_count=$estimatedTokens');
-              }
-              _log(
-                '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${piece.replaceAll('\n', r'\n')}"'
-                ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
-              );
-              _log(
-                '[TOKEN_EVAL] token_index=$estimatedTokens elapsed_ms=${streamingElapsed.inMilliseconds}',
-              );
-              _log(
-                '[TOKEN_DECODE] token_index=$estimatedTokens chars=${piece.length}'
-                ' text="${piece.replaceAll('\n', r'\n')}"',
-              );
-              if (piece == lastPiece) {
-                repeatedTokenCount++;
-                if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
-                  _safeCancel(bindings);
-                  clearRuntimeVerification();
-                  runtimeNeedsReset = true;
-                  runtimeResetReason = 'repeated_token_loop';
-                  _log(
-                    '[STREAM_LOOP] reason=repeated_token'
-                    ' count=$repeatedTokenCount token="${piece.replaceAll('\n', r'\n')}"'
-                    ' generated_tokens=$estimatedTokens session=$sessionId',
-                  );
-                  _log(
-                    '[TERMINAL_STATE] state=failed reason=repeated_token_loop'
-                    ' generated_tokens=$estimatedTokens'
-                    ' elapsed_ms=${streamingElapsed.inMilliseconds}',
-                  );
-                  _updateRuntimeStatus(
-                    LocalRuntimeStatus.failed,
-                    message: 'Repeated-token loop detected.',
-                    tokensGenerated: estimatedTokens,
-                    elapsed: streamingElapsed,
-                    startedAt: startedAt,
-                  );
-                  _finishWithRuntimeError(
-                    controller,
-                    stage: 'generation_loop',
-                    message: 'Repeated-token loop detected.',
-                    details: 'token="$piece"',
-                  );
-                  break;
-                }
-              } else {
-                lastPiece = piece;
-                repeatedTokenCount = 0;
-              }
-              _updateRuntimeStatus(
-                LocalRuntimeStatus.streaming,
-                message: 'Streaming',
-                tokensGenerated: estimatedTokens,
-                elapsed: streamingElapsed,
-                startedAt: startedAt,
-              );
-              _log(
-                '[TOKEN_EMIT] token_index=$estimatedTokens chars=${piece.length}'
-                ' session=$sessionId',
-              );
-              _log(
-                '[DART_STREAM_RENDER] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
-              );
-              _log('[STREAM_ADD] event=token session=$sessionId');
-              final flushWatch = Stopwatch()..start();
-              controller.add(InferenceResponse.token(text: piece, model: modelId));
-              flushWatch.stop();
-              _log(
-                '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
-              );
-            } else {
-              consecutiveInvalidTokens++;
-              _log(
-                '[TOKEN_STREAM] empty token iteration=$pollIterations consecutive_empty=$consecutiveInvalidTokens',
-              );
-              if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
-                _log('[TOKENIZER_DECODE_FAIL] stage=empty_piece_loop');
-                _safeCancel(bindings);
-                clearRuntimeVerification();
-                runtimeNeedsReset = true;
-                runtimeResetReason = 'empty_token_loop';
-                _log(
-                  '[TERMINAL_STATE] state=failed reason=empty_token_loop'
-                  ' generated_tokens=$estimatedTokens'
-                  ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
-                );
-                _updateRuntimeStatus(
-                  LocalRuntimeStatus.failed,
-                  message: 'Invalid empty token stream.',
-                  tokensGenerated: estimatedTokens,
-                  elapsed: DateTime.now().difference(startedAt),
-                  startedAt: startedAt,
-                );
-                _finishWithRuntimeError(
-                  controller,
-                  stage: 'token_decode',
-                  message: 'Invalid token stream.',
-                );
-                break;
-              }
-            }
-          } else if (status == 2) {
-            // EOS or max-tokens: generation complete.
-            final completedElapsed = DateTime.now().difference(startedAt);
-            markRuntimeVerified(modelPath);
-            _log(
-              '[GENERATION_END] state=success generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${completedElapsed.inMilliseconds}',
-            );
-            _log(
-              '[FINAL_RESPONSE] eos generated_tokens=$estimatedTokens elapsed_ms=${completedElapsed.inMilliseconds}',
-            );
-            _log(
-              '[TERMINAL_STATE] state=success generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${completedElapsed.inMilliseconds}',
-            );
-            _logAi('inference completed');
-            _log('[STREAM_ADD] event=final_chunk session=$sessionId');
-            final flushWatch = Stopwatch()..start();
-            controller.add(InferenceResponse.finalChunk(
-              text: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              model: modelId,
-            ));
-            flushWatch.stop();
-            _log(
-              '[STREAM_FLUSH] event=final_chunk session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.completed,
-              message: 'Completed',
-              tokensGenerated: estimatedTokens,
-              elapsed: completedElapsed,
-              startedAt: startedAt,
-            );
-            break;
-          } else if (status == -99) {
-            // Cancelled by the native thread.
-            _log('[GENERATION_END] state=cancelled generated_tokens=$estimatedTokens');
-            _log(
-              '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
-            );
-            clearRuntimeVerification();
-            _finishWithRuntimeError(
-              controller,
-              stage: 'cancelled',
-              message: 'Inference cancelled.',
-              state: InferenceTerminalState.cancelled,
-            );
-            _updateRuntimeStatus(
-              LocalRuntimeStatus.runtimeUnavailable,
-              tokensGenerated: estimatedTokens,
-              elapsed: DateTime.now().difference(startedAt),
-            );
-            break;
-          } else if (status == -1) {
-            clearRuntimeVerification();
-            final err = _safeLastError(bindings);
-            _log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
-            final statusLower = err.toLowerCase();
-            runtimeNeedsReset = true;
-            runtimeResetReason = 'native_error';
-            _log(
-              '[TERMINAL_STATE] state=native_error generated_tokens=$estimatedTokens'
-              ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
-              ' error=$err',
-            );
-            if (statusLower.contains('out of memory') ||
-                statusLower.contains('oom') ||
-                statusLower.contains('memory')) {
-              _updateRuntimeStatus(LocalRuntimeStatus.failed,
-                  message: 'Out of memory: $err',
-                  tokensGenerated: estimatedTokens,
-                  elapsed: DateTime.now().difference(startedAt),
-                  startedAt: startedAt);
-            } else {
-              _updateRuntimeStatus(
-                LocalRuntimeStatus.failed,
-                message: err,
-                tokensGenerated: estimatedTokens,
-                elapsed: DateTime.now().difference(startedAt),
-                startedAt: startedAt,
-              );
-            }
-            if ((statusLower.contains('timeout') || statusLower.contains('stalled')) &&
-                fullText.toString().trim().isNotEmpty) {
-              await _finishWithPartialOrRuntimeError(
-                controller,
-                stage: 'generation',
-                message: err.isNotEmpty ? err : 'Inference failed.',
-                modelId: modelId,
-                fullText: fullText.toString(),
-                tokensGenerated: estimatedTokens,
-                notice: err,
-                partialTerminalState: InferenceTerminalState.timeout,
-              );
-            } else {
-              _finishWithRuntimeError(
-                controller,
-                stage: 'generation',
-                message: err.isNotEmpty ? err : 'Inference failed.',
-              );
-            }
-            break;
-          } else {
-            // status == 0: no token ready yet; yield to the Flutter event loop.
-            // Use a small non-zero delay to avoid excessive CPU churn during
-            // periods when the generation thread has not yet produced output.
-            consecutiveIdlePolls++;
-            if (consecutiveIdlePolls % 120 == 0) {
-              _log(
-                '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
-                'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
-              );
-              _log(
-                '[GENERATION_IDLE] idle_polls=$consecutiveIdlePolls idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
-              );
-            }
-            await Future<void>.delayed(const Duration(milliseconds: 24));
-          }
-        }
-      } finally {
-        if (runtimeNeedsReset) {
-          _safeResetRuntime(
-            bindings,
-            reason: runtimeResetReason ?? 'runtime_recovery',
-          );
-        }
-        final terminalState = monitor.state.status;
-        _log(
-          '[TERMINAL_STATE] state=${terminalState.name}'
-          ' generated_tokens=$estimatedTokens'
-          ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
-          ' first_token=${firstTokenAt != null}',
-        );
-        if (terminalState == LocalRuntimeStatus.loading ||
-            terminalState == LocalRuntimeStatus.tokenizing ||
-            terminalState == LocalRuntimeStatus.inferencing ||
-            terminalState == LocalRuntimeStatus.streaming) {
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.ready,
-            message: 'Runtime verified and ready for the next prompt.',
-            tokensGenerated: 0,
-            elapsed: Duration.zero,
-            startedAt: null,
-            resetProgress: true,
-          );
-        }
-        calloc.free(tokenBufRaw);
-        if (!controller.isClosed) {
-          _log(
-            '[DART_STREAM_CLOSE] elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations session=$sessionId',
-          );
-          _log('[STREAM_CLOSE] session=$sessionId');
-          await controller.close();
-        }
-      }
-      } finally {
-        _releaseInferenceSlot(sessionId);
-        _log('[SESSION] end session=$sessionId');
-      }
       });
     }();
 
     return controller.stream;
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────────
-
-  Future<void> _runInferenceSerially(Future<void> Function() action) {
-    final next = _inferenceTail.then((_) => action());
-    _inferenceTail = next.catchError((_) {});
-    return next;
+  Future<void> _ackFreeModel() async {
+    if (_workerSendPort == null) return;
+    final port = ReceivePort();
+    try {
+      _workerSendPort!.send(_WorkerMessage(_WorkerCommand.freeModel, replyPort: port.sendPort));
+      await port.first.timeout(const Duration(seconds: 4));
+    } catch (_) {} finally {
+      port.close();
+    }
   }
 
-  Future<T> _runNativeCallWithTimeout<T>({
-    required String stage,
-    required Duration timeout,
-    required T Function() call,
-  }) async {
-    _log('[WARMUP] native_call stage=$stage timeout_ms=${timeout.inMilliseconds}');
-    return Future<T>.sync(call).timeout(
-      timeout,
-      onTimeout: () => throw TimeoutException(
-        'Native call timed out at stage=$stage after ${timeout.inSeconds}s.',
-      ),
-    );
+  Future<void> _runInferenceSerially(Future<void> Function() action) async {
+    final previous = _inferenceTail;
+    _inferenceTail = previous.then((_) => action()).catchError((_) {});
+    await _inferenceTail;
   }
 
-  bool _claimInferenceSlot(String sessionId) {
-    if (_activeInferenceSessions.contains(sessionId)) return false;
-    _activeInferenceSessions.add(sessionId);
+  bool _claimSession(String id) {
+    if (_activeSessions.contains(id)) return false;
+    _activeSessions.add(id);
     return true;
   }
 
-  void _releaseInferenceSlot(String sessionId) {
-    _activeInferenceSessions.remove(sessionId);
-  }
+  void _releaseSession(String id) => _activeSessions.remove(id);
 
-  Future<void> _ensureWarmup({
-    required StreamController<InferenceResponse> controller,
-    required String sessionId,
-  }) async {
-    _warmupFuture ??= _runWarmup();
-    _log('[WARMUP] await session=$sessionId');
-    try {
-      await _warmupFuture!;
-      _log('[WARMUP] complete session=$sessionId');
-    } catch (error) {
-      _warmupFuture = null;
-      _finishWithRuntimeError(
-        controller,
-        stage: 'warmup',
-        message: 'Runtime warmup failed.',
-        details: error.toString(),
-      );
-    }
-  }
-
-  Future<void> _runWarmup() async {
-    _log('[BOOT] runtime warmup begin');
-    _updateRuntimeStatus(
-      LocalRuntimeStatus.loading,
-      message: 'Runtime warmup in progress...',
-      resetProgress: true,
-    );
-    if (!LlamaFfiLoader.isCurrentPlatformSupported) {
-      throw StateError('Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).');
-    }
-    if (!_ensureLibraryLoaded()) {
-      throw StateError('libllama_bridge.so is missing for this Android build.');
-    }
-    _log('[BOOT] runtime warmup library ready');
-  }
-
-  static void _finishWithError(
-    StreamController<InferenceResponse> ctrl,
-    String message, {
-    InferenceTerminalState state = InferenceTerminalState.failed,
-  }) {
-    if (ctrl.isClosed) return;
-    ctrl.add(InferenceResponse.error(message, state: state));
-    _log(
-      '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=finish_with_error',
-    );
-    _log('[STREAM_CLOSE] reason=finish_with_error');
-    ctrl.close();
-  }
-
-  static void _finishWithRuntimeError(
-    StreamController<InferenceResponse> ctrl, {
-    required String stage,
-    required String message,
-    String? details,
-    InferenceTerminalState state = InferenceTerminalState.failed,
-  }) {
-    final exception = RuntimeStageException(
-      stage: stage,
-      message: message,
-      details: details,
-    );
-    final payload = exception.toPayload();
-    _log('[GENERATION_ERROR] stage=$stage message=$message details=${details ?? ''}');
-    _logAi(
-      'runtime error: ${exception.toLogMessage()}',
-    );
-    _log(payload);
-    _finishWithError(ctrl, payload, state: state);
-  }
-
-  static Future<void> _finishWithPartialOrRuntimeError(
-    StreamController<InferenceResponse> ctrl, {
-    required String stage,
-    required String message,
-    required String modelId,
-    required String fullText,
-    required int tokensGenerated,
-    String? notice,
-    InferenceTerminalState partialTerminalState = InferenceTerminalState.failed,
-  }) async {
-    if (ctrl.isClosed) return;
-    if (fullText.trim().isNotEmpty) {
-      if (notice != null && notice.trim().isNotEmpty) {
-        _log('[STREAM_ADD] event=notice');
-        ctrl.add(InferenceResponse.notice(notice));
-      }
-      _log('[STREAM_ADD] event=final_partial');
-      ctrl.add(
-        InferenceResponse(
-          text: fullText,
-          model: modelId,
-          tokensGenerated: tokensGenerated,
-          timestamp: DateTime.now().millisecondsSinceEpoch,
-          isFinal: true,
-          terminalState: partialTerminalState,
-        ),
-      );
-      await ctrl.close();
-      _log(
-        '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=partial_or_runtime_error',
-      );
-      _log('[STREAM_CLOSE] reason=partial_or_runtime_error');
-      return;
-    }
-    _finishWithRuntimeError(
-      ctrl,
-      stage: stage,
-      message: message,
-      state: partialTerminalState,
-    );
-  }
-
-  String _composePrompt(
-    InferenceRequest request, {
-    required String modelId,
-    bool bypassNonessentialLayers = false,
-  }) {
-    if (bypassNonessentialLayers) {
-      _log(
-        '[FORENSIC_BYPASS] session=${request.sessionId} mode=raw_prompt_only semantic_memory=false embeddings=false workspace_indexing=false retrieval_augmentation=false conversation_rebuild=false',
-      );
-      return request.prompt.trim();
-    }
+  String _composePrompt(InferenceRequest request, {required String modelId}) {
     return LocalPromptTemplates.compose(
       modelId: modelId,
       prompt: request.prompt,
@@ -1287,130 +308,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
   }
 
-  static String? _validateModelFileForRuntime(String modelPath) {
-    final file = File(modelPath);
-    if (!file.existsSync()) {
-      return 'Selected model file does not exist.';
-    }
-    if (!modelPath.toLowerCase().endsWith('.gguf')) {
-      return 'Selected model is not a GGUF file.';
-    }
-    RandomAccessFile? handle;
-    try {
-      handle = file.openSync(mode: FileMode.read);
-      final length = handle.lengthSync();
-      if (length <= _minValidModelSizeBytes) {
-        return 'Selected model appears truncated or corrupted.';
-      }
-      final header = handle.readSync(4);
-      if (header.length < 4 ||
-          header[0] != 0x47 ||
-          header[1] != 0x47 ||
-          header[2] != 0x55 ||
-          header[3] != 0x46) {
-        return 'Selected model has an invalid GGUF header.';
-      }
-      return null;
-    } catch (_) {
-      return 'Selected model file is not readable.';
-    } finally {
-      handle?.closeSync();
-    }
+  @override
+  void dispose() {
+    _heartbeatTimer?.cancel();
+    _disposeWorker();
+    super.dispose();
   }
-
-  static String _safeLastError(LlamaBridgeBindings bindings) {
-    try {
-      final value = bindings.lastError();
-      if (value.trim().isEmpty) return 'Unknown native runtime error.';
-      _log('[MODEL_EXECUTION] native error: $value');
-      return value;
-    } catch (error) {
-      _log('[MODEL_EXECUTION] llb_last_error failed: $error');
-      return 'Native runtime error (unable to read details).';
-    }
-  }
-
-  static void _safeCancel(LlamaBridgeBindings bindings) {
-    try {
-      bindings.cancel();
-    } catch (error) {
-      _log('[MODEL_EXECUTION] llb_cancel failed: $error');
-    }
-  }
-
-  static void _safeResetRuntime(
-    LlamaBridgeBindings bindings, {
-    required String reason,
-  }) {
-    try {
-      _log('[MODEL_EXECUTION] resetting native runtime: $reason');
-      _log('[MODEL_EXECUTION] llb_is_loaded before reset: ${bindings.isLoaded()}');
-      bindings.cancel();
-      bindings.freeModel();
-      _log('[MODEL_EXECUTION] llb_is_loaded after reset: ${bindings.isLoaded()}');
-    } catch (error) {
-      _log('[MODEL_EXECUTION] runtime reset failed: $error');
-    }
-  }
-
-  static void _log(String message) {
-    debugPrint('[$_logTag] $message');
-    RuntimeEventLog.instance.emit(message);
-  }
-
-  static void _logAi(String message) {
-    debugPrint('[AI] $message');
-  }
-
-  static int _currentThreadId() => Isolate.current.hashCode;
-
-  void _updateRuntimeStatus(
-    LocalRuntimeStatus status, {
-    String? message,
-    int? tokensGenerated,
-    Duration? elapsed,
-    DateTime? startedAt,
-    bool resetProgress = false,
-  }) {
-    monitor.update(
-      status,
-      message: message,
-      tokensGenerated: tokensGenerated,
-      elapsed: elapsed,
-      startedAt: startedAt,
-      resetProgress: resetProgress,
-    );
-    _syncLifecycleState(status);
-  }
-
-  void _syncLifecycleState(LocalRuntimeStatus status) {
-    switch (status) {
-      case LocalRuntimeStatus.uninitialized:
-      case LocalRuntimeStatus.runtimeUnavailable:
-      case LocalRuntimeStatus.modelMissing:
-        runtimeStateMachine.reset();
-        return;
-      case LocalRuntimeStatus.loading:
-      case LocalRuntimeStatus.tokenizing:
-        runtimeStateMachine.markLoading();
-        return;
-      case LocalRuntimeStatus.ready:
-        runtimeStateMachine.markReady();
-        return;
-      case LocalRuntimeStatus.completed:
-        runtimeStateMachine.markInferenceCompleted();
-        return;
-      case LocalRuntimeStatus.inferencing:
-      case LocalRuntimeStatus.streaming:
-        runtimeStateMachine.markInferencing();
-        return;
-      case LocalRuntimeStatus.timedOut:
-      case LocalRuntimeStatus.stalled:
-      case LocalRuntimeStatus.ffiMissing:
-      case LocalRuntimeStatus.failed:
-        runtimeStateMachine.markFailed();
-        return;
-    }
-  }
-
 }
