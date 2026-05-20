@@ -44,13 +44,13 @@ class _EulaText extends StatelessWidget {
     return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Last updated: 2025 — Version 1',
           style: subStyle,
         ),
-        const SizedBox(height: 12),
-        const Text('1. Beta Software — Experimental Use', style: headingStyle),
-        const Text(
+        SizedBox(height: 12),
+        Text('1. Beta Software — Experimental Use', style: headingStyle),
+        Text(
           'This application is currently in Beta / experimental stage. '
           'It is provided "as is" without warranty of any kind, either '
           'express or implied, including but not limited to the warranties '
@@ -58,30 +58,30 @@ class _EulaText extends StatelessWidget {
           'non-infringement.',
           style: bodyStyle,
         ),
-        const Text('2. Risk of Data Loss & Malfunctions', style: headingStyle),
-        const Text(
+        Text('2. Risk of Data Loss & Malfunctions', style: headingStyle),
+        Text(
           'You acknowledge that this software may experience crashes, '
           'data loss, or unexpected behaviour. The developer cannot be '
           'held liable for any direct or indirect damages arising from '
           'the use of this application.',
           style: bodyStyle,
         ),
-        const Text('3. AI Feature Instability', style: headingStyle),
-        const Text(
+        Text('3. AI Feature Instability', style: headingStyle),
+        Text(
           'Certain AI-powered features may be unstable, incomplete, or '
           'produce inaccurate results. You agree to use all AI outputs '
           'critically and at your own risk.',
           style: bodyStyle,
         ),
-        const Text('4. Acceptance of Risk', style: headingStyle),
-        const Text(
+        Text('4. Acceptance of Risk', style: headingStyle),
+        Text(
           'By using this application you expressly acknowledge and accept '
           'all associated risks, including but not limited to data loss, '
           'unexpected behaviour, and the experimental nature of AI features.',
           style: bodyStyle,
         ),
-        const Text('5. Diagnostic Data', style: headingStyle),
-        const Text(
+        Text('5. Diagnostic Data', style: headingStyle),
+        Text(
           'You agree to the anonymous collection and transmission of '
           'diagnostic logs and crash reports solely for the purpose of '
           'improving application stability. No personally identifiable '
@@ -90,29 +90,29 @@ class _EulaText extends StatelessWidget {
           'personal documents.',
           style: bodyStyle,
         ),
-        const Text('6. Remote Feature Management', style: headingStyle),
-        const Text(
+        Text('6. Remote Feature Management', style: headingStyle),
+        Text(
           'The developer reserves the right to enable, disable, or modify '
           'application features remotely via software updates or feature '
           'flags without prior notice.',
           style: bodyStyle,
         ),
-        const Text('7. No Sensitive Data', style: headingStyle),
-        const Text(
+        Text('7. No Sensitive Data', style: headingStyle),
+        Text(
           'You agree not to input, store, or process sensitive personal '
           'data (including health, financial, or government-issued '
           'identification data) within this application during the Beta '
           'period.',
           style: bodyStyle,
         ),
-        const Text('8. Updates to this Agreement', style: headingStyle),
-        const Text(
+        Text('8. Updates to this Agreement', style: headingStyle),
+        Text(
           'This agreement may be updated at any time. When a new version '
           'is published you will be required to review and accept the '
           'updated terms before continuing to use the application.',
           style: bodyStyle,
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
       ],
     );
   }
