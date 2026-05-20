@@ -1504,10 +1504,10 @@ class UpdateManager {
     _logUpdatePostVerifyFailed(
       'installed_before_version_code=${beforeInstallVersionCode?.toString() ?? '-'} '
       'installed_after_version_code=${installedVersionCode?.toString() ?? '-'} '
-      'installed_after_version_name=${installedVersionName ?? 'unknown'} '
+      'installed_after_version_name=${installedVersionName ?? '-'} '
       'expected_version_code=${expectedVersionCode?.toString() ?? '-'} '
       'expected_version_name=${expectedVersionName ?? '-'} '
-      'application_id=${installedApplicationId ?? 'unknown'}',
+      'application_id=${installedApplicationId ?? '-'}',
     );
     _logStructuredUpdateError(
       action: 'post_install_verify',
