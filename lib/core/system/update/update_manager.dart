@@ -1479,7 +1479,6 @@ class UpdateManager {
     );
     _InstalledIdentity? post;
     for (var attempt = 1; attempt <= _postInstallVerifyMaxAttempts; attempt++) {
-      await Future<void>.delayed(_postInstallVerifyPollInterval);
       post = await _readInstalledIdentity();
       final changed = beforeInstallVersionCode != null &&
           post.versionCode != null &&
@@ -1492,6 +1491,9 @@ class UpdateManager {
           'application_id=${post.applicationId}',
         );
         return;
+      }
+      if (attempt < _postInstallVerifyMaxAttempts) {
+        await Future<void>.delayed(_postInstallVerifyPollInterval);
       }
     }
     post ??= await _readInstalledIdentity();
@@ -1520,7 +1522,7 @@ class UpdateManager {
     } catch (_) {}
     final localVersionName = installedIdentity?.versionName ?? _currentVersion;
     final localVersionCode = installedIdentity?.versionCode ??
-        _extractVersionCodeFromVersion(_currentVersion);
+        _extractBuildNumberFromVersionString(_currentVersion);
     _logUpdateCheck(
       'application_id=${installedIdentity?.applicationId ?? '-'} '
       'installed_version_name=$localVersionName '
@@ -1535,7 +1537,7 @@ class UpdateManager {
     );
   }
 
-  int? _extractVersionCodeFromVersion(String version) {
+  int? _extractBuildNumberFromVersionString(String version) {
     final buildIndex = version.lastIndexOf('+');
     if (buildIndex < 0 || buildIndex == version.length - 1) {
       return null;
