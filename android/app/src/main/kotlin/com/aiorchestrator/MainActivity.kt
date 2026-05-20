@@ -485,7 +485,7 @@ class MainActivity : FlutterActivity() {
         val versionName = packageInfo?.versionName
         val versionCode = packageInfo?.let { getVersionCode(it) }
         val signatureSha256 = packageInfo?.let { extractSignatureSha256(it) }
-        val hasSplitConfig = hasSplitConfigArtifact(apkFile.name, packageInfo)
+        val hasSplitConfig = hasSplitConfiguration(apkFile.name, packageInfo)
         val archiveParsed = packageInfo != null
         Log.i(
             logTag,
@@ -605,7 +605,7 @@ class MainActivity : FlutterActivity() {
         null
     }
 
-    private fun hasSplitConfigArtifact(
+    private fun hasSplitConfiguration(
         fileName: String,
         packageInfo: android.content.pm.PackageInfo?
     ): Boolean {
