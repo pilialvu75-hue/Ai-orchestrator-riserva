@@ -23,6 +23,8 @@ class LocalRuntimeDiagnosticsService {
   bool _refreshInProgress = false;
   DateTime? _lastRefreshAt;
   LocalRuntimeState? _lastRefreshSnapshot;
+  // Collapse same-frame startup/UI diagnostics bursts without delaying normal
+  // user-driven refresh actions.
   static const Duration _refreshDebounce = Duration(milliseconds: 600);
 
   /// Returns `true` when the runtime state indicates that local inference
