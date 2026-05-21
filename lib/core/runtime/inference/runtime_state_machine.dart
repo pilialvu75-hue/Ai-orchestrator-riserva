@@ -34,6 +34,7 @@ class RuntimeStateMachine {
   static int _resetCount = 0;
   RuntimeLifecycleState _state = RuntimeLifecycleState.uninitialized;
   RuntimeLifecycleState? _stateBeforeInference;
+  bool _readyLatched = false;
   final List<void Function(RuntimeLifecycleState state)> _listeners =
       <void Function(RuntimeLifecycleState state)>[];
 
@@ -101,6 +102,7 @@ class RuntimeStateMachine {
   };
 
   RuntimeLifecycleState get state => _state;
+  bool get isReadyLatched => _readyLatched;
 
   Map<RuntimeLifecycleState, Set<RuntimeLifecycleEvent>> get transitionMap =>
       _allowedTransitions;
@@ -137,10 +139,19 @@ class RuntimeStateMachine {
       _stateBeforeInference = null;
     } else {
       nextState = _resolveNextState(_state, event);
+      if (event == RuntimeLifecycleEvent.inferenceFailed && _readyLatched) {
+        nextState = _stateBeforeInference ?? RuntimeLifecycleState.verified;
+      }
       if (event == RuntimeLifecycleEvent.reset ||
           event == RuntimeLifecycleEvent.inferenceFailed) {
         _stateBeforeInference = null;
       }
+    }
+    if (event == RuntimeLifecycleEvent.reset) {
+      _readyLatched = false;
+    } else if (nextState == RuntimeLifecycleState.ready ||
+        nextState == RuntimeLifecycleState.verified) {
+      _readyLatched = true;
     }
     if (nextState == _state) return _state;
     _state = nextState;

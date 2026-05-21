@@ -141,6 +141,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
+  String? _lastKnownModelPath;
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -254,6 +255,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     final selectedModelPath = selectedModel?.localPath;
+    _lastKnownModelPath = selectedModelPath?.trim().isNotEmpty == true
+        ? selectedModelPath
+        : null;
     if (selectedModelPath != null &&
         selectedModelPath.trim().isNotEmpty &&
         hasVerifiedRuntimeForModel(selectedModelPath) &&
@@ -266,13 +270,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     try {
       final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      final reconciledSnapshot = _reconcileRuntimeSnapshot(snapshot);
       _syncLifecycleState(
-        snapshot.status,
+        reconciledSnapshot.status,
         reason: 'runtime_check_complete',
         origin: 'AndroidFfiRuntimeProvider.validateRuntime',
       );
-      _lastRuntimeValidationSnapshot = snapshot;
-      return snapshot;
+      _lastRuntimeValidationSnapshot = reconciledSnapshot;
+      return reconciledSnapshot;
     } finally {
       _runtimeCheckInProgress = false;
     }
@@ -281,6 +286,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   bool shouldReuseRuntimeVerification({
     required String modelPath,
   }) {
+    _lastKnownModelPath = modelPath;
     final reusable = hasVerifiedRuntimeForModel(modelPath) &&
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
         !_manualVerificationResetRequested;
@@ -319,6 +325,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void requestManualVerificationReset() {
     _manualVerificationResetRequested = true;
     _verifiedRuntimeAbi = null;
+    runtimeStateMachine.reset();
     clearRuntimeVerification();
   }
 
@@ -518,6 +525,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ' runtimeMode=android_ffi');
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        _lastKnownModelPath = null;
         _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
@@ -534,6 +542,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
+      _lastKnownModelPath = modelPath;
 
       // Log file existence / size / readability before any guard.
       final modelFile = File(modelPath);
@@ -2296,12 +2305,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return;
     }
+    var effectiveStatus = status;
+    var effectiveMessage = message;
+    if (status == LocalRuntimeStatus.runtimeUnavailable &&
+        !_canReportRuntimeUnavailable()) {
+      effectiveStatus = LocalRuntimeStatus.ready;
+      effectiveMessage ??=
+          'Runtime verification already succeeded; keeping READY state.';
+      _log(
+        '[RUNTIME_UNAVAILABLE_SUPPRESSED] reason=ready_latched model_loaded=$_hasLoadedModel readiness_latched=${runtimeStateMachine.isReadyLatched}',
+      );
+    }
     final previous = monitor.state.status;
     final transitionReason =
-        reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
+        reason == _autoTransitionReason
+            ? _defaultReasonFor(effectiveStatus)
+            : reason;
     monitor.update(
-      status,
-      message: message,
+      effectiveStatus,
+      message: effectiveMessage,
       tokensGenerated: tokensGenerated,
       elapsed: elapsed,
       startedAt: startedAt,
@@ -2309,11 +2331,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
     _traceStatePath(
       from: previous,
-      to: status,
+      to: effectiveStatus,
       reason: transitionReason,
       origin: origin,
     );
-    _syncLifecycleState(status, reason: transitionReason, origin: origin);
+    _syncLifecycleState(
+      effectiveStatus,
+      reason: transitionReason,
+      origin: origin,
+    );
   }
 
   void _syncLifecycleState(
@@ -2324,14 +2350,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
       case LocalRuntimeStatus.modelMissing:
+        _lastKnownModelPath = null;
         runtimeStateMachine.reset();
         _emitStateReset(reason: reason, origin: origin);
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
-        // Non-terminal state: model/FFI prerequisites can be present while no
-        // successful first-token verification has been observed yet.
-        // Keep lifecycle recoverable (healthy) instead of reset/failed.
-        runtimeStateMachine.markHealthy();
+        if (_canReportRuntimeUnavailable()) {
+          // Non-terminal state: model/FFI prerequisites can be present while no
+          // successful first-token verification has been observed yet.
+          // Keep lifecycle recoverable (healthy) instead of reset/failed.
+          runtimeStateMachine.markHealthy();
+        } else {
+          runtimeStateMachine.markVerified();
+        }
         return;
       case LocalRuntimeStatus.loading:
       case LocalRuntimeStatus.tokenizing:
@@ -2500,6 +2531,36 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } catch (_) {
       return trimmed;
     }
+  }
+
+  LocalRuntimeState _reconcileRuntimeSnapshot(LocalRuntimeState snapshot) {
+    if (snapshot.status != LocalRuntimeStatus.runtimeUnavailable) {
+      return snapshot;
+    }
+    if (_canReportRuntimeUnavailable()) {
+      return snapshot;
+    }
+    return LocalRuntimeState(
+      status: LocalRuntimeStatus.ready,
+      message:
+          'Runtime verification already succeeded; keeping READY state.',
+      tokensGenerated: snapshot.tokensGenerated,
+      elapsed: snapshot.elapsed,
+      startedAt: snapshot.startedAt,
+    );
+  }
+
+  bool get _hasLoadedModel {
+    final knownPath = _lastKnownModelPath;
+    if (knownPath != null && knownPath.trim().isNotEmpty) {
+      return true;
+    }
+    final activePath = _nativeSessionModelPath;
+    return activePath != null && activePath.trim().isNotEmpty;
+  }
+
+  bool _canReportRuntimeUnavailable() {
+    return !_hasLoadedModel || !runtimeStateMachine.isReadyLatched;
   }
 
 }

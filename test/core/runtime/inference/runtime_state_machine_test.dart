@@ -118,5 +118,35 @@ void main() {
       stateMachine.markVerified();
       expect(stateMachine.state, RuntimeLifecycleState.verified);
     });
+
+    test('keeps readiness latched across failures until reset', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.markLoading();
+      stateMachine.markReady();
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
+      expect(stateMachine.isReadyLatched, isTrue);
+
+      stateMachine.markFailed();
+      expect(stateMachine.state, RuntimeLifecycleState.verified);
+      expect(stateMachine.isReadyLatched, isTrue);
+
+      stateMachine.reset();
+      expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
+      expect(stateMachine.isReadyLatched, isFalse);
+    });
+
+    test('does not degrade to failed after ready during inference', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.markLoading();
+      stateMachine.markReady();
+      stateMachine.markInferencing();
+      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
+
+      stateMachine.markFailed();
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
+      expect(stateMachine.isReadyLatched, isTrue);
+    });
   });
 }

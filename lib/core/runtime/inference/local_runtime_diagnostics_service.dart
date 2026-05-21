@@ -10,12 +10,14 @@ class LocalRuntimeDiagnosticsService {
     required LocalAiRepository localAiRepository,
   })  : _runtimeProvider = runtimeProvider,
         _localAiRepository = localAiRepository,
+        _usesProviderMonitor = runtimeProvider is AndroidFfiRuntimeProvider,
         monitor = runtimeProvider is AndroidFfiRuntimeProvider
             ? runtimeProvider.monitor
             : LocalRuntimeMonitor();
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
+  final bool _usesProviderMonitor;
 
   final LocalRuntimeMonitor monitor;
 
@@ -61,31 +63,49 @@ class LocalRuntimeDiagnosticsService {
     if (sinceLastRefresh != null &&
         sinceLastRefresh < _refreshDebounce &&
         _lastRefreshSnapshot != null) {
-      monitor.update(
-        _lastRefreshSnapshot!.status,
-        message: _lastRefreshSnapshot!.message,
-        tokensGenerated: _lastRefreshSnapshot!.tokensGenerated,
-        elapsed: _lastRefreshSnapshot!.elapsed,
-        startedAt: _lastRefreshSnapshot!.startedAt,
-      );
+      if (!_usesProviderMonitor) {
+        monitor.update(
+          _lastRefreshSnapshot!.status,
+          message: _lastRefreshSnapshot!.message,
+          tokensGenerated: _lastRefreshSnapshot!.tokensGenerated,
+          elapsed: _lastRefreshSnapshot!.elapsed,
+          startedAt: _lastRefreshSnapshot!.startedAt,
+        );
+      }
       return;
     }
     _refreshInProgress = true;
     _lastRefreshAt = now;
-    monitor.update(
-      LocalRuntimeStatus.loading,
-      message: 'Checking local runtime...',
-      tokensGenerated: 0,
-      elapsed: Duration.zero,
-      startedAt: null,
-      resetProgress: true,
-    );
+    if (!_usesProviderMonitor) {
+      monitor.update(
+        LocalRuntimeStatus.loading,
+        message: 'Checking local runtime...',
+        tokensGenerated: 0,
+        elapsed: Duration.zero,
+        startedAt: null,
+        resetProgress: true,
+      );
+    }
 
     try {
       final selectedModel = await _loadSelectedModel();
       final snapshot =
           await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
       _lastRefreshSnapshot = snapshot;
+      final currentStatus = monitor.state.status;
+      if (_usesProviderMonitor &&
+          currentStatus == LocalRuntimeStatus.ready &&
+          snapshot.status == LocalRuntimeStatus.runtimeUnavailable) {
+        return;
+      }
+      if (_usesProviderMonitor &&
+          currentStatus == snapshot.status &&
+          monitor.state.message == snapshot.message &&
+          monitor.state.tokensGenerated == snapshot.tokensGenerated &&
+          monitor.state.elapsed == snapshot.elapsed &&
+          monitor.state.startedAt == snapshot.startedAt) {
+        return;
+      }
       monitor.update(
         snapshot.status,
         message: snapshot.message,
