@@ -120,6 +120,9 @@ class RuntimeStateMachine {
         }
         break;
       case RuntimeEvent.selfTestFailed:
+        // Self-test failures are recorded for forensics only. They never
+        // degrade readiness; only a successful self-test is allowed to promote
+        // the runtime state.
         _logIgnored(
           event: event,
           source: source,
