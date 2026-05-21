@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provi
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalRuntimeDiagnosticsService {
   LocalRuntimeDiagnosticsService({
@@ -56,6 +57,15 @@ class LocalRuntimeDiagnosticsService {
     // Intentional ordering: do not acquire refresh lock while an inference
     // stream is active; diagnostics refresh must remain a no-op in that window.
     if (_isInferenceActive) return;
+    final provider = _runtimeProvider;
+    if (provider is AndroidFfiRuntimeProvider &&
+        provider.runtimeStateMachine.isEverReady) {
+      debugPrint(
+        '[AI_RUNTIME] [DIAGNOSTICS_STATE_WRITE_IGNORED] reason=ever_ready '
+        'status=${monitor.state.status.name}',
+      );
+      return;
+    }
     final now = DateTime.now();
     final sinceLastRefresh = _lastRefreshAt == null
         ? null

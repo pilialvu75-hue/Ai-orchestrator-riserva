@@ -33,7 +33,7 @@ void main() {
 
       expect(reusable, isTrue);
       expect(provider.monitor.state.status, LocalRuntimeStatus.ready);
-      expect(stateMachine.state, RuntimeLifecycleState.verified);
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
     });
 
     test('marks lifecycle verified for non-promoted statuses when reuse is valid',
@@ -65,7 +65,7 @@ void main() {
 
       expect(reusable, isTrue);
       expect(provider.monitor.state.status, LocalRuntimeStatus.loading);
-      expect(stateMachine.state, RuntimeLifecycleState.verified);
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
     });
   });
 }

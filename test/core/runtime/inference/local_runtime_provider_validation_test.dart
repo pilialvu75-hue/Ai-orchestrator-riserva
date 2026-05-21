@@ -14,11 +14,11 @@ void main() {
       expect(state.status, LocalRuntimeStatus.modelMissing);
     });
 
-    test('returns failed for invalid model metadata', () async {
+    test('ignores model identity metadata when GGUF file is valid', () async {
       // Create a real temp file with a valid GGUF magic header so that the
       // file-existence and GGUF-header checks pass.  The model carries
-      // `invalidModel` validation status, which must cause `failed` when
-      // developer mode is disabled.
+      // `invalidModel` validation status, which must not block readiness when
+      // the GGUF file itself is valid.
       final tempDir =
           await Directory.systemTemp.createTemp('runtime-test-invalid-');
       addTearDown(() async => tempDir.delete(recursive: true));
@@ -38,12 +38,11 @@ void main() {
         validationStatus: ModelValidationStatus.invalidModel,
       );
 
-      // Developer mode must be disabled so the invalid status is not bypassed.
       final providerNoDev =
           LocalRuntimeProvider(developerModeProvider: () => false);
       final state =
           await providerNoDev.validateRuntime(selectedModel: model);
-      expect(state.status, LocalRuntimeStatus.failed);
+      expect(state.status, LocalRuntimeStatus.runtimeUnavailable);
     });
 
     test('returns runtimeUnavailable until inference is proven', () async {

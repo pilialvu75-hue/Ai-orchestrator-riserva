@@ -1,12 +1,13 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
-import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
+import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -22,6 +23,7 @@ void main() {
   late MockAndroidRuntimeProvider androidRuntimeProvider;
   late MockLocalAiRepository localAiRepository;
   late LocalRuntimeMonitor androidMonitor;
+  late RuntimeStateMachine androidStateMachine;
 
   const selectedModel = AiModel(
     id: 'llama_1b',
@@ -41,6 +43,7 @@ void main() {
     androidRuntimeProvider = MockAndroidRuntimeProvider();
     localAiRepository = MockLocalAiRepository();
     androidMonitor = LocalRuntimeMonitor();
+    androidStateMachine = RuntimeStateMachine();
   });
 
   group('LocalRuntimeDiagnosticsService.refresh', () {
@@ -118,6 +121,8 @@ void main() {
       when(() => androidRuntimeProvider.lifecycleRuntimeStateName)
           .thenReturn(LocalRuntimeStatus.ready.name);
       when(() => androidRuntimeProvider.monitor).thenReturn(androidMonitor);
+      when(() => androidRuntimeProvider.runtimeStateMachine)
+          .thenReturn(androidStateMachine);
       when(() => localAiRepository.getSelectedModel())
           .thenAnswer((_) async => const Right<Failure, AiModel?>(selectedModel));
       when(() => androidRuntimeProvider.validateRuntime(selectedModel: selectedModel))
@@ -135,12 +140,48 @@ void main() {
         LocalRuntimeStatus.ready,
         message: 'ready',
       );
+      androidStateMachine.applyEvent(
+        RuntimeEvent.selfTestSucceeded,
+        source: 'test',
+      );
 
       await service.refresh();
 
       expect(service.monitor.state.status, LocalRuntimeStatus.ready);
-      verify(() => androidRuntimeProvider.validateRuntime(selectedModel: selectedModel))
-          .called(1);
+      verifyNever(
+        () => androidRuntimeProvider.validateRuntime(selectedModel: selectedModel),
+      );
+    });
+
+    test('repeated diagnostics calls keep provider-owned ready state stable',
+        () async {
+      when(() => androidRuntimeProvider.lifecycleRuntimeStateName)
+          .thenReturn(LocalRuntimeStatus.ready.name);
+      when(() => androidRuntimeProvider.monitor).thenReturn(androidMonitor);
+      when(() => androidRuntimeProvider.runtimeStateMachine)
+          .thenReturn(androidStateMachine);
+
+      final service = LocalRuntimeDiagnosticsService(
+        runtimeProvider: androidRuntimeProvider,
+        localAiRepository: localAiRepository,
+      );
+
+      androidMonitor.update(
+        LocalRuntimeStatus.ready,
+        message: 'ready',
+      );
+      androidStateMachine.applyEvent(
+        RuntimeEvent.selfTestSucceeded,
+        source: 'test',
+      );
+
+      await service.refresh();
+      await service.refresh();
+
+      expect(service.monitor.state.status, LocalRuntimeStatus.ready);
+      verifyNever(
+        () => androidRuntimeProvider.validateRuntime(selectedModel: selectedModel),
+      );
     });
   });
 }

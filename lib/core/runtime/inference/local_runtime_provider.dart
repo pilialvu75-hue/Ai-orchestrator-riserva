@@ -7,10 +7,8 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
@@ -19,30 +17,18 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
-            developerModeProvider ?? (() => kDebugMode);
+           developerModeProvider ?? (() => kDebugMode);
 
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  static const Set<String> _mobileValidatedModelIds = <String>{
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
-
-  static const Set<String> _desktopValidatedModelIds = <String>{
-    ..._mobileValidatedModelIds,
-  };
-
   final bool Function() _developerModeProvider;
-
-  bool get _isDeveloperMode => _developerModeProvider();
-
   String? _verifiedModelPath;
+
+  @protected
+  bool get isDeveloperMode => _developerModeProvider();
 
   String _normalizeModelPath(String modelPath) {
     final trimmed = modelPath.trim();
@@ -94,34 +80,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   bool supportsModel(AiModel model) {
-    final modelId = model.effectiveRuntimeModelId;
-
-    final allowed = _isModelAllowedOnPlatform(modelId);
-
-    if (!allowed) {
-      if (_isDeveloperMode) {
-        const msg =
-            '[VALIDATION] developer_mode=true: allowing custom/unvalidated model';
-
-        debugPrint(
-          '[$_localProviderTag] $msg modelId=$modelId',
-        );
-
-        RuntimeEventLog.instance.emit(
-          '$msg modelId=$modelId',
-        );
-
-        return model.localPath != null &&
-            model.localPath!.isNotEmpty &&
-            model.isDownloaded;
-      }
-
-      return false;
-    }
-
-    return model.validationStatus ==
-            ModelValidationStatus.validatedOk ||
-        (_isDeveloperMode && model.isDownloaded);
+    return model.localPath != null &&
+        model.localPath!.trim().isNotEmpty &&
+        model.isDownloaded;
   }
 
   Future<LocalRuntimeState> validateRuntime({
@@ -185,22 +146,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
-    if (!supportsModel(selectedModel)) {
-      if (_isDeveloperMode) {
-        return const LocalRuntimeState(
-          status: LocalRuntimeStatus.runtimeUnavailable,
-          message:
-              '[DEVELOPER_MODE] Unvalidated model accepted.',
-        );
-      }
-
-      return const LocalRuntimeState(
-        status: LocalRuntimeStatus.failed,
-        message:
-            'Selected model is not supported.',
-      );
-    }
-
     if (hasVerifiedRuntimeForModel(modelPath)) {
       return LocalRuntimeState(
         status: LocalRuntimeStatus.ready,
@@ -214,6 +159,20 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       message:
           '${selectedModel.displayName} detected but runtime not yet verified.',
     );
+  }
+
+  Future<LocalRuntimeState> ensureReadyForInference({
+    required AiModel selectedModel,
+    String source = 'inference',
+  }) async {
+    final snapshot = await validateRuntime(selectedModel: selectedModel);
+    if (snapshot.status != LocalRuntimeStatus.ready) {
+      debugPrint(
+        '[$_localProviderTag] [INFERENCE_BLOCKED] source=$source '
+        'status=${snapshot.status.name} message="${snapshot.message ?? ''}"',
+      );
+    }
+    return snapshot;
   }
 
   @override
@@ -445,17 +404,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return controller.stream;
   }
 
-  bool _isModelAllowedOnPlatform(
-    String modelId,
-  ) {
-    final allowed =
-        _isDesktopPlatform()
-            ? _desktopValidatedModelIds
-            : _mobileValidatedModelIds;
-
-    return allowed.contains(modelId);
-  }
-
   String _resolveLlamaExecutable() {
     final envPath =
         Platform.environment[
@@ -543,11 +491,5 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return cleaned
         .split(RegExp(r'\s+'))
         .length;
-  }
-
-  static bool _isDesktopPlatform() {
-    return Platform.isWindows ||
-        Platform.isLinux ||
-        Platform.isMacOS;
   }
 }
