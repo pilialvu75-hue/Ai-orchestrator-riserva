@@ -107,5 +107,16 @@ void main() {
       // Returns to loading (the state captured when inferenceStarted fired).
       expect(stateMachine.state, RuntimeLifecycleState.loading);
     });
+
+    test('keeps verified state on repeated verification confirmations', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.markHealthy();
+      stateMachine.markVerified();
+      expect(stateMachine.state, RuntimeLifecycleState.verified);
+
+      stateMachine.markVerified();
+      expect(stateMachine.state, RuntimeLifecycleState.verified);
+    });
   });
 }

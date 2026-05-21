@@ -194,6 +194,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return _lastRuntimeValidationSnapshot ?? monitor.state;
     }
+    if (_activeInferenceSessions.isNotEmpty ||
+        monitor.state.status == LocalRuntimeStatus.inferencing ||
+        monitor.state.status == LocalRuntimeStatus.streaming) {
+      _log(
+        '[RUNTIME_CHECK_SKIPPED] reason=inference_active origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored active_sessions=${_activeInferenceSessions.length}',
+      );
+      return _lastRuntimeValidationSnapshot ?? monitor.state;
+    }
     final now = DateTime.now();
     if (_runtimeCheckInProgress) {
       _log('[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored');
@@ -277,12 +285,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
         !_manualVerificationResetRequested;
     if (reusable) {
+      // Keep both markers for compatibility with existing log filters/forensics
+      // that match one tag or the other.
       _log(
         '[RUNTIME_VERIFICATION_REUSED] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName}',
       );
-      _log(
-        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=true',
-      );
+      if (!_inVerificationScope) {
+        _log(
+          '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=false',
+        );
+        final status = monitor.state.status;
+        // These states represent stale/pre-verified snapshots that should be
+        // immediately promoted back to `ready` once reusable verification
+        // evidence is present.
+        if (status == LocalRuntimeStatus.runtimeUnavailable ||
+            status == LocalRuntimeStatus.uninitialized ||
+            status == LocalRuntimeStatus.failed ||
+            status == LocalRuntimeStatus.completed) {
+          _updateRuntimeStatus(
+            LocalRuntimeStatus.ready,
+            message: 'Runtime verification reused and ready for inference.',
+            reason: 'verification_reused',
+            origin: 'shouldReuseRuntimeVerification',
+          );
+        } else {
+          runtimeStateMachine.markVerified();
+        }
+      }
     }
     return reusable;
   }

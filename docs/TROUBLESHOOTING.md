@@ -149,6 +149,15 @@ Then verify that:
 - the decoded keystore is non-empty
 - the alias exists in the keystore
 - `apksigner verify` succeeds on the final APK
+- installs use a consistently signed package lineage on the device
+
+If install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, remove old installs
+signed with a different key before re-installing:
+
+```bash
+adb uninstall com.aiorchestrator
+adb uninstall com.aiorchestrator.debug
+```
 
 ## 9. Android: split APK or custom packaging problems
 
