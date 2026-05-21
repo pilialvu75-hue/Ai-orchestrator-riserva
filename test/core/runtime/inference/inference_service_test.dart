@@ -26,6 +26,18 @@ void main() {
     localPath: '/tmp/gemma.gguf',
     validationStatus: ModelValidationStatus.validatedOk,
   );
+  const validGgufWithInvalidMetadata = AiModel(
+    id: 'custom_gguf',
+    displayName: 'Custom GGUF',
+    fileName: 'custom.gguf',
+    downloadUrl: 'https://example.com/custom.gguf',
+    version: '1.0.0',
+    sizeBytes: 321,
+    description: 'Custom test model',
+    isDownloaded: true,
+    localPath: '/tmp/custom.gguf',
+    validationStatus: ModelValidationStatus.invalidModel,
+  );
 
   InferenceService buildService({
     required AiRuntimeMode mode,
@@ -273,6 +285,32 @@ void main() {
       expect(response.isError, false);
       expect(response.text, 'Cloud response');
       expect(response.model, 'gpt-4o');
+    });
+
+    test('local mode still routes to local runtime for GGUF with stale metadata',
+        () async {
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validGgufWithInvalidMetadata,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          responses: <InferenceResponse>[
+            InferenceResponse.finalChunk(
+              text: 'Local response',
+              tokensGenerated: 4,
+              model: 'custom_gguf',
+            ),
+          ],
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(sessionId: 'metadata-non-blocking', prompt: 'hello'),
+      );
+
+      expect(response.isError, false);
+      expect(response.text, 'Local response');
+      expect(response.model, 'custom_gguf');
     });
   });
 }

@@ -105,5 +105,24 @@ void main() {
 
       expect(service.monitor.state.status, LocalRuntimeStatus.runtimeUnavailable);
     });
+
+    test('swallows diagnostics refresh exceptions without crashing', () async {
+      when(() => runtimeProvider.lifecycleRuntimeStateName)
+          .thenReturn(LocalRuntimeStatus.ready.name);
+      when(() => localAiRepository.getSelectedModel())
+          .thenAnswer((_) async => const Right<Failure, AiModel?>(selectedModel));
+      when(() => runtimeProvider.validateRuntime(selectedModel: selectedModel))
+          .thenThrow(StateError('refresh failure'));
+
+      final service = LocalRuntimeDiagnosticsService(
+        runtimeProvider: runtimeProvider,
+        localAiRepository: localAiRepository,
+      );
+
+      await service.refresh();
+
+      expect(service.monitor.state.status, LocalRuntimeStatus.loading);
+      expect(service.monitor.state.message, isNotEmpty);
+    });
   });
 }

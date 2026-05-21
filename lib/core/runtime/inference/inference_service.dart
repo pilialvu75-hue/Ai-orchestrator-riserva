@@ -92,6 +92,10 @@ class InferenceService {
       );
     } catch (error, stackTrace) {
       _log('[ASYNC_FATAL] scope=inference_service.stream session=${request.sessionId} error=$error stack=$stackTrace');
+      _log(
+        '[APP_CLOSE_FORENSICS] component=inference_service session=${request.sessionId}'
+        ' stage=stream_start error=$error stack=$stackTrace',
+      );
       yield InferenceResponse.error(
         'Inference service failed before runtime stream start: $error',
       );
@@ -180,37 +184,11 @@ class InferenceService {
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.invalidModel) {
-      _log(
-        '[VALIDATION] reason=invalidModel'
-        ' modelId=${selected.id} path=${selected.localPath}',
-      );
-      return null;
-    }
-
-    if (selected.validationStatus == ModelValidationStatus.missingFile) {
-      _log(
-        '[VALIDATION] reason=missingFile'
-        ' modelId=${selected.id} path=${selected.localPath}',
-      );
-      return null;
-    }
-
-    if (selected.validationStatus == ModelValidationStatus.notDownloaded) {
-      _log(
-        '[VALIDATION] reason=notDownloaded'
-        ' modelId=${selected.id}',
-      );
-      return null;
-    }
-
-    if (selected.validationStatus == ModelValidationStatus.downloading) {
-      _log(
-        '[VALIDATION] reason=downloading – model transfer in progress'
-        ' modelId=${selected.id}',
-      );
-      return null;
-    }
+    _log(
+      '[VALIDATION] metadata_non_blocking=true'
+      ' validationStatus=${selected.validationStatus}'
+      ' modelId=${selected.id} path=${selected.localPath}',
+    );
 
     if (!_runtimeProvider.supportsModel(selected)) {
       // Infer the precise reason for the runtime rejection so the log is

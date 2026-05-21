@@ -67,5 +67,33 @@ void main() {
       expect(provider.monitor.state.status, LocalRuntimeStatus.loading);
       expect(stateMachine.state, RuntimeLifecycleState.verified);
     });
+
+    test(
+        'persists verified snapshot so inference-active validation skip returns ready',
+        () async {
+      final stateMachine = RuntimeStateMachine();
+      final provider = AndroidFfiRuntimeProvider(
+        runtimeStateMachine: stateMachine,
+        developerModeProvider: () => false,
+      );
+      const modelPath = '/tmp/runtime-model-3.gguf';
+
+      provider.monitor.update(
+        LocalRuntimeStatus.runtimeUnavailable,
+        message: 'pre-verified',
+      );
+      provider.recordVerificationSuccess(
+        modelPath: modelPath,
+        source: 'test',
+      );
+      provider.monitor.update(
+        LocalRuntimeStatus.inferencing,
+        message: 'active-stream',
+      );
+
+      final snapshot = await provider.validateRuntime();
+      expect(snapshot.status, LocalRuntimeStatus.ready);
+      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
+    });
   });
 }

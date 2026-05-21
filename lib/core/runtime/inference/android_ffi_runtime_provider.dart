@@ -10,7 +10,6 @@ import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -91,13 +90,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _clearVerificationCallerFrameIndex = 2;
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
-  static const Set<String> _androidSafeModelIds = <String>{
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
   static int _printCounter = 0;
 
@@ -285,6 +277,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
         !_manualVerificationResetRequested;
     if (reusable) {
+      _persistVerifiedSnapshot(
+        message: 'Runtime verification reused and ready for inference.',
+      );
       // Keep both markers for compatibility with existing log filters/forensics
       // that match one tag or the other.
       _log(
@@ -399,6 +394,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           reason: 'verification_scope_exit',
           origin: '_runInVerificationScope',
         );
+        _persistVerifiedSnapshot(message: 'Runtime verification passed.');
       }
       _log(
         '[VERIFICATION_SCOPE_EXIT] verification_scope=$_inVerificationScope model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
@@ -431,6 +427,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }) async {
       _log(
         '[FFI_FATAL_EARLY_EXIT] session=$sessionId branch=$branch reason=$reason',
+      );
+      _log(
+        '[APP_CLOSE_FORENSICS] component=android_ffi_runtime_provider session=$sessionId '
+        'stage=$stage branch=$branch reason=$reason details=${details ?? 'none'} '
+        'first_ffi_attempted=$firstFfiInvocationAttempted first_ffi_completed=$firstFfiInvocationCompleted',
       );
       _log(
         '[FFI_BRANCH_RETURN] session=$sessionId branch=$branch reason=$reason'
@@ -555,42 +556,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[MODEL_READABLE] path=$modelPath readable=false (file not found)');
       }
 
-      if (!_androidSafeModelIds.contains(modelId)) {
-        if (_isDeveloperMode) {
-          // Developer mode: warn but allow the run to proceed.
-          _log(
-            '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
-            'validated set – unsupported quantization or architecture possible. '
-            'Proceeding with experimental inference.',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            message:
-                '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
-          );
-          _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=developer_mode_unvalidated_model modelId=$modelId');
-        } else {
-          _log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
-          clearRuntimeVerification();
-          const unsupportedAndroidModelMessage =
-              'Selected model is not enabled for Android local runtime. '
-              'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-              'gemma-2-2b-it, llama_1b, or gemma_2b.';
-          _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.failed,
-            message: unsupportedAndroidModelMessage,
-          );
-          await fatalEarlyExit(
-            sessionId,
-            branch: 'unsupported_model_guard',
-            reason: unsupportedAndroidModelMessage,
-            stage: 'model_guard',
-            details: 'modelId=$modelId',
-          );
-          return;
-        }
-      }
+      _log(
+        '[GGUF_MODEL_POLICY] session=$sessionId modelId=$modelId'
+        ' allow_all_gguf=true developer_mode=$_isDeveloperMode',
+      );
 
       // Model file validation runs synchronously on the current isolate.
       // Using compute()/Isolate.run here would require serialising a closure
@@ -1555,6 +1524,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       } catch (error, stackTrace) {
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
+        _log(
+          '[APP_CLOSE_FORENSICS] component=android_ffi_runtime_provider session=$sessionId '
+          'stage=stream_inference_unhandled error=$error stack=$stackTrace '
+          'first_ffi_attempted=$firstFfiInvocationAttempted first_ffi_completed=$firstFfiInvocationCompleted',
+        );
         if (!firstFfiInvocationAttempted) {
           // Classification is based on whether session_create has been attempted yet.
           await fatalEarlyExit(
@@ -2371,6 +2345,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return;
     }
     final status = monitor.state.status;
+    _persistVerifiedSnapshot(
+      message: 'Runtime verification persisted from source=$source.',
+    );
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
         status == LocalRuntimeStatus.uninitialized) {
       // Verification evidence arrived while runtime was still in pre-verified
@@ -2391,6 +2368,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } else {
       runtimeStateMachine.markVerified();
     }
+  }
+
+  void _persistVerifiedSnapshot({required String message}) {
+    _lastRuntimeValidationSnapshot = LocalRuntimeState(
+      status: LocalRuntimeStatus.ready,
+      message: message,
+      tokensGenerated: monitor.state.tokensGenerated,
+      elapsed: monitor.state.elapsed,
+      startedAt: monitor.state.startedAt,
+    );
   }
 
   String _defaultReasonFor(LocalRuntimeStatus status) {
