@@ -264,6 +264,13 @@ class InferenceService {
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
+    final runtimeState = _runtimeProvider.lifecycleRuntimeStateName;
+    final activeTransitionId = _runtimeProvider.activeLifecycleTransitionId;
+    final verificationState =
+        _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
+    _log(
+      '[PRE_INFERENCE_GATE] runtime_state=$runtimeState provider_hash=${_runtimeProvider.hashCode.toRadixString(16)} verification_state=$verificationState active_transition_id=$activeTransitionId',
+    );
     _log('[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType}');
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,

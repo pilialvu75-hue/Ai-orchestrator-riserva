@@ -79,6 +79,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
+  // Soft suppression only: 600ms was chosen to collapse same-frame startup/UI
+  // revalidation bursts while still allowing user-driven retries immediately.
+  static const Duration _runtimeCheckDebounce = Duration(milliseconds: 600);
+  // 1200ms captures tight runtimeUnavailable->loading churn seen in failing
+  // traces without flagging normal user pacing as a loop.
+  static const Duration _reentryWarnThreshold = Duration(milliseconds: 1200);
+  // Emit loop-boundary blocked marker after the third rapid re-entry.
+  static const int _reentryLoopBlockThreshold = 3;
+  static const String _autoTransitionReason = 'status_update';
+  static const int _clearVerificationCallerFrameIndex = 2;
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
   static const Set<String> _androidSafeModelIds = <String>{
@@ -107,6 +117,21 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<void> _inferenceTail = Future<void>.value();
   Future<void>? _warmupFuture;
   String? _warmupModelPath;
+  // Soft lifecycle-tracking state used strictly for diagnostics:
+  // - transitions are monitor status changes (from -> to)
+  // - reentry means rapid runtimeUnavailable -> loading cycling
+  // - runtime-check flags debounce duplicate verification calls
+  // No hard transition blocking is enforced by these fields.
+  LocalRuntimeState? _lastRuntimeValidationSnapshot;
+  bool _runtimeCheckInProgress = false;
+  DateTime? _lastRuntimeCheckAt;
+  int _transitionCounter = 0;
+  int _activeTransitionId = 0;
+  DateTime? _lastTransitionAt;
+  String _lastTransitionReason = 'provider_init';
+  String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
+  int _reentryCount = 0;
+  bool _streamInferenceEntered = false;
   final Set<String> _activeInferenceSessions = <String>{};
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
@@ -114,6 +139,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
+
+  @override
+  int get activeLifecycleTransitionId => _activeTransitionId;
+
+  @override
+  String get lifecycleRuntimeStateName => monitor.state.status.name;
 
   // ── Library loading ──────────────────────────────────────────────────────────
 
@@ -148,6 +179,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
+    final now = DateTime.now();
+    if (_runtimeCheckInProgress) {
+      _log('[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored');
+      return _lastRuntimeValidationSnapshot ?? monitor.state;
+    }
+    final sinceLastCheck = _lastRuntimeCheckAt == null
+        ? null
+        : now.difference(_lastRuntimeCheckAt!);
+    if (sinceLastCheck != null &&
+        sinceLastCheck < _runtimeCheckDebounce &&
+        _lastRuntimeValidationSnapshot != null) {
+      _log(
+        '[RUNTIME_CHECK_SKIPPED] reason=debounced elapsed_ms=${sinceLastCheck.inMilliseconds} origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=delayed',
+      );
+      return _lastRuntimeValidationSnapshot!;
+    }
+    _runtimeCheckInProgress = true;
+    _lastRuntimeCheckAt = now;
+    _log('[RUNTIME_CHECK_BEGIN] origin=AndroidFfiRuntimeProvider.validateRuntime');
     if (!LlamaFfiLoader.isCurrentPlatformSupported) {
       final snapshot = LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
@@ -155,7 +205,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}). '
             'Only ${LlamaFfiLoader.supportedAbiNames} builds are supported.',
       );
-      _syncLifecycleState(snapshot.status);
+      _syncLifecycleState(
+        snapshot.status,
+        reason: 'runtime_check_unsupported_abi',
+        origin: 'AndroidFfiRuntimeProvider.validateRuntime',
+      );
+      _lastRuntimeValidationSnapshot = snapshot;
+      _runtimeCheckInProgress = false;
       return snapshot;
     }
     if (!_ensureLibraryLoaded()) {
@@ -164,13 +220,28 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         message:
             'libllama_bridge.so is missing for this Android build. Rebuild the native runtime for arm64-v8a or x86_64.',
       );
-      _syncLifecycleState(snapshot.status);
+      _syncLifecycleState(
+        snapshot.status,
+        reason: 'runtime_check_library_missing',
+        origin: 'AndroidFfiRuntimeProvider.validateRuntime',
+      );
+      _lastRuntimeValidationSnapshot = snapshot;
+      _runtimeCheckInProgress = false;
       return snapshot;
     }
 
-    final snapshot = await super.validateRuntime(selectedModel: selectedModel);
-    _syncLifecycleState(snapshot.status);
-    return snapshot;
+    try {
+      final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      _syncLifecycleState(
+        snapshot.status,
+        reason: 'runtime_check_complete',
+        origin: 'AndroidFfiRuntimeProvider.validateRuntime',
+      );
+      _lastRuntimeValidationSnapshot = snapshot;
+      return snapshot;
+    } finally {
+      _runtimeCheckInProgress = false;
+    }
   }
 
   // ── Inference ────────────────────────────────────────────────────────────────
@@ -183,6 +254,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _log(
       '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
+    _streamInferenceEntered = true;
     final controller = StreamController<InferenceResponse>();
     var firstFfiInvocationAttempted = false;
     var firstFfiInvocationCompleted = false;
@@ -1763,6 +1835,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static int _currentThreadId() => Isolate.current.hashCode;
 
+  @override
+  @protected
+  void clearRuntimeVerification() {
+    final caller = kDebugMode
+        ? _inferCallerFromStack()
+        : 'AndroidFfiRuntimeProvider.clearRuntimeVerification';
+    _emitStateReset(
+      reason: 'verification_invalidated',
+      origin: caller,
+    );
+    super.clearRuntimeVerification();
+  }
+
   void _updateRuntimeStatus(
     LocalRuntimeStatus status, {
     String? message,
@@ -1770,7 +1855,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     Duration? elapsed,
     DateTime? startedAt,
     bool resetProgress = false,
+    String reason = _autoTransitionReason,
+    String origin = 'AndroidFfiRuntimeProvider',
   }) {
+    final previous = monitor.state.status;
+    final transitionReason =
+        reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
     monitor.update(
       status,
       message: message,
@@ -1779,14 +1869,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       startedAt: startedAt,
       resetProgress: resetProgress,
     );
-    _syncLifecycleState(status);
+    _traceStatePath(
+      from: previous,
+      to: status,
+      reason: transitionReason,
+      origin: origin,
+    );
+    _syncLifecycleState(status, reason: transitionReason, origin: origin);
   }
 
-  void _syncLifecycleState(LocalRuntimeStatus status) {
+  void _syncLifecycleState(
+    LocalRuntimeStatus status, {
+    required String reason,
+    required String origin,
+  }) {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
       case LocalRuntimeStatus.modelMissing:
         runtimeStateMachine.reset();
+        _emitStateReset(reason: reason, origin: origin);
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
         // Non-terminal state: model/FFI prerequisites can be present while no
@@ -1844,6 +1945,105 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } else {
       runtimeStateMachine.markVerified();
     }
+  }
+
+  String _defaultReasonFor(LocalRuntimeStatus status) {
+    switch (status) {
+      case LocalRuntimeStatus.loading:
+        return 'runtime_check_begin';
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return 'runtime_not_verified';
+      case LocalRuntimeStatus.uninitialized:
+        return 'runtime_reset';
+      case LocalRuntimeStatus.ready:
+        return 'runtime_verified';
+      default:
+        return 'status_update';
+    }
+  }
+
+  String _expectedNextFor(LocalRuntimeStatus status) {
+    switch (status) {
+      case LocalRuntimeStatus.loading:
+        return 'runtime_unavailable_or_ready';
+      case LocalRuntimeStatus.runtimeUnavailable:
+        return 'ready_or_pre_stream_inference';
+      case LocalRuntimeStatus.uninitialized:
+        return 'loading';
+      case LocalRuntimeStatus.ready:
+        return 'pre_stream_inference_or_inferencing';
+      default:
+        return 'runtime_progression';
+    }
+  }
+
+  void _traceStatePath({
+    required LocalRuntimeStatus from,
+    required LocalRuntimeStatus to,
+    required String reason,
+    required String origin,
+  }) {
+    final now = DateTime.now();
+    final elapsedSinceLast =
+        _lastTransitionAt == null ? null : now.difference(_lastTransitionAt!);
+    final repeated = from == to;
+    _transitionCounter++;
+    _activeTransitionId = _transitionCounter;
+    _lastTransitionAt = now;
+    _lastTransitionReason = reason;
+    _lastTransitionOrigin = origin;
+    _log(
+      '[STATE_PATH] path=${from.name}->${to.name} reason=$reason origin=$origin transition_id=$_activeTransitionId transition_ts=${now.toIso8601String()} elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1} repeated=$repeated',
+    );
+    _log('[EXPECTED_NEXT] current=${to.name} next=${_expectedNextFor(to)}');
+
+    if (from == LocalRuntimeStatus.runtimeUnavailable &&
+        to == LocalRuntimeStatus.loading &&
+        elapsedSinceLast != null &&
+        elapsedSinceLast < _reentryWarnThreshold) {
+      _reentryCount++;
+      _log(
+        '[REENTRY_DETECTED] from=${from.name} to=${to.name} elapsed_ms=${elapsedSinceLast.inMilliseconds} origin=$origin reentry_count=$_reentryCount',
+      );
+    }
+
+    if (to == LocalRuntimeStatus.runtimeUnavailable && !_streamInferenceEntered) {
+      // Kept as separate markers intentionally so log parsers can key on both:
+      // interruption classification and first-response boundary reporting.
+      _log(
+        '[LIFECYCLE_INTERRUPTION] expected_next=PRE_STREAM_INFERENCE last_state=${to.name} last_transition_id=$_activeTransitionId reason=unexpected_reset_before_inference',
+      );
+      _log(
+        '[FIRST_RESPONSE_BLOCKED] boundary=pre_stream_inference last_known_state=${to.name} last_transition_reason=$_lastTransitionReason last_transition_origin=$_lastTransitionOrigin',
+      );
+      if (_reentryCount >= _reentryLoopBlockThreshold) {
+        _log(
+          '[FIRST_RESPONSE_BLOCKED] boundary=runtime_verification_loop reentry_count=$_reentryCount elapsed_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
+        );
+      }
+    }
+  }
+
+  void _emitStateReset({
+    required String reason,
+    required String origin,
+  }) {
+    final now = DateTime.now();
+    final elapsedSinceLast =
+        _lastTransitionAt == null ? null : now.difference(_lastTransitionAt!);
+    _log(
+      '[STATE_RESET] reason=$reason origin=$origin elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
+    );
+  }
+
+  String _inferCallerFromStack() {
+    final lines = StackTrace.current.toString().split('\n');
+    // 0=current helper frame, 1=clearRuntimeVerification frame, 2=actual caller.
+    if (lines.length <= _clearVerificationCallerFrameIndex) {
+      return 'unknown_caller';
+    }
+    final caller = lines[_clearVerificationCallerFrameIndex].trim();
+    return caller.isEmpty ? 'unknown_caller' : caller;
   }
 
 }
