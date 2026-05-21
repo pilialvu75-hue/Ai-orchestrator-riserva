@@ -24,7 +24,7 @@ void main() {
   late MockAndroidIntentHandler mockIntentHandler;
   late SharedPreferences preferences;
   late UpdateManager updateManager;
-  final packageInfoChannel =
+  const packageInfoChannel =
       const MethodChannel('dev.fluttercommunity.plus/package_info');
 
   setUp(() async {
