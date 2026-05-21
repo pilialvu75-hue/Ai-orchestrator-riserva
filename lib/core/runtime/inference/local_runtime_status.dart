@@ -162,3 +162,61 @@ class LocalRuntimeMonitor {
     }
   }
 }
+
+enum RuntimeVerificationPhase {
+  idle,
+  loading,
+  running,
+  passed,
+  failed,
+}
+
+class RuntimeVerificationState {
+  const RuntimeVerificationState({
+    this.phase = RuntimeVerificationPhase.idle,
+    this.message,
+  });
+
+  final RuntimeVerificationPhase phase;
+  final String? message;
+
+  bool get verificationLoading => phase == RuntimeVerificationPhase.loading;
+  bool get verificationRunning => phase == RuntimeVerificationPhase.running;
+  bool get verificationPassed => phase == RuntimeVerificationPhase.passed;
+  bool get verificationFailed => phase == RuntimeVerificationPhase.failed;
+
+  RuntimeVerificationState copyWith({
+    RuntimeVerificationPhase? phase,
+    String? message,
+  }) {
+    return RuntimeVerificationState(
+      phase: phase ?? this.phase,
+      message: message,
+    );
+  }
+}
+
+class RuntimeVerificationMonitor {
+  RuntimeVerificationState _state = const RuntimeVerificationState();
+  final List<void Function(RuntimeVerificationState)> _listeners = [];
+
+  RuntimeVerificationState get state => _state;
+
+  void addListener(void Function(RuntimeVerificationState state) listener) {
+    _listeners.add(listener);
+  }
+
+  void removeListener(void Function(RuntimeVerificationState state) listener) {
+    _listeners.remove(listener);
+  }
+
+  void update(
+    RuntimeVerificationPhase phase, {
+    String? message,
+  }) {
+    _state = RuntimeVerificationState(phase: phase, message: message);
+    for (final listener in List.of(_listeners)) {
+      listener(_state);
+    }
+  }
+}
