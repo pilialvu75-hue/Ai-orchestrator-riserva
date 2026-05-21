@@ -44,7 +44,7 @@ class FileTreeService {
         isDirectory: isDirectory,
       );
     }
-    final dir = entity as Directory;
+    final dir = entity;
     final children = <WorkspaceFileNode>[];
     final listed = dir.listSync(followLinks: false);
     listed.sort((a, b) => a.path.compareTo(b.path));
