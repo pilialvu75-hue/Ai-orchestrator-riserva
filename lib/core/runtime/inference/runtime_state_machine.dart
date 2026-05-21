@@ -49,11 +49,15 @@ class RuntimeStateMachine {
     // From loading, two separate transitions are valid:
     //   loadCompleted → ready   (legacy path, via markReady())
     //   healthObserved → healthy (new verification-layer path, via markHealthy())
+    //   inferenceStarted → inferencing (direct path when inference begins while
+    //     the session is still in the loading phase, e.g. after a verified
+    //     warmup skip that leaves the state machine in loading)
     RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadCompleted,
       RuntimeLifecycleEvent.healthObserved,
       RuntimeLifecycleEvent.verificationConfirmed,
+      RuntimeLifecycleEvent.inferenceStarted,
       RuntimeLifecycleEvent.inferenceFailed,
     },
     // Legacy "ready" state: functionally equivalent to "healthy".
