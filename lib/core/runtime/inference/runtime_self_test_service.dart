@@ -86,7 +86,8 @@ class RuntimeSelfTestService {
     try {
       final selectedResult = await _localAiRepository.getSelectedModel();
       final selectedModel = selectedResult.fold((_) => null, (model) => model);
-      if (selectedModel == null || selectedModel.localPath == null) {
+      final selectedModelPath = selectedModel?.localPath;
+      if (selectedModel == null || selectedModelPath == null) {
         return const RuntimeSelfTestResult(
           success: false,
           summary:
@@ -94,7 +95,7 @@ class RuntimeSelfTestService {
         );
       }
 
-      notes.add('1. Model exists: OK (${selectedModel.localPath})');
+      notes.add('1. Model exists: OK ($selectedModelPath)');
 
       final shouldReuse = _shouldReuseVerification(selectedModel);
       if (shouldReuse) {
@@ -231,12 +232,15 @@ class RuntimeSelfTestService {
       _log(
         '[WARMUP_VALIDATION_PASS] session=$selfTestSessionId first_token_received=$firstTokenReceived liveness_ok=$livenessOk completed=$completed',
       );
-      if (_runtimeProvider is! AndroidFfiRuntimeProvider) {
-        _runtimeProvider.recordVerificationSuccess(
-          modelPath: selectedModel.localPath!,
-          source: 'self_test_pass',
-        );
-      }
+      _log(
+        '[SELF_TEST_SUCCESS] session=$selfTestSessionId first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks completed=$completed emitted_token_chunks=$emittedTokenChunks',
+      );
+      _runtimeProvider.recordVerificationSuccess(
+        modelPath: selectedModelPath,
+        source: 'self_test_success',
+      );
+      _log('[VERIFICATION_MARK_SET] source=self_test_success');
+      _log('[VERIFIED_MODEL_PATH=$selectedModelPath]');
       _log(
         '[COMM_TEST_PASS] first_token_received=$firstTokenReceived first_token="$firstToken"',
       );

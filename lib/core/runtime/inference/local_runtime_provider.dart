@@ -87,9 +87,16 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required String modelPath,
     String source = 'runtime',
   }) {
+    final normalizedModelPath = _normalizeModelPath(modelPath);
     markRuntimeVerified(modelPath);
     debugPrint(
-      '[$_localProviderTag] verification marked source=$source modelPath=${_normalizeModelPath(modelPath)}',
+      '[$_localProviderTag] [VERIFICATION_MARK_SET] source=$source',
+    );
+    debugPrint(
+      '[$_localProviderTag] [VERIFIED_MODEL_PATH=$normalizedModelPath]',
+    );
+    debugPrint(
+      '[$_localProviderTag] verification marked source=$source modelPath=$normalizedModelPath',
     );
   }
 
