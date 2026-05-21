@@ -2346,7 +2346,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     final status = monitor.state.status;
     _persistVerifiedSnapshot(
-      message: 'Runtime verification persisted source=$source.',
+      message: 'Runtime verification persisted from source=$source.',
     );
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
         status == LocalRuntimeStatus.uninitialized) {

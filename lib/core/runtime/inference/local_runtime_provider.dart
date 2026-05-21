@@ -81,6 +81,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   bool supportsModel(AiModel model) {
+    // Compatibility is now validated at runtime using the GGUF file itself
+    // (header/readability/size checks), so this gate only enforces that a
+    // local downloaded path exists before routing to local inference.
     final modelPath = model.localPath;
     final hasPath = modelPath != null && modelPath.trim().isNotEmpty;
     if (!model.isDownloaded || !hasPath) {
