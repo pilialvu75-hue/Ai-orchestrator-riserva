@@ -106,6 +106,9 @@ class LocalRuntimeDiagnosticsService {
       if (_usesProviderMonitor &&
           currentStatus == LocalRuntimeStatus.ready &&
           snapshot.status == LocalRuntimeStatus.runtimeUnavailable) {
+        // Provider-owned READY state is authoritative after successful
+        // verification; diagnostics must never downgrade it back to
+        // runtimeUnavailable during refresh/revalidation loops.
         return;
       }
       if (_usesProviderMonitor &&

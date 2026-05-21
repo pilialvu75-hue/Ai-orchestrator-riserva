@@ -53,6 +53,11 @@ class RuntimeStateMachine {
     _listeners.remove(listener);
   }
 
+  /// Applies a runtime event to the lifecycle state machine.
+  ///
+  /// [source] is included in forensic logs so callers can identify which
+  /// subsystem attempted the transition. Returns the current lifecycle state
+  /// after the event has been processed.
   RuntimeLifecycleState applyEvent(
     RuntimeEvent event, {
     String source = 'runtime',
@@ -209,6 +214,10 @@ class RuntimeStateMachine {
     return _state;
   }
 
+  /// Backward-compatible alias for [resetHard].
+  ///
+  /// Use hard reset only when the runtime must forget all readiness evidence.
+  /// For transient recovery, prefer [resetSoft].
   void reset() => resetHard();
 
   void resetSoft() =>
