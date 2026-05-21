@@ -1613,11 +1613,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             try {
               final startResult = bindings.startGeneration(
                 verificationSessionId,
-                // Keep verification generation parameters aligned with warmup so
-                // runtime semantics remain unchanged while lifecycle state is isolated.
-                _warmupPrompt,
-                _warmupMaxTokens,
-                _warmupTemperature,
+                request.prompt,
+                request.maxTokens.clamp(1, _safeMaxTokens),
+                request.temperature,
               );
               if (startResult != 0) {
                 final err = _safeLastError(bindings, verificationSessionId);
@@ -2304,9 +2302,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String modelPath,
     String source = 'runtime',
   }) {
+    super.recordVerificationSuccess(modelPath: modelPath, source: source);
     _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
     _manualVerificationResetRequested = false;
-    super.recordVerificationSuccess(modelPath: modelPath, source: source);
     if (_verificationScopeActive) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=record_verification_success_skip_ui_transition source=$source',

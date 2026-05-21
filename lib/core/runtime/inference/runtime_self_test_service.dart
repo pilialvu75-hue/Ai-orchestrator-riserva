@@ -100,7 +100,7 @@ class RuntimeSelfTestService {
       if (shouldReuse) {
         notes.add('2. Runtime validation: OK (reused previous verification)');
         _log('[RUNTIME_VERIFICATION_REUSED] session=$selfTestSessionId');
-        _log('[VERIFICATION_REUSE] session=$selfTestSessionId verification_scope=true');
+        _log('[VERIFICATION_REUSE] session=$selfTestSessionId verification_scope=false');
         return RuntimeSelfTestResult(
           success: true,
           summary:
