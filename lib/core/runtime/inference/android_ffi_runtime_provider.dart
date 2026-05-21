@@ -54,7 +54,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     RuntimeStateMachine? runtimeStateMachine,
     bool Function()? developerModeProvider,
   })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
-        _developerModeProvider = developerModeProvider ?? (() => false),
         super(developerModeProvider: developerModeProvider);
 
   static const _logTag = 'AI_RUNTIME';
@@ -76,6 +75,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const int _maxUnexpectedPollStatuses = 8;
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
@@ -106,9 +106,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   final RuntimeVerificationMonitor verificationMonitor =
       RuntimeVerificationMonitor();
   final RuntimeStateMachine runtimeStateMachine;
-  final bool Function() _developerModeProvider;
-
-  bool get _isDeveloperMode => _developerModeProvider();
 
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
@@ -150,6 +147,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   String get lifecycleRuntimeStateName => monitor.state.status.name;
+
+  @override
+  bool supportsModel(AiModel model) {
+    final modelPath = model.localPath;
+    final accepted =
+        model.isDownloaded && modelPath != null && modelPath.trim().isNotEmpty;
+    if (accepted && !_androidSafeModelIds.contains(model.effectiveRuntimeModelId)) {
+      _log(
+        '[VALIDATION] android_ffi_accept_any_gguf=true modelId=${model.effectiveRuntimeModelId}',
+      );
+    }
+    return accepted;
+  }
 
   // ── Library loading ──────────────────────────────────────────────────────────
 
@@ -265,7 +275,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     try {
-      final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      var snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      if (snapshot.status == LocalRuntimeStatus.runtimeUnavailable &&
+          selectedModelPath != null &&
+          selectedModelPath.trim().isNotEmpty &&
+          shouldReuseRuntimeVerification(modelPath: selectedModelPath)) {
+        snapshot = monitor.state.status == LocalRuntimeStatus.ready
+            ? monitor.state
+            : const LocalRuntimeState(
+                status: LocalRuntimeStatus.ready,
+                message: 'Runtime verification reused and ready for inference.',
+              );
+      }
       _syncLifecycleState(
         snapshot.status,
         reason: 'runtime_check_complete',
@@ -556,40 +577,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (!_androidSafeModelIds.contains(modelId)) {
-        if (_isDeveloperMode) {
-          // Developer mode: warn but allow the run to proceed.
-          _log(
-            '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
-            'validated set – unsupported quantization or architecture possible. '
-            'Proceeding with experimental inference.',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            message:
-                '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
-          );
-          _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=developer_mode_unvalidated_model modelId=$modelId');
-        } else {
-          _log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
-          clearRuntimeVerification();
-          const unsupportedAndroidModelMessage =
-              'Selected model is not enabled for Android local runtime. '
-              'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-              'gemma-2-2b-it, llama_1b, or gemma_2b.';
-          _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.failed,
-            message: unsupportedAndroidModelMessage,
-          );
-          await fatalEarlyExit(
-            sessionId,
-            branch: 'unsupported_model_guard',
-            reason: unsupportedAndroidModelMessage,
-            stage: 'model_guard',
-            details: 'modelId=$modelId',
-          );
-          return;
-        }
+        _log(
+          '[VALIDATION] android_ffi_accept_any_gguf=true modelId=$modelId '
+          'note=not_in_validated_catalog',
+        );
       }
 
       // Model file validation runs synchronously on the current isolate.
@@ -933,6 +924,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       var estimatedTokens = 0;
       var repeatedTokenCount = 0;
       var consecutiveInvalidTokens = 0;
+      var consecutiveUnexpectedStatuses = 0;
       var pollIterations = 0;
       String? lastPiece;
       final fullText = StringBuffer();
@@ -1064,6 +1056,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${firstTokenDeadline.inMilliseconds}',
             );
             _log(
+              '[NO_RESPONSE_FORENSICS] session=$sessionId reason=first_token_timeout '
+              'poll_iteration=$pollIterations generated_tokens=$estimatedTokens '
+              'elapsed_ms=${elapsed.inMilliseconds} native_error=${_safeLastError(bindings, nativeSessionId)}',
+            );
+            _log(
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
               ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
             );
@@ -1102,6 +1099,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' generated_tokens=$estimatedTokens'
               ' elapsed_ms=${elapsed.inMilliseconds}'
               ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
+            );
+            _log(
+              '[NO_RESPONSE_FORENSICS] session=$sessionId reason=token_progress_watchdog '
+              'poll_iteration=$pollIterations generated_tokens=$estimatedTokens '
+              'elapsed_ms=${elapsed.inMilliseconds} since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
             );
             _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
@@ -1142,6 +1144,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ' idle_polls=$consecutiveIdlePolls generated_tokens=$estimatedTokens'
               ' elapsed_ms=${elapsed.inMilliseconds}',
             );
+            _log(
+              '[NO_RESPONSE_FORENSICS] session=$sessionId reason=poll_loop_watchdog '
+              'poll_iteration=$pollIterations idle_polls=$consecutiveIdlePolls '
+              'generated_tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
+            );
             _updateRuntimeStatus(
               LocalRuntimeStatus.stalled,
               message: 'Polling loop stalled',
@@ -1173,10 +1180,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
             );
             status = bindings.pollToken(nativeSessionId, tokenBuf);
-          } catch (error) {
+          } catch (error, stackTrace) {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_token_exception';
+            _log(
+              '[CRASH_FORENSICS] session=$sessionId reason=poll_token_exception '
+              'poll_iteration=$pollIterations generated_tokens=$estimatedTokens '
+              'elapsed_ms=${elapsed.inMilliseconds} error=$error',
+            );
+            _log('[CRASH_FORENSICS] session=$sessionId stack=$stackTrace');
             _updateRuntimeStatus(
               LocalRuntimeStatus.failed,
               message: 'Native poll_token failed: $error',
@@ -1195,6 +1208,49 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           _log(
             '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations status=$status',
           );
+
+          if (status == -99 ||
+              status == -1 ||
+              status == 0 ||
+              status == 1 ||
+              status == 2) {
+            consecutiveUnexpectedStatuses = 0;
+          } else {
+            consecutiveUnexpectedStatuses++;
+            final nativeErr = _safeLastError(bindings, nativeSessionId);
+            _log(
+              '[POLL_STATUS_UNEXPECTED] session=$sessionId status=$status '
+              'iteration=$pollIterations consecutive=$consecutiveUnexpectedStatuses '
+              'native_error=$nativeErr',
+            );
+            if (consecutiveUnexpectedStatuses >= _maxUnexpectedPollStatuses) {
+              _safeCancel(bindings, nativeSessionId);
+              clearRuntimeVerification();
+              runtimeNeedsReset = true;
+              runtimeResetReason = 'unexpected_poll_status';
+              _log(
+                '[NO_RESPONSE_FORENSICS] session=$sessionId reason=unexpected_poll_status '
+                'status=$status poll_iteration=$pollIterations generated_tokens=$estimatedTokens '
+                'elapsed_ms=${elapsed.inMilliseconds} native_error=$nativeErr',
+              );
+              _updateRuntimeStatus(
+                LocalRuntimeStatus.failed,
+                message: 'Unexpected native poll status ($status).',
+                tokensGenerated: estimatedTokens,
+                elapsed: elapsed,
+                startedAt: startedAt,
+              );
+              _finishWithRuntimeError(
+                controller,
+                stage: 'poll_token',
+                message: 'Unexpected native poll status ($status).',
+                details: nativeErr,
+              );
+              break;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 16));
+            continue;
+          }
 
           if (status == 1) {
             String piece;
@@ -1346,7 +1402,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       ),
                     );
                   }
-                } catch (_) {}
+                } catch (error) {
+                  _log(
+                    '[STREAM_GUARD] session=$sessionId event=token_add_failed '
+                    'poll_iteration=$pollIterations generated_tokens=$estimatedTokens error=$error',
+                  );
+                }
               });
               flushWatch.stop();
               _log(
@@ -1405,15 +1466,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             _logAi('inference completed');
             _log('[STREAM_ADD] event=final_chunk session=$sessionId');
             final flushWatch = Stopwatch()..start();
-            controller.add(InferenceResponse.finalChunk(
-              text: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              model: modelId,
-            ));
+            var finalChunkDelivered = true;
+            try {
+              controller.add(InferenceResponse.finalChunk(
+                text: fullText.toString(),
+                tokensGenerated: estimatedTokens,
+                model: modelId,
+              ));
+            } catch (error) {
+              finalChunkDelivered = false;
+              _log(
+                '[STREAM_GUARD] session=$sessionId event=final_chunk_add_failed '
+                'generated_tokens=$estimatedTokens error=$error',
+              );
+              _finishWithRuntimeError(
+                controller,
+                stage: 'final_chunk',
+                message: 'Failed to deliver final inference chunk.',
+                details: error.toString(),
+              );
+            }
             flushWatch.stop();
             _log(
               '[STREAM_FLUSH] event=final_chunk session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
             );
+            if (!finalChunkDelivered) {
+              break;
+            }
             _updateRuntimeStatus(
               LocalRuntimeStatus.completed,
               message: 'Completed',
@@ -1555,6 +1634,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       } catch (error, stackTrace) {
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
+        _log(
+          '[CRASH_FORENSICS] session=$sessionId reason=stream_inference_unhandled '
+          'first_ffi_attempted=$firstFfiInvocationAttempted '
+          'first_ffi_completed=$firstFfiInvocationCompleted error=$error',
+        );
         if (!firstFfiInvocationAttempted) {
           // Classification is based on whether session_create has been attempted yet.
           await fatalEarlyExit(
