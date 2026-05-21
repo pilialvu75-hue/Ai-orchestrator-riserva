@@ -75,6 +75,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  // Abort after ~8 anomalous polls (~128ms with retry delay) to avoid hanging
+  // in undefined native states while still tolerating brief transient glitches.
   static const int _maxUnexpectedPollStatuses = 8;
   /// Native poll status returned when generation was cancelled by runtime.
   static const int _pollStatusNativeCancelled = -99;
@@ -1405,23 +1407,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
-              scheduleMicrotask(() {
-                try {
-                  if (!controller.isClosed) {
-                    controller.add(
-                      InferenceResponse.token(
-                        text: piece,
-                        model: modelId,
-                      ),
-                    );
-                  }
-                } catch (error) {
-                  _log(
-                    '[STREAM_GUARD] session=$sessionId event=token_add_failed '
-                    'poll_iteration=$pollIterations generated_tokens=$estimatedTokens error=$error',
+              try {
+                if (!controller.isClosed) {
+                  controller.add(
+                    InferenceResponse.token(
+                      text: piece,
+                      model: modelId,
+                    ),
                   );
                 }
-              });
+              } catch (error) {
+                _safeCancel(bindings, nativeSessionId);
+                clearRuntimeVerification();
+                runtimeNeedsReset = true;
+                runtimeResetReason = 'token_delivery_failed';
+                _log(
+                  '[STREAM_GUARD] session=$sessionId event=token_add_failed '
+                  'poll_iteration=$pollIterations generated_tokens=$estimatedTokens error=$error',
+                );
+                _updateRuntimeStatus(
+                  LocalRuntimeStatus.failed,
+                  message: 'Failed to deliver token stream chunk: $error',
+                  tokensGenerated: estimatedTokens,
+                  elapsed: streamingElapsed,
+                  startedAt: startedAt,
+                );
+                _finishWithRuntimeError(
+                  controller,
+                  stage: 'token_delivery',
+                  message: 'Failed to deliver token stream chunk.',
+                  details: error.toString(),
+                );
+                break;
+              }
               flushWatch.stop();
               _log(
                 '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
