@@ -33,6 +33,7 @@ class RuntimeSelfTestService {
   /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
   static const Duration _selfTestCompletionTimeout = Duration(seconds: 60);
+  static const String _verificationReusedMarker = 'VERIFICATION_REUSED';
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
@@ -103,7 +104,7 @@ class RuntimeSelfTestService {
         return RuntimeSelfTestResult(
           success: true,
           summary:
-              '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\nVERIFICATION_REUSED',
+              '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\n$_verificationReusedMarker',
         );
       }
 

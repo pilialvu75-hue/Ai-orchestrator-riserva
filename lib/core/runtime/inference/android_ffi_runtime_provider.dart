@@ -1613,6 +1613,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             try {
               final startResult = bindings.startGeneration(
                 verificationSessionId,
+                // Keep verification generation parameters aligned with warmup so
+                // runtime semantics remain unchanged while lifecycle state is isolated.
                 _warmupPrompt,
                 _warmupMaxTokens,
                 _warmupTemperature,
@@ -1758,7 +1760,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               try {
                 bindings.releaseSession(verificationSessionId);
                 released = true;
-              } catch (_) {}
+              } catch (error) {
+                _log(
+                  '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_exception error=$error',
+                );
+              }
               if (!released) {
                 _log(
                   '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_failed_no_production_impact',
