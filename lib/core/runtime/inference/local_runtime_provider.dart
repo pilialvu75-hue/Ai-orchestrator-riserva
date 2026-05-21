@@ -7,7 +7,6 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -25,18 +24,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
-
-  static const Set<String> _mobileValidatedModelIds = <String>{
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
-
-  static const Set<String> _desktopValidatedModelIds = <String>{
-    ..._mobileValidatedModelIds,
-  };
 
   final bool Function() _developerModeProvider;
 
@@ -94,34 +81,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   bool supportsModel(AiModel model) {
-    final modelId = model.effectiveRuntimeModelId;
-
-    final allowed = _isModelAllowedOnPlatform(modelId);
-
-    if (!allowed) {
-      if (_isDeveloperMode) {
-        const msg =
-            '[VALIDATION] developer_mode=true: allowing custom/unvalidated model';
-
-        debugPrint(
-          '[$_localProviderTag] $msg modelId=$modelId',
-        );
-
-        RuntimeEventLog.instance.emit(
-          '$msg modelId=$modelId',
-        );
-
-        return model.localPath != null &&
-            model.localPath!.isNotEmpty &&
-            model.isDownloaded;
-      }
-
+    final modelPath = model.localPath;
+    final hasPath = modelPath != null && modelPath.trim().isNotEmpty;
+    if (!model.isDownloaded || !hasPath) {
       return false;
     }
-
-    return model.validationStatus ==
-            ModelValidationStatus.validatedOk ||
-        (_isDeveloperMode && model.isDownloaded);
+    final modelId = model.effectiveRuntimeModelId;
+    RuntimeEventLog.instance.emit(
+      '[VALIDATION] gguf_accept_unrestricted=true modelId=$modelId'
+      ' validationStatus=${model.validationStatus} developerMode=$_isDeveloperMode',
+    );
+    return true;
   }
 
   Future<LocalRuntimeState> validateRuntime({
@@ -445,17 +415,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return controller.stream;
   }
 
-  bool _isModelAllowedOnPlatform(
-    String modelId,
-  ) {
-    final allowed =
-        _isDesktopPlatform()
-            ? _desktopValidatedModelIds
-            : _mobileValidatedModelIds;
-
-    return allowed.contains(modelId);
-  }
-
   String _resolveLlamaExecutable() {
     final envPath =
         Platform.environment[
@@ -543,11 +502,5 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return cleaned
         .split(RegExp(r'\s+'))
         .length;
-  }
-
-  static bool _isDesktopPlatform() {
-    return Platform.isWindows ||
-        Platform.isLinux ||
-        Platform.isMacOS;
   }
 }

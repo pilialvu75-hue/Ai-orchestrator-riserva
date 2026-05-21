@@ -2,7 +2,9 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalRuntimeDiagnosticsService {
   LocalRuntimeDiagnosticsService({
@@ -50,10 +52,16 @@ class LocalRuntimeDiagnosticsService {
   }
 
   Future<void> refresh() async {
-    if (_refreshInProgress) return;
+    if (_refreshInProgress) {
+      _log('[DIAGNOSTICS_REFRESH_SKIPPED] reason=refresh_in_progress');
+      return;
+    }
     // Intentional ordering: do not acquire refresh lock while an inference
     // stream is active; diagnostics refresh must remain a no-op in that window.
-    if (_isInferenceActive) return;
+    if (_isInferenceActive) {
+      _log('[DIAGNOSTICS_REFRESH_SKIPPED] reason=inference_active_prelock state=${_runtimeProvider.lifecycleRuntimeStateName}');
+      return;
+    }
     final now = DateTime.now();
     final sinceLastRefresh = _lastRefreshAt == null
         ? null
@@ -72,19 +80,27 @@ class LocalRuntimeDiagnosticsService {
     }
     _refreshInProgress = true;
     _lastRefreshAt = now;
-    monitor.update(
-      LocalRuntimeStatus.loading,
-      message: 'Checking local runtime...',
-      tokensGenerated: 0,
-      elapsed: Duration.zero,
-      startedAt: null,
-      resetProgress: true,
-    );
 
     try {
+      if (_isInferenceActive) {
+        _log('[DIAGNOSTICS_REFRESH_SKIPPED] reason=inference_active_postlock state=${_runtimeProvider.lifecycleRuntimeStateName}');
+        return;
+      }
+      monitor.update(
+        LocalRuntimeStatus.loading,
+        message: 'Checking local runtime...',
+        tokensGenerated: 0,
+        elapsed: Duration.zero,
+        startedAt: null,
+        resetProgress: true,
+      );
       final selectedModel = await _loadSelectedModel();
       final snapshot =
           await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
+      if (_isInferenceActive) {
+        _log('[DIAGNOSTICS_REFRESH_SKIPPED] reason=inference_active_before_snapshot_apply state=${_runtimeProvider.lifecycleRuntimeStateName}');
+        return;
+      }
       _lastRefreshSnapshot = snapshot;
       monitor.update(
         snapshot.status,
@@ -92,6 +108,19 @@ class LocalRuntimeDiagnosticsService {
         tokensGenerated: snapshot.tokensGenerated,
         elapsed: snapshot.elapsed,
         startedAt: snapshot.startedAt,
+      );
+    } catch (error, stackTrace) {
+      _log(
+        '[APP_CLOSE_FORENSICS] component=local_runtime_diagnostics_service'
+        ' stage=refresh error=$error stack=$stackTrace',
+      );
+      final fallback = _lastRefreshSnapshot ?? monitor.state;
+      monitor.update(
+        fallback.status,
+        message: fallback.message ?? 'Diagnostics refresh failed: $error',
+        tokensGenerated: fallback.tokensGenerated,
+        elapsed: fallback.elapsed,
+        startedAt: fallback.startedAt,
       );
     } finally {
       _refreshInProgress = false;
@@ -107,5 +136,10 @@ class LocalRuntimeDiagnosticsService {
   Future<AiModel?> _loadSelectedModel() async {
     final result = await _localAiRepository.getSelectedModel();
     return result.fold((_) => null, (model) => model);
+  }
+
+  static void _log(String message) {
+    RuntimeEventLog.instance.emit(message);
+    debugPrint('[AI_RUNTIME] $message');
   }
 }
