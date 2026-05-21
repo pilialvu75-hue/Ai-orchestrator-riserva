@@ -98,6 +98,8 @@ class RuntimeSelfTestService {
 
       final shouldReuse = _shouldReuseVerification(selectedModel);
       if (shouldReuse) {
+        // Force-refresh verification markers so diagnostics/UI cannot remain
+        // stuck in runtimeUnavailable after a successful reuse-only self-test.
         _runtimeProvider.recordVerificationSuccess(
           modelPath: selectedModel.localPath!,
           source: 'self_test_reuse',

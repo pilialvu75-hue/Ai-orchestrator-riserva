@@ -85,7 +85,7 @@ void main() {
         description: 'custom gguf',
         isDownloaded: true,
         localPath: '/tmp/tinyllama.gguf',
-        validationStatus: ModelValidationStatus.invalidModel,
+        validationStatus: ModelValidationStatus.validatedOk,
       );
 
       expect(provider.supportsModel(model), isTrue);

@@ -76,6 +76,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
   static const int _maxUnexpectedPollStatuses = 8;
+  static const int _pollStatusNativeCancelled = -99;
+  static const int _pollStatusNativeError = -1;
+  static const int _pollStatusIdle = 0;
+  static const int _pollStatusToken = 1;
+  static const int _pollStatusCompleted = 2;
+  static const Duration _unexpectedPollRetryDelay = Duration(milliseconds: 16);
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
@@ -1209,11 +1215,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations status=$status',
           );
 
-          if (status == -99 ||
-              status == -1 ||
-              status == 0 ||
-              status == 1 ||
-              status == 2) {
+          if (status == _pollStatusNativeCancelled ||
+              status == _pollStatusNativeError ||
+              status == _pollStatusIdle ||
+              status == _pollStatusToken ||
+              status == _pollStatusCompleted) {
             consecutiveUnexpectedStatuses = 0;
           } else {
             consecutiveUnexpectedStatuses++;
@@ -1248,11 +1254,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               break;
             }
-            await Future<void>.delayed(const Duration(milliseconds: 16));
+            await Future<void>.delayed(_unexpectedPollRetryDelay);
             continue;
           }
 
-          if (status == 1) {
+          if (status == _pollStatusToken) {
             String piece;
             try {
               piece = tokenBuf.toDartString();
@@ -1444,7 +1450,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 break;
               }
             }
-          } else if (status == 2) {
+          } else if (status == _pollStatusCompleted) {
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
             recordVerificationSuccess(
@@ -1501,7 +1507,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               startedAt: startedAt,
             );
             break;
-          } else if (status == -99) {
+          } else if (status == _pollStatusNativeCancelled) {
             // Cancelled by the native thread.
             _log('[GENERATION_END] state=cancelled generated_tokens=$estimatedTokens');
             _log(
@@ -1523,7 +1529,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled_status');
             break;
-          } else if (status == -1) {
+          } else if (status == _pollStatusNativeError) {
             clearRuntimeVerification();
             final err = _safeLastError(bindings, nativeSessionId);
             _log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
@@ -1573,7 +1579,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             }
             break;
           } else {
-            // status == 0: no token ready yet; yield to the Flutter event loop.
+            // status == _pollStatusIdle: no token ready yet; yield to the Flutter event loop.
             // Use a small non-zero delay to avoid excessive CPU churn during
             // periods when the generation thread has not yet produced output.
             consecutiveIdlePolls++;
