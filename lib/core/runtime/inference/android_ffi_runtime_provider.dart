@@ -103,6 +103,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   /// Observable runtime status.  UI layers may register listeners here.
   final LocalRuntimeMonitor monitor = LocalRuntimeMonitor();
+  final RuntimeVerificationMonitor verificationMonitor =
+      RuntimeVerificationMonitor();
   final RuntimeStateMachine runtimeStateMachine;
   final bool Function() _developerModeProvider;
 
@@ -132,7 +134,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
+  bool _verificationScopeActive = false;
   final Set<String> _activeInferenceSessions = <String>{};
+  String? _verifiedRuntimeAbi;
+  bool _manualVerificationResetRequested = false;
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
@@ -230,6 +235,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return snapshot;
     }
 
+    final selectedModelPath = selectedModel?.localPath;
+    if (selectedModelPath != null &&
+        selectedModelPath.trim().isNotEmpty &&
+        hasVerifiedRuntimeForModel(selectedModelPath) &&
+        _verifiedRuntimeAbi != LlamaFfiLoader.currentAbiName) {
+      _log(
+        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(selectedModelPath)} verification_scope=false reason=abi_changed previous_abi=${_verifiedRuntimeAbi ?? 'unknown'} current_abi=${LlamaFfiLoader.currentAbiName}',
+      );
+      clearRuntimeVerification();
+    }
+
     try {
       final snapshot = await super.validateRuntime(selectedModel: selectedModel);
       _syncLifecycleState(
@@ -241,6 +257,93 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return snapshot;
     } finally {
       _runtimeCheckInProgress = false;
+    }
+  }
+
+  bool shouldReuseRuntimeVerification({
+    required String modelPath,
+  }) {
+    final reusable = hasVerifiedRuntimeForModel(modelPath) &&
+        _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
+        !_manualVerificationResetRequested;
+    if (reusable) {
+      _log(
+        '[RUNTIME_VERIFICATION_REUSED] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName}',
+      );
+      _log(
+        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=true',
+      );
+    }
+    return reusable;
+  }
+
+  void requestManualVerificationReset() {
+    _manualVerificationResetRequested = true;
+    _verifiedRuntimeAbi = null;
+    clearRuntimeVerification();
+  }
+
+  Future<LocalRuntimeState> validateRuntimeInVerificationScope({
+    AiModel? selectedModel,
+  }) async {
+    return _runInVerificationScope(
+      modelPath: selectedModel?.localPath,
+      action: () async {
+        verificationMonitor.update(
+          RuntimeVerificationPhase.loading,
+          message: 'Checking runtime prerequisites.',
+        );
+        if (!LlamaFfiLoader.isCurrentPlatformSupported) {
+          verificationMonitor.update(
+            RuntimeVerificationPhase.failed,
+            message: 'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).',
+          );
+          return LocalRuntimeState(
+            status: LocalRuntimeStatus.failed,
+            message:
+                'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}). '
+                'Only ${LlamaFfiLoader.supportedAbiNames} builds are supported.',
+          );
+        }
+        if (!_ensureLibraryLoaded()) {
+          verificationMonitor.update(
+            RuntimeVerificationPhase.failed,
+            message: 'libllama_bridge.so missing for current build.',
+          );
+          return const LocalRuntimeState(
+            status: LocalRuntimeStatus.ffiMissing,
+            message:
+                'libllama_bridge.so is missing for this Android build. Rebuild the native runtime for arm64-v8a or x86_64.',
+          );
+        }
+        verificationMonitor.update(
+          RuntimeVerificationPhase.running,
+          message: 'Runtime prerequisites verified.',
+        );
+        return super.validateRuntime(selectedModel: selectedModel);
+      },
+    );
+  }
+
+  Future<T> _runInVerificationScope<T>({
+    required Future<T> Function() action,
+    String? modelPath,
+  }) async {
+    final previousScopeState = _verificationScopeActive;
+    _verificationScopeActive = true;
+    _log(
+      '[VERIFICATION_SCOPE_ENTER] verification_scope=true model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+    );
+    _log(
+      '[VERIFICATION_STATE_ISOLATED] verification_scope=true ui_lifecycle_mutation=false runtime_state_machine_mutation=false',
+    );
+    try {
+      return await action();
+    } finally {
+      _verificationScopeActive = previousScopeState;
+      _log(
+        '[VERIFICATION_SCOPE_EXIT] verification_scope=true model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+      );
     }
   }
 
@@ -303,6 +406,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final sessionId = request.sessionId.trim().isEmpty
           ? 'unknown'
           : request.sessionId.trim();
+      final isVerificationSession = sessionId == _forensicSelfTestSessionId;
       final dartThreadId = _currentThreadId();
       _log('[FFI_FLOW_ENTER] session=$sessionId thread_id=$dartThreadId');
       _log(
@@ -313,7 +417,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[DART_STREAM_LISTEN] elapsed_ms=0 thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=0 session=$sessionId',
       );
-      if (!_claimInferenceSlot(sessionId)) {
+      if (!isVerificationSession && !_claimInferenceSlot(sessionId)) {
         _log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
         _log('[SESSION] recursive_guard_triggered session=$sessionId');
         await fatalEarlyExit(
@@ -327,6 +431,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ' first_ffi_completed=$firstFfiInvocationCompleted controller_closed=${controller.isClosed}',
         );
         return;
+      }
+      if (isVerificationSession) {
+        _log(
+          '[VERIFICATION_UI_IGNORED] verification_scope=true reason=skip_activeInferenceSessions_tracking session=$sessionId',
+        );
       }
       try {
       if (cancellationToken.isCancelled) {
@@ -1424,12 +1533,242 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             ' fatal=true',
           );
         }
-        _releaseInferenceSlot(sessionId);
+        if (!isVerificationSession) {
+          _releaseInferenceSlot(sessionId);
+        }
         _log('[SESSION] end session=$sessionId');
       }
       });
     }();
 
+    return controller.stream;
+  }
+
+  TokenStream streamVerificationInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    final controller = StreamController<InferenceResponse>();
+    () async {
+      await _runInferenceSerially(() async {
+        await _runInVerificationScope(
+          modelPath: request.modelPath,
+          action: () async {
+            final modelPath = request.modelPath;
+            final modelId = request.modelId;
+            if (modelPath == null ||
+                modelPath.trim().isEmpty ||
+                modelId == null ||
+                modelId.trim().isEmpty) {
+              _finishWithRuntimeError(
+                controller,
+                stage: 'verification_request_validation',
+                message: 'Missing local model path.',
+              );
+              verificationMonitor.update(
+                RuntimeVerificationPhase.failed,
+                message: 'Verification request missing model metadata.',
+              );
+              return;
+            }
+            if (!_ensureLibraryLoaded()) {
+              _finishWithRuntimeError(
+                controller,
+                stage: 'verification_library_load',
+                message: 'Local AI runtime library (libllama_bridge.so) not found.',
+              );
+              verificationMonitor.update(
+                RuntimeVerificationPhase.failed,
+                message: 'libllama_bridge.so missing for current build.',
+              );
+              return;
+            }
+            final bindings = _bindings!;
+            verificationMonitor.update(
+              RuntimeVerificationPhase.loading,
+              message: 'Creating isolated verification session.',
+            );
+            final verificationSessionId = bindings.createSession(modelPath);
+            if (verificationSessionId <= 0) {
+              final err = _safeLastError(bindings, verificationSessionId);
+              _finishWithRuntimeError(
+                controller,
+                stage: 'verification_session_create',
+                message: 'Verification session create failed.',
+                details: err,
+              );
+              verificationMonitor.update(
+                RuntimeVerificationPhase.failed,
+                message: 'Verification session create failed: $err',
+              );
+              clearRuntimeVerification();
+              return;
+            }
+            final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
+            final tokenBuf = tokenBufRaw.cast<Utf8>();
+            var emittedTokens = 0;
+            final fullText = StringBuffer();
+            var completed = false;
+            var released = false;
+            try {
+              final startResult = bindings.startGeneration(
+                verificationSessionId,
+                _warmupPrompt,
+                _warmupMaxTokens,
+                _warmupTemperature,
+              );
+              if (startResult != 0) {
+                final err = _safeLastError(bindings, verificationSessionId);
+                _finishWithRuntimeError(
+                  controller,
+                  stage: 'verification_start_generation',
+                  message: 'Failed to start isolated runtime verification.',
+                  details: err,
+                );
+                verificationMonitor.update(
+                  RuntimeVerificationPhase.failed,
+                  message: 'Verification start_generation failed: $err',
+                );
+                clearRuntimeVerification();
+                return;
+              }
+              verificationMonitor.update(
+                RuntimeVerificationPhase.running,
+                message: 'Verification inference running.',
+              );
+              final startedAt = DateTime.now();
+              while (true) {
+                if (cancellationToken.isCancelled) {
+                  _safeCancel(bindings, verificationSessionId);
+                  _finishWithRuntimeError(
+                    controller,
+                    stage: 'verification_cancelled',
+                    message: 'Verification cancelled.',
+                    state: InferenceTerminalState.cancelled,
+                  );
+                  verificationMonitor.update(
+                    RuntimeVerificationPhase.failed,
+                    message: 'Verification cancelled.',
+                  );
+                  return;
+                }
+                final elapsed = DateTime.now().difference(startedAt);
+                if (elapsed > _generationTimeout) {
+                  _safeCancel(bindings, verificationSessionId);
+                  _finishWithRuntimeError(
+                    controller,
+                    stage: 'verification_timeout',
+                    message: 'Runtime verification timed out.',
+                    state: InferenceTerminalState.timeout,
+                  );
+                  verificationMonitor.update(
+                    RuntimeVerificationPhase.failed,
+                    message: 'Runtime verification timed out.',
+                  );
+                  clearRuntimeVerification();
+                  return;
+                }
+                final status = bindings.pollToken(verificationSessionId, tokenBuf);
+                if (status == 1) {
+                  final piece = tokenBuf.toDartString();
+                  if (piece.isNotEmpty) {
+                    emittedTokens++;
+                    fullText.write(piece);
+                    if (!controller.isClosed) {
+                      controller.add(
+                        InferenceResponse.token(
+                          text: piece,
+                          model: modelId,
+                        ),
+                      );
+                    }
+                  }
+                  continue;
+                }
+                if (status == 2) {
+                  completed = true;
+                  break;
+                }
+                if (status == -1) {
+                  final err = _safeLastError(bindings, verificationSessionId);
+                  _finishWithRuntimeError(
+                    controller,
+                    stage: 'verification_poll_token',
+                    message: 'Verification poll_token failed.',
+                    details: err,
+                  );
+                  verificationMonitor.update(
+                    RuntimeVerificationPhase.failed,
+                    message: 'Verification poll_token failed: $err',
+                  );
+                  clearRuntimeVerification();
+                  return;
+                }
+                if (status == -99) {
+                  _finishWithRuntimeError(
+                    controller,
+                    stage: 'verification_cancelled_native',
+                    message: 'Verification cancelled by native runtime.',
+                    state: InferenceTerminalState.cancelled,
+                  );
+                  verificationMonitor.update(
+                    RuntimeVerificationPhase.failed,
+                    message: 'Verification cancelled by native runtime.',
+                  );
+                  return;
+                }
+                await Future<void>.delayed(const Duration(milliseconds: 24));
+              }
+
+              if (!completed) {
+                _finishWithRuntimeError(
+                  controller,
+                  stage: 'verification_completion',
+                  message: 'Verification did not complete.',
+                );
+                verificationMonitor.update(
+                  RuntimeVerificationPhase.failed,
+                  message: 'Verification did not complete.',
+                );
+                clearRuntimeVerification();
+                return;
+              }
+
+              recordVerificationSuccess(
+                modelPath: modelPath,
+                source: 'verification_scope',
+              );
+              verificationMonitor.update(
+                RuntimeVerificationPhase.passed,
+                message: 'Runtime verification passed.',
+              );
+              if (!controller.isClosed) {
+                controller.add(
+                  InferenceResponse.finalChunk(
+                    text: fullText.toString(),
+                    tokensGenerated: emittedTokens,
+                    model: modelId,
+                  ),
+                );
+                await controller.close();
+              }
+            } finally {
+              calloc.free(tokenBufRaw);
+              _safeCancel(bindings, verificationSessionId);
+              try {
+                bindings.releaseSession(verificationSessionId);
+                released = true;
+              } catch (_) {}
+              if (!released) {
+                _log(
+                  '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_failed_no_production_impact',
+                );
+              }
+            }
+          },
+        );
+      });
+    }();
     return controller.stream;
   }
 
@@ -1542,6 +1881,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String sessionId,
     required String modelPath,
   }) async {
+    if (shouldReuseRuntimeVerification(modelPath: modelPath)) {
+      verificationMonitor.update(
+        RuntimeVerificationPhase.passed,
+        message: 'Runtime verification reused.',
+      );
+      return true;
+    }
     if (_warmupFuture == null || _warmupModelPath != modelPath) {
       _warmupModelPath = modelPath;
       _warmupFuture = _runWarmup(modelPath: modelPath);
@@ -1553,6 +1899,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return true;
     } catch (error) {
       _warmupFuture = null;
+      verificationMonitor.update(
+        RuntimeVerificationPhase.failed,
+        message: 'Runtime warmup failed: $error',
+      );
       clearRuntimeVerification();
       _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=warmup_failed error=$error');
       _updateRuntimeStatus(
@@ -1569,6 +1919,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   Future<void> _runWarmup({required String modelPath}) async {
     _log('[BOOT] runtime warmup begin');
+    verificationMonitor.update(
+      RuntimeVerificationPhase.loading,
+      message: 'Runtime warmup started.',
+    );
     _updateRuntimeStatus(
       LocalRuntimeStatus.loading,
       message: 'Runtime warmup in progress...',
@@ -1582,6 +1936,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     final bindings = _bindings!;
     _log('[BOOT] runtime warmup library ready');
+    verificationMonitor.update(
+      RuntimeVerificationPhase.running,
+      message: 'Runtime warmup inference running.',
+    );
     _log('[FFI_CREATE_SESSION] warmup path=$modelPath');
     final warmupSessionId = bindings.createSession(modelPath);
     if (warmupSessionId <= 0) {
@@ -1639,6 +1997,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       if (!firstTokenSeen) {
         throw StateError('FIRST_TOKEN_TIMEOUT');
       }
+      verificationMonitor.update(
+        RuntimeVerificationPhase.passed,
+        message: 'Runtime warmup passed.',
+      );
     } finally {
       calloc.free(tokenBufRaw);
       _log('[FFI_CANCEL] warmup session=$warmupSessionId');
@@ -1838,6 +2200,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   @protected
   void clearRuntimeVerification() {
+    if (_verificationScopeActive) {
+      _log(
+        '[VERIFICATION_UI_IGNORED] verification_scope=true reason=clear_runtime_verification_ignored',
+      );
+      return;
+    }
     final caller = kDebugMode
         ? _inferCallerFromStack()
         : 'AndroidFfiRuntimeProvider.clearRuntimeVerification';
@@ -1845,6 +2213,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       reason: 'verification_invalidated',
       origin: caller,
     );
+    _verifiedRuntimeAbi = null;
     super.clearRuntimeVerification();
   }
 
@@ -1858,6 +2227,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     String reason = _autoTransitionReason,
     String origin = 'AndroidFfiRuntimeProvider',
   }) {
+    if (_verificationScopeActive) {
+      _log(
+        '[VERIFICATION_UI_IGNORED] verification_scope=true status=${status.name} reason=$reason origin=$origin',
+      );
+      return;
+    }
     final previous = monitor.state.status;
     final transitionReason =
         reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
@@ -1923,7 +2298,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String modelPath,
     String source = 'runtime',
   }) {
+    _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
+    _manualVerificationResetRequested = false;
     super.recordVerificationSuccess(modelPath: modelPath, source: source);
+    if (_verificationScopeActive) {
+      _log(
+        '[VERIFICATION_UI_IGNORED] verification_scope=true reason=record_verification_success_skip_ui_transition source=$source',
+      );
+      return;
+    }
     final status = monitor.state.status;
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
         status == LocalRuntimeStatus.uninitialized) {
@@ -2044,6 +2427,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     final caller = lines[_clearVerificationCallerFrameIndex].trim();
     return caller.isEmpty ? 'unknown_caller' : caller;
+  }
+
+  String _normalizePathForLogs(String modelPath) {
+    final trimmed = modelPath.trim();
+    if (trimmed.isEmpty) return trimmed;
+    try {
+      return File(trimmed).absolute.path;
+    } catch (_) {
+      return trimmed;
+    }
   }
 
 }

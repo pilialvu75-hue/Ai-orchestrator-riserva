@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:flutter/foundation.dart';
@@ -35,6 +38,46 @@ class RuntimeSelfTestService {
   final LocalAiRepository _localAiRepository;
   final ChatRepository _chatRepository;
 
+  Future<LocalRuntimeState> _validateForVerificationScope(
+    AiModel selectedModel,
+  ) {
+    final runtimeProvider = _runtimeProvider;
+    if (runtimeProvider is AndroidFfiRuntimeProvider) {
+      return runtimeProvider.validateRuntimeInVerificationScope(
+        selectedModel: selectedModel,
+      );
+    }
+    return _runtimeProvider.validateRuntime(selectedModel: selectedModel);
+  }
+
+  bool _shouldReuseVerification(AiModel selectedModel) {
+    final runtimeProvider = _runtimeProvider;
+    final modelPath = selectedModel.localPath;
+    if (runtimeProvider is! AndroidFfiRuntimeProvider ||
+        modelPath == null ||
+        modelPath.trim().isEmpty) {
+      return false;
+    }
+    return runtimeProvider.shouldReuseRuntimeVerification(modelPath: modelPath);
+  }
+
+  TokenStream _runVerificationInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    final runtimeProvider = _runtimeProvider;
+    if (runtimeProvider is AndroidFfiRuntimeProvider) {
+      return runtimeProvider.streamVerificationInference(
+        request: request,
+        cancellationToken: cancellationToken,
+      );
+    }
+    return _runtimeProvider.streamInference(
+      request: request,
+      cancellationToken: cancellationToken,
+    );
+  }
+
   Future<RuntimeSelfTestResult> run() async {
     final notes = <String>[];
     _log('[COMM_TEST_START] session=$selfTestSessionId');
@@ -52,8 +95,19 @@ class RuntimeSelfTestService {
 
       notes.add('1. Model exists: OK (${selectedModel.localPath})');
 
-      final validation =
-          await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
+      final shouldReuse = _shouldReuseVerification(selectedModel);
+      if (shouldReuse) {
+        notes.add('2. Runtime validation: OK (reused previous verification)');
+        _log('[RUNTIME_VERIFICATION_REUSED] session=$selfTestSessionId');
+        _log('[VERIFICATION_REUSE] session=$selfTestSessionId verification_scope=true');
+        return RuntimeSelfTestResult(
+          success: true,
+          summary:
+              '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\nVERIFICATION_REUSED',
+        );
+      }
+
+      final validation = await _validateForVerificationScope(selectedModel);
       if (validation.status == LocalRuntimeStatus.ffiMissing ||
           validation.status == LocalRuntimeStatus.modelMissing ||
           validation.status == LocalRuntimeStatus.failed) {
@@ -78,7 +132,7 @@ class RuntimeSelfTestService {
       var completed = false;
 
       // Iniezione della protezione da timeout per evitare il blocco sincrono nativo
-      final testStream = _runtimeProvider.streamInference(
+      final testStream = _runVerificationInference(
         request: InferenceRequest(
           sessionId: selfTestSessionId,
           prompt: 'Reply with the single word: OK',
@@ -176,10 +230,12 @@ class RuntimeSelfTestService {
       _log(
         '[WARMUP_VALIDATION_PASS] session=$selfTestSessionId first_token_received=$firstTokenReceived liveness_ok=$livenessOk completed=$completed',
       );
-      _runtimeProvider.recordVerificationSuccess(
-        modelPath: selectedModel.localPath!,
-        source: 'self_test_pass',
-      );
+      if (_runtimeProvider is! AndroidFfiRuntimeProvider) {
+        _runtimeProvider.recordVerificationSuccess(
+          modelPath: selectedModel.localPath!,
+          source: 'self_test_pass',
+        );
+      }
       _log(
         '[COMM_TEST_PASS] first_token_received=$firstTokenReceived first_token="$firstToken"',
       );
