@@ -100,6 +100,7 @@ void main() {
       ));
 
       await firstRefresh;
+      expect(service.monitor.state.status, LocalRuntimeStatus.runtimeUnavailable);
       await secondRefresh;
 
       expect(service.monitor.state.status, LocalRuntimeStatus.runtimeUnavailable);
