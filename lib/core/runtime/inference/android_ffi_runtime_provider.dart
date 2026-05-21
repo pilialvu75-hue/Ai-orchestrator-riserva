@@ -194,6 +194,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return _lastRuntimeValidationSnapshot ?? monitor.state;
     }
+    if (_activeInferenceSessions.isNotEmpty ||
+        monitor.state.status == LocalRuntimeStatus.inferencing ||
+        monitor.state.status == LocalRuntimeStatus.streaming) {
+      _log(
+        '[RUNTIME_CHECK_SKIPPED] reason=inference_active origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored active_sessions=${_activeInferenceSessions.length}',
+      );
+      return _lastRuntimeValidationSnapshot ?? monitor.state;
+    }
     final now = DateTime.now();
     if (_runtimeCheckInProgress) {
       _log('[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored');
@@ -283,6 +291,22 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=true',
       );
+      if (!_inVerificationScope) {
+        final status = monitor.state.status;
+        if (status == LocalRuntimeStatus.runtimeUnavailable ||
+            status == LocalRuntimeStatus.uninitialized ||
+            status == LocalRuntimeStatus.failed ||
+            status == LocalRuntimeStatus.completed) {
+          _updateRuntimeStatus(
+            LocalRuntimeStatus.ready,
+            message: 'Runtime verification reused and ready for inference.',
+            reason: 'verification_reused',
+            origin: 'shouldReuseRuntimeVerification',
+          );
+        } else {
+          runtimeStateMachine.markVerified();
+        }
+      }
     }
     return reusable;
   }

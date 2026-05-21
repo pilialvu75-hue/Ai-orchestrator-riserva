@@ -80,6 +80,7 @@ class RuntimeStateMachine {
     RuntimeLifecycleState.verified: <RuntimeLifecycleEvent>{
       RuntimeLifecycleEvent.reset,
       RuntimeLifecycleEvent.loadRequested,
+      RuntimeLifecycleEvent.verificationConfirmed,
       RuntimeLifecycleEvent.inferenceStarted,
       RuntimeLifecycleEvent.inferenceFailed,
     },

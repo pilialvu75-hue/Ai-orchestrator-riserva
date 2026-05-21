@@ -20,6 +20,10 @@ class LocalRuntimeDiagnosticsService {
   final LocalRuntimeMonitor monitor;
 
   bool _hasRunStartupValidation = false;
+  bool _refreshInProgress = false;
+  DateTime? _lastRefreshAt;
+  LocalRuntimeState? _lastRefreshSnapshot;
+  static const Duration _refreshDebounce = Duration(milliseconds: 600);
 
   /// Returns `true` when the runtime state indicates that local inference
   /// cannot proceed (model missing, FFI library absent, hard runtime failure,
@@ -44,6 +48,26 @@ class LocalRuntimeDiagnosticsService {
   }
 
   Future<void> refresh() async {
+    if (_isInferenceActive) return;
+    final now = DateTime.now();
+    if (_refreshInProgress) return;
+    final sinceLastRefresh = _lastRefreshAt == null
+        ? null
+        : now.difference(_lastRefreshAt!);
+    if (sinceLastRefresh != null &&
+        sinceLastRefresh < _refreshDebounce &&
+        _lastRefreshSnapshot != null) {
+      monitor.update(
+        _lastRefreshSnapshot!.status,
+        message: _lastRefreshSnapshot!.message,
+        tokensGenerated: _lastRefreshSnapshot!.tokensGenerated,
+        elapsed: _lastRefreshSnapshot!.elapsed,
+        startedAt: _lastRefreshSnapshot!.startedAt,
+      );
+      return;
+    }
+    _refreshInProgress = true;
+    _lastRefreshAt = now;
     monitor.update(
       LocalRuntimeStatus.loading,
       message: 'Checking local runtime...',
@@ -53,16 +77,27 @@ class LocalRuntimeDiagnosticsService {
       resetProgress: true,
     );
 
-    final selectedModel = await _loadSelectedModel();
-    final snapshot =
-        await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
-    monitor.update(
-      snapshot.status,
-      message: snapshot.message,
-      tokensGenerated: snapshot.tokensGenerated,
-      elapsed: snapshot.elapsed,
-      startedAt: snapshot.startedAt,
-    );
+    try {
+      final selectedModel = await _loadSelectedModel();
+      final snapshot =
+          await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
+      _lastRefreshSnapshot = snapshot;
+      monitor.update(
+        snapshot.status,
+        message: snapshot.message,
+        tokensGenerated: snapshot.tokensGenerated,
+        elapsed: snapshot.elapsed,
+        startedAt: snapshot.startedAt,
+      );
+    } finally {
+      _refreshInProgress = false;
+    }
+  }
+
+  bool get _isInferenceActive {
+    final stateName = _runtimeProvider.lifecycleRuntimeStateName;
+    return stateName == LocalRuntimeStatus.inferencing.name ||
+        stateName == LocalRuntimeStatus.streaming.name;
   }
 
   Future<AiModel?> _loadSelectedModel() async {
