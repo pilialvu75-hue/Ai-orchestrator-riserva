@@ -1204,7 +1204,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'poll_token',
               message: 'Native poll_token failed.',
-              details: error.toString(),
+              details: '$error\n$stackTrace',
             );
             break;
           }
@@ -1481,9 +1481,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               ));
             } catch (error) {
               finalChunkDelivered = false;
+              clearRuntimeVerification();
+              runtimeNeedsReset = true;
+              runtimeResetReason = 'final_chunk_delivery_failed';
               _log(
                 '[STREAM_GUARD] session=$sessionId event=final_chunk_add_failed '
                 'generated_tokens=$estimatedTokens error=$error',
+              );
+              _updateRuntimeStatus(
+                LocalRuntimeStatus.failed,
+                message: 'Failed to deliver final inference chunk: $error',
+                tokensGenerated: estimatedTokens,
+                elapsed: completedElapsed,
+                startedAt: startedAt,
               );
               _finishWithRuntimeError(
                 controller,
