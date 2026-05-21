@@ -98,6 +98,14 @@ class RuntimeSelfTestService {
 
       final shouldReuse = _shouldReuseVerification(selectedModel);
       if (shouldReuse) {
+        // Force-refresh verification markers so diagnostics/UI cannot remain
+        // stuck in runtimeUnavailable after a successful reuse-only self-test.
+        // This can happen when status snapshots are refreshed out-of-band while
+        // verification is reused and no new stream token is emitted.
+        _runtimeProvider.recordVerificationSuccess(
+          modelPath: selectedModel.localPath!,
+          source: 'self_test_reuse',
+        );
         notes.add('2. Runtime validation: OK (reused previous verification)');
         _log('[RUNTIME_VERIFICATION_REUSED] session=$selfTestSessionId');
         _log('[VERIFICATION_REUSE] session=$selfTestSessionId verification_scope=false');
@@ -231,12 +239,10 @@ class RuntimeSelfTestService {
       _log(
         '[WARMUP_VALIDATION_PASS] session=$selfTestSessionId first_token_received=$firstTokenReceived liveness_ok=$livenessOk completed=$completed',
       );
-      if (_runtimeProvider is! AndroidFfiRuntimeProvider) {
-        _runtimeProvider.recordVerificationSuccess(
-          modelPath: selectedModel.localPath!,
-          source: 'self_test_pass',
-        );
-      }
+      _runtimeProvider.recordVerificationSuccess(
+        modelPath: selectedModel.localPath!,
+        source: 'self_test_pass',
+      );
       _log(
         '[COMM_TEST_PASS] first_token_received=$firstTokenReceived first_token="$firstToken"',
       );
