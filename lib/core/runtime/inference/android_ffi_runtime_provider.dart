@@ -290,10 +290,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[RUNTIME_VERIFICATION_REUSED] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName}',
       );
-      _log(
-        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=false',
-      );
       if (!_inVerificationScope) {
+        _log(
+          '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=false',
+        );
         final status = monitor.state.status;
         // These states represent stale/pre-verified snapshots that should be
         // immediately promoted back to `ready` once reusable verification

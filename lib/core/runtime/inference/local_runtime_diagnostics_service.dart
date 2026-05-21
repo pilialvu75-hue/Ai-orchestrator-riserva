@@ -23,8 +23,9 @@ class LocalRuntimeDiagnosticsService {
   bool _refreshInProgress = false;
   DateTime? _lastRefreshAt;
   LocalRuntimeState? _lastRefreshSnapshot;
-  // 600ms empirically collapses same-frame startup/UI diagnostics bursts
-  // without delaying normal user-driven refresh actions.
+  // Align with AndroidFfiRuntimeProvider._runtimeCheckDebounce (600ms) so
+  // diagnostics and provider-side validation collapse the same startup/UI burst
+  // pattern that caused rapid loading→runtimeUnavailable churn.
   static const Duration _refreshDebounce = Duration(milliseconds: 600);
 
   /// Returns `true` when the runtime state indicates that local inference
