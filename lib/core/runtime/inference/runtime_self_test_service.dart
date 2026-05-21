@@ -100,6 +100,8 @@ class RuntimeSelfTestService {
       if (shouldReuse) {
         // Force-refresh verification markers so diagnostics/UI cannot remain
         // stuck in runtimeUnavailable after a successful reuse-only self-test.
+        // This can happen when status snapshots are refreshed out-of-band while
+        // verification is reused and no new stream token is emitted.
         _runtimeProvider.recordVerificationSuccess(
           modelPath: selectedModel.localPath!,
           source: 'self_test_reuse',

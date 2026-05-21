@@ -76,11 +76,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
   static const int _maxUnexpectedPollStatuses = 8;
+  /// Native poll status returned when generation was cancelled by runtime.
   static const int _pollStatusNativeCancelled = -99;
+  /// Native poll status returned when the runtime reports an unrecoverable error.
   static const int _pollStatusNativeError = -1;
+  /// Native poll status returned when no token is currently available.
   static const int _pollStatusIdle = 0;
+  /// Native poll status returned when a token has been produced.
   static const int _pollStatusToken = 1;
+  /// Native poll status returned when generation is complete (EOS/max tokens).
   static const int _pollStatusCompleted = 2;
+  // 16ms ~= one UI frame @60Hz; this yields control to avoid tight busy loops
+  // while still keeping token polling responsive on mobile devices.
   static const Duration _unexpectedPollRetryDelay = Duration(milliseconds: 16);
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
@@ -1484,6 +1491,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               clearRuntimeVerification();
               runtimeNeedsReset = true;
               runtimeResetReason = 'final_chunk_delivery_failed';
+              // Do not swallow terminal delivery failures: record failure state
+              // and emit a terminal runtime error payload for diagnostics.
               _log(
                 '[STREAM_GUARD] session=$sessionId event=final_chunk_add_failed '
                 'generated_tokens=$estimatedTokens error=$error',
