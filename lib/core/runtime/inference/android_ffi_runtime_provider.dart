@@ -372,7 +372,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
       }
       _log(
-        '[VERIFICATION_SCOPE_EXIT] verification_scope=false model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+        '[VERIFICATION_SCOPE_EXIT] verification_scope=$_inVerificationScope model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
       );
     }
   }
