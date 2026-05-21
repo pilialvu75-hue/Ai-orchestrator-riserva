@@ -285,6 +285,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
         !_manualVerificationResetRequested;
     if (reusable) {
+      // Keep both markers for compatibility with existing log filters/forensics
+      // that match one tag or the other.
       _log(
         '[RUNTIME_VERIFICATION_REUSED] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName}',
       );

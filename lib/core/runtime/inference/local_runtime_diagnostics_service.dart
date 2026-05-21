@@ -49,6 +49,8 @@ class LocalRuntimeDiagnosticsService {
 
   Future<void> refresh() async {
     if (_refreshInProgress) return;
+    // Intentional ordering: do not acquire refresh lock while an inference
+    // stream is active; diagnostics refresh must remain a no-op in that window.
     if (_isInferenceActive) return;
     final now = DateTime.now();
     final sinceLastRefresh = _lastRefreshAt == null
