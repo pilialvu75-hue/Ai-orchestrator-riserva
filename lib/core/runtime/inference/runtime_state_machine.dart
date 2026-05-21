@@ -198,9 +198,7 @@ class RuntimeStateMachine {
         'from=${previousState.name} to=${_state.name} '
         'ever_ready=$_isEverReady healthy=$_isCurrentlyHealthy has_model=$_hasLoadedModel',
       );
-      for (final listener in List<void Function(RuntimeLifecycleState state)>.of(
-        _listeners,
-      )) {
+      for (final listener in _listeners.toList()) {
         listener(_state);
       }
     }

@@ -17,7 +17,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
-           developerModeProvider ?? (() => kDebugMode);
+          developerModeProvider ?? (() => kDebugMode);
 
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
