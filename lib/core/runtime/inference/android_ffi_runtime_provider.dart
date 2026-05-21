@@ -134,7 +134,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
-  bool _verificationScopeActive = false;
+  bool _inVerificationScope = false;
   final Set<String> _activeInferenceSessions = <String>{};
   String? _verifiedRuntimeAbi;
   bool _manualVerificationResetRequested = false;
@@ -184,6 +184,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
+    // Guard: never mutate the runtime state machine or clear verification while
+    // a verification scope is active.  A concurrent diagnostic refresh (e.g.
+    // from LocalRuntimeDiagnosticsService.refresh()) must not corrupt the
+    // lifecycle state that the verification scope is managing.
+    if (_inVerificationScope) {
+      _log(
+        '[RUNTIME_CHECK_SKIPPED] reason=in_verification_scope origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored',
+      );
+      return _lastRuntimeValidationSnapshot ?? monitor.state;
+    }
     final now = DateTime.now();
     if (_runtimeCheckInProgress) {
       _log('[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored');
@@ -329,8 +339,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required Future<T> Function() action,
     String? modelPath,
   }) async {
-    final previousScopeState = _verificationScopeActive;
-    _verificationScopeActive = true;
+    final previousScopeState = _inVerificationScope;
+    _inVerificationScope = true;
     _log(
       '[VERIFICATION_SCOPE_ENTER] verification_scope=true model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
     );
@@ -340,9 +350,29 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     try {
       return await action();
     } finally {
-      _verificationScopeActive = previousScopeState;
+      _inVerificationScope = previousScopeState;
+      // After exiting the outermost verification scope, emit the deferred
+      // lifecycle state that was suppressed during verification.  This ensures
+      // the RuntimeStateMachine reaches `verified` before production inference
+      // starts, so the `verified → loading → inferencing` transitions work
+      // correctly and the state machine is never stuck in `loading` during an
+      // active stream.
+      if (!_inVerificationScope &&
+          modelPath != null &&
+          hasVerifiedRuntimeForModel(modelPath)) {
+        _log(
+          '[VERIFICATION_SCOPE_DEFERRED_UPDATE] verification_scope=false model_path=${_normalizePathForLogs(modelPath)} status=ready',
+        );
+        _updateRuntimeStatus(
+          LocalRuntimeStatus.ready,
+          message: 'Runtime verification passed.',
+          resetProgress: true,
+          reason: 'verification_scope_exit',
+          origin: '_runInVerificationScope',
+        );
+      }
       _log(
-        '[VERIFICATION_SCOPE_EXIT] verification_scope=true model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+        '[VERIFICATION_SCOPE_EXIT] verification_scope=$_inVerificationScope model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
       );
     }
   }
@@ -2204,7 +2234,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   @protected
   void clearRuntimeVerification() {
-    if (_verificationScopeActive) {
+    if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=clear_runtime_verification_ignored',
       );
@@ -2231,7 +2261,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     String reason = _autoTransitionReason,
     String origin = 'AndroidFfiRuntimeProvider',
   }) {
-    if (_verificationScopeActive) {
+    if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true status=${status.name} reason=$reason origin=$origin',
       );
@@ -2305,7 +2335,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     super.recordVerificationSuccess(modelPath: modelPath, source: source);
     _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
     _manualVerificationResetRequested = false;
-    if (_verificationScopeActive) {
+    if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=record_verification_success_skip_ui_transition source=$source',
       );
