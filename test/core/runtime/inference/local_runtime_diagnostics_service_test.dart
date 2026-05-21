@@ -55,6 +55,24 @@ void main() {
       );
     });
 
+    test('skips diagnostics refresh while runtime is streaming', () async {
+      when(() => runtimeProvider.lifecycleRuntimeStateName)
+          .thenReturn(LocalRuntimeStatus.streaming.name);
+
+      final service = LocalRuntimeDiagnosticsService(
+        runtimeProvider: runtimeProvider,
+        localAiRepository: localAiRepository,
+      );
+
+      await service.refresh();
+
+      expect(service.monitor.state.status, LocalRuntimeStatus.uninitialized);
+      verifyNever(() => localAiRepository.getSelectedModel());
+      verifyNever(
+        () => runtimeProvider.validateRuntime(selectedModel: selectedModel),
+      );
+    });
+
     test('does not run concurrent refresh validations', () async {
       final validationCompleter = Completer<LocalRuntimeState>();
       when(() => runtimeProvider.lifecycleRuntimeStateName)
