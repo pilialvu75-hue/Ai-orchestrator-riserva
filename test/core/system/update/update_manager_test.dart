@@ -25,7 +25,7 @@ void main() {
   late SharedPreferences preferences;
   late UpdateManager updateManager;
   const packageInfoChannel =
-      const MethodChannel('dev.fluttercommunity.plus/package_info');
+      MethodChannel('dev.fluttercommunity.plus/package_info');
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
