@@ -289,7 +289,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[RUNTIME_VERIFICATION_REUSED] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName}',
       );
       _log(
-        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=true',
+        '[VERIFICATION_REUSE] model_path=${_normalizePathForLogs(modelPath)} abi=${LlamaFfiLoader.currentAbiName} verification_scope=${_inVerificationScope}',
       );
       if (!_inVerificationScope) {
         final status = monitor.state.status;

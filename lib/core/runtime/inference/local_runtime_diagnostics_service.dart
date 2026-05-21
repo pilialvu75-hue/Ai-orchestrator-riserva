@@ -48,9 +48,9 @@ class LocalRuntimeDiagnosticsService {
   }
 
   Future<void> refresh() async {
+    if (_refreshInProgress) return;
     if (_isInferenceActive) return;
     final now = DateTime.now();
-    if (_refreshInProgress) return;
     final sinceLastRefresh = _lastRefreshAt == null
         ? null
         : now.difference(_lastRefreshAt!);
