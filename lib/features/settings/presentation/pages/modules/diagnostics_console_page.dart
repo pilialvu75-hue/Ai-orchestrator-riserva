@@ -165,7 +165,7 @@ class _DiagnosticsConsolePageState extends State<DiagnosticsConsolePage> {
                 const Spacer(),
                 const Text(
                   'buffer max ${RuntimeEventLog.maxEntries}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Color(0xFF374151),
                     fontSize: 10,
                   ),
