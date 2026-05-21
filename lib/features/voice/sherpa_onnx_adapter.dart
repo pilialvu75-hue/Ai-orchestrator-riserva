@@ -157,7 +157,7 @@ class SherpaOnnxAdapter implements VoiceEngine {
   VoiceEngineStatus _parseStatus(dynamic response) {
     if (response is Map) {
       return VoiceEngineStatus.fromMap(
-        Map<Object?, Object?>.from(response as Map<dynamic, dynamic>),
+        Map<Object?, Object?>.from(response),
       );
     }
     if (response is bool) {
