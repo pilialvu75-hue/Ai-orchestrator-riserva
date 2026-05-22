@@ -297,6 +297,12 @@ void run_generation(
     float temperature,
     const uint64_t owner_epoch
 ) {
+    LOGI("[FORENSIC] [RUN_GENERATION] before session=%" PRId64 " epoch=%" PRIu64
+         " prompt_chars=%zu max_tokens=%d",
+         session->id,
+         owner_epoch,
+         prompt.size(),
+         max_tokens);
     const auto thread_id = current_thread_id();
     const auto generation_started_at = std::chrono::steady_clock::now();
     auto last_decode_progress_at = generation_started_at;
@@ -328,7 +334,14 @@ void run_generation(
         }
     } guard{session, owner_epoch, thread_id, generation_started_at};
 
+    LOGI("[FORENSIC] [THREAD_START] before session=%" PRId64 " epoch=%" PRIu64,
+         session->id,
+         owner_epoch);
     LOGI("[THREAD_START] session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64,
+         session->id,
+         owner_epoch,
+         thread_id);
+    LOGI("[FORENSIC] [THREAD_START] after session=%" PRId64 " epoch=%" PRIu64 " thread_id=%" PRIu64,
          session->id,
          owner_epoch,
          thread_id);
@@ -398,7 +411,15 @@ void run_generation(
         return;
     }
 
+    LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] before session=%" PRId64 " epoch=%" PRIu64,
+         session->id,
+         owner_epoch);
     LOGI("[THREAD_PREFILL_BEGIN] session=%" PRId64 " epoch=%" PRIu64 " prompt_tokens=%d",
+         session->id,
+         owner_epoch,
+         n_tokens);
+    LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] after session=%" PRId64 " epoch=%" PRIu64
+         " prompt_tokens=%d",
          session->id,
          owner_epoch,
          n_tokens);
@@ -433,7 +454,16 @@ void run_generation(
     const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - prefill_started_at
     ).count();
+    LOGI("[FORENSIC] [THREAD_PREFILL_OK] before session=%" PRId64 " epoch=%" PRIu64,
+         session->id,
+         owner_epoch);
     LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64 " status=%d prefill_ms=%lld",
+         session->id,
+         owner_epoch,
+         prefill_status,
+         static_cast<long long>(prefill_ms));
+    LOGI("[FORENSIC] [THREAD_PREFILL_OK] after session=%" PRId64 " epoch=%" PRIu64
+         " status=%d prefill_ms=%lld",
          session->id,
          owner_epoch,
          prefill_status,
@@ -827,6 +857,10 @@ int32_t llb_session_start_gen(
     int32_t max_tokens,
     float temperature
 ) {
+    LOGI("[FORENSIC] [LLB_SESSION_START_GEN] before session=%" PRId64 " max_tokens=%d temp=%.3f",
+         session_id,
+         max_tokens,
+         static_cast<double>(temperature));
     set_global_error("");
     auto session = find_session(session_id);
     if (session == nullptr) {
@@ -880,6 +914,9 @@ int32_t llb_session_start_gen(
          static_cast<double>(temperature));
 
     try {
+        LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] before session=%" PRId64 " epoch=%" PRIu64,
+             session_id,
+             owner_epoch);
         session->gen_thread = std::thread(
             run_generation,
             session,
@@ -888,6 +925,9 @@ int32_t llb_session_start_gen(
             temperature,
             owner_epoch
         );
+        LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] after session=%" PRId64 " epoch=%" PRIu64,
+             session_id,
+             owner_epoch);
     } catch (const std::exception& error) {
         session->set_error(error.what());
         session->gen_state.store(kStateFailed, std::memory_order_release);
@@ -897,6 +937,9 @@ int32_t llb_session_start_gen(
         return -5;
     }
 
+    LOGI("[FORENSIC] [LLB_SESSION_START_GEN] after session=%" PRId64 " epoch=%" PRIu64 " result=0",
+         session_id,
+         owner_epoch);
     return 0;
 }
 
