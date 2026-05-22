@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart'
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
@@ -87,6 +88,7 @@ class InferenceService {
       yield* _streamWithRetryAndGuards(
         runtimeMode: runtimeMode,
         cloudRequest: request,
+        selectedModel: selectedModel,
         localRequest: localRequest,
         cancellationToken: session.cancellationToken,
       );
@@ -180,14 +182,6 @@ class InferenceService {
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.invalidModel) {
-      _log(
-        '[VALIDATION] reason=invalidModel'
-        ' modelId=${selected.id} path=${selected.localPath}',
-      );
-      return null;
-    }
-
     if (selected.validationStatus == ModelValidationStatus.missingFile) {
       _log(
         '[VALIDATION] reason=missingFile'
@@ -208,31 +202,6 @@ class InferenceService {
       _log(
         '[VALIDATION] reason=downloading – model transfer in progress'
         ' modelId=${selected.id}',
-      );
-      return null;
-    }
-
-    if (!_runtimeProvider.supportsModel(selected)) {
-      // Infer the precise reason for the runtime rejection so the log is
-      // actionable rather than a generic "unavailable" message.
-      final effectiveId = selected.effectiveRuntimeModelId;
-      final vs = selected.validationStatus;
-      String rejectionReason;
-      if (vs != ModelValidationStatus.validatedOk) {
-        rejectionReason = 'unsupported_quantization_or_validation_status'
-            ' (validationStatus=$vs)';
-      } else {
-        rejectionReason =
-            'runtime_provider_incompatibility – modelId="$effectiveId"'
-            ' not in validated set; possible unsupported architecture'
-            ' or tokenizer mismatch';
-      }
-      _log(
-        '[VALIDATION] reason=$rejectionReason'
-        ' modelId=${selected.id}'
-        ' effectiveRuntimeModelId=$effectiveId'
-        ' validationStatus=$vs'
-        ' path=${selected.localPath}',
       );
       return null;
     }
@@ -259,11 +228,40 @@ class InferenceService {
   TokenStream _streamLocalInference({
     required InferenceRequest localRequest,
     required InferenceRequest cloudRequest,
+    required AiModel selectedModel,
     required CancellationToken cancellationToken,
     required bool allowCloudFallback,
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
+    final readiness = await _runtimeProvider.ensureReadyForInference(
+      selectedModel: selectedModel,
+      source: 'InferenceService._streamLocalInference',
+    );
+    if (readiness.status != LocalRuntimeStatus.ready) {
+      _log(
+        '[INFERENCE_BLOCKED] session=${localRequest.sessionId} '
+        'status=${readiness.status.name} message="${readiness.message ?? ''}"',
+      );
+      if (allowCloudFallback && _cloudRuntimeProvider.canInfer) {
+        _log(
+          '[RUNTIME_PATH] fallback session=${localRequest.sessionId} from=local_gate to=cloud reason=${readiness.message}',
+        );
+        yield InferenceResponse.notice(
+          'Local runtime not ready yet, switching to cloud runtime.',
+        );
+        yield* _cloudRuntimeProvider.streamInference(
+          request: cloudRequest,
+          cancellationToken: cancellationToken,
+        );
+        return;
+      }
+      yield InferenceResponse.error(
+        readiness.message ?? 'Local runtime is not ready for inference.',
+        state: InferenceTerminalState.modelUnavailable,
+      );
+      return;
+    }
     final runtimeState = _runtimeProvider.lifecycleRuntimeStateName;
     final activeTransitionId = _runtimeProvider.activeLifecycleTransitionId;
     final verificationState =
@@ -321,6 +319,7 @@ class InferenceService {
   TokenStream _streamWithRetryAndGuards({
     required AiRuntimeMode runtimeMode,
     required InferenceRequest cloudRequest,
+    required AiModel? selectedModel,
     required InferenceRequest? localRequest,
     required CancellationToken cancellationToken,
   }) async* {
@@ -331,6 +330,7 @@ class InferenceService {
       final routedStream = _routeInference(
         runtimeMode: runtimeMode,
         cloudRequest: cloudRequest,
+        selectedModel: selectedModel,
         localRequest: localRequest,
         cancellationToken: cancellationToken,
       );
@@ -382,6 +382,7 @@ class InferenceService {
   TokenStream _routeInference({
     required AiRuntimeMode runtimeMode,
     required InferenceRequest cloudRequest,
+    required AiModel? selectedModel,
     required InferenceRequest? localRequest,
     required CancellationToken cancellationToken,
   }) {
@@ -399,6 +400,7 @@ class InferenceService {
           return _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
+            selectedModel: selectedModel!,
             cancellationToken: cancellationToken,
             allowCloudFallback: false,
           );
@@ -416,6 +418,7 @@ class InferenceService {
         );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
+          selectedModel: selectedModel,
           localRequest: localRequest,
           cancellationToken: cancellationToken,
           forceCloudPrimary: true,
@@ -429,6 +432,7 @@ class InferenceService {
         );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
+          selectedModel: selectedModel,
           localRequest: localRequest,
           cancellationToken: cancellationToken,
         );
@@ -508,6 +512,7 @@ class InferenceService {
 
   TokenStream _streamAutomaticOrchestration({
     required InferenceRequest cloudRequest,
+    required AiModel? selectedModel,
     required InferenceRequest? localRequest,
     required CancellationToken cancellationToken,
     bool forceCloudPrimary = false,
@@ -520,6 +525,7 @@ class InferenceService {
         yield* _streamLocalInference(
           localRequest: localRequest,
           cloudRequest: cloudRequest,
+          selectedModel: selectedModel!,
           cancellationToken: cancellationToken,
           allowCloudFallback: false,
         );
@@ -541,6 +547,7 @@ class InferenceService {
       yield* _streamLocalInference(
         localRequest: localRequest,
         cloudRequest: cloudRequest,
+        selectedModel: selectedModel!,
         cancellationToken: cancellationToken,
         allowCloudFallback: true,
       );
@@ -568,6 +575,7 @@ class InferenceService {
           yield* _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
+            selectedModel: selectedModel!,
             cancellationToken: cancellationToken,
             allowCloudFallback: false,
           );

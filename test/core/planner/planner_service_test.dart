@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -32,6 +33,17 @@ class _FakeLocalRuntime extends LocalRuntimeProvider {
 
   @override
   bool supportsModel(AiModel model) => true;
+
+  @override
+  Future<LocalRuntimeState> ensureReadyForInference({
+    required AiModel selectedModel,
+    String source = 'inference',
+  }) async {
+    return const LocalRuntimeState(
+      status: LocalRuntimeStatus.ready,
+      message: 'ready',
+    );
+  }
 
   @override
   TokenStream streamInference({

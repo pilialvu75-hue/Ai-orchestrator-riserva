@@ -4,10 +4,7 @@ enum RuntimeLifecycleState {
   uninitialized,
   loading,
 
-  /// Backward-compatible alias for [healthy].
-  /// Used by legacy tests and any call-site that predates the verification
-  /// layer.  Semantically equivalent to [healthy] (runtime is responsive but
-  /// not yet fully verified by a self-test pass).
+  /// Backward-compatible alias for the first stable ready state.
   ready,
 
   healthy,
@@ -16,94 +13,37 @@ enum RuntimeLifecycleState {
   failed,
 }
 
-enum RuntimeLifecycleEvent {
-  reset,
+enum RuntimeEvent {
+  resetSoft,
+  resetHard,
+  modelDetected,
+  modelCleared,
   loadRequested,
-
-  /// Backward-compatible event emitted by [markReady].
-  loadCompleted,
-
   healthObserved,
-  verificationConfirmed,
+  selfTestSucceeded,
+  selfTestFailed,
+  runtimeUnavailableObserved,
   inferenceStarted,
   inferenceCompleted,
-  inferenceFailed,
+  errorObserved,
 }
 
 class RuntimeStateMachine {
   static int _resetCount = 0;
+
   RuntimeLifecycleState _state = RuntimeLifecycleState.uninitialized;
   RuntimeLifecycleState? _stateBeforeInference;
+  bool _isEverReady = false;
+  bool _isCurrentlyHealthy = false;
+  bool _hasLoadedModel = false;
   final List<void Function(RuntimeLifecycleState state)> _listeners =
       <void Function(RuntimeLifecycleState state)>[];
 
-  static const Map<RuntimeLifecycleState, Set<RuntimeLifecycleEvent>>
-      _allowedTransitions = <RuntimeLifecycleState, Set<RuntimeLifecycleEvent>>{
-    RuntimeLifecycleState.uninitialized: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.healthObserved,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    // From loading, two separate transitions are valid:
-    //   loadCompleted → ready   (legacy path, via markReady())
-    //   healthObserved → healthy (new verification-layer path, via markHealthy())
-    //   inferenceStarted → inferencing (direct path when inference begins while
-    //     the session is still in the loading phase, e.g. after a verified
-    //     warmup skip that leaves the state machine in loading)
-    RuntimeLifecycleState.loading: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadCompleted,
-      RuntimeLifecycleEvent.healthObserved,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceStarted,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    // Legacy "ready" state: functionally equivalent to "healthy".
-    // Allowed transitions match those of "healthy" exactly so the two states
-    // behave identically for routing purposes.
-    RuntimeLifecycleState.ready: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.healthObserved,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceStarted,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    RuntimeLifecycleState.healthy: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceStarted,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    RuntimeLifecycleState.verified: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceStarted,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    RuntimeLifecycleState.inferencing: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.inferenceCompleted,
-      // First token can confirm runtime viability while inference is active.
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-    RuntimeLifecycleState.failed: <RuntimeLifecycleEvent>{
-      RuntimeLifecycleEvent.reset,
-      RuntimeLifecycleEvent.loadRequested,
-      RuntimeLifecycleEvent.healthObserved,
-      RuntimeLifecycleEvent.verificationConfirmed,
-      RuntimeLifecycleEvent.inferenceFailed,
-    },
-  };
-
   RuntimeLifecycleState get state => _state;
-
-  Map<RuntimeLifecycleState, Set<RuntimeLifecycleEvent>> get transitionMap =>
-      _allowedTransitions;
+  bool get isEverReady => _isEverReady;
+  bool get isCurrentlyHealthy => _isCurrentlyHealthy;
+  bool get hasLoadedModel => _hasLoadedModel;
+  bool get isReady => _isEverReady && _isCurrentlyHealthy;
 
   void addListener(void Function(RuntimeLifecycleState state) listener) {
     _listeners.add(listener);
@@ -113,88 +53,247 @@ class RuntimeStateMachine {
     _listeners.remove(listener);
   }
 
-  RuntimeLifecycleState transition(RuntimeLifecycleEvent event) {
-    if (event == RuntimeLifecycleEvent.reset) {
-      _resetCount++;
-      debugPrint(
-        '[STATE_RESET] type=RuntimeStateMachine hash=${hashCode.toRadixString(16)} reset_count=$_resetCount from=${_state.name}',
-      );
-    }
-    final allowed = _allowedTransitions[_state];
-    if (allowed != null && !allowed.contains(event)) return _state;
-    if (event == RuntimeLifecycleEvent.inferenceStarted) {
-      _stateBeforeInference = _state;
-    }
-    RuntimeLifecycleState nextState;
-    if (event == RuntimeLifecycleEvent.inferenceCompleted &&
-        _state == RuntimeLifecycleState.inferencing) {
-      if (_stateBeforeInference == null) {
-        debugPrint(
-          '[AI_RUNTIME_MONITOR] inference_completed without pre-inference state; defaulting to healthy',
-        );
-      }
-      nextState = _stateBeforeInference ?? RuntimeLifecycleState.healthy;
-      _stateBeforeInference = null;
-    } else {
-      nextState = _resolveNextState(_state, event);
-      if (event == RuntimeLifecycleEvent.reset ||
-          event == RuntimeLifecycleEvent.inferenceFailed) {
+  /// Applies a runtime event to the lifecycle state machine.
+  ///
+  /// [source] is included in forensic logs so callers can identify which
+  /// subsystem attempted the transition. Returns the current lifecycle state
+  /// after the event has been processed.
+  RuntimeLifecycleState applyEvent(
+    RuntimeEvent event, {
+    String source = 'runtime',
+  }) {
+    final previousState = _state;
+    final previousEverReady = _isEverReady;
+    final previousHealthy = _isCurrentlyHealthy;
+    final previousHasModel = _hasLoadedModel;
+    var nextState = _state;
+
+    switch (event) {
+      case RuntimeEvent.resetSoft:
+        _resetCount++;
         _stateBeforeInference = null;
+        if (_isEverReady) {
+          _isCurrentlyHealthy = true;
+          nextState = RuntimeLifecycleState.ready;
+        } else {
+          _isCurrentlyHealthy = false;
+          nextState = _hasLoadedModel
+              ? RuntimeLifecycleState.loading
+              : RuntimeLifecycleState.uninitialized;
+        }
+        _logReset(kind: 'soft', source: source, from: previousState);
+        break;
+      case RuntimeEvent.resetHard:
+        _resetCount++;
+        _stateBeforeInference = null;
+        _isEverReady = false;
+        _isCurrentlyHealthy = false;
+        _hasLoadedModel = false;
+        nextState = RuntimeLifecycleState.uninitialized;
+        _logReset(kind: 'hard', source: source, from: previousState);
+        break;
+      case RuntimeEvent.modelDetected:
+        _hasLoadedModel = true;
+        break;
+      case RuntimeEvent.modelCleared:
+        _hasLoadedModel = false;
+        if (!_isEverReady && _state != RuntimeLifecycleState.inferencing) {
+          nextState = RuntimeLifecycleState.uninitialized;
+        }
+        break;
+      case RuntimeEvent.loadRequested:
+        nextState = RuntimeLifecycleState.loading;
+        break;
+      case RuntimeEvent.healthObserved:
+        _isCurrentlyHealthy = true;
+        if (_state != RuntimeLifecycleState.inferencing) {
+          nextState = _isEverReady
+              ? RuntimeLifecycleState.ready
+              : RuntimeLifecycleState.healthy;
+        }
+        break;
+      case RuntimeEvent.selfTestSucceeded:
+        _isEverReady = true;
+        _isCurrentlyHealthy = true;
+        if (!previousEverReady) {
+          debugPrint(
+            '[READINESS_PROMOTION] source=$source from=${previousState.name} to=ready',
+          );
+        }
+        if (_state != RuntimeLifecycleState.inferencing) {
+          nextState = RuntimeLifecycleState.ready;
+        }
+        break;
+      case RuntimeEvent.selfTestFailed:
+        // Self-test failures are recorded for forensics only. They never
+        // degrade readiness; only a successful self-test is allowed to promote
+        // the runtime state.
+        _logIgnored(
+          event: event,
+          source: source,
+          reason: 'self_test_failures_cannot_degrade_state',
+        );
+        return _state;
+      case RuntimeEvent.runtimeUnavailableObserved:
+        if (_isEverReady) {
+          _logIgnored(
+            event: event,
+            source: source,
+            reason: 'runtime_unavailable_forbidden_after_ready',
+          );
+          return _state;
+        }
+        break;
+      case RuntimeEvent.inferenceStarted:
+        if (!_hasLoadedModel) {
+          _logIgnored(
+            event: event,
+            source: source,
+            reason: 'no_model_loaded',
+          );
+          return _state;
+        }
+        _stateBeforeInference = _state;
+        nextState = RuntimeLifecycleState.inferencing;
+        break;
+      case RuntimeEvent.inferenceCompleted:
+        if (_state != RuntimeLifecycleState.inferencing) {
+          _logIgnored(
+            event: event,
+            source: source,
+            reason: 'not_currently_inferencing',
+          );
+          return _state;
+        }
+        nextState = _stateBeforeInference ??
+            (_isEverReady
+                ? RuntimeLifecycleState.ready
+                : (_hasLoadedModel
+                    ? RuntimeLifecycleState.healthy
+                    : RuntimeLifecycleState.uninitialized));
+        _stateBeforeInference = null;
+        break;
+      case RuntimeEvent.errorObserved:
+        if (_state == RuntimeLifecycleState.inferencing) {
+          nextState = _stateBeforeInference ??
+              (_isEverReady
+                  ? RuntimeLifecycleState.ready
+                  : (_hasLoadedModel
+                      ? RuntimeLifecycleState.healthy
+                      : RuntimeLifecycleState.uninitialized));
+          _stateBeforeInference = null;
+          break;
+        }
+        _stateBeforeInference = null;
+        if (_isEverReady) {
+          nextState = RuntimeLifecycleState.ready;
+        } else {
+          _isCurrentlyHealthy = false;
+          nextState = RuntimeLifecycleState.failed;
+        }
+        break;
+    }
+
+    final changed = nextState != previousState ||
+        previousEverReady != _isEverReady ||
+        previousHealthy != _isCurrentlyHealthy ||
+        previousHasModel != _hasLoadedModel;
+    _state = nextState;
+
+    if (changed) {
+      debugPrint(
+        '[RUNTIME_EVENT] event=${event.name} source=$source '
+        'from=${previousState.name} to=${_state.name} '
+        'ever_ready=$_isEverReady healthy=$_isCurrentlyHealthy has_model=$_hasLoadedModel',
+      );
+      for (final listener in _listeners.toList()) {
+        listener(_state);
       }
     }
-    if (nextState == _state) return _state;
-    _state = nextState;
-    for (final listener in List<void Function(RuntimeLifecycleState state)>.of(
-      _listeners,
-    )) {
-      listener(_state);
-    }
+
     return _state;
   }
 
-  void reset() => transition(RuntimeLifecycleEvent.reset);
-
-  void markLoading() => transition(RuntimeLifecycleEvent.loadRequested);
-
-  void markHealthy() => transition(RuntimeLifecycleEvent.healthObserved);
-
-  /// Backward-compatible alias for legacy tests and call-sites.
+  /// Backward-compatible alias for [resetHard].
   ///
-  /// Equivalent to [markHealthy] but transitions to [RuntimeLifecycleState.ready]
-  /// so existing tests that assert `state == RuntimeLifecycleState.ready` continue
-  /// to pass without modification.
-  void markReady() => transition(RuntimeLifecycleEvent.loadCompleted);
+  /// Use hard reset only when the runtime must forget all readiness evidence.
+  /// For transient recovery, prefer [resetSoft].
+  void reset() => resetHard();
 
-  void markVerified() => transition(RuntimeLifecycleEvent.verificationConfirmed);
+  void resetSoft() =>
+      applyEvent(RuntimeEvent.resetSoft, source: 'RuntimeStateMachine.resetSoft');
 
-  void markInferencing() => transition(RuntimeLifecycleEvent.inferenceStarted);
+  void resetHard() =>
+      applyEvent(RuntimeEvent.resetHard, source: 'RuntimeStateMachine.resetHard');
 
-  void markInferenceCompleted() =>
-      transition(RuntimeLifecycleEvent.inferenceCompleted);
+  void markModelDetected() => applyEvent(
+        RuntimeEvent.modelDetected,
+        source: 'RuntimeStateMachine.markModelDetected',
+      );
 
-  void markFailed() => transition(RuntimeLifecycleEvent.inferenceFailed);
+  void markModelCleared() => applyEvent(
+        RuntimeEvent.modelCleared,
+        source: 'RuntimeStateMachine.markModelCleared',
+      );
 
-  static RuntimeLifecycleState _resolveNextState(
-    RuntimeLifecycleState currentState,
-    RuntimeLifecycleEvent event,
-  ) {
-    switch (event) {
-      case RuntimeLifecycleEvent.reset:
-        return RuntimeLifecycleState.uninitialized;
-      case RuntimeLifecycleEvent.loadRequested:
-        return RuntimeLifecycleState.loading;
-      case RuntimeLifecycleEvent.loadCompleted:
-        return RuntimeLifecycleState.ready;
-      case RuntimeLifecycleEvent.healthObserved:
-        return RuntimeLifecycleState.healthy;
-      case RuntimeLifecycleEvent.verificationConfirmed:
-        return RuntimeLifecycleState.verified;
-      case RuntimeLifecycleEvent.inferenceStarted:
-        return RuntimeLifecycleState.inferencing;
-      case RuntimeLifecycleEvent.inferenceCompleted:
-        return RuntimeLifecycleState.verified;
-      case RuntimeLifecycleEvent.inferenceFailed:
-        return RuntimeLifecycleState.failed;
-    }
+  void markLoading() => applyEvent(
+        RuntimeEvent.loadRequested,
+        source: 'RuntimeStateMachine.markLoading',
+      );
+
+  void markHealthy() => applyEvent(
+        RuntimeEvent.healthObserved,
+        source: 'RuntimeStateMachine.markHealthy',
+      );
+
+  void markReady() => applyEvent(
+        RuntimeEvent.selfTestSucceeded,
+        source: 'RuntimeStateMachine.markReady',
+      );
+
+  void markVerified() => applyEvent(
+        RuntimeEvent.selfTestSucceeded,
+        source: 'RuntimeStateMachine.markVerified',
+      );
+
+  void markRuntimeUnavailable() => applyEvent(
+        RuntimeEvent.runtimeUnavailableObserved,
+        source: 'RuntimeStateMachine.markRuntimeUnavailable',
+      );
+
+  void markInferencing() => applyEvent(
+        RuntimeEvent.inferenceStarted,
+        source: 'RuntimeStateMachine.markInferencing',
+      );
+
+  void markInferenceCompleted() => applyEvent(
+        RuntimeEvent.inferenceCompleted,
+        source: 'RuntimeStateMachine.markInferenceCompleted',
+      );
+
+  void markFailed() => applyEvent(
+        RuntimeEvent.errorObserved,
+        source: 'RuntimeStateMachine.markFailed',
+      );
+
+  void _logReset({
+    required String kind,
+    required String source,
+    required RuntimeLifecycleState from,
+  }) {
+    debugPrint(
+      '[STATE_RESET] kind=$kind source=$source from=${from.name} reset_count=$_resetCount',
+    );
+  }
+
+  void _logIgnored({
+    required RuntimeEvent event,
+    required String source,
+    required String reason,
+  }) {
+    debugPrint(
+      '[RUNTIME_EVENT_IGNORED] event=${event.name} source=$source reason=$reason '
+      'state=${_state.name} ever_ready=$_isEverReady healthy=$_isCurrentlyHealthy has_model=$_hasLoadedModel',
+    );
   }
 }

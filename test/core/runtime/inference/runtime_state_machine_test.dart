@@ -3,120 +3,112 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('RuntimeStateMachine', () {
-    test('starts uninitialized', () {
+    test('starts uninitialized and not ready', () {
       final stateMachine = RuntimeStateMachine();
 
       expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
+      expect(stateMachine.isEverReady, isFalse);
+      expect(stateMachine.isReady, isFalse);
+      expect(stateMachine.hasLoadedModel, isFalse);
     });
 
-    test('follows deterministic runtime transitions', () {
+    test('self-test success forces ready latch', () {
       final stateMachine = RuntimeStateMachine();
 
-      stateMachine.markLoading();
-      expect(stateMachine.state, RuntimeLifecycleState.loading);
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.selfTestSucceeded, source: 'test');
 
-      stateMachine.markReady();
       expect(stateMachine.state, RuntimeLifecycleState.ready);
-
-      stateMachine.markInferencing();
-      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
-
-      stateMachine.markInferenceCompleted();
-      expect(stateMachine.state, RuntimeLifecycleState.ready);
+      expect(stateMachine.isEverReady, isTrue);
+      expect(stateMachine.isCurrentlyHealthy, isTrue);
+      expect(stateMachine.isReady, isTrue);
     });
 
-    test('enters failed on runtime failure and can recover on reload', () {
-      final stateMachine = RuntimeStateMachine()
-        ..markLoading()
-        ..markInferencing()
-        ..markFailed();
+    test('runtimeUnavailable cannot overwrite ready after self-test success', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.selfTestSucceeded, source: 'test');
+      stateMachine.applyEvent(
+        RuntimeEvent.runtimeUnavailableObserved,
+        source: 'diagnostics',
+      );
+
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
+      expect(stateMachine.isReady, isTrue);
+    });
+
+    test('inference can start from loading and return to loading on completion',
+        () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.loadRequested, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.inferenceStarted, source: 'test');
+      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
+
+      stateMachine.applyEvent(RuntimeEvent.inferenceCompleted, source: 'test');
+      expect(stateMachine.state, RuntimeLifecycleState.loading);
+    });
+
+    test('pre-ready error transitions to failed', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.errorObserved, source: 'test');
 
       expect(stateMachine.state, RuntimeLifecycleState.failed);
+      expect(stateMachine.isEverReady, isFalse);
+      expect(stateMachine.isReady, isFalse);
+    });
 
-      stateMachine.markLoading();
-      stateMachine.markReady();
+    test('ready state is irreversible until resetHard', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.selfTestSucceeded, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.loadRequested, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.errorObserved, source: 'test');
+      stateMachine.applyEvent(
+        RuntimeEvent.runtimeUnavailableObserved,
+        source: 'diagnostics',
+      );
+
+      expect(stateMachine.isEverReady, isTrue);
+      expect(stateMachine.isReady, isTrue);
+      expect(stateMachine.state, RuntimeLifecycleState.ready);
+
+      stateMachine.resetHard();
+      expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
+      expect(stateMachine.isEverReady, isFalse);
+      expect(stateMachine.isReady, isFalse);
+    });
+
+    test('resetSoft does not clear readiness latch', () {
+      final stateMachine = RuntimeStateMachine();
+
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      stateMachine.applyEvent(RuntimeEvent.selfTestSucceeded, source: 'test');
+
+      stateMachine.resetSoft();
 
       expect(stateMachine.state, RuntimeLifecycleState.ready);
+      expect(stateMachine.isEverReady, isTrue);
+      expect(stateMachine.isReady, isTrue);
     });
 
-    test('reset returns to uninitialized', () {
-      final stateMachine = RuntimeStateMachine()
-        ..markLoading()
-        ..markInferencing();
-
-      stateMachine.reset();
-
-      expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
-    });
-
-    test('ignores invalid transition from uninitialized to inferencing', () {
+    test('model detection only updates metadata and never readiness directly', () {
       final stateMachine = RuntimeStateMachine();
 
-      stateMachine.markInferencing();
+      stateMachine.applyEvent(RuntimeEvent.modelDetected, source: 'test');
+      expect(stateMachine.hasLoadedModel, isTrue);
+      expect(stateMachine.isEverReady, isFalse);
+      expect(stateMachine.isReady, isFalse);
 
-      expect(stateMachine.state, RuntimeLifecycleState.uninitialized);
-    });
-
-    // Regression: after a verified warmup skip the state machine may be in
-    // `loading` when the production stream starts.  It must be possible to
-    // transition directly loading → inferencing so the machine is never
-    // permanently stuck in `loading` during an active generation stream.
-    test('allows loading → inferencing transition for verified inference path',
-        () {
-      final stateMachine = RuntimeStateMachine();
-
-      stateMachine.markLoading();
-      expect(stateMachine.state, RuntimeLifecycleState.loading);
-
-      stateMachine.markInferencing();
-      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
-    });
-
-    test(
-        'inference completes back to pre-inference state when started from loading',
-        () {
-      final stateMachine = RuntimeStateMachine();
-
-      stateMachine.markLoading();
-      stateMachine.markInferencing();
-      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
-
-      // On completion the machine must return to loading (the pre-inference
-      // state recorded when inferenceStarted was dispatched).
-      stateMachine.markInferenceCompleted();
-      expect(stateMachine.state, RuntimeLifecycleState.loading);
-    });
-
-    test('verified → loading → inferencing follows full production path', () {
-      final stateMachine = RuntimeStateMachine();
-
-      stateMachine.markHealthy();
-      expect(stateMachine.state, RuntimeLifecycleState.healthy);
-
-      stateMachine.markVerified();
-      expect(stateMachine.state, RuntimeLifecycleState.verified);
-
-      // Production inference: model reload then generation start.
-      stateMachine.markLoading();
-      expect(stateMachine.state, RuntimeLifecycleState.loading);
-
-      stateMachine.markInferencing();
-      expect(stateMachine.state, RuntimeLifecycleState.inferencing);
-
-      stateMachine.markInferenceCompleted();
-      // Returns to loading (the state captured when inferenceStarted fired).
-      expect(stateMachine.state, RuntimeLifecycleState.loading);
-    });
-
-    test('keeps verified state on repeated verification confirmations', () {
-      final stateMachine = RuntimeStateMachine();
-
-      stateMachine.markHealthy();
-      stateMachine.markVerified();
-      expect(stateMachine.state, RuntimeLifecycleState.verified);
-
-      stateMachine.markVerified();
-      expect(stateMachine.state, RuntimeLifecycleState.verified);
+      stateMachine.applyEvent(RuntimeEvent.modelCleared, source: 'test');
+      expect(stateMachine.hasLoadedModel, isFalse);
+      expect(stateMachine.isEverReady, isFalse);
+      expect(stateMachine.isReady, isFalse);
     });
   });
 }

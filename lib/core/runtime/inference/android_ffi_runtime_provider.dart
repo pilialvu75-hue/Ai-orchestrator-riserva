@@ -10,7 +10,6 @@ import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -54,7 +53,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     RuntimeStateMachine? runtimeStateMachine,
     bool Function()? developerModeProvider,
   })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
-        _developerModeProvider = developerModeProvider ?? (() => false),
         super(developerModeProvider: developerModeProvider);
 
   static const _logTag = 'AI_RUNTIME';
@@ -91,13 +89,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _clearVerificationCallerFrameIndex = 2;
   // Very small GGUF files are usually truncated/corrupted placeholders.
   static const int _minValidModelSizeBytes = 4096;
-  static const Set<String> _androidSafeModelIds = <String>{
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
   static int _printCounter = 0;
 
@@ -106,9 +97,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   final RuntimeVerificationMonitor verificationMonitor =
       RuntimeVerificationMonitor();
   final RuntimeStateMachine runtimeStateMachine;
-  final bool Function() _developerModeProvider;
-
-  bool get _isDeveloperMode => _developerModeProvider();
 
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
@@ -141,6 +129,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
+  String? _lastKnownModelPath;
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -254,6 +243,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     final selectedModelPath = selectedModel?.localPath;
+    _lastKnownModelPath = selectedModelPath?.trim().isNotEmpty == true
+        ? selectedModelPath
+        : null;
+    if (_lastKnownModelPath == null) {
+      runtimeStateMachine.applyEvent(
+        RuntimeEvent.modelCleared,
+        source: 'AndroidFfiRuntimeProvider.validateRuntime',
+      );
+    } else {
+      runtimeStateMachine.applyEvent(
+        RuntimeEvent.modelDetected,
+        source: 'AndroidFfiRuntimeProvider.validateRuntime',
+      );
+    }
     if (selectedModelPath != null &&
         selectedModelPath.trim().isNotEmpty &&
         hasVerifiedRuntimeForModel(selectedModelPath) &&
@@ -266,21 +269,85 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     try {
       final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      final reconciledSnapshot = _reconcileRuntimeSnapshot(snapshot);
       _syncLifecycleState(
-        snapshot.status,
+        reconciledSnapshot.status,
         reason: 'runtime_check_complete',
         origin: 'AndroidFfiRuntimeProvider.validateRuntime',
       );
-      _lastRuntimeValidationSnapshot = snapshot;
-      return snapshot;
+      _lastRuntimeValidationSnapshot = reconciledSnapshot;
+      return reconciledSnapshot;
     } finally {
       _runtimeCheckInProgress = false;
     }
   }
 
+  @override
+  Future<LocalRuntimeState> ensureReadyForInference({
+    required AiModel selectedModel,
+    String source = 'inference',
+  }) async {
+    final modelPath = selectedModel.localPath;
+    if (modelPath == null || modelPath.trim().isEmpty) {
+      runtimeStateMachine.applyEvent(
+        RuntimeEvent.modelCleared,
+        source: 'AndroidFfiRuntimeProvider.ensureReadyForInference',
+      );
+      return super.ensureReadyForInference(
+        selectedModel: selectedModel,
+        source: source,
+      );
+    }
+
+    _lastKnownModelPath = modelPath;
+    runtimeStateMachine.applyEvent(
+      RuntimeEvent.modelDetected,
+      source: 'AndroidFfiRuntimeProvider.ensureReadyForInference',
+    );
+    final validation = await validateRuntime(selectedModel: selectedModel);
+    if (validation.status == LocalRuntimeStatus.ffiMissing ||
+        validation.status == LocalRuntimeStatus.modelMissing ||
+        validation.status == LocalRuntimeStatus.failed) {
+      _log(
+        '[INFERENCE_BLOCKED] source=$source status=${validation.status.name} '
+        'reason=${validation.message ?? 'validation_failed'}',
+      );
+      return validation;
+    }
+    if (runtimeStateMachine.isReady) {
+      _log('[PRE_INFERENCE_GATE_READY] source=$source reason=state_machine_ready');
+      return LocalRuntimeState(
+        status: LocalRuntimeStatus.ready,
+        message: validation.message ?? 'Runtime already ready for inference.',
+      );
+    }
+
+    final warmupReady = await _ensureWarmup(
+      sessionId: 'ensure_ready',
+      modelPath: modelPath,
+    );
+    if (warmupReady && runtimeStateMachine.isReady) {
+      _log('[PRE_INFERENCE_GATE_READY] source=$source reason=self_test_ready');
+      return const LocalRuntimeState(
+        status: LocalRuntimeStatus.ready,
+        message: 'Runtime verified and ready for inference.',
+      );
+    }
+
+    final blocked = _reconcileRuntimeSnapshot(
+      _lastRuntimeValidationSnapshot ?? monitor.state,
+    );
+    _log(
+      '[INFERENCE_BLOCKED] source=$source status=${blocked.status.name} '
+      'ever_ready=${runtimeStateMachine.isEverReady} healthy=${runtimeStateMachine.isCurrentlyHealthy}',
+    );
+    return blocked;
+  }
+
   bool shouldReuseRuntimeVerification({
     required String modelPath,
   }) {
+    _lastKnownModelPath = modelPath;
     final reusable = hasVerifiedRuntimeForModel(modelPath) &&
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
         !_manualVerificationResetRequested;
@@ -309,7 +376,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             origin: 'shouldReuseRuntimeVerification',
           );
         } else {
-          runtimeStateMachine.markVerified();
+          runtimeStateMachine.applyEvent(
+            RuntimeEvent.selfTestSucceeded,
+            source: 'AndroidFfiRuntimeProvider.shouldReuseRuntimeVerification',
+          );
         }
       }
     }
@@ -319,6 +389,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void requestManualVerificationReset() {
     _manualVerificationResetRequested = true;
     _verifiedRuntimeAbi = null;
+    runtimeStateMachine.resetHard();
     clearRuntimeVerification();
   }
 
@@ -518,6 +589,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ' runtimeMode=android_ffi');
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        _lastKnownModelPath = null;
         _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
@@ -534,6 +606,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
+      _lastKnownModelPath = modelPath;
 
       // Log file existence / size / readability before any guard.
       final modelFile = File(modelPath);
@@ -555,42 +628,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[MODEL_READABLE] path=$modelPath readable=false (file not found)');
       }
 
-      if (!_androidSafeModelIds.contains(modelId)) {
-        if (_isDeveloperMode) {
-          // Developer mode: warn but allow the run to proceed.
-          _log(
-            '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
-            'validated set – unsupported quantization or architecture possible. '
-            'Proceeding with experimental inference.',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            message:
-                '[DEVELOPER MODE] $modelId is experimental – compatibility not guaranteed.',
-          );
-          _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=developer_mode_unvalidated_model modelId=$modelId');
-        } else {
-          _log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
-          clearRuntimeVerification();
-          const unsupportedAndroidModelMessage =
-              'Selected model is not enabled for Android local runtime. '
-              'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-              'gemma-2-2b-it, llama_1b, or gemma_2b.';
-          _log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.failed,
-            message: unsupportedAndroidModelMessage,
-          );
-          await fatalEarlyExit(
-            sessionId,
-            branch: 'unsupported_model_guard',
-            reason: unsupportedAndroidModelMessage,
-            stage: 'model_guard',
-            details: 'modelId=$modelId',
-          );
-          return;
-        }
-      }
+      _log('[MODEL_IDENTITY_CHECK_SKIPPED] session=$sessionId modelId=$modelId reason=gguf_validation_is_authoritative');
 
       // Model file validation runs synchronously on the current isolate.
       // Using compute()/Isolate.run here would require serialising a closure
@@ -2296,12 +2334,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return;
     }
+    var effectiveStatus = status;
+    var effectiveMessage = message;
+    if (status == LocalRuntimeStatus.runtimeUnavailable &&
+        !_canReportRuntimeUnavailable()) {
+      effectiveStatus = LocalRuntimeStatus.ready;
+      effectiveMessage ??=
+          'Runtime verification already succeeded; keeping READY state.';
+      _log(
+        '[RUNTIME_UNAVAILABLE_SUPPRESSED] reason=ever_ready model_loaded=$_hasLoadedModel ever_ready=${runtimeStateMachine.isEverReady}',
+      );
+    }
     final previous = monitor.state.status;
     final transitionReason =
-        reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
+        reason == _autoTransitionReason
+            ? _defaultReasonFor(effectiveStatus)
+            : reason;
     monitor.update(
-      status,
-      message: message,
+      effectiveStatus,
+      message: effectiveMessage,
       tokensGenerated: tokensGenerated,
       elapsed: elapsed,
       startedAt: startedAt,
@@ -2309,11 +2360,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
     _traceStatePath(
       from: previous,
-      to: status,
+      to: effectiveStatus,
       reason: transitionReason,
       origin: origin,
     );
-    _syncLifecycleState(status, reason: transitionReason, origin: origin);
+    _syncLifecycleState(
+      effectiveStatus,
+      reason: transitionReason,
+      origin: origin,
+    );
   }
 
   void _syncLifecycleState(
@@ -2324,34 +2379,52 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     switch (status) {
       case LocalRuntimeStatus.uninitialized:
       case LocalRuntimeStatus.modelMissing:
-        runtimeStateMachine.reset();
-        _emitStateReset(reason: reason, origin: origin);
+        _lastKnownModelPath = null;
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.modelCleared,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.runtimeUnavailable:
-        // Non-terminal state: model/FFI prerequisites can be present while no
-        // successful first-token verification has been observed yet.
-        // Keep lifecycle recoverable (healthy) instead of reset/failed.
-        runtimeStateMachine.markHealthy();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.runtimeUnavailableObserved,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.loading:
       case LocalRuntimeStatus.tokenizing:
-        runtimeStateMachine.markLoading();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.loadRequested,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.ready:
-        runtimeStateMachine.markVerified();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.healthObserved,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.completed:
-        runtimeStateMachine.markInferenceCompleted();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.inferenceCompleted,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.inferencing:
       case LocalRuntimeStatus.streaming:
-        runtimeStateMachine.markInferencing();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.inferenceStarted,
+          source: '$origin.$reason',
+        );
         return;
       case LocalRuntimeStatus.timedOut:
       case LocalRuntimeStatus.stalled:
       case LocalRuntimeStatus.ffiMissing:
       case LocalRuntimeStatus.failed:
-        runtimeStateMachine.markFailed();
+        runtimeStateMachine.applyEvent(
+          RuntimeEvent.errorObserved,
+          source: '$origin.$reason',
+        );
         return;
     }
   }
@@ -2362,6 +2435,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     String source = 'runtime',
   }) {
     super.recordVerificationSuccess(modelPath: modelPath, source: source);
+    runtimeStateMachine.applyEvent(
+      RuntimeEvent.selfTestSucceeded,
+      source: 'AndroidFfiRuntimeProvider.recordVerificationSuccess.$source',
+    );
     _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
     _manualVerificationResetRequested = false;
     if (_inVerificationScope) {
@@ -2389,7 +2466,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         message: 'Runtime re-verified and ready for inference.',
       );
     } else {
-      runtimeStateMachine.markVerified();
+      runtimeStateMachine.applyEvent(
+        RuntimeEvent.healthObserved,
+        source: 'AndroidFfiRuntimeProvider.recordVerificationSuccess.$source',
+      );
     }
   }
 
@@ -2500,6 +2580,39 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } catch (_) {
       return trimmed;
     }
+  }
+
+  LocalRuntimeState _reconcileRuntimeSnapshot(LocalRuntimeState snapshot) {
+    if (snapshot.status != LocalRuntimeStatus.runtimeUnavailable) {
+      return snapshot;
+    }
+    if (_canReportRuntimeUnavailable()) {
+      return snapshot;
+    }
+    return LocalRuntimeState(
+      status: LocalRuntimeStatus.ready,
+      message:
+          'Runtime verification already succeeded; keeping READY state.',
+      tokensGenerated: snapshot.tokensGenerated,
+      elapsed: snapshot.elapsed,
+      startedAt: snapshot.startedAt,
+    );
+  }
+
+  bool get _hasLoadedModel {
+    if (runtimeStateMachine.hasLoadedModel) {
+      return true;
+    }
+    final knownPath = _lastKnownModelPath;
+    if (knownPath != null && knownPath.trim().isNotEmpty) {
+      return true;
+    }
+    final activePath = _nativeSessionModelPath;
+    return activePath != null && activePath.trim().isNotEmpty;
+  }
+
+  bool _canReportRuntimeUnavailable() {
+    return !runtimeStateMachine.isEverReady;
   }
 
 }

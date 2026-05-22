@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 
@@ -92,6 +93,27 @@ void main() {
       expect(response.text, 'Hello world');
       expect(response.model, 'gemma_2b');
       expect(response.tokensGenerated, 2);
+    });
+
+    test('blocks local inference until readiness gate is ready', () async {
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          readinessState: const LocalRuntimeState(
+            status: LocalRuntimeStatus.runtimeUnavailable,
+            message: 'Runtime self-test has not succeeded yet.',
+          ),
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(sessionId: 'blocked-local', prompt: 'hello'),
+      );
+
+      expect(response.isError, isTrue);
+      expect(response.errorMessage, contains('Runtime self-test'));
     });
 
     test('cancel propagates to local runtime stream', () async {
@@ -281,11 +303,16 @@ class FakeLocalRuntimeProvider extends LocalRuntimeProvider {
   FakeLocalRuntimeProvider({
     this.responses = const <InferenceResponse>[],
     this.isSupported = true,
+    this.readinessState = const LocalRuntimeState(
+      status: LocalRuntimeStatus.ready,
+      message: 'ready',
+    ),
     this.streamBuilder,
   });
 
   final List<InferenceResponse> responses;
   final bool isSupported;
+  final LocalRuntimeState readinessState;
   final TokenStream Function(
     InferenceRequest request,
     CancellationToken cancellationToken,
@@ -293,6 +320,14 @@ class FakeLocalRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   bool supportsModel(AiModel model) => isSupported;
+
+  @override
+  Future<LocalRuntimeState> ensureReadyForInference({
+    required AiModel selectedModel,
+    String source = 'inference',
+  }) async {
+    return readinessState;
+  }
 
   @override
   TokenStream streamInference({

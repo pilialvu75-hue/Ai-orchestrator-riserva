@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provi
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalRuntimeDiagnosticsService {
   LocalRuntimeDiagnosticsService({
@@ -10,12 +11,14 @@ class LocalRuntimeDiagnosticsService {
     required LocalAiRepository localAiRepository,
   })  : _runtimeProvider = runtimeProvider,
         _localAiRepository = localAiRepository,
+        _usesProviderMonitor = runtimeProvider is AndroidFfiRuntimeProvider,
         monitor = runtimeProvider is AndroidFfiRuntimeProvider
             ? runtimeProvider.monitor
             : LocalRuntimeMonitor();
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
+  final bool _usesProviderMonitor;
 
   final LocalRuntimeMonitor monitor;
 
@@ -54,6 +57,15 @@ class LocalRuntimeDiagnosticsService {
     // Intentional ordering: do not acquire refresh lock while an inference
     // stream is active; diagnostics refresh must remain a no-op in that window.
     if (_isInferenceActive) return;
+    final provider = _runtimeProvider;
+    if (provider is AndroidFfiRuntimeProvider &&
+        provider.runtimeStateMachine.isEverReady) {
+      debugPrint(
+        '[AI_RUNTIME] [DIAGNOSTICS_STATE_WRITE_IGNORED] reason=ever_ready '
+        'status=${monitor.state.status.name}',
+      );
+      return;
+    }
     final now = DateTime.now();
     final sinceLastRefresh = _lastRefreshAt == null
         ? null
@@ -61,31 +73,52 @@ class LocalRuntimeDiagnosticsService {
     if (sinceLastRefresh != null &&
         sinceLastRefresh < _refreshDebounce &&
         _lastRefreshSnapshot != null) {
-      monitor.update(
-        _lastRefreshSnapshot!.status,
-        message: _lastRefreshSnapshot!.message,
-        tokensGenerated: _lastRefreshSnapshot!.tokensGenerated,
-        elapsed: _lastRefreshSnapshot!.elapsed,
-        startedAt: _lastRefreshSnapshot!.startedAt,
-      );
+      if (!_usesProviderMonitor) {
+        monitor.update(
+          _lastRefreshSnapshot!.status,
+          message: _lastRefreshSnapshot!.message,
+          tokensGenerated: _lastRefreshSnapshot!.tokensGenerated,
+          elapsed: _lastRefreshSnapshot!.elapsed,
+          startedAt: _lastRefreshSnapshot!.startedAt,
+        );
+      }
       return;
     }
     _refreshInProgress = true;
     _lastRefreshAt = now;
-    monitor.update(
-      LocalRuntimeStatus.loading,
-      message: 'Checking local runtime...',
-      tokensGenerated: 0,
-      elapsed: Duration.zero,
-      startedAt: null,
-      resetProgress: true,
-    );
+    if (!_usesProviderMonitor) {
+      monitor.update(
+        LocalRuntimeStatus.loading,
+        message: 'Checking local runtime...',
+        tokensGenerated: 0,
+        elapsed: Duration.zero,
+        startedAt: null,
+        resetProgress: true,
+      );
+    }
 
     try {
       final selectedModel = await _loadSelectedModel();
       final snapshot =
           await _runtimeProvider.validateRuntime(selectedModel: selectedModel);
       _lastRefreshSnapshot = snapshot;
+      final currentStatus = monitor.state.status;
+      if (_usesProviderMonitor &&
+          currentStatus == LocalRuntimeStatus.ready &&
+          snapshot.status == LocalRuntimeStatus.runtimeUnavailable) {
+        // Provider-owned READY state is authoritative after successful
+        // verification; diagnostics must never downgrade it back to
+        // runtimeUnavailable during refresh/revalidation loops.
+        return;
+      }
+      if (_usesProviderMonitor &&
+          currentStatus == snapshot.status &&
+          monitor.state.message == snapshot.message &&
+          monitor.state.tokensGenerated == snapshot.tokensGenerated &&
+          monitor.state.elapsed == snapshot.elapsed &&
+          monitor.state.startedAt == snapshot.startedAt) {
+        return;
+      }
       monitor.update(
         snapshot.status,
         message: snapshot.message,

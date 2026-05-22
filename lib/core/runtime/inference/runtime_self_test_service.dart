@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
@@ -79,6 +80,15 @@ class RuntimeSelfTestService {
     );
   }
 
+  void _recordSelfTestFailure(String source) {
+    final runtimeProvider = _runtimeProvider;
+    if (runtimeProvider is! AndroidFfiRuntimeProvider) return;
+    runtimeProvider.runtimeStateMachine.applyEvent(
+      RuntimeEvent.selfTestFailed,
+      source: 'RuntimeSelfTestService.$source',
+    );
+  }
+
   Future<RuntimeSelfTestResult> run() async {
     final notes = <String>[];
     _log('[COMM_TEST_START] session=$selfTestSessionId');
@@ -113,6 +123,7 @@ class RuntimeSelfTestService {
       if (validation.status == LocalRuntimeStatus.ffiMissing ||
           validation.status == LocalRuntimeStatus.modelMissing ||
           validation.status == LocalRuntimeStatus.failed) {
+        _recordSelfTestFailure('validation_failed');
         return RuntimeSelfTestResult(
           success: false,
           summary:
@@ -202,6 +213,7 @@ class RuntimeSelfTestService {
         _log(
           '[COMM_TEST_FAIL] reason=${streamTerminalError ?? 'generation_completed_without_token'}',
         );
+        _recordSelfTestFailure('first_token_missing');
         return RuntimeSelfTestResult(
           success: false,
           summary:
@@ -233,6 +245,7 @@ class RuntimeSelfTestService {
         _log(
           '[COMM_TEST_FAIL] first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks completed=$completed',
         );
+        _recordSelfTestFailure('pass_criteria_failed');
         return RuntimeSelfTestResult(
           success: false,
           summary:
@@ -263,6 +276,7 @@ class RuntimeSelfTestService {
       );
     } catch (error) {
       _log('[COMM_TEST_FAIL] reason=exception error=$error');
+      _recordSelfTestFailure('exception');
       return RuntimeSelfTestResult(
         success: false,
         summary:
