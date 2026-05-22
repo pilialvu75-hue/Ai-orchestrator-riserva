@@ -233,6 +233,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     () async {
       try {
+        if (Platform.isAndroid) {
+          throw UnsupportedError('CLI inference via Process.start is not supported on Android. Please implement FFI integration.');
+        }
+
         final modelPath = request.modelPath;
         final modelId = request.modelId;
 
@@ -464,6 +468,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String _resolveLlamaExecutable() {
+    if (Platform.isAndroid) {
+       throw UnsupportedError('CLI execution is not supported on Android. Use FFI.');
+    }
+    
     final envPath =
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
