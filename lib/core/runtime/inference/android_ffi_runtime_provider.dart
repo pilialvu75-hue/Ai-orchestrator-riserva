@@ -908,11 +908,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // to be complete, or (b) in the polling try/finally as a catch-all for
       // every early-exit path.
       final promptNativePtr = prompt.toNativeUtf8(allocator: calloc);
-      var promptNativePtrFreed = false;
+      // Nullable sentinel: set to null after freeing to prevent double-free.
+      Pointer<Utf8>? promptNativePtrOrNull = promptNativePtr;
       void freePromptNativePtr() {
-        if (!promptNativePtrFreed) {
-          calloc.free(promptNativePtr);
-          promptNativePtrFreed = true;
+        final ptr = promptNativePtrOrNull;
+        if (ptr != null) {
+          calloc.free(ptr);
+          promptNativePtrOrNull = null;
         }
       }
 
@@ -1797,11 +1799,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             // the native tokenisation stage may read it from a background thread.
             final verificationPromptPtr =
                 request.prompt.toNativeUtf8(allocator: calloc);
-            var verificationPromptPtrFreed = false;
+            // Nullable sentinel: set to null after freeing to prevent double-free.
+            Pointer<Utf8>? verificationPromptPtrOrNull = verificationPromptPtr;
             void freeVerificationPromptPtr() {
-              if (!verificationPromptPtrFreed) {
-                calloc.free(verificationPromptPtr);
-                verificationPromptPtrFreed = true;
+              final ptr = verificationPromptPtrOrNull;
+              if (ptr != null) {
+                calloc.free(ptr);
+                verificationPromptPtrOrNull = null;
               }
             }
             try {
@@ -2351,11 +2355,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final stopwatch = Stopwatch()..start();
     // Keep the warmup prompt pointer alive until the first token is polled.
     final warmupPromptPtr = _warmupPrompt.toNativeUtf8(allocator: calloc);
-    var warmupPromptPtrFreed = false;
+    // Nullable sentinel: set to null after freeing to prevent double-free.
+    Pointer<Utf8>? warmupPromptPtrOrNull = warmupPromptPtr;
     void freeWarmupPromptPtr() {
-      if (!warmupPromptPtrFreed) {
-        calloc.free(warmupPromptPtr);
-        warmupPromptPtrFreed = true;
+      final ptr = warmupPromptPtrOrNull;
+      if (ptr != null) {
+        calloc.free(ptr);
+        warmupPromptPtrOrNull = null;
       }
     }
     try {
