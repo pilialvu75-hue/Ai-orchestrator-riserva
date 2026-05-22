@@ -265,6 +265,7 @@ void main() {
     final result = await updateManager.prepareInstallIntent();
 
     expect(result, isTrue);
+    expect(updateManager.state.value.status, isNot(UpdateStatus.error));
     verify(() => mockIntentHandler.openApkInstaller(apkFile.path)).called(1);
     await tempDir.delete(recursive: true);
   });
