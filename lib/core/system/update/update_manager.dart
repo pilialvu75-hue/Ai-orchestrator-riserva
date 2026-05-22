@@ -752,7 +752,8 @@ class UpdateManager {
           'new=${verification.signatureSha256}',
         );
         if (_allowDebugSignatureMismatchBypass) {
-          const warning = 'Warning: APK signature mismatch bypassed in debug mode for local development; disabled in release builds.';
+          const warning = 'Warning: APK signature mismatch bypassed for local development. '
+              'Bypass defaults to disabled in release builds unless explicitly overridden.';
           _logInstall(warning);
           _logUpdateInstallResult(
             'success=true reason=signature_mismatch_debug_bypass apk_path=$apkPath',
