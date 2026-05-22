@@ -71,7 +71,7 @@ def hasReleaseSigningMaterial = releaseStoreFileCandidate != null &&
     releaseKeyPasswordValue != null
 def useReleaseSigningForDebug = alignDebugReleaseSigning && hasReleaseSigningMaterial
 if (useReleaseSigningForDebug) {
-    println("⚠ AlignDebugReleaseSigning enabled: debug builds will use release signing and package identity for OTA local testing.")
+    println("⚠ alignDebugReleaseSigning enabled: debug builds will use release signing and package identity for OTA local testing.")
 }
 def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
     !supportedFlutterTargetPlatforms.contains(it)
