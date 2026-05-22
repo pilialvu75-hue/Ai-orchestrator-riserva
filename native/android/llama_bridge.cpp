@@ -297,6 +297,7 @@ void run_generation(
     float temperature,
     const uint64_t owner_epoch
 ) {
+    LOGI("[FORENSIC_RUN_GENERATION_ENTER]");
     const auto thread_id = current_thread_id();
     const auto generation_started_at = std::chrono::steady_clock::now();
     auto last_decode_progress_at = generation_started_at;
@@ -340,6 +341,9 @@ void run_generation(
          static_cast<double>(temperature));
 
     auto [model, ctx] = session->snapshot_native_handles();
+    LOGI("[FORENSIC_NATIVE_HANDLES] model=%p ctx=%p",
+         static_cast<void*>(model),
+         static_cast<void*>(ctx));
     if (model == nullptr || ctx == nullptr) {
         session->set_error("Session native resources unavailable");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "missing_native_resources");
@@ -379,6 +383,7 @@ void run_generation(
     };
 
     std::vector<llama_token> tokens;
+    LOGI("[FORENSIC_TOKENIZE_BEGIN]");
     int n_tokens = tokenize_prompt(prompt, &tokens);
 
     if (n_tokens <= 1) {
@@ -391,6 +396,7 @@ void run_generation(
         prompt = kFallbackPrompt;
         n_tokens = tokenize_prompt(prompt, &tokens);
     }
+    LOGI("[FORENSIC_TOKENIZE_OK] tokens=%d", n_tokens);
 
     if (n_tokens <= 0) {
         session->set_error("Tokenisation failed");
@@ -422,8 +428,10 @@ void run_generation(
     }
     prefill_batch.batch.n_tokens = static_cast<int32_t>(tokens.size());
 
+    LOGI("[FORENSIC_PREFILL_BEGIN]");
     const auto prefill_started_at = std::chrono::steady_clock::now();
     const int prefill_status = llama_decode(ctx, prefill_batch.batch);
+    LOGI("[FORENSIC_PREFILL_RESULT] status=%d", prefill_status);
     if (prefill_status != 0) {
         session->set_error("Prompt prefill decode failed");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_decode_failed");
@@ -451,6 +459,7 @@ void run_generation(
         return;
     }
 
+    LOGI("[FORENSIC_SAMPLER_BEGIN]");
     llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
     SamplerPtr sampler(llama_sampler_chain_init(sampler_params), &llama_sampler_free);
     if (!sampler) {
@@ -458,6 +467,7 @@ void run_generation(
         set_state_if_epoch(session, kStateFailed, owner_epoch, "sampler_alloc_failed");
         return;
     }
+    LOGI("[FORENSIC_SAMPLER_OK]");
 
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_p(0.9f, 1));
@@ -467,6 +477,7 @@ void run_generation(
     int32_t n_cur = n_tokens;
     int32_t n_decode = 0;
     bool eos_reached = false;
+    bool forensic_first_sample_logged = false;
 
     while (n_decode < std::min(max_tokens, kMaxGeneratedTokens)) {
         if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
@@ -500,7 +511,14 @@ void run_generation(
             last_decode_progress_at = now;
         }
 
+        if (!forensic_first_sample_logged) {
+            LOGI("[FORENSIC_FIRST_SAMPLE_BEGIN]");
+        }
         llama_token next_token = llama_sampler_sample(sampler.get(), ctx, -1);
+        if (!forensic_first_sample_logged) {
+            LOGI("[FORENSIC_FIRST_SAMPLE_RESULT] token=%d", static_cast<int>(next_token));
+            forensic_first_sample_logged = true;
+        }
         if (next_token < 0) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
                 initial_sample_retry_count < kMaxInitialSampleRetries) {
@@ -747,6 +765,11 @@ int64_t llb_create_session(
     cparams.n_ubatch = kSafeNBatch;
     cparams.embeddings = false;
     cparams.offload_kqv = true;
+    const char* backend_type = mparams.n_gpu_layers > 0 ? "GPU" : "CPU";
+    LOGI("[FORENSIC_BACKEND] ggml_backend=llama.cpp n_gpu_layers=%d offload_kqv=%s backend=%s",
+         mparams.n_gpu_layers,
+         cparams.offload_kqv ? "true" : "false",
+         backend_type);
 
     {
         std::lock_guard<std::mutex> lock(session->native_mutex);
@@ -800,6 +823,7 @@ int32_t llb_session_start_gen(
     int32_t max_tokens,
     float temperature
 ) {
+    LOGI("[FORENSIC_START_GEN_ENTER]");
     set_global_error("");
     auto session = find_session(session_id);
     if (session == nullptr) {
@@ -852,6 +876,18 @@ int32_t llb_session_start_gen(
          max_tokens,
          static_cast<double>(temperature));
 
+    auto [model, ctx] = session->snapshot_native_handles();
+    LOGI("[FORENSIC_POINTER_CHECK] model=%p ctx=%p",
+         static_cast<void*>(model),
+         static_cast<void*>(ctx));
+    if (model == nullptr || ctx == nullptr) {
+        session->set_error("Invalid native model/context pointers before thread spawn");
+        session->gen_state.store(kStateFailed, std::memory_order_release);
+        LOGE("[ERROR] [FORENSIC_POINTER_CHECK] session=%" PRId64 " null_pointer=true", session_id);
+        return -6;
+    }
+    LOGI("[FORENSIC_START_GEN_BEFORE_THREAD]");
+
     try {
         session->gen_thread = std::thread(
             run_generation,
@@ -869,6 +905,7 @@ int32_t llb_session_start_gen(
              error.what());
         return -5;
     }
+    LOGI("[FORENSIC_START_GEN_AFTER_THREAD]");
 
     return 0;
 }

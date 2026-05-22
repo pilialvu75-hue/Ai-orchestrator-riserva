@@ -1043,6 +1043,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
       _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
       _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
+      _log(
+        '[FORENSIC_POLL_BEGIN] nativeSessionId=$nativeSessionId elapsedMs=0 pollCount=0',
+      );
       _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
 
       try {
@@ -1056,6 +1059,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           final sinceFirstToken =
               firstTokenAt == null ? null : now.difference(firstTokenAt);
           final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
+          if (pollIterations % 100 == 0) {
+            _log(
+              '[FORENSIC_POLL_HEARTBEAT] nativeSessionId=$nativeSessionId elapsedMs=${elapsed.inMilliseconds} pollCount=$pollIterations',
+            );
+          }
           _throttledLoopLog(
             '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
             ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
@@ -1278,6 +1286,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           }
+          _log(
+            '[FORENSIC_POLL_STATUS] nativeSessionId=$nativeSessionId elapsedMs=${elapsed.inMilliseconds} pollCount=$pollIterations code=$status',
+          );
           _throttledLoopLog(
             '[TOKEN_STREAM] poll status iteration=$pollIterations status=$status',
           );
@@ -2029,6 +2040,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _markSessionAsMostRecentlyUsed(modelPath);
         _nativeSessionId = existingSessionId;
         _nativeSessionModelPath = modelPath;
+        _log(
+          '[FORENSIC_SESSION_REUSE] modelPath=$modelPath nativeSessionId=$_nativeSessionId existingSessionId=$existingSessionId reuse=true',
+        );
         _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
         _log('[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
         _log(
@@ -2077,6 +2091,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _nativeSessionModelPath = modelPath;
       _nativeSessionsByModel[modelPath] = created;
       _markSessionAsMostRecentlyUsed(modelPath);
+      _log(
+        '[FORENSIC_SESSION_REUSE] modelPath=$modelPath nativeSessionId=$_nativeSessionId existingSessionId=${existingSessionId ?? 'null'} reuse=false',
+      );
       _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
       _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
       _log(
