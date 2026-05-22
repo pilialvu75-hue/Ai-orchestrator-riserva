@@ -12,7 +12,8 @@ void llb_init_backend(void);
 int64_t llb_create_session(
     const char* model_path,
     int32_t n_ctx,
-    int32_t n_threads
+    int32_t n_threads,
+    int32_t n_gpu_layers
 );
 
 int32_t llb_session_start_gen(

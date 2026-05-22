@@ -80,6 +80,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const int _defaultGpuLayers = LlamaNativeDefaults.nGpuLayers;
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
@@ -741,7 +742,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       await Future<void>.delayed(Duration.zero);
       _logAi('creating native session...');
       _log('[NATIVE_MODEL_LOAD_BEGIN] path=$modelPath modelId=$modelId'
-          ' n_ctx=512 n_threads=2 gpu_layers=0');
+          ' n_ctx=512 n_threads=2 gpu_layers=$_defaultGpuLayers');
 
       int nativeSessionId;
       try {
@@ -1773,7 +1774,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               RuntimeVerificationPhase.loading,
               message: 'Creating isolated verification session.',
             );
-            final verificationSessionId = bindings.createSession(modelPath);
+            final verificationSessionId = _createSessionWithGpuFallback(
+              bindings,
+              modelPath,
+            );
             if (verificationSessionId <= 0) {
               final err = _safeLastError(bindings, verificationSessionId);
               _finishWithRuntimeError(
@@ -2057,7 +2061,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
       );
-      final created = bindings.createSession(modelPath);
+      final created = _createSessionWithGpuFallback(bindings, modelPath);
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
       );
@@ -2067,6 +2071,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         final err = _safeLastError(bindings, created);
         throw StateError('Native session creation failed: $err');
       }
+
       if (bindings.sessionIsActive(created) != 1) {
         _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
         final err = _safeLastError(bindings, created);
@@ -2089,6 +2094,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       rethrow;
     }
+  }
+
+  int _createSessionWithGpuFallback(
+    LlamaBridgeBindings bindings,
+    String modelPath,
+  ) {
+    final requestedGpuLayers = _defaultGpuLayers > 0 ? _defaultGpuLayers : 0;
+    final created = bindings.createSession(
+      modelPath,
+      nGpuLayers: requestedGpuLayers,
+    );
+    if (created > 0 || requestedGpuLayers <= 0) {
+      return created;
+    }
+
+    final gpuError = _safeLastError(bindings, created);
+    _log(
+      '[FFI_CREATE_SESSION_GPU_FALLBACK] path=$modelPath requested_gpu_layers=$requestedGpuLayers gpu_error=$gpuError',
+    );
+
+    final cpuFallbackSession = bindings.createSession(modelPath, nGpuLayers: 0);
+    if (cpuFallbackSession > 0) {
+      _log(
+        '[FFI_CREATE_SESSION_GPU_FALLBACK_OK] path=$modelPath requested_gpu_layers=$requestedGpuLayers',
+      );
+    }
+    return cpuFallbackSession;
   }
 
   void _releaseNativeSessionByModelPath(
