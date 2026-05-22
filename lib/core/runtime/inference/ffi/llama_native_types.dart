@@ -38,8 +38,7 @@ abstract final class LlamaNativeDefaults {
   // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
   // High sentinel value: llama.cpp clamps to the maximum offloadable layers.
-  static const int _defaultRequestedGpuLayers = 99;
-  static const int nGpuLayers = _defaultRequestedGpuLayers;
+  static const int nGpuLayers = 99;
   static const int nBatch = 32;
   static const double temperature = 0.7;
   static const int topK = 40;
