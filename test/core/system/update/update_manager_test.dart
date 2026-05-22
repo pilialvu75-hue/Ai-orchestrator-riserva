@@ -158,6 +158,14 @@ void main() {
   });
 
   test('rejects install when APK signature differs from installed app', () async {
+    final strictUpdateManager = UpdateManager(
+      updateChecker: mockUpdateChecker,
+      comparator: const VersionComparator(),
+      preferences: preferences,
+      intentHandler: mockIntentHandler,
+      currentVersion: '1.12.119+119',
+      allowDebugSignatureMismatchBypass: false,
+    );
     final tempDir = await Directory.systemTemp.createTemp('update-manager-test-');
     final apkFile = File('${tempDir.path}/candidate.apk');
     await apkFile.writeAsBytes(Uint8List(80 * 1024));
@@ -168,7 +176,7 @@ void main() {
       'apkUrl': 'https://example.com/app-release.apk',
       'forceUpdate': false,
     });
-    updateManager.state.value = updateManager.state.value.copyWith(
+    strictUpdateManager.state.value = strictUpdateManager.state.value.copyWith(
       status: UpdateStatus.readyToInstall,
       latestManifest: manifest,
       tempApkPath: apkFile.path,
@@ -199,12 +207,65 @@ void main() {
       }),
     );
 
-    final result = await updateManager.prepareInstallIntent();
+    final result = await strictUpdateManager.prepareInstallIntent();
 
     expect(result, isFalse);
-    expect(updateManager.state.value.status, UpdateStatus.error);
-    expect(updateManager.state.value.errorMessage, contains('signature'));
+    expect(strictUpdateManager.state.value.status, UpdateStatus.error);
+    expect(strictUpdateManager.state.value.errorMessage, contains('signature'));
     verifyNever(() => mockIntentHandler.openApkInstaller(any()));
+    await tempDir.delete(recursive: true);
+  });
+
+  test('bypasses signature mismatch in debug mode and launches installer', () async {
+    final tempDir = await Directory.systemTemp.createTemp('update-manager-test-');
+    final apkFile = File('${tempDir.path}/candidate.apk');
+    await apkFile.writeAsBytes(Uint8List(80 * 1024));
+
+    final manifest = UpdateManifest.fromJson(const {
+      'versionName': '1.12.120',
+      'versionCode': 120,
+      'apkUrl': 'https://example.com/app-release.apk',
+      'forceUpdate': false,
+    });
+    updateManager.state.value = updateManager.state.value.copyWith(
+      status: UpdateStatus.readyToInstall,
+      latestManifest: manifest,
+      tempApkPath: apkFile.path,
+    );
+
+    when(
+      () => mockIntentHandler.getInstallDiagnostics(),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'installerPackageName': 'com.android.packageinstaller',
+        'installedSignatureSha256': 'AA:BB',
+        'installedVersionCode': 119,
+      }),
+    );
+    when(
+      () => mockIntentHandler.verifyApk(any()),
+    ).thenAnswer(
+      (_) async => const Right(<String, dynamic>{
+        'valid': true,
+        'reason': 'ok',
+        'packageName': 'com.aiorchestrator',
+        'versionName': '1.12.120',
+        'versionCode': 120,
+        'signatureSha256': 'CC:DD',
+        'fileSha256': '1234',
+        'hasSplitConfig': false,
+        'abi': 'arm64-v8a',
+        'archiveParsed': true,
+      }),
+    );
+    when(
+      () => mockIntentHandler.openApkInstaller(any()),
+    ).thenAnswer((_) async => const Right(true));
+
+    final result = await updateManager.prepareInstallIntent();
+
+    expect(result, isTrue);
+    verify(() => mockIntentHandler.openApkInstaller(apkFile.path)).called(1);
     await tempDir.delete(recursive: true);
   });
 }

@@ -48,6 +48,11 @@ def forceDebugReleaseSigning = (
         ?: System.getenv("FORCE_DEBUG_RELEASE_SIGNING")
         ?: "false"
 ).toString().toBoolean()
+def alignDebugReleaseSigning = (
+    project.findProperty("alignDebugReleaseSigning")
+        ?: System.getenv("ALIGN_DEBUG_RELEASE_SIGNING")
+        ?: "false"
+).toString().toBoolean()
 def requiresReleaseSigning = requestedGradleTasks.any { taskName ->
     taskName.contains("assemblerelease")
         || taskName.contains("bundlerelease")
@@ -146,12 +151,15 @@ android {
 
     buildTypes {
         debug {
-            // Explicit debug signing via the auto-generated debug.keystore so the
-            // APK is always signed and installable on physical devices.
-            signingConfig signingConfigs.debug
-            // Suffix isolates the debug package from any existing release install,
-            // eliminating "INSTALL_FAILED_UPDATE_INCOMPATIBLE" signature conflicts.
-            applicationIdSuffix ".debug"
+            // Default: keep isolated debug package signed with debug key.
+            // Optional OTA local test mode: align debug with release signing/package
+            // (`-PalignDebugReleaseSigning=true` or `ALIGN_DEBUG_RELEASE_SIGNING=true`)
+            // so local OTA signatures match server-provided APK lineage.
+            signingConfig alignDebugReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            if (!alignDebugReleaseSigning) {
+                // Suffix isolates the debug package from release installs.
+                applicationIdSuffix ".debug"
+            }
             debuggable true
         }
         release {

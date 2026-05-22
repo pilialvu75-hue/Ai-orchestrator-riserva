@@ -117,6 +117,10 @@ The release build expects runtime-provided signing material.
 - CI decodes the keystore at runtime into a temporary directory
 - release signing is used when credentials are valid
 - debug-signing fallback can be used only for temporary installability validation
+- local OTA testing can align debug with release lineage using
+  `-PalignDebugReleaseSigning=true` (or `ALIGN_DEBUG_RELEASE_SIGNING=true`),
+  which makes debug use the release signing config and removes `.debug`
+  applicationId suffix for that build
 
 A missing or malformed keystore does not mean the build system is broken; it means the signing path must be repaired.
 
