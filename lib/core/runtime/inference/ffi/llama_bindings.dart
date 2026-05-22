@@ -61,13 +61,20 @@ class LlamaBridgeBindings {
     }
   }
 
-  int startGeneration(int sessionId, String prompt, int maxTokens, double temperature) {
-    final promptPtr = prompt.toNativeUtf8(allocator: calloc);
-    try {
-      return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
-    } finally {
-      calloc.free(promptPtr);
-    }
+  /// Starts generation for [sessionId] using the caller-owned [promptPtr].
+  ///
+  /// The caller is responsible for keeping [promptPtr] valid until the first
+  /// token has been polled from the native side (i.e. until the first
+  /// successful [pollToken] call returns a non-empty piece). Freeing the
+  /// pointer before that point is undefined behaviour because the native
+  /// tokenisation stage may read from it on a background thread.
+  int startGeneration(
+    int sessionId,
+    Pointer<Utf8> promptPtr,
+    int maxTokens,
+    double temperature,
+  ) {
+    return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
   }
 
   int pollToken(int sessionId, Pointer<Utf8> buf) =>
