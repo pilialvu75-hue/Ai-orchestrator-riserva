@@ -70,7 +70,7 @@ class StreamChatMessageParams extends Equatable {
     required this.userPrompt,
     this.systemPrompt,
     this.attachments = const <ChatAttachment>[],
-    this.activeProvider = 'assistant',
+    this.activeProvider = 'openAi',
   });
 
   final String sessionId;
