@@ -477,7 +477,7 @@ void run_generation(
     int32_t n_cur = n_tokens;
     int32_t n_decode = 0;
     bool eos_reached = false;
-    bool first_sample_logged = false;
+    bool first_sample_trace_emitted = false;
 
     while (n_decode < std::min(max_tokens, kMaxGeneratedTokens)) {
         if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
@@ -511,13 +511,13 @@ void run_generation(
             last_decode_progress_at = now;
         }
 
-        if (!first_sample_logged) {
+        if (!first_sample_trace_emitted) {
             LOGI("[FORENSIC_FIRST_SAMPLE_BEGIN]");
         }
         llama_token next_token = llama_sampler_sample(sampler.get(), ctx, -1);
-        if (!first_sample_logged) {
+        if (!first_sample_trace_emitted) {
             LOGI("[FORENSIC_FIRST_SAMPLE_RESULT] token=%d", static_cast<int>(next_token));
-            first_sample_logged = true;
+            first_sample_trace_emitted = true;
         }
         if (next_token < 0) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
@@ -765,12 +765,12 @@ int64_t llb_create_session(
     cparams.n_ubatch = kSafeNBatch;
     cparams.embeddings = false;
     cparams.offload_kqv = true;
-    const char* backend_config_status =
+    const char* configured_backend =
         mparams.n_gpu_layers > 0 ? "GPU_CONFIGURED" : "CPU_CONFIGURED";
     LOGI("[FORENSIC_BACKEND] ggml_backend=llama.cpp n_gpu_layers=%d offload_kqv=%s backend=%s backend_initialized=%s",
          mparams.n_gpu_layers,
          cparams.offload_kqv ? "true" : "false",
-         backend_config_status,
+         configured_backend,
          g_backend_initialized.load(std::memory_order_acquire) ? "true" : "false");
 
     {

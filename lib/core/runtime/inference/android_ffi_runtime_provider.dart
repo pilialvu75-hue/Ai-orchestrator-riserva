@@ -80,6 +80,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const int _forensicPollHeartbeatInterval = 100;
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
@@ -1059,7 +1060,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           final sinceFirstToken =
               firstTokenAt == null ? null : now.difference(firstTokenAt);
           final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
-          if (pollIterations % 100 == 0) {
+          if (pollIterations % _forensicPollHeartbeatInterval == 0) {
             _log(
               '[FORENSIC_POLL_HEARTBEAT] nativeSessionId=$nativeSessionId elapsedMs=${elapsed.inMilliseconds} pollCount=$pollIterations',
             );
