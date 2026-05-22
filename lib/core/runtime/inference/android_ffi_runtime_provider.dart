@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
@@ -53,8 +54,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   AndroidFfiRuntimeProvider({
     RuntimeStateMachine? runtimeStateMachine,
     bool Function()? developerModeProvider,
+    int maxActiveNativeSessions = 1,
   })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
         _developerModeProvider = developerModeProvider ?? (() => false),
+        _maxActiveNativeSessions =
+            maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions,
         super(developerModeProvider: developerModeProvider);
 
   static const _logTag = 'AI_RUNTIME';
@@ -114,6 +118,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   LlamaBridgeBindings? _bindings;
   int? _nativeSessionId;
   String? _nativeSessionModelPath;
+  final int _maxActiveNativeSessions;
+  final LinkedHashMap<String, int> _nativeSessionsByModel =
+      LinkedHashMap<String, int>();
   bool _loadAttempted = false;
   bool _libraryLoadInProgress = false;
   Future<void> _inferenceTail = Future<void>.value();
@@ -1959,23 +1966,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1955 | Function: _ensureNativeSession() | BEFORE reuse check',
       );
-      if (_nativeSessionId != null &&
-          _nativeSessionModelPath == modelPath &&
-          bindings.sessionIsActive(_nativeSessionId!) == 1) {
-        _log('[SESSION_CREATE_OK] reusing session=$_nativeSessionId path=$modelPath');
-        _log('[FFI_CREATE_SESSION_OK] reusing=true session=$_nativeSessionId path=$modelPath');
+      final existingSessionId = _nativeSessionsByModel[modelPath];
+      if (existingSessionId != null && bindings.sessionIsActive(existingSessionId) == 1) {
+        _markSessionAsMostRecentlyUsed(modelPath);
+        _nativeSessionId = existingSessionId;
+        _nativeSessionModelPath = modelPath;
+        _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
+        _log('[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
         _log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1963 | Function: _ensureNativeSession() | AFTER reuse return',
         );
-        return _nativeSessionId!;
+        return existingSessionId;
+      }
+
+      if (existingSessionId != null) {
+        _releaseNativeSessionByModelPath(
+          bindings,
+          modelPath,
+          reason: 'inactive_existing_session',
+        );
       }
 
       _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1969 | Function: _ensureNativeSession() | BEFORE _releaseNativeSessionIfPresent()',
+        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1969 | Function: _ensureNativeSession() | BEFORE LRU eviction check',
       );
-      _releaseNativeSessionIfPresent(bindings);
+      _evictLeastRecentlyUsedSessionIfNeeded(bindings);
       _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER _releaseNativeSessionIfPresent()',
+        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
 
       _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
@@ -2000,6 +2017,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       _nativeSessionId = created;
       _nativeSessionModelPath = modelPath;
+      _nativeSessionsByModel[modelPath] = created;
+      _markSessionAsMostRecentlyUsed(modelPath);
       _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
       _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
       _log(
@@ -2014,19 +2033,77 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  void _releaseNativeSessionIfPresent(LlamaBridgeBindings bindings) {
-    final sessionId = _nativeSessionId;
+  void _releaseNativeSessionByModelPath(
+    LlamaBridgeBindings bindings,
+    String modelPath, {
+    required String reason,
+  }) {
+    final sessionId = _nativeSessionsByModel.remove(modelPath);
     if (sessionId == null) return;
     try {
-      // Native release is intentionally non-blocking; cleanup continues in C++.
-      _log('[FFI_RELEASE] session=$sessionId');
+      _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
       bindings.releaseSession(sessionId);
     } catch (error) {
-      _log('[FFI_RELEASE] session=$sessionId failed: $error');
+      _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason failed: $error');
     } finally {
-      _nativeSessionId = null;
-      _nativeSessionModelPath = null;
+      if (_nativeSessionId == sessionId) {
+        _nativeSessionId = null;
+        _nativeSessionModelPath = null;
+      }
     }
+  }
+
+  void _evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) {
+    while (_nativeSessionsByModel.length >= _maxActiveNativeSessions) {
+      final evictedModelPath = _nativeSessionsByModel.keys.first;
+      final evictedSessionId = _nativeSessionsByModel.remove(evictedModelPath);
+      if (evictedSessionId == null) {
+        break;
+      }
+      _log(
+        '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=$_maxActiveNativeSessions',
+      );
+      try {
+        bindings.releaseSession(evictedSessionId);
+      } catch (error) {
+        _log(
+          '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
+        );
+      } finally {
+        if (_nativeSessionId == evictedSessionId) {
+          _nativeSessionId = null;
+          _nativeSessionModelPath = null;
+        }
+      }
+    }
+  }
+
+  void _markSessionAsMostRecentlyUsed(String modelPath) {
+    final sessionId = _nativeSessionsByModel.remove(modelPath);
+    if (sessionId == null) return;
+    _nativeSessionsByModel[modelPath] = sessionId;
+  }
+
+  void _releaseAllNativeSessions(
+    LlamaBridgeBindings bindings, {
+    required String reason,
+  }) {
+    final entries = _nativeSessionsByModel.entries.toList(growable: false);
+    for (final entry in entries) {
+      try {
+        _log(
+          '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason',
+        );
+        bindings.releaseSession(entry.value);
+      } catch (error) {
+        _log(
+          '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason failed: $error',
+        );
+      }
+    }
+    _nativeSessionsByModel.clear();
+    _nativeSessionId = null;
+    _nativeSessionModelPath = null;
   }
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {
@@ -2105,8 +2182,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   /// Returns true when warmup succeeds.
-  /// Returns false when warmup fails, but inference continues to createSession
-  /// so runtime verification remains observational instead of a hard gate.
+  /// Returns false when warmup fails, but inference continues and can still
+  /// attempt production generation on the shared native session.
   Future<bool> _ensureWarmup({
     required String sessionId,
     required String modelPath,
@@ -2200,15 +2277,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       RuntimeVerificationPhase.running,
       message: 'Runtime warmup inference running.',
     );
-    _log('[FFI_CREATE_SESSION] warmup path=$modelPath');
-    final warmupSessionId = bindings.createSession(modelPath);
-    if (warmupSessionId <= 0) {
-      throw StateError(
-        'Warmup session creation failed: ${_safeLastError(bindings, warmupSessionId)}',
-      );
-    }
+    _log('[WARMUP] resolving shared native session path=$modelPath');
+    final warmupSessionId = _ensureNativeSession(bindings, modelPath);
     if (bindings.sessionIsActive(warmupSessionId) != 1) {
-      bindings.releaseSession(warmupSessionId);
       throw StateError(
         'Warmup session inactive: ${_safeLastError(bindings, warmupSessionId)}',
       );
@@ -2285,8 +2356,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       calloc.free(tokenBufRaw);
       _log('[FFI_CANCEL] warmup session=$warmupSessionId');
       bindings.cancelSession(warmupSessionId);
-      _log('[FFI_RELEASE] warmup session=$warmupSessionId');
-      bindings.releaseSession(warmupSessionId);
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2286 | Function: _runWarmup() | AFTER finally cleanup',
       );
@@ -2458,7 +2527,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[MODEL_EXECUTION] llb_session_is_active before reset: ${bindings.sessionIsActive(sessionId)}');
         _safeCancel(bindings, sessionId);
       }
-      _releaseNativeSessionIfPresent(bindings);
+      _releaseAllNativeSessions(bindings, reason: reason);
     } catch (error) {
       _log('[MODEL_EXECUTION] runtime reset failed: $error');
     }
