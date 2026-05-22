@@ -28,41 +28,67 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onLoadMessages(
       LoadMessagesEvent event, Emitter<ChatState> emit) async {
-    emit(const ChatLoading());
-    final result = await loadChatMessages(
-        LoadChatMessagesParams(sessionId: event.sessionId));
-    result.fold(
-      (failure) => emit(ChatError(message: failure.message)),
-      (messages) {
-        _messages = List<ChatMessage>.from(messages);
-        emit(ChatLoaded(
-            messages: List.unmodifiable(_messages),
-            activeProvider: _activeProvider));
-      },
-    );
+    try {
+      emit(const ChatLoading());
+      final result = await loadChatMessages(
+          LoadChatMessagesParams(sessionId: event.sessionId));
+      
+      if (isClosed) return;
+
+      result.fold(
+        (failure) => emit(ChatError(message: failure.message)),
+        (messages) {
+          _messages = List<ChatMessage>.from(messages);
+          emit(ChatLoaded(
+              messages: List.unmodifiable(_messages),
+              activeProvider: _activeProvider));
+        },
+      );
+    } catch (e) {
+      if (!isClosed) {
+        emit(ChatError(message: e.toString()));
+      }
+    }
   }
 
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
-    emit(ChatSending(
-        messages: List.unmodifiable(_messages),
-        activeProvider: _activeProvider));
+    try {
+      emit(ChatSending(
+          messages: List.unmodifiable(_messages),
+          activeProvider: _activeProvider));
 
-    final result = await sendChatMessage(SendChatMessageParams(
-      sessionId: event.sessionId,
-      userPrompt: event.userPrompt,
-      systemPrompt: event.systemPrompt,
-    ));
+      final result = await sendChatMessage(SendChatMessageParams(
+        sessionId: event.sessionId,
+        userPrompt: event.userPrompt,
+        systemPrompt: event.systemPrompt,
+      ));
 
-    result.fold(
-      (failure) => emit(ChatError(message: failure.message)),
-      (_) => add(LoadMessagesEvent(sessionId: event.sessionId)),
-    );
+      if (isClosed) return;
+
+      result.fold(
+        (failure) => emit(ChatError(message: failure.message)),
+        (_) {
+          if (!isClosed) {
+            add(LoadMessagesEvent(sessionId: event.sessionId));
+          }
+        },
+      );
+    } catch (e) {
+      if (!isClosed) {
+        emit(ChatError(message: e.toString()));
+      }
+    }
   }
 
   Future<void> _onPruneHistory(
       PruneHistoryEvent event, Emitter<ChatState> emit) async {
-    await pruneChatHistory(const PruneChatHistoryParams());
+    try {
+      await pruneChatHistory(const PruneChatHistoryParams());
+    } catch (e) {
+      if (!isClosed) {
+        emit(ChatError(message: e.toString()));
+      }
+    }
   }
-
 }
