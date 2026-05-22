@@ -2119,6 +2119,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[FFI_CREATE_SESSION_GPU_FALLBACK_OK] path=$modelPath requested_gpu_layers=$requestedGpuLayers',
       );
+    } else {
+      final cpuError = _safeLastError(bindings, cpuFallbackSession);
+      _log(
+        '[FFI_CREATE_SESSION_GPU_FALLBACK_FAIL] path=$modelPath requested_gpu_layers=$requestedGpuLayers cpu_error=$cpuError',
+      );
     }
     return cpuFallbackSession;
   }
