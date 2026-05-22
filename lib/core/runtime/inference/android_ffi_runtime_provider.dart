@@ -184,10 +184,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   Future<LocalRuntimeState> validateRuntime({AiModel? selectedModel}) async {
-    print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 187 - BEFORE entry',
-    );
     try {
+      print(
+        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 189 - BEFORE entry',
+      );
     // Guard: never mutate the runtime state machine or clear verification while
     // a verification scope is active.  A concurrent diagnostic refresh (e.g.
     // from LocalRuntimeDiagnosticsService.refresh()) must not corrupt the
@@ -270,11 +270,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     try {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 271 - BEFORE calling super.validateRuntime()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 273 - BEFORE calling super.validateRuntime()',
       );
       final snapshot = await super.validateRuntime(selectedModel: selectedModel);
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 275 - AFTER calling super.validateRuntime()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 277 - AFTER calling super.validateRuntime()',
       );
       _syncLifecycleState(
         snapshot.status,
@@ -288,12 +288,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: validateRuntime() LINE 283 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: validateRuntime() LINE 291 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     } finally {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 288 - AFTER exit',
+        '[FORENSIC] android_ffi_runtime_provider.dart: validateRuntime() LINE 296 - AFTER exit',
       );
     }
   }
@@ -433,10 +433,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 425 - BEFORE entry',
-    );
     try {
+    print(
+      '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 438 - BEFORE entry',
+    );
     _log(
       '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
@@ -486,9 +486,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
     () async {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 473 - BEFORE calling _runInferenceSerially()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 489 - BEFORE calling _runInferenceSerially()',
       );
-      await _runInferenceSerially(() async {
+      try {
+        await _runInferenceSerially(() async {
       final sessionId = request.sessionId.trim().isEmpty
           ? 'unknown'
           : request.sessionId.trim();
@@ -666,14 +667,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           request.sessionId.trim() == _forensicSelfTestSessionId;
       if (!isForensicSelfTest) {
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 653 - BEFORE calling _ensureWarmup()',
+          '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 670 - BEFORE calling _ensureWarmup()',
         );
         final warmupReady = await _ensureWarmup(
           sessionId: sessionId,
           modelPath: modelPath,
         );
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 660 - AFTER calling _ensureWarmup()',
+          '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 677 - AFTER calling _ensureWarmup()',
         );
         if (!warmupReady) {
           _log('[FFI_BRANCH] session=$sessionId name=warmup_failed_non_blocking_continue');
@@ -1630,19 +1631,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
         _log('[SESSION] end session=$sessionId');
       }
-      });
-      print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 1617 - AFTER calling _runInferenceSerially()',
-      );
+        });
+        print(
+          '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 1636 - AFTER calling _runInferenceSerially()',
+        );
+      } catch (e, stackTrace) {
+        print(
+          '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamInference() LINE 1640 - BEFORE rethrow after async execution exception: $e \n $stackTrace',
+        );
+        rethrow;
+      }
     }();
 
     print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 1622 - AFTER exit',
+      '[FORENSIC] android_ffi_runtime_provider.dart: streamInference() LINE 1647 - AFTER exit',
     );
     return controller.stream;
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamInference() LINE 1627 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamInference() LINE 1652 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     }
@@ -1652,18 +1659,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1642 - BEFORE entry',
-    );
     try {
+      print(
+        '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1664 - BEFORE entry',
+      );
       final controller = StreamController<InferenceResponse>();
       () async {
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1648 - BEFORE calling _runInferenceSerially()',
+          '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1669 - BEFORE calling _runInferenceSerially()',
         );
-        await _runInferenceSerially(() async {
+        try {
+          await _runInferenceSerially(() async {
           print(
-            '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1651 - BEFORE calling _runInVerificationScope()',
+            '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1674 - BEFORE calling _runInVerificationScope()',
           );
           await _runInVerificationScope(
           modelPath: request.modelPath,
@@ -1783,11 +1791,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   return;
                 }
                 print(
-                  '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1786 - BEFORE verification pollToken loop iteration',
+                  '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1794 - BEFORE verification pollToken loop iteration',
                 );
                 final status = bindings.pollToken(verificationSessionId, tokenBuf);
                 print(
-                  '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1789 - AFTER verification pollToken loop iteration status=$status',
+                  '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1798 - AFTER verification pollToken loop iteration status=$status',
                 );
                 if (status == 1) {
                   final piece = tokenBuf.toDartString();
@@ -1892,20 +1900,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           },
         );
           print(
-            '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1890 - AFTER calling _runInVerificationScope()',
+            '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1903 - AFTER calling _runInVerificationScope()',
           );
-        });
-        print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1894 - AFTER calling _runInferenceSerially()',
-        );
+          });
+          print(
+            '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1907 - AFTER calling _runInferenceSerially()',
+          );
+        } catch (e, stackTrace) {
+          print(
+            '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1911 - BEFORE rethrow after async execution exception: $e \n $stackTrace',
+          );
+          rethrow;
+        }
       }();
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1898 - AFTER exit',
+        '[FORENSIC] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1917 - AFTER exit',
       );
       return controller.stream;
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1903 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: streamVerificationInference() LINE 1922 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     }
@@ -1914,12 +1928,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // ── Private helpers ───────────────────────────────────────────────────────────
 
   int _ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) {
-    print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1880 - BEFORE entry',
-    );
     try {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1884 - BEFORE reuse check',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1933 - BEFORE entry',
+      );
+      print(
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1936 - BEFORE reuse check',
       );
       if (_nativeSessionId != null &&
           _nativeSessionModelPath == modelPath &&
@@ -1927,26 +1941,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[SESSION_CREATE_OK] reusing session=$_nativeSessionId path=$modelPath');
         _log('[FFI_CREATE_SESSION_OK] reusing=true session=$_nativeSessionId path=$modelPath');
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1893 - AFTER reuse return',
+          '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1944 - AFTER reuse return',
         );
         return _nativeSessionId!;
       }
 
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1898 - BEFORE _releaseNativeSessionIfPresent()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1950 - BEFORE _releaseNativeSessionIfPresent()',
       );
       _releaseNativeSessionIfPresent(bindings);
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1901 - AFTER _releaseNativeSessionIfPresent()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1954 - AFTER _releaseNativeSessionIfPresent()',
       );
 
       _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1906 - BEFORE bindings.createSession()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1959 - BEFORE bindings.createSession()',
       );
       final created = bindings.createSession(modelPath);
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1909 - AFTER bindings.createSession()',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1963 - AFTER bindings.createSession()',
       );
       _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath');
       if (created <= 0) {
@@ -1965,12 +1979,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
       _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1928 - AFTER exit',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1982 - AFTER exit',
       );
       return created;
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1933 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _ensureNativeSession() LINE 1987 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     }
@@ -1992,22 +2006,22 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {
-    print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1918 - BEFORE entry',
-    );
     try {
+      print(
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2011 - BEFORE entry',
+      );
       final next = _inferenceTail.then((_) async {
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1923 - BEFORE action()',
+          '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2015 - BEFORE action()',
         );
         try {
           await action();
           print(
-            '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1928 - AFTER action()',
+            '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2020 - AFTER action()',
           );
         } catch (e, st) {
           print(
-            '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1932 - BEFORE rethrow after exception in action: $e \n $st',
+            '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2024 - BEFORE rethrow after exception in action: $e \n $st',
           );
           _log('[SERIAL_QUEUE_ERROR] $e $st');
           rethrow;
@@ -2015,12 +2029,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       });
       _inferenceTail = next.catchError((_) {});
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1941 - AFTER exit',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2032 - AFTER exit',
       );
       return next;
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 1946 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runInferenceSerially() LINE 2037 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     }
@@ -2074,7 +2088,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String modelPath,
   }) async {
     print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 1996 - BEFORE entry',
+      '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2091 - BEFORE entry',
     );
     if (shouldReuseRuntimeVerification(modelPath: modelPath)) {
       verificationMonitor.update(
@@ -2082,37 +2096,37 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         message: 'Runtime verification reused.',
       );
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2004 - AFTER reuse short-circuit',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2099 - AFTER reuse short-circuit',
       );
       return true;
     }
     if (_warmupFuture == null || _warmupModelPath != modelPath) {
       _warmupModelPath = modelPath;
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2011 - BEFORE assigning _runWarmup() future',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2106 - BEFORE assigning _runWarmup() future',
       );
       _warmupFuture = _runWarmup(modelPath: modelPath);
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2014 - AFTER assigning _runWarmup() future',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2110 - AFTER assigning _runWarmup() future',
       );
     }
     _log('[WARMUP] await session=$sessionId');
     try {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2019 - BEFORE awaiting _warmupFuture',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2116 - BEFORE awaiting _warmupFuture',
       );
       await _warmupFuture!;
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2022 - AFTER awaiting _warmupFuture',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2120 - AFTER awaiting _warmupFuture',
       );
       _log('[WARMUP] complete session=$sessionId');
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2025 - AFTER exit success',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2124 - AFTER exit success',
       );
       return true;
     } catch (error) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2029 - AFTER catch observational path exception: $error',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2129 - AFTER catch observational path exception: $error',
       );
       _warmupFuture = null;
       verificationMonitor.update(
@@ -2130,7 +2144,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ' action=continue_to_create_session',
       );
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2046 - AFTER exit failure_observational',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _ensureWarmup() LINE 2147 - AFTER exit failure_observational',
       );
       return false;
     }
@@ -2138,7 +2152,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   Future<void> _runWarmup({required String modelPath}) async {
     print(
-      '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2053 - BEFORE entry',
+      '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2155 - BEFORE entry',
     );
     _log('[BOOT] runtime warmup begin');
     verificationMonitor.update(
@@ -2182,7 +2196,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final stopwatch = Stopwatch()..start();
     try {
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2095 - BEFORE warmup startGeneration',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2199 - BEFORE warmup startGeneration',
       );
       _log('[FFI_START_GEN] entering startGeneration session=$warmupSessionId warmup=true');
       final start = bindings.startGeneration(
@@ -2197,16 +2211,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
       }
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2108 - AFTER warmup startGeneration',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2214 - AFTER warmup startGeneration',
       );
       while (stopwatch.elapsed < _verificationFirstTokenTimeout) {
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2111 - BEFORE warmup pollToken loop iteration',
+          '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2218 - BEFORE warmup pollToken loop iteration',
         );
         _log('[FFI_POLL_BEGIN] entering pollToken session=$warmupSessionId warmup=true');
         final status = bindings.pollToken(warmupSessionId, tokenBuf);
         print(
-          '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2115 - AFTER warmup pollToken loop iteration status=$status',
+          '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2223 - AFTER warmup pollToken loop iteration status=$status',
         );
         if (status == 1) {
           final token = tokenBuf.toDartString();
@@ -2236,11 +2250,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         message: 'Runtime warmup passed.',
       );
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2145 - AFTER exit success',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2253 - AFTER exit success',
       );
     } catch (e, stackTrace) {
       print(
-        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runWarmup() LINE 2148 - BEFORE rethrow after exception: $e \n $stackTrace',
+        '[FORENSIC_EXCEPTION] android_ffi_runtime_provider.dart: _runWarmup() LINE 2257 - BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     } finally {
@@ -2250,7 +2264,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[FFI_RELEASE] warmup session=$warmupSessionId');
       bindings.releaseSession(warmupSessionId);
       print(
-        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2158 - AFTER finally cleanup',
+        '[FORENSIC] android_ffi_runtime_provider.dart: _runWarmup() LINE 2267 - AFTER finally cleanup',
       );
     }
   }
