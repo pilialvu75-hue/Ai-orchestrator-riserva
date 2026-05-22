@@ -49,7 +49,7 @@ class LlamaBridgeBindings {
   void initBackend() => _initBackend();
 
   int createSession(String modelPath) {
-    final pathPtr = modelPath.toNativeUtf8();
+    final pathPtr = modelPath.toNativeUtf8(allocator: calloc);
     try {
       return _createSession(
         pathPtr,
@@ -62,7 +62,7 @@ class LlamaBridgeBindings {
   }
 
   int startGeneration(int sessionId, String prompt, int maxTokens, double temperature) {
-    final promptPtr = prompt.toNativeUtf8();
+    final promptPtr = prompt.toNativeUtf8(allocator: calloc);
     try {
       return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
     } finally {
