@@ -276,7 +276,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         hasVerifiedRuntimeForModel(selectedModelPath);
     _log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart'
-      ' | Line: 274 | Function: validateRuntime()'
+      ' | Line: 277 | Function: validateRuntime()'
       ' | hasVerifiedRuntimeForModel: $_forensicVerified'
       ' | ModelID: $_forensicModelId'
       ' | ModelPath: ${_normalizePathForLogs(_forensicModelPath)}'
