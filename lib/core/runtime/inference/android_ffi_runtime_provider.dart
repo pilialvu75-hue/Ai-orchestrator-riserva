@@ -2054,31 +2054,37 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }
 
   void _evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) {
-    while (_nativeSessionsByModel.length >= _maxActiveNativeSessions) {
-      final evictedModelPath = _nativeSessionsByModel.keys.first;
-      final evictedSessionId = _nativeSessionsByModel.remove(evictedModelPath);
-      if (evictedSessionId == null) {
-        break;
-      }
+    if (_nativeSessionsByModel.length < _maxActiveNativeSessions) {
+      return;
+    }
+    final evictedModelPath = _nativeSessionsByModel.keys.first;
+    final evictedSessionId = _nativeSessionsByModel.remove(evictedModelPath);
+    if (evictedSessionId == null) {
+      return;
+    }
+    _log(
+      '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=$_maxActiveNativeSessions',
+    );
+    try {
+      bindings.releaseSession(evictedSessionId);
+    } catch (error) {
       _log(
-        '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=$_maxActiveNativeSessions',
+        '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
       );
-      try {
-        bindings.releaseSession(evictedSessionId);
-      } catch (error) {
-        _log(
-          '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
-        );
-      } finally {
-        if (_nativeSessionId == evictedSessionId) {
-          _nativeSessionId = null;
-          _nativeSessionModelPath = null;
-        }
+    } finally {
+      if (_nativeSessionId == evictedSessionId) {
+        _nativeSessionId = null;
+        _nativeSessionModelPath = null;
       }
     }
   }
 
   void _markSessionAsMostRecentlyUsed(String modelPath) {
+    // LRU ordering is encoded in LinkedHashMap insertion order. Re-inserting
+    // the same key moves it to the end and marks it as most recently used.
+    final lastModelPath =
+        _nativeSessionsByModel.isEmpty ? null : _nativeSessionsByModel.keys.last;
+    if (lastModelPath == modelPath) return;
     final sessionId = _nativeSessionsByModel.remove(modelPath);
     if (sessionId == null) return;
     _nativeSessionsByModel[modelPath] = sessionId;
