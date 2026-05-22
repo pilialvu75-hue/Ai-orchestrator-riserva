@@ -122,7 +122,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
     } catch (e, stackTrace) {
       developer.log(
-        'CRITICAL: Eccezione non gestita nella pipeline di streaming di invio',
+        'CRITICAL: Unhandled exception in send streaming pipeline',
         name: 'ai_orchestrator.ChatBloc',
         error: e,
         stackTrace: stackTrace,
