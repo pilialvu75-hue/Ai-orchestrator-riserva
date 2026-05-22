@@ -689,7 +689,8 @@ void llb_init_backend(void) {
 int64_t llb_create_session(
     const char* model_path,
     int32_t n_ctx,
-    int32_t n_threads
+    int32_t n_threads,
+    int32_t n_gpu_layers
 ) {
     llb_init_backend();
     set_global_error("");
@@ -705,10 +706,11 @@ int64_t llb_create_session(
     const bool model_readable = access(model_path, R_OK) == 0;
     const int64_t model_size = model_exists ? static_cast<int64_t>(model_stat.st_size) : -1;
 
-    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d",
+    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d n_gpu_layers=%d",
          model_path,
          n_ctx,
-         n_threads);
+         n_threads,
+         n_gpu_layers);
     LOGI("[SESSION_LOAD] model_exists=%s model_readable=%s model_size=%" PRId64,
          model_exists ? "true" : "false",
          model_readable ? "true" : "false",
@@ -724,7 +726,7 @@ int64_t llb_create_session(
     auto session = std::make_shared<RuntimeSession>(session_id);
 
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;
+    mparams.n_gpu_layers = n_gpu_layers > 0 ? n_gpu_layers : 0;
     mparams.use_mmap = true;
     mparams.use_mlock = false;
 

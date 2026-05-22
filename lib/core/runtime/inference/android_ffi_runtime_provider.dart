@@ -80,6 +80,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _maxIdlePollIterations = 2400;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
+  static const int _defaultGpuLayers = LlamaNativeDefaults.nGpuLayers;
   static const String _warmupPrompt = 'Reply with the single word: OK';
   static const int _warmupMaxTokens = 4;
   static const double _warmupTemperature = 0.1;
@@ -1773,7 +1774,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               RuntimeVerificationPhase.loading,
               message: 'Creating isolated verification session.',
             );
-            final verificationSessionId = bindings.createSession(modelPath);
+            final verificationSessionId = bindings.createSession(
+              modelPath,
+              nGpuLayers: _defaultGpuLayers,
+            );
             if (verificationSessionId <= 0) {
               final err = _safeLastError(bindings, verificationSessionId);
               _finishWithRuntimeError(
@@ -2057,7 +2061,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
       );
-      final created = bindings.createSession(modelPath);
+      final created = bindings.createSession(
+        modelPath,
+        nGpuLayers: _defaultGpuLayers,
+      );
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
       );

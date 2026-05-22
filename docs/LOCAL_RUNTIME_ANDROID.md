@@ -206,7 +206,7 @@ GGUF-header validated).
 
 `llb_load_model` receives the absolute path and:
 1. Calls `llama_backend_init()`.
-2. Sets `n_gpu_layers = 0` (CPU-only; safe on all Android devices).
+2. Sets `n_gpu_layers > 0` to offload layers to the Vulkan backend when available.
 3. Creates a `llama_model*` and a `llama_context*` with the given context size
    and thread count.
 

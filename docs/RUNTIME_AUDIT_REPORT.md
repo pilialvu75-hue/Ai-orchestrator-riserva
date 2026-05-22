@@ -210,7 +210,7 @@ Per the stabilization rules:
 | LIM-1 | Model load blocks Flutter UI thread (OBS-1) | `await Future<void>.delayed(Duration.zero)` before load gives UI one frame; deferred to follow-up |
 | LIM-2 | `libllama_bridge.so` must be pre-built and placed in `android/app/src/main/jniLibs/<abi>/` | See `native/android/README.md` for build instructions |
 | LIM-3 | `kMaxGeneratedTokens = 256` cap in native layer; Dart `_safeMaxTokens = 128` is the effective limit | Sufficient for on-device mobile inference; raise both constants if longer outputs are needed |
-| LIM-4 | No GPU acceleration (n_gpu_layers = 0) | Enable by recompiling with Vulkan/OpenCL ggml backend and setting n_gpu_layers > 0 in `llb_load_model` |
+| LIM-4 | GPU acceleration depends on Vulkan availability on device/build | Ensure native build enables Vulkan ggml backend and keeps `n_gpu_layers > 0` in `llb_create_session` |
 
 ---
 
