@@ -119,8 +119,14 @@ class RuntimeSelfTestService {
               '${notes.join('\n')}\n2. Runtime validation: FAILED\n${validation.message ?? 'Local runtime prerequisites are not satisfied.'}',
         );
       }
+      
+      // SPIEGAZIONE: Formattiamo il messaggio per renderlo meno spaventoso se è il primo avvio.
+      String validationMsg = validation.message ?? '';
+      if (validation.status.name == 'unverified') {
+        validationMsg = 'Pronto per il primo test del modello.';
+      }
       notes.add(
-        '2. Runtime validation: OK (${validation.status.name}${validation.message == null ? '' : ' – ${validation.message}'})',
+        '2. Runtime validation: OK (${validation.status.name}${validationMsg.isEmpty ? '' : ' – $validationMsg'})',
       );
 
       await _chatRepository.clearSession(selfTestSessionId);
@@ -158,6 +164,7 @@ class RuntimeSelfTestService {
 
       await for (final chunk in testStream) {
         streamAliveTicks++;
+        
         if (!chunk.isError && !chunk.isFinal && chunk.text.isNotEmpty) {
           responseBuffer.write(chunk.text);
           emittedTokenChunks++;
@@ -165,6 +172,7 @@ class RuntimeSelfTestService {
             '[COMM_TEST_TOKEN] chunk=$emittedTokenChunks chars=${chunk.text.length}',
           );
         }
+        
         if (!chunk.isError &&
             !chunk.isFinal &&
             chunk.text.trim().isNotEmpty &&
@@ -175,13 +183,16 @@ class RuntimeSelfTestService {
             '[WARMUP_FIRST_TOKEN_OK] session=$selfTestSessionId chars=${firstToken.length}',
           );
         }
+        
         if (chunk.isFinal) {
           completed = true;
-          if (chunk.text.isNotEmpty) {
-            responseBuffer.clear();
+          // SPIEGAZIONE: Rimosso responseBuffer.clear()! 
+          // Aggiungiamo eventuale testo finale solo se non è vuoto.
+          if (chunk.text.isNotEmpty && !responseBuffer.toString().endsWith(chunk.text.trim())) {
             responseBuffer.write(chunk.text);
           }
         }
+        
         if (chunk.isError && firstToken == null) {
           streamTerminalError = chunk.errorMessage ?? 'unknown runtime error';
         }
