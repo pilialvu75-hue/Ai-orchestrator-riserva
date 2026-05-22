@@ -38,6 +38,14 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
+# ggml-vulkan requires vulkan/vulkan.hpp (Vulkan-Hpp C++ header), which is NOT
+# provided by the Android NDK. The NDK ships vulkan/vulkan.h (the C API) and
+# libvulkan.so (the runtime loader), but vulkan.hpp is only available through
+# the LunarG Vulkan SDK or the Khronos vulkan-hpp project. Forcing this OFF
+# prevents ggml-vulkan.cpp from being compiled and avoids the fatal header
+# error even if a future CMake argument accidentally sets it to ON.
+set(GGML_VULKAN           OFF CACHE BOOL "" FORCE)
+
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)

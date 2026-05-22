@@ -5,8 +5,8 @@ import 'package:ffi/ffi.dart';
 typedef LlbInitBackendNative = Void Function();
 typedef LlbInitBackendDart = void Function();
 
-typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32);
-typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int);
+typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32, Int32);
+typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
 
 typedef LlbSessionStartGenNative = Int32 Function(Int64, Pointer<Utf8>, Int32, Float);
 typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
@@ -37,4 +37,11 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
+  // Number of model layers to request for GPU offload when Vulkan is available.
+  // 99 exceeds the layer count of most GGUF models, so all layers are
+  // offloaded. The C++ bridge clamps this to 0 at compile time when
+  // GGML_VULKAN is not compiled in and logs a clear fallback message.
+  // If session creation with GPU layers fails at runtime, the Dart layer
+  // retries with nGpuLayers=0 so inference continues on CPU.
+  static const int nGpuLayers = 99;
 }
