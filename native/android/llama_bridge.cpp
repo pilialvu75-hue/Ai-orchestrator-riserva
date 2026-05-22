@@ -689,7 +689,8 @@ void llb_init_backend(void) {
 int64_t llb_create_session(
     const char* model_path,
     int32_t n_ctx,
-    int32_t n_threads
+    int32_t n_threads,
+    int32_t n_gpu_layers
 ) {
     llb_init_backend();
     set_global_error("");
@@ -705,14 +706,29 @@ int64_t llb_create_session(
     const bool model_readable = access(model_path, R_OK) == 0;
     const int64_t model_size = model_exists ? static_cast<int64_t>(model_stat.st_size) : -1;
 
-    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d",
+    const int32_t effective_gpu_layers = n_gpu_layers < 0 ? 0 : n_gpu_layers;
+
+    LOGI("[SESSION_CREATE_BEGIN] model_path=%s n_ctx=%d n_threads=%d n_gpu_layers=%d",
          model_path,
          n_ctx,
-         n_threads);
+         n_threads,
+         effective_gpu_layers);
     LOGI("[SESSION_LOAD] model_exists=%s model_readable=%s model_size=%" PRId64,
          model_exists ? "true" : "false",
          model_readable ? "true" : "false",
          model_size);
+
+#if defined(GGML_USE_VULKAN)
+    LOGI("[GPU_DETECT] vulkan=enabled requested_gpu_layers=%d", effective_gpu_layers);
+#else
+    if (effective_gpu_layers > 0) {
+        LOGI("[GPU_DETECT] vulkan=disabled requested_gpu_layers=%d effective_gpu_layers=0"
+             " reason=GGML_USE_VULKAN_not_compiled fallback=cpu",
+             effective_gpu_layers);
+    } else {
+        LOGI("[GPU_DETECT] vulkan=disabled gpu_layers=0 backend=cpu");
+    }
+#endif
 
     if (!model_exists || !model_readable || model_size <= 0) {
         set_global_error("Invalid model file path or unreadable file");
@@ -724,7 +740,18 @@ int64_t llb_create_session(
     auto session = std::make_shared<RuntimeSession>(session_id);
 
     llama_model_params mparams = llama_model_default_params();
+#if defined(GGML_USE_VULKAN)
+    mparams.n_gpu_layers = effective_gpu_layers;
+    LOGI("[GPU_ASSIGN] session=%" PRId64 " n_gpu_layers=%d backend=vulkan",
+         session_id, mparams.n_gpu_layers);
+#else
     mparams.n_gpu_layers = 0;
+    if (effective_gpu_layers > 0) {
+        LOGI("[GPU_ASSIGN] session=%" PRId64 " n_gpu_layers=0 requested=%d"
+             " reason=vulkan_not_available fallback=cpu",
+             session_id, effective_gpu_layers);
+    }
+#endif
     mparams.use_mmap = true;
     mparams.use_mlock = false;
 
