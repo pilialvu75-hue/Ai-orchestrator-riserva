@@ -38,10 +38,13 @@ abstract final class LlamaNativeDefaults {
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
   // Number of model layers to request for GPU offload when Vulkan is available.
-  // 99 exceeds the layer count of most GGUF models, so all layers are
-  // offloaded. The C++ bridge clamps this to 0 at compile time when
-  // GGML_VULKAN is not compiled in and logs a clear fallback message.
-  // If session creation with GPU layers fails at runtime, the Dart layer
-  // retries with nGpuLayers=0 so inference continues on CPU.
+  // 99 exceeds the layer count of most GGUF models in use; llama.cpp clamps
+  // any value above the actual layer count to that count, so passing 99 is
+  // equivalent to "offload all layers". For future models with more than 99
+  // layers, INT_MAX (-1 is treated as 0 by the bridge) would fully offload;
+  // 99 is used here as a safe large-but-readable sentinel.
+  // The C++ bridge clamps this to 0 at compile time when GGML_VULKAN is not
+  // compiled in and logs a clear fallback message. If session creation with
+  // GPU layers fails at runtime, the Dart layer retries with nGpuLayers=0.
   static const int nGpuLayers = 99;
 }
