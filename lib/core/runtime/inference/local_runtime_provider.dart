@@ -228,15 +228,19 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    final controller =
-        StreamController<InferenceResponse>();
+    // 1. BLOCCO IMMEDIATO: Se è Android, esce subito senza fare NIENTE altro
+    if (Platform.isAndroid) {
+      debugPrint('[$_localProviderTag] Android detected: Processo CLI bloccato.');
+      final controller = StreamController<InferenceResponse>();
+      controller.add(InferenceResponse.error('Esecuzione locale tramite CLI non supportata su Android.'));
+      controller.close();
+      return controller.stream;
+    }
+
+    final controller = StreamController<InferenceResponse>();
 
     () async {
       try {
-        if (Platform.isAndroid) {
-          throw UnsupportedError('CLI inference via Process.start is not supported on Android. Please implement FFI integration.');
-        }
-
         final modelPath = request.modelPath;
         final modelId = request.modelId;
 
@@ -468,10 +472,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String _resolveLlamaExecutable() {
-    if (Platform.isAndroid) {
-       throw UnsupportedError('CLI execution is not supported on Android. Use FFI.');
-    }
-    
     final envPath =
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
