@@ -1043,8 +1043,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[TOKEN_STREAM] loop start max_tokens=$maxTokens');
       _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
       _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
+      final pollLoopStartedAt = DateTime.now();
       _log(
-        '[FORENSIC_POLL_BEGIN] nativeSessionId=$nativeSessionId elapsedMs=0 pollCount=0',
+        '[FORENSIC_POLL_BEGIN] nativeSessionId=$nativeSessionId elapsedMs=${pollLoopStartedAt.difference(startedAt).inMilliseconds} pollCount=$pollIterations',
       );
       _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
 

@@ -765,7 +765,7 @@ int64_t llb_create_session(
     cparams.n_ubatch = kSafeNBatch;
     cparams.embeddings = false;
     cparams.offload_kqv = true;
-    const char* backend_type = "CPU";
+    const char* backend_type = mparams.n_gpu_layers > 0 ? "GPU_CONFIGURED" : "CPU_CONFIGURED";
     LOGI("[FORENSIC_BACKEND] ggml_backend=llama.cpp n_gpu_layers=%d offload_kqv=%s backend=%s backend_initialized=%s",
          mparams.n_gpu_layers,
          cparams.offload_kqv ? "true" : "false",
