@@ -2100,7 +2100,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     LlamaBridgeBindings bindings,
     String modelPath,
   ) {
-    final requestedGpuLayers = _defaultGpuLayers > 0 ? _defaultGpuLayers : 0;
+    final requestedGpuLayers = _defaultGpuLayers;
     final created = bindings.createSession(
       modelPath,
       nGpuLayers: requestedGpuLayers,
