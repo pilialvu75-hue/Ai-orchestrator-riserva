@@ -115,6 +115,12 @@ android {
                 cppFlags "-std=c++17 -O3 -fno-finite-math-only -DNDEBUG"
                 arguments(
                     "-DAI_ANDROID_ENABLE_MLC=OFF",
+                    // Enable Vulkan GPU acceleration for llama_bridge.
+                    // Requires libvulkan.so on the device (available on S24 FE and
+                    // most Android 7+ devices). Falls back to CPU automatically if
+                    // libvulkan is not found by CMake or if session creation with
+                    // GPU layers fails at runtime.
+                    "-DAI_ANDROID_ENABLE_VULKAN=ON",
                     // Disable OpenMP to prevent libomp.so from being bundled
                     // into the APK. libomp.so (LLVM OpenMP runtime) is not a
                     // standard Android system library and causes "App not

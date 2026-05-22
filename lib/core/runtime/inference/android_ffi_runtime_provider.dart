@@ -741,7 +741,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       await Future<void>.delayed(Duration.zero);
       _logAi('creating native session...');
       _log('[NATIVE_MODEL_LOAD_BEGIN] path=$modelPath modelId=$modelId'
-          ' n_ctx=512 n_threads=2 gpu_layers=0');
+          ' n_ctx=${LlamaNativeDefaults.nCtx} n_threads=${LlamaNativeDefaults.nThreads}'
+          ' gpu_layers=${LlamaNativeDefaults.nGpuLayers}');
 
       int nativeSessionId;
       try {
@@ -2053,15 +2054,34 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
 
-      _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
+      // ── GPU-accelerated session (Vulkan) with CPU fallback ───────────────────
+      // Attempt to create a session with GPU layers (Vulkan). If session
+      // creation fails, the native bridge may not support Vulkan on this device
+      // or build; retry with 0 GPU layers so inference continues on CPU.
+      final desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
+      _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath gpu_layers=$desiredGpuLayers');
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
       );
-      final created = bindings.createSession(modelPath);
+      int created = bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
       );
-      _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath');
+      _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=$desiredGpuLayers');
+
+      if (created <= 0 && desiredGpuLayers > 0) {
+        // GPU session creation failed — fall back to CPU.
+        _log(
+          '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers failed=$created'
+          ' reason=session_create_error retrying_with_cpu',
+        );
+        created = bindings.createSession(modelPath, nGpuLayers: 0);
+        _log(
+          '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=0 fallback=cpu',
+        );
+      }
+
       if (created <= 0) {
         _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
         final err = _safeLastError(bindings, created);

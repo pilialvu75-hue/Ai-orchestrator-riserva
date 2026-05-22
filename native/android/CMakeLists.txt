@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(SUPPORTED_ANDROID_ABIS arm64-v8a)
 option(AI_ANDROID_ENABLE_MLC "Enable MLC-LLM JNI bridge integration" OFF)
+option(AI_ANDROID_ENABLE_VULKAN "Enable Vulkan GPU acceleration for llama_bridge" OFF)
 
 if(ANDROID AND DEFINED ANDROID_ABI AND NOT ANDROID_ABI IN_LIST SUPPORTED_ANDROID_ABIS)
     message(FATAL_ERROR
@@ -38,6 +39,22 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
+# Optional Vulkan GPU acceleration for llama.cpp on Android
+# Enabled when AI_ANDROID_ENABLE_VULKAN=ON and vulkan.hpp is available on the NDK.
+if(AI_ANDROID_ENABLE_VULKAN)
+    find_library(VULKAN_LIB vulkan)
+    if(VULKAN_LIB)
+        set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+        message(STATUS "[AI_RUNTIME] Vulkan enabled for llama_bridge (lib=${VULKAN_LIB})")
+    else()
+        set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+        message(STATUS "[AI_RUNTIME] Vulkan requested but libvulkan not found — falling back to CPU")
+    endif()
+else()
+    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+    message(STATUS "[AI_RUNTIME] Vulkan disabled for llama_bridge (AI_ANDROID_ENABLE_VULKAN=OFF)")
+endif()
+
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
@@ -60,6 +77,10 @@ target_link_libraries(llama_bridge PRIVATE
     log       # Android NDK logging
     android   # Android NDK utils
 )
+
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_LIB)
+    target_link_libraries(llama_bridge PRIVATE ${VULKAN_LIB})
+endif()
 
 target_compile_options(llama_bridge PRIVATE
     -O3
