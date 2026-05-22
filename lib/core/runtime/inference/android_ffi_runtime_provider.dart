@@ -2110,12 +2110,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     final gpuError = _safeLastError(bindings, created);
-    if (requestedGpuLayers <= 0) {
-      _log(
-        '[FFI_CREATE_SESSION_FAIL] path=$modelPath requested_gpu_layers=$requestedGpuLayers error=$gpuError',
-      );
-      return created;
-    }
     _log(
       '[FFI_CREATE_SESSION_GPU_FALLBACK] path=$modelPath requested_gpu_layers=$requestedGpuLayers gpu_error=$gpuError',
     );

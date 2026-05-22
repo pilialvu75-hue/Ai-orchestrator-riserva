@@ -37,7 +37,7 @@ abstract final class LlamaNativeDefaults {
   // Keep Android runtime thread usage bounded for thermals/stability.
   // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
-  // Request a high layer count so GPU offload is preferred where supported.
+  // Intentionally high so runtimes can offload as many layers as the model/device allow.
   static const int nGpuLayers = 99;
   static const int nBatch = 32;
   static const double temperature = 0.7;
