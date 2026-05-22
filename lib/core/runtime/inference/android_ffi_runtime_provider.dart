@@ -1336,18 +1336,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
-              scheduleMicrotask(() {
-                try {
-                  if (!controller.isClosed) {
-                    controller.add(
-                      InferenceResponse.token(
-                        text: piece,
-                        model: modelId,
-                      ),
-                    );
-                  }
-                } catch (_) {}
-              });
+              try {
+                // Emit synchronously. Deferring via microtask can starve token
+                // delivery until after the polling loop closes the stream.
+                if (!controller.isClosed) {
+                  controller.add(
+                    InferenceResponse.token(
+                      text: piece,
+                      model: modelId,
+                    ),
+                  );
+                }
+              } catch (_) {}
               flushWatch.stop();
               _log(
                 '[STREAM_FLUSH] event=token session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',

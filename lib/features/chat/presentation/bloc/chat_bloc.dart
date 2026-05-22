@@ -3,13 +3,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/prune_chat_history.dart';
-import 'package:ai_orchestrator/features/chat/domain/usecases/send_chat_message.dart';
+import 'package:ai_orchestrator/features/chat/domain/usecases/stream_chat_message.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
-    required this.sendChatMessage,
+    required this.streamChatMessage,
     required this.loadChatMessages,
     required this.pruneChatHistory,
     String initialProvider = 'openAi',
@@ -20,7 +20,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<PruneHistoryEvent>(_onPruneHistory);
   }
 
-  final SendChatMessage sendChatMessage;
+  final StreamChatMessage streamChatMessage;
   final LoadChatMessages loadChatMessages;
   final PruneChatHistory pruneChatHistory;
 
@@ -69,33 +69,57 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
     try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final optimisticUserMessage = ChatMessage(
+        id: 'pending-user-$now',
+        sessionId: event.sessionId,
+        role: 'user',
+        content: event.userPrompt,
+        timestamp: now,
+        attachments: event.attachments,
+      );
+      final optimisticAssistantMessage = ChatMessage(
+        id: 'pending-assistant-$now',
+        sessionId: event.sessionId,
+        role: 'assistant',
+        content: '',
+        timestamp: now + 1,
+        provider: _activeProvider,
+      );
+      final shouldShowAssistantPlaceholder =
+          event.userPrompt.trim().isNotEmpty || event.attachments.isEmpty;
+
       emit(ChatSending(
-          messages: List.unmodifiable(_messages),
+          messages: List.unmodifiable(<ChatMessage>[
+            ..._messages,
+            optimisticUserMessage,
+            if (shouldShowAssistantPlaceholder) optimisticAssistantMessage,
+          ]),
           activeProvider: _activeProvider));
 
-      final result = await sendChatMessage(SendChatMessageParams(
-        sessionId: event.sessionId,
-        userPrompt: event.userPrompt,
-        systemPrompt: event.systemPrompt,
-      ));
+      await for (final assistantMessage in streamChatMessage(
+        StreamChatMessageParams(
+          sessionId: event.sessionId,
+          userPrompt: event.userPrompt,
+          systemPrompt: event.systemPrompt,
+          attachments: event.attachments,
+          activeProvider: _activeProvider,
+        ),
+      )) {
+        if (isClosed) return;
+        emit(ChatSending(
+          messages: List.unmodifiable(<ChatMessage>[
+            ..._messages,
+            optimisticUserMessage,
+            assistantMessage,
+          ]),
+          activeProvider: _activeProvider,
+        ));
+      }
 
-      if (isClosed) return;
-
-      result.fold(
-        (failure) {
-          developer.log(
-            'FAIL: Invio messaggio fallito. Sessione: ${event.sessionId}. Errore: ${failure.message}',
-            name: 'ai_orchestrator.ChatBloc',
-            level: 900,
-          );
-          emit(ChatError(message: failure.message));
-        },
-        (_) {
-          if (!isClosed) {
-            add(LoadMessagesEvent(sessionId: event.sessionId));
-          }
-        },
-      );
+      if (!isClosed) {
+        add(LoadMessagesEvent(sessionId: event.sessionId));
+      }
     } catch (e, stackTrace) {
       developer.log(
         'CRITICAL: Eccezione non gestita durante l\'invio del messaggio',
