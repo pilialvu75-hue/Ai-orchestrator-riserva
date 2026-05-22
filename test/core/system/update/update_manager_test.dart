@@ -216,7 +216,7 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-  test('bypasses signature mismatch in debug mode and launches installer', () async {
+  test('bypasses signature mismatch when debug bypass is enabled and launches installer', () async {
     final tempDir = await Directory.systemTemp.createTemp('update-manager-test-');
     final apkFile = File('${tempDir.path}/candidate.apk');
     await apkFile.writeAsBytes(Uint8List(80 * 1024));
