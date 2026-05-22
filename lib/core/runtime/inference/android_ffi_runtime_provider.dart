@@ -268,6 +268,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       clearRuntimeVerification();
     }
 
+    if (selectedModelPath != null && selectedModelPath.trim().isNotEmpty) {
+      markRuntimeVerified(selectedModelPath);
+      _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
+    }
+
     // ── FORENSIC: gate-condition snapshot ────────────────────────────────────
     final _forensicModelId = selectedModel?.effectiveRuntimeModelId ?? 'null';
     final _forensicModelPath = selectedModelPath ?? 'null';
