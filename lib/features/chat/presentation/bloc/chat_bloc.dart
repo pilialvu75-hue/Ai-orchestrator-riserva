@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages.dart';
@@ -36,7 +37,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (isClosed) return;
 
       result.fold(
-        (failure) => emit(ChatError(message: failure.message)),
+        (failure) {
+          developer.log(
+            'FAIL: Impossibile caricare i messaggi per la sessione ${event.sessionId}. Errore: ${failure.message}',
+            name: 'ai_orchestrator.ChatBloc',
+            level: 900,
+          );
+          emit(ChatError(message: failure.message));
+        },
         (messages) {
           _messages = List<ChatMessage>.from(messages);
           emit(ChatLoaded(
@@ -44,7 +52,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
               activeProvider: _activeProvider));
         },
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      developer.log(
+        'CRITICAL: Eccezione non gestita durante il caricamento dei messaggi',
+        name: 'ai_orchestrator.ChatBloc',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
       }
@@ -67,14 +82,28 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (isClosed) return;
 
       result.fold(
-        (failure) => emit(ChatError(message: failure.message)),
+        (failure) {
+          developer.log(
+            'FAIL: Invio messaggio fallito. Sessione: ${event.sessionId}. Errore: ${failure.message}',
+            name: 'ai_orchestrator.ChatBloc',
+            level: 900,
+          );
+          emit(ChatError(message: failure.message));
+        },
         (_) {
           if (!isClosed) {
             add(LoadMessagesEvent(sessionId: event.sessionId));
           }
         },
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      developer.log(
+        'CRITICAL: Eccezione non gestita durante l\'invio del messaggio',
+        name: 'ai_orchestrator.ChatBloc',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
       }
@@ -85,7 +114,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       PruneHistoryEvent event, Emitter<ChatState> emit) async {
     try {
       await pruneChatHistory(const PruneChatHistoryParams());
-    } catch (e) {
+    } catch (e, stackTrace) {
+      developer.log(
+        'CRITICAL: Eccezione durante la pulizia della cronologia (Prune)',
+        name: 'ai_orchestrator.ChatBloc',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
       }
