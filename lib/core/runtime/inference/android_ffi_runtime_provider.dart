@@ -897,6 +897,25 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ' top_p=$effectiveTopP',
       );
       _logAi('starting inference...');
+
+      // Allocate the prompt pointer here and keep it alive until the first
+      // token is received from pollToken. The native llb_session_start_gen
+      // may begin tokenisation on a background thread and continue reading
+      // from this pointer after the FFI call has returned to Dart. Freeing
+      // it immediately (e.g. in a finally after startGeneration) is a
+      // use-after-free that causes an instant native crash. The pointer is
+      // freed either (a) in the isFirstToken block once ingestion is known
+      // to be complete, or (b) in the polling try/finally as a catch-all for
+      // every early-exit path.
+      final promptNativePtr = prompt.toNativeUtf8(allocator: calloc);
+      var promptNativePtrFreed = false;
+      void freePromptNativePtr() {
+        if (!promptNativePtrFreed) {
+          calloc.free(promptNativePtr);
+          promptNativePtrFreed = true;
+        }
+      }
+
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
@@ -906,7 +925,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           timeout: _startGenerationTimeout,
           call: () => bindings.startGeneration(
             nativeSessionId,
-            prompt,
+            promptNativePtr,
             maxTokens,
             effectiveTemperature,
           ),
@@ -917,6 +936,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
       } catch (error) {
         startupWatch.stop();
+        freePromptNativePtr();
         _log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
@@ -952,6 +972,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[FFI_TIMEOUT] session=$sessionId stage=start_generation_postcheck'
           ' timeout_ms=${_startGenerationTimeout.inMilliseconds}',
         );
+        freePromptNativePtr();
         _safeCancel(bindings, nativeSessionId);
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_timeout');
@@ -972,6 +993,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       if (startResult != 0) {
         _log('[FFI_BRANCH] session=$sessionId name=start_generation_failed_code');
+        freePromptNativePtr();
         clearRuntimeVerification();
         final err = _safeLastError(bindings, nativeSessionId);
         _safeResetRuntime(bindings, reason: 'start_generation_failed');
@@ -1316,6 +1338,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
               );
               if (isFirstToken) {
+                // The native ingestion phase is now complete: the prompt
+                // pointer is safe to release.
+                freePromptNativePtr();
                 _log(
                   '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
                 );
@@ -1577,6 +1602,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           }
         }
       } finally {
+        // Guard: free the prompt pointer if it was not yet freed by the
+        // isFirstToken path (covers all early-exit branches such as
+        // timeouts, cancellations, and native errors that fire before the
+        // first token is produced).
+        freePromptNativePtr();
         if (runtimeNeedsReset) {
           _safeResetRuntime(
             bindings,
@@ -1763,14 +1793,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             final fullText = StringBuffer();
             var completed = false;
             var released = false;
+            // Keep the prompt pointer alive until the first token is polled;
+            // the native tokenisation stage may read it from a background thread.
+            final verificationPromptPtr =
+                request.prompt.toNativeUtf8(allocator: calloc);
+            var verificationPromptPtrFreed = false;
+            void freeVerificationPromptPtr() {
+              if (!verificationPromptPtrFreed) {
+                calloc.free(verificationPromptPtr);
+                verificationPromptPtrFreed = true;
+              }
+            }
             try {
               final startResult = bindings.startGeneration(
                 verificationSessionId,
-                request.prompt,
+                verificationPromptPtr,
                 request.maxTokens.clamp(1, _safeMaxTokens),
                 request.temperature,
               );
               if (startResult != 0) {
+                freeVerificationPromptPtr();
                 final err = _safeLastError(bindings, verificationSessionId);
                 _finishWithRuntimeError(
                   controller,
@@ -1790,8 +1832,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 message: 'Verification inference running.',
               );
               final startedAt = DateTime.now();
+              var verificationFirstTokenReceived = false;
               while (true) {
                 if (cancellationToken.isCancelled) {
+                  freeVerificationPromptPtr();
                   _safeCancel(bindings, verificationSessionId);
                   _finishWithRuntimeError(
                     controller,
@@ -1807,6 +1851,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 }
                 final elapsed = DateTime.now().difference(startedAt);
                 if (elapsed > _generationTimeout) {
+                  freeVerificationPromptPtr();
                   _safeCancel(bindings, verificationSessionId);
                   _finishWithRuntimeError(
                     controller,
@@ -1831,6 +1876,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 if (status == 1) {
                   final piece = tokenBuf.toDartString();
                   if (piece.isNotEmpty) {
+                    if (!verificationFirstTokenReceived) {
+                      // Ingestion phase is done; safe to release the pointer.
+                      freeVerificationPromptPtr();
+                      verificationFirstTokenReceived = true;
+                    }
                     emittedTokens++;
                     fullText.write(piece);
                     if (!controller.isClosed) {
@@ -1845,10 +1895,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   continue;
                 }
                 if (status == 2) {
+                  freeVerificationPromptPtr();
                   completed = true;
                   break;
                 }
                 if (status == -1) {
+                  freeVerificationPromptPtr();
                   final err = _safeLastError(bindings, verificationSessionId);
                   _finishWithRuntimeError(
                     controller,
@@ -1864,6 +1916,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   return;
                 }
                 if (status == -99) {
+                  freeVerificationPromptPtr();
                   _finishWithRuntimeError(
                     controller,
                     stage: 'verification_cancelled_native',
@@ -1912,6 +1965,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 await controller.close();
               }
             } finally {
+              freeVerificationPromptPtr();
               calloc.free(tokenBufRaw);
               _safeCancel(bindings, verificationSessionId);
               try {
@@ -2295,6 +2349,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final tokenBuf = tokenBufRaw.cast<Utf8>();
     var firstTokenSeen = false;
     final stopwatch = Stopwatch()..start();
+    // Keep the warmup prompt pointer alive until the first token is polled.
+    final warmupPromptPtr = _warmupPrompt.toNativeUtf8(allocator: calloc);
+    var warmupPromptPtrFreed = false;
+    void freeWarmupPromptPtr() {
+      if (!warmupPromptPtrFreed) {
+        calloc.free(warmupPromptPtr);
+        warmupPromptPtrFreed = true;
+      }
+    }
     try {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2218 | Function: _runWarmup() | BEFORE warmup startGeneration',
@@ -2302,7 +2365,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[FFI_START_GEN] entering startGeneration session=$warmupSessionId warmup=true');
       final start = bindings.startGeneration(
         warmupSessionId,
-        _warmupPrompt,
+        warmupPromptPtr,
         _warmupMaxTokens,
         _warmupTemperature,
       );
@@ -2326,6 +2389,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         if (status == 1) {
           final token = tokenBuf.toDartString();
           if (token.trim().isNotEmpty) {
+            // Ingestion complete; safe to free the prompt pointer.
+            freeWarmupPromptPtr();
             firstTokenSeen = true;
             _log(
               '[FFI_FIRST_TOKEN] warmup session=$warmupSessionId elapsed_ms=${stopwatch.elapsedMilliseconds}',
@@ -2359,6 +2424,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       rethrow;
     } finally {
+      freeWarmupPromptPtr();
       calloc.free(tokenBufRaw);
       _log('[FFI_CANCEL] warmup session=$warmupSessionId');
       bindings.cancelSession(warmupSessionId);
