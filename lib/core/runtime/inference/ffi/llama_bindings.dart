@@ -48,13 +48,17 @@ class LlamaBridgeBindings {
 
   void initBackend() => _initBackend();
 
-  int createSession(String modelPath) {
+  int createSession(String modelPath, {int? nGpuLayers}) {
     final pathPtr = modelPath.toNativeUtf8(allocator: calloc);
+    final resolvedGpuLayers = nGpuLayers != null && nGpuLayers > 0
+        ? nGpuLayers
+        : LlamaNativeDefaults.nGpuLayers;
     try {
       return _createSession(
         pathPtr,
         LlamaNativeDefaults.nCtx,
         LlamaNativeDefaults.nThreads,
+        resolvedGpuLayers,
       );
     } finally {
       calloc.free(pathPtr);

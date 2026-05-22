@@ -37,6 +37,7 @@ endif()
 # Forza i flag di accelerazione nativi di llama.cpp per Android
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
+set(GGML_VULKAN           ON  CACHE BOOL "" FORCE)
 
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
