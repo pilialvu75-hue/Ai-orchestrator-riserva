@@ -88,12 +88,15 @@ class UpdateManager {
     required SharedPreferences preferences,
     required AndroidIntentHandler intentHandler,
     required String currentVersion,
+    bool? allowDebugSignatureMismatchBypass,
     Dio? dio,
   })  : _updateChecker = updateChecker,
         _comparator = comparator,
         _preferences = preferences,
         _intentHandler = intentHandler,
         _currentVersion = comparator.normalize(currentVersion) ?? currentVersion,
+        _allowDebugSignatureMismatchBypass =
+            allowDebugSignatureMismatchBypass ?? kDebugMode,
         _dio = dio ?? Dio(),
         state = ValueNotifier<UpdateState>(
           UpdateState.initial(
@@ -109,6 +112,7 @@ class UpdateManager {
   final SharedPreferences _preferences;
   final AndroidIntentHandler _intentHandler;
   final String _currentVersion;
+  final bool _allowDebugSignatureMismatchBypass;
   final Dio _dio;
 
   final ValueNotifier<UpdateState> state;
@@ -742,26 +746,35 @@ class UpdateManager {
               verification.signatureSha256 != null &&
               installedIdentity.signatureSha256 != verification.signatureSha256;
       if (signaturesDiffer) {
-        const message = 'APK signature does not match installed app signature';
         _logSignatureMismatch(
           'reason=signature_fingerprint_mismatch '
           'current=${installedIdentity.signatureSha256} '
           'new=${verification.signatureSha256}',
         );
-        _logUpdateInstallResult(
-          'success=false reason=signature_mismatch apk_path=$apkPath',
-        );
-        state.value = state.value.copyWith(
-          status: UpdateStatus.error,
-          errorMessage: message,
-          diagnostics: state.value.diagnostics.copyWith(
-            installerLaunchSuccess: false,
-            apkPath: apkPath,
-            apkFileExists: verification.exists,
-            lastException: message,
-          ),
-        );
-        return false;
+        if (_allowDebugSignatureMismatchBypass) {
+          const warning = 'Warning: APK signature mismatch bypassed for local development. '
+              'Bypass defaults to enabled in debug mode and disabled in release mode unless explicitly overridden.';
+          _logInstall(warning);
+          _logUpdateInstallResult(
+            'success=true reason=signature_mismatch_debug_bypass apk_path=$apkPath',
+          );
+        } else {
+          const message = 'APK signature does not match installed app signature';
+          _logUpdateInstallResult(
+            'success=false reason=signature_mismatch apk_path=$apkPath',
+          );
+          state.value = state.value.copyWith(
+            status: UpdateStatus.error,
+            errorMessage: message,
+            diagnostics: state.value.diagnostics.copyWith(
+              installerLaunchSuccess: false,
+              apkPath: apkPath,
+              apkFileExists: verification.exists,
+              lastException: message,
+            ),
+          );
+          return false;
+        }
       }
 
       final result = await _intentHandler.openApkInstaller(apkPath);
