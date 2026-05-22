@@ -59,6 +59,17 @@ def requiresReleaseSigning = requestedGradleTasks.any { taskName ->
         || taskName.contains("packagerelease")
         || (taskName.contains("publish") && taskName.contains("release"))
 }
+def releaseStoreFilePath = keystoreProperties.getProperty("storeFile") ?: System.getenv("KEYSTORE_FILE")
+def releaseStorePasswordValue = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
+def releaseKeyAliasValue = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
+def releaseKeyPasswordValue = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
+def releaseStoreFileCandidate = releaseStoreFilePath ? file(releaseStoreFilePath) : null
+def hasReleaseSigningMaterial = releaseStoreFileCandidate != null &&
+    releaseStoreFileCandidate.exists() &&
+    releaseStorePasswordValue != null &&
+    releaseKeyAliasValue != null &&
+    releaseKeyPasswordValue != null
+def useReleaseSigningForDebug = alignDebugReleaseSigning && hasReleaseSigningMaterial
 def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
     !supportedFlutterTargetPlatforms.contains(it)
 }
@@ -119,17 +130,11 @@ android {
             keyPassword "android"
         }
         release {
-            def storeFilePath = keystoreProperties.getProperty("storeFile") ?: System.getenv("KEYSTORE_FILE")
-            def storePasswordValue = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
-            def keyAliasValue = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
-            def keyPasswordValue = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
-            def storeFileCandidate = storeFilePath ? file(storeFilePath) : null
-
-            if (storeFileCandidate != null && storeFileCandidate.exists() && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
-                storeFile storeFileCandidate
-                storePassword storePasswordValue
-                keyAlias keyAliasValue
-                keyPassword keyPasswordValue
+            if (hasReleaseSigningMaterial) {
+                storeFile releaseStoreFileCandidate
+                storePassword releaseStorePasswordValue
+                keyAlias releaseKeyAliasValue
+                keyPassword releaseKeyPasswordValue
             } else if (requiresReleaseSigning) {
                 throw new GradleException(
                     "Missing Android release signing configuration. " +
@@ -155,8 +160,10 @@ android {
             // Optional OTA local test mode: align debug with release signing/package
             // (`-PalignDebugReleaseSigning=true` or `ALIGN_DEBUG_RELEASE_SIGNING=true`)
             // so local OTA signatures match server-provided APK lineage.
-            signingConfig alignDebugReleaseSigning ? signingConfigs.release : signingConfigs.debug
-            if (!alignDebugReleaseSigning) {
+            // If release signing credentials are unavailable locally, fallback to
+            // standard debug signing and debug package suffix.
+            signingConfig useReleaseSigningForDebug ? signingConfigs.release : signingConfigs.debug
+            if (!useReleaseSigningForDebug) {
                 // Suffix isolates the debug package from release installs.
                 applicationIdSuffix ".debug"
             }

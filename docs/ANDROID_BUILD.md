@@ -120,7 +120,8 @@ The release build expects runtime-provided signing material.
 - local OTA testing can align debug with release lineage using
   `-PalignDebugReleaseSigning=true` (or `ALIGN_DEBUG_RELEASE_SIGNING=true`),
   which makes debug use the release signing config and removes `.debug`
-  applicationId suffix for that build
+  applicationId suffix for that build when release credentials are available;
+  otherwise it falls back to standard debug signing/suffix
 
 A missing or malformed keystore does not mean the build system is broken; it means the signing path must be repaired.
 
