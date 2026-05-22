@@ -33,7 +33,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(const ChatLoading());
       final result = await loadChatMessages(
           LoadChatMessagesParams(sessionId: event.sessionId));
-      
+
       if (isClosed) return;
 
       result.fold(
@@ -122,7 +122,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
     } catch (e, stackTrace) {
       developer.log(
-        'CRITICAL: Eccezione non gestita durante l\'invio del messaggio',
+        'CRITICAL: Eccezione non gestita nella pipeline di streaming di invio',
         name: 'ai_orchestrator.ChatBloc',
         error: e,
         stackTrace: stackTrace,
