@@ -73,6 +73,11 @@ def useReleaseSigningForDebug = alignDebugReleaseSigning && hasReleaseSigningMat
 if (useReleaseSigningForDebug) {
     println("⚠ alignDebugReleaseSigning enabled: debug builds will use release signing and package identity for local OTA testing.")
 }
+def enableAndroidVulkan = (
+    project.findProperty("enableAndroidVulkan")
+        ?: System.getenv("ENABLE_ANDROID_VULKAN")
+        ?: "true"
+).toString().toBoolean()
 def unsupportedTargetPlatforms = requestedTargetPlatforms.findAll {
     !supportedFlutterTargetPlatforms.contains(it)
 }
@@ -115,6 +120,7 @@ android {
                 cppFlags "-std=c++17 -O3 -fno-finite-math-only -DNDEBUG"
                 arguments(
                     "-DAI_ANDROID_ENABLE_MLC=OFF",
+                    "-DAI_ANDROID_ENABLE_VULKAN=${enableAndroidVulkan ? 'ON' : 'OFF'}",
                     // Disable OpenMP to prevent libomp.so from being bundled
                     // into the APK. libomp.so (LLVM OpenMP runtime) is not a
                     // standard Android system library and causes "App not

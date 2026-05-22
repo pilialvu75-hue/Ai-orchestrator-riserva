@@ -4,11 +4,14 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(llama_bridge VERSION 1.0.0 LANGUAGES C CXX)
 
+include(CheckIncludeFileCXX)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(SUPPORTED_ANDROID_ABIS arm64-v8a)
 option(AI_ANDROID_ENABLE_MLC "Enable MLC-LLM JNI bridge integration" OFF)
+option(AI_ANDROID_ENABLE_VULKAN "Enable Vulkan ggml backend for llama.cpp on Android" ON)
 
 if(ANDROID AND DEFINED ANDROID_ABI AND NOT ANDROID_ABI IN_LIST SUPPORTED_ANDROID_ABIS)
     message(FATAL_ERROR
@@ -37,6 +40,21 @@ endif()
 # Forza i flag di accelerazione nativi di llama.cpp per Android
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
+if(AI_ANDROID_ENABLE_VULKAN)
+    check_include_file_cxx("vulkan/vulkan.hpp" AI_ANDROID_HAS_VULKAN_HPP)
+    if(AI_ANDROID_HAS_VULKAN_HPP)
+        set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+        message(STATUS "AI Android Vulkan backend enabled (vulkan/vulkan.hpp found).")
+    else()
+        set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+        message(WARNING
+            "AI_ANDROID_ENABLE_VULKAN=ON but vulkan/vulkan.hpp was not found. "
+            "Building with CPU fallback (GGML_VULKAN=OFF).")
+    endif()
+else()
+    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+    message(STATUS "AI Android Vulkan backend disabled (AI_ANDROID_ENABLE_VULKAN=OFF).")
+endif()
 
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

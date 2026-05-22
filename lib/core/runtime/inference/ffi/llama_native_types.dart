@@ -5,8 +5,13 @@ import 'package:ffi/ffi.dart';
 typedef LlbInitBackendNative = Void Function();
 typedef LlbInitBackendDart = void Function();
 
-typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32);
-typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int);
+typedef LlbCreateSessionNative = Int64 Function(
+  Pointer<Utf8>,
+  Int32,
+  Int32,
+  Int32,
+);
+typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
 
 typedef LlbSessionStartGenNative = Int32 Function(Int64, Pointer<Utf8>, Int32, Float);
 typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
@@ -32,6 +37,9 @@ abstract final class LlamaNativeDefaults {
   // Keep Android runtime thread usage bounded for thermals/stability.
   // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
+  // Intentionally high (99) so runtimes can offload as many layers as the model/device allow.
+  // The supported mobile models in this app have far fewer than 99 transformer layers.
+  static const int nGpuLayers = 99;
   static const int nBatch = 32;
   static const double temperature = 0.7;
   static const int topK = 40;
