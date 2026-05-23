@@ -79,9 +79,6 @@ void main() {
 class _FakeChatRepository implements ChatRepository {
   _FakeChatRepository({
     required this.onSendMessage,
-    this.onGetMessages,
-    this.onPruneHistory,
-    this.onClearSession,
   });
 
   final Future<ChatMessage> Function({
@@ -92,28 +89,18 @@ class _FakeChatRepository implements ChatRepository {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) onSendMessage;
-  final Future<List<ChatMessage>> Function(String sessionId)? onGetMessages;
-  final Future<int> Function({
-    int maxAgeDays,
-    int maxRows,
-  })? onPruneHistory;
-  final Future<void> Function(String sessionId)? onClearSession;
-
   @override
-  Future<void> clearSession(String sessionId) =>
-      onClearSession?.call(sessionId) ?? Future<void>.value();
+  Future<void> clearSession(String sessionId) => Future<void>.value();
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
-      onGetMessages?.call(sessionId) ?? Future<List<ChatMessage>>.value(const []);
+      Future<List<ChatMessage>>.value(const []);
 
   @override
   Future<int> pruneHistory({
     int maxAgeDays = 0,
     int maxRows = 0,
-  }) =>
-      onPruneHistory?.call(maxAgeDays: maxAgeDays, maxRows: maxRows) ??
-      Future<int>.value(0);
+  }) => Future<int>.value(0);
 
   @override
   Future<ChatMessage> sendMessage({

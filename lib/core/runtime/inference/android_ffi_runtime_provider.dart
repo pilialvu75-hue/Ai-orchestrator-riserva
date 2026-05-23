@@ -759,24 +759,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       // ── Step 1: Create/validate native session ───────────────────────────────
       _updateRuntimeStatus(LocalRuntimeStatus.loading,
-          message: 'Loading model: $modelId', resetProgress: true);
+          message: 'Loading model: ${request.modelId!}', resetProgress: true);
       // Let UI observers process the loading state before the blocking FFI call.
       await Future<void>.delayed(Duration.zero);
       _logAi('creating native session...');
-      _log('[NATIVE_MODEL_LOAD_BEGIN] path=$modelPath modelId=$modelId'
+      _log('[NATIVE_MODEL_LOAD_BEGIN] path=${request.modelPath!} modelId=${request.modelId!}'
           ' n_ctx=${LlamaNativeDefaults.nCtx} n_threads=${LlamaNativeDefaults.nThreads}'
           ' gpu_layers=${LlamaNativeDefaults.nGpuLayers}');
 
       int nativeSessionId;
       try {
         _log(
-          '[CHAT_ORCHESTRATOR_ENTRY] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
+          '[CHAT_ORCHESTRATOR_ENTRY] session=${request.sessionId} model_path=${request.modelPath!} model_id=${request.modelId!} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
         );
         _log(
-          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
+          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=${request.modelPath!} model_id=${request.modelId!} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
         );
         _log(
-          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
+          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=${request.modelPath!} model_id=${request.modelId!} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
         );
         _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
@@ -831,7 +831,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      _log('[NATIVE_MODEL_LOAD_SUCCESS] path=$modelPath modelId=$modelId'
+      _log('[NATIVE_MODEL_LOAD_SUCCESS] path=${request.modelPath!} modelId=${request.modelId!}'
           ' session=$nativeSessionId');
       _log('[NATIVE_CONTEXT_CREATE] path=$modelPath status=ok');
       _logAi('native session ready');
@@ -839,7 +839,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // ── Step 2: Start generation ─────────────────────────────────────────────
       final prompt = _composePrompt(
         request,
-        modelId: modelId,
+        modelId: request.modelId!,
         bypassNonessentialLayers: isForensicSelfTest,
       );
       final promptWordEstimate = prompt
@@ -955,10 +955,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final startupWatch = Stopwatch()..start();
       try {
         _log(
-          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
+          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=${request.modelPath!} model_id=${request.modelId!} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
         );
         _log(
-          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
+          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=${request.modelPath!} model_id=${request.modelId!} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
         );
         _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
         startResult = await _runNativeCallWithTimeout<int>(
@@ -1162,7 +1162,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'timeout',
               message: 'Local generation timed out.',
-              modelId: modelId,
+              modelId: request.modelId!,
               fullText: fullText.toString(),
               tokensGenerated: estimatedTokens,
               notice:
@@ -1242,7 +1242,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'stalled',
               message: 'Token stream stalled during local inference.',
-              modelId: modelId,
+              modelId: request.modelId!,
               fullText: fullText.toString(),
               tokensGenerated: estimatedTokens,
               notice:
@@ -1281,7 +1281,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               controller,
               stage: 'poll_loop',
               message: 'Token polling stalled in local runtime.',
-              modelId: modelId,
+              modelId: request.modelId!,
               fullText: fullText.toString(),
               tokensGenerated: estimatedTokens,
               notice:
@@ -1368,7 +1368,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               fullText.write(piece);
               estimatedTokens++;
               recordVerificationSuccess(
-                modelPath: modelPath,
+                modelPath: request.modelPath!,
                 source: 'first_token',
               );
               final streamingElapsed = DateTime.now().difference(startedAt);
@@ -1474,7 +1474,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   controller.add(
                     InferenceResponse.token(
                       text: piece,
-                      model: modelId,
+                      model: request.modelId!,
                     ),
                   );
                 }
@@ -1518,7 +1518,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
             recordVerificationSuccess(
-              modelPath: modelPath,
+              modelPath: request.modelPath!,
               source: 'eos',
             );
             _log('[FFI_EOS] session=$nativeSessionId');
@@ -1539,7 +1539,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             controller.add(InferenceResponse.finalChunk(
               text: fullText.toString(),
               tokensGenerated: estimatedTokens,
-              model: modelId,
+              model: request.modelId!,
             ));
             flushWatch.stop();
             _log(
@@ -1610,7 +1610,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 controller,
                 stage: 'generation',
                 message: err.isNotEmpty ? err : 'Inference failed.',
-                modelId: modelId,
+                modelId: request.modelId!,
                 fullText: fullText.toString(),
                 tokensGenerated: estimatedTokens,
                 notice: err,
@@ -1988,20 +1988,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 await Future<void>.delayed(const Duration(milliseconds: 24));
               }
 
-              if (!completed) {
-                _finishWithRuntimeError(
-                  controller,
-                  stage: 'verification_completion',
-                  message: 'Verification did not complete.',
-                );
-                verificationMonitor.update(
-                  RuntimeVerificationPhase.failed,
-                  message: 'Verification did not complete.',
-                );
-                clearRuntimeVerification();
-                return;
-              }
-
               recordVerificationSuccess(
                 modelPath: modelPath,
                 source: 'verification_scope',
@@ -2113,7 +2099,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // Attempt to create a session with GPU layers (Vulkan). If session
       // creation fails, the native bridge may not support Vulkan on this device
       // or build; retry with 0 GPU layers so inference continues on CPU.
-      final desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       int created = bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
       _log(
