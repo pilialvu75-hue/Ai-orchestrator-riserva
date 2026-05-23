@@ -78,6 +78,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         timestamp: now,
         attachments: event.attachments,
       );
+      
+      // Aggiorna immediatamente la lista locale con il messaggio dell'utente
+      _messages.add(optimisticUserMessage);
+
       final optimisticAssistantMessage = ChatMessage(
         id: 'pending-assistant-$now',
         sessionId: event.sessionId,
@@ -92,10 +96,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(ChatSending(
           messages: List.unmodifiable(<ChatMessage>[
             ..._messages,
-            optimisticUserMessage,
             if (shouldShowAssistantPlaceholder) optimisticAssistantMessage,
           ]),
           activeProvider: _activeProvider));
+
+      ChatMessage? lastAssistantMessage;
 
       await for (final assistantMessage in streamChatMessage(
         StreamChatMessageParams(
@@ -107,17 +112,29 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
       )) {
         if (isClosed) return;
+        lastAssistantMessage = assistantMessage;
+        
         emit(ChatSending(
           messages: List.unmodifiable(<ChatMessage>[
             ..._messages,
-            optimisticUserMessage,
             assistantMessage,
           ]),
           activeProvider: _activeProvider,
         ));
       }
 
+      // Consolida la risposta finale dell'assistente nella lista locale
+      if (lastAssistantMessage != null) {
+        _messages.add(lastAssistantMessage);
+      }
+
+      // Emette lo stato Loaded stabile prima di invocare il ricaricamento in background
       if (!isClosed) {
+        emit(ChatLoaded(
+          messages: List.unmodifiable(_messages),
+          activeProvider: _activeProvider,
+        ));
+        
         add(LoadMessagesEvent(sessionId: event.sessionId));
       }
     } catch (e, stackTrace) {
