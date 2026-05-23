@@ -1,5 +1,5 @@
-import 'dart:developer' as developer;
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/prune_chat_history.dart';
@@ -8,6 +8,8 @@ import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart'
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
+  static const _logTag = 'CHAT_BLOC';
+
   ChatBloc({
     required this.streamChatMessage,
     required this.loadChatMessages,
@@ -38,14 +40,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       result.fold(
         (failure) {
-          developer.log(
-            'FAIL: Impossibile caricare i messaggi per la sessione ${event.sessionId}. Errore: ${failure.message}',
-            name: 'ai_orchestrator.ChatBloc',
-            level: 900,
+          _log(
+            '[LOAD_MESSAGES_FAIL] session=${event.sessionId} error=${failure.message}',
           );
           emit(ChatError(message: failure.message));
         },
         (messages) {
+          _log(
+            '[LOAD_MESSAGES_OK] session=${event.sessionId} count=${messages.length}',
+          );
           _messages = List<ChatMessage>.from(messages);
           emit(ChatLoaded(
               messages: List.unmodifiable(_messages),
@@ -53,12 +56,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         },
       );
     } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Eccezione non gestita durante il caricamento dei messaggi',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
+      _log(
+        '[CHAT_BLOC_FATAL] scope=loadMessages session=${event.sessionId} error=$e stack=$stackTrace',
       );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
@@ -69,6 +68,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _onSendMessage(
       SendMessageEvent event, Emitter<ChatState> emit) async {
     try {
+      _log(
+        '[CHAT_SEND_BEGIN] session=${event.sessionId} prompt_chars=${event.userPrompt.length} attachments=${event.attachments.length}',
+      );
       final now = DateTime.now().millisecondsSinceEpoch;
       final optimisticUserMessage = ChatMessage(
         id: 'pending-user-$now',
@@ -106,6 +108,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           activeProvider: _activeProvider,
         ),
       )) {
+        _log(
+          '[CHAT_STREAM_CHUNK] session=${event.sessionId} role=${assistantMessage.role} chars=${assistantMessage.content.length}',
+        );
         if (isClosed) return;
         emit(ChatSending(
           messages: List.unmodifiable(<ChatMessage>[
@@ -118,15 +123,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
 
       if (!isClosed) {
+        _log('[CHAT_SEND_COMPLETE] session=${event.sessionId} reload=true');
         add(LoadMessagesEvent(sessionId: event.sessionId));
       }
     } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Unhandled exception in send streaming pipeline',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
+      _log(
+        '[CHAT_BLOC_FATAL] scope=sendMessage session=${event.sessionId} error=$e stack=$stackTrace',
       );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
@@ -139,16 +141,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       await pruneChatHistory(const PruneChatHistoryParams());
     } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Eccezione durante la pulizia della cronologia (Prune)',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
+      _log(
+        '[CHAT_BLOC_FATAL] scope=pruneHistory error=$e stack=$stackTrace',
       );
       if (!isClosed) {
         emit(ChatError(message: e.toString()));
       }
     }
+  }
+
+  static void _log(String message) {
+    RuntimeEventLog.instance.emit('[$_logTag] $message');
   }
 }
