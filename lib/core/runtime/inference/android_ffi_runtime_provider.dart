@@ -571,16 +571,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      final modelPath = request.modelPath;
-      final modelId = request.modelId;
+      final modelPath = request.modelPath ?? '';
+      final modelId = request.modelId ?? '';
       _log('[CONTEXT] session=$sessionId lines=${request.context.length}'
           ' system_prompt=${(request.systemPrompt ?? '').trim().isNotEmpty}');
 
       // ── MODEL PATH FORENSICS ─────────────────────────────────────────────────
-      _log('[MODEL_PATH] modelId=$modelId path=${modelPath ?? "(null)"}'
+      _log('[MODEL_PATH] modelId=$modelId path=${modelPath.isEmpty ? "(null)" : modelPath}'
           ' runtimeMode=android_ffi');
 
-      if (modelPath == null || modelPath.isEmpty || modelId == null) {
+      if (modelPath.isEmpty || modelId.isEmpty) {
         _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
@@ -1789,14 +1789,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1693 | Function: streamVerificationInference() | BEFORE calling _runInVerificationScope()',
           );
           await _runInVerificationScope(
-          modelPath: request.modelPath,
+          modelPath: request.modelPath ?? '',
           action: () async {
-            final modelPath = request.modelPath;
-            final modelId = request.modelId;
-            if (modelPath == null ||
-                modelPath.trim().isEmpty ||
-                modelId == null ||
-                modelId.trim().isEmpty) {
+            final modelPath = request.modelPath ?? '';
+            final modelId = request.modelId ?? '';
+            if (modelPath.trim().isEmpty || modelId.trim().isEmpty) {
               _finishWithRuntimeError(
                 controller,
                 stage: 'verification_request_validation',
@@ -2113,7 +2110,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // Attempt to create a session with GPU layers (Vulkan). If session
       // creation fails, the native bridge may not support Vulkan on this device
       // or build; retry with 0 GPU layers so inference continues on CPU.
-      final desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       int created = bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
       _log(
