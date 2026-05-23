@@ -628,7 +628,7 @@ class _HighPerformanceChatList extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView.custom(
       controller: controller,
-      cacheExtent: 1200,
+      cacheExtent: const ScrollCacheExtent.pixels(1200.0),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
       childrenDelegate: SliverChildBuilderDelegate(
