@@ -178,7 +178,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       if (handle == null) return false;
       _libraryHandle = handle;
       _bindings = handle.bindings;
+      _log('[FORENSIC_BEFORE_INIT_BACKEND]');
       _bindings!.initBackend();
+      _log('[FORENSIC_AFTER_INIT_BACKEND]');
       _log(
         '[FFI_INIT] Library loaded: ${LlamaFfiLoader.bridgeLibraryName}'
         ' abi=${LlamaFfiLoader.currentAbiName}',
@@ -469,6 +471,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 457 | Function: streamInference() | BEFORE entry',
     );
     _log(
+      '[FORENSIC_STREAM_ENTRY] sessionId=${request.sessionId} modelId=${request.modelId} promptLength=${request.prompt.length}',
+    );
+    _log(
       '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
     _streamInferenceEntered = true;
@@ -697,6 +702,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final isForensicSelfTest =
           request.sessionId.trim() == _forensicSelfTestSessionId;
       if (!isForensicSelfTest) {
+        _log('[FORENSIC_BEFORE_WARMUP]');
         _log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 689 | Function: streamInference() | BEFORE calling _ensureWarmup()',
         );
@@ -704,6 +710,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           sessionId: sessionId,
           modelPath: modelPath,
         );
+        _log('[FORENSIC_AFTER_WARMUP]');
         _log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 696 | Function: streamInference() | AFTER calling _ensureWarmup()',
         );
@@ -748,6 +755,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       try {
         _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
+        _log(
+          '[FORENSIC_BEFORE_CREATE_SESSION] sessionId=$sessionId modelId=$modelId modelPath=$modelPath',
+        );
         // This flag marks the first native entry point for this inference flow.
         firstFfiInvocationAttempted = true;
         _log('[FFI_CREATE_SESSION] path=$modelPath');
@@ -755,6 +765,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           stage: 'session_create',
           timeout: _modelLoadTimeout,
           call: () => _ensureNativeSession(bindings, modelPath),
+        );
+        _log(
+          '[FORENSIC_AFTER_CREATE_SESSION] nativeSessionId=$nativeSessionId',
         );
         firstFfiInvocationCompleted = true;
         _log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
@@ -923,6 +936,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final startupWatch = Stopwatch()..start();
       try {
         _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
+        _log('[FORENSIC_BEFORE_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId');
         startResult = await _runNativeCallWithTimeout<int>(
           stage: 'start_generation',
           timeout: _startGenerationTimeout,
@@ -933,6 +947,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             effectiveTemperature,
           ),
         );
+        _log('[FORENSIC_AFTER_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult');
         _log(
           '[FFI_POST_START] session=$sessionId native_session=$nativeSessionId result=$startResult'
           ' elapsed_ms=${startupWatch.elapsedMilliseconds}',
@@ -1439,6 +1454,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       model: modelId,
                     ),
                   );
+                  if (isFirstToken) {
+                    _log('[FORENSIC_FIRST_TOKEN] sessionId=$sessionId nativeSessionId=$nativeSessionId chars=${piece.length}');
+                  }
                 }
               } catch (_) {}
               flushWatch.stop();
@@ -1712,6 +1730,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
     return controller.stream;
     } catch (e, stackTrace) {
+      _log(
+        '[FORENSIC_UNHANDLED_EXCEPTION] error=$e stackTrace=$stackTrace',
+      );
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1671 | Function: streamInference() | BEFORE rethrow after exception: $e \n $stackTrace',
       );
