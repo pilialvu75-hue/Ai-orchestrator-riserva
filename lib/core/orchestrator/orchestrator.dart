@@ -7,7 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:flutter/foundation.dart';
 
 /// Central routing layer for all AI calls.
 ///
@@ -66,13 +66,10 @@ class Orchestrator {
     int maxTokens = 256,
     double temperature = 0.7,
   }) {
-    RuntimeEventLog.instance.emit(
-      '[CHAT_ORCHESTRATOR_ENTRY] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_lines=${context.length}',
+    debugPrint(
+      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_lines=${context.length}',
     );
     final type = _analyzer.analyze(input);
-    RuntimeEventLog.instance.emit(
-      '[ORCHESTRATOR_ROUTE] session=$sessionId route=${type.name} is_offline=$isOffline',
-    );
 
     if (type == TaskType.command) {
       return Stream<InferenceResponse>.fromFuture(_executeCommand(input));

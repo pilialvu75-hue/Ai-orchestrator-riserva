@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
@@ -40,12 +40,8 @@ class ChatRepositoryImpl implements ChatRepository {
       final messages = await localDataSource.getMessages(sessionId);
       return messages;
     } on DatabaseException catch (e) {
-      _log('[CHAT_REPOSITORY_ERROR] scope=getMessages session=$sessionId error=$e');
       throw DatabaseFailure(e.message);
-    } catch (e, stackTrace) {
-      _log(
-        '[CHAT_REPOSITORY_ERROR] scope=getMessages session=$sessionId error=$e stack=$stackTrace',
-      );
+    } catch (e) {
       throw DatabaseFailure(e.toString());
     }
   }
@@ -236,17 +232,12 @@ class ChatRepositoryImpl implements ChatRepository {
         },
       );
     } on DatabaseException catch (e) {
-      _log('[CHAT_REPOSITORY_ERROR] scope=sendMessage session=$sessionId error=$e');
       throw DatabaseFailure(e.message);
     } on ServerException catch (e) {
-      _log('[CHAT_REPOSITORY_ERROR] scope=sendMessage session=$sessionId error=$e');
       throw ServerFailure(e.message);
     } on Failure {
       rethrow;
-    } catch (e, stackTrace) {
-      _log(
-        '[CHAT_REPOSITORY_ERROR] scope=sendMessage session=$sessionId error=$e stack=$stackTrace',
-      );
+    } catch (e) {
       throw ServerFailure(e.toString());
     }
   }
@@ -266,12 +257,8 @@ class ChatRepositoryImpl implements ChatRepository {
       }
       return deleted;
     } on DatabaseException catch (e) {
-      _log('[CHAT_REPOSITORY_ERROR] scope=pruneHistory error=$e');
       throw DatabaseFailure(e.message);
-    } catch (e, stackTrace) {
-      _log(
-        '[CHAT_REPOSITORY_ERROR] scope=pruneHistory error=$e stack=$stackTrace',
-      );
+    } catch (e) {
       throw DatabaseFailure(e.toString());
     }
   }
@@ -281,12 +268,8 @@ class ChatRepositoryImpl implements ChatRepository {
     try {
       await localDataSource.clearSession(sessionId);
     } on DatabaseException catch (e) {
-      _log('[CHAT_REPOSITORY_ERROR] scope=clearSession session=$sessionId error=$e');
       throw DatabaseFailure(e.message);
-    } catch (e, stackTrace) {
-      _log(
-        '[CHAT_REPOSITORY_ERROR] scope=clearSession session=$sessionId error=$e stack=$stackTrace',
-      );
+    } catch (e) {
       throw DatabaseFailure(e.toString());
     }
   }
@@ -324,6 +307,6 @@ class ChatRepositoryImpl implements ChatRepository {
   }
 
   static void _log(String message) {
-    RuntimeEventLog.instance.emit('[$_logTag] $message');
+    debugPrint('[$_logTag] $message');
   }
 }

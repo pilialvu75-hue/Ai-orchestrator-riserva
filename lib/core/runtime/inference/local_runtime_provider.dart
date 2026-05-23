@@ -83,8 +83,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   String get lifecycleRuntimeStateName => 'unknown';
 
-  bool get hasActiveMessageTransmission => false;
-
   void recordVerificationSuccess({
     required String modelPath,
     String source = 'runtime',
