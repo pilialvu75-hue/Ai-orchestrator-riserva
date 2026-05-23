@@ -142,7 +142,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
   bool _inVerificationScope = false;
-  int _pendingInferenceDispatches = 0;
   final Set<String> _activeInferenceSessions = <String>{};
   String? _verifiedRuntimeAbi;
   bool _manualVerificationResetRequested = false;
@@ -158,9 +157,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   @override
   String get lifecycleRuntimeStateName => monitor.state.status.name;
-
-  @override
-  bool get hasActiveMessageTransmission => _isMessageTransmissionActive;
 
   // ── Library loading ──────────────────────────────────────────────────────────
 
@@ -209,9 +205,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return _lastRuntimeValidationSnapshot ?? monitor.state;
     }
-    if (_isMessageTransmissionActive) {
+    if (_activeInferenceSessions.isNotEmpty ||
+        monitor.state.status == LocalRuntimeStatus.inferencing ||
+        monitor.state.status == LocalRuntimeStatus.streaming) {
       _log(
-        '[RUNTIME_CHECK_SKIPPED] reason=message_transmission_active origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored active_sessions=${_activeInferenceSessions.length} pending_dispatches=$_pendingInferenceDispatches status=${monitor.state.status.name}',
+        '[RUNTIME_CHECK_SKIPPED] reason=inference_active origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored active_sessions=${_activeInferenceSessions.length}',
       );
       return _lastRuntimeValidationSnapshot ?? monitor.state;
     }
@@ -474,7 +472,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
     _streamInferenceEntered = true;
-    _pendingInferenceDispatches++;
     final controller = StreamController<InferenceResponse>();
     var firstFfiInvocationAttempted = false;
     var firstFfiInvocationCompleted = false;
@@ -558,7 +555,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[VERIFICATION_UI_IGNORED] verification_scope=true reason=skip_activeInferenceSessions_tracking session=$sessionId',
         );
       }
-      try {
       try {
       if (cancellationToken.isCancelled) {
         _log('[FFI_BRANCH] session=$sessionId name=preflight_cancellation');
@@ -735,25 +731,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      } catch (error, stackTrace) {
-        if (!firstFfiInvocationAttempted) {
-          _log(
-            '[PRE_FFI_DART_EXCEPTION] session=$sessionId stage=pre_ffi_initialization error=$error stack=${_formatForensicStackTrace(stackTrace)}',
-          );
-          await fatalEarlyExit(
-            sessionId,
-            branch: 'pre_ffi_initialization_exception',
-            reason: 'Dart exception before first FFI call: $error',
-            stage: 'pre_ffi_initialization',
-            details: _formatForensicStackTrace(stackTrace),
-          );
-          _log(
-            '[PRE_FFI_FORCED_EXIT] session=$sessionId stage=pre_ffi_initialization first_ffi_attempted=$firstFfiInvocationAttempted',
-          );
-          return;
-        }
-        rethrow;
-      }
 
       final bindings = _bindings!;
 
@@ -769,15 +746,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       int nativeSessionId;
       try {
-        _log(
-          '[CHAT_ORCHESTRATOR_ENTRY] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
-        );
-        _log(
-          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
-        );
-        _log(
-          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${request.prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
-        );
         _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
         // This flag marks the first native entry point for this inference flow.
@@ -954,12 +922,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
-        _log(
-          '[PRE_FFI_SESSION_GUARD] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
-        );
-        _log(
-          '[FORENSIC_PROMPT_STATE] session=${request.sessionId} model_path=$modelPath model_id=${request.modelId} prompt_length=${prompt.length} first_ffi_attempted=$firstFfiInvocationAttempted',
-        );
         _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
         startResult = await _runNativeCallWithTimeout<int>(
           stage: 'start_generation',
@@ -1692,9 +1654,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
         if (!firstFfiInvocationAttempted) {
-          _log(
-            '[PRE_FFI_DART_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error stack=${_formatForensicStackTrace(stackTrace)}',
-          );
           // Classification is based on whether session_create has been attempted yet.
           await fatalEarlyExit(
             sessionId,
@@ -1702,9 +1661,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             reason: 'Unhandled exception before first FFI call: $error',
             stage: 'stream_inference',
             details: '$stackTrace',
-          );
-          _log(
-            '[PRE_FFI_FORCED_EXIT] session=$sessionId stage=stream_inference_unhandled first_ffi_attempted=$firstFfiInvocationAttempted',
           );
         } else if (!controller.isClosed) {
           _finishWithRuntimeError(
@@ -1748,13 +1704,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1659 | Function: streamInference() | BEFORE rethrow after async execution exception: $e \n $stackTrace',
         );
         rethrow;
-      } finally {
-        if (_pendingInferenceDispatches > 0) {
-          _pendingInferenceDispatches--;
-        }
-        _log(
-          '[STREAM_INFERENCE_DISPATCH] session=${request.sessionId} pending_dispatches=$_pendingInferenceDispatches active_sessions=${_activeInferenceSessions.length}',
-        );
       }
     }();
 
@@ -2256,13 +2205,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           );
         } catch (e, st) {
           _log(
-            '[PRE_FFI_DART_EXCEPTION] scope=_runInferenceSerially stage=action error=$e stack=${_formatForensicStackTrace(st)}',
-          );
-          _log(
             '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2043 | Function: _runInferenceSerially() | BEFORE rethrow after exception in action: $e \n $st',
-          );
-          _log(
-            '[PRE_FFI_FORCED_EXIT] scope=_runInferenceSerially stage=action',
           );
           _log('[SERIAL_QUEUE_ERROR] $e $st');
           rethrow;
@@ -2275,24 +2218,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return next;
     } catch (e, stackTrace) {
       _log(
-        '[PRE_FFI_DART_EXCEPTION] scope=_runInferenceSerially stage=queue_setup error=$e stack=${_formatForensicStackTrace(stackTrace)}',
-      );
-      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2056 | Function: _runInferenceSerially() | BEFORE rethrow after exception: $e \n $stackTrace',
-      );
-      _log(
-        '[PRE_FFI_FORCED_EXIT] scope=_runInferenceSerially stage=queue_setup',
       );
       rethrow;
     }
-  }
-
-  bool get _isMessageTransmissionActive {
-    final status = monitor.state.status;
-    return _pendingInferenceDispatches > 0 ||
-        _activeInferenceSessions.isNotEmpty ||
-        status == LocalRuntimeStatus.inferencing ||
-        status == LocalRuntimeStatus.streaming;
   }
 
   void _throttledLoopLog(String message) {
@@ -2957,15 +2886,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } catch (_) {
       return trimmed;
     }
-  }
-
-  String _formatForensicStackTrace(StackTrace stackTrace) {
-    return stackTrace
-        .toString()
-        .split('\n')
-        .where((line) => line.trim().isNotEmpty)
-        .take(12)
-        .join(' | ');
   }
 
 }

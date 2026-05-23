@@ -100,8 +100,7 @@ class LocalRuntimeDiagnosticsService {
 
   bool get _isInferenceActive {
     final stateName = _runtimeProvider.lifecycleRuntimeStateName;
-    return _runtimeProvider.hasActiveMessageTransmission ||
-        stateName == LocalRuntimeStatus.inferencing.name ||
+    return stateName == LocalRuntimeStatus.inferencing.name ||
         stateName == LocalRuntimeStatus.streaming.name;
   }
 
