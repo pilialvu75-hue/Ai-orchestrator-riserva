@@ -1,5 +1,3 @@
-// FILE INTERO QUI SOTTO — VERSIONE CORRETTA
-
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -59,6 +57,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool get _canSubmit => _hasText || _attachments.isNotEmpty;
 
   void _submit() {
+    // 🚨 TEST ATOMICO 1: Emette solo il marker isolato
+    RuntimeEventLog.instance.emit('[FORENSIC_BUTTON_PRESSED]');
+    
+    // Logica originale commentata per evitare qualsiasi effetto collaterale
+    /*
     final text = _controller.text.trim();
     if (text.isEmpty && _attachments.isEmpty) return;
     debugPrint(
@@ -71,6 +74,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _controller.clear();
     setState(_attachments.clear);
     widget.onSend(text, outgoingAttachments);
+    */
   }
 
   Future<void> _pickAttachment(_AttachmentPickerAction action) async {
