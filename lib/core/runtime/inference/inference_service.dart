@@ -37,15 +37,21 @@ class InferenceService {
     try {
       final runtimeMode = await _loadRuntimeMode();
 
-      // 1. MODALITÀ LOCALE REQUISITO: mantiene la richiesta intatta per non rompere il matching del Mock
+      // 1. MODALITÀ LOCALE REQUISITO: richiesta intatta + token della sessione corrente
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
-        yield* _runtimeProvider.streamInference(request: request);
+        yield* _runtimeProvider.streamInference(
+          request: request,
+          cancellationToken: session.cancellationToken,
+        );
       } else {
-        // 2. MODALITÀ CLOUD CON FALLBACK SU AUTENTICAZIONE FALLITA
+        // 2. MODALITÀ CLOUD CON FALLBACK
         bool cloudFailed = false;
         
         try {
-          await for (final chunk in _cloudRuntimeProvider.streamInference(request: request)) {
+          await for (final chunk in _cloudRuntimeProvider.streamInference(
+            request: request,
+            cancellationToken: session.cancellationToken,
+          )) {
             if (chunk.isError) {
               cloudFailed = true;
               break;
@@ -53,13 +59,15 @@ class InferenceService {
             yield chunk;
           }
         } catch (_) {
-          // Cattura eccezioni dirette di autenticazione o handshake del client cloud
           cloudFailed = true;
         }
 
-        // Se il cloud ha fallito l'inizializzazione o l'autenticazione, scala sul provider locale
+        // Se il cloud fallisce l'autenticazione/handshake, scala sul locale
         if (cloudFailed) {
-          yield* _runtimeProvider.streamInference(request: request);
+          yield* _runtimeProvider.streamInference(
+            request: request,
+            cancellationToken: session.cancellationToken,
+          );
         }
       }
     } catch (error) {
