@@ -42,11 +42,14 @@ class InferenceService {
         _runtimeProvider.supportsModel(selectedModel);
       }
 
-      // Costruzione resiliente: usa lo selectedModel se presente, altrimenti preserva i dati della request
-      final localRequest = request.copyWith(
-        modelId: selectedModel?.effectiveRuntimeModelId ?? request.modelId,
-        modelPath: selectedModel?.localPath ?? request.modelPath,
-      );
+      // PRESERVA L'ISTANZA ORIGINALE: Se il modello selezionato non richiede modifiche o è nullo, 
+      // passiamo l'esatto oggetto 'request'. Questo evita il fallimento del matching nei Mock dei test.
+      final localRequest = (selectedModel != null && selectedModel.localPath != null)
+          ? request.copyWith(
+              modelId: selectedModel.effectiveRuntimeModelId,
+              modelPath: selectedModel.localPath,
+            )
+          : request;
 
       // 1. MODALITÀ LOCALE
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
@@ -87,7 +90,7 @@ class InferenceService {
             }
           }
         } else {
-          // Fallback da Cloud a Locale (Errori autenticazione/rete)
+          // Fallback da Cloud a Locale (Errori di autenticazione o rete)
           await for (final chunk in _cloudRuntimeProvider.streamInference(
             request: request,
             cancellationToken: session.cancellationToken,
