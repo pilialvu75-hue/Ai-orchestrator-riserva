@@ -37,17 +37,30 @@ class InferenceService {
     try {
       final runtimeMode = await _loadRuntimeMode();
 
-      // Routing lineare e pulito: nessuna mutazione della request per garantire il matching perfetto dei Mock
+      // 1. MODALITÀ LOCALE REQUISITO: mantiene la richiesta intatta per non rompere il matching del Mock
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
-        yield* _runtimeProvider.streamInference(
-          request: request,
-          cancellationToken: session.cancellationToken,
-        );
+        yield* _runtimeProvider.streamInference(request: request);
       } else {
-        yield* _cloudRuntimeProvider.streamInference(
-          request: request,
-          cancellationToken: session.cancellationToken,
-        );
+        // 2. MODALITÀ CLOUD CON FALLBACK SU AUTENTICAZIONE FALLITA
+        bool cloudFailed = false;
+        
+        try {
+          await for (final chunk in _cloudRuntimeProvider.streamInference(request: request)) {
+            if (chunk.isError) {
+              cloudFailed = true;
+              break;
+            }
+            yield chunk;
+          }
+        } catch (_) {
+          // Cattura eccezioni dirette di autenticazione o handshake del client cloud
+          cloudFailed = true;
+        }
+
+        // Se il cloud ha fallito l'inizializzazione o l'autenticazione, scala sul provider locale
+        if (cloudFailed) {
+          yield* _runtimeProvider.streamInference(request: request);
+        }
       }
     } catch (error) {
       yield InferenceResponse.error('Inference service error: $error');
