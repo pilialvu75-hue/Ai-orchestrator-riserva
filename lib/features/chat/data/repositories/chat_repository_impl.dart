@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -67,6 +68,9 @@ class ChatRepositoryImpl implements ChatRepository {
             throw const ServerFailure('A response is already in progress for this session.');
           }
           try {
+            RuntimeEventLog.instance.emit(
+              '[FORENSIC_CONVERSATION_START] session=$sessionId prompt_chars=${userPrompt.trim().length} attachments=${attachments.length}',
+            );
             final normalizedPrompt = userPrompt.trim();
             _log(
               'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',

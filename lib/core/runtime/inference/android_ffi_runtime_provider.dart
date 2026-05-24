@@ -468,6 +468,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }) {
     try {
     _log(
+      '[FORENSIC_PROVIDER_ENTRY] sessionId=${request.sessionId} provider=$runtimeType modelId=${request.modelId} promptLength=${request.prompt.length}',
+    );
+    _log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 457 | Function: streamInference() | BEFORE entry',
     );
     _log(
