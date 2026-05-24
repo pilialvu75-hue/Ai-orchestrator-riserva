@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
@@ -132,6 +133,12 @@ class _ChatPageState extends State<ChatPage> {
     _uiSendBeganAt = DateTime.now();
     _uiStreamStarted = false;
     _startUiDeadlockGuard();
+    emitRuntimeDiagnosticsMarker('FORENSIC_CHAT_SEND', <String, Object?>{
+      'boundary': 'chat_page_on_send',
+      'session': _kDefaultSessionId,
+      'chars': text.length,
+      'attachments': attachments.length,
+    });
     _uiLog(
       '[UI_SEND] session=$_kDefaultSessionId page=${hashCode.toRadixString(16)} chars=${text.length} attachments=${attachments.length}',
     );

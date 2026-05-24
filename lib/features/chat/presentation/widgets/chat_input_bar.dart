@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
@@ -60,6 +61,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void _submit() {
     final text = _controller.text.trim();
     if (text.isEmpty && _attachments.isEmpty) return;
+    emitRuntimeDiagnosticsMarker('FORENSIC_CHAT_SEND', <String, Object?>{
+      'boundary': 'ui_send_button',
+      'session': 'default',
+      'chars': text.length,
+      'attachments': _attachments.length,
+    });
     debugPrint(
       '[UI_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
     );

@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_state.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Centralised runtime state engine for all chat + AI-response state.
 ///
@@ -85,6 +86,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     }
     _sendInFlight = true;
     try {
+      emitRuntimeDiagnosticsMarker('FORENSIC_CHAT_SEND', <String, Object?>{
+        'boundary': 'view_model',
+        'session': event.sessionId,
+        'chars': event.userPrompt.length,
+        'attachments': event.attachments.length,
+      });
       await runInferenceGuarded<void>(
         scope: 'orchestrator_state_engine.send_message',
         log: _log,

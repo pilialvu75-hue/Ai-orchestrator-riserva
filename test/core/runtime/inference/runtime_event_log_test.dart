@@ -60,4 +60,18 @@ void main() {
       isNull,
     );
   });
+
+  test('formats forensic marker details through runtime diagnostics sink', () {
+    emitRuntimeDiagnosticsMarker('FORENSIC_CHAT_SEND', <String, Object?>{
+      'boundary': 'ui_send_button',
+      'session': 'default',
+      'chars': 12,
+    });
+
+    final entry = RuntimeEventLog.instance.entries.single;
+    expect(
+      entry.message,
+      '[FORENSIC_CHAT_SEND] boundary=ui_send_button session=default chars=12',
+    );
+  });
 }

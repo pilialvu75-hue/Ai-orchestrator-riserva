@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 
@@ -71,6 +72,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) async* {
+    emitRuntimeDiagnosticsMarker('FORENSIC_STREAM_ENTRY', <String, Object?>{
+      'sessionId': request.sessionId,
+      'provider': runtimeType,
+      'promptLength': request.prompt.length,
+    });
     if (cancellationToken.isCancelled) {
       yield InferenceResponse.error(
         'Inference cancelled.',

@@ -4,6 +4,19 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+void emitRuntimeDiagnosticsMarker(
+  String marker, [
+  Map<String, Object?> details = const <String, Object?>{},
+]) {
+  final suffix = details.entries
+      .where((entry) => entry.value != null)
+      .map((entry) => '${entry.key}=${entry.value}')
+      .join(' ');
+  RuntimeEventLog.instance.emit(
+    suffix.isEmpty ? '[$marker]' : '[$marker] $suffix',
+  );
+}
+
 /// Categorises a runtime log entry by the subsystem that produced it.
 enum RuntimeEventCategory {
   model,
