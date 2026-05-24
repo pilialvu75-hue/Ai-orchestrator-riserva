@@ -15,37 +15,90 @@ import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
+/// Emits a [FORENSIC_UNCAUGHT_DART_EXCEPTION] entry through the shared
+/// RuntimeEventLog pipeline and prints to the debug console.
+///
+/// This is intentionally a top-level function so it can be reached from
+/// every exception handler (zone, FlutterError, PlatformDispatcher, isolate)
+/// without capturing mutable state.
+void _emitForensicException(
+  Object error,
+  StackTrace stackTrace, {
+  required String source,
+}) {
+  final timestamp = DateTime.now().toIso8601String();
+  final message =
+      '[FORENSIC_UNCAUGHT_DART_EXCEPTION] '
+      'timestamp=$timestamp '
+      'source=$source '
+      'type=${error.runtimeType} '
+      'message=$error\n'
+      'stack=\n$stackTrace';
+  debugPrint(message);
+  RuntimeEventLog.instance.emit(message);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Global exception handlers ─────────────────────────────────────────────
+  // All three handlers capture exceptions into RuntimeEventLog so that
+  // Runtime Diagnostics shows [FORENSIC_UNCAUGHT_DART_EXCEPTION] entries
+  // when the crash originates inside Dart.  None of them rethrow or terminate
+  // the application; the UI is kept alive to distinguish a Dart exception
+  // (Scenario A) from a native process termination (Scenario B).
+
   FlutterError.onError = (FlutterErrorDetails details) {
-    debugPrint(
-      '[FLUTTER_UNCAUGHT] error=${details.exceptionAsString()} stack=${details.stack}',
+    _emitForensicException(
+      details.exception,
+      details.stack ?? StackTrace.empty,
+      source: 'FlutterError',
     );
+    // presentError shows a non-fatal diagnostic widget in debug builds;
+    // it is a no-op in release builds and does not terminate the process.
     FlutterError.presentError(details);
   };
+
   PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
-    debugPrint('[PLATFORM_UNCAUGHT] error=$error stack=$stackTrace');
-    return false;
+    _emitForensicException(error, stackTrace, source: 'PlatformDispatcher');
+    // Return true to mark the error as handled and suppress platform
+    // propagation that would otherwise terminate the application.
+    return true;
   };
+
   final isolateErrorPort = RawReceivePort((dynamic pair) {
     if (pair is List<dynamic> && pair.length >= 2) {
-      debugPrint('[ASYNC_FATAL] isolate_error=${pair[0]} stack=${pair[1]}');
+      _emitForensicException(
+        pair[0] as Object? ?? 'unknown',
+        StackTrace.fromString('${pair[1]}'),
+        source: 'isolate',
+      );
       return;
     }
-    debugPrint('[ASYNC_FATAL] isolate_error=$pair');
+    _emitForensicException(
+      pair as Object? ?? 'unknown',
+      StackTrace.empty,
+      source: 'isolate',
+    );
   });
   Isolate.current.addErrorListener(isolateErrorPort.sendPort);
+
+  // Confirm that all handlers are active before the app tree is built.
+  RuntimeEventLog.instance
+      .emit('[FORENSIC_GLOBAL_EXCEPTION_HANDLERS_INSTALLED]');
+
   await runZonedGuarded(
     () async {
       runApp(const StartupApp());
     },
     (Object error, StackTrace stackTrace) {
-      debugPrint('[ZONE_UNCAUGHT] scope=main error=$error stack=$stackTrace');
+      _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
     },
   );
 }
