@@ -46,6 +46,7 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
+    _log('[FORENSIC_INFERENCE_SERVICE_ENTRY] session=${request.sessionId} prompt_chars=${request.prompt.length} provider=${_runtimeProvider.runtimeType}');
     _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
     _log(
       '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',

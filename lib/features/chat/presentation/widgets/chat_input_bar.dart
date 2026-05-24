@@ -2,6 +2,7 @@
 
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
@@ -62,6 +63,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (text.isEmpty && _attachments.isEmpty) return;
     debugPrint(
       '[UI_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
+    );
+    RuntimeEventLog.instance.emit(
+      '[FORENSIC_CHAT_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
     );
     final outgoingAttachments = List<ChatAttachment>.from(_attachments);
     _controller.clear();
