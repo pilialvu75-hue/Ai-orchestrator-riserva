@@ -468,6 +468,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }) {
     try {
     _log(
+      '[FORENSIC_PROVIDER_ENTRY] session=${request.sessionId} provider=$runtimeType modelId=${request.modelId}',
+    );
+    _log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 457 | Function: streamInference() | BEFORE entry',
     );
     _log(
@@ -2653,6 +2656,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _log(String message) {
     RuntimeEventLog.instance.emit(message);
+    if (_isForensicLogMessage(message)) return;
     _printCounter++;
     if (_printCounter % 10 == 0) {
       final safeMessage =
@@ -2660,6 +2664,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       debugPrint('[$_logTag] $safeMessage');
     }
   }
+
+  static bool _isForensicLogMessage(String message) =>
+      message.contains('FORENSIC');
 
   static void _logAi(String message) {
     debugPrint('[AI] $message');

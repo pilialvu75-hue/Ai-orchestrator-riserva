@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
 import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
@@ -24,6 +25,15 @@ class ConversationMemoryService {
     String? systemPrompt,
     String? excludedMessageId,
   }) async {
+    emitRuntimeDiagnosticsMarker(
+      'FORENSIC_CONVERSATION_START',
+      <String, Object?>{
+        'boundary': 'conversation_service',
+        'session': sessionId,
+        'history_count': messages.length,
+        'prompt_chars': userPrompt.length,
+      },
+    );
     final recalled = await recallRelevantMessages(
       sessionId: sessionId,
       query: userPrompt,
@@ -110,4 +120,3 @@ class ConversationMemoryService {
 
   String _workspaceId(String sessionId) => 'chat_memory:$sessionId';
 }
-

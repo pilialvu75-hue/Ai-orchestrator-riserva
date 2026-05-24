@@ -239,6 +239,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
+    emitRuntimeDiagnosticsMarker('FORENSIC_STREAM_ENTRY', <String, Object?>{
+      'sessionId': request.sessionId,
+      'provider': runtimeType,
+      'modelId': request.modelId,
+      'promptLength': request.prompt.length,
+    });
     // 1. BLOCCO IMMEDIATO: Se è Android, esce subito senza fare NIENTE altro
     if (Platform.isAndroid) {
       debugPrint('[$_localProviderTag] Android detected: Processo CLI bloccato.');

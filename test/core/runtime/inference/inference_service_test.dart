@@ -10,10 +10,15 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 
 void main() {
+  setUp(() {
+    RuntimeEventLog.instance.resetForTest();
+  });
+
   const validModel = AiModel(
     id: 'gemma_2b',
     displayName: 'Gemma 2B',
@@ -273,6 +278,44 @@ void main() {
       expect(response.isError, false);
       expect(response.text, 'Cloud response');
       expect(response.model, 'gpt-4o');
+    });
+
+    test('emits forensic inference and provider markers through runtime diagnostics',
+        () async {
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          responses: <InferenceResponse>[
+            InferenceResponse.finalChunk(
+              text: 'Hello world',
+              tokensGenerated: 2,
+              model: 'gemma_2b',
+            ),
+          ],
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      await service
+          .stream(const InferenceRequest(sessionId: 'forensic-s1', prompt: 'hello'))
+          .toList();
+
+      final messages = RuntimeEventLog.instance.entries
+          .map((entry) => entry.message)
+          .toList(growable: false);
+      expect(
+        messages,
+        contains(
+          '[FORENSIC_INFERENCE_SERVICE_ENTRY] session=forensic-s1 prompt_chars=5 context_lines=0 offline=false',
+        ),
+      );
+      expect(
+        messages,
+        contains(
+          '[FORENSIC_PROVIDER_ENTRY] session=forensic-s1 provider=FakeLocalRuntimeProvider mode=local',
+        ),
+      );
     });
   });
 }

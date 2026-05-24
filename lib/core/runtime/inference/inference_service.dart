@@ -46,6 +46,15 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
+    emitRuntimeDiagnosticsMarker(
+      'FORENSIC_INFERENCE_SERVICE_ENTRY',
+      <String, Object?>{
+        'session': request.sessionId,
+        'prompt_chars': request.prompt.length,
+        'context_lines': request.context.length,
+        'offline': request.isOffline,
+      },
+    );
     _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
     _log(
       '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
@@ -272,6 +281,14 @@ class InferenceService {
       '[PRE_INFERENCE_GATE] runtime_state=$runtimeState provider_hash=${_runtimeProvider.hashCode.toRadixString(16)} verification_state=$verificationState active_transition_id=$activeTransitionId',
     );
     _log('[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType}');
+    emitRuntimeDiagnosticsMarker(
+      'FORENSIC_PROVIDER_ENTRY',
+      <String, Object?>{
+        'session': localRequest.sessionId,
+        'provider': _runtimeProvider.runtimeType,
+        'mode': 'local',
+      },
+    );
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: cancellationToken,
@@ -547,7 +564,45 @@ class InferenceService {
       return;
     }
 
+    emitRuntimeDiagnosticsMarker(
+      'FORENSIC_PROVIDER_ENTRY',
+      <String, Object?>{
+        'session': cloudRequest.sessionId,
+        'provider': _cloudRuntimeProvider.runtimeType,
+        'mode': 'cloud',
+      },
+    );
     await for (final chunk in _cloudRuntimeProvider.streamInference(
+      request: cloudRequest,
+      cancellationToken: cancellationToken,
+    )) {
+      if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+        yield chunk;
+        continue;
+      }
+      if (chunk.isError) {
+        if (localRequest != null &&
+            _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
+          _log(
+            'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=${chunk.errorMessage}',
+          );
+          final notice = _cloudRuntimeProvider.consumeRuntimeNotice();
+          if (notice != null) {
+            yield InferenceResponse.notice(notice);
+          }
+          yield* _streamLocalInference(
+            localRequest: localRequest,
+            cloudRequest: cloudRequest,
+            cancellationToken: cancellationToken,
+            allowCloudFallback: false,
+          );
+          return;
+        }
+      }
+      yield chunk;
+    }
+  }
+*** End Patch
       request: cloudRequest,
       cancellationToken: cancellationToken,
     )) {

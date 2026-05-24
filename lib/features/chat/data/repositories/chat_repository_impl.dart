@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -68,6 +69,15 @@ class ChatRepositoryImpl implements ChatRepository {
           }
           try {
             final normalizedPrompt = userPrompt.trim();
+            emitRuntimeDiagnosticsMarker(
+              'FORENSIC_CONVERSATION_START',
+              <String, Object?>{
+                'boundary': 'chat_controller',
+                'session': sessionId,
+                'chars': normalizedPrompt.length,
+                'attachments': attachments.length,
+              },
+            );
             _log(
               'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',
             );

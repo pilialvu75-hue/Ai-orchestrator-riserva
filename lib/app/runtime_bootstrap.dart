@@ -7,17 +7,22 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class RuntimeBootstrap {
-  const RuntimeBootstrap();
+  RuntimeBootstrap({
+    RuntimeEventLog? runtimeEventLog,
+  }) : _runtimeEventLog = runtimeEventLog ?? RuntimeEventLog.instance;
 
   static const String _versionFallback = '1.0.12+12';
   static const VersionParser _versionParser = VersionParser();
+  final RuntimeEventLog _runtimeEventLog;
 
   Future<void> initialize() async {
+    await initializeDiagnosticsPipeline();
     debugPrint('[BOOT] init begin');
     final appVersion = await _resolveAppVersion();
 
@@ -32,6 +37,12 @@ class RuntimeBootstrap {
 
     await _runWarmupChecks();
     debugPrint('[BOOT] init complete');
+  }
+
+  @visibleForTesting
+  Future<void> initializeDiagnosticsPipeline() async {
+    await _runtimeEventLog.initializePersistence();
+    _runtimeEventLog.emit('[FORENSIC_DIAGNOSTICS_PIPELINE_VERIFIED] startup');
   }
 
   Future<String> _resolveAppVersion() async {
