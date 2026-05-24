@@ -2653,6 +2653,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _log(String message) {
     RuntimeEventLog.instance.emit(message);
+    if (_isForensicLogMessage(message)) return;
     _printCounter++;
     if (_printCounter % 10 == 0) {
       final safeMessage =
@@ -2660,6 +2661,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       debugPrint('[$_logTag] $safeMessage');
     }
   }
+
+  static bool _isForensicLogMessage(String message) =>
+      message.contains('FORENSIC');
 
   static void _logAi(String message) {
     debugPrint('[AI] $message');

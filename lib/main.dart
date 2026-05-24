@@ -60,7 +60,7 @@ class StartupApp extends StatefulWidget {
 class _StartupAppState extends State<StartupApp> {
   final StartupTransitionController _transitionController =
       StartupTransitionController();
-  final RuntimeBootstrap _bootstrap = const RuntimeBootstrap();
+  final RuntimeBootstrap _bootstrap = RuntimeBootstrap();
 
   Object? _startupError;
 
@@ -234,4 +234,3 @@ class AppRoot extends StatelessWidget {
     );
   }
 }
-

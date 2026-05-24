@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Categorises a runtime log entry by the subsystem that produced it.
 enum RuntimeEventCategory {
@@ -37,11 +39,12 @@ class RuntimeEventEntry {
       '[${timestamp.toIso8601String()}] [$tag] $message';
 }
 
-/// Process-wide in-memory log buffer for all runtime inference events.
+/// Process-wide runtime log buffer for all runtime inference events.
 ///
 /// Providers call [emit] for every significant pipeline event.  UI layers
 /// listen to [stream] for live updates or read [entries] for the current
-/// snapshot.
+/// snapshot.  Entries are also mirrored into shared preferences so the
+/// Runtime Diagnostics screen can restore them after app restart.
 ///
 /// The buffer is capped at [maxEntries] to avoid unbounded memory growth.
 /// When the cap is reached the oldest entry is discarded.
@@ -53,6 +56,8 @@ class RuntimeEventLog {
 
   /// Maximum number of entries retained in memory.
   static const int maxEntries = 600;
+  @visibleForTesting
+  static const String persistenceStorageKey = 'runtime_event_log_entries';
 
   final List<RuntimeEventEntry> _entries = [];
   final StreamController<RuntimeEventEntry> _controller =
@@ -61,6 +66,8 @@ class RuntimeEventLog {
   // Separate controller used to notify listeners that the log was cleared.
   final StreamController<void> _clearController =
       StreamController<void>.broadcast();
+  SharedPreferences? _preferences;
+  bool _persistenceInitialized = false;
 
   /// Current snapshot of all retained log entries (oldest first).
   List<RuntimeEventEntry> get entries => List.unmodifiable(_entries);
@@ -70,6 +77,28 @@ class RuntimeEventLog {
 
   /// Stream that fires whenever [clear] is called.
   Stream<void> get onClear => _clearController.stream;
+
+  /// Initializes persistent storage and restores any retained entries.
+  Future<void> initializePersistence({
+    SharedPreferences? preferences,
+    bool reload = false,
+  }) async {
+    final resolvedPreferences =
+        preferences ?? _preferences ?? await SharedPreferences.getInstance();
+    _preferences = resolvedPreferences;
+    if (_persistenceInitialized && !reload) return;
+
+    final restored = (resolvedPreferences.getStringList(persistenceStorageKey) ??
+            const <String>[])
+        .map(_decodeEntry)
+        .whereType<RuntimeEventEntry>()
+        .toList(growable: false);
+
+    _entries
+      ..clear()
+      ..addAll(restored.takeLast(maxEntries));
+    _persistenceInitialized = true;
+  }
 
   /// Adds [message] to the log buffer and broadcasts it to all listeners.
   ///
@@ -86,6 +115,7 @@ class RuntimeEventLog {
     );
     if (_entries.length >= maxEntries) _entries.removeAt(0);
     _entries.add(entry);
+    _persistEntries();
     if (!_controller.isClosed) {
       _controller.add(entry);
     }
@@ -94,9 +124,17 @@ class RuntimeEventLog {
   /// Removes all retained entries and notifies listeners via [onClear].
   void clear() {
     _entries.clear();
+    _clearPersistedEntries();
     if (!_clearController.isClosed) {
       _clearController.add(null);
     }
+  }
+
+  @visibleForTesting
+  void resetForTest() {
+    _entries.clear();
+    _preferences = null;
+    _persistenceInitialized = false;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
@@ -207,6 +245,47 @@ class RuntimeEventLog {
   static const Set<String> _validationTags = {
     'VALIDATION', 'MODEL_PATH', 'MODEL_EXISTS', 'MODEL_SIZE', 'MODEL_READABLE',
   };
+
+  void _persistEntries() {
+    final preferences = _preferences;
+    if (preferences == null) return;
+    unawaited(
+      preferences.setStringList(
+        persistenceStorageKey,
+        _entries.map(_encodeEntry).toList(growable: false),
+      ),
+    );
+  }
+
+  void _clearPersistedEntries() {
+    final preferences = _preferences;
+    if (preferences == null) return;
+    unawaited(preferences.remove(persistenceStorageKey));
+  }
+
+  static String _encodeEntry(RuntimeEventEntry entry) => jsonEncode({
+        'timestamp': entry.timestamp.toIso8601String(),
+        'message': entry.message,
+      });
+
+  static RuntimeEventEntry? _decodeEntry(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      final message = decoded['message'];
+      final timestamp = decoded['timestamp'];
+      if (message is! String || timestamp is! String) return null;
+      final tag = _extractTag(message);
+      return RuntimeEventEntry(
+        timestamp: DateTime.parse(timestamp),
+        category: _categoryFor(tag),
+        tag: tag,
+        message: message,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// Mixin that wires a class's private `_log` calls to [RuntimeEventLog].
@@ -218,5 +297,12 @@ mixin RuntimeEventEmitter {
     final full = '[$tag] $message';
     debugPrint(full);
     RuntimeEventLog.instance.emit(full);
+  }
+}
+
+extension on List<RuntimeEventEntry> {
+  Iterable<RuntimeEventEntry> takeLast(int maxItems) {
+    if (length <= maxItems) return this;
+    return skip(length - maxItems);
   }
 }
