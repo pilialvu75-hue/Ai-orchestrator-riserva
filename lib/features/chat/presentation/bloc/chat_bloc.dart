@@ -11,7 +11,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final LoadChatMessages loadChatMessages;
   final PruneChatHistory pruneChatHistory;
 
-  final List<ChatMessage> _messages = [];
+  List<ChatMessage> _messages = [];
   final String _activeProvider;
 
   ChatBloc({
@@ -22,41 +22,69 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   })  : _activeProvider = initialProvider,
         super(const ChatInitial()) {
     
-    // Gestione minima degli eventi per evitare crash
-    on<LoadMessagesEvent>((event, emit) => emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider)));
-    on<PruneHistoryEvent>((event, emit) => _messages.clear());
+    on<LoadMessagesEvent>(_onLoadMessages);
     on<SendMessageEvent>(_onSendMessage);
+    on<PruneHistoryEvent>((event, emit) => _messages.clear());
+  }
+
+  Future<void> _onLoadMessages(LoadMessagesEvent event, Emitter<ChatState> emit) async {
+    emit(const ChatLoading());
+    final result = await loadChatMessages(LoadChatMessagesParams(sessionId: event.sessionId));
+    
+    if (isClosed) return;
+
+    result.fold(
+      (failure) => emit(ChatError(message: failure.message)),
+      (messages) {
+        _messages = List<ChatMessage>.from(messages);
+        emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
+      },
+    );
   }
 
   Future<void> _onSendMessage(SendMessageEvent event, Emitter<ChatState> emit) async {
-    if (event.userPrompt.trim().isEmpty) return;
-
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-
-    // 1. Crea e aggiunge il messaggio dell'utente alla lista locale
+    final now = DateTime.now().millisecondsSinceEpoch;
+    
+    // 1. Aggiunta ottimistica del messaggio utente
     _messages.add(ChatMessage(
-      id: 'user-$timestamp',
+      id: 'user-$now',
       sessionId: event.sessionId,
       role: 'user',
       content: event.userPrompt,
-      timestamp: timestamp,
-    ));
-    emit(ChatSending(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
-
-    // 2. Simulazione del tempo di inference (Iniezione logica file base)
-    await Future.delayed(const Duration(seconds: 2));
-
-    // 3. Crea e aggiunge la risposta simulata dell'assistente
-    _messages.add(ChatMessage(
-      id: 'assistant-$timestamp',
-      sessionId: event.sessionId,
-      role: 'assistant',
-      content: "Risposta base per: ${event.userPrompt}",
-      timestamp: timestamp + 1,
-      provider: _activeProvider,
+      timestamp: now,
+      attachments: event.attachments,
     ));
 
-    // 4. Ritorna lo stato finale alla UI
-    emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
+    ChatMessage? lastAssistantMessage;
+
+    // 2. Consuma lo stream (Soddisfa la richiesta del test: "incremental assistant updates")
+    await for (final assistantMessage in streamChatMessage(
+      StreamChatMessageParams(
+        sessionId: event.sessionId,
+        userPrompt: event.userPrompt,
+        systemPrompt: event.systemPrompt,
+        attachments: event.attachments,
+        activeProvider: _activeProvider,
+      ),
+    )) {
+      if (isClosed) return;
+      lastAssistantMessage = assistantMessage;
+      
+      emit(ChatSending(
+        messages: List.unmodifiable([..._messages, assistantMessage]),
+        activeProvider: _activeProvider,
+      ));
+    }
+
+    if (lastAssistantMessage != null) {
+      _messages.add(lastAssistantMessage);
+    }
+
+    if (!isClosed) {
+      emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
+      
+      // 3. Ricarica i messaggi salvati (Soddisfa la richiesta del test: "before loading persisted messages")
+      add(LoadMessagesEvent(sessionId: event.sessionId));
+    }
   }
 }
