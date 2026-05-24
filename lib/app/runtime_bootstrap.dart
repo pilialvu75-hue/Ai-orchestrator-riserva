@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
@@ -19,6 +20,7 @@ class RuntimeBootstrap {
 
   Future<void> initialize() async {
     debugPrint('[BOOT] init begin');
+    RuntimeEventLog.instance.emit('[FORENSIC_DIAGNOSTICS_PIPELINE_VERIFIED]');
     final appVersion = await _resolveAppVersion();
 
     await di.initDependencies(

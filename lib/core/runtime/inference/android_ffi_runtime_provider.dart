@@ -2653,6 +2653,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   static void _log(String message) {
     RuntimeEventLog.instance.emit(message);
+    if (message.contains('FORENSIC_')) return;
     _printCounter++;
     if (_printCounter % 10 == 0) {
       final safeMessage =
