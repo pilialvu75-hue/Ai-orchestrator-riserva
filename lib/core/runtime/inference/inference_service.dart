@@ -42,45 +42,29 @@ class InferenceService {
         _runtimeProvider.supportsModel(selectedModel);
       }
 
-      final localRequest = (selectedModel != null && selectedModel.localPath != null)
-          ? request.copyWith(
-              modelId: selectedModel.effectiveRuntimeModelId,
-              modelPath: selectedModel.localPath,
-            )
-          : null;
+      // Costruzione resiliente: usa lo selectedModel se presente, altrimenti preserva i dati della request
+      final localRequest = request.copyWith(
+        modelId: selectedModel?.effectiveRuntimeModelId ?? request.modelId,
+        modelPath: selectedModel?.localPath ?? request.modelPath,
+      );
 
-      // 1. MODALITÀ LOCALE (Risolve il test sul caricamento del flusso locale)
+      // 1. MODALITÀ LOCALE
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
-        if (localRequest != null) {
-          // Trigger delle proprietà interne richieste dalle verifiche dei Mock nei test
-          _runtimeProvider.lifecycleRuntimeStateName;
-          _runtimeProvider.activeLifecycleTransitionId;
-          _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
-
-          await for (final chunk in _runtimeProvider.streamInference(
-            request: localRequest,
-            cancellationToken: session.cancellationToken,
-          )) {
-            yield chunk;
-          }
-        } else {
-          yield InferenceResponse.error(
-            'Local AI mode requires a downloaded validated model. Please download one in Settings > Models or switch to Cloud or Hybrid mode.',
-          );
+        await for (final chunk in _runtimeProvider.streamInference(
+          request: localRequest,
+          cancellationToken: session.cancellationToken,
+        )) {
+          yield chunk;
         }
       } else {
         // 2. MODALITÀ IBRIDA / CLOUD
         final shouldPreferCloud = runtimeMode == AiRuntimeMode.cloud ||
             _cloudRuntimeProvider.shouldPreferCloudFor(request);
 
-        if (!shouldPreferCloud && localRequest != null) {
+        if (!shouldPreferCloud) {
           // Gestione Fallback Ibrido su fallimento Startup Locale
           var emittedLocalToken = false;
           var localStartupFailed = false;
-
-          _runtimeProvider.lifecycleRuntimeStateName;
-          _runtimeProvider.activeLifecycleTransitionId;
-          _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
 
           await for (final chunk in _runtimeProvider.streamInference(
             request: localRequest,
@@ -108,13 +92,7 @@ class InferenceService {
             request: request,
             cancellationToken: session.cancellationToken,
           )) {
-            if (chunk.isError && localRequest != null &&
-                _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
-              
-              _runtimeProvider.lifecycleRuntimeStateName;
-              _runtimeProvider.activeLifecycleTransitionId;
-              _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
-
+            if (chunk.isError && _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
               await for (final localChunk in _runtimeProvider.streamInference(
                 request: localRequest,
                 cancellationToken: session.cancellationToken,
