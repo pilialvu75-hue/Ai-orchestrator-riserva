@@ -37,14 +37,11 @@ class InferenceService {
     try {
       final runtimeMode = await _loadRuntimeMode();
       final selectedModel = await _loadSelectedModel();
-      
-      if (selectedModel != null) {
-        _runtimeProvider.supportsModel(selectedModel);
-      }
 
-      // PRESERVA L'ISTANZA ORIGINALE: Se il modello selezionato non richiede modifiche o è nullo, 
-      // passiamo l'esatto oggetto 'request'. Questo evita il fallimento del matching nei Mock dei test.
-      final localRequest = (selectedModel != null && selectedModel.localPath != null)
+      // Modifica la richiesta solo se strettamente necessario per non alterare l'identità dell'oggetto nei test
+      final localRequest = (selectedModel != null && 
+                            selectedModel.localPath != null && 
+                            (request.modelPath != selectedModel.localPath || request.modelId != selectedModel.effectiveRuntimeModelId))
           ? request.copyWith(
               modelId: selectedModel.effectiveRuntimeModelId,
               modelPath: selectedModel.localPath,
@@ -53,59 +50,55 @@ class InferenceService {
 
       // 1. MODALITÀ LOCALE
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
+        // yield* delega direttamente lo stream originale senza alterare la catena di eventi o i pacchetti finali
+        yield* _runtimeProvider.streamInference(
+          request: localRequest,
+          cancellationToken: session.cancellationToken,
+        );
+        return;
+      }
+
+      // 2. MODALITÀ IBRIDA / CLOUD
+      final shouldPreferCloud = runtimeMode == AiRuntimeMode.cloud ||
+          _cloudRuntimeProvider.shouldPreferCloudFor(request);
+
+      if (!shouldPreferCloud) {
+        // Gestione Fallback Ibrido su fallimento Startup Locale
+        var emittedLocalToken = false;
+        var localStartupFailed = false;
+
         await for (final chunk in _runtimeProvider.streamInference(
           request: localRequest,
           cancellationToken: session.cancellationToken,
         )) {
+          if (chunk.isError && !emittedLocalToken) {
+            localStartupFailed = true;
+            break;
+          }
+          if (chunk.text.isNotEmpty) emittedLocalToken = true;
           yield chunk;
         }
-      } else {
-        // 2. MODALITÀ IBRIDA / CLOUD
-        final shouldPreferCloud = runtimeMode == AiRuntimeMode.cloud ||
-            _cloudRuntimeProvider.shouldPreferCloudFor(request);
 
-        if (!shouldPreferCloud) {
-          // Gestione Fallback Ibrido su fallimento Startup Locale
-          var emittedLocalToken = false;
-          var localStartupFailed = false;
-
-          await for (final chunk in _runtimeProvider.streamInference(
-            request: localRequest,
-            cancellationToken: session.cancellationToken,
-          )) {
-            if (chunk.isError && !emittedLocalToken) {
-              localStartupFailed = true;
-              break;
-            }
-            if (chunk.text.isNotEmpty) emittedLocalToken = true;
-            yield chunk;
-          }
-
-          if (localStartupFailed) {
-            await for (final chunk in _cloudRuntimeProvider.streamInference(
-              request: request,
-              cancellationToken: session.cancellationToken,
-            )) {
-              yield chunk;
-            }
-          }
-        } else {
-          // Fallback da Cloud a Locale (Errori di autenticazione o rete)
-          await for (final chunk in _cloudRuntimeProvider.streamInference(
+        if (localStartupFailed) {
+          yield* _cloudRuntimeProvider.streamInference(
             request: request,
             cancellationToken: session.cancellationToken,
-          )) {
-            if (chunk.isError && _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
-              await for (final localChunk in _runtimeProvider.streamInference(
-                request: localRequest,
-                cancellationToken: session.cancellationToken,
-              )) {
-                yield localChunk;
-              }
-              return;
-            }
-            yield chunk;
+          );
+        }
+      } else {
+        // Fallback da Cloud a Locale (Errori di autenticazione o rete)
+        await for (final chunk in _cloudRuntimeProvider.streamInference(
+          request: request,
+          cancellationToken: session.cancellationToken,
+        )) {
+          if (chunk.isError && _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
+            yield* _runtimeProvider.streamInference(
+              request: localRequest,
+              cancellationToken: session.cancellationToken,
+            );
+            return;
           }
+          yield chunk;
         }
       }
     } catch (error) {
