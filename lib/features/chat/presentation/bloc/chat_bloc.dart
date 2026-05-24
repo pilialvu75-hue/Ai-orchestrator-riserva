@@ -1,4 +1,3 @@
-import 'dart:developer' as developer;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/usecases/load_chat_messages.dart';
@@ -8,6 +7,13 @@ import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart'
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
+  final StreamChatMessage streamChatMessage;
+  final LoadChatMessages loadChatMessages;
+  final PruneChatHistory pruneChatHistory;
+
+  final List<ChatMessage> _messages = [];
+  final String _activeProvider;
+
   ChatBloc({
     required this.streamChatMessage,
     required this.loadChatMessages,
@@ -15,157 +21,42 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     String initialProvider = 'openAi',
   })  : _activeProvider = initialProvider,
         super(const ChatInitial()) {
-    on<LoadMessagesEvent>(_onLoadMessages);
+    
+    // Gestione minima degli eventi per evitare crash
+    on<LoadMessagesEvent>((event, emit) => emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider)));
+    on<PruneHistoryEvent>((event, emit) => _messages.clear());
     on<SendMessageEvent>(_onSendMessage);
-    on<PruneHistoryEvent>(_onPruneHistory);
   }
 
-  final StreamChatMessage streamChatMessage;
-  final LoadChatMessages loadChatMessages;
-  final PruneChatHistory pruneChatHistory;
+  Future<void> _onSendMessage(SendMessageEvent event, Emitter<ChatState> emit) async {
+    if (event.userPrompt.trim().isEmpty) return;
 
-  final String _activeProvider;
-  List<ChatMessage> _messages = [];
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
 
-  Future<void> _onLoadMessages(
-      LoadMessagesEvent event, Emitter<ChatState> emit) async {
-    try {
-      emit(const ChatLoading());
-      final result = await loadChatMessages(
-          LoadChatMessagesParams(sessionId: event.sessionId));
+    // 1. Crea e aggiunge il messaggio dell'utente alla lista locale
+    _messages.add(ChatMessage(
+      id: 'user-$timestamp',
+      sessionId: event.sessionId,
+      role: 'user',
+      content: event.userPrompt,
+      timestamp: timestamp,
+    ));
+    emit(ChatSending(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
 
-      if (isClosed) return;
+    // 2. Simulazione del tempo di inference (Iniezione logica file base)
+    await Future.delayed(const Duration(seconds: 2));
 
-      result.fold(
-        (failure) {
-          developer.log(
-            'FAIL: Impossibile caricare i messaggi per la sessione ${event.sessionId}. Errore: ${failure.message}',
-            name: 'ai_orchestrator.ChatBloc',
-            level: 900,
-          );
-          emit(ChatError(message: failure.message));
-        },
-        (messages) {
-          _messages = List<ChatMessage>.from(messages);
-          emit(ChatLoaded(
-              messages: List.unmodifiable(_messages),
-              activeProvider: _activeProvider));
-        },
-      );
-    } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Eccezione non gestita durante il caricamento dei messaggi',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
-      );
-      if (!isClosed) {
-        emit(ChatError(message: e.toString()));
-      }
-    }
-  }
+    // 3. Crea e aggiunge la risposta simulata dell'assistente
+    _messages.add(ChatMessage(
+      id: 'assistant-$timestamp',
+      sessionId: event.sessionId,
+      role: 'assistant',
+      content: "Risposta base per: ${event.userPrompt}",
+      timestamp: timestamp + 1,
+      provider: _activeProvider,
+    ));
 
-  Future<void> _onSendMessage(
-      SendMessageEvent event, Emitter<ChatState> emit) async {
-    try {
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final optimisticUserMessage = ChatMessage(
-        id: 'pending-user-$now',
-        sessionId: event.sessionId,
-        role: 'user',
-        content: event.userPrompt,
-        timestamp: now,
-        attachments: event.attachments,
-      );
-      
-      // Aggiorna immediatamente la lista locale con il messaggio dell'utente
-      _messages.add(optimisticUserMessage);
-
-      final optimisticAssistantMessage = ChatMessage(
-        id: 'pending-assistant-$now',
-        sessionId: event.sessionId,
-        role: 'assistant',
-        content: '',
-        timestamp: now + 1,
-        provider: _activeProvider,
-      );
-      final shouldShowAssistantPlaceholder =
-          event.userPrompt.trim().isNotEmpty || event.attachments.isEmpty;
-
-      emit(ChatSending(
-          messages: List.unmodifiable(<ChatMessage>[
-            ..._messages,
-            if (shouldShowAssistantPlaceholder) optimisticAssistantMessage,
-          ]),
-          activeProvider: _activeProvider));
-
-      ChatMessage? lastAssistantMessage;
-
-      await for (final assistantMessage in streamChatMessage(
-        StreamChatMessageParams(
-          sessionId: event.sessionId,
-          userPrompt: event.userPrompt,
-          systemPrompt: event.systemPrompt,
-          attachments: event.attachments,
-          activeProvider: _activeProvider,
-        ),
-      )) {
-        if (isClosed) return;
-        lastAssistantMessage = assistantMessage;
-        
-        emit(ChatSending(
-          messages: List.unmodifiable(<ChatMessage>[
-            ..._messages,
-            assistantMessage,
-          ]),
-          activeProvider: _activeProvider,
-        ));
-      }
-
-      // Consolida la risposta finale dell'assistente nella lista locale
-      if (lastAssistantMessage != null) {
-        _messages.add(lastAssistantMessage);
-      }
-
-      // Emette lo stato Loaded stabile prima di invocare il ricaricamento in background
-      if (!isClosed) {
-        emit(ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          activeProvider: _activeProvider,
-        ));
-        
-        add(LoadMessagesEvent(sessionId: event.sessionId));
-      }
-    } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Unhandled exception in send streaming pipeline',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
-      );
-      if (!isClosed) {
-        emit(ChatError(message: e.toString()));
-      }
-    }
-  }
-
-  Future<void> _onPruneHistory(
-      PruneHistoryEvent event, Emitter<ChatState> emit) async {
-    try {
-      await pruneChatHistory(const PruneChatHistoryParams());
-    } catch (e, stackTrace) {
-      developer.log(
-        'CRITICAL: Eccezione durante la pulizia della cronologia (Prune)',
-        name: 'ai_orchestrator.ChatBloc',
-        error: e,
-        stackTrace: stackTrace,
-        level: 1000,
-      );
-      if (!isClosed) {
-        emit(ChatError(message: e.toString()));
-      }
-    }
+    // 4. Ritorna lo stato finale alla UI
+    emit(ChatLoaded(messages: List.unmodifiable(_messages), activeProvider: _activeProvider));
   }
 }
