@@ -129,6 +129,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onSend(String text, List<ChatAttachment> attachments) {
+    // Log di ingresso forense per mappare lo scenario di tracciamento
+    _uiLog('[FORENSIC_BEFORE_ONSEND] chars=${text.length} attachments=${attachments.length}');
+
     _uiSendBeganAt = DateTime.now();
     _uiStreamStarted = false;
     _startUiDeadlockGuard();
@@ -136,11 +139,15 @@ class _ChatPageState extends State<ChatPage> {
       '[UI_SEND] session=$_kDefaultSessionId page=${hashCode.toRadixString(16)} chars=${text.length} attachments=${attachments.length}',
     );
     _uiLog('[UI_SEND_BEGIN] session=$_kDefaultSessionId chars=${text.length} attachments=${attachments.length}');
+    
     context.read<OrchestratorStateEngine>().add(SendMessageEvent(
           sessionId: _kDefaultSessionId,
           userPrompt: text,
           attachments: attachments,
         ));
+
+    // Log di uscita forense per verificare se l'esecuzione supera l'aggiunta all'Engine
+    _uiLog('[FORENSIC_AFTER_ONSEND]');
   }
 
   bool _isRuntimeInferencing() {
