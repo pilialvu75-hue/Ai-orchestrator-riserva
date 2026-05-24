@@ -38,55 +38,83 @@ class InferenceService {
       final runtimeMode = await _loadRuntimeMode();
       final selectedModel = await _loadSelectedModel();
       
-      // Soddisfa le verifiche dei mock nei test locali
-      if (selectedModel != null) {
-        _runtimeProvider.supportsModel(selectedModel);
-      }
+      // Validazione completa del modello per i mock dei test
+      final isSupported = selectedModel != null && 
+          selectedModel.isDownloaded && 
+          selectedModel.localPath != null && 
+          _runtimeProvider.supportsModel(selectedModel);
 
-      // Costruzione dell'oggetto di richiesta locale se il modello è valido
-      final localRequest = (selectedModel != null && selectedModel.localPath != null)
+      final localRequest = isSupported
           ? request.copyWith(
               modelId: selectedModel.effectiveRuntimeModelId,
               modelPath: selectedModel.localPath,
             )
           : null;
 
-      // 1. ROUTING IN MODALITÀ LOCALE (Risolve il Test 1)
+      // 1. MODALITÀ LOCALE REALE (Risolve Test 1 con interruzione a isFinal)
       if (runtimeMode == AiRuntimeMode.local || request.isOffline) {
         if (localRequest != null) {
-          yield* _runtimeProvider.streamInference(
+          await for (final chunk in _runtimeProvider.streamInference(
             request: localRequest,
             cancellationToken: session.cancellationToken,
-          );
+          )) {
+            yield chunk;
+            if (chunk.isFinal) return;
+          }
         } else {
           yield InferenceResponse.error('Local AI mode requires a downloaded validated model.');
         }
       } else {
-        // 2. ROUTING IBRIDO / CLOUD CON LOGICA DI FALLBACK (Risolve il Test 2)
+        // 2. MODALITÀ IBRIDA / CLOUD
         final shouldPreferCloud = runtimeMode == AiRuntimeMode.cloud ||
             _cloudRuntimeProvider.shouldPreferCloudFor(request);
 
         if (!shouldPreferCloud && localRequest != null) {
-          yield* _runtimeProvider.streamInference(
+          // Gestione Fallback Ibrido su fallimento Startup Locale (Risolve Test 2)
+          var emittedLocalToken = false;
+          var localStartupFailed = false;
+
+          await for (final chunk in _runtimeProvider.streamInference(
             request: localRequest,
             cancellationToken: session.cancellationToken,
-          );
+          )) {
+            if (chunk.isError && !emittedLocalToken) {
+              localStartupFailed = true;
+              break;
+            }
+            if (chunk.text.isNotEmpty) emittedLocalToken = true;
+            yield chunk;
+            if (chunk.isFinal) return;
+          }
+
+          if (localStartupFailed) {
+            await for (final chunk in _cloudRuntimeProvider.streamInference(
+              request: request,
+              cancellationToken: session.cancellationToken,
+            )) {
+              yield chunk;
+              if (chunk.isFinal) return;
+            }
+          }
         } else {
-          // Consuma lo stream cloud e controlla eventuali errori di autenticazione o rete
+          // Fallback da Cloud a Locale (Errori autenticazione/rete)
           await for (final chunk in _cloudRuntimeProvider.streamInference(
             request: request,
             cancellationToken: session.cancellationToken,
           )) {
             if (chunk.isError && localRequest != null &&
                 _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
-              // Intercetta il fallimento cloud e passa al motore locale
-              yield* _runtimeProvider.streamInference(
+              await for (final localChunk in _runtimeProvider.streamInference(
                 request: localRequest,
                 cancellationToken: session.cancellationToken,
-              );
+              )) {
+                yield localChunk;
+                if (localChunk.isFinal) return;
+              }
               return;
             }
             yield chunk;
+            if (chunk.isFinal) return;
           }
         }
       }
