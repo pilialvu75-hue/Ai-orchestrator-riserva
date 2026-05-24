@@ -57,24 +57,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool get _canSubmit => _hasText || _attachments.isNotEmpty;
 
   void _submit() {
-    // 🚨 TEST ATOMICO 1: Emette solo il marker isolato
-    RuntimeEventLog.instance.emit('[FORENSIC_BUTTON_PRESSED]');
-    
-    // Logica originale commentata per evitare qualsiasi effetto collaterale
-    /*
     final text = _controller.text.trim();
     if (text.isEmpty && _attachments.isEmpty) return;
+    
     debugPrint(
       '[UI_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
     );
+    
     RuntimeEventLog.instance.emit(
       '[FORENSIC_CHAT_SEND] source=chat_input_bar state=${hashCode.toRadixString(16)} chars=${text.length} attachments=${_attachments.length}',
     );
+    
     final outgoingAttachments = List<ChatAttachment>.from(_attachments);
     _controller.clear();
     setState(_attachments.clear);
+    
+    // 🔍 STRUMENTAZIONE FORENSE - TEST 1
+    RuntimeEventLog.instance.emit('[FORENSIC_BEFORE_ONSEND]');
+    
     widget.onSend(text, outgoingAttachments);
-    */
+    
+    RuntimeEventLog.instance.emit('[FORENSIC_AFTER_ONSEND]');
   }
 
   Future<void> _pickAttachment(_AttachmentPickerAction action) async {
