@@ -130,14 +130,16 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     // ── 2. Resolve dynamic model directory and verify required files ────────
     // On Android: prefer the public Download folder (persists across
-    // uninstalls, useful for debug/sideloading).  Fall back to the private
-    // app-documents folder on other platforms or if the debug folder does
-    // not exist.
-    String modelFolder = Platform.isAndroid
-        ? '/storage/emulated/0/Download/AiOrchestratorModels'
-        : '';
-    final debugDir = Directory(modelFolder);
-    if (modelFolder.isEmpty || !debugDir.existsSync()) {
+    // uninstalls, useful for debug/sideloading). Fall back to the private
+    // app-documents folder when the debug folder is missing or empty.
+    const String sharedModelFolder =
+        '/storage/emulated/0/Download/AiOrchestratorModels';
+    String modelFolder = sharedModelFolder;
+    final debugDir = Directory(sharedModelFolder);
+    final bool hasSharedModels = Platform.isAndroid &&
+        debugDir.existsSync() &&
+        debugDir.listSync(followLinks: false).isNotEmpty;
+    if (!hasSharedModels) {
       final docDir = await getApplicationDocumentsDirectory();
       modelFolder = '${docDir.path}/models';
     }
