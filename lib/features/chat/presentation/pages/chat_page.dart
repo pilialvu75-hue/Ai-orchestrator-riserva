@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,6 +14,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
+import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
@@ -234,6 +236,7 @@ class _ChatPageState extends State<ChatPage> {
         voiceLoopManager: _voiceLoopManager,
         voiceEngine: _voiceLoopEngine,
         voiceModelDownloader: _voiceModelDownloader,
+        textNormalizer: di.sl<VoiceTextNormalizer>(),
       ),
     );
   }
@@ -706,16 +709,44 @@ class _HighPerformanceChatList extends StatelessWidget {
 
 enum _LiveVoiceUiState { listening, thinking, speaking, idle }
 
+// ── Voice session settings ───────────────────────────────────────────────────
+
+class _VoiceSessionSettings {
+  const _VoiceSessionSettings({
+    this.speechRate = 1.0,
+    this.femaleSpeaker = false,
+    this.language = VoiceLanguage.italian,
+  });
+
+  final double speechRate;
+  final bool femaleSpeaker;
+  final VoiceLanguage language;
+
+  _VoiceSessionSettings copyWith({
+    double? speechRate,
+    bool? femaleSpeaker,
+    VoiceLanguage? language,
+  }) {
+    return _VoiceSessionSettings(
+      speechRate: speechRate ?? this.speechRate,
+      femaleSpeaker: femaleSpeaker ?? this.femaleSpeaker,
+      language: language ?? this.language,
+    );
+  }
+}
+
 class _LiveVoiceOverlay extends StatefulWidget {
   const _LiveVoiceOverlay({
     required this.voiceLoopManager,
     required this.voiceEngine,
     required this.voiceModelDownloader,
+    required this.textNormalizer,
   });
 
   final VoiceLoopManager voiceLoopManager;
-  final VoiceEngine voiceEngine;
+  final SherpaOnnxVoiceEngine voiceEngine;
   final VoiceModelDownloader voiceModelDownloader;
+  final VoiceTextNormalizer textNormalizer;
 
   @override
   State<_LiveVoiceOverlay> createState() => _LiveVoiceOverlayState();
@@ -727,9 +758,12 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
   Timer? _stateTicker;
   bool _closing = false;
   String? _error;
+  String? _diagnosticBanner;
   bool _isDownloadingModels = false;
   double _downloadProgress = 0;
   String _downloadStatus = 'Preparazione download modelli vocali...';
+  bool _showSettings = false;
+  _VoiceSessionSettings _settings = const _VoiceSessionSettings();
 
   @override
   void initState() {
@@ -757,6 +791,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
             if (!mounted) return;
             setState(() {
               _error = message;
+              _diagnosticBanner = widget.voiceLoopManager.pipelineError ?? message;
             });
             _syncUiStateFromEngine();
           },
@@ -843,6 +878,33 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     }
   }
 
+  // ── Settings helpers ──────────────────────────────────────────────────────
+
+  void _applySettings(_VoiceSessionSettings s) {
+    setState(() => _settings = s);
+    widget.voiceEngine.updateSettings(
+      speechRate: s.speechRate,
+      speakerId: s.femaleSpeaker ? 1 : 0,
+    );
+    widget.textNormalizer.language = s.language;
+  }
+
+  Future<void> _resetModels() async {
+    final dir = Directory(VoiceModelDownloader.sharedModelsFolder);
+    if (dir.existsSync()) {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Modelli eliminati. Riavvia la sessione per scaricarli di nuovo.'),
+        backgroundColor: Color(0xFF1E293B),
+      ),
+    );
+  }
+
   Future<void> _closeOverlay() async {
     if (_closing) return;
     _closing = true;
@@ -904,177 +966,404 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
               ),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
-              child: ValueListenableBuilder<_LiveVoiceUiState>(
-                valueListenable: _uiState,
-                builder: (context, state, _) {
-                  if (_isDownloadingModels) {
-                    return Column(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
+            child: Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+                  child: ValueListenableBuilder<_LiveVoiceUiState>(
+                    valueListenable: _uiState,
+                    builder: (context, state, _) {
+                      if (_isDownloadingModels) {
+                        return _buildDownloadBody();
+                      }
+                      if (_showSettings) {
+                        return _buildSettingsPanel();
+                      }
+                      return _buildSessionBody(state);
+                    },
+                  ),
+                ),
+                // ── Settings icon ───────────────────────────────────────────
+                Positioned(
+                  top: 14,
+                  right: 14,
+                  child: IconButton(
+                    icon: Icon(
+                      _showSettings ? Icons.close : Icons.settings,
+                      color: Colors.white54,
+                      size: 22,
+                    ),
+                    tooltip: _showSettings ? 'Chiudi impostazioni' : 'Impostazioni sessione',
+                    onPressed: () => setState(() => _showSettings = !_showSettings),
+                  ),
+                ),
+                // ── Diagnostic banner ───────────────────────────────────────
+                if ((_diagnosticBanner ?? '').isNotEmpty)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFDC2626),
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(30),
+                          topRight: Radius.circular(30),
                         ),
-                        const Spacer(),
-                        const SizedBox(
-                          width: 96,
-                          height: 96,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 4,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Color(0xFF8AB4F8),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                          _downloadStatus,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: _downloadProgress,
-                            minHeight: 10,
-                            backgroundColor: Colors.white.withValues(alpha: 0.14),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFF8AB4F8),
-                            ),
-                          ),
-                        ),
-                        if ((_error ?? '').trim().isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Color(0xFFFF8A80),
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                        const Spacer(),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFDC2626),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                            ),
-                            onPressed: _closeOverlay,
-                            icon: const Icon(Icons.call_end_rounded),
-                            label: const Text(
-                              'Termina sessione live',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _diagnosticBanner!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    );
-                  }
-                  final statusColor = _statusColor(state);
-                  final isActive = state != _LiveVoiceUiState.idle;
-                  return Column(
-                    children: [
-                      Container(
-                        width: 52,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                      const Spacer(),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: isActive ? 132 : 96,
-                        height: isActive ? 132 : 96,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: statusColor.withValues(alpha: 0.12),
-                          border: Border.all(
-                            color: statusColor.withValues(alpha: 0.8),
-                            width: 2,
+                          GestureDetector(
+                            onTap: () => setState(() => _diagnosticBanner = null),
+                            child: const Icon(Icons.close, color: Colors.white70, size: 16),
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: statusColor.withValues(alpha: 0.35),
-                              blurRadius: 28,
-                              spreadRadius: 3,
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          state == _LiveVoiceUiState.speaking
-                              ? Icons.volume_up_rounded
-                              : Icons.graphic_eq_rounded,
-                          size: 46,
-                          color: statusColor,
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 22),
-                      Text(
-                        _statusLabel(state),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if ((_error ?? '').trim().isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Color(0xFFFF8A80),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFDC2626),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 18),
-                          ),
-                          onPressed: _closeOverlay,
-                          icon: const Icon(Icons.call_end_rounded),
-                          label: const Text(
-                            'Termina sessione live',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Download body ─────────────────────────────────────────────────────────
+
+  Widget _buildDownloadBody() {
+    return Column(
+      children: [
+        Container(
+          width: 52,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const Spacer(),
+        const SizedBox(
+          width: 96,
+          height: 96,
+          child: CircularProgressIndicator(
+            strokeWidth: 4,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              Color(0xFF8AB4F8),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          _downloadStatus,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 18),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: _downloadProgress,
+            minHeight: 10,
+            backgroundColor: Colors.white.withValues(alpha: 0.14),
+            valueColor: const AlwaysStoppedAnimation<Color>(
+              Color(0xFF8AB4F8),
+            ),
+          ),
+        ),
+        if ((_error ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFFF8A80),
+              fontSize: 13,
+            ),
+          ),
+        ],
+        const Spacer(),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+            ),
+            onPressed: _closeOverlay,
+            icon: const Icon(Icons.call_end_rounded),
+            label: const Text(
+              'Termina sessione live',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  // ── Session body ──────────────────────────────────────────────────────────
+
+  Widget _buildSessionBody(_LiveVoiceUiState state) {
+    final statusColor = _statusColor(state);
+    final isActive = state != _LiveVoiceUiState.idle;
+    return Column(
+      children: [
+        Container(
+          width: 52,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const Spacer(),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: isActive ? 132 : 96,
+          height: isActive ? 132 : 96,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: statusColor.withValues(alpha: 0.12),
+            border: Border.all(
+              color: statusColor.withValues(alpha: 0.8),
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: statusColor.withValues(alpha: 0.35),
+                blurRadius: 28,
+                spreadRadius: 3,
+              ),
+            ],
+          ),
+          child: Icon(
+            state == _LiveVoiceUiState.speaking
+                ? Icons.volume_up_rounded
+                : Icons.graphic_eq_rounded,
+            size: 46,
+            color: statusColor,
+          ),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          _statusLabel(state),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 26,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if ((_error ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFFF8A80),
+              fontSize: 13,
+            ),
+          ),
+        ],
+        const Spacer(),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+            ),
+            onPressed: _closeOverlay,
+            icon: const Icon(Icons.call_end_rounded),
+            label: const Text(
+              'Termina sessione live',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Settings panel ────────────────────────────────────────────────────────
+
+  Widget _buildSettingsPanel() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 8),
+          // Title
+          const Text(
+            'Impostazioni Sessione Vocale',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Speech rate slider ────────────────────────────────────────────
+          const Text(
+            'Velocità voce',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          Row(
+            children: [
+              const Text('0.8x', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              Expanded(
+                child: Slider(
+                  value: _settings.speechRate,
+                  min: 0.8,
+                  max: 1.5,
+                  divisions: 14,
+                  label: '${_settings.speechRate.toStringAsFixed(1)}x',
+                  activeColor: const Color(0xFF8AB4F8),
+                  inactiveColor: Colors.white12,
+                  onChanged: (v) => _applySettings(_settings.copyWith(speechRate: v)),
+                ),
+              ),
+              const Text('1.5x', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Gender switch ─────────────────────────────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Genere voce',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              Row(
+                children: [
+                  Text(
+                    _settings.femaleSpeaker ? 'Voce Femminile' : 'Voce Maschile',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(width: 8),
+                  Switch(
+                    value: _settings.femaleSpeaker,
+                    activeColor: const Color(0xFF8AB4F8),
+                    onChanged: (v) => _applySettings(_settings.copyWith(femaleSpeaker: v)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Language dropdown ─────────────────────────────────────────────
+          const Text(
+            'Lingua',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A2035),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: DropdownButton<VoiceLanguage>(
+              value: _settings.language,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1A2035),
+              underline: const SizedBox.shrink(),
+              iconEnabledColor: Colors.white54,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              items: const [
+                DropdownMenuItem(
+                  value: VoiceLanguage.italian,
+                  child: Text('Italiano'),
+                ),
+                DropdownMenuItem(
+                  value: VoiceLanguage.french,
+                  child: Text('Français'),
+                ),
+                DropdownMenuItem(
+                  value: VoiceLanguage.english,
+                  child: Text('English'),
+                ),
+              ],
+              onChanged: (lang) {
+                if (lang != null) {
+                  _applySettings(_settings.copyWith(language: lang));
+                }
+              },
+            ),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Reset models button ───────────────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFFF8A80),
+                side: const BorderSide(color: Color(0xFFFF8A80)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _resetModels,
+              icon: const Icon(Icons.delete_sweep_rounded),
+              label: const Text('Ripristina Modelli'),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Close settings ────────────────────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              onPressed: _closeOverlay,
+              icon: const Icon(Icons.call_end_rounded),
+              label: const Text(
+                'Termina sessione live',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }

@@ -8,7 +8,7 @@ import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 class VoiceInputService {
   VoiceInputService({
     required VoiceEngine engine,
-    VoiceTextNormalizer normalizer = const VoiceTextNormalizer(),
+    VoiceTextNormalizer normalizer = VoiceTextNormalizer(),
   })  : _engine = engine,
         _normalizer = normalizer;
 

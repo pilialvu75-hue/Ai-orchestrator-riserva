@@ -62,6 +62,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   bool _isListening = false;
   bool _initialized = false;
 
+  // Active VITS speaker ID; 0 = default (male), 1 = female (multi-speaker).
+  int _speakerId = 0;
+
   // Phase 2: serial low-latency audio output player.
   final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
 
@@ -82,6 +85,27 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   Float32List? get pendingTtsSamples => _pendingTtsSamples;
   int get pendingTtsSampleRate => _pendingTtsSampleRate;
+
+  // ── Settings update ───────────────────────────────────────────────────────
+
+  /// Updates TTS playback settings at runtime.
+  ///
+  /// [speechRate] – multiplier in the range [0.8, 1.5]; clamped to that range.
+  /// [speakerId]  – VITS speaker ID (0 = default / male, 1 = female for most
+  ///                multi-speaker VITS models).  Ignored when the loaded model
+  ///                has only one speaker (sid is passed directly to the ONNX
+  ///                runtime; the runtime silently clamps it).
+  void updateSettings({double? speechRate, int? speakerId}) {
+    if (speechRate != null) {
+      final clamped = speechRate.clamp(0.8, 1.5);
+      _status = _status.copyWithSettings(speechRate: clamped);
+      logEvent(_tag, '[SETTINGS_UPDATE] speechRate=$clamped');
+    }
+    if (speakerId != null) {
+      _speakerId = speakerId;
+      logEvent(_tag, '[SETTINGS_UPDATE] speakerId=$speakerId');
+    }
+  }
 
   // ── Forensic print helper ─────────────────────────────────────────────────
 
@@ -444,7 +468,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       final audio = tts.generate(
         text: sanitized,
-        sid: 0,
+        sid: _speakerId,
         speed: _status.speechRate,
       );
       _pendingTtsSamples = audio.samples;

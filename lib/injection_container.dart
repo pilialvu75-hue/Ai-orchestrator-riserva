@@ -352,7 +352,7 @@ Future<void> initDependencies({
 
   // ── Voice ─────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<VoiceTextNormalizer>(
-    () => const VoiceTextNormalizer(),
+    () => VoiceTextNormalizer(),
   );
   sl.registerLazySingleton<VoiceEngine>(
     () => SherpaOnnxAdapter(),
