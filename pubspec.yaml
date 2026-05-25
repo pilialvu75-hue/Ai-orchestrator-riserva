@@ -45,7 +45,7 @@ dependencies:
   # Voice subsystem: offline STT/TTS via Sherpa-ONNX Dart SDK
   sherpa_onnx: ^1.10.2
   # Low-level PCM microphone streaming required by SherpaOnnxVoiceEngine
-  record: ^5.1.2
+  record: ^5.2.0
 
   uuid: ^4.4.0
   intl: ^0.20.2
@@ -60,3 +60,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/models/
+
+dependency_overrides:
+  record_linux: ^0.8.0
+  record_platform_interface: ^1.6.0
