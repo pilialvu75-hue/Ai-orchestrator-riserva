@@ -46,6 +46,8 @@ dependencies:
   sherpa_onnx: ^1.10.2
   # Low-level PCM microphone streaming required by SherpaOnnxVoiceEngine
   record: ^5.2.0
+  # Phase 2: raw PCM audio output (live playback streaming to speaker)
+  mp_audio_stream: any
 
   uuid: ^4.4.0
   intl: ^0.20.2

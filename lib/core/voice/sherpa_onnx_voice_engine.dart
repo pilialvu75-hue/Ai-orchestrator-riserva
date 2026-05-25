@@ -8,6 +8,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
 /// Direct Dart-SDK voice engine using the `sherpa_onnx` package for offline
@@ -24,10 +25,12 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 ///    and feeds each [Uint8List] chunk – converted to [Float32List] via the
 ///    standard int16/32768 normalisation – to [sherpa_onnx.OnlineStream].
 /// 3. [speak] calls [sherpa_onnx.OfflineTts.generate] synchronously on the
-///    caller's zone.  Phase 2 will hook the resulting [Float32List] samples
-///    to a platform audio-output channel; for now the samples are held in
-///    [_pendingTtsSamples] and the engine reports [isSpeaking] correctly.
-/// 4. [dispose] shuts down all native streams and frees ONNX handles in the
+///    caller's zone.  The resulting [Float32List] samples are immediately
+///    enqueued on [_audioPlayer] which streams them to the device speaker
+///    via [mp_audio_stream] at low latency.
+/// 4. [stopSpeaking] cancels any in-progress playback and flushes the
+///    hardware ring-buffer for immediate barge-in response.
+/// 5. [dispose] shuts down all native streams and frees ONNX handles in the
 ///    correct order to prevent memory leaks or audio-thread stalls.
 ///
 /// Guardrails
@@ -56,19 +59,25 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   VoiceEngineStatus _status = VoiceEngineStatus.unsupported();
   bool _isListening = false;
-  bool _isSpeaking = false;
   bool _initialized = false;
 
-  // TTS output is stored per-generation.  Phase 2 will pipe this to a
-  // platform audio-output channel (e.g. flutter_sound or audioplayers).
+  // Phase 2: serial low-latency audio output player.
+  final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
+
+  // TTS output is stored per-generation for diagnostics / callers that read
+  // the raw samples directly (e.g. tests, subtitle rendering).
   Float32List? _pendingTtsSamples;
   int _pendingTtsSampleRate = 22050;
 
   @override
   bool get isListening => _isListening;
 
+  /// `true` while audio samples are being played or queued for playback.
+  ///
+  /// Delegates to [_audioPlayer.isPlaying] so the flag correctly reflects
+  /// the actual hardware state rather than a simple bool toggle.
   @override
-  bool get isSpeaking => _isSpeaking;
+  bool get isSpeaking => _audioPlayer.isPlaying;
 
   Float32List? get pendingTtsSamples => _pendingTtsSamples;
   int get pendingTtsSampleRate => _pendingTtsSampleRate;
@@ -408,7 +417,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     logEvent(_tag, '[TTS_GENERATE_BEGIN] text="${sanitized.length > 60 ? sanitized.substring(0, 60) : sanitized}..."');
 
-    _isSpeaking = true;
     try {
       final audio = tts.generate(
         text: sanitized,
@@ -423,16 +431,16 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         '[TTS_GENERATE_OK] samples=${audio.samples.length} sampleRate=${audio.sampleRate}',
       );
 
-      // Phase 2 hook: pipe _pendingTtsSamples to a platform audio-output
-      // channel (e.g. flutter_sound WriteStream or audioplayers).
-      // For Phase 1 the generation is complete and samples are in memory.
-      logEvent(_tag, '[TTS_PLAYBACK_STUB] Phase 2 will route samples to audio output');
+      // Phase 2: pipe generated samples to the hardware speaker via
+      // AudioStreamPlayer.  The push is fire-and-forget; the player
+      // serialises concurrent chunks and clears itself on stopSpeaking().
+      _audioPlayer.push(audio.samples, audio.sampleRate);
+
+      logEvent(_tag, '[TTS_PLAYBACK_ENQUEUED] queued ${audio.samples.length} samples at ${audio.sampleRate} Hz');
     } catch (e, st) {
       final msg = 'TTS generation error: $e';
       _forensicPrint('[VOICE_ENGINE] [TTS_GENERATE_FAIL] $msg\n$st');
       logEvent(_tag, '[TTS_GENERATE_FAIL] $msg');
-    } finally {
-      _isSpeaking = false;
     }
   }
 
@@ -441,7 +449,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   @override
   Future<void> stopSpeaking() async {
     logEvent(_tag, '[TTS_STOP]');
-    _isSpeaking = false;
+    // Stop the audio player immediately (clears queue + flushes hardware
+    // ring-buffer) for low-latency barge-in response.
+    _audioPlayer.stop();
     _pendingTtsSamples = null;
   }
 
@@ -485,6 +495,15 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       logEvent(_tag, '[DISPOSE_RECORDER_OK]');
     } catch (e) {
       logEvent(_tag, '[DISPOSE_RECORDER_FAIL] $e');
+    }
+
+    // Dispose the audio output player after the recorder so any in-progress
+    // TTS playback is cleanly terminated.
+    try {
+      _audioPlayer.dispose();
+      logEvent(_tag, '[DISPOSE_AUDIO_PLAYER_OK]');
+    } catch (e) {
+      logEvent(_tag, '[DISPOSE_AUDIO_PLAYER_FAIL] $e');
     }
 
     _initialized = false;
