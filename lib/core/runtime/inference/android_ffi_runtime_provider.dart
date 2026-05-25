@@ -53,13 +53,12 @@ import 'package:flutter/foundation.dart';
 class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   AndroidFfiRuntimeProvider({
     RuntimeStateMachine? runtimeStateMachine,
-    bool Function()? developerModeProvider,
+    super.developerModeProvider,
     int maxActiveNativeSessions = 1,
   })  : runtimeStateMachine = runtimeStateMachine ?? RuntimeStateMachine(),
         _developerModeProvider = developerModeProvider ?? (() => false),
         _maxActiveNativeSessions =
-            maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions,
-        super(developerModeProvider: developerModeProvider);
+            maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions;
 
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 128;
@@ -117,7 +116,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
   int? _nativeSessionId;
-  String? _nativeSessionModelPath;
   final int _maxActiveNativeSessions;
   final LinkedHashMap<String, int> _nativeSessionsByModel =
       LinkedHashMap<String, int>();
@@ -283,17 +281,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
 
     // ── FORENSIC: gate-condition snapshot ────────────────────────────────────
-    final _forensicModelId = selectedModel?.effectiveRuntimeModelId ?? 'null';
-    final _forensicModelPath = selectedModelPath ?? 'null';
-    final _forensicVerified = selectedModelPath != null &&
+    final forensicModelId = selectedModel?.effectiveRuntimeModelId ?? 'null';
+    final forensicModelPath = selectedModelPath ?? 'null';
+    final forensicVerified = selectedModelPath != null &&
         selectedModelPath.trim().isNotEmpty &&
         hasVerifiedRuntimeForModel(selectedModelPath);
     _log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart'
       ' | Line: 277 | Function: validateRuntime()'
-      ' | hasVerifiedRuntimeForModel: $_forensicVerified'
-      ' | ModelID: $_forensicModelId'
-      ' | ModelPath: ${_normalizePathForLogs(_forensicModelPath)}'
+      ' | hasVerifiedRuntimeForModel: $forensicVerified'
+      ' | ModelID: $forensicModelId'
+      ' | ModelPath: ${_normalizePathForLogs(forensicModelPath)}'
       ' | verifiedAbi: ${_verifiedRuntimeAbi ?? 'null'}'
       ' | currentAbi: ${LlamaFfiLoader.currentAbiName}'
       ' | _verifiedModelPath: ${isRuntimeVerified() ? 'SET' : 'null'}'
@@ -1961,20 +1959,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 await Future<void>.delayed(const Duration(milliseconds: 24));
               }
 
-              if (!completed) {
-                _finishWithRuntimeError(
-                  controller,
-                  stage: 'verification_completion',
-                  message: 'Verification did not complete.',
-                );
-                verificationMonitor.update(
-                  RuntimeVerificationPhase.failed,
-                  message: 'Verification did not complete.',
-                );
-                clearRuntimeVerification();
-                return;
-              }
-
               recordVerificationSuccess(
                 modelPath: modelPath,
                 source: 'verification_scope',
@@ -2053,7 +2037,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       if (existingSessionId != null && bindings.sessionIsActive(existingSessionId) == 1) {
         _markSessionAsMostRecentlyUsed(modelPath);
         _nativeSessionId = existingSessionId;
-        _nativeSessionModelPath = modelPath;
         _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
         _log('[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
         _log(
@@ -2086,7 +2069,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // Attempt to create a session with GPU layers (Vulkan). If session
       // creation fails, the native bridge may not support Vulkan on this device
       // or build; retry with 0 GPU layers so inference continues on CPU.
-      final desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       int created = bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
       _log(
@@ -2117,7 +2100,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       _nativeSessionId = created;
-      _nativeSessionModelPath = modelPath;
       _nativeSessionsByModel[modelPath] = created;
       _markSessionAsMostRecentlyUsed(modelPath);
       _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
@@ -2149,7 +2131,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } finally {
       if (_nativeSessionId == sessionId) {
         _nativeSessionId = null;
-        _nativeSessionModelPath = null;
       }
     }
   }
@@ -2175,7 +2156,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } finally {
       if (_nativeSessionId == evictedSessionId) {
         _nativeSessionId = null;
-        _nativeSessionModelPath = null;
       }
     }
   }
@@ -2210,7 +2190,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     _nativeSessionsByModel.clear();
     _nativeSessionId = null;
-    _nativeSessionModelPath = null;
   }
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {

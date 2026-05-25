@@ -109,7 +109,7 @@ void main() {
   group('CrdtRecord serialisation', () {
     test('toJson / fromJson round-trips correctly', () {
       const hlc = Hlc(wallMs: 1000000, counter: 5, nodeId: 'n1');
-      final record = CrdtRecord(
+      const record = CrdtRecord(
         id: 'uuid-abc',
         collection: 'messages',
         key: 'msg-123',
