@@ -70,6 +70,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   @override
   bool get isSpeaking => _isSpeaking;
 
+  Float32List? get pendingTtsSamples => _pendingTtsSamples;
+  int get pendingTtsSampleRate => _pendingTtsSampleRate;
+
   // ── Forensic print helper ─────────────────────────────────────────────────
 
   /// Synchronous forensic print emitted immediately before/after hardware-
@@ -161,27 +164,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
           numThreads: 1,
           debug: false,
         );
-        final endpointConfig = sherpa_onnx.EndpointConfig(
-          rule1: sherpa_onnx.EndpointRule(
-            mustContainNonSilence: false,
-            minTrailingSilence: 2.4,
-            minUtteranceLength: 0,
-          ),
-          rule2: sherpa_onnx.EndpointRule(
-            mustContainNonSilence: true,
-            minTrailingSilence: 1.4,
-            minUtteranceLength: 0,
-          ),
-          rule3: sherpa_onnx.EndpointRule(
-            mustContainNonSilence: false,
-            minTrailingSilence: 0,
-            minUtteranceLength: 20,
-          ),
-        );
         final config = sherpa_onnx.OnlineRecognizerConfig(
           model: modelConfig,
-          endpointConfig: endpointConfig,
           enableEndpoint: true,
+          rule1MinTrailingSilence: 2.4,
+          rule2MinTrailingSilence: 1.4,
+          rule3MinUtteranceLength: 20,
         );
         _recognizer = sherpa_onnx.OnlineRecognizer(config);
         sttReady = true;
