@@ -99,14 +99,18 @@ class VoiceModelDownloader {
       (sum, spec) => sum + spec.expectedBytes,
     );
     var completedExpectedBytes = 0;
-    onProgress(0);
+    onProgress(0.0);
 
     for (final spec in specs) {
       final destinationPath = '${targetDir.path}/${spec.fileName}';
       final destinationFile = File(destinationPath);
       if (destinationFile.existsSync() && destinationFile.lengthSync() > 0) {
         completedExpectedBytes += spec.expectedBytes;
-        onProgress((completedExpectedBytes / totalExpectedBytes).clamp(0.0, 1.0));
+        onProgress(
+          (completedExpectedBytes / totalExpectedBytes)
+              .clamp(0.0, 1.0)
+              .toDouble(),
+        );
         continue;
       }
 
@@ -119,15 +123,19 @@ class VoiceModelDownloader {
           final fileProgress = (received / denominator).clamp(0.0, 1.0);
           final aggregate = (completedExpectedBytes + fileProgress * spec.expectedBytes) /
               totalExpectedBytes;
-          onProgress(aggregate.clamp(0.0, 1.0));
+          onProgress(aggregate.clamp(0.0, 1.0).toDouble());
         },
       );
 
       completedExpectedBytes += spec.expectedBytes;
-      onProgress((completedExpectedBytes / totalExpectedBytes).clamp(0.0, 1.0));
+      onProgress(
+        (completedExpectedBytes / totalExpectedBytes)
+            .clamp(0.0, 1.0)
+            .toDouble(),
+      );
     }
 
-    onProgress(1);
+    onProgress(1.0);
   }
 }
 
