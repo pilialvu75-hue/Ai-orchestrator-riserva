@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
+import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
@@ -46,6 +47,7 @@ class _ChatPageState extends State<ChatPage> {
   late final VoiceEngine _voiceEngine;
   late final VoiceLoopManager _voiceLoopManager;
   late final SherpaOnnxVoiceEngine _voiceLoopEngine;
+  late final VoiceModelDownloader _voiceModelDownloader;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
@@ -66,6 +68,7 @@ class _ChatPageState extends State<ChatPage> {
     _voiceEngine = di.sl<VoiceEngine>();
     _voiceLoopManager = di.sl<VoiceLoopManager>();
     _voiceLoopEngine = di.sl<SherpaOnnxVoiceEngine>();
+    _voiceModelDownloader = di.sl<VoiceModelDownloader>();
     _runtimeState = _runtimeDiagnostics.monitor.state;
     _runtimeDiagnostics.monitor.addListener(_handleRuntimeStateChanged);
     unawaited(_refreshRuntimeIndicators());
@@ -230,6 +233,7 @@ class _ChatPageState extends State<ChatPage> {
       builder: (_) => _LiveVoiceOverlay(
         voiceLoopManager: _voiceLoopManager,
         voiceEngine: _voiceLoopEngine,
+        voiceModelDownloader: _voiceModelDownloader,
       ),
     );
   }
@@ -706,10 +710,12 @@ class _LiveVoiceOverlay extends StatefulWidget {
   const _LiveVoiceOverlay({
     required this.voiceLoopManager,
     required this.voiceEngine,
+    required this.voiceModelDownloader,
   });
 
   final VoiceLoopManager voiceLoopManager;
   final VoiceEngine voiceEngine;
+  final VoiceModelDownloader voiceModelDownloader;
 
   @override
   State<_LiveVoiceOverlay> createState() => _LiveVoiceOverlayState();
@@ -721,6 +727,9 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
   Timer? _stateTicker;
   bool _closing = false;
   String? _error;
+  bool _isDownloadingModels = false;
+  double _downloadProgress = 0;
+  String _downloadStatus = 'Preparazione download modelli vocali...';
 
   @override
   void initState() {
@@ -734,7 +743,12 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
 
   Future<void> _startSession() async {
     try {
-      await widget.voiceEngine.initialize();
+      final status = await widget.voiceEngine.initialize();
+      if (_requiresModelsDownload(status)) {
+        await _runModelDownloadPipeline();
+        if (!mounted) return;
+        await widget.voiceEngine.initialize();
+      }
       if (!mounted) return;
       _syncUiStateFromEngine();
       unawaited(
@@ -756,9 +770,54 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
       if (!mounted) return;
       setState(() {
         _error = '$error';
+        _isDownloadingModels = false;
       });
       _uiState.value = _LiveVoiceUiState.idle;
     }
+  }
+
+  bool _requiresModelsDownload(VoiceEngineStatus status) {
+    final details = (status.details ?? '').toLowerCase();
+    return !status.supportedPlatform && details.contains('modelli mancanti');
+  }
+
+  Future<void> _runModelDownloadPipeline() async {
+    setState(() {
+      _isDownloadingModels = true;
+      _downloadProgress = 0;
+      _downloadStatus = 'Richiesta permessi storage...';
+      _error = null;
+    });
+
+    final hasPermissions =
+        await widget.voiceModelDownloader.checkAndRequestPermissions();
+    if (!hasPermissions) {
+      throw Exception('Permessi storage non concessi.');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _downloadStatus = 'Scaricamento modelli vocali: 0%';
+    });
+
+    await widget.voiceModelDownloader.downloadModels(
+      onProgress: (value) {
+        if (!mounted) return;
+        final normalized = value.clamp(0.0, 1.0).toDouble();
+        setState(() {
+          _downloadProgress = normalized;
+          _downloadStatus =
+              'Scaricamento modelli vocali: ${(normalized * 100).toStringAsFixed(0)}%';
+        });
+      },
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _downloadProgress = 1;
+      _downloadStatus = 'Download completato. Inizializzazione motore...';
+      _isDownloadingModels = false;
+    });
   }
 
   _LiveVoiceUiState _deriveUiState() {
@@ -775,6 +834,9 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
   }
 
   void _syncUiStateFromEngine() {
+    if (_isDownloadingModels) {
+      return;
+    }
     final next = _deriveUiState();
     if (_uiState.value != next) {
       _uiState.value = next;
@@ -847,6 +909,84 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
               child: ValueListenableBuilder<_LiveVoiceUiState>(
                 valueListenable: _uiState,
                 builder: (context, state, _) {
+                  if (_isDownloadingModels) {
+                    return Column(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        const Spacer(),
+                        const SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 4,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Color(0xFF8AB4F8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          _downloadStatus,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: _downloadProgress,
+                            minHeight: 10,
+                            backgroundColor: Colors.white.withValues(alpha: 0.14),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              Color(0xFF8AB4F8),
+                            ),
+                          ),
+                        ),
+                        if ((_error ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFFF8A80),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFDC2626),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                            ),
+                            onPressed: _closeOverlay,
+                            icon: const Icon(Icons.call_end_rounded),
+                            label: const Text(
+                              'Termina sessione live',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
                   final statusColor = _statusColor(state);
                   final isActive = state != _LiveVoiceUiState.idle;
                   return Column(
