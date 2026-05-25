@@ -373,7 +373,9 @@ Future<void> initDependencies({
   // Model paths are supplied at runtime when voice models are downloaded;
   // the engine starts in an uninitialised state and initialises on first use.
   sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
-    () => SherpaOnnxVoiceEngine(),
+    () => SherpaOnnxVoiceEngine(
+      normalizer: sl<VoiceTextNormalizer>(),
+    ),
   );
   sl.registerLazySingleton<VoiceModelDownloader>(
     () => VoiceModelDownloader(),

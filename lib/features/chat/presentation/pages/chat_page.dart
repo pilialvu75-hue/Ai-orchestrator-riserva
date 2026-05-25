@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -29,6 +30,8 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
 const int _kAssistantTtsRecencyThresholdSeconds = 10;
+const MethodChannel _voiceAudioFocusChannel =
+    MethodChannel(AppConstants.voiceAudioFocusMethodChannel);
 
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
@@ -757,6 +760,8 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
       ValueNotifier<_LiveVoiceUiState>(_LiveVoiceUiState.thinking);
   Timer? _stateTicker;
   bool _closing = false;
+  bool _downloadFailed = false;
+  bool _audioFocusAcquired = false;
   String? _error;
   String? _diagnosticBanner;
   bool _isDownloadingModels = false;
@@ -779,28 +784,15 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     try {
       final status = await widget.voiceEngine.initialize();
       if (_requiresModelsDownload(status)) {
-        await _runModelDownloadPipeline();
+        final downloaded = await _runModelDownloadPipeline();
+        if (!downloaded) return;
         if (!mounted) return;
         await widget.voiceEngine.initialize();
       }
       if (!mounted) return;
+      await _acquireAudioFocus();
       _syncUiStateFromEngine();
-      unawaited(
-        widget.voiceLoopManager.startLiveSession(
-          onError: (message) {
-            if (!mounted) return;
-            setState(() {
-              _error = message;
-              _diagnosticBanner = widget.voiceLoopManager.pipelineError ?? message;
-            });
-            _syncUiStateFromEngine();
-          },
-          onSubtitle: (_, __) {
-            if (!mounted) return;
-            _syncUiStateFromEngine();
-          },
-        ),
-      );
+      _launchLiveSession();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -813,12 +805,13 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
 
   bool _requiresModelsDownload(VoiceEngineStatus status) {
     final details = (status.details ?? '').toLowerCase();
-    return !status.supportedPlatform && details.contains('modelli mancanti');
+    return details.contains('modelli mancanti');
   }
 
-  Future<void> _runModelDownloadPipeline() async {
+  Future<bool> _runModelDownloadPipeline() async {
     setState(() {
       _isDownloadingModels = true;
+      _downloadFailed = false;
       _downloadProgress = 0;
       _downloadStatus = 'Richiesta permessi storage...';
       _error = null;
@@ -827,32 +820,60 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     final hasPermissions =
         await widget.voiceModelDownloader.checkAndRequestPermissions();
     if (!hasPermissions) {
-      throw Exception('Permessi storage non concessi.');
+      setState(() {
+        _error = 'Permessi storage non concessi.';
+        _downloadStatus = 'Download fallito. Controlla la connessione.';
+        _downloadFailed = true;
+        _isDownloadingModels = false;
+      });
+      return false;
     }
 
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() {
       _downloadStatus = 'Scaricamento modelli vocali: 0%';
     });
 
-    await widget.voiceModelDownloader.downloadModels(
-      onProgress: (value) {
-        if (!mounted) return;
-        final normalized = value.clamp(0.0, 1.0).toDouble();
-        setState(() {
-          _downloadProgress = normalized;
-          _downloadStatus =
-              'Scaricamento modelli vocali: ${(normalized * 100).toStringAsFixed(0)}%';
-        });
-      },
-    );
+    try {
+      await widget.voiceModelDownloader.downloadModels(
+        onProgress: (value) {
+          if (!mounted) return;
+          final normalized = value.clamp(0.0, 1.0).toDouble();
+          setState(() {
+            _downloadProgress = normalized;
+            _downloadStatus =
+                'Scaricamento modelli vocali: ${(normalized * 100).toStringAsFixed(0)}%';
+          });
+        },
+      );
+    } on VoiceModelDownloadException catch (error) {
+      if (!mounted) return false;
+      setState(() {
+        _error = error.debugMessage;
+        _downloadStatus = error.userMessage;
+        _downloadFailed = true;
+        _isDownloadingModels = false;
+      });
+      return false;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() {
+        _error = '$error';
+        _downloadStatus = 'Download fallito. Controlla la connessione.';
+        _downloadFailed = true;
+        _isDownloadingModels = false;
+      });
+      return false;
+    }
 
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() {
       _downloadProgress = 1;
       _downloadStatus = 'Download completato. Inizializzazione motore...';
       _isDownloadingModels = false;
+      _downloadFailed = false;
     });
+    return true;
   }
 
   _LiveVoiceUiState _deriveUiState() {
@@ -885,8 +906,90 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     widget.voiceEngine.updateSettings(
       speechRate: s.speechRate,
       speakerId: s.femaleSpeaker ? 1 : 0,
+      pitchMultiplier: 1.0,
     );
     widget.textNormalizer.language = s.language;
+  }
+
+  void _launchLiveSession() {
+    unawaited(
+      widget.voiceLoopManager.startLiveSession(
+        onError: (message) {
+          if (!mounted) return;
+          setState(() {
+            _error = message;
+            _diagnosticBanner =
+                widget.voiceLoopManager.pipelineError ?? message;
+          });
+          _syncUiStateFromEngine();
+        },
+        onSubtitle: (_, __) {
+          if (!mounted) return;
+          _syncUiStateFromEngine();
+        },
+      ),
+    );
+  }
+
+  Future<void> _acquireAudioFocus() async {
+    if (_audioFocusAcquired) return;
+    try {
+      _audioFocusAcquired = await _voiceAudioFocusChannel
+              .invokeMethod<bool>('acquireVoiceFocus') ==
+          true;
+    } on PlatformException {
+      _audioFocusAcquired = false;
+    } on MissingPluginException {
+      _audioFocusAcquired = false;
+    }
+  }
+
+  Future<void> _releaseAudioFocus() async {
+    if (!_audioFocusAcquired) return;
+    try {
+      await _voiceAudioFocusChannel.invokeMethod<void>('releaseVoiceFocus');
+    } on PlatformException {
+      // Ignore native failures during teardown.
+    } on MissingPluginException {
+      // Ignore when channel is unavailable.
+    } finally {
+      _audioFocusAcquired = false;
+    }
+  }
+
+  Future<void> _interruptSpeech() async {
+    if (_uiState.value != _LiveVoiceUiState.speaking &&
+        widget.voiceLoopManager.currentPhase !=
+            VoicePipelinePhase.ttsSynthesizing) {
+      return;
+    }
+    await widget.voiceEngine.stopSpeaking();
+    if (!mounted) return;
+    _uiState.value = _LiveVoiceUiState.listening;
+    if (!widget.voiceLoopManager.isSessionActive) {
+      _launchLiveSession();
+    }
+  }
+
+  Future<void> _retryDownloadAndStartSession() async {
+    final ok = await _runModelDownloadPipeline();
+    if (!ok || !mounted) return;
+    await widget.voiceEngine.initialize();
+    if (!mounted) return;
+    await _acquireAudioFocus();
+    _launchLiveSession();
+  }
+
+  Future<void> _copyDiagnosticBanner() async {
+    final text = _diagnosticBanner;
+    if (text == null || text.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Log diagnostico copiato negli appunti.'),
+      ),
+    );
   }
 
   Future<void> _resetModels() async {
@@ -909,6 +1012,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     if (_closing) return;
     _closing = true;
     await widget.voiceLoopManager.stopLiveSession();
+    await _releaseAudioFocus();
     if (!mounted) return;
     Navigator.of(context).pop();
   }
@@ -918,6 +1022,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     _stateTicker?.cancel();
     _uiState.dispose();
     unawaited(widget.voiceLoopManager.stopLiveSession());
+    unawaited(_releaseAudioFocus());
     super.dispose();
   }
 
@@ -973,7 +1078,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                   child: ValueListenableBuilder<_LiveVoiceUiState>(
                     valueListenable: _uiState,
                     builder: (context, state, _) {
-                      if (_isDownloadingModels) {
+                      if (_isDownloadingModels || _downloadFailed) {
                         return _buildDownloadBody();
                       }
                       if (_showSettings) {
@@ -1027,6 +1132,16 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                               ),
                             ),
                           ),
+                          IconButton(
+                            onPressed: _copyDiagnosticBanner,
+                            icon: const Icon(
+                              Icons.copy_all_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            splashRadius: 18,
+                            tooltip: 'Copia log',
+                          ),
                           GestureDetector(
                             onTap: () => setState(() => _diagnosticBanner = null),
                             child: const Icon(Icons.close, color: Colors.white70, size: 16),
@@ -1057,15 +1172,21 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
           ),
         ),
         const Spacer(),
-        const SizedBox(
+        SizedBox(
           width: 96,
           height: 96,
-          child: CircularProgressIndicator(
-            strokeWidth: 4,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              Color(0xFF8AB4F8),
-            ),
-          ),
+          child: _downloadFailed
+              ? const Icon(
+                  Icons.cloud_off_rounded,
+                  size: 72,
+                  color: Color(0xFFFF8A80),
+                )
+              : const CircularProgressIndicator(
+                  strokeWidth: 4,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Color(0xFF8AB4F8),
+                  ),
+                ),
         ),
         const SizedBox(height: 24),
         Text(
@@ -1078,17 +1199,18 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
           ),
         ),
         const SizedBox(height: 18),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: _downloadProgress,
-            minHeight: 10,
-            backgroundColor: Colors.white.withValues(alpha: 0.14),
-            valueColor: const AlwaysStoppedAnimation<Color>(
-              Color(0xFF8AB4F8),
+        if (!_downloadFailed)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: _downloadProgress,
+              minHeight: 10,
+              backgroundColor: Colors.white.withValues(alpha: 0.14),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF8AB4F8),
+              ),
             ),
           ),
-        ),
         if ((_error ?? '').trim().isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(
@@ -1101,25 +1223,66 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
           ),
         ],
         const Spacer(),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-            ),
-            onPressed: _closeOverlay,
-            icon: const Icon(Icons.call_end_rounded),
-            label: const Text(
-              'Termina sessione live',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+        if (_downloadFailed) ...[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8AB4F8),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+              ),
+              onPressed: () => unawaited(_retryDownloadAndStartSession()),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text(
+                'Riprova',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
-        ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
+                padding: const EdgeInsets.symmetric(vertical: 18),
+              ),
+              onPressed: _closeOverlay,
+              icon: const Icon(Icons.chat_bubble_outline_rounded),
+              label: const Text(
+                'Usa solo Testo',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ] else
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+              ),
+              onPressed: _closeOverlay,
+              icon: const Icon(Icons.call_end_rounded),
+              label: const Text(
+                'Termina sessione live',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1129,86 +1292,124 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
   Widget _buildSessionBody(_LiveVoiceUiState state) {
     final statusColor = _statusColor(state);
     final isActive = state != _LiveVoiceUiState.idle;
-    return Column(
-      children: [
-        Container(
-          width: 52,
-          height: 4,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-        const Spacer(),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          width: isActive ? 132 : 96,
-          height: isActive ? 132 : 96,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: statusColor.withValues(alpha: 0.12),
-            border: Border.all(
-              color: statusColor.withValues(alpha: 0.8),
-              width: 2,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: state == _LiveVoiceUiState.speaking ? _interruptSpeech : null,
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(999),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: statusColor.withValues(alpha: 0.35),
-                blurRadius: 28,
-                spreadRadius: 3,
+          ),
+          const Spacer(),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            width: isActive ? 132 : 96,
+            height: isActive ? 132 : 96,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: statusColor.withValues(alpha: 0.12),
+              border: Border.all(
+                color: statusColor.withValues(alpha: 0.8),
+                width: 2,
               ),
-            ],
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor.withValues(alpha: 0.35),
+                  blurRadius: 28,
+                  spreadRadius: 3,
+                ),
+              ],
+            ),
+            child: Icon(
+              state == _LiveVoiceUiState.speaking
+                  ? Icons.volume_up_rounded
+                  : Icons.graphic_eq_rounded,
+              size: 46,
+              color: statusColor,
+            ),
           ),
-          child: Icon(
-            state == _LiveVoiceUiState.speaking
-                ? Icons.volume_up_rounded
-                : Icons.graphic_eq_rounded,
-            size: 46,
-            color: statusColor,
-          ),
-        ),
-        const SizedBox(height: 22),
-        Text(
-          _statusLabel(state),
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 26,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        if ((_error ?? '').trim().isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 22),
           Text(
-            _error!,
+            _statusLabel(state),
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Color(0xFFFF8A80),
-              fontSize: 13,
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (state == _LiveVoiceUiState.speaking) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Tocca per interrompere e tornare all’ascolto',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          if ((_error ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFFF8A80),
+                fontSize: 13,
+              ),
+            ),
+          ],
+          const Spacer(),
+          if (state == _LiveVoiceUiState.speaking) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF8AB4F8),
+                  side: const BorderSide(color: Color(0xFF8AB4F8)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                onPressed: _interruptSpeech,
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text(
+                  'Interrompi subito',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+              ),
+              onPressed: _closeOverlay,
+              icon: const Icon(Icons.call_end_rounded),
+              label: const Text(
+                'Termina sessione live',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
         ],
-        const Spacer(),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-            ),
-            onPressed: _closeOverlay,
-            icon: const Icon(Icons.call_end_rounded),
-            label: const Text(
-              'Termina sessione live',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 

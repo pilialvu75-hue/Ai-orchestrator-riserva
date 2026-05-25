@@ -104,7 +104,8 @@ class VoiceModelDownloader {
     for (final spec in specs) {
       final destinationPath = '${targetDir.path}/${spec.fileName}';
       final destinationFile = File(destinationPath);
-      if (destinationFile.existsSync() && destinationFile.lengthSync() > 0) {
+      if (destinationFile.existsSync() &&
+          destinationFile.lengthSync() >= spec.expectedBytes) {
         completedExpectedBytes += spec.expectedBytes;
         onProgress(
           (completedExpectedBytes / totalExpectedBytes)
@@ -114,18 +115,30 @@ class VoiceModelDownloader {
         continue;
       }
 
-      await _dio.download(
-        spec.url,
-        destinationPath,
-        deleteOnError: true,
-        onReceiveProgress: (received, total) {
-          final denominator = total > 0 ? total : spec.expectedBytes;
-          final fileProgress = (received / denominator).clamp(0.0, 1.0);
-          final aggregate = (completedExpectedBytes + fileProgress * spec.expectedBytes) /
-              totalExpectedBytes;
-          onProgress(aggregate.clamp(0.0, 1.0).toDouble());
-        },
-      );
+      try {
+        await _downloadWithResume(
+          spec: spec,
+          destinationFile: destinationFile,
+          completedExpectedBytes: completedExpectedBytes,
+          totalExpectedBytes: totalExpectedBytes,
+          onProgress: onProgress,
+        );
+      } on DioException catch (error) {
+        throw VoiceModelDownloadException(
+          userMessage: 'Download fallito. Controlla la connessione.',
+          debugMessage: error.message ?? error.toString(),
+        );
+      } on HttpException catch (error) {
+        throw VoiceModelDownloadException(
+          userMessage: 'Download fallito. Controlla la connessione.',
+          debugMessage: error.message,
+        );
+      } on FileSystemException catch (error) {
+        throw VoiceModelDownloadException(
+          userMessage: 'Download fallito. Spazio di archiviazione non disponibile.',
+          debugMessage: error.message,
+        );
+      }
 
       completedExpectedBytes += spec.expectedBytes;
       onProgress(
@@ -137,6 +150,76 @@ class VoiceModelDownloader {
 
     onProgress(1.0);
   }
+
+  Future<void> _downloadWithResume({
+    required _VoiceModelDownloadSpec spec,
+    required File destinationFile,
+    required int completedExpectedBytes,
+    required int totalExpectedBytes,
+    required Function(double) onProgress,
+  }) async {
+    destinationFile.parent.createSync(recursive: true);
+
+    var existingBytes =
+        destinationFile.existsSync() ? destinationFile.lengthSync() : 0;
+    final supportsResume = existingBytes > 0;
+
+    Response<ResponseBody> response = await _dio.get<ResponseBody>(
+      spec.url,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: supportsResume
+            ? <String, Object>{
+                HttpHeaders.rangeHeader: 'bytes=$existingBytes-',
+              }
+            : null,
+      ),
+    );
+
+    final statusCode = response.statusCode ?? HttpStatus.ok;
+    final shouldAppend = supportsResume && statusCode == HttpStatus.partialContent;
+    if (!shouldAppend && existingBytes > 0) {
+      destinationFile.deleteSync();
+      existingBytes = 0;
+    }
+
+    final sink = destinationFile.openWrite(
+      mode: shouldAppend ? FileMode.append : FileMode.writeOnly,
+    );
+    var receivedBytes = existingBytes;
+
+    try {
+      final stream = response.data?.stream;
+      if (stream == null) {
+        throw HttpException('Empty download stream.');
+      }
+
+      await for (final chunk in stream) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        final fileProgress = (receivedBytes / spec.expectedBytes).clamp(0.0, 1.0);
+        final aggregate = (completedExpectedBytes + fileProgress * spec.expectedBytes) /
+            totalExpectedBytes;
+        onProgress(aggregate.clamp(0.0, 1.0).toDouble());
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+  }
+}
+
+class VoiceModelDownloadException implements Exception {
+  const VoiceModelDownloadException({
+    required this.userMessage,
+    required this.debugMessage,
+  });
+
+  final String userMessage;
+  final String debugMessage;
+
+  @override
+  String toString() => '$userMessage ($debugMessage)';
 }
 
 class _VoiceModelDownloadSpec {

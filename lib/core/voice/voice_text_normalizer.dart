@@ -5,6 +5,23 @@ enum VoiceLanguage {
   english,
 }
 
+enum VoiceExpressiveStyle {
+  neutral,
+  happy,
+  serious,
+  sad,
+}
+
+class TtsNormalizationResult {
+  const TtsNormalizationResult({
+    required this.text,
+    required this.style,
+  });
+
+  final String text;
+  final VoiceExpressiveStyle style;
+}
+
 /// Pre-processing utility that normalises text before sending it to the TTS
 /// engine.
 ///
@@ -22,11 +39,36 @@ class VoiceTextNormalizer {
 
   String normalizeAsr(String input) => _normalize(input);
 
-  String normalizeForTts(String input) =>
-      _applyPhonetics(_normalize(input));
+  String normalizeForTts(String input) => preprocessForTts(input).text;
+
+  TtsNormalizationResult preprocessForTts(String input) {
+    final normalized = _normalize(input);
+    final style = _extractStyle(normalized);
+    final cleanText = normalized
+        .replaceAll(RegExp(r'\[(FELICE|SERIO|TRISTE)\]', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return TtsNormalizationResult(
+      text: _applyPhonetics(cleanText),
+      style: style,
+    );
+  }
 
   String _normalize(String input) =>
       input.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  VoiceExpressiveStyle _extractStyle(String text) {
+    if (RegExp(r'\[FELICE\]', caseSensitive: false).hasMatch(text)) {
+      return VoiceExpressiveStyle.happy;
+    }
+    if (RegExp(r'\[TRISTE\]', caseSensitive: false).hasMatch(text)) {
+      return VoiceExpressiveStyle.sad;
+    }
+    if (RegExp(r'\[SERIO\]', caseSensitive: false).hasMatch(text)) {
+      return VoiceExpressiveStyle.serious;
+    }
+    return VoiceExpressiveStyle.neutral;
+  }
 
   String _applyPhonetics(String text) {
     switch (language) {

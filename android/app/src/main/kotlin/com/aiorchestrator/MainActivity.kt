@@ -1,6 +1,8 @@
 package com.aiorchestrator
 
 import android.Manifest
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.content.Intent
@@ -39,6 +41,7 @@ class MainActivity : FlutterActivity() {
     private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
     private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
     private val mlcNativeChannelName = "com.aiorchestrator/mlc_native"
+    private val voiceAudioFocusChannelName = "com.aiorchestrator/audio_focus"
     private val logTag = "AO_UPDATE"
     private val hashBufferSizeBytes = 32 * 1024
     private val apkInstallRequestCode = 9917
@@ -57,6 +60,9 @@ class MainActivity : FlutterActivity() {
     private var sherpaLibrariesChecked = false
     private var sherpaLibrariesLoaded = false
     private var sherpaLibraryError: String? = null
+    private val voiceAudioFocusChangeListener =
+        AudioManager.OnAudioFocusChangeListener { /* observational only */ }
+    private var voiceAudioFocusRequest: AudioFocusRequest? = null
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -65,12 +71,18 @@ class MainActivity : FlutterActivity() {
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
+        registerVoiceAudioFocusChannel(flutterEngine)
         extractIncomingIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         extractIncomingIntent(intent)
+    }
+
+    override fun onDestroy() {
+        releaseVoiceAudioFocus()
+        super.onDestroy()
     }
 
     // ── MethodChannel registration ─────────────────────────────────────────
@@ -400,6 +412,62 @@ class MainActivity : FlutterActivity() {
                 "getMlcBackend" -> result.success(MlcNativeBridge.backendName())
                 "getMlcRuntimeDiagnostics" -> result.success(MlcNativeBridge.diagnostics())
                 else -> result.notImplemented()
+            }
+        }
+
+        private fun registerVoiceAudioFocusChannel(engine: FlutterEngine) {
+            MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                voiceAudioFocusChannelName
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "acquireVoiceFocus" -> result.success(requestVoiceAudioFocus())
+                    "releaseVoiceFocus" -> {
+                        releaseVoiceAudioFocus()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        private fun requestVoiceAudioFocus(): Boolean {
+            val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return false
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (voiceAudioFocusRequest == null) {
+                    voiceAudioFocusRequest = AudioFocusRequest.Builder(
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                    )
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .setAcceptsDelayedFocusGain(false)
+                        .setWillPauseWhenDucked(false)
+                        .setOnAudioFocusChangeListener(voiceAudioFocusChangeListener)
+                        .build()
+                }
+                audioManager.requestAudioFocus(voiceAudioFocusRequest!!) ==
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(
+                    voiceAudioFocusChangeListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+        }
+
+        private fun releaseVoiceAudioFocus() {
+            val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                voiceAudioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(voiceAudioFocusChangeListener)
             }
         }
     }

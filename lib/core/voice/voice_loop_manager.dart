@@ -31,6 +31,18 @@ enum VoicePipelinePhase {
   ttsSynthesizing,
 }
 
+extension VoicePipelinePhaseWireName on VoicePipelinePhase {
+  String get wireName {
+    return switch (this) {
+      VoicePipelinePhase.idle => 'idle',
+      VoicePipelinePhase.sttListening => 'stt_listening',
+      VoicePipelinePhase.llmConnecting => 'llm_connecting',
+      VoicePipelinePhase.llmWaitingToken => 'llm_waiting_token',
+      VoicePipelinePhase.ttsSynthesizing => 'tts_synthesizing',
+    };
+  }
+}
+
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
 /// This component is the **preferential lane** that routes audio directly
@@ -98,7 +110,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   void _setPhase(VoicePipelinePhase phase) {
     _currentPhase = phase;
-    logEvent(_tag, '[PHASE] ${phase.name}');
+    logEvent(_tag, '[PHASE] ${phase.wireName}');
   }
 
   // ── Session lifecycle ─────────────────────────────────────────────────────
@@ -247,7 +259,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
       final errMsg =
           'Errore di pipeline. Connessione con il modulo di pensiero fallita.';
       logEvent(_tag, '[INFERENCE_CONNECT_FAIL] $e');
-      _pipelineError = 'STATUS: ${VoicePipelinePhase.llmConnecting.name} - ERROR: connection failed';
+      _pipelineError =
+          'STATUS: ${VoicePipelinePhase.llmConnecting.wireName} - ERROR: connection failed';
       onError?.call(_pipelineError!);
       if (!token.isCancelled) {
         unawaited(_engine.speak(errMsg));
@@ -273,7 +286,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
             'Errore di pipeline. Timeout di quindici secondi sul primo token dell\'LLM.';
         logEvent(_tag, '[LLM_FIRST_TOKEN_TIMEOUT] 15s elapsed with no token');
         _pipelineError =
-            'STATUS: ${VoicePipelinePhase.llmWaitingToken.name} - ERROR: Timeout 15s';
+            'STATUS: ${VoicePipelinePhase.llmWaitingToken.wireName} - ERROR: Timeout 15s';
         onError?.call(_pipelineError!);
         token.cancel();
         unawaited(_engine.speak(timeoutPhrase));
@@ -291,7 +304,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
           final msg = response.errorMessage ?? 'Inference error';
           logEvent(_tag, '[INFERENCE_ERROR] $msg');
           _pipelineError =
-              'STATUS: ${_currentPhase.name} - ERROR: $msg';
+              'STATUS: ${_currentPhase.wireName} - ERROR: $msg';
           onError?.call(_pipelineError!);
           const errPhrase =
               'Errore di pipeline. Connessione con il modulo di pensiero fallita.';

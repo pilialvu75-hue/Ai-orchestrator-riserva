@@ -140,4 +140,6 @@ class AppConstants {
       'com.aiorchestrator/sherpa_onnx_voice';
   static const String sherpaAsrEventChannel =
       'com.aiorchestrator/sherpa_onnx_asr_events';
+  static const String voiceAudioFocusMethodChannel =
+      'com.aiorchestrator/audio_focus';
 }
