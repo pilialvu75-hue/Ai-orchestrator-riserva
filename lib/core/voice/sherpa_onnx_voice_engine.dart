@@ -319,7 +319,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       final audioStream = await _recorder.startStream(
         const RecordConfig(
-          encoder: AudioEncoder.pcm16bit,
+          encoder: AudioEncoder.pcm16bits,
           sampleRate: 16000,
           numChannels: 1,
         ),
