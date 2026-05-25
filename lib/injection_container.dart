@@ -26,6 +26,7 @@ import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
+import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 import 'package:ai_orchestrator/core/services/cache_manager.dart';
@@ -373,6 +374,9 @@ Future<void> initDependencies({
   // the engine starts in an uninitialised state and initialises on first use.
   sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
     () => SherpaOnnxVoiceEngine(),
+  );
+  sl.registerLazySingleton<VoiceModelDownloader>(
+    () => VoiceModelDownloader(),
   );
   sl.registerLazySingleton<VoiceLoopManager>(
     () => VoiceLoopManager(
