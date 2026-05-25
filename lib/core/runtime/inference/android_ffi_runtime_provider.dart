@@ -1816,7 +1816,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             final tokenBuf = tokenBufRaw.cast<Utf8>();
             var emittedTokens = 0;
             final fullText = StringBuffer();
-            var completed = false;
             var released = false;
             // Keep the prompt pointer alive until the first token is polled;
             // the native tokenisation stage may read it from a background thread.
@@ -1923,7 +1922,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 }
                 if (status == 2) {
                   freeVerificationPromptPtr();
-                  completed = true;
                   break;
                 }
                 if (status == -1) {
