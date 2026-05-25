@@ -85,8 +85,8 @@ if (!unsupportedTargetPlatforms.isEmpty()) {
 
 android {
     namespace "com.aiorchestrator"
-    compileSdk 34
-    ndkVersion "26.1.10909125"
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -104,7 +104,7 @@ android {
     defaultConfig {
         applicationId "com.aiorchestrator"
         minSdk 24
-        targetSdk 34
+        targetSdk = 36
         versionCode safeFlutterVersionCode
         versionName flutterVersionName
         buildConfigField "boolean", "ANDROID_NATIVE_MLC_ENABLED", "false"
