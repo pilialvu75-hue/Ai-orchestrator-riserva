@@ -17,10 +17,14 @@ class ChatInputBar extends StatefulWidget {
     super.key,
     required this.onSend,
     this.isLoading = false,
+    this.onStartLiveSession,
+    this.liveSessionEnabled = true,
   });
 
   final void Function(String text, List<ChatAttachment> attachments) onSend;
   final bool isLoading;
+  final VoidCallback? onStartLiveSession;
+  final bool liveSessionEnabled;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -247,6 +251,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       );
                       _controller.value = value;
                     },
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Sessione Live',
+                    child: IconButton(
+                      style: IconButton.styleFrom(
+                        backgroundColor: widget.liveSessionEnabled
+                            ? const Color(0xFF1F2A44)
+                            : Colors.white.withValues(alpha: 0.08),
+                        foregroundColor:
+                            widget.liveSessionEnabled ? Colors.white : Colors.white30,
+                      ),
+                      onPressed: widget.liveSessionEnabled
+                          ? widget.onStartLiveSession
+                          : null,
+                      icon: const Icon(Icons.graphic_eq_rounded, size: 20),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   widget.isLoading

@@ -11,6 +11,8 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
+import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
@@ -42,6 +44,8 @@ class _ChatPageState extends State<ChatPage> {
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
+  late final VoiceLoopManager _voiceLoopManager;
+  late final SherpaOnnxVoiceEngine _voiceLoopEngine;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
@@ -60,6 +64,8 @@ class _ChatPageState extends State<ChatPage> {
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
     _runtimeSettings = di.sl<AiRuntimeSettingsService>();
     _voiceEngine = di.sl<VoiceEngine>();
+    _voiceLoopManager = di.sl<VoiceLoopManager>();
+    _voiceLoopEngine = di.sl<SherpaOnnxVoiceEngine>();
     _runtimeState = _runtimeDiagnostics.monitor.state;
     _runtimeDiagnostics.monitor.addListener(_handleRuntimeStateChanged);
     unawaited(_refreshRuntimeIndicators());
@@ -213,6 +219,21 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  Future<void> _openLiveVoiceSession() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.76),
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => _LiveVoiceOverlay(
+        voiceLoopManager: _voiceLoopManager,
+        voiceEngine: _voiceLoopEngine,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiBlocListener(
@@ -253,6 +274,8 @@ class _ChatPageState extends State<ChatPage> {
                     gpuAccelerationActive: _gpuAccelerationActive,
                     gpuBackend: _gpuBackend,
                     runtimeModeName: _runtimeModeName,
+                    onStartLiveSession: _openLiveVoiceSession,
+                    liveSessionEnabled: !_voiceLoopManager.isSessionActive,
                   )
                 : _NarrowLayout(
                     scrollController: _scrollController,
@@ -264,6 +287,8 @@ class _ChatPageState extends State<ChatPage> {
                     gpuAccelerationActive: _gpuAccelerationActive,
                     gpuBackend: _gpuBackend,
                     runtimeModeName: _runtimeModeName,
+                    onStartLiveSession: _openLiveVoiceSession,
+                    liveSessionEnabled: !_voiceLoopManager.isSessionActive,
                   );
           }),
     );
@@ -287,6 +312,8 @@ class _NarrowLayout extends StatelessWidget {
     required this.gpuAccelerationActive,
     required this.gpuBackend,
     required this.runtimeModeName,
+    required this.onStartLiveSession,
+    required this.liveSessionEnabled,
   });
 
   final ScrollController scrollController;
@@ -298,6 +325,8 @@ class _NarrowLayout extends StatelessWidget {
   final bool gpuAccelerationActive;
   final String gpuBackend;
   final String runtimeModeName;
+  final VoidCallback onStartLiveSession;
+  final bool liveSessionEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +340,8 @@ class _NarrowLayout extends StatelessWidget {
       gpuAccelerationActive: gpuAccelerationActive,
       gpuBackend: gpuBackend,
       runtimeModeName: runtimeModeName,
+      onStartLiveSession: onStartLiveSession,
+      liveSessionEnabled: liveSessionEnabled,
     );
   }
 }
@@ -328,6 +359,8 @@ class _WideLayout extends StatelessWidget {
     required this.gpuAccelerationActive,
     required this.gpuBackend,
     required this.runtimeModeName,
+    required this.onStartLiveSession,
+    required this.liveSessionEnabled,
   });
 
   final ScrollController scrollController;
@@ -339,6 +372,8 @@ class _WideLayout extends StatelessWidget {
   final bool gpuAccelerationActive;
   final String gpuBackend;
   final String runtimeModeName;
+  final VoidCallback onStartLiveSession;
+  final bool liveSessionEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -394,6 +429,8 @@ class _WideLayout extends StatelessWidget {
              gpuAccelerationActive: gpuAccelerationActive,
              gpuBackend: gpuBackend,
              runtimeModeName: runtimeModeName,
+             onStartLiveSession: onStartLiveSession,
+             liveSessionEnabled: liveSessionEnabled,
            ),
         ),
       ],
@@ -412,6 +449,8 @@ class _ChatBody extends StatefulWidget {
     required this.gpuAccelerationActive,
     required this.gpuBackend,
     required this.runtimeModeName,
+    required this.onStartLiveSession,
+    required this.liveSessionEnabled,
   });
 
   final ScrollController scrollController;
@@ -423,6 +462,8 @@ class _ChatBody extends StatefulWidget {
   final bool gpuAccelerationActive;
   final String gpuBackend;
   final String runtimeModeName;
+  final VoidCallback onStartLiveSession;
+  final bool liveSessionEnabled;
 
   @override
   State<_ChatBody> createState() => _ChatBodyState();
@@ -550,6 +591,8 @@ class _ChatBodyState extends State<_ChatBody> {
             ChatInputBar(
               onSend: widget.onSend,
               isLoading: isLoading,
+              onStartLiveSession: widget.onStartLiveSession,
+              liveSessionEnabled: widget.liveSessionEnabled,
             ),
           ],
         );
@@ -652,6 +695,246 @@ class _HighPerformanceChatList extends StatelessWidget {
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
+      ),
+    );
+  }
+}
+
+enum _LiveVoiceUiState { listening, thinking, speaking, idle }
+
+class _LiveVoiceOverlay extends StatefulWidget {
+  const _LiveVoiceOverlay({
+    required this.voiceLoopManager,
+    required this.voiceEngine,
+  });
+
+  final VoiceLoopManager voiceLoopManager;
+  final VoiceEngine voiceEngine;
+
+  @override
+  State<_LiveVoiceOverlay> createState() => _LiveVoiceOverlayState();
+}
+
+class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
+  final ValueNotifier<_LiveVoiceUiState> _uiState =
+      ValueNotifier<_LiveVoiceUiState>(_LiveVoiceUiState.thinking);
+  Timer? _stateTicker;
+  bool _closing = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _stateTicker = Timer.periodic(
+      const Duration(milliseconds: 120),
+      (_) => _syncUiStateFromEngine(),
+    );
+    unawaited(_startSession());
+  }
+
+  Future<void> _startSession() async {
+    try {
+      await widget.voiceEngine.initialize();
+      if (!mounted) return;
+      _syncUiStateFromEngine();
+      unawaited(
+        widget.voiceLoopManager.startLiveSession(
+          onError: (message) {
+            if (!mounted) return;
+            setState(() {
+              _error = message;
+            });
+            _syncUiStateFromEngine();
+          },
+          onSubtitle: (_, __) {
+            if (!mounted) return;
+            _syncUiStateFromEngine();
+          },
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$error';
+      });
+      _uiState.value = _LiveVoiceUiState.idle;
+    }
+  }
+
+  _LiveVoiceUiState _deriveUiState() {
+    if (widget.voiceEngine.isListening) {
+      return _LiveVoiceUiState.listening;
+    }
+    if (widget.voiceEngine.isSpeaking) {
+      return _LiveVoiceUiState.speaking;
+    }
+    if (widget.voiceLoopManager.isSessionActive) {
+      return _LiveVoiceUiState.thinking;
+    }
+    return _LiveVoiceUiState.idle;
+  }
+
+  void _syncUiStateFromEngine() {
+    final next = _deriveUiState();
+    if (_uiState.value != next) {
+      _uiState.value = next;
+    }
+  }
+
+  Future<void> _closeOverlay() async {
+    if (_closing) return;
+    _closing = true;
+    await widget.voiceLoopManager.stopLiveSession();
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  @override
+  void dispose() {
+    _stateTicker?.cancel();
+    _uiState.dispose();
+    unawaited(widget.voiceLoopManager.stopLiveSession());
+    super.dispose();
+  }
+
+  String _statusLabel(_LiveVoiceUiState state) {
+    switch (state) {
+      case _LiveVoiceUiState.listening:
+        return 'Ti ascolto...';
+      case _LiveVoiceUiState.thinking:
+        return 'Sto pensando...';
+      case _LiveVoiceUiState.speaking:
+        return "L'assistente parla...";
+      case _LiveVoiceUiState.idle:
+        return 'Sessione in attesa...';
+    }
+  }
+
+  Color _statusColor(_LiveVoiceUiState state) {
+    switch (state) {
+      case _LiveVoiceUiState.listening:
+        return const Color(0xFF4ADE80);
+      case _LiveVoiceUiState.thinking:
+        return const Color(0xFFF9A826);
+      case _LiveVoiceUiState.speaking:
+        return const Color(0xFF8AB4F8);
+      case _LiveVoiceUiState.idle:
+        return const Color(0xFF9CA3AF);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 24, 12, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(30),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF0A0F1B).withValues(alpha: 0.94),
+                  const Color(0xFF05070D).withValues(alpha: 0.98),
+                ],
+              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+              child: ValueListenableBuilder<_LiveVoiceUiState>(
+                valueListenable: _uiState,
+                builder: (context, state, _) {
+                  final statusColor = _statusColor(state);
+                  final isActive = state != _LiveVoiceUiState.idle;
+                  return Column(
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const Spacer(),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        width: isActive ? 132 : 96,
+                        height: isActive ? 132 : 96,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: statusColor.withValues(alpha: 0.12),
+                          border: Border.all(
+                            color: statusColor.withValues(alpha: 0.8),
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: statusColor.withValues(alpha: 0.35),
+                              blurRadius: 28,
+                              spreadRadius: 3,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          state == _LiveVoiceUiState.speaking
+                              ? Icons.volume_up_rounded
+                              : Icons.graphic_eq_rounded,
+                          size: 46,
+                          color: statusColor,
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      Text(
+                        _statusLabel(state),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if ((_error ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFFFF8A80),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                      const Spacer(),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFDC2626),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                          ),
+                          onPressed: _closeOverlay,
+                          icon: const Icon(Icons.call_end_rounded),
+                          label: const Text(
+                            'Termina sessione live',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
