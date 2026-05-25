@@ -13,6 +13,8 @@
 /// * [LocalSyncClient] – Exchanges changesets with a peer.
 /// * [SyncDiscoveryService] – Discovers peers via UDP broadcast.
 /// * [SyncPeer] – Represents a discovered peer device.
+library;
+
 export 'crdt/hlc.dart';
 export 'crdt/crdt_record.dart';
 export 'crdt/crdt_document.dart';

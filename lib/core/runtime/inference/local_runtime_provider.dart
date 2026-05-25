@@ -208,18 +208,18 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
-    final _gateVerified = hasVerifiedRuntimeForModel(modelPath);
-    final _gateModelId = selectedModel.effectiveRuntimeModelId;
-    final _gateMsg = '[AI_RUNTIME_MONITOR] FORENSIC - File: local_runtime_provider.dart'
+    final gateVerified = hasVerifiedRuntimeForModel(modelPath);
+    final gateModelId = selectedModel.effectiveRuntimeModelId;
+    final gateMsg = '[AI_RUNTIME_MONITOR] FORENSIC - File: local_runtime_provider.dart'
         ' | Function: validateRuntime()'
-        ' | hasVerifiedRuntimeForModel: $_gateVerified'
-        ' | ModelID: $_gateModelId'
+        ' | hasVerifiedRuntimeForModel: $gateVerified'
+        ' | ModelID: $gateModelId'
         ' | ModelPath: $modelPath'
         ' | _verifiedModelPath: ${_verifiedModelPath ?? 'null'}';
-    debugPrint(_gateMsg);
-    RuntimeEventLog.instance.emit(_gateMsg);
+    debugPrint(gateMsg);
+    RuntimeEventLog.instance.emit(gateMsg);
 
-    if (_gateVerified) {
+    if (gateVerified) {
       return LocalRuntimeState(
         status: LocalRuntimeStatus.ready,
         message:
