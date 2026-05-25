@@ -129,6 +129,13 @@ class AppConstants {
   static const Duration updateCheckInterval = Duration(hours: 12);
 
   static const String sttDefaultLocaleId = 'en_US';
+  // ── Sherpa-ONNX local model file names ─────────────────────────────────────
+  static const String sttModelFile = 'whisper-tiny-en.onnx';
+  static const String sttTokensFile = 'whisper-tiny-en-tokens.txt';
+  static const String llmModelFile = 'gemma-2b-it.onnx';
+  static const String ttsModelFile = 'vits-tts-it.onnx';
+  static const String ttsLexiconFile = 'vits-tts-lexicon.txt';
+  static const String ttsTokensFile = 'vits-tts-tokens.txt';
   static const String sherpaVoiceMethodChannel =
       'com.aiorchestrator/sherpa_onnx_voice';
   static const String sherpaAsrEventChannel =

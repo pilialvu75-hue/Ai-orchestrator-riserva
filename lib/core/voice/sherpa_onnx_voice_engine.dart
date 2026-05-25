@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
@@ -127,7 +128,45 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return _status;
     }
 
-    // ── 2. Bind native ONNX libraries (forensic print before native call) ──
+    // ── 2. Resolve dynamic model directory and verify required files ────────
+    final docDir = await getApplicationDocumentsDirectory();
+    final String modelFolder = '${docDir.path}/models';
+    final String sttModelPath =
+        _modelPaths.sttEncoder ?? '$modelFolder/${AppConstants.sttModelFile}';
+    final String sttDecoderPath = _modelPaths.sttDecoder ?? sttModelPath;
+    final String sttJoinerPath = _modelPaths.sttJoiner ?? sttModelPath;
+    final String sttTokensPath =
+        _modelPaths.sttTokens ?? '$modelFolder/${AppConstants.sttTokensFile}';
+    final String ttsModelPath =
+        _modelPaths.ttsModel ?? '$modelFolder/${AppConstants.ttsModelFile}';
+    final String ttsLexiconPath =
+        _modelPaths.ttsLexicon ?? '$modelFolder/${AppConstants.ttsLexiconFile}';
+    final String ttsTokensPath =
+        _modelPaths.ttsTokens ?? '$modelFolder/${AppConstants.ttsTokensFile}';
+
+    final requiredModelPaths = <String>[
+      sttModelPath,
+      sttTokensPath,
+      ttsModelPath,
+      ttsLexiconPath,
+      ttsTokensPath,
+    ];
+    final missingModelPaths =
+        requiredModelPaths.where((path) => !File(path).existsSync()).toList();
+    if (missingModelPaths.isNotEmpty) {
+      final msg = 'Modelli mancanti in: $modelFolder';
+      logEvent(
+        _tag,
+        '[MODEL_FILES_MISSING] $msg missing=${missingModelPaths.join(", ")}',
+      );
+      _forensicPrint(
+        '[VOICE_ENGINE] [MODEL_FILES_MISSING] $msg missing=${missingModelPaths.join(", ")}',
+      );
+      _status = VoiceEngineStatus.unsupported(details: msg);
+      return _status;
+    }
+
+    // ── 3. Bind native ONNX libraries (forensic print before native call) ──
     _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_BEGIN] Calling sherpa_onnx.initBindings()');
     try {
       sherpa_onnx.initBindings();
@@ -141,99 +180,72 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return _status;
     }
 
-    // ── 3. Build STT recognizer ────────────────────────────────────────────
+    // ── 4. Build STT recognizer ────────────────────────────────────────────
     bool sttReady = false;
     logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer');
 
-    if (!_modelPaths.hasSttPaths) {
-      logEvent(
-        _tag,
-        '[STT_PATHS_MISSING] One or more STT model paths are absent — '
-        'sttEncoder=${_modelPaths.sttEncoder ?? "null"} '
-        'sttDecoder=${_modelPaths.sttDecoder ?? "null"} '
-        'sttJoiner=${_modelPaths.sttJoiner ?? "null"} '
-        'sttTokens=${_modelPaths.sttTokens ?? "null"}',
+    _forensicPrint(
+      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
+      'encoder=$sttModelPath decoder=$sttDecoderPath joiner=$sttJoinerPath tokens=$sttTokensPath',
+    );
+    try {
+      final modelConfig = sherpa_onnx.OnlineModelConfig(
+        transducer: sherpa_onnx.OnlineTransducerModelConfig(
+          encoder: sttModelPath,
+          decoder: sttDecoderPath,
+          joiner: sttJoinerPath,
+        ),
+        tokens: sttTokensPath,
+        numThreads: 1,
+        debug: false,
       );
-    } else {
-      // Guard: coalescent path resolution — never pass null to native layer.
-      final encoder = _modelPaths.sttEncoder ?? '';
-      final decoder = _modelPaths.sttDecoder ?? '';
-      final joiner = _modelPaths.sttJoiner ?? '';
-      final tokens = _modelPaths.sttTokens ?? '';
-
-      _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] encoder=$encoder');
-      try {
-        final modelConfig = sherpa_onnx.OnlineModelConfig(
-          transducer: sherpa_onnx.OnlineTransducerModelConfig(
-            encoder: encoder,
-            decoder: decoder,
-            joiner: joiner,
-          ),
-          tokens: tokens,
-          numThreads: 1,
-          debug: false,
-        );
-        final config = sherpa_onnx.OnlineRecognizerConfig(
-          model: modelConfig,
-          enableEndpoint: true,
-          rule1MinTrailingSilence: 2.4,
-          rule2MinTrailingSilence: 1.4,
-          rule3MinUtteranceLength: 20,
-        );
-        _recognizer = sherpa_onnx.OnlineRecognizer(config);
-        sttReady = true;
-        _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
-        logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
-      } catch (e, st) {
-        final msg = 'STT recognizer init failed: $e';
-        _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
-        logEvent(_tag, '[STT_RECOGNIZER_ALLOC_FAIL] $msg');
-      }
+      final config = sherpa_onnx.OnlineRecognizerConfig(
+        model: modelConfig,
+        enableEndpoint: true,
+        rule1MinTrailingSilence: 2.4,
+        rule2MinTrailingSilence: 1.4,
+        rule3MinUtteranceLength: 20,
+      );
+      _recognizer = sherpa_onnx.OnlineRecognizer(config);
+      sttReady = true;
+      _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
+      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
+    } catch (e, st) {
+      final msg = 'STT recognizer init failed: $e';
+      _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
+      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_FAIL] $msg');
     }
 
-    // ── 4. Build TTS engine ────────────────────────────────────────────────
+    // ── 5. Build TTS engine ────────────────────────────────────────────────
     bool ttsReady = false;
     logEvent(_tag, '[TTS_INIT_BEGIN] Constructing OfflineTts');
 
-    if (!_modelPaths.hasTtsPaths) {
-      logEvent(
-        _tag,
-        '[TTS_PATHS_MISSING] One or more TTS model paths are absent — '
-        'ttsModel=${_modelPaths.ttsModel ?? "null"} '
-        'ttsTokens=${_modelPaths.ttsTokens ?? "null"}',
+    _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_BEGIN] ttsModel=$ttsModelPath');
+    try {
+      final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
+        vits: sherpa_onnx.OfflineTtsVitsModelConfig(
+          model: ttsModelPath,
+          lexicon: ttsLexiconPath,
+          tokens: ttsTokensPath,
+        ),
+        numThreads: 2,
+        debug: false,
+        provider: 'cpu',
       );
-    } else {
-      final ttsModelPath = _modelPaths.ttsModel ?? '';
-      final ttsLexicon = _modelPaths.ttsLexicon ?? '';
-      final ttsTokensPath = _modelPaths.ttsTokens ?? '';
-
-      _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_BEGIN] ttsModel=$ttsModelPath');
-      try {
-        final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
-          vits: sherpa_onnx.OfflineTtsVitsModelConfig(
-            model: ttsModelPath,
-            lexicon: ttsLexicon,
-            tokens: ttsTokensPath,
-          ),
-          numThreads: 2,
-          debug: false,
-          provider: 'cpu',
-        );
-        final ttsConfig = sherpa_onnx.OfflineTtsConfig(
-          model: ttsModelConfig,
-        );
-        _tts = sherpa_onnx.OfflineTts(ttsConfig);
-        ttsReady = true;
-        _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_OK]');
-        logEvent(_tag, '[TTS_ALLOC_OK] OfflineTts ready');
-      } catch (e, st) {
-        final msg = 'TTS engine init failed: $e';
-        _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_FAIL] $msg\n$st');
-        logEvent(_tag, '[TTS_ALLOC_FAIL] $msg');
-      }
+      final ttsConfig = sherpa_onnx.OfflineTtsConfig(
+        model: ttsModelConfig,
+      );
+      _tts = sherpa_onnx.OfflineTts(ttsConfig);
+      ttsReady = true;
+      _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_OK]');
+      logEvent(_tag, '[TTS_ALLOC_OK] OfflineTts ready');
+    } catch (e, st) {
+      final msg = 'TTS engine init failed: $e';
+      _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_FAIL] $msg\n$st');
+      logEvent(_tag, '[TTS_ALLOC_FAIL] $msg');
     }
 
-    // ── 5. Audio-channel allocation (VAD mic session check) ───────────────
+    // ── 6. Audio-channel allocation (VAD mic session check) ───────────────
     bool micReady = false;
     logEvent(_tag, '[AUDIO_SESSION_CHECK_BEGIN] Verifying AudioRecorder');
     _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN] AudioRecorder availability');
@@ -248,7 +260,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       logEvent(_tag, '[AUDIO_SESSION_CHECK_FAIL] $msg');
     }
 
-    // ── 6. Compute final status ───────────────────────────────────────────
+    // ── 7. Compute final status ───────────────────────────────────────────
     final initOk = sttReady || ttsReady;
     _initialized = initOk;
     _status = VoiceEngineStatus(
