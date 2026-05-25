@@ -20,9 +20,15 @@ endif()
 add_compile_options(-fno-finite-math-only)
 
 # 🔥 ACCELERAZIONE HARDWARE COMPILAZIONE CRUCIALE PER S24 FE (ARM64)
-# Abilitiamo NEON e le ottimizzazioni matematiche spinte a livello globale
-add_compile_options(-O3 -march=armv8-a+simd+dotprod -mfpu=neon -flto)
+# Abilitiamo le ottimizzazioni matematiche spinte a livello globale
+add_compile_options(-O3 -march=armv8-a+simd+dotprod -flto)
 add_link_options(-flto)
+
+if(ANDROID AND DEFINED ANDROID_ABI AND ANDROID_ABI STREQUAL "armeabi-v7a")
+    # Per ARMv7 serve esplicitare NEON; su arm64-v8a è già abilitato di default
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpu=neon")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfpu=neon")
+endif()
 
 # ── llama.cpp submodule ───────────────────────────────────────────────────────
 
