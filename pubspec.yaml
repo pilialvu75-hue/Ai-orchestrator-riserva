@@ -62,5 +62,5 @@ flutter:
     - assets/models/
 
 dependency_overrides:
-  record_linux: ^0.8.0
+  record_linux: any
   record_platform_interface: ^1.6.0
