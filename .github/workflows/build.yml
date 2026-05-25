@@ -71,15 +71,13 @@ jobs:
         if: steps.cache-cmdline-tools.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          TOOLS_ZIP="/tmp/commandlinetools-linux-12.zip"
-          curl -fsSL -o "$TOOLS_ZIP" \
-            https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          unzip -q "$TOOLS_ZIP" -d /tmp/cmdline-tools-unpack
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv /tmp/cmdline-tools-unpack/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-          rm -f "$TOOLS_ZIP"
-          rm -rf /tmp/cmdline-tools-unpack
+          export ANDROID_CUSTOM_CMDLINE="${ANDROID_SDK_ROOT}/cmdline-tools"
+          curl -sS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          mkdir -p "$ANDROID_CUSTOM_CMDLINE"
+          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest"
+          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
+          mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_CUSTOM_CMDLINE/latest"
+          rm -rf /tmp/tools.zip /tmp/cmdline-extract
 
       - name: Install Android NDK
         run: |
