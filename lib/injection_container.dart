@@ -22,8 +22,10 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
+import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
+import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 import 'package:ai_orchestrator/core/services/cache_manager.dart';
@@ -364,6 +366,18 @@ Future<void> initDependencies({
     () => VoiceOutputService(
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
+    ),
+  );
+  // Dedicated engine for the voice-loop fast lane (bypasses chat UI).
+  // Model paths are supplied at runtime when voice models are downloaded;
+  // the engine starts in an uninitialised state and initialises on first use.
+  sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
+    () => SherpaOnnxVoiceEngine(),
+  );
+  sl.registerLazySingleton<VoiceLoopManager>(
+    () => VoiceLoopManager(
+      engine: sl<SherpaOnnxVoiceEngine>(),
+      runtimeProvider: sl<LocalRuntimeProvider>(),
     ),
   );
 
