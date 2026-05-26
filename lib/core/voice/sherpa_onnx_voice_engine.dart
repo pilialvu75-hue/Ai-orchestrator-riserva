@@ -141,8 +141,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             Platform.isLinux ||
             Platform.isMacOS);
     if (!supported) {
-      final msg =
-          'Sherpa-ONNX voice engine is not supported on this platform.';
+      const msg = 'Sherpa-ONNX voice engine is not supported on this platform.';
       logEvent(_tag, '[VOICE_UNSUPPORTED] $msg');
       _status = VoiceEngineStatus.unsupported(details: msg);
       return _status;
@@ -174,6 +173,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       privateAbsolutePathHint: _modelPaths.ttsTokens,
     );
 
+    // Manteniamo anche il puntamento al file singolo streaming per sicurezza architetturale
+    final sttModelResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttModelFile,
+      privateAbsolutePathHint: _modelPaths.sttModel,
+    );
+
     final String sttEncoderPath =
         _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
     final String sttDecoderPath =
@@ -186,11 +191,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         _modelPaths.ttsLexicon ?? _preferredResolvedPath(ttsLexiconResolution);
     final String ttsTokensPath =
         _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
+    final String sttModelPath =
+        _modelPaths.sttModel ?? _preferredResolvedPath(sttModelResolution);
 
     logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
     final requiredModelPaths = <String, String>{
-      AppConstants.sttEncoderFile: sttEncoderPath,
-      AppConstants.sttDecoderFile: sttDecoderPath,
+      AppConstants.sttModelFile: sttModelPath,
       AppConstants.sttTokensFile: sttTokensPath,
       AppConstants.ttsModelFile: ttsModelPath,
       AppConstants.ttsLexiconFile: ttsLexiconPath,
@@ -202,8 +208,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
        .toList();
     final assetsReady = missingModelPaths.isEmpty;
     if (!assetsReady) {
-      final msg =
-         'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
+      const msg = 'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
       logEvent(
        _tag,
        '[ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
@@ -242,20 +247,17 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return _status;
     }
 
-    // ── 4. Build STT recognizer (Configurato per Whisper) ──────────────────
+    // ── 4. Build STT recognizer (Online Streaming Transducer / Zipformer) ──
     bool sttReady = false;
-    logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer (Whisper)');
+    logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer');
 
     _forensicPrint(
-      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
-      'encoder=$sttEncoderPath decoder=$sttDecoderPath tokens=$sttTokensPath',
+      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] encoder=$sttEncoderPath decoder=$sttDecoderPath tokens=$sttTokensPath model=$sttModelPath',
     );
     try {
+      // Inizializzazione corretta dello stream in tempo reale usando Zipformer2Ctc
       final modelConfig = sherpa_onnx.OnlineModelConfig(
-        whisper: sherpa_onnx.OnlineWhisperModelConfig(
-          encoder: sttEncoderPath,
-          decoder: sttDecoderPath,
-        ),
+        zipformer2Ctc: sherpa_onnx.OnlineZipformer2CtcModelConfig(model: sttModelPath),
         tokens: sttTokensPath,
         numThreads: 1,
         debug: false,
@@ -270,7 +272,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       _recognizer = sherpa_onnx.OnlineRecognizer(config);
       sttReady = true;
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
-      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer Whisper ready');
+      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
     } catch (e, st) {
       final msg = 'STT recognizer init failed: $e';
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
