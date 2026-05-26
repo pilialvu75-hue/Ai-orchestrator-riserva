@@ -62,6 +62,7 @@ import 'package:ai_orchestrator/features/local_ai/data/services/model_download_s
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/usecases/local_ai_usecases.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
+import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
@@ -377,6 +378,9 @@ Future<void> initDependencies({
   );
   sl.registerLazySingleton<VoiceModelDownloader>(
     () => VoiceModelDownloader(),
+  );
+  sl.registerLazySingleton<ModelManagementService>(
+    () => ModelManagementService(),
   );
   sl.registerLazySingleton<VoiceLoopManager>(
     () => VoiceLoopManager(
