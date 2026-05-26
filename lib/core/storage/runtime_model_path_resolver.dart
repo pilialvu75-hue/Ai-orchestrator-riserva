@@ -74,15 +74,8 @@ class RuntimeModelPathResolver {
           )
         : File(privateAbsolutePathHint);
 
-    if (Platform.isAndroid && await _safeExistsWithContent(publicFile)) {
-      return RuntimeModelResolution(
-        file: publicFile,
-        publicFile: publicFile,
-        privateFile: privateFile,
-        location: RuntimeModelStorageLocation.publicDownload,
-      );
-    }
-
+    // 1. PRIORITÀ ASSOLUTA: Controlla e preferisce la copia privata dell'app
+    // Questo evita richieste di permessi di archiviazione su Android 11+ / 13+
     if (await _safeExistsWithContent(privateFile)) {
       return RuntimeModelResolution(
         file: privateFile,
@@ -92,6 +85,17 @@ class RuntimeModelPathResolver {
       );
     }
 
+    // 2. FALLBACK: Se non esiste nella cartella privata, controlla i Download pubblici (Android)
+    if (Platform.isAndroid && await _safeExistsWithContent(publicFile)) {
+      return RuntimeModelResolution(
+        file: publicFile,
+        publicFile: publicFile,
+        privateFile: privateFile,
+        location: RuntimeModelStorageLocation.publicDownload,
+      );
+    }
+
+    // 3. DEFAULT: Restituisce il riferimento privato (il file non esiste ancora)
     return RuntimeModelResolution(
       file: privateFile,
       publicFile: publicFile,
