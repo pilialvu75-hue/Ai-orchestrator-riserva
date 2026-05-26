@@ -149,9 +149,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     // ── 2. Resolve dynamic model paths (public Download -> private app) ─────
-    final sttModelResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttModelFile,
+    final sttEncoderResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttEncoderFile,
       privateAbsolutePathHint: _modelPaths.sttEncoder,
+    );
+    final sttDecoderResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttDecoderFile,
+      privateAbsolutePathHint: _modelPaths.sttDecoder,
     );
     final sttTokensResolution = await _pathResolver.resolveForRead(
       fileName: AppConstants.sttTokensFile,
@@ -170,10 +174,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       privateAbsolutePathHint: _modelPaths.ttsTokens,
     );
 
-    final String sttModelPath =
-        _modelPaths.sttEncoder ?? _preferredResolvedPath(sttModelResolution);
-    final String sttDecoderPath = _modelPaths.sttDecoder ?? sttModelPath;
-    final String sttJoinerPath = _modelPaths.sttJoiner ?? sttModelPath;
+    final String sttEncoderPath =
+        _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
+    final String sttDecoderPath =
+        _modelPaths.sttDecoder ?? _preferredResolvedPath(sttDecoderResolution);
     final String sttTokensPath =
         _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
     final String ttsModelPath =
@@ -185,7 +189,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
     final requiredModelPaths = <String, String>{
-      AppConstants.sttModelFile: sttModelPath,
+      AppConstants.sttEncoderFile: sttEncoderPath,
+      AppConstants.sttDecoderFile: sttDecoderPath,
       AppConstants.sttTokensFile: sttTokensPath,
       AppConstants.ttsModelFile: ttsModelPath,
       AppConstants.ttsLexiconFile: ttsLexiconPath,
@@ -237,20 +242,19 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return _status;
     }
 
-    // ── 4. Build STT recognizer ────────────────────────────────────────────
+    // ── 4. Build STT recognizer (Configurato per Whisper) ──────────────────
     bool sttReady = false;
-    logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer');
+    logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer (Whisper)');
 
     _forensicPrint(
       '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
-      'encoder=$sttModelPath decoder=$sttDecoderPath joiner=$sttJoinerPath tokens=$sttTokensPath',
+      'encoder=$sttEncoderPath decoder=$sttDecoderPath tokens=$sttTokensPath',
     );
     try {
       final modelConfig = sherpa_onnx.OnlineModelConfig(
-        transducer: sherpa_onnx.OnlineTransducerModelConfig(
-          encoder: sttModelPath,
+        whisper: sherpa_onnx.OnlineWhisperModelConfig(
+          encoder: sttEncoderPath,
           decoder: sttDecoderPath,
-          joiner: sttJoinerPath,
         ),
         tokens: sttTokensPath,
         numThreads: 1,
@@ -266,7 +270,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       _recognizer = sherpa_onnx.OnlineRecognizer(config);
       sttReady = true;
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
-      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
+      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer Whisper ready');
     } catch (e, st) {
       final msg = 'STT recognizer init failed: $e';
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
