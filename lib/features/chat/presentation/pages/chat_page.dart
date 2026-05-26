@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
@@ -743,12 +744,13 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
 
   Future<void> _startSession() async {
     try {
-      final status = await widget.voiceEngine.initialize();
+      var status = await widget.voiceEngine.initialize();
       if (_requiresModelsDownload(status)) {
         await _runModelDownloadPipeline();
         if (!mounted) return;
-        await widget.voiceEngine.initialize();
+        status = await widget.voiceEngine.initialize();
       }
+      await _ensureLiveModeStartupReady(status);
       if (!mounted) return;
       _syncUiStateFromEngine();
       unawaited(
@@ -778,21 +780,52 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
 
   bool _requiresModelsDownload(VoiceEngineStatus status) {
     final details = (status.details ?? '').toLowerCase();
-    return !status.supportedPlatform && details.contains('modelli mancanti');
+    return !status.isVoiceDownloaded ||
+        details.contains('modelli mancanti') ||
+        details.contains('risorse vocali mancanti');
+  }
+
+  Future<void> _ensureLiveModeStartupReady(VoiceEngineStatus status) async {
+    RuntimeEventLog.instance.emit(
+      '[VOICE_LIVE_ASSET_CHECK_BEGIN] validating voice assets before Live Mode startup',
+    );
+    await widget.voiceModelDownloader.validateDownloadedAssets();
+
+    if (!status.isVoiceDownloaded) {
+      const message =
+          'I modelli vocali richiesti non sono disponibili. Completa di nuovo il download dei modelli vocali prima di avviare Live Mode.';
+      RuntimeEventLog.instance.emit('[VOICE_LIVE_ASSET_CHECK_FAIL] $message');
+      throw const VoiceAssetException(message);
+    }
+
+    if (!status.readyForInput || !status.readyForOutput) {
+      final detail = (status.details ?? '').trim();
+      final message = detail.isEmpty
+          ? 'Live Mode richiede modelli vocali validi e accesso al microfono. Verifica il download dei modelli vocali e i permessi microfono, poi riprova.'
+          : 'Live Mode non può avviarsi: $detail';
+      RuntimeEventLog.instance.emit('[VOICE_LIVE_ASSET_CHECK_FAIL] $message');
+      throw VoiceAssetException(message);
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[VOICE_LIVE_ASSET_CHECK_COMPLETE] voice assets verified for Live Mode startup',
+    );
   }
 
   Future<void> _runModelDownloadPipeline() async {
     setState(() {
       _isDownloadingModels = true;
       _downloadProgress = 0;
-      _downloadStatus = 'Richiesta permessi storage...';
+      _downloadStatus = 'Preparazione archivio modelli vocali...';
       _error = null;
     });
 
     final hasPermissions =
         await widget.voiceModelDownloader.checkAndRequestPermissions();
     if (!hasPermissions) {
-      throw Exception('Permessi storage non concessi.');
+      throw const VoiceAssetException(
+        'Impossibile preparare l’archivio dei modelli vocali.',
+      );
     }
 
     if (!mounted) return;

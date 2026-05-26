@@ -74,7 +74,7 @@ class RuntimeModelPathResolver {
           )
         : File(privateAbsolutePathHint);
 
-    if (Platform.isAndroid && await _safeExists(publicFile)) {
+    if (Platform.isAndroid && await _safeExistsWithContent(publicFile)) {
       return RuntimeModelResolution(
         file: publicFile,
         publicFile: publicFile,
@@ -83,7 +83,7 @@ class RuntimeModelPathResolver {
       );
     }
 
-    if (await _safeExists(privateFile)) {
+    if (await _safeExistsWithContent(privateFile)) {
       return RuntimeModelResolution(
         file: privateFile,
         publicFile: publicFile,
@@ -100,9 +100,12 @@ class RuntimeModelPathResolver {
     );
   }
 
-  Future<bool> _safeExists(File file) async {
+  Future<bool> _safeExistsWithContent(File file) async {
     try {
-      return await file.exists();
+      if (!await file.exists()) {
+        return false;
+      }
+      return await file.length() > 0;
     } catch (_) {
       return false;
     }
