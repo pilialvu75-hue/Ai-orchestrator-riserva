@@ -1,13 +1,24 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 
-class VoiceModelDownloader {
+class VoiceAssetException implements Exception {
+  const VoiceAssetException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class VoiceModelDownloader with RuntimeEventEmitter {
   VoiceModelDownloader({
     Dio? dio,
+    RuntimeModelPathResolver? pathResolver,
   }) : _dio = dio ??
             Dio(
               BaseOptions(
@@ -15,84 +26,42 @@ class VoiceModelDownloader {
                 receiveTimeout: const Duration(hours: 1),
                 sendTimeout: const Duration(seconds: 30),
               ),
-            );
+            ),
+       _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
 
-  static const String sharedModelsFolder =
-      '/storage/emulated/0/Download/AiOrchestrator/models';
+  static const String _tag = 'VOICE_DOWNLOAD';
 
   final Dio _dio;
+  final RuntimeModelPathResolver _pathResolver;
 
   Future<bool> checkAndRequestPermissions() async {
+    logEvent(
+      _tag,
+      '[PERMISSION_REQUEST_BEGIN] checking storage requirements for voice assets',
+    );
     if (!Platform.isAndroid) {
+      logEvent(
+        _tag,
+        '[PERMISSION_REQUEST_RESULT] no runtime storage permission required on this platform',
+      );
       return true;
     }
 
-    if (await Permission.manageExternalStorage.isGranted) {
-      return true;
-    }
-    if (await Permission.storage.isGranted) {
-      return true;
-    }
-
-    final manageStorageStatus = await Permission.manageExternalStorage.request();
-    if (manageStorageStatus.isGranted) {
-      return true;
-    }
-
-    final storageStatus = await Permission.storage.request();
-    if (storageStatus.isGranted) {
-      return true;
-    }
-
-    final mediaStatuses = await <Permission>[
-      Permission.audio,
-      Permission.photos,
-      Permission.videos,
-    ].request();
-    return mediaStatuses.values
-        .every((status) => status.isGranted || status.isLimited);
+    logEvent(
+      _tag,
+      '[PERMISSION_REQUEST_RESULT] no runtime storage permission required; '
+      'voice assets now use app-private storage to avoid Android 11+ (API 30+) '
+      'shared-storage restrictions and Android 13+ (API 33+) media permission limits',
+    );
+    return true;
   }
 
   Future<void> downloadModels({
     required Function(double) onProgress,
   }) async {
-    final targetDir = Directory(sharedModelsFolder);
-    if (!targetDir.existsSync()) {
-      targetDir.createSync(recursive: true);
-    }
-
-    final specs = <_VoiceModelDownloadSpec>[
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.sttModelFile,
-        url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en.onnx',
-        expectedBytes: 78 * 1024 * 1024,
-      ),
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.sttTokensFile,
-        url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en-tokens.txt',
-        expectedBytes: 48 * 1024,
-      ),
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.llmModelFile,
-        url: 'https://pub-models.riconoscimento.ai/gemma-2b-it.onnx',
-        expectedBytes: 512 * 1024 * 1024,
-      ),
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.ttsModelFile,
-        url: 'https://pub-models.riconoscimento.ai/vits-tts-it.onnx',
-        expectedBytes: 126 * 1024 * 1024,
-      ),
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.ttsLexiconFile,
-        url: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
-        expectedBytes: 2 * 1024 * 1024,
-      ),
-      _VoiceModelDownloadSpec(
-        fileName: AppConstants.ttsTokensFile,
-        url: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
-        expectedBytes: 92 * 1024,
-      ),
-    ];
+    final targetDir = await _ensureTargetDirectory();
+    logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
+    final specs = _voiceModelSpecs;
 
     final totalExpectedBytes = specs.fold<int>(
       0,
@@ -104,7 +73,11 @@ class VoiceModelDownloader {
     for (final spec in specs) {
       final destinationPath = '${targetDir.path}/${spec.fileName}';
       final destinationFile = File(destinationPath);
-      if (destinationFile.existsSync() && destinationFile.lengthSync() > 0) {
+      if (await _validateExistingFile(spec, destinationFile)) {
+        logEvent(
+          _tag,
+          '[DOWNLOAD_SKIP] file=${spec.fileName} path=${destinationFile.path}',
+        );
         completedExpectedBytes += spec.expectedBytes;
         onProgress(
           (completedExpectedBytes / totalExpectedBytes)
@@ -114,18 +87,62 @@ class VoiceModelDownloader {
         continue;
       }
 
-      await _dio.download(
-        spec.url,
-        destinationPath,
-        deleteOnError: true,
-        onReceiveProgress: (received, total) {
-          final denominator = total > 0 ? total : spec.expectedBytes;
-          final fileProgress = (received / denominator).clamp(0.0, 1.0);
-          final aggregate = (completedExpectedBytes + fileProgress * spec.expectedBytes) /
-              totalExpectedBytes;
-          onProgress(aggregate.clamp(0.0, 1.0).toDouble());
-        },
+      final tempFile = File('$destinationPath.part');
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+      if (await destinationFile.exists()) {
+        await destinationFile.delete();
+      }
+
+      logEvent(
+        _tag,
+        '[DOWNLOAD_FILE_BEGIN] file=${spec.fileName} url=${spec.url}',
       );
+
+      try {
+        await _dio.download(
+          spec.url,
+          tempFile.path,
+          deleteOnError: true,
+          onReceiveProgress: (received, total) {
+            final denominator = total > 0 ? total : spec.expectedBytes;
+            final fileProgress = (received / denominator).clamp(0.0, 1.0);
+            final aggregate =
+                (completedExpectedBytes + fileProgress * spec.expectedBytes) /
+                    totalExpectedBytes;
+            onProgress(aggregate.clamp(0.0, 1.0).toDouble());
+          },
+        );
+        await _validateDownloadedFile(spec, tempFile);
+        await tempFile.rename(destinationFile.path);
+        await _validateDownloadedFile(spec, destinationFile);
+        logEvent(
+          _tag,
+          '[DOWNLOAD_FILE_COMPLETE] file=${spec.fileName} bytes=${spec.expectedBytes} path=${destinationFile.path}',
+        );
+      } on DioException catch (error) {
+        await _cleanupTempFiles(tempFile, destinationFile);
+        final statusCode = error.response?.statusCode;
+        final message = statusCode == null
+            ? 'Download del modello vocale fallito: ${spec.fileName}. ${error.message ?? "Errore di rete"}'
+            : 'Download del modello vocale fallito: ${spec.fileName} (HTTP $statusCode).';
+        logEvent(_tag, '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=$message');
+        throw VoiceAssetException(message);
+      } on VoiceAssetException catch (error) {
+        await _cleanupTempFiles(tempFile, destinationFile);
+        logEvent(
+          _tag,
+          '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=${error.message}',
+        );
+        rethrow;
+      } catch (error) {
+        await _cleanupTempFiles(tempFile, destinationFile);
+        final message =
+            'Download del modello vocale fallito: ${spec.fileName}. $error';
+        logEvent(_tag, '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=$message');
+        throw VoiceAssetException(message);
+      }
 
       completedExpectedBytes += spec.expectedBytes;
       onProgress(
@@ -135,8 +152,146 @@ class VoiceModelDownloader {
       );
     }
 
+    logEvent(
+      _tag,
+      '[EXTRACTION_COMPLETE] no extraction required for raw voice asset files',
+    );
+    await validateDownloadedAssets();
+    logEvent(_tag, '[DOWNLOAD_COMPLETE] voice assets ready in ${targetDir.path}');
     onProgress(1.0);
   }
+
+  Future<void> validateDownloadedAssets() async {
+    logEvent(_tag, '[ASSET_VALIDATION_BEGIN] checking required voice files');
+    final missingOrInvalid = <String>[];
+    String? resolvedDirectoryPath;
+
+    for (final spec in _voiceModelSpecs) {
+      final resolution = await _pathResolver.resolveForRead(
+        fileName: spec.fileName,
+      );
+      final file = await _selectValidDownloadedFile(spec, resolution);
+      resolvedDirectoryPath ??= file?.parent.path ?? resolution.privateFile.parent.path;
+
+      final parentExists = file != null && await file.parent.exists();
+      if (!parentExists || file == null) {
+        missingOrInvalid.add(spec.fileName);
+      }
+    }
+
+    if (missingOrInvalid.isNotEmpty) {
+      final message =
+          'Risorse vocali mancanti o non valide: ${missingOrInvalid.join(", ")}. '
+          'Riprova il download dei modelli vocali.';
+      logEvent(_tag, '[ASSET_VALIDATION_FAIL] $message');
+      throw VoiceAssetException(message);
+    }
+
+    logEvent(
+      _tag,
+      '[ASSET_VALIDATION_COMPLETE] all voice assets available dir=${resolvedDirectoryPath ?? "unknown"}',
+    );
+  }
+
+  Future<Directory> _ensureTargetDirectory() async {
+    final targetDir = await _pathResolver.privateModelsDirectory();
+    if (!await targetDir.exists()) {
+      await targetDir.create(recursive: true);
+    }
+    return targetDir;
+  }
+
+  Future<bool> _validateExistingFile(
+    _VoiceModelDownloadSpec spec,
+    File file,
+  ) async {
+    try {
+      if (!await file.exists()) {
+        return false;
+      }
+      final length = await file.length();
+      return length > 0 && length == spec.expectedBytes;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _validateDownloadedFile(
+    _VoiceModelDownloadSpec spec,
+    File file,
+  ) async {
+    if (!await file.exists()) {
+      throw VoiceAssetException(
+        'File vocale non trovato dopo il download: ${spec.fileName}.',
+      );
+    }
+
+    final length = await file.length();
+    if (length <= 0) {
+      throw VoiceAssetException(
+        'File vocale vuoto dopo il download: ${spec.fileName}.',
+      );
+    }
+    if (length != spec.expectedBytes) {
+      throw VoiceAssetException(
+        'File vocale incompleto o corrotto: ${spec.fileName} '
+        '(${length}/${spec.expectedBytes} byte).',
+      );
+    }
+  }
+
+  Future<File?> _selectValidDownloadedFile(
+    _VoiceModelDownloadSpec spec,
+    RuntimeModelResolution resolution,
+  ) async {
+    if (await _validateExistingFile(spec, resolution.privateFile)) {
+      return resolution.privateFile;
+    }
+    if (await _validateExistingFile(spec, resolution.publicFile)) {
+      return resolution.publicFile;
+    }
+    if (await _validateExistingFile(spec, resolution.file)) {
+      return resolution.file;
+    }
+    return null;
+  }
+
+  Future<void> _cleanupTempFiles(File tempFile, File destinationFile) async {
+    if (await tempFile.exists()) {
+      await tempFile.delete();
+    }
+    if (await destinationFile.exists()) {
+      await destinationFile.delete();
+    }
+  }
+
+  List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.sttModelFile,
+          url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en.onnx',
+          expectedBytes: 78 * 1024 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.sttTokensFile,
+          url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en-tokens.txt',
+          expectedBytes: 48 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.ttsModelFile,
+          url: 'https://pub-models.riconoscimento.ai/vits-tts-it.onnx',
+          expectedBytes: 126 * 1024 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.ttsLexiconFile,
+          url: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
+          expectedBytes: 2 * 1024 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.ttsTokensFile,
+          url: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
+          expectedBytes: 92 * 1024,
+        ),
+      ];
 }
 
 class _VoiceModelDownloadSpec {

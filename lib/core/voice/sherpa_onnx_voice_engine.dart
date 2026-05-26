@@ -96,6 +96,25 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     print(message);
   }
 
+  static bool _isReadableAssetFileSync(String path) {
+    try {
+      final file = File(path);
+      return file.existsSync() && file.lengthSync() > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String _preferredResolvedPath(RuntimeModelResolution resolution) {
+    if (_isReadableAssetFileSync(resolution.privateFile.path)) {
+      return resolution.privateFile.path;
+    }
+    if (_isReadableAssetFileSync(resolution.publicFile.path)) {
+      return resolution.publicFile.path;
+    }
+    return resolution.file.path;
+  }
+
   // ── inspect ───────────────────────────────────────────────────────────────
 
   @override
@@ -152,39 +171,57 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     );
 
     final String sttModelPath =
-        _modelPaths.sttEncoder ?? sttModelResolution.file.path;
+        _modelPaths.sttEncoder ?? _preferredResolvedPath(sttModelResolution);
     final String sttDecoderPath = _modelPaths.sttDecoder ?? sttModelPath;
     final String sttJoinerPath = _modelPaths.sttJoiner ?? sttModelPath;
     final String sttTokensPath =
-        _modelPaths.sttTokens ?? sttTokensResolution.file.path;
-    final String ttsModelPath = _modelPaths.ttsModel ?? ttsModelResolution.file.path;
+        _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
+    final String ttsModelPath =
+        _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
     final String ttsLexiconPath =
-        _modelPaths.ttsLexicon ?? ttsLexiconResolution.file.path;
+        _modelPaths.ttsLexicon ?? _preferredResolvedPath(ttsLexiconResolution);
     final String ttsTokensPath =
-        _modelPaths.ttsTokens ?? ttsTokensResolution.file.path;
+        _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
 
-    final requiredModelPaths = <String>[
-      sttModelPath,
-      sttTokensPath,
-      ttsModelPath,
-      ttsLexiconPath,
-      ttsTokensPath,
-    ];
-    final missingModelPaths =
-        requiredModelPaths.where((path) => !File(path).existsSync()).toList();
-    if (missingModelPaths.isNotEmpty) {
+    logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
+    final requiredModelPaths = <String, String>{
+      AppConstants.sttModelFile: sttModelPath,
+      AppConstants.sttTokensFile: sttTokensPath,
+      AppConstants.ttsModelFile: ttsModelPath,
+      AppConstants.ttsLexiconFile: ttsLexiconPath,
+      AppConstants.ttsTokensFile: ttsTokensPath,
+    };
+    final missingModelPaths = requiredModelPaths.entries
+       .where((entry) => !_isReadableAssetFileSync(entry.value))
+       .map((entry) => '${entry.key}(${entry.value})')
+       .toList();
+    final assetsReady = missingModelPaths.isEmpty;
+    if (!assetsReady) {
       final msg =
-          'Modelli voce mancanti (resolver pubblico→interno) nella cartella Download/AiOrchestrator/models o app storage.';
+         'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
       logEvent(
-        _tag,
-        '[MODEL_FILES_MISSING] $msg missing=${missingModelPaths.join(", ")}',
+       _tag,
+       '[ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
       );
       _forensicPrint(
-        '[VOICE_ENGINE] [MODEL_FILES_MISSING] $msg missing=${missingModelPaths.join(", ")}',
+       '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
       );
-      _status = VoiceEngineStatus.unsupported(details: msg);
+      _status = VoiceEngineStatus(
+       engineId: sherpaOnnxEngineId,
+       supportedPlatform: true,
+       nativeLibrariesLoaded: false,
+       microphonePermissionGranted: false,
+       audioSessionReady: false,
+       speakerOutputReady: false,
+       initialized: false,
+       offlineAsrAvailable: false,
+       offlineTtsAvailable: false,
+       isVoiceDownloaded: false,
+       details: msg,
+      );
       return _status;
     }
+    logEvent(_tag, '[ASSET_CHECK_COMPLETE] all required voice files are present');
 
     // ── 3. Bind native ONNX libraries (forensic print before native call) ──
     _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_BEGIN] Calling sherpa_onnx.initBindings()');
@@ -293,7 +330,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       initialized: initOk,
       offlineAsrAvailable: sttReady,
       offlineTtsAvailable: ttsReady,
-      isVoiceDownloaded: _modelPaths.hasSttPaths || _modelPaths.hasTtsPaths,
+      isVoiceDownloaded: assetsReady,
       details: initOk ? null : 'STT=$sttReady TTS=$ttsReady mic=$micReady',
     );
 
