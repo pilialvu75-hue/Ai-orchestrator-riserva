@@ -273,13 +273,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttModelFile,
-          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/main/tiny.en.onnx',
-          expectedBytes: 77 * 1024 * 1024,
+          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny.onnx',
+          expectedBytes: 151 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttTokensFile,
-          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/main/tiny.en-tokens.txt',
-          expectedBytes: 42 * 1024,
+          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-tokens.txt',
+          expectedBytes: 460 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.ttsModelFile,
