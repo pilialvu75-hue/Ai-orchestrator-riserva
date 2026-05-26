@@ -24,14 +24,6 @@ import io.flutter.plugin.common.MethodChannel
  * Main Android activity for AI-Orchestrator.
  *
  * Bridges Android [Intent] data to the Flutter layer via a [MethodChannel].
- *
- * Channel name: "com.aiorchestrator/android_intents"
- *
- * Methods handled from Flutter:
- *   - shareContext(context: String)   → broadcasts a SHARE_CONTEXT intent
- *   - sendCodeSnippet(snippet: String)→ broadcasts a RECEIVE_CODE intent
- *   - getIncomingIntentData()         → returns the payload of the launching
- *                                       intent, if any
  */
 class MainActivity : FlutterActivity() {
 
@@ -42,8 +34,7 @@ class MainActivity : FlutterActivity() {
     private val logTag = "AO_UPDATE"
     private val hashBufferSizeBytes = 32 * 1024
     private val apkInstallRequestCode = 9917
-    // Native Sherpa/ONNX builds use different shared-library names depending on
-    // packaging strategy; probe the most common combinations in priority order.
+    
     private val sherpaLibraryGroups = listOf(
         listOf("onnxruntime", "sherpa-onnx-jni"),
         listOf("onnxruntime", "sherpa-onnx"),
@@ -58,6 +49,9 @@ class MainActivity : FlutterActivity() {
     private var sherpaLibrariesLoaded = false
     private var sherpaLibraryError: String? = null
 
+    // For tracking AudioFocusRequest on Android 8.0+
+    private var audioFocusRequestO: android.media.AudioFocusRequest? = null
+
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -65,12 +59,18 @@ class MainActivity : FlutterActivity() {
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
+        registerVoiceAudioFocusChannel(flutterEngine)
         extractIncomingIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         extractIncomingIntent(intent)
+    }
+
+    override fun onDestroy() {
+        releaseVoiceAudioFocus()
+        super.onDestroy()
     }
 
     // ── MethodChannel registration ─────────────────────────────────────────
@@ -112,31 +112,23 @@ class MainActivity : FlutterActivity() {
                     }
                     try {
                         Log.i(logTag, "[INSTALL] openApkInstaller requested path=$apkPath")
-                        Log.i(logTag, "[UPDATE_INSTALL_BEGIN] apk_path=$apkPath")
-                        Log.i(logTag, "[UPDATE_INSTALL_START] path=$apkPath")
                         val apkFile = File(apkPath)
                         if (!apkFile.exists()) {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "APK file not found at $apkPath"
-                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=apk_file_missing")
-                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=apk_file_missing")
                             result.error("FILE_NOT_FOUND", "APK file not found", null)
                             return@setMethodCallHandler
                         }
-                        Log.i(logTag, "[APK] APK exists=${apkFile.exists()} size=${apkFile.length()} path=${apkFile.absolutePath}")
 
                         val canInstallPackages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             packageManager.canRequestPackageInstalls()
                         } else {
                             true
                         }
-                        Log.i(logTag, "[INSTALL] canRequestPackageInstalls=$canInstallPackages sdk=${Build.VERSION.SDK_INT}")
                         if (!canInstallPackages) {
                             openUnknownAppsSettingsInternal()
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "Unknown apps install permission denied"
-                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=unknown_apps_permission_denied")
-                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=unknown_apps_permission_denied")
                             result.error(
                                 "UNKNOWN_APPS_PERMISSION_DENIED",
                                 "Allow install from unknown apps for AI Orchestrator, then retry.",
@@ -150,7 +142,6 @@ class MainActivity : FlutterActivity() {
                             "${packageName}.fileprovider",
                             apkFile
                         )
-                        Log.i(logTag, "[APK] Using FileProvider content URI: $apkUri")
                         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
                             setDataAndType(apkUri, "application/vnd.android.package-archive")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -160,12 +151,9 @@ class MainActivity : FlutterActivity() {
                             clipData = ClipData.newUri(contentResolver, "apk", apkUri)
                         }
                         val resolved = installIntent.resolveActivity(packageManager)
-                        Log.i(logTag, "[INSTALL] Installer resolveActivity=${resolved?.flattenToShortString()}")
                         if (resolved == null) {
                             lastInstallerLaunchSuccess = false
                             lastInstallerException = "No package installer activity found"
-                            Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=installer_not_found")
-                            Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=installer_not_found")
                             result.error("INSTALLER_NOT_FOUND", "No package installer available", null)
                             return@setMethodCallHandler
                         }
@@ -184,16 +172,10 @@ class MainActivity : FlutterActivity() {
                         startActivityForResult(installIntent, apkInstallRequestCode)
                         lastInstallerLaunchSuccess = true
                         lastInstallerException = null
-                        Log.i(logTag, "[INSTALL] Installer intent launched successfully")
-                        Log.i(logTag, "[UPDATE_INSTALL_SUCCESS] launched=true")
-                        Log.i(logTag, "[UPDATE_INSTALL_RESULT] success=true launched=true")
                         result.success(true)
                     } catch (e: Exception) {
                         lastInstallerLaunchSuccess = false
                         lastInstallerException = "Failed to launch installer: ${e.message}"
-                        Log.e(logTag, "[INSTALL] Failed to launch installer", e)
-                        Log.e(logTag, "[UPDATE_INSTALL_FAIL] reason=exception message=${e.message}")
-                        Log.e(logTag, "[UPDATE_INSTALL_RESULT] success=false reason=exception message=${e.message}")
                         result.error(
                             "INSTALL_ERROR",
                             "Failed to create FileProvider URI or launch installer: ${e.message}",
@@ -207,7 +189,6 @@ class MainActivity : FlutterActivity() {
                         openUnknownAppsSettingsInternal()
                         result.success(true)
                     } catch (e: Exception) {
-                        Log.e(logTag, "[INSTALL] Failed to open unknown-apps settings", e)
                         result.error(
                             "UNKNOWN_APPS_SETTINGS_ERROR",
                             "Failed to open unknown apps settings: ${e.message}",
@@ -283,17 +264,15 @@ class MainActivity : FlutterActivity() {
             sherpaVoiceChannelName
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                "initializeSherpaOnnx" -> {
-                    result.success(buildSherpaStatus())
-                }
+                "initializeSherpaOnnx" -> result.success(buildSherpaStatus())
                 "getSherpaStatus" -> result.success(buildSherpaStatus())
                 "startAsr", "stopAsr", "speakTts", "stopTts" -> {
                     if (!ensureSherpaLibrariesLoaded()) {
                         result.error(
                             "SHERPA_NOT_AVAILABLE",
                             sherpaLibraryError ?: "Sherpa-ONNX libraries are unavailable in this build.",
-                        buildSherpaStatus()
-                    )
+                            buildSherpaStatus()
+                        )
                         return@setMethodCallHandler
                     }
                     result.error(
@@ -310,13 +289,8 @@ class MainActivity : FlutterActivity() {
             engine.dartExecutor.binaryMessenger,
             sherpaAsrEventsChannelName
         ).setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                // Stream hook reserved for native Sherpa ASR partial/final events.
-            }
-
-            override fun onCancel(arguments: Any?) {
-                // No-op placeholder.
-            }
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {}
+            override fun onCancel(arguments: Any?) {}
         })
     }
 
@@ -404,11 +378,61 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ── Audio Focus Native Implementation ──────────────────────────────────
+
+    private fun registerVoiceAudioFocusChannel(engine: FlutterEngine) {
+        MethodChannel(
+            engine.dartExecutor.binaryMessenger,
+            "com.aiorchestrator/audio_focus"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestVoiceAudioFocus" -> result.success(requestVoiceAudioFocus())
+                "releaseVoiceAudioFocus" -> {
+                    releaseVoiceAudioFocus()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun requestVoiceAudioFocus(): Boolean {
+        val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener { }
+                .build()
+            audioFocusRequestO = request
+            audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                { },
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun releaseVoiceAudioFocus() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequestO?.let { audioManager.abandonAudioFocusRequest(it) }
+            audioFocusRequestO = null
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus { }
+        }
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    /**
-     * Sends a broadcast [Intent] with the given [action] and optional [extras].
-     */
     private fun broadcastIntent(action: String, extras: Map<String, String>) {
         val intent = Intent(action).apply {
             extras.forEach { (key, value) -> putExtra(key, value) }
@@ -416,10 +440,6 @@ class MainActivity : FlutterActivity() {
         sendBroadcast(intent)
     }
 
-    /**
-     * Parses an incoming [Intent] and stores any relevant payload so that
-     * Flutter can retrieve it via [getIncomingIntentData].
-     */
     private fun extractIncomingIntent(intent: Intent?) {
         intent ?: return
         val data = mutableMapOf<String, Any?>()
@@ -457,7 +477,6 @@ class MainActivity : FlutterActivity() {
         ).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        Log.i(logTag, "[INSTALL] Opening unknown-apps settings for package=$packageName")
         startActivity(settingsIntent)
     }
 
@@ -488,19 +507,9 @@ class MainActivity : FlutterActivity() {
         val signatureSha256 = packageInfo?.let { extractSignatureSha256(it) }
         val hasSplitConfig = hasSplitConfiguration(apkFile.name, packageInfo)
         val archiveParsed = packageInfo != null
-        Log.i(
-            logTag,
-            "[UPDATE_APK_ANALYSIS] apk_filename=${apkFile.name} abi=${inferredAbi ?: "-"} split_config_present=$hasSplitConfig package_archive_info=$archiveParsed"
-        )
+        
         return mapOf(
-            "valid" to (
-                exists &&
-                    readable &&
-                    hasApkExtension &&
-                    sizeBytes > 0 &&
-                    packageName != null &&
-                    !hasSplitConfig
-                ),
+            "valid" to (exists && readable && hasApkExtension && sizeBytes > 0 && packageName != null && !hasSplitConfig),
             "exists" to exists,
             "readable" to readable,
             "hasApkExtension" to hasApkExtension,
@@ -530,8 +539,6 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == apkInstallRequestCode) {
             lastInstallerResultCode = resultCode
-            Log.i(logTag, "[INSTALL] Installer activity resultCode=$resultCode")
-            Log.i(logTag, "[UPDATE_INSTALL_RESULT] success=${resultCode == RESULT_OK} result_code=$resultCode")
         }
     }
 
