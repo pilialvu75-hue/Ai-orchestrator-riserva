@@ -1,5 +1,4 @@
 enum ModelManagementSection {
-  linguisticModel,
   voiceItalian,
   voiceFrench,
   voiceEnglish,
@@ -32,7 +31,6 @@ class ModelRuntimeManifest {
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
-    ModelManagementSection.linguisticModel,
     ModelManagementSection.voiceItalian,
     ModelManagementSection.voiceFrench,
     ModelManagementSection.voiceEnglish,
@@ -40,24 +38,12 @@ class ModelRuntimeManifest {
 
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
-    ModelManagementSection.linguisticModel: 'Modello Linguistico',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
     ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',
   };
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
-    RuntimeModelFileSpec(
-      id: 'llm_tinyllama_q4km',
-      section: ModelManagementSection.linguisticModel,
-      logicalName: 'TinyLlama 1.1B Chat GGUF',
-      fileName: 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
-      relativeDirectory: 'models',
-      downloadUrl:
-          'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf?download=true',
-      expectedBytes: 669000000,
-      estimatedSizeLabel: '638MB',
-    ),
     RuntimeModelFileSpec(
       id: 'it_stt_model',
       section: ModelManagementSection.voiceItalian,

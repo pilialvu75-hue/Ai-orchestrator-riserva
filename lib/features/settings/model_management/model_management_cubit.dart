@@ -1,6 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
@@ -10,11 +9,9 @@ import 'package:ai_orchestrator/features/settings/model_management/model_runtime
 class ModelManagementCubit extends Cubit<ModelManagementState> {
   ModelManagementCubit({
     required ModelManagementService service,
-    required LocalRuntimeDiagnosticsService runtimeDiagnosticsService,
     required VoiceEngine voiceEngine,
     required SherpaOnnxVoiceEngine directVoiceEngine,
   })  : _service = service,
-        _runtimeDiagnosticsService = runtimeDiagnosticsService,
         _voiceEngine = voiceEngine,
         _directVoiceEngine = directVoiceEngine,
         super(
@@ -24,7 +21,6 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
         );
 
   final ModelManagementService _service;
-  final LocalRuntimeDiagnosticsService _runtimeDiagnosticsService;
   final VoiceEngine _voiceEngine;
   final SherpaOnnxVoiceEngine _directVoiceEngine;
 
@@ -149,9 +145,6 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
   }
 
   Future<void> _notifyRuntimeBindingsReload() async {
-    try {
-      await _runtimeDiagnosticsService.refresh();
-    } catch (_) {}
     try {
       await _voiceEngine.initialize();
     } catch (_) {}

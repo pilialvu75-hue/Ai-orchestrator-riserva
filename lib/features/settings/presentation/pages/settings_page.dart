@@ -242,8 +242,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _ModuleCard(
                   icon: Icons.settings_suggest_outlined,
-                  title: 'Gestione e Forzatura Modelli',
-                  subtitle: 'Verifica integrità e ripara ogni file runtime',
+                  title: 'Gestione e Ripristino Voice Engine',
+                  subtitle: 'Diagnostica e ripara ascolto/voce multilingua',
                   onTap: () {
                     Navigator.push(
                       context,

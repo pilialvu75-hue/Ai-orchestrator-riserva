@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/features/settings/model_management/model_management_cubit.dart';
@@ -18,7 +17,6 @@ class ModelManagementPage extends StatelessWidget {
     return BlocProvider<ModelManagementCubit>(
       create: (_) => ModelManagementCubit(
         service: di.sl<ModelManagementService>(),
-        runtimeDiagnosticsService: di.sl<LocalRuntimeDiagnosticsService>(),
         voiceEngine: di.sl<VoiceEngine>(),
         directVoiceEngine: di.sl<SherpaOnnxVoiceEngine>(),
       )..scanIntegrity(),
@@ -38,7 +36,7 @@ class _ModelManagementView extends StatelessWidget {
         backgroundColor: const Color(0xFF0D0D0D),
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
-          'Gestione e Forzatura Modelli',
+          'Gestione e Ripristino Voice Engine',
           style: TextStyle(color: Colors.white),
         ),
       ),
@@ -100,7 +98,7 @@ class _ModelManagementView extends StatelessWidget {
                   label: Text(
                     state.repairingAll
                         ? 'Riparazione in corso...'
-                        : 'Verifica Integrità e Ripara Tutto',
+                        : 'Verifica Integrità Voice e Ripara Tutto',
                   ),
                 ),
               ],
