@@ -148,13 +148,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     // ── 2. Resolve dynamic model paths (public Download -> private app) ─────
-    final sttEncoderResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttEncoderFile,
-      privateAbsolutePathHint: _modelPaths.sttEncoder,
-    );
-    final sttDecoderResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttDecoderFile,
-      privateAbsolutePathHint: _modelPaths.sttDecoder,
+    final sttModelResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttModelFile,
+      privateAbsolutePathHint: _modelPaths.sttModel,
     );
     final sttTokensResolution = await _pathResolver.resolveForRead(
       fileName: AppConstants.sttTokensFile,
@@ -173,16 +169,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       privateAbsolutePathHint: _modelPaths.ttsTokens,
     );
 
-    // Manteniamo anche il puntamento al file singolo streaming per sicurezza architetturale
-    final sttModelResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttModelFile,
-      privateAbsolutePathHint: _modelPaths.sttModel,
-    );
-
-    final String sttEncoderPath =
-        _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
-    final String sttDecoderPath =
-        _modelPaths.sttDecoder ?? _preferredResolvedPath(sttDecoderResolution);
+    final String sttModelPath =
+        _modelPaths.sttModel ?? _preferredResolvedPath(sttModelResolution);
     final String sttTokensPath =
         _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
     final String ttsModelPath =
@@ -191,8 +179,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         _modelPaths.ttsLexicon ?? _preferredResolvedPath(ttsLexiconResolution);
     final String ttsTokensPath =
         _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
-    final String sttModelPath =
-        _modelPaths.sttModel ?? _preferredResolvedPath(sttModelResolution);
 
     logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
     final requiredModelPaths = <String, String>{
@@ -252,7 +238,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer');
 
     _forensicPrint(
-      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] encoder=$sttEncoderPath decoder=$sttDecoderPath tokens=$sttTokensPath model=$sttModelPath',
+      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] model=$sttModelPath tokens=$sttTokensPath',
     );
     try {
       // Inizializzazione corretta dello stream in tempo reale usando Zipformer2Ctc
