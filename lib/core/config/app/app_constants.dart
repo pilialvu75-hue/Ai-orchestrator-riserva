@@ -130,8 +130,8 @@ class AppConstants {
 
   static const String sttDefaultLocaleId = 'en_US';
   // ── Sherpa-ONNX local model file names ─────────────────────────────────────
-  static const String sttModelFile = 'whisper-tiny-en.onnx';
-  static const String sttTokensFile = 'whisper-tiny-en-tokens.txt';
+  static const String sttModelFile = 'tiny.onnx';
+  static const String sttTokensFile = 'tiny-tokens.txt';
   static const String llmModelFile = 'gemma-2b-it.onnx';
   static const String ttsModelFile = 'vits-tts-it.onnx';
   static const String ttsLexiconFile = 'vits-tts-lexicon.txt';
