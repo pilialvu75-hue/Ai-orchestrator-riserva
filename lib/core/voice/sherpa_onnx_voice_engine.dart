@@ -205,7 +205,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             Platform.isLinux ||
             Platform.isMacOS);
     if (!supported) {
-      final msg =
+      const msg =
           'Sherpa-ONNX voice engine is not supported on this platform.';
       logEvent(_tag, '[VOICE_UNSUPPORTED] $msg');
       _status = VoiceEngineStatus.unsupported(details: msg);

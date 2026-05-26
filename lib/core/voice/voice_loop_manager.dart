@@ -256,7 +256,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
         cancellationToken: token,
       );
     } catch (e) {
-      final errMsg =
+      const errMsg =
           'Errore di pipeline. Connessione con il modulo di pensiero fallita.';
       logEvent(_tag, '[INFERENCE_CONNECT_FAIL] $e');
       _pipelineError =

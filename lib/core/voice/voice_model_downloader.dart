@@ -62,32 +62,32 @@ class VoiceModelDownloader {
     }
 
     final specs = <_VoiceModelDownloadSpec>[
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.sttModelFile,
         url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en.onnx',
         expectedBytes: 78 * 1024 * 1024,
       ),
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.sttTokensFile,
         url: 'https://pub-models.riconoscimento.ai/whisper-tiny-en-tokens.txt',
         expectedBytes: 48 * 1024,
       ),
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.llmModelFile,
         url: 'https://pub-models.riconoscimento.ai/gemma-2b-it.onnx',
         expectedBytes: 512 * 1024 * 1024,
       ),
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.ttsModelFile,
         url: 'https://pub-models.riconoscimento.ai/vits-tts-it.onnx',
         expectedBytes: 126 * 1024 * 1024,
       ),
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.ttsLexiconFile,
         url: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
         expectedBytes: 2 * 1024 * 1024,
       ),
-      _VoiceModelDownloadSpec(
+      const _VoiceModelDownloadSpec(
         fileName: AppConstants.ttsTokensFile,
         url: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
         expectedBytes: 92 * 1024,

@@ -688,7 +688,7 @@ class _HighPerformanceChatList extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView.custom(
       controller: controller,
-      scrollCacheExtent: 1200,
+      cacheExtent: 1200,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
       childrenDelegate: SliverChildBuilderDelegate(
@@ -1447,7 +1447,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                   max: 1.5,
                   divisions: 14,
                   label: '${_settings.speechRate.toStringAsFixed(1)}x',
-                  activeThumbColor: const Color(0xFF8AB4F8),
+                  activeColor: const Color(0xFF8AB4F8),
                   onChanged: (v) => _applySettings(_settings.copyWith(speechRate: v)),
                 ),
               ),
