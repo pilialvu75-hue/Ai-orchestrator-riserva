@@ -4,9 +4,9 @@ import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 class VoiceOutputService {
   VoiceOutputService({
     required VoiceEngine engine,
-    VoiceTextNormalizer normalizer = const VoiceTextNormalizer(),
+    VoiceTextNormalizer? normalizer,
   })  : _engine = engine,
-        _normalizer = normalizer;
+        _normalizer = normalizer ?? VoiceTextNormalizer();
 
   final VoiceEngine _engine;
   final VoiceTextNormalizer _normalizer;

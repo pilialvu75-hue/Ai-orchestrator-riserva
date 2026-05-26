@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -11,6 +10,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 
 /// Direct Dart-SDK voice engine using the `sherpa_onnx` package for offline
 /// STT and TTS, and `record` for low-level PCM microphone streaming.
@@ -45,11 +45,14 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   SherpaOnnxVoiceEngine({
     VoiceModelPaths? modelPaths,
-  }) : _modelPaths = modelPaths ?? const VoiceModelPaths();
+    VoiceTextNormalizer? normalizer,
+  })  : _modelPaths = modelPaths ?? const VoiceModelPaths(),
+        _normalizer = normalizer ?? VoiceTextNormalizer();
 
   static const String _tag = 'VOICE_ENGINE';
 
   final VoiceModelPaths _modelPaths;
+  final VoiceTextNormalizer _normalizer;
 
   sherpa_onnx.OnlineRecognizer? _recognizer;
   sherpa_onnx.OnlineStream? _asrStream;
@@ -61,6 +64,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   VoiceEngineStatus _status = VoiceEngineStatus.unsupported();
   bool _isListening = false;
   bool _initialized = false;
+
+  // Active VITS speaker ID; 0 = default (male), 1 = female (multi-speaker).
+  int _speakerId = 0;
+  int _userSpeakerId = 0;
+  double _pitchMultiplier = 1.0;
+  double _userPitchMultiplier = 1.0;
 
   // Phase 2: serial low-latency audio output player.
   final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
@@ -82,6 +91,81 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   Float32List? get pendingTtsSamples => _pendingTtsSamples;
   int get pendingTtsSampleRate => _pendingTtsSampleRate;
+
+  // ── Settings update ───────────────────────────────────────────────────────
+
+  /// Updates TTS playback settings at runtime.
+  ///
+  /// [speechRate] – multiplier in the range [0.8, 1.5]; clamped to that range.
+  /// [speakerId]  – VITS speaker ID (0 = default / male, 1 = female for most
+  ///                multi-speaker VITS models).  Ignored when the loaded model
+  ///                has only one speaker (sid is passed directly to the ONNX
+  ///                runtime; the runtime silently clamps it).
+  void updateSettings({
+    double? speechRate,
+    int? speakerId,
+    double? pitchMultiplier,
+    bool persistAsUserPreference = true,
+  }) {
+    if (speechRate != null) {
+      final clamped = speechRate.clamp(0.8, 1.5).toDouble();
+      if (persistAsUserPreference) {
+        _status = _status.copyWithSettings(speechRate: clamped);
+      }
+      _activeSpeechRate = clamped;
+      if (persistAsUserPreference) {
+        _userSpeechRate = clamped;
+      }
+      logEvent(_tag, '[SETTINGS_UPDATE] speechRate=$clamped persist=$persistAsUserPreference');
+    }
+    if (speakerId != null) {
+      _speakerId = speakerId;
+      if (persistAsUserPreference) {
+        _userSpeakerId = speakerId;
+      }
+      logEvent(_tag, '[SETTINGS_UPDATE] speakerId=$speakerId persist=$persistAsUserPreference');
+    }
+    if (pitchMultiplier != null) {
+      final clampedPitch = pitchMultiplier.clamp(0.9, 1.1).toDouble();
+      _pitchMultiplier = clampedPitch;
+      if (persistAsUserPreference) {
+        _userPitchMultiplier = clampedPitch;
+      }
+      logEvent(_tag, '[SETTINGS_UPDATE] pitchMultiplier=$clampedPitch persist=$persistAsUserPreference');
+    }
+  }
+
+  double _activeSpeechRate = 1.0;
+  double _userSpeechRate = 1.0;
+
+  void _restoreUserSettings() {
+    updateSettings(
+      speechRate: _userSpeechRate,
+      speakerId: _userSpeakerId,
+      pitchMultiplier: _userPitchMultiplier,
+      persistAsUserPreference: false,
+    );
+  }
+
+  void _applyExpressiveStyle(VoiceExpressiveStyle style) {
+    switch (style) {
+      case VoiceExpressiveStyle.happy:
+        updateSettings(
+          speechRate: 1.15,
+          pitchMultiplier: 1.06,
+          persistAsUserPreference: false,
+        );
+      case VoiceExpressiveStyle.sad:
+        updateSettings(
+          speechRate: 0.85,
+          pitchMultiplier: 0.94,
+          persistAsUserPreference: false,
+        );
+      case VoiceExpressiveStyle.serious:
+      case VoiceExpressiveStyle.neutral:
+        _restoreUserSettings();
+    }
+  }
 
   // ── Forensic print helper ─────────────────────────────────────────────────
 
@@ -121,7 +205,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             Platform.isLinux ||
             Platform.isMacOS);
     if (!supported) {
-      final msg =
+      const msg =
           'Sherpa-ONNX voice engine is not supported on this platform.';
       logEvent(_tag, '[VOICE_UNSUPPORTED] $msg');
       _status = VoiceEngineStatus.unsupported(details: msg);
@@ -288,6 +372,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       isVoiceDownloaded: _modelPaths.hasSttPaths || _modelPaths.hasTtsPaths,
       details: initOk ? null : 'STT=$sttReady TTS=$ttsReady mic=$micReady',
     );
+    _activeSpeechRate = _status.speechRate;
+    _userSpeechRate = _status.speechRate;
+    _userSpeakerId = _speakerId;
+    _userPitchMultiplier = _pitchMultiplier;
 
     logEvent(
       _tag,
@@ -425,17 +513,24 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   @override
   Future<void> speak(String text) async {
-    final sanitized = text.trim();
-    if (sanitized.isEmpty) return;
+    final normalized = _normalizer.preprocessForTts(text);
+    _applyExpressiveStyle(normalized.style);
+    final sanitized = normalized.text.trim();
+    if (sanitized.isEmpty) {
+      _restoreUserSettings();
+      return;
+    }
 
     if (!_status.readyForOutput) {
       logEvent(_tag, '[TTS_BLOCKED] engine not ready for output text="$sanitized"');
+      _restoreUserSettings();
       return;
     }
 
     final tts = _tts;
     if (tts == null) {
       logEvent(_tag, '[TTS_NULL] tts engine is null, cannot speak');
+      _restoreUserSettings();
       return;
     }
 
@@ -444,27 +539,36 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       final audio = tts.generate(
         text: sanitized,
-        sid: 0,
-        speed: _status.speechRate,
+        sid: _speakerId,
+        speed: _activeSpeechRate,
       );
       _pendingTtsSamples = audio.samples;
-      _pendingTtsSampleRate = audio.sampleRate;
+      _pendingTtsSampleRate = (audio.sampleRate * _pitchMultiplier)
+          .round()
+          .clamp(8000, 96000)
+          .toInt();
 
       logEvent(
         _tag,
-        '[TTS_GENERATE_OK] samples=${audio.samples.length} sampleRate=${audio.sampleRate}',
+        '[TTS_GENERATE_OK] samples=${audio.samples.length} sampleRate=${audio.sampleRate} '
+        'effectiveSampleRate=$_pendingTtsSampleRate pitch=$_pitchMultiplier speed=$_activeSpeechRate',
       );
 
       // Phase 2: pipe generated samples to the hardware speaker via
       // AudioStreamPlayer.  The push is fire-and-forget; the player
       // serialises concurrent chunks and clears itself on stopSpeaking().
-      _audioPlayer.push(audio.samples, audio.sampleRate);
+      _audioPlayer.push(audio.samples, _pendingTtsSampleRate);
 
       logEvent(_tag, '[TTS_PLAYBACK_ENQUEUED] queued ${audio.samples.length} samples at ${audio.sampleRate} Hz');
     } catch (e, st) {
       final msg = 'TTS generation error: $e';
       _forensicPrint('[VOICE_ENGINE] [TTS_GENERATE_FAIL] $msg\n$st');
       logEvent(_tag, '[TTS_GENERATE_FAIL] $msg');
+    } finally {
+      if (normalized.style != VoiceExpressiveStyle.neutral &&
+          normalized.style != VoiceExpressiveStyle.serious) {
+        _restoreUserSettings();
+      }
     }
   }
 
@@ -477,6 +581,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     // ring-buffer) for low-latency barge-in response.
     _audioPlayer.stop();
     _pendingTtsSamples = null;
+    _restoreUserSettings();
   }
 
   // ── dispose ───────────────────────────────────────────────────────────────

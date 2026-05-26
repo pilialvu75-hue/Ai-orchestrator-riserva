@@ -4,9 +4,44 @@ import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+
+/// Identifies the current stage of the voice STT → LLM → TTS pipeline.
+///
+/// Exposed via [VoiceLoopManager.currentPhase] so that the UI overlay can
+/// display fine-grained diagnostic information without polling.
+enum VoicePipelinePhase {
+  /// No active pipeline iteration.
+  idle,
+
+  /// Microphone is open and the STT engine is processing audio.
+  sttListening,
+
+  /// A final STT result has been received and the LLM connection is being
+  /// established.
+  llmConnecting,
+
+  /// Connection to the LLM is open; waiting for the first response token.
+  llmWaitingToken,
+
+  /// Tokens are flowing and TTS chunks are being synthesised / played.
+  ttsSynthesizing,
+}
+
+extension VoicePipelinePhaseWireName on VoicePipelinePhase {
+  String get wireName {
+    return switch (this) {
+      VoicePipelinePhase.idle => 'idle',
+      VoicePipelinePhase.sttListening => 'stt_listening',
+      VoicePipelinePhase.llmConnecting => 'llm_connecting',
+      VoicePipelinePhase.llmWaitingToken => 'llm_waiting_token',
+      VoicePipelinePhase.ttsSynthesizing => 'tts_synthesizing',
+    };
+  }
+}
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -25,6 +60,14 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 ///             → [VoiceEngine.speak]
 /// ```
 ///
+/// Guardrails
+/// ──────────
+/// • A 15-second safe-timeout fires when no LLM token arrives after connection.
+///   The engine immediately speaks an offline diagnostic phrase so the user
+///   hears an audible failure notice even when the UI is backgrounded.
+/// • A network-error path speaks a different diagnostic phrase when the
+///   inference stream cannot be established.
+///
 /// Barge-in
 /// ─────────
 /// When the user speaks while TTS is active, [stopLiveSession] cancels the
@@ -39,17 +82,38 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   static const String _tag = 'VOICE_LOOP';
 
+  /// Timeout for receiving the first LLM token after stream open.
+  static const Duration _llmFirstTokenTimeout = Duration(seconds: 15);
+
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
 
   CancellationToken? _activeCancellation;
   bool _sessionActive = false;
 
+  VoicePipelinePhase _currentPhase = VoicePipelinePhase.idle;
+  String? _pipelineError;
+
+  /// Current pipeline stage; updated at each phase boundary.
+  VoicePipelinePhase get currentPhase => _currentPhase;
+
+  /// Non-null when the pipeline ended with an error or timeout.
+  String? get pipelineError => _pipelineError;
+
   /// The session-level cancellation token; exposed so callers can integrate
   /// with external lifecycle events (e.g. app backgrounding).
   CancellationToken? get activeCancellationToken => _activeCancellation;
 
   bool get isSessionActive => _sessionActive;
+
+  // ── Phase helpers ─────────────────────────────────────────────────────────
+
+  void _setPhase(VoicePipelinePhase phase) {
+    _currentPhase = phase;
+    logEvent(_tag, '[PHASE] ${phase.wireName}');
+  }
+
+  // ── Session lifecycle ─────────────────────────────────────────────────────
 
   /// Starts the live Voice-to-Voice loop.
   ///
@@ -72,6 +136,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     _sessionActive = true;
     _activeCancellation = CancellationToken();
+    _pipelineError = null;
 
     logEvent(
       _tag,
@@ -93,6 +158,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       logEvent(_tag, '[SESSION_FATAL] $msg');
       onError?.call(msg);
     } finally {
+      _setPhase(VoicePipelinePhase.idle);
       _sessionActive = false;
       _activeCancellation = null;
     }
@@ -105,6 +171,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     _activeCancellation?.cancel();
     await _engine.stopListening();
     await _engine.stopSpeaking();
+    _setPhase(VoicePipelinePhase.idle);
     _sessionActive = false;
     logEvent(_tag, '[SESSION_STOP_DONE]');
   }
@@ -121,6 +188,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     final token = _activeCancellation!;
 
     // ── 1. STT: listen until a final result arrives ────────────────────────
+    _setPhase(VoicePipelinePhase.sttListening);
     logEvent(_tag, '[STT_LISTEN_BEGIN]');
 
     final sttCompleter = Completer<String>();
@@ -164,6 +232,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     // ── 2. LLM inference: stream tokens directly from the runtime ──────────
+    _setPhase(VoicePipelinePhase.llmConnecting);
     logEvent(
       _tag,
       '[INFERENCE_BEGIN] prompt="${spokenText.length > 60 ? spokenText.substring(0, 60) : spokenText}"',
@@ -180,10 +249,24 @@ class VoiceLoopManager with RuntimeEventEmitter {
       modelPath: modelPath,
     );
 
-    final inferenceStream = _runtimeProvider.streamInference(
-      request: request,
-      cancellationToken: token,
-    );
+    late Stream<InferenceResponse> inferenceStream;
+    try {
+      inferenceStream = _runtimeProvider.streamInference(
+        request: request,
+        cancellationToken: token,
+      );
+    } catch (e) {
+      const errMsg =
+          'Errore di pipeline. Connessione con il modulo di pensiero fallita.';
+      logEvent(_tag, '[INFERENCE_CONNECT_FAIL] $e');
+      _pipelineError =
+          'STATUS: ${VoicePipelinePhase.llmConnecting.wireName} - ERROR: connection failed';
+      onError?.call(_pipelineError!);
+      if (!token.isCancelled) {
+        unawaited(_engine.speak(errMsg));
+      }
+      return;
+    }
 
     // ── 3. Token accumulation with punctuation-based TTS chunking ──────────
     // Tokens are buffered until a sentence-boundary character is detected,
@@ -191,45 +274,86 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // barge-in design where TTS starts before the full response is available.
     final tokenBuffer = StringBuffer();
     final sentenceBoundaryPattern = RegExp(r'[.!?,;:\n]');
+    bool firstTokenReceived = false;
 
-    await for (final response in inferenceStream) {
-      if (token.isCancelled) {
-        logEvent(_tag, '[INFERENCE_CANCELLED]');
-        break;
-      }
+    // Timer that fires when no first token has arrived within the safe window.
+    Timer? firstTokenTimer;
 
-      if (response.isError) {
-        final msg = response.errorMessage ?? 'Inference error';
-        logEvent(_tag, '[INFERENCE_ERROR] $msg');
-        onError?.call(msg);
-        break;
-      }
+    try {
+      firstTokenTimer = Timer(_llmFirstTokenTimeout, () {
+        if (firstTokenReceived || token.isCancelled) return;
+        const timeoutPhrase =
+            'Errore di pipeline. Timeout di quindici secondi sul primo token dell\'LLM.';
+        logEvent(_tag, '[LLM_FIRST_TOKEN_TIMEOUT] 15s elapsed with no token');
+        _pipelineError =
+            'STATUS: ${VoicePipelinePhase.llmWaitingToken.wireName} - ERROR: Timeout 15s';
+        onError?.call(_pipelineError!);
+        token.cancel();
+        unawaited(_engine.speak(timeoutPhrase));
+      });
 
-      final chunk = response.text;
-      if (chunk.isEmpty) continue;
+      _setPhase(VoicePipelinePhase.llmWaitingToken);
 
-      tokenBuffer.write(chunk);
+      await for (final response in inferenceStream) {
+        if (token.isCancelled) {
+          logEvent(_tag, '[INFERENCE_CANCELLED]');
+          break;
+        }
 
-      // Forward token to subtitle stream.
-      onSubtitle?.call(tokenBuffer.toString(), response.isFinal);
-
-      // Flush to TTS on sentence boundary or at final chunk.
-      if (response.isFinal || sentenceBoundaryPattern.hasMatch(chunk)) {
-        final speakChunk = tokenBuffer.toString().trim();
-        tokenBuffer.clear();
-
-        if (speakChunk.isNotEmpty) {
-          logEvent(
-            _tag,
-            '[TTS_CHUNK_FLUSH] length=${speakChunk.length} '
-            'isFinal=${response.isFinal}',
-          );
-          // Barge-in guard: only speak if not cancelled.
+        if (response.isError) {
+          final msg = response.errorMessage ?? 'Inference error';
+          logEvent(_tag, '[INFERENCE_ERROR] $msg');
+          _pipelineError =
+              'STATUS: ${_currentPhase.wireName} - ERROR: $msg';
+          onError?.call(_pipelineError!);
+          const errPhrase =
+              'Errore di pipeline. Connessione con il modulo di pensiero fallita.';
           if (!token.isCancelled) {
-            unawaited(_engine.speak(speakChunk));
+            unawaited(_engine.speak(errPhrase));
+          }
+          break;
+        }
+
+        final chunk = response.text;
+        if (chunk.isEmpty) continue;
+
+        if (!firstTokenReceived) {
+          firstTokenReceived = true;
+          firstTokenTimer?.cancel();
+          firstTokenTimer = null;
+          logEvent(_tag, '[LLM_FIRST_TOKEN_RECEIVED]');
+        }
+
+        tokenBuffer.write(chunk);
+
+        // Transition to TTS phase on first real token.
+        if (_currentPhase != VoicePipelinePhase.ttsSynthesizing) {
+          _setPhase(VoicePipelinePhase.ttsSynthesizing);
+        }
+
+        // Forward token to subtitle stream.
+        onSubtitle?.call(tokenBuffer.toString(), response.isFinal);
+
+        // Flush to TTS on sentence boundary or at final chunk.
+        if (response.isFinal || sentenceBoundaryPattern.hasMatch(chunk)) {
+          final speakChunk = tokenBuffer.toString().trim();
+          tokenBuffer.clear();
+
+          if (speakChunk.isNotEmpty) {
+            logEvent(
+              _tag,
+              '[TTS_CHUNK_FLUSH] length=${speakChunk.length} '
+              'isFinal=${response.isFinal}',
+            );
+            // Barge-in guard: only speak if not cancelled.
+            if (!token.isCancelled) {
+              unawaited(_engine.speak(speakChunk));
+            }
           }
         }
       }
+    } finally {
+      firstTokenTimer?.cancel();
     }
 
     // Flush any remaining tokens.
