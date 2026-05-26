@@ -380,7 +380,9 @@ Future<void> initDependencies({
     () => VoiceModelDownloader(),
   );
   sl.registerLazySingleton<ModelManagementService>(
-    () => ModelManagementService(),
+    () => ModelManagementService(
+      localAiRepository: sl<LocalAiRepository>(),
+    ),
   );
   sl.registerLazySingleton<VoiceLoopManager>(
     () => VoiceLoopManager(

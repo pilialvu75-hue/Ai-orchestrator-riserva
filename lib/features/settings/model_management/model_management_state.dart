@@ -9,6 +9,9 @@ class ModelManagementState extends Equatable {
     required this.messageByFileId,
     this.scanning = false,
     this.repairingAll = false,
+    this.exportingAll = false,
+    this.exportProgress = 0,
+    this.exportMessage,
   });
 
   factory ModelManagementState.initial(Iterable<String> fileIds) {
@@ -26,6 +29,9 @@ class ModelManagementState extends Equatable {
   final Map<String, String?> messageByFileId;
   final bool scanning;
   final bool repairingAll;
+  final bool exportingAll;
+  final double exportProgress;
+  final String? exportMessage;
 
   bool isDownloading(String fileId) => progressByFileId.containsKey(fileId);
 
@@ -35,6 +41,10 @@ class ModelManagementState extends Equatable {
     Map<String, String?>? messageByFileId,
     bool? scanning,
     bool? repairingAll,
+    bool? exportingAll,
+    double? exportProgress,
+    String? exportMessage,
+    bool clearExportMessage = false,
   }) {
     return ModelManagementState(
       integrityByFileId: integrityByFileId ?? this.integrityByFileId,
@@ -42,6 +52,9 @@ class ModelManagementState extends Equatable {
       messageByFileId: messageByFileId ?? this.messageByFileId,
       scanning: scanning ?? this.scanning,
       repairingAll: repairingAll ?? this.repairingAll,
+      exportingAll: exportingAll ?? this.exportingAll,
+      exportProgress: exportProgress ?? this.exportProgress,
+      exportMessage: clearExportMessage ? null : (exportMessage ?? this.exportMessage),
     );
   }
 
@@ -52,5 +65,8 @@ class ModelManagementState extends Equatable {
         messageByFileId,
         scanning,
         repairingAll,
+        exportingAll,
+        exportProgress,
+        exportMessage,
       ];
 }

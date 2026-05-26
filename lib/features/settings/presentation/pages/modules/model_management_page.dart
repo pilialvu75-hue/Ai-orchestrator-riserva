@@ -47,6 +47,55 @@ class _ModelManagementView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
+                FilledButton.icon(
+                  onPressed: state.exportingAll
+                      ? null
+                      : () => cubit.exportAllModelsToPublicStorage(),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF34D399),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: state.exportingAll
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Colors.black,
+                          ),
+                        )
+                      : const Icon(Icons.file_upload_outlined),
+                  label: Text(
+                    state.exportingAll
+                        ? 'Esportazione in corso...'
+                        : 'Esporta Tutti i Modelli nello Storage Pubblico',
+                  ),
+                ),
+                if (state.exportingAll) ...[
+                  const SizedBox(height: 10),
+                  LinearProgressIndicator(
+                    value: state.exportProgress,
+                    minHeight: 4,
+                    backgroundColor: const Color(0xFF1F2937),
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Color(0xFF34D399)),
+                  ),
+                ],
+                if ((state.exportMessage ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    state.exportMessage!,
+                    style: TextStyle(
+                      color: state.exportMessage!.toLowerCase().contains('completata')
+                          ? const Color(0xFF34D399)
+                          : const Color(0xFFF59E0B),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
                 if (state.scanning)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
@@ -275,8 +324,10 @@ class _FileRow extends StatelessWidget {
       return ('Download in corso', const Color(0xFF8AB4F8));
     }
     switch (status) {
-      case ModelFileIntegrityStatus.present:
-        return ('Verificato / Presente', const Color(0xFF34D399));
+      case ModelFileIntegrityStatus.presentPublicStorage:
+        return ('Presente (Storage Pubblico)', const Color(0xFF34D399));
+      case ModelFileIntegrityStatus.presentInternalStorage:
+        return ('Presente (Storage Interno)', const Color(0xFF60A5FA));
       case ModelFileIntegrityStatus.missing:
         return ('Mancante', const Color(0xFFEF4444));
       case ModelFileIntegrityStatus.corrupted:

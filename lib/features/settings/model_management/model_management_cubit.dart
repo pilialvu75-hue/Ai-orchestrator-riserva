@@ -64,6 +64,53 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     emit(state.copyWith(repairingAll: false));
   }
 
+  Future<void> exportAllModelsToPublicStorage() async {
+    emit(
+      state.copyWith(
+        exportingAll: true,
+        exportProgress: 0,
+        clearExportMessage: true,
+      ),
+    );
+    try {
+      await _service.exportAllRuntimeModels(
+        onProgress: (progress) {
+          emit(
+            state.copyWith(
+              exportingAll: true,
+              exportProgress: progress,
+            ),
+          );
+        },
+      );
+      emit(
+        state.copyWith(
+          exportingAll: false,
+          exportProgress: 1,
+          exportMessage:
+              'Esportazione completata! Ora puoi disinstallare l’app in sicurezza.',
+        ),
+      );
+      await scanIntegrity();
+    } on ModelDownloadFailureException catch (error) {
+      emit(
+        state.copyWith(
+          exportingAll: false,
+          exportProgress: 0,
+          exportMessage: error.message,
+        ),
+      );
+    } catch (error) {
+      emit(
+        state.copyWith(
+          exportingAll: false,
+          exportProgress: 0,
+          exportMessage: 'Esportazione fallita: $error',
+        ),
+      );
+    }
+  }
+
   Future<void> _downloadOne(RuntimeModelFileSpec spec) async {
     emit(
       state.copyWith(

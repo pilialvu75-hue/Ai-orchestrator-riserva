@@ -18,7 +18,7 @@ class VoiceModelDownloader {
             );
 
   static const String sharedModelsFolder =
-      '/storage/emulated/0/Download/AiOrchestratorModels';
+      '/storage/emulated/0/Download/AiOrchestrator/models';
 
   final Dio _dio;
 
