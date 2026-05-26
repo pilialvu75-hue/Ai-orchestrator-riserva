@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 
@@ -65,6 +66,7 @@ class ModelDownloadService {
   final Dio _dio;
   final FilePicker _filePicker;
   final BundledModelRegistryService _bundledModelRegistryService;
+  final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
   final Map<String, CancelToken> _cancelTokens = {};
   static const Uuid _uuid = Uuid();
   static const MethodChannel _androidChannel =
@@ -85,10 +87,15 @@ class ModelDownloadService {
     final builtIn = await Future.wait(
       catalog.map((m) async {
         final file = File('${modelsDir.path}/${m['fileName']}');
-        final downloaded = await file.exists();
+        final resolution = await _pathResolver.resolveForRead(
+          fileName: m['fileName'] as String,
+          privateAbsolutePathHint: file.path,
+        );
+        final downloaded = resolution.exists;
+        final effectiveFile = resolution.file;
         ModelValidationStatus status;
         if (downloaded) {
-          status = await _validateModelFile(file);
+          status = await _validateModelFile(effectiveFile);
         } else {
           status = ModelValidationStatus.notDownloaded;
         }
@@ -101,7 +108,7 @@ class ModelDownloadService {
           sizeBytes: m['sizeBytes'] as int,
           description: m['description'] as String,
           isDownloaded: downloaded,
-          localPath: downloaded ? file.path : null,
+          localPath: downloaded ? effectiveFile.path : null,
           platformTarget: m['platformTarget'] as String?,
           validationStatus: status,
         );
@@ -608,22 +615,29 @@ class ModelDownloadService {
             : ModelValidationStatus.notDownloaded,
         );
     }
-    final exists = await File(path).exists();
+    final resolution = await _pathResolver.resolveForRead(
+      fileName: p.basename(path),
+      privateAbsolutePathHint: path,
+    );
+    final resolvedPath = resolution.file.path;
+    final exists = resolution.exists;
     if (!exists && !model.isImportedModel) {
       return model.copyWith(
         isDownloaded: false,
         validationStatus: ModelValidationStatus.notDownloaded,
+        localPath: path,
       );
     }
     final validation = await _validateModelPath(
-      path,
+      resolvedPath,
       treatMissingAsMissing: model.isImportedModel,
     );
     final isMissing = validation.status == ModelValidationStatus.missingFile;
     return model.copyWith(
       isDownloaded: model.isImportedModel ? true : !isMissing,
       validationStatus: validation.status,
-      sizeBytes: await _safeFileLength(path, fallback: model.sizeBytes),
+      localPath: exists ? resolvedPath : path,
+      sizeBytes: await _safeFileLength(resolvedPath, fallback: model.sizeBytes),
     );
   }
 

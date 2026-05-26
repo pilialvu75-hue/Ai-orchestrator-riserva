@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/diagnostics_console_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/personal_data_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/system_prompt_page.dart';
@@ -232,6 +233,22 @@ class _SettingsPageState extends State<SettingsPage> {
                       context,
                       MaterialPageRoute<void>(
                         builder: (_) => const ModelsPage(),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _ModuleCard(
+                  icon: Icons.settings_suggest_outlined,
+                  title: 'Gestione e Ripristino Voice Engine',
+                  subtitle: 'Diagnostica e ripara ascolto/voce multilingua',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ModelManagementPage(),
                       ),
                     );
                   },

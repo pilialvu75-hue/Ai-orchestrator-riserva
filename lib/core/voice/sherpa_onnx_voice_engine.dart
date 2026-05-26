@@ -3,12 +3,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
@@ -50,6 +50,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   static const String _tag = 'VOICE_ENGINE';
 
   final VoiceModelPaths _modelPaths;
+  final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
 
   sherpa_onnx.OnlineRecognizer? _recognizer;
   sherpa_onnx.OnlineStream? _asrStream;
@@ -128,33 +129,39 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return _status;
     }
 
-    // ── 2. Resolve dynamic model directory and verify required files ────────
-    // On Android: prefer the public Download folder (persists across
-    // uninstalls, useful for debug/sideloading). Fall back to the private
-    // app-documents folder when the debug folder is missing or empty.
-    const String sharedModelFolder =
-        '/storage/emulated/0/Download/AiOrchestratorModels';
-    String modelFolder = sharedModelFolder;
-    final debugDir = Directory(sharedModelFolder);
-    final bool hasSharedModels = Platform.isAndroid &&
-        debugDir.existsSync() &&
-        debugDir.listSync(followLinks: false).isNotEmpty;
-    if (!hasSharedModels) {
-      final docDir = await getApplicationDocumentsDirectory();
-      modelFolder = '${docDir.path}/models';
-    }
+    // ── 2. Resolve dynamic model paths (public Download -> private app) ─────
+    final sttModelResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttModelFile,
+      privateAbsolutePathHint: _modelPaths.sttEncoder,
+    );
+    final sttTokensResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.sttTokensFile,
+      privateAbsolutePathHint: _modelPaths.sttTokens,
+    );
+    final ttsModelResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.ttsModelFile,
+      privateAbsolutePathHint: _modelPaths.ttsModel,
+    );
+    final ttsLexiconResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.ttsLexiconFile,
+      privateAbsolutePathHint: _modelPaths.ttsLexicon,
+    );
+    final ttsTokensResolution = await _pathResolver.resolveForRead(
+      fileName: AppConstants.ttsTokensFile,
+      privateAbsolutePathHint: _modelPaths.ttsTokens,
+    );
+
     final String sttModelPath =
-        _modelPaths.sttEncoder ?? '$modelFolder/${AppConstants.sttModelFile}';
+        _modelPaths.sttEncoder ?? sttModelResolution.file.path;
     final String sttDecoderPath = _modelPaths.sttDecoder ?? sttModelPath;
     final String sttJoinerPath = _modelPaths.sttJoiner ?? sttModelPath;
     final String sttTokensPath =
-        _modelPaths.sttTokens ?? '$modelFolder/${AppConstants.sttTokensFile}';
-    final String ttsModelPath =
-        _modelPaths.ttsModel ?? '$modelFolder/${AppConstants.ttsModelFile}';
+        _modelPaths.sttTokens ?? sttTokensResolution.file.path;
+    final String ttsModelPath = _modelPaths.ttsModel ?? ttsModelResolution.file.path;
     final String ttsLexiconPath =
-        _modelPaths.ttsLexicon ?? '$modelFolder/${AppConstants.ttsLexiconFile}';
+        _modelPaths.ttsLexicon ?? ttsLexiconResolution.file.path;
     final String ttsTokensPath =
-        _modelPaths.ttsTokens ?? '$modelFolder/${AppConstants.ttsTokensFile}';
+        _modelPaths.ttsTokens ?? ttsTokensResolution.file.path;
 
     final requiredModelPaths = <String>[
       sttModelPath,
@@ -166,7 +173,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     final missingModelPaths =
         requiredModelPaths.where((path) => !File(path).existsSync()).toList();
     if (missingModelPaths.isNotEmpty) {
-      final msg = 'Modelli mancanti in: $modelFolder';
+      final msg =
+          'Modelli voce mancanti (resolver pubblico→interno) nella cartella Download/AiOrchestrator/models o app storage.';
       logEvent(
         _tag,
         '[MODEL_FILES_MISSING] $msg missing=${missingModelPaths.join(", ")}',

@@ -19,8 +19,10 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -146,6 +148,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
+  final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -264,7 +267,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return snapshot;
     }
 
-    final selectedModelPath = selectedModel?.localPath;
+    final rawSelectedModelPath = selectedModel?.localPath;
+    final selectedModelPath = (rawSelectedModelPath == null ||
+            rawSelectedModelPath.trim().isEmpty)
+        ? rawSelectedModelPath
+        : await _resolveHybridModelPath(rawSelectedModelPath);
+    final effectiveSelectedModel =
+        selectedModelPath == null || selectedModel == null
+            ? selectedModel
+            : selectedModel.copyWith(localPath: selectedModelPath);
     if (selectedModelPath != null &&
         selectedModelPath.trim().isNotEmpty &&
         hasVerifiedRuntimeForModel(selectedModelPath) &&
@@ -303,7 +314,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 292 | Function: validateRuntime() | BEFORE calling super.validateRuntime()',
       );
-      final snapshot = await super.validateRuntime(selectedModel: selectedModel);
+      final snapshot =
+          await super.validateRuntime(selectedModel: effectiveSelectedModel);
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 296 | Function: validateRuntime() | AFTER calling super.validateRuntime()',
       );
@@ -376,8 +388,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<LocalRuntimeState> validateRuntimeInVerificationScope({
     AiModel? selectedModel,
   }) async {
+    final rawModelPath = selectedModel?.localPath;
+    final resolvedModelPath =
+        rawModelPath == null || rawModelPath.trim().isEmpty
+            ? rawModelPath
+            : await _resolveHybridModelPath(rawModelPath);
+    final effectiveSelectedModel =
+        resolvedModelPath == null || selectedModel == null
+            ? selectedModel
+            : selectedModel.copyWith(localPath: resolvedModelPath);
     return _runInVerificationScope(
-      modelPath: selectedModel?.localPath,
+      modelPath: resolvedModelPath ?? selectedModel?.localPath,
       action: () async {
         verificationMonitor.update(
           RuntimeVerificationPhase.loading,
@@ -410,7 +431,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           RuntimeVerificationPhase.running,
           message: 'Runtime prerequisites verified.',
         );
-        return super.validateRuntime(selectedModel: selectedModel);
+        return super.validateRuntime(selectedModel: effectiveSelectedModel);
       },
     );
   }
@@ -573,7 +594,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         return;
       }
-      final modelPath = request.modelPath;
+      final rawModelPath = request.modelPath;
+      final modelPath = rawModelPath == null || rawModelPath.trim().isEmpty
+          ? rawModelPath
+          : await _resolveHybridModelPath(rawModelPath);
       final modelId = request.modelId;
       _log('[CONTEXT] session=$sessionId lines=${request.context.length}'
           ' system_prompt=${(request.systemPrompt ?? '').trim().isNotEmpty}');
@@ -581,6 +605,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // ── MODEL PATH FORENSICS ─────────────────────────────────────────────────
       _log('[MODEL_PATH] modelId=$modelId path=${modelPath ?? "(null)"}'
           ' runtimeMode=android_ffi');
+      if (rawModelPath != null &&
+          modelPath != null &&
+          rawModelPath.trim() != modelPath.trim()) {
+        _log(
+          '[MODEL_PATH_RESOLVED] original=${_normalizePathForLogs(rawModelPath)} resolved=${_normalizePathForLogs(modelPath)}',
+        );
+      }
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
         _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
@@ -1759,10 +1790,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           _log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1693 | Function: streamVerificationInference() | BEFORE calling _runInVerificationScope()',
           );
+          final verificationRawModelPath = request.modelPath;
+          final verificationModelPath =
+              verificationRawModelPath == null ||
+                      verificationRawModelPath.trim().isEmpty
+                  ? verificationRawModelPath
+                  : await _resolveHybridModelPath(verificationRawModelPath);
           await _runInVerificationScope(
-          modelPath: request.modelPath,
+          modelPath: verificationModelPath,
           action: () async {
-            final modelPath = request.modelPath;
+            final modelPath = verificationModelPath;
             final modelId = request.modelId;
             if (modelPath == null ||
                 modelPath.trim().isEmpty ||
@@ -2878,6 +2915,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
     final caller = lines[_clearVerificationCallerFrameIndex].trim();
     return caller.isEmpty ? 'unknown_caller' : caller;
+  }
+
+  Future<String> _resolveHybridModelPath(String rawModelPath) async {
+    final trimmedPath = rawModelPath.trim();
+    final fileName = p.basename(trimmedPath);
+    final resolution = await _pathResolver.resolveForRead(
+      fileName: fileName,
+      privateAbsolutePathHint: trimmedPath,
+    );
+    return resolution.file.path;
   }
 
   String _normalizePathForLogs(String modelPath) {

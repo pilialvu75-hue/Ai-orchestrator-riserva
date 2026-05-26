@@ -1,5 +1,6 @@
 export 'presentation/pages/settings_page.dart';
 export 'presentation/pages/modules/models_page.dart';
+export 'presentation/pages/modules/model_management_page.dart';
 export 'presentation/pages/modules/personal_data_page.dart';
 export 'presentation/pages/modules/language_page.dart';
 export 'presentation/pages/modules/ai_mode_page.dart';
