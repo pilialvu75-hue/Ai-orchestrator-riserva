@@ -1,10 +1,14 @@
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 
+// Runtime-supported Voice Engine sections.
+// NOTE: Only the sections below reflect the ACTUAL current runtime architecture:
+//   - voiceStt: Sherpa-ONNX streaming Zipformer2 transducer (English, online)
+//   - voiceTtsItalian: VITS ONNX TTS for Italian (Paola), the active TTS voice
+// Additional TTS languages (FR, EN) are NOT currently loaded by the runtime
+// and are intentionally excluded to keep the manifest consistent with reality.
 enum ModelManagementSection {
-  voiceBaseEnStt,
-  voiceItalian,
-  voiceFrench,
-  voiceEnglish,
+  voiceStt,
+  voiceTtsItalian,
 }
 
 class RuntimeModelFileSpec {
@@ -13,7 +17,6 @@ class RuntimeModelFileSpec {
     required this.section,
     required this.logicalName,
     required this.fileName,
-    required this.relativeDirectory,
     required this.downloadUrl,
     required this.expectedBytes,
     required this.estimatedSizeLabel,
@@ -23,10 +26,15 @@ class RuntimeModelFileSpec {
   final ModelManagementSection section;
   final String logicalName;
   final String fileName;
-  final String relativeDirectory;
   final String downloadUrl;
   final int expectedBytes;
   final String estimatedSizeLabel;
+
+  // All voice model files are stored flat in the private models directory
+  // (appDir/models/<fileName>).  There is no subdirectory layering so that
+  // VoiceModelDownloader, ModelManagementService, and SherpaOnnxVoiceEngine
+  // all resolve to the same on-disk paths.
+  String get relativeDirectory => '';
 }
 
 class ModelRuntimeManifest {
@@ -34,143 +42,96 @@ class ModelRuntimeManifest {
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
-    ModelManagementSection.voiceBaseEnStt,
-    ModelManagementSection.voiceItalian,
-    ModelManagementSection.voiceFrench,
-    ModelManagementSection.voiceEnglish,
+    ModelManagementSection.voiceStt,
+    ModelManagementSection.voiceTtsItalian,
   ];
 
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
-    ModelManagementSection.voiceBaseEnStt:
-        'Voice Engine - STT Zipformer (EN, streaming)',
-    ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
-    ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
-    ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',
+    ModelManagementSection.voiceStt:
+        'STT — Zipformer2 Transducer (EN streaming)',
+    ModelManagementSection.voiceTtsItalian:
+        'TTS — VITS Italiano (Paola)',
   };
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
+    // ── Zipformer2 streaming transducer — STT ──────────────────────────────
+    // Source: csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
+    // Architecture: Online Zipformer2 transducer (encoder + decoder + joiner)
+    // Language: English (EN-only; multilingual streaming Zipformer is not
+    //   available as of mid-2025).
     RuntimeModelFileSpec(
       id: 'stt_zipformer_encoder',
-      section: ModelManagementSection.voiceBaseEnStt,
-      logicalName: 'Zipformer STT Encoder',
-      fileName: 'encoder.onnx',
-      relativeDirectory: 'models/stt_zipformer',
+      section: ModelManagementSection.voiceStt,
+      logicalName: 'Zipformer2 Transducer — Encoder',
+      fileName: AppConstants.sttEncoderFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 170 * 1024 * 1024,
-      estimatedSizeLabel: '170MB',
+      estimatedSizeLabel: '~170 MB',
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_decoder',
-      section: ModelManagementSection.voiceBaseEnStt,
-      logicalName: 'Zipformer STT Decoder',
-      fileName: 'decoder.onnx',
-      relativeDirectory: 'models/stt_zipformer',
+      section: ModelManagementSection.voiceStt,
+      logicalName: 'Zipformer2 Transducer — Decoder',
+      fileName: AppConstants.sttDecoderFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 400 * 1024,
-      estimatedSizeLabel: '400KB',
+      estimatedSizeLabel: '~400 KB',
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_joiner',
-      section: ModelManagementSection.voiceBaseEnStt,
-      logicalName: 'Zipformer STT Joiner',
-      fileName: 'joiner.onnx',
-      relativeDirectory: 'models/stt_zipformer',
+      section: ModelManagementSection.voiceStt,
+      logicalName: 'Zipformer2 Transducer — Joiner',
+      fileName: AppConstants.sttJoinerFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 18 * 1024 * 1024,
-      estimatedSizeLabel: '18MB',
+      estimatedSizeLabel: '~18 MB',
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_tokens',
-      section: ModelManagementSection.voiceBaseEnStt,
-      logicalName: 'Zipformer STT Tokens',
-      fileName: 'tokens.txt',
-      relativeDirectory: 'models/stt_zipformer',
+      section: ModelManagementSection.voiceStt,
+      logicalName: 'Zipformer2 Transducer — Tokens',
+      fileName: AppConstants.sttTokensFile,
       downloadUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
       expectedBytes: 7 * 1024,
-      estimatedSizeLabel: '7KB',
+      estimatedSizeLabel: '~7 KB',
     ),
+    // ── VITS TTS — Italiano (Paola) ────────────────────────────────────────
+    // Source: csukuangfj/vits-models — vits-tts-it-paola
+    // Architecture: VITS ONNX offline TTS
+    // Language: Italian (lexicon-based; requires lexicon + tokens).
     RuntimeModelFileSpec(
       id: 'it_tts_model',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'VITS TTS Italiano',
-      fileName: 'vits-tts-it.onnx',
-      relativeDirectory: 'models/it',
+      section: ModelManagementSection.voiceTtsItalian,
+      logicalName: 'VITS TTS Italiano — Modello',
+      fileName: AppConstants.ttsModelFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx',
       expectedBytes: 120 * 1024 * 1024,
-      estimatedSizeLabel: '120MB',
+      estimatedSizeLabel: '~120 MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_lexicon',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'VITS Lexicon Italiano',
-      fileName: 'vits-tts-lexicon.txt',
-      relativeDirectory: 'models/it',
+      section: ModelManagementSection.voiceTtsItalian,
+      logicalName: 'VITS TTS Italiano — Lessico',
+      fileName: AppConstants.ttsLexiconFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt',
       expectedBytes: 1 * 1024 * 1024,
-      estimatedSizeLabel: '1MB',
+      estimatedSizeLabel: '~1 MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_tokens',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'VITS Tokens Italiano',
-      fileName: 'vits-tts-tokens.txt',
-      relativeDirectory: 'models/it',
+      section: ModelManagementSection.voiceTtsItalian,
+      logicalName: 'VITS TTS Italiano — Tokens',
+      fileName: AppConstants.ttsTokensFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt',
       expectedBytes: 85 * 1024,
-      estimatedSizeLabel: '85KB',
-    ),
-    // French MMS-VITS: character-level model, no lexicon required.
-    RuntimeModelFileSpec(
-      id: 'fr_tts_model',
-      section: ModelManagementSection.voiceFrench,
-      logicalName: 'VITS TTS Francese (MMS)',
-      fileName: 'vits-tts-fr.onnx',
-      relativeDirectory: 'models/fr',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-fra/vits-mms-fra.onnx',
-      expectedBytes: 125 * 1024 * 1024,
-      estimatedSizeLabel: '125MB',
-    ),
-    RuntimeModelFileSpec(
-      id: 'fr_tts_tokens',
-      section: ModelManagementSection.voiceFrench,
-      logicalName: 'VITS Tokens Francese',
-      fileName: 'vits-tts-tokens.txt',
-      relativeDirectory: 'models/fr',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-fra/tokens.txt',
-      expectedBytes: 10 * 1024,
-      estimatedSizeLabel: '10KB',
-    ),
-    // English MMS-VITS: character-level model, no lexicon required.
-    RuntimeModelFileSpec(
-      id: 'en_tts_model',
-      section: ModelManagementSection.voiceEnglish,
-      logicalName: 'VITS TTS Inglese (MMS)',
-      fileName: 'vits-tts-en.onnx',
-      relativeDirectory: 'models/en',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-eng/vits-mms-eng.onnx',
-      expectedBytes: 125 * 1024 * 1024,
-      estimatedSizeLabel: '125MB',
-    ),
-    RuntimeModelFileSpec(
-      id: 'en_tts_tokens',
-      section: ModelManagementSection.voiceEnglish,
-      logicalName: 'VITS Tokens Inglese',
-      fileName: 'vits-tts-tokens.txt',
-      relativeDirectory: 'models/en',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-eng/tokens.txt',
-      expectedBytes: 10 * 1024,
-      estimatedSizeLabel: '10KB',
+      estimatedSizeLabel: '~85 KB',
     ),
   ];
 }
