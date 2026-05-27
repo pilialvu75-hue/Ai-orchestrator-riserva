@@ -364,7 +364,7 @@ class ModelManagementService {
         url,
         options: Options(
           headers: const <String, dynamic>{},
-          validateStatus: (status) => status != null && status >= 200 && status < 500,
+          validateStatus: (status) => status != null && status >= 200 && status < 400,
           followRedirects: true,
         ),
       );

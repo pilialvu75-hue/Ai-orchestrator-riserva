@@ -780,7 +780,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
 
   bool _requiresModelsDownload(VoiceEngineStatus status) {
     final details = (status.details ?? '').toLowerCase();
-    return !status.isVoiceDownloaded ||
+    return (!status.isVoiceDownloaded && !status.readyForInput) ||
         details.contains('modelli mancanti') ||
         details.contains('risorse vocali mancanti');
   }

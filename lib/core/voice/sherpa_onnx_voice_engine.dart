@@ -214,7 +214,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         .toList();
     final sttAssetsReady = missingSttPaths.isEmpty;
     final ttsAssetsReady = missingTtsPaths.isEmpty;
-    final assetsReady = sttAssetsReady || ttsAssetsReady;
+    final anyAssetsReady = sttAssetsReady || ttsAssetsReady;
+    final assetsReady = sttAssetsReady && ttsAssetsReady;
     if (!sttAssetsReady) {
       logEvent(
         _tag,
@@ -227,7 +228,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         '[ASSET_CHECK_PARTIAL] TTS assets missing: ${missingTtsPaths.join(", ")}',
       );
     }
-    if (!assetsReady) {
+    if (!anyAssetsReady) {
       const msg =
           'Risorse vocali mancanti o non valide. Download richiesto prima di avviare Live Mode.';
       logEvent(_tag, '[ASSET_CHECK_FAIL] $msg');
