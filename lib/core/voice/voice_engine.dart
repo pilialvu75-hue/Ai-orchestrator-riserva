@@ -10,15 +10,24 @@ typedef VoiceRecognitionResultCallback = void Function(String text, bool isFinal
 /// report a clear diagnostic when a path is absent rather than crashing.
 class VoiceModelPaths {
   const VoiceModelPaths({
-    this.sttModel,
+    this.sttEncoder,
+    this.sttDecoder,
+    this.sttJoiner,
     this.sttTokens,
     this.ttsModel,
     this.ttsLexicon,
     this.ttsTokens,
   });
 
-  /// Path to the Zipformer CTC single-file STT ONNX model.
-  final String? sttModel;
+  /// Path to the Zipformer transducer encoder STT ONNX model
+  /// (used together with decoder + joiner).
+  final String? sttEncoder;
+
+  /// Path to the Zipformer transducer decoder STT ONNX model.
+  final String? sttDecoder;
+
+  /// Path to the Zipformer transducer joiner STT ONNX model.
+  final String? sttJoiner;
 
   /// Path to the STT vocabulary tokens file.
   final String? sttTokens;
@@ -34,7 +43,10 @@ class VoiceModelPaths {
 
   /// Returns `true` when all required STT files are non-null and non-empty.
   bool get hasSttPaths =>
-      (sttModel?.isNotEmpty ?? false) && (sttTokens?.isNotEmpty ?? false);
+      (sttEncoder?.isNotEmpty ?? false) &&
+      (sttDecoder?.isNotEmpty ?? false) &&
+      (sttJoiner?.isNotEmpty ?? false) &&
+      (sttTokens?.isNotEmpty ?? false);
 
   /// Returns `true` when the minimum required TTS files are non-null and
   /// non-empty.

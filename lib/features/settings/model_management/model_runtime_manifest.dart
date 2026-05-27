@@ -1,4 +1,7 @@
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+
 enum ModelManagementSection {
+  voiceBaseEnStt,
   voiceItalian,
   voiceFrench,
   voiceEnglish,
@@ -31,6 +34,7 @@ class ModelRuntimeManifest {
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
+    ModelManagementSection.voiceBaseEnStt,
     ModelManagementSection.voiceItalian,
     ModelManagementSection.voiceFrench,
     ModelManagementSection.voiceEnglish,
@@ -38,6 +42,8 @@ class ModelRuntimeManifest {
 
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
+    ModelManagementSection.voiceBaseEnStt:
+        'Voice Engine - STT Zipformer (Base EN)',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
     ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',
@@ -45,25 +51,47 @@ class ModelRuntimeManifest {
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     RuntimeModelFileSpec(
-      id: 'it_stt_model',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Whisper STT Italiano',
-      fileName: 'whisper-tiny-en.onnx',
-      relativeDirectory: 'models/it',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/whisper-tiny-en.onnx',
-      expectedBytes: 81788928,
-      estimatedSizeLabel: '78MB',
+      id: 'stt_zipformer_encoder',
+      section: ModelManagementSection.voiceBaseEnStt,
+      logicalName: 'Zipformer STT Encoder',
+      fileName: 'encoder.onnx',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 170 * 1024 * 1024,
+      estimatedSizeLabel: '170MB',
     ),
     RuntimeModelFileSpec(
-      id: 'it_stt_tokens',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Whisper STT Tokens',
-      fileName: 'whisper-tiny-en-tokens.txt',
-      relativeDirectory: 'models/it',
+      id: 'stt_zipformer_decoder',
+      section: ModelManagementSection.voiceBaseEnStt,
+      logicalName: 'Zipformer STT Decoder',
+      fileName: 'decoder.onnx',
+      relativeDirectory: 'models/stt_zipformer',
       downloadUrl:
-          'https://pub-models.riconoscimento.ai/whisper-tiny-en-tokens.txt',
-      expectedBytes: 49152,
-      estimatedSizeLabel: '48KB',
+          '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 400 * 1024,
+      estimatedSizeLabel: '400KB',
+    ),
+    RuntimeModelFileSpec(
+      id: 'stt_zipformer_joiner',
+      section: ModelManagementSection.voiceBaseEnStt,
+      logicalName: 'Zipformer STT Joiner',
+      fileName: 'joiner.onnx',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 18 * 1024 * 1024,
+      estimatedSizeLabel: '18MB',
+    ),
+    RuntimeModelFileSpec(
+      id: 'stt_zipformer_tokens',
+      section: ModelManagementSection.voiceBaseEnStt,
+      logicalName: 'Zipformer STT Tokens',
+      fileName: 'tokens.txt',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
+      expectedBytes: 7 * 1024,
+      estimatedSizeLabel: '7KB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_model',

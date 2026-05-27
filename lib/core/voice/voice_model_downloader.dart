@@ -61,6 +61,11 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   }) async {
     final targetDir = await _ensureTargetDirectory();
     logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
+    logEvent(
+      _tag,
+      '[URL_GENERATION] sttRepository=${AppConstants.sttZipformerEnRepository} '
+      'baseUrl=${AppConstants.sttZipformerBaseUrl}',
+    );
     final specs = _voiceModelSpecs;
 
     final totalExpectedBytes = specs.fold<int>(
@@ -73,6 +78,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     for (final spec in specs) {
       final destinationPath = '${targetDir.path}/${spec.fileName}';
       final destinationFile = File(destinationPath);
+      logEvent(
+        _tag,
+        '[URL_RESOLVE] file=${spec.fileName} url=${spec.url}',
+      );
       if (await _validateExistingFile(spec, destinationFile)) {
         logEvent(
           _tag,
@@ -175,6 +184,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       final parentExists = file != null && await file.parent.exists();
       if (!parentExists || file == null) {
+        logEvent(
+          _tag,
+          '[ASSET_MISSING] file=${spec.fileName} expectedPrivate=${resolution.privateFile.path} expectedPublic=${resolution.publicFile.path}',
+        );
         missingOrInvalid.add(spec.fileName);
       }
     }
@@ -272,13 +285,26 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
   List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[
         _VoiceModelDownloadSpec(
-          fileName: AppConstants.sttModelFile,
-          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-it-2023-06-25/resolve/main/model.onnx',
-          expectedBytes: 74 * 1024 * 1024,
+          fileName: AppConstants.sttEncoderFile,
+          url:
+              '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+          expectedBytes: 170 * 1024 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.sttDecoderFile,
+          url:
+              '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+          expectedBytes: 400 * 1024,
+        ),
+        _VoiceModelDownloadSpec(
+          fileName: AppConstants.sttJoinerFile,
+          url:
+              '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+          expectedBytes: 18 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttTokensFile,
-          url: 'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-it-2023-06-25/resolve/main/tokens.txt',
+          url: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
           expectedBytes: 7 * 1024,
         ),
         _VoiceModelDownloadSpec(
