@@ -249,6 +249,35 @@ class _FileRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _ModelFlagChip(
+                          label: file.requiredAtRuntime
+                              ? 'required_at_runtime'
+                              : 'not_required_runtime',
+                          color: file.requiredAtRuntime
+                              ? const Color(0xFF34D399)
+                              : const Color(0xFF9CA3AF),
+                        ),
+                        _ModelFlagChip(
+                          label: file.downloadable ? 'downloadable' : 'build_asset',
+                          color: file.downloadable
+                              ? const Color(0xFF8AB4F8)
+                              : const Color(0xFFF59E0B),
+                        ),
+                        _ModelFlagChip(
+                          label: file.optionalCache
+                              ? 'optional_cache'
+                              : 'runtime_core',
+                          color: file.optionalCache
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF60A5FA),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -274,11 +303,17 @@ class _FileRow extends StatelessWidget {
                 ),
               ),
               IconButton(
-                onPressed: isDownloading ? null : onForceDownload,
-                tooltip: 'Forza Download',
+                onPressed: (isDownloading || !file.downloadable) ? null : onForceDownload,
+                tooltip: file.downloadable
+                    ? 'Forza Download'
+                    : 'Asset incluso nella build',
                 color: const Color(0xFF8AB4F8),
                 icon: Icon(
-                  isDownloading ? Icons.downloading_rounded : Icons.download_rounded,
+                  isDownloading
+                      ? Icons.downloading_rounded
+                      : (file.downloadable
+                          ? Icons.download_rounded
+                          : Icons.inventory_2_outlined),
                 ),
               ),
             ],
@@ -338,8 +373,40 @@ class _FileRow extends StatelessWidget {
         return ('Download Interrotto — Fare clic per Riprovare', const Color(0xFFF59E0B));
       case ModelFileIntegrityStatus.failed:
         return ('Errore verifica/download', const Color(0xFFFB7185));
+      case ModelFileIntegrityStatus.unavailable:
+        return ('Sorgente non disponibile (primary+fallback)', const Color(0xFFFB7185));
       case ModelFileIntegrityStatus.unknown:
         return ('Da verificare', const Color(0xFF9CA3AF));
     }
+  }
+}
+
+class _ModelFlagChip extends StatelessWidget {
+  const _ModelFlagChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 }

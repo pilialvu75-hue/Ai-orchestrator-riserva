@@ -19,6 +19,7 @@ enum ModelFileIntegrityStatus {
   corrupted,
   interrupted,
   failed,
+  unavailable,
 }
 
 class ModelFileInspection {
@@ -45,6 +46,12 @@ class ModelDownloadInterruptedException implements Exception {
 
 class ModelDownloadFailureException implements Exception {
   const ModelDownloadFailureException(this.message);
+
+  final String message;
+}
+
+class ModelSourceUnavailableException implements Exception {
+  const ModelSourceUnavailableException(this.message);
 
   final String message;
 }
@@ -139,6 +146,12 @@ class ModelManagementService {
     RuntimeModelFileSpec spec, {
     required void Function(double progress) onProgress,
   }) async {
+    if (!spec.downloadable) {
+      throw const ModelSourceUnavailableException(
+        'Modello non scaricabile in runtime (incluso nella build o disabilitato).',
+      );
+    }
+    final downloadUrl = await _resolveDownloadUrl(spec);
     final destination = await _resolvePrivateFile(spec);
     final destinationDir = destination.parent;
     if (!await destinationDir.exists()) {
@@ -151,18 +164,18 @@ class ModelManagementService {
       await tempFile.delete();
     }
 
-    _log(
-      '[FORCE_DL_BEGIN] file=${spec.fileName} '
-      'url=${spec.downloadUrl} '
-      'expectedBytes=${spec.expectedBytes} '
-      'dest=${destination.path}',
-    );
+      _log(
+        '[FORCE_DL_BEGIN] file=${spec.fileName} '
+        'url=$downloadUrl '
+        'expectedBytes=${spec.expectedBytes} '
+        'dest=${destination.path}',
+      );
 
     try {
       int? serverContentLength;
 
       await _dio.download(
-        spec.downloadUrl,
+        downloadUrl,
         tempFile.path,
         deleteOnError: true,
         options: Options(headers: const <String, dynamic>{}),
@@ -322,6 +335,45 @@ class ModelManagementService {
         error.type == DioExceptionType.receiveTimeout ||
         error.type == DioExceptionType.cancel ||
         error.type == DioExceptionType.unknown;
+  }
+
+  Future<String> _resolveDownloadUrl(RuntimeModelFileSpec spec) async {
+    final candidates = <String>[
+      spec.downloadUrl,
+      if ((spec.fallbackDownloadUrl ?? '').trim().isNotEmpty)
+        spec.fallbackDownloadUrl!.trim(),
+    ];
+    for (final candidate in candidates) {
+      final available = await _isDownloadSourceAvailable(candidate);
+      _log(
+        '[FORCE_DL_SOURCE_CHECK] file=${spec.fileName} '
+        'url=$candidate available=$available',
+      );
+      if (available) {
+        return candidate;
+      }
+    }
+    throw ModelSourceUnavailableException(
+      'Sorgente modello non disponibile (primary+fallback): ${spec.fileName}',
+    );
+  }
+
+  Future<bool> _isDownloadSourceAvailable(String url) async {
+    try {
+      final response = await _dio.head(
+        url,
+        options: Options(
+          headers: const <String, dynamic>{},
+          validateStatus: (status) => status != null && status >= 200 && status < 500,
+          followRedirects: true,
+        ),
+      );
+      return response.statusCode == 200;
+    } on DioException {
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<RuntimeModelResolution> _resolveFile(RuntimeModelFileSpec spec) {

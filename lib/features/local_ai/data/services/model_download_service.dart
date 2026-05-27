@@ -146,13 +146,17 @@ class ModelDownloadService {
 
     final modelsDir = await _modelsDirectory();
     final filePath = '${modelsDir.path}/${model.fileName}';
+    final resolvedDownloadUrl = await _resolveDownloadSourceUrl(
+      primaryUrl: model.downloadUrl,
+      modelId: model.id,
+    );
 
     final cancelToken = CancelToken();
     _cancelTokens[model.id] = cancelToken;
 
     try {
       await _dio.download(
-        model.downloadUrl,
+        resolvedDownloadUrl,
         filePath,
         cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
@@ -220,13 +224,17 @@ class ModelDownloadService {
   }) async {
     final modelsDir = await _modelsDirectory();
     final filePath = '${modelsDir.path}/$fileName';
+    final resolvedDownloadUrl = await _resolveDownloadSourceUrl(
+      primaryUrl: url,
+      modelId: modelId,
+    );
 
     final cancelToken = CancelToken();
     _cancelTokens[modelId] = cancelToken;
 
     try {
       await _dio.download(
-        url,
+        resolvedDownloadUrl,
         filePath,
         cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
@@ -759,5 +767,67 @@ class ModelDownloadService {
       await dir.create(recursive: true);
     }
     return dir;
+  }
+
+  Future<String> _resolveDownloadSourceUrl({
+    required String primaryUrl,
+    required String modelId,
+  }) async {
+    final candidates = _buildDownloadUrlCandidates(primaryUrl);
+    for (final candidate in candidates) {
+      final available = await _isDownloadSourceAvailable(candidate);
+      // ignore: avoid_print
+      print(
+        '[ModelDownloadService] Source check for $modelId: '
+        'url=$candidate available=$available',
+      );
+      if (available) {
+        return candidate;
+      }
+    }
+    throw DownloadException(
+      'Model source unavailable for $modelId (primary+fallback).',
+    );
+  }
+
+  List<String> _buildDownloadUrlCandidates(String primaryUrl) {
+    final trimmed = primaryUrl.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
+      return <String>[trimmed];
+    }
+    final candidates = <String>[trimmed];
+    if (uri.queryParameters['download'] == 'true') {
+      final withoutDownload = uri.replace(
+        queryParameters: Map<String, String>.from(uri.queryParameters)
+          ..remove('download'),
+      );
+      candidates.add(withoutDownload.toString());
+    } else {
+      final withDownload = uri.replace(
+        queryParameters: Map<String, String>.from(uri.queryParameters)
+          ..['download'] = 'true',
+      );
+      candidates.add(withDownload.toString());
+    }
+    return candidates.toSet().toList();
+  }
+
+  Future<bool> _isDownloadSourceAvailable(String url) async {
+    try {
+      final response = await _dio.head(
+        url,
+        options: Options(
+          headers: const <String, dynamic>{},
+          validateStatus: (status) => status != null && status >= 200 && status < 500,
+          followRedirects: true,
+        ),
+      );
+      return response.statusCode == 200;
+    } on DioException {
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 }

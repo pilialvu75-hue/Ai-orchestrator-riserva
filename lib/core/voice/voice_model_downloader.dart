@@ -82,6 +82,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         _tag,
         '[URL_RESOLVE] file=${spec.fileName} url=${spec.url}',
       );
+      final resolvedUrl = await _resolveDownloadUrl(spec);
       if (await _validateExistingFile(spec, destinationFile)) {
         logEvent(
           _tag,
@@ -106,14 +107,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       logEvent(
         _tag,
-        '[DOWNLOAD_FILE_BEGIN] file=${spec.fileName} url=${spec.url}',
+        '[DOWNLOAD_FILE_BEGIN] file=${spec.fileName} url=$resolvedUrl',
       );
 
       try {
         int? serverContentLength;
 
         await _dio.download(
-          spec.url,
+          resolvedUrl,
           tempFile.path,
           deleteOnError: true,
           onReceiveProgress: (received, total) {
@@ -321,43 +322,94 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
   }
 
+  Future<String> _resolveDownloadUrl(_VoiceModelDownloadSpec spec) async {
+    final candidates = <String>[
+      spec.url,
+      if ((spec.fallbackUrl ?? '').trim().isNotEmpty) spec.fallbackUrl!.trim(),
+    ];
+    for (final candidate in candidates) {
+      final available = await _isDownloadSourceAvailable(candidate);
+      logEvent(
+        _tag,
+        '[DOWNLOAD_SOURCE_CHECK] file=${spec.fileName} url=$candidate available=$available',
+      );
+      if (available) {
+        return candidate;
+      }
+    }
+    throw VoiceAssetException(
+      'Sorgente non disponibile (primary+fallback) per ${spec.fileName}.',
+    );
+  }
+
+  Future<bool> _isDownloadSourceAvailable(String url) async {
+    try {
+      final response = await _dio.head(
+        url,
+        options: Options(
+          headers: const <String, dynamic>{},
+          validateStatus: (status) => status != null && status >= 200 && status < 500,
+          followRedirects: true,
+        ),
+      );
+      return response.statusCode == 200;
+    } on DioException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttEncoderFile,
           url:
               '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+          fallbackUrl:
+              '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
           expectedBytes: 170 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttDecoderFile,
           url:
               '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+          fallbackUrl:
+              '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
           expectedBytes: 400 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttJoinerFile,
           url:
               '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+          fallbackUrl:
+              '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
           expectedBytes: 18 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttTokensFile,
           url: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
+          fallbackUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt?download=true',
           expectedBytes: 7 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.ttsModelFile,
           url: 'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx',
+          fallbackUrl:
+              'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx?download=true',
           expectedBytes: 120 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.ttsLexiconFile,
           url: 'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt',
+          fallbackUrl:
+              'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt?download=true',
           expectedBytes: 1 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.ttsTokensFile,
           url: 'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt',
+          fallbackUrl:
+              'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt?download=true',
           expectedBytes: 85 * 1024,
         ),
       ];
@@ -367,10 +419,12 @@ class _VoiceModelDownloadSpec {
   const _VoiceModelDownloadSpec({
     required this.fileName,
     required this.url,
+    this.fallbackUrl,
     required this.expectedBytes,
   });
 
   final String fileName;
   final String url;
+  final String? fallbackUrl;
   final int expectedBytes;
 }

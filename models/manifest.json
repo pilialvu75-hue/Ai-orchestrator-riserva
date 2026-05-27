@@ -1,5 +1,10 @@
 {
   "llama_1b": {
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "downloadUrl": "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf?download=true",
+    "fallbackDownloadUrl": "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+    "required_at_runtime": true,
+    "downloadable": true,
+    "optional_cache": false
   }
 }

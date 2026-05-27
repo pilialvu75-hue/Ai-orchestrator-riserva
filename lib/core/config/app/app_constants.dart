@@ -112,11 +112,16 @@ class AppConstants {
       'fileName': 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
       'downloadUrl':
           'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf?download=true',
+      'fallbackDownloadUrl':
+          'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
       'version': '1.0.0',
       'sizeBytes': 669000000,
       'description':
           'TinyLlama 1.1B Chat (Q4_K_M) – minimal verification model for Android local-runtime proof-of-life.',
       'platformTarget': 'android',
+      'required_at_runtime': true,
+      'downloadable': true,
+      'optional_cache': false,
     },
   ];
 

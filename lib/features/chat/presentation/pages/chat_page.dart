@@ -789,22 +789,29 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     RuntimeEventLog.instance.emit(
       '[VOICE_LIVE_ASSET_CHECK_BEGIN] validating voice assets before Live Mode startup',
     );
-    await widget.voiceModelDownloader.validateDownloadedAssets();
-
-    if (!status.isVoiceDownloaded) {
+    if (!status.readyForInput && !status.readyForOutput) {
       const message =
           'I modelli vocali richiesti non sono disponibili. Completa di nuovo il download dei modelli vocali prima di avviare Live Mode.';
       RuntimeEventLog.instance.emit('[VOICE_LIVE_ASSET_CHECK_FAIL] $message');
       throw const VoiceAssetException(message);
     }
 
-    if (!status.readyForInput || !status.readyForOutput) {
+    if (!status.readyForInput) {
       final detail = (status.details ?? '').trim();
       final message = detail.isEmpty
-          ? 'Live Mode richiede modelli vocali validi e accesso al microfono. Verifica il download dei modelli vocali e i permessi microfono, poi riprova.'
+          ? 'Live Mode richiede almeno STT valido e accesso al microfono. Verifica il download dei modelli STT e i permessi microfono, poi riprova.'
           : 'Live Mode non può avviarsi: $detail';
       RuntimeEventLog.instance.emit('[VOICE_LIVE_ASSET_CHECK_FAIL] $message');
       throw VoiceAssetException(message);
+    }
+
+    if (status.readyForInput && status.readyForOutput) {
+      await widget.voiceModelDownloader.validateDownloadedAssets();
+    } else {
+      RuntimeEventLog.instance.emit(
+        '[VOICE_LIVE_ASSET_CHECK_PARTIAL] Live Mode in partial readiness: '
+        'readyForInput=${status.readyForInput} readyForOutput=${status.readyForOutput}',
+      );
     }
 
     RuntimeEventLog.instance.emit(
