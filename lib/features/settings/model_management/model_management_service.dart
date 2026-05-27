@@ -64,6 +64,9 @@ class ModelManagementService {
   final Dio _dio;
   final LocalAiRepository _localAiRepository;
   final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
+  // Remote providers occasionally vary raw payload length (headers/repacking),
+  // so integrity checks accept files at or above 85% of expected size.
+  static const double _minExpectedBytesRatio = 0.85;
 
   Future<List<ModelFileInspection>> inspectAll() async {
     final inspections = <ModelFileInspection>[];
@@ -86,7 +89,7 @@ class ModelManagementService {
         );
       }
       final fileLength = await file.length();
-      final minBytes = (spec.expectedBytes * 0.85).toInt();
+      final minBytes = (spec.expectedBytes * _minExpectedBytesRatio).toInt();
       if (fileLength < minBytes) {
         return ModelFileInspection(
           spec: spec,
@@ -144,7 +147,7 @@ class ModelManagementService {
       );
 
       final length = await tempFile.length();
-      final minBytes = (spec.expectedBytes * 0.85).toInt();
+      final minBytes = (spec.expectedBytes * _minExpectedBytesRatio).toInt();
       if (length < minBytes) {
         await tempFile.delete();
         throw ModelDownloadFailureException(
