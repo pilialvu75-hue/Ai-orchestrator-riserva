@@ -370,6 +370,14 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     // ── 7. Compute final status ───────────────────────────────────────────
     final initOk = sttReady || ttsReady;
     _initialized = initOk;
+    String? details;
+    if (initOk) {
+      if (!sttReady || !ttsReady) {
+        details = 'Partial readiness: STT=$sttReady TTS=$ttsReady mic=$micReady';
+      }
+    } else {
+      details = 'STT=$sttReady TTS=$ttsReady mic=$micReady';
+    }
     _status = VoiceEngineStatus(
       engineId: sherpaOnnxEngineId,
       supportedPlatform: true,
@@ -381,11 +389,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       offlineAsrAvailable: sttReady,
       offlineTtsAvailable: ttsReady,
       isVoiceDownloaded: assetsReady,
-      details: initOk
-          ? (!sttReady || !ttsReady
-              ? 'Partial readiness: STT=$sttReady TTS=$ttsReady mic=$micReady'
-              : null)
-          : 'STT=$sttReady TTS=$ttsReady mic=$micReady',
+      details: details,
     );
 
     logEvent(

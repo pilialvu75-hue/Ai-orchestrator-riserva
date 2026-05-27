@@ -793,6 +793,9 @@ class ModelDownloadService {
     final trimmed = primaryUrl.trim();
     final uri = Uri.tryParse(trimmed);
     if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
+      _log(
+        '[ModelDownloadService] Invalid URL for fallback generation: "$primaryUrl"',
+      );
       return <String>[trimmed];
     }
     final candidates = <String>[trimmed];
@@ -811,7 +814,10 @@ class ModelDownloadService {
       );
       candidates.add(withDownload.toString());
     }
-    return candidates.toSet().toList();
+    if (candidates.length == 2 && candidates.first == candidates.last) {
+      return <String>[candidates.first];
+    }
+    return candidates;
   }
 
   Future<bool> _isDownloadSourceAvailable(String url) async {

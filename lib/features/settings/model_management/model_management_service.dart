@@ -164,12 +164,12 @@ class ModelManagementService {
       await tempFile.delete();
     }
 
-      _log(
-        '[FORCE_DL_BEGIN] file=${spec.fileName} '
-        'url=$downloadUrl '
-        'expectedBytes=${spec.expectedBytes} '
-        'dest=${destination.path}',
-      );
+    _log(
+      '[FORCE_DL_BEGIN] file=${spec.fileName} '
+      'url=$downloadUrl '
+      'expectedBytes=${spec.expectedBytes} '
+      'dest=${destination.path}',
+    );
 
     try {
       int? serverContentLength;
