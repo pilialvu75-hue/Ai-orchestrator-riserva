@@ -59,6 +59,8 @@ class ModelManagementService {
                 connectTimeout: const Duration(seconds: 30),
                 receiveTimeout: const Duration(hours: 2),
                 sendTimeout: const Duration(seconds: 30),
+                followRedirects: true,
+                maxRedirects: 10,
                 headers: const <String, dynamic>{},
               ),
             ),
@@ -75,6 +77,9 @@ class ModelManagementService {
   static const double _minAcceptableFraction = 0.85;
 
   Future<List<ModelFileInspection>> inspectAll() async {
+    // Remove orphan .part files before scanning so that a stale partial
+    // download is never mistakenly reported as a valid present file.
+    await _cleanOrphanPartFiles();
     final inspections = <ModelFileInspection>[];
     for (final spec in ModelRuntimeManifest.files) {
       inspections.add(await inspect(spec));
@@ -86,6 +91,15 @@ class ModelManagementService {
     final resolution = await _resolveFile(spec);
     final file = resolution.file;
     final fullPath = file.path;
+    // A .part file is never a valid asset; treat it as missing.
+    if (fullPath.endsWith('.part')) {
+      return ModelFileInspection(
+        spec: spec,
+        status: ModelFileIntegrityStatus.missing,
+        path: fullPath,
+        message: 'Temp (.part) file detected — not a valid asset',
+      );
+    }
     try {
       if (!resolution.exists) {
         return ModelFileInspection(
@@ -145,60 +159,99 @@ class ModelManagementService {
       await destinationDir.create(recursive: true);
     }
 
+    // Emit storage forensics before each download.
+    _logStorageForensics(destinationDir);
+
+    // Remove any stale .part file from a previous interrupted session.
     final tempFile = File('${destination.path}.part');
     if (await tempFile.exists()) {
       _log('[FORCE_DL_TEMP_CLEANUP] removing stale temp file: ${tempFile.path}');
-      await tempFile.delete();
+      await _safeDeleteFile(tempFile, '[FORCE_DL_TEMP_CLEANUP]');
     }
 
     _log(
-      '[FORCE_DL_BEGIN] file=${spec.fileName} '
+      '[DOWNLOAD_BEGIN] file=${spec.fileName} '
       'url=${spec.downloadUrl} '
       'expectedBytes=${spec.expectedBytes} '
       'dest=${destination.path}',
     );
 
     try {
-      int? serverContentLength;
-
-      await _dio.download(
+      // Stream-based GET for explicit flush control (see VoiceModelDownloader).
+      final response = await _dio.get<ResponseBody>(
         spec.downloadUrl,
-        tempFile.path,
-        deleteOnError: true,
-        options: Options(headers: const <String, dynamic>{}),
-        onReceiveProgress: (received, total) {
-          if (total > 0 && serverContentLength == null) {
-            serverContentLength = total;
-            _log(
-              '[FORCE_DL_CONTENT_LENGTH] file=${spec.fileName} '
-              'content-length=$total expectedBytes=${spec.expectedBytes}',
-            );
-          }
-          final denominator = total > 0 ? total : spec.expectedBytes;
-          final progress = (received / denominator).clamp(0.0, 1.0).toDouble();
-          onProgress(progress);
-        },
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: true,
+          headers: const <String, dynamic>{},
+        ),
       );
 
-      final length = await tempFile.length();
+      final contentLengthHeader =
+          response.headers.value(HttpHeaders.contentLengthHeader);
+      final serverContentLength =
+          int.tryParse(contentLengthHeader ?? '') ?? -1;
+      _log(
+        '[CONTENT_LENGTH] file=${spec.fileName} '
+        'content-length=$serverContentLength expectedBytes=${spec.expectedBytes}',
+      );
+
+      final sink = tempFile.openWrite();
+      int bytesWritten = 0;
+
+      try {
+        await for (final chunk in response.data!.stream) {
+          sink.add(chunk);
+          bytesWritten += chunk.length;
+          final denominator = serverContentLength > 0
+              ? serverContentLength
+              : spec.expectedBytes;
+          final progress =
+              (bytesWritten / denominator).clamp(0.0, 1.0).toDouble();
+          onProgress(progress);
+        }
+
+        _log('[BYTES_WRITTEN] file=${spec.fileName} bytesWritten=$bytesWritten');
+
+        await sink.flush();
+        _log('[FILE_FLUSHED] file=${spec.fileName}');
+        await sink.close();
+        _log('[STREAM_CLOSED] file=${spec.fileName}');
+      } catch (streamError) {
+        try {
+          await sink.close();
+        } catch (_) {}
+        _log('[STREAM_ERROR] file=${spec.fileName} error=$streamError');
+        rethrow;
+      }
+
       _log(
         '[FORCE_DL_DOWNLOADED] file=${spec.fileName} '
-        'savedBytes=$length '
-        'serverContentLength=${serverContentLength ?? "unknown"} '
+        'bytesWritten=$bytesWritten '
+        'serverContentLength=$serverContentLength '
         'expectedBytes=${spec.expectedBytes}',
       );
 
+      // Strict content-length check.
+      if (serverContentLength > 0 && bytesWritten < serverContentLength) {
+        await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_TRUNCATED]');
+        throw ModelDownloadFailureException(
+          'Download troncato: ${spec.fileName} '
+          '($bytesWritten byte ricevuti, server ha dichiarato $serverContentLength)',
+        );
+      }
+
       final minBytes = (spec.expectedBytes * _minAcceptableFraction).toInt();
-      if (length <= 0) {
+      if (bytesWritten <= 0) {
         await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_EMPTY]');
         throw ModelDownloadFailureException(
           'File vuoto dopo download: ${spec.fileName}',
         );
       }
-      if (length < minBytes) {
+      if (bytesWritten < minBytes) {
         await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_INCOMPLETE]');
         throw ModelDownloadFailureException(
-          'Download incompleto: ${_formatBytes(length)} ricevuti, '
+          'Download incompleto: ${_formatBytes(bytesWritten)} ricevuti, '
           'attesi almeno ${_formatBytes(minBytes)} '
           '(${_formatBytes(spec.expectedBytes)} stimati) — ${spec.fileName}',
         );
@@ -208,15 +261,22 @@ class ModelManagementService {
         await destination.delete();
       }
       _log(
-        '[FORCE_DL_RENAME] temp=${tempFile.path} -> dest=${destination.path}',
+        '[TEMP_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destination.path}',
       );
-      await tempFile.rename(destination.path);
-      _log('[FORCE_DL_RENAME_OK] file=${spec.fileName}');
+      try {
+        await tempFile.rename(destination.path);
+      } catch (renameError) {
+        _log(
+          '[TEMP_RENAME_FAIL] file=${spec.fileName} error=$renameError',
+        );
+        rethrow;
+      }
+      _log('[TEMP_RENAME_OK] file=${spec.fileName}');
 
       onProgress(1.0);
       final inspection = await inspect(spec);
       _log(
-        '[FORCE_DL_COMPLETE] file=${spec.fileName} '
+        '[DOWNLOAD_FINALIZED] file=${spec.fileName} '
         'status=${inspection.status} '
         'actualBytes=${inspection.actualBytes ?? "unknown"}',
       );
@@ -445,6 +505,34 @@ class ModelManagementService {
         _log('$logTag DELETE_WARN unable to delete file: $deleteError');
       }
     }
+  }
+
+  /// Deletes all orphan `.part` temp files in the private models directory.
+  /// Orphan `.part` files are left over from interrupted downloads and must
+  /// never be treated as valid assets.
+  Future<void> _cleanOrphanPartFiles() async {
+    try {
+      final privateDir = await _pathResolver.privateModelsDirectory();
+      if (!await privateDir.exists()) return;
+      await for (final entity in privateDir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        if (!entity.path.endsWith('.part')) continue;
+        _log('[ORPHAN_TEMP_CLEANUP] deleting stale part file: ${entity.path}');
+        await _safeDeleteFile(entity, '[ORPHAN_TEMP_CLEANUP]');
+      }
+    } catch (error) {
+      _log('[ORPHAN_TEMP_CLEANUP_WARN] list error: $error');
+    }
+  }
+
+  /// Emits storage forensic diagnostics for the given directory.
+  void _logStorageForensics(Directory dir) {
+    _log('[STORAGE_PATH] dir=${dir.path}');
+    try {
+      if (Platform.isAndroid || Platform.isLinux) {
+        _log('[STORAGE_PLATFORM] platform=${Platform.operatingSystem}');
+      }
+    } catch (_) {}
   }
 
   // ignore: avoid_print
