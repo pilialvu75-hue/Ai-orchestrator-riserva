@@ -328,28 +328,44 @@ class MainActivity : FlutterActivity() {
             return sherpaLibrariesLoaded
         }
         sherpaLibrariesChecked = true
+
+        val supportedAbis = Build.SUPPORTED_ABIS.joinToString(",")
+        val nativeLibraryDir = applicationInfo.nativeLibraryDir
+        Log.d(logTag, "[SHERPA_LOAD_BEGIN] supportedAbis=$supportedAbis nativeLibraryDir=$nativeLibraryDir")
+
+        val nativeLibraryDirectory = File(nativeLibraryDir)
+        val availableLibs = nativeLibraryDirectory.listFiles()?.map { it.name }?.joinToString(",") ?: "<empty>"
+        Log.d(logTag, "[SHERPA_NATIVE_LIBS] available=$availableLibs")
+
         val failures = mutableListOf<String>()
-        val nativeLibraryDirectory = File(applicationInfo.nativeLibraryDir)
         for (group in sherpaLibraryGroups) {
             val missingLibraries = group.filterNot { libraryName ->
                 File(nativeLibraryDirectory, System.mapLibraryName(libraryName)).exists()
             }
             if (missingLibraries.isNotEmpty()) {
-                failures += "${group.joinToString("+")}: missing ${missingLibraries.joinToString(",")}"
+                val msg = "${group.joinToString("+")}: missing ${missingLibraries.joinToString(",")}"
+                failures += msg
+                Log.d(logTag, "[SHERPA_GROUP_SKIP] $msg")
                 continue
             }
             val groupFailures = mutableListOf<String>()
             for (libraryName in group) {
+                val loadStartMs = System.currentTimeMillis()
                 try {
                     System.loadLibrary(libraryName)
+                    val elapsedMs = System.currentTimeMillis() - loadStartMs
+                    Log.d(logTag, "[SHERPA_LIB_LOADED] lib=$libraryName elapsedMs=$elapsedMs")
                 } catch (error: Throwable) {
+                    val elapsedMs = System.currentTimeMillis() - loadStartMs
                     groupFailures += "$libraryName: ${error.message}"
+                    Log.e(logTag, "[SHERPA_LIB_FAIL] lib=$libraryName elapsedMs=$elapsedMs error=${error.message}")
                     break
                 }
             }
             if (groupFailures.isEmpty()) {
                 sherpaLibrariesLoaded = true
                 sherpaLibraryError = null
+                Log.d(logTag, "[SHERPA_LOAD_OK] group=${group.joinToString("+")}")
                 break
             }
             failures += "${group.joinToString("+")}: ${groupFailures.joinToString(" | ")}"
@@ -360,6 +376,7 @@ class MainActivity : FlutterActivity() {
             } else {
                 "Sherpa-ONNX fallback groups attempted: ${failures.joinToString(" | ")}"
             }
+            Log.e(logTag, "[SHERPA_LOAD_FAIL] abi=${Build.SUPPORTED_ABIS.firstOrNull()} error=$sherpaLibraryError")
         }
         return sherpaLibrariesLoaded
     }
