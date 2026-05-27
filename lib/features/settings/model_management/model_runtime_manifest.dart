@@ -1,4 +1,5 @@
 enum ModelManagementSection {
+  voiceMultilingualStt,
   voiceItalian,
   voiceFrench,
   voiceEnglish,
@@ -31,6 +32,7 @@ class ModelRuntimeManifest {
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
+    ModelManagementSection.voiceMultilingualStt,
     ModelManagementSection.voiceItalian,
     ModelManagementSection.voiceFrench,
     ModelManagementSection.voiceEnglish,
@@ -38,6 +40,8 @@ class ModelRuntimeManifest {
 
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
+    ModelManagementSection.voiceMultilingualStt:
+        'Voice Engine - STT Zipformer',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
     ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',
@@ -46,8 +50,8 @@ class ModelRuntimeManifest {
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     RuntimeModelFileSpec(
       id: 'it_stt_encoder',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Codificatore STT Zipformer',
+      section: ModelManagementSection.voiceMultilingualStt,
+      logicalName: 'Zipformer STT Encoder',
       fileName: 'encoder.onnx',
       relativeDirectory: 'models/it',
       downloadUrl:
@@ -57,8 +61,8 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'it_stt_decoder',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Decodificatore STT Zipformer',
+      section: ModelManagementSection.voiceMultilingualStt,
+      logicalName: 'Zipformer STT Decoder',
       fileName: 'decoder.onnx',
       relativeDirectory: 'models/it',
       downloadUrl:
@@ -68,8 +72,8 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'it_stt_joiner',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Combinatore STT Zipformer',
+      section: ModelManagementSection.voiceMultilingualStt,
+      logicalName: 'Zipformer STT Joiner',
       fileName: 'joiner.onnx',
       relativeDirectory: 'models/it',
       downloadUrl:
@@ -79,8 +83,8 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'it_stt_tokens',
-      section: ModelManagementSection.voiceItalian,
-      logicalName: 'Token STT Zipformer',
+      section: ModelManagementSection.voiceMultilingualStt,
+      logicalName: 'Zipformer STT Tokens',
       fileName: 'tokens.txt',
       relativeDirectory: 'models/it',
       downloadUrl:
