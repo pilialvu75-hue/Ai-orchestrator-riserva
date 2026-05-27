@@ -105,7 +105,7 @@ class VoiceTextNormalizer {
     if (locale == 'it') {
       text = text.replaceAllMapped(
         RegExp(r'\b(\d+)[°oa]\b'),
-        (m) => _itOrdinal(int.tryParse(m[1]!) ?? 0),
+        (m) => _itOrdinal(int.tryParse(m[1] ?? '') ?? 0),
       );
     }
     return text;
@@ -152,7 +152,7 @@ class VoiceTextNormalizer {
           // Preserve back-references (e.g. r'\1' in the replacement).
           var replacement = entry.value;
           for (var i = 1; i <= m.groupCount; i++) {
-            replacement = replacement.replaceAll(r'\' + i.toString(), m[i] ?? '');
+            replacement = replacement.replaceAll('\\$i', m[i] ?? '');
           }
           return replacement;
         },

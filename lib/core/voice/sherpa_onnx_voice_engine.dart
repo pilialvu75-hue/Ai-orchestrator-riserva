@@ -279,8 +279,11 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         '[VOICE_ENGINE] [STT_CONFIG_SHAPE] '
         'modelType=${AppConstants.sttModelType} '
         'provider=cpu numThreads=${AppConstants.sttNumThreads} '
+        // The values below are OnlineRecognizerConfig defaults (not
+        // explicitly set in the config object above, but logged here
+        // so the full effective config is visible in forensic output).
         'rule1=2.4 rule2=1.4 rule3=20.0 '
-        'decodingMethod=greedy_search maxActivePaths=4',
+        'decodingMethod=greedy_search(default) maxActivePaths=4(default)',
       );
       _recognizer = sherpa_onnx.OnlineRecognizer(config);
       sttReady = true;
