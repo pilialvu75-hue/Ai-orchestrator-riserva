@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -814,8 +815,8 @@ class ModelDownloadService {
       );
       candidates.add(withDownload.toString());
     }
-    if (candidates.length == 2 && candidates.first == candidates.last) {
-      return <String>[candidates.first];
+    if (candidates.length > 1 && candidates[0] == candidates[1]) {
+      return <String>[candidates[0]];
     }
     return candidates;
   }
@@ -838,6 +839,6 @@ class ModelDownloadService {
     }
   }
 
-  // ignore: avoid_print
-  static void _log(String message) => print(message);
+  static void _log(String message) =>
+      developer.log(message, name: 'ModelDownloadService');
 }
