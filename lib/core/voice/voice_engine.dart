@@ -19,7 +19,8 @@ class VoiceModelPaths {
     this.ttsTokens,
   });
 
-  /// Path to the Zipformer transducer encoder STT ONNX model.
+  /// Path to the Zipformer transducer encoder STT ONNX model
+  /// (used together with decoder + joiner).
   final String? sttEncoder;
 
   /// Path to the Zipformer transducer decoder STT ONNX model.

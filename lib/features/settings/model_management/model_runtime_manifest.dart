@@ -43,7 +43,7 @@ class ModelRuntimeManifest {
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
     ModelManagementSection.voiceMultilingualStt:
-        'Voice Engine - STT Zipformer',
+        'Voice Engine - STT Zipformer (Base EN)',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
     ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',

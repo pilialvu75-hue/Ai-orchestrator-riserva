@@ -30,10 +30,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
        _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
 
   static const String _tag = 'VOICE_DOWNLOAD';
-  static const String _sttZipformerRepository =
+  static const String _sttZipformerEnRepository =
       'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
   static const String _sttZipformerBaseUrl =
-      'https://huggingface.co/$_sttZipformerRepository/resolve/main';
+      'https://huggingface.co/$_sttZipformerEnRepository/resolve/main';
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
@@ -67,7 +67,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
     logEvent(
       _tag,
-      '[URL_GENERATION] sttRepository=$_sttZipformerRepository baseUrl=$_sttZipformerBaseUrl',
+      '[URL_GENERATION] sttRepository=$_sttZipformerEnRepository baseUrl=$_sttZipformerBaseUrl',
     );
     final specs = _voiceModelSpecs;
 
