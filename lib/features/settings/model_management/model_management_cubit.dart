@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
@@ -23,10 +24,17 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
   final ModelManagementService _service;
   final VoiceEngine _voiceEngine;
   final SherpaOnnxVoiceEngine _directVoiceEngine;
+  final Map<String, CancelToken> _downloadCancelTokens = <String, CancelToken>{};
+
+  void _emitIfOpen(ModelManagementState nextState) {
+    if (isClosed) return;
+    emit(nextState);
+  }
 
   Future<void> scanIntegrity() async {
-    emit(state.copyWith(scanning: true));
+    _emitIfOpen(state.copyWith(scanning: true));
     final inspections = await _service.inspectAll();
+    if (isClosed) return;
     emit(
       state.copyWith(
         scanning: false,
@@ -47,7 +55,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
   }
 
   Future<void> verifyAndRepairAll() async {
-    emit(state.copyWith(repairingAll: true));
+    _emitIfOpen(state.copyWith(repairingAll: true));
     await scanIntegrity();
     final toRepair = ModelRuntimeManifest.files.where((file) {
       final integrity = state.integrityByFileId[file.id];
@@ -60,13 +68,14 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     }).toList();
 
     for (final file in toRepair) {
+      if (isClosed) break;
       await _downloadOne(file);
     }
-    emit(state.copyWith(repairingAll: false));
+    _emitIfOpen(state.copyWith(repairingAll: false));
   }
 
   Future<void> exportAllModelsToPublicStorage() async {
-    emit(
+    _emitIfOpen(
       state.copyWith(
         exportingAll: true,
         exportProgress: 0,
@@ -76,7 +85,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     try {
       await _service.exportAllRuntimeModels(
         onProgress: (progress) {
-          emit(
+          _emitIfOpen(
             state.copyWith(
               exportingAll: true,
               exportProgress: progress,
@@ -84,7 +93,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
           );
         },
       );
-      emit(
+      _emitIfOpen(
         state.copyWith(
           exportingAll: false,
           exportProgress: 1,
@@ -94,7 +103,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
       );
       await scanIntegrity();
     } on ModelDownloadFailureException catch (error) {
-      emit(
+      _emitIfOpen(
         state.copyWith(
           exportingAll: false,
           exportProgress: 0,
@@ -102,7 +111,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
         ),
       );
     } catch (error) {
-      emit(
+      _emitIfOpen(
         state.copyWith(
           exportingAll: false,
           exportProgress: 0,
@@ -113,7 +122,12 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
   }
 
   Future<void> _downloadOne(RuntimeModelFileSpec spec) async {
-    emit(
+    if (_downloadCancelTokens.containsKey(spec.id)) {
+      return;
+    }
+    final cancelToken = CancelToken();
+    _downloadCancelTokens[spec.id] = cancelToken;
+    _emitIfOpen(
       state.copyWith(
         progressByFileId: <String, double>{
           ...state.progressByFileId,
@@ -129,7 +143,9 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     try {
       final inspection = await _service.forceDownload(
         spec,
+        cancelToken: cancelToken,
         onProgress: (progress) {
+          if (isClosed || !_downloadCancelTokens.containsKey(spec.id)) return;
           emit(
             state.copyWith(
               progressByFileId: <String, double>{
@@ -143,7 +159,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
 
       final newProgress = Map<String, double>.from(state.progressByFileId)
         ..remove(spec.id);
-      emit(
+      _emitIfOpen(
         state.copyWith(
           progressByFileId: newProgress,
           integrityByFileId: <String, ModelFileIntegrityStatus>{
@@ -160,7 +176,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     } on ModelDownloadInterruptedException catch (error) {
       final newProgress = Map<String, double>.from(state.progressByFileId)
         ..remove(spec.id);
-      emit(
+      _emitIfOpen(
         state.copyWith(
           progressByFileId: newProgress,
           integrityByFileId: <String, ModelFileIntegrityStatus>{
@@ -176,7 +192,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     } on ModelDownloadFailureException catch (error) {
       final newProgress = Map<String, double>.from(state.progressByFileId)
         ..remove(spec.id);
-      emit(
+      _emitIfOpen(
         state.copyWith(
           progressByFileId: newProgress,
           integrityByFileId: <String, ModelFileIntegrityStatus>{
@@ -189,6 +205,8 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
           },
         ),
       );
+    } finally {
+      _downloadCancelTokens.remove(spec.id);
     }
   }
 
@@ -200,5 +218,14 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
       await _directVoiceEngine.dispose();
       await _directVoiceEngine.initialize();
     } catch (_) {}
+  }
+
+  @override
+  Future<void> close() async {
+    for (final entry in _downloadCancelTokens.entries) {
+      entry.value.cancel('ModelManagementCubit closed');
+    }
+    _downloadCancelTokens.clear();
+    return super.close();
   }
 }

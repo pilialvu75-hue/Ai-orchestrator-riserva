@@ -25,6 +25,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
                 connectTimeout: const Duration(seconds: 30),
                 receiveTimeout: const Duration(hours: 1),
                 sendTimeout: const Duration(seconds: 30),
+                followRedirects: true,
+                maxRedirects: 10,
               ),
             ),
        _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
@@ -66,6 +68,15 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       '[URL_GENERATION] sttRepository=${AppConstants.sttZipformerEnRepository} '
       'baseUrl=${AppConstants.sttZipformerBaseUrl}',
     );
+
+    // Emit storage forensics on every download session.
+    await _logStorageForensics(targetDir);
+
+    // Clean up any orphan .part temp files from previous interrupted sessions
+    // before starting. A .part file is never a valid asset and must not be
+    // mistaken for a complete file by validation logic.
+    await _cleanOrphanPartFiles(targetDir);
+
     final specs = _voiceModelSpecs;
 
     final totalExpectedBytes = specs.fold<int>(
@@ -98,70 +109,42 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       final tempFile = File('$destinationPath.part');
       if (await tempFile.exists()) {
+        logEvent(_tag, '[TEMP_CLEANUP] removing stale part: ${tempFile.path}');
         await tempFile.delete();
       }
       if (await destinationFile.exists()) {
+        logEvent(
+          _tag,
+          '[DEST_CLEANUP] removing incomplete destination: ${destinationFile.path}',
+        );
         await destinationFile.delete();
       }
 
       logEvent(
         _tag,
-        '[DOWNLOAD_FILE_BEGIN] file=${spec.fileName} url=${spec.url}',
+        '[DOWNLOAD_BEGIN] file=${spec.fileName} url=${spec.url} expectedBytes=${spec.expectedBytes}',
       );
 
       try {
-        int? serverContentLength;
-
-        await _dio.download(
-          spec.url,
-          tempFile.path,
-          deleteOnError: true,
-          onReceiveProgress: (received, total) {
-            if (total > 0 && serverContentLength == null) {
-              serverContentLength = total;
-              logEvent(
-                _tag,
-                '[DOWNLOAD_CONTENT_LENGTH] file=${spec.fileName} '
-                'content-length=$total expectedBytes=${spec.expectedBytes}',
-              );
-            }
-            final denominator = total > 0 ? total : spec.expectedBytes;
-            final fileProgress = (received / denominator).clamp(0.0, 1.0);
-            final aggregate =
-                (completedExpectedBytes + fileProgress * spec.expectedBytes) /
-                    totalExpectedBytes;
-            onProgress(aggregate.clamp(0.0, 1.0).toDouble());
-          },
-        );
-
-        final savedBytes = await tempFile.exists() ? await tempFile.length() : 0;
-        logEvent(
-          _tag,
-          '[DOWNLOAD_SAVED_BYTES] file=${spec.fileName} '
-          'savedBytes=$savedBytes '
-          'serverContentLength=${serverContentLength ?? "unknown"} '
-          'expectedBytes=${spec.expectedBytes}',
-        );
-
-        await _validateDownloadedFile(spec, tempFile);
-
-        logEvent(
-          _tag,
-          '[DOWNLOAD_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destinationFile.path}',
-        );
-        await tempFile.rename(destinationFile.path);
-        logEvent(
-          _tag,
-          '[DOWNLOAD_RENAME_OK] file=${spec.fileName}',
-        );
-
-        await _validateDownloadedFile(spec, destinationFile);
-        logEvent(
-          _tag,
-          '[DOWNLOAD_FILE_COMPLETE] file=${spec.fileName} bytes=${spec.expectedBytes} path=${destinationFile.path}',
+        await _downloadFileAtomic(
+          spec: spec,
+          tempFile: tempFile,
+          destinationFile: destinationFile,
+          totalExpectedBytes: totalExpectedBytes,
+          completedExpectedBytes: completedExpectedBytes,
+          onProgress: onProgress,
         );
       } on DioException catch (error) {
         await _cleanupTempFiles(tempFile, destinationFile);
+        if (_isInterruption(error)) {
+          logEvent(
+            _tag,
+            '[LIFECYCLE_INTERRUPT] file=${spec.fileName} '
+            'cause=${_classifyInterruptionCause(error)} '
+            'dioType=${error.type} '
+            'message=${error.message}',
+          );
+        }
         final statusCode = error.response?.statusCode;
         final message = statusCode == null
             ? 'Download del modello vocale fallito: ${spec.fileName}. ${error.message ?? "Errore di rete"}'
@@ -205,6 +188,15 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final missingOrInvalid = <String>[];
     String? resolvedDirectoryPath;
 
+    // Remove any orphan .part files before validating so that a stale partial
+    // download is never mistakenly counted as a valid asset.
+    try {
+      final targetDir = await _pathResolver.privateModelsDirectory();
+      if (await targetDir.exists()) {
+        await _cleanOrphanPartFiles(targetDir);
+      }
+    } catch (_) {}
+
     for (final spec in _voiceModelSpecs) {
       final resolution = await _pathResolver.resolveForRead(
         fileName: spec.fileName,
@@ -236,6 +228,202 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     );
   }
 
+  /// Downloads [spec] atomically: streams to a `.part` temp file, explicitly
+  /// flushes and closes the sink, validates byte count against the HTTP
+  /// content-length header (when available) and against the 85 % minimum
+  /// threshold, then renames the temp file to the final path only after all
+  /// checks pass.  Progress is reported as an aggregate over all specs.
+  Future<void> _downloadFileAtomic({
+    required _VoiceModelDownloadSpec spec,
+    required File tempFile,
+    required File destinationFile,
+    required int totalExpectedBytes,
+    required int completedExpectedBytes,
+    required void Function(double) onProgress,
+  }) async {
+    // Stream-based GET so we control the IOSink and can call flush() explicitly.
+    final response = await _dio.get<ResponseBody>(
+      spec.url,
+      options: Options(
+        responseType: ResponseType.stream,
+        followRedirects: true,
+        headers: const <String, dynamic>{},
+      ),
+    );
+
+    final contentLengthHeader = response.headers.value(HttpHeaders.contentLengthHeader);
+    final serverContentLength = int.tryParse(contentLengthHeader ?? '') ?? -1;
+    logEvent(
+      _tag,
+      '[CONTENT_LENGTH] file=${spec.fileName} '
+      'content-length=$serverContentLength expectedBytes=${spec.expectedBytes}',
+    );
+
+    final sink = tempFile.openWrite();
+    int bytesWritten = 0;
+
+    try {
+      await for (final chunk in response.data!.stream) {
+        sink.add(chunk);
+        bytesWritten += chunk.length;
+        // Report incremental progress.
+        final denominator =
+            serverContentLength > 0 ? serverContentLength : spec.expectedBytes;
+        final fileProgress = (bytesWritten / denominator).clamp(0.0, 1.0);
+        final aggregate =
+            (completedExpectedBytes + fileProgress * spec.expectedBytes) /
+                totalExpectedBytes;
+        onProgress(aggregate.clamp(0.0, 1.0).toDouble());
+      }
+
+      logEvent(
+        _tag,
+        '[BYTES_WRITTEN] file=${spec.fileName} bytesWritten=$bytesWritten',
+      );
+
+      // Flush the IOSink to push any buffered data through to the OS page
+      // cache, then close to trigger the underlying file descriptor close.
+      // On Android, closing an IOSink backed by a RandomAccessFile calls
+      // fsync internally, ensuring writes survive a subsequent app kill.
+      final flushStopwatch = Stopwatch()..start();
+      await sink.flush();
+      flushStopwatch.stop();
+      logEvent(_tag, '[FILE_FLUSHED] file=${spec.fileName}');
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=flush durationMs=${flushStopwatch.elapsedMilliseconds}',
+      );
+      final closeStopwatch = Stopwatch()..start();
+      await sink.close();
+      closeStopwatch.stop();
+      logEvent(_tag, '[STREAM_CLOSED] file=${spec.fileName}');
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=close durationMs=${closeStopwatch.elapsedMilliseconds}',
+      );
+    } catch (error) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      logEvent(
+        _tag,
+        '[STREAM_ERROR] file=${spec.fileName} error=$error',
+      );
+      rethrow;
+    }
+
+    logEvent(
+      _tag,
+      '[DOWNLOAD_STREAM_COMPLETE] file=${spec.fileName} '
+      'bytesWritten=$bytesWritten '
+      'serverContentLength=$serverContentLength '
+      'expectedBytes=${spec.expectedBytes}',
+    );
+
+    // Strict content-length check: if the server advertised a size and we
+    // received fewer bytes, the file is truncated — reject it immediately.
+    if (serverContentLength > 0 && bytesWritten < serverContentLength) {
+      throw VoiceAssetException(
+        'Download truncated: ${spec.fileName} '
+        '($bytesWritten bytes ricevuti, server ha dichiarato $serverContentLength).',
+      );
+    }
+
+    // Minimum-size guard: ensures we don't rename a fragment file.
+    final minBytes = (spec.expectedBytes * 0.85).toInt();
+    if (bytesWritten <= 0) {
+      throw VoiceAssetException(
+        'File vocale vuoto dopo il download: ${spec.fileName}.',
+      );
+    }
+    if (bytesWritten < minBytes) {
+      throw VoiceAssetException(
+        'File vocale incompleto o corrotto: ${spec.fileName} '
+        '($bytesWritten bytes ricevuti, attesi almeno $minBytes).',
+      );
+    }
+
+    // Atomic rename: only expose the final path when the temp file is fully
+    // validated.
+    logEvent(
+      _tag,
+      '[TEMP_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destinationFile.path}',
+    );
+    try {
+      final renameStopwatch = Stopwatch()..start();
+      await tempFile.rename(destinationFile.path);
+      renameStopwatch.stop();
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=rename durationMs=${renameStopwatch.elapsedMilliseconds}',
+      );
+    } catch (renameError) {
+      logEvent(
+        _tag,
+        '[TEMP_RENAME_FAIL] file=${spec.fileName} error=$renameError',
+      );
+      rethrow;
+    }
+    logEvent(_tag, '[TEMP_RENAME_OK] file=${spec.fileName}');
+
+    // Post-rename integrity check: verify the final file is readable and
+    // meets the minimum size threshold before reporting success.
+    final validationStopwatch = Stopwatch()..start();
+    await _validateFinalFile(spec, destinationFile);
+    validationStopwatch.stop();
+    logEvent(
+      _tag,
+      '[FORENSIC_TIMING] file=${spec.fileName} phase=validation durationMs=${validationStopwatch.elapsedMilliseconds}',
+    );
+    logEvent(
+      _tag,
+      '[DOWNLOAD_FINALIZED] file=${spec.fileName} '
+      'bytes=$bytesWritten path=${destinationFile.path}',
+    );
+  }
+
+  /// Logs available disk space for forensic diagnostics.
+  Future<void> _logStorageForensics(Directory targetDir) async {
+    try {
+      logEvent(
+        _tag,
+        '[STORAGE_PATH] targetDir=${targetDir.path}',
+      );
+      if (Platform.isAndroid || Platform.isLinux) {
+        final stat = await FileStat.stat(targetDir.path);
+        logEvent(_tag, '[STORAGE_STAT] type=${stat.type} modified=${stat.modified}');
+      }
+    } catch (error) {
+      logEvent(_tag, '[STORAGE_FORENSICS_WARN] unable to query storage: $error');
+    }
+  }
+
+  /// Deletes all orphan `.part` temp files in [targetDir].
+  /// Orphan `.part` files are left over from interrupted downloads and must
+  /// never be treated as valid assets.
+  Future<void> _cleanOrphanPartFiles(Directory targetDir) async {
+    try {
+      await for (final entity in targetDir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        if (!entity.path.endsWith('.part')) continue;
+        logEvent(
+          _tag,
+          '[ORPHAN_TEMP_CLEANUP] deleting stale part file: ${entity.path}',
+        );
+        try {
+          await entity.delete();
+        } catch (deleteError) {
+          logEvent(
+            _tag,
+            '[ORPHAN_TEMP_CLEANUP_WARN] failed to delete ${entity.path}: $deleteError',
+          );
+        }
+      }
+    } catch (error) {
+      logEvent(_tag, '[ORPHAN_TEMP_CLEANUP_WARN] list error: $error');
+    }
+  }
+
   Future<Directory> _ensureTargetDirectory() async {
     final targetDir = await _pathResolver.privateModelsDirectory();
     if (!await targetDir.exists()) {
@@ -249,6 +437,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     File file,
   ) async {
     try {
+      // A .part file is never a valid asset regardless of size.
+      if (file.path.endsWith('.part')) return false;
       if (!await file.exists()) {
         return false;
       }
@@ -262,28 +452,31 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
   }
 
-  Future<void> _validateDownloadedFile(
+  /// Post-rename integrity check used exclusively on the final destination
+  /// file (after the atomic rename).  Requires existence, non-zero length,
+  /// and the 85% minimum-size threshold.
+  Future<void> _validateFinalFile(
     _VoiceModelDownloadSpec spec,
     File file,
   ) async {
     if (!await file.exists()) {
       throw VoiceAssetException(
-        'File vocale non trovato dopo il download: ${spec.fileName}.',
+        'File vocale non trovato dopo il rename: ${spec.fileName}.',
       );
     }
 
     final length = await file.length();
     if (length <= 0) {
       throw VoiceAssetException(
-        'File vocale vuoto dopo il download: ${spec.fileName}.',
+        'File vocale vuoto dopo il rename: ${spec.fileName}.',
       );
     }
 
     final minBytes = (spec.expectedBytes * 0.85).toInt();
     if (length < minBytes) {
       throw VoiceAssetException(
-        'File vocale incompleto o corrotto: ${spec.fileName} '
-        '($length byte rilevati, attesi circa ${spec.expectedBytes}).',
+        'File vocale incompleto dopo il rename: ${spec.fileName} '
+        '($length bytes rilevati, attesi almeno $minBytes).',
       );
     }
   }
@@ -310,15 +503,50 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         _tag,
         '[CLEANUP_TEMP] deleting temp file: ${tempFile.path}',
       );
-      await tempFile.delete();
+      try {
+        await tempFile.delete();
+      } catch (error) {
+        logEvent(_tag, '[CLEANUP_TEMP_WARN] failed to delete ${tempFile.path}: $error');
+      }
     }
     if (await destinationFile.exists()) {
       logEvent(
         _tag,
         '[CLEANUP_DEST] deleting partial destination: ${destinationFile.path}',
       );
-      await destinationFile.delete();
+      try {
+        await destinationFile.delete();
+      } catch (error) {
+        logEvent(
+          _tag,
+          '[CLEANUP_DEST_WARN] failed to delete ${destinationFile.path}: $error',
+        );
+      }
     }
+  }
+
+  bool _isInterruption(DioException error) {
+    return error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.cancel ||
+        error.type == DioExceptionType.unknown;
+  }
+
+  String _classifyInterruptionCause(DioException error) {
+    if (error.type == DioExceptionType.cancel) {
+      return 'cancelled';
+    }
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return 'timeout';
+    }
+    if (error.type == DioExceptionType.connectionError) {
+      return 'connectivity_loss';
+    }
+    return 'unknown_interrupt';
   }
 
   List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[

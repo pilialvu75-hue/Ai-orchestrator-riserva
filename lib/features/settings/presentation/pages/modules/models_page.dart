@@ -58,7 +58,7 @@ class _ModelsPageState extends State<ModelsPage> {
   ///  3. 'update_available' – valid model with a newer remote version
   ///  4. 'invalid'          – file failed GGUF validation
   ///  5. 'validated'        – file passed GGUF validation
-  ///  6. 'ready'            – file on disk but not yet validated (legacy)
+  ///  6. 'invalid'          – file on disk but not validated/unknown state
   ///  7. 'idle'             – not downloaded
   String _modelStatusFor(AiModel model, ModelsLoaded state) {
     if (state.downloadProgress.containsKey(model.id)) return 'downloading';
@@ -75,7 +75,7 @@ class _ModelsPageState extends State<ModelsPage> {
     if (model.validationStatus == ModelValidationStatus.validatedOk) {
       return 'validated';
     }
-    if (model.isDownloaded) return 'ready';
+    if (model.isDownloaded) return 'invalid';
     return 'idle';
   }
 
@@ -580,7 +580,6 @@ class _ModelConfigTile extends StatelessWidget {
 
     final statusColor = switch (status) {
       'validated' => const Color(0xFF4CAF50),
-      'ready' => const Color(0xFF4CAF50),
       'downloading' => const Color(0xFF8AB4F8),
       'update_available' => const Color(0xFFFFA726),
       'invalid' => const Color(0xFFFF7043),
@@ -591,7 +590,6 @@ class _ModelConfigTile extends StatelessWidget {
 
     final statusLabel = switch (status) {
       'validated' => l10n.t('model_validated'),
-      'ready' => l10n.t('model_validated'),
       'downloading' => '\u2026',
       'update_available' => l10n.t('update_available'),
       'invalid' => l10n.t('model_invalid'),
@@ -603,9 +601,7 @@ class _ModelConfigTile extends StatelessWidget {
     // A model can only be set active when it is on disk AND passed validation.
     final canSetActive = model.isDownloaded &&
         !isSelected &&
-        status != 'invalid' &&
-        status != 'missing' &&
-        status != 'error' &&
+        (status == 'validated' || status == 'update_available') &&
         (!model.isImportedModel || model.runtimeModelId != null);
 
     return Container(

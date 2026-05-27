@@ -66,6 +66,7 @@ class ModelDownloadCard extends StatelessWidget {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final isDownloading = downloadProgress != null;
+    final isValidated = model.validationStatus == ModelValidationStatus.validatedOk;
     final sizeLabel = _formatBytes(model.sizeBytes);
     final roleLabel = _roleLabel(model.description);
     final quantTag = _quantTag(model.description, model.fileName);
@@ -231,8 +232,7 @@ class ModelDownloadCard extends StatelessWidget {
                     icon: const Icon(Icons.download_rounded),
                     label: Text(l10n.t('download')),
                   )
-                else if (model.validationStatus ==
-                    ModelValidationStatus.invalidModel) ...[
+                else if (!isValidated) ...[
                   FilledButton.icon(
                     onPressed: onDownload,
                     icon: const Icon(Icons.download_rounded),

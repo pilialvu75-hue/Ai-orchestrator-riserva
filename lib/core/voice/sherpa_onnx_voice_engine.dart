@@ -98,12 +98,39 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   static bool _isReadableAssetFileSync(String path) {
     try {
+      // A .part file is never a valid asset regardless of size.
+      if (path.endsWith('.part')) return false;
       final file = File(path);
       return file.existsSync() && file.lengthSync() > 0;
     } catch (_) {
       return false;
     }
   }
+
+  /// Returns `true` when [path] exists, is not a `.part` temp file, has
+  /// content, and has at least [minBytes] bytes on disk.
+  ///
+  /// Used for STT asset validation where a truncated file would cause a
+  /// silent ONNX load failure instead of a clean error message.
+  static bool _isValidSttAssetSync(String path, int minBytes) {
+    try {
+      if (path.endsWith('.part')) return false;
+      final file = File(path);
+      if (!file.existsSync()) return false;
+      final size = file.lengthSync();
+      return size >= minBytes;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Minimum acceptable byte sizes for each STT asset (85% of nominal sizes).
+  // These mirror the thresholds used by VoiceModelDownloader so the validation
+  // criterion is consistent across both layers.
+  static const int _minEncoderBytes = (170 * 1024 * 1024 * 85) ~/ 100; // ~144.5 MB
+  static const int _minDecoderBytes = (400 * 1024 * 85) ~/ 100;        // ~340 KB
+  static const int _minJoinerBytes  = (18 * 1024 * 1024 * 85) ~/ 100;  // ~15.3 MB
+  static const int _minTokensBytes  = (7 * 1024 * 85) ~/ 100;          // ~5.9 KB
 
   static String _preferredResolvedPath(RuntimeModelResolution resolution) {
     if (_isReadableAssetFileSync(resolution.privateFile.path)) {
@@ -193,28 +220,40 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
 
     logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
-    final requiredModelPaths = <String, String>{
-      AppConstants.sttEncoderFile: sttEncoderPath,
-      AppConstants.sttDecoderFile: sttDecoderPath,
-      AppConstants.sttJoinerFile: sttJoinerPath,
-      AppConstants.sttTokensFile: sttTokensPath,
-      AppConstants.ttsModelFile: ttsModelPath,
-      AppConstants.ttsLexiconFile: ttsLexiconPath,
-      AppConstants.ttsTokensFile: ttsTokensPath,
+
+    // STT files use size-aware validation: a truncated encoder/decoder/joiner
+    // will cause a silent ONNX crash; we catch that here before binding native
+    // libraries and surface a readable error instead.
+    final sttAssetChecks = <String, bool>{
+      AppConstants.sttEncoderFile:
+          _isValidSttAssetSync(sttEncoderPath, _minEncoderBytes),
+      AppConstants.sttDecoderFile:
+          _isValidSttAssetSync(sttDecoderPath, _minDecoderBytes),
+      AppConstants.sttJoinerFile:
+          _isValidSttAssetSync(sttJoinerPath, _minJoinerBytes),
+      AppConstants.sttTokensFile:
+          _isValidSttAssetSync(sttTokensPath, _minTokensBytes),
     };
-    final missingModelPaths = requiredModelPaths.entries
-       .where((entry) => !_isReadableAssetFileSync(entry.value))
-       .map((entry) => '${entry.key}(${entry.value})')
+    // TTS files use the basic readability check (no strict size threshold).
+    final ttsAssetChecks = <String, bool>{
+      AppConstants.ttsModelFile: _isReadableAssetFileSync(ttsModelPath),
+      AppConstants.ttsLexiconFile: _isReadableAssetFileSync(ttsLexiconPath),
+      AppConstants.ttsTokensFile: _isReadableAssetFileSync(ttsTokensPath),
+    };
+    final allChecks = <String, bool>{...sttAssetChecks, ...ttsAssetChecks};
+    final failedAssetChecks = allChecks.entries
+       .where((entry) => !entry.value)
+       .map((entry) => entry.key)
        .toList();
-    final assetsReady = missingModelPaths.isEmpty;
+    final assetsReady = failedAssetChecks.isEmpty;
     if (!assetsReady) {
       const msg = 'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
       logEvent(
        _tag,
-       '[ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
+       '[ASSET_CHECK_FAIL] $msg missing=${failedAssetChecks.join(", ")}',
       );
       _forensicPrint(
-       '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
+       '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${failedAssetChecks.join(", ")}',
       );
       _status = VoiceEngineStatus(
        engineId: sherpaOnnxEngineId,

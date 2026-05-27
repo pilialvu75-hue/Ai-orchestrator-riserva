@@ -135,6 +135,9 @@ class ModelDownloadService {
     AiModel model, {
     void Function(double progress)? onProgress,
   }) async {
+    if (_cancelTokens.containsKey(model.id)) {
+      throw DownloadException('Download already in progress for ${model.id}');
+    }
     // Pre-validate the URL before touching the network.
     final uri = Uri.tryParse(model.downloadUrl);
     if (uri == null ||
@@ -166,8 +169,6 @@ class ModelDownloadService {
           headers: const <String, dynamic>{},
         ),
       );
-      _cancelTokens.remove(model.id);
-
       // Validate the downloaded file before marking it as ready.
       final file = File(filePath);
       final status = await _validateModelFile(file);
@@ -193,6 +194,8 @@ class ModelDownloadService {
       throw DownloadException(
         'Download failed (HTTP $statusCode): ${e.message}',
       );
+    } finally {
+      _cancelTokens.remove(model.id);
     }
   }
 
@@ -218,6 +221,9 @@ class ModelDownloadService {
     required String fileName,
     void Function(double progress)? onProgress,
   }) async {
+    if (_cancelTokens.containsKey(modelId)) {
+      throw DownloadException('Download already in progress for $modelId');
+    }
     final modelsDir = await _modelsDirectory();
     final filePath = '${modelsDir.path}/$fileName';
 
@@ -238,8 +244,6 @@ class ModelDownloadService {
           headers: const <String, dynamic>{},
         ),
       );
-      _cancelTokens.remove(modelId);
-
       // Validate the downloaded file and use actual size.
       final file = File(filePath);
       final fileSize = await file.length();
@@ -277,6 +281,8 @@ class ModelDownloadService {
       throw DownloadException(
         'Download failed (HTTP $statusCode): ${e.message}',
       );
+    } finally {
+      _cancelTokens.remove(modelId);
     }
   }
 
