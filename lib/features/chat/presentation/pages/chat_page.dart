@@ -789,6 +789,8 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     RuntimeEventLog.instance.emit(
       '[VOICE_LIVE_ASSET_CHECK_BEGIN] validating voice assets before Live Mode startup',
     );
+    // Live Mode can start in safe-mode partial readiness when STT is available.
+    // `isVoiceDownloaded` tracks full bundle completeness, not startup viability.
     if (!status.readyForInput && !status.readyForOutput) {
       const message =
           'I modelli vocali richiesti non sono disponibili. Completa di nuovo il download dei modelli vocali prima di avviare Live Mode.';

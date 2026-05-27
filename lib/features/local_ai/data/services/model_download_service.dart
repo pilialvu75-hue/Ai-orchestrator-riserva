@@ -776,8 +776,7 @@ class ModelDownloadService {
     final candidates = _buildDownloadUrlCandidates(primaryUrl);
     for (final candidate in candidates) {
       final available = await _isDownloadSourceAvailable(candidate);
-      // ignore: avoid_print
-      print(
+      _log(
         '[ModelDownloadService] Source check for $modelId: '
         'url=$candidate available=$available',
       );
@@ -832,4 +831,7 @@ class ModelDownloadService {
       return false;
     }
   }
+
+  // ignore: avoid_print
+  static void _log(String message) => print(message);
 }
