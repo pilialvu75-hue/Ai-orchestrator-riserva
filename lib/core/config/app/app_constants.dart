@@ -128,7 +128,19 @@ class AppConstants {
   static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
+  // Primary locale for STT recognition output post-processing.
+  // Note: the selected streaming transducer (Zipformer EN-2023-06-26) is
+  // English-primary.  No public streaming Zipformer/transducer model covering
+  // Italian + French + English exists as of mid-2025.  Italian and French
+  // vocabulary embedded in English speech (code-switching) is handled via
+  // VoiceTextNormalizer and hotwords if needed.
   static const String sttDefaultLocaleId = 'en_US';
+  // ── Sherpa-ONNX STT runtime hints ──────────────────────────────────────────
+  // modelType must match the architecture tag expected by the sherpa-onnx
+  // OnlineModelConfig.  'zipformer2' selects the Zipformer2 transducer
+  // processing path in the ONNX runtime.
+  static const String sttModelType = 'zipformer2';
+  static const int sttNumThreads = 2;
   // ── Sherpa-ONNX local model file names ─────────────────────────────────────
   static const String sttEncoderFile = 'encoder.onnx';
   static const String sttDecoderFile = 'decoder.onnx';

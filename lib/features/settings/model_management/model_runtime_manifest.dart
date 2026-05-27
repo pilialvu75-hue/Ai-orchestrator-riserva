@@ -43,7 +43,7 @@ class ModelRuntimeManifest {
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
     ModelManagementSection.voiceBaseEnStt:
-        'Voice Engine - STT Zipformer (Base EN)',
+        'Voice Engine - STT Zipformer (EN, streaming)',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
     ModelManagementSection.voiceEnglish: 'Voice Engine - Inglese',
@@ -99,9 +99,10 @@ class ModelRuntimeManifest {
       logicalName: 'VITS TTS Italiano',
       fileName: 'vits-tts-it.onnx',
       relativeDirectory: 'models/it',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-it.onnx',
-      expectedBytes: 132120576,
-      estimatedSizeLabel: '126MB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx',
+      expectedBytes: 120 * 1024 * 1024,
+      estimatedSizeLabel: '120MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_lexicon',
@@ -109,9 +110,10 @@ class ModelRuntimeManifest {
       logicalName: 'VITS Lexicon Italiano',
       fileName: 'vits-tts-lexicon.txt',
       relativeDirectory: 'models/it',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
-      expectedBytes: 2097152,
-      estimatedSizeLabel: '2MB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt',
+      expectedBytes: 1 * 1024 * 1024,
+      estimatedSizeLabel: '1MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_tokens',
@@ -119,29 +121,22 @@ class ModelRuntimeManifest {
       logicalName: 'VITS Tokens Italiano',
       fileName: 'vits-tts-tokens.txt',
       relativeDirectory: 'models/it',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
-      expectedBytes: 94208,
-      estimatedSizeLabel: '92KB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt',
+      expectedBytes: 85 * 1024,
+      estimatedSizeLabel: '85KB',
     ),
+    // French MMS-VITS: character-level model, no lexicon required.
     RuntimeModelFileSpec(
       id: 'fr_tts_model',
       section: ModelManagementSection.voiceFrench,
-      logicalName: 'VITS TTS Francese',
+      logicalName: 'VITS TTS Francese (MMS)',
       fileName: 'vits-tts-fr.onnx',
       relativeDirectory: 'models/fr',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-fr.onnx',
-      expectedBytes: 132120576,
-      estimatedSizeLabel: '126MB',
-    ),
-    RuntimeModelFileSpec(
-      id: 'fr_tts_lexicon',
-      section: ModelManagementSection.voiceFrench,
-      logicalName: 'VITS Lexicon Francese',
-      fileName: 'vits-tts-lexicon.txt',
-      relativeDirectory: 'models/fr',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
-      expectedBytes: 2097152,
-      estimatedSizeLabel: '2MB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-fra/vits-mms-fra.onnx',
+      expectedBytes: 125 * 1024 * 1024,
+      estimatedSizeLabel: '125MB',
     ),
     RuntimeModelFileSpec(
       id: 'fr_tts_tokens',
@@ -149,29 +144,22 @@ class ModelRuntimeManifest {
       logicalName: 'VITS Tokens Francese',
       fileName: 'vits-tts-tokens.txt',
       relativeDirectory: 'models/fr',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
-      expectedBytes: 94208,
-      estimatedSizeLabel: '92KB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-fra/tokens.txt',
+      expectedBytes: 10 * 1024,
+      estimatedSizeLabel: '10KB',
     ),
+    // English MMS-VITS: character-level model, no lexicon required.
     RuntimeModelFileSpec(
       id: 'en_tts_model',
       section: ModelManagementSection.voiceEnglish,
-      logicalName: 'VITS TTS Inglese',
+      logicalName: 'VITS TTS Inglese (MMS)',
       fileName: 'vits-tts-en.onnx',
       relativeDirectory: 'models/en',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-en.onnx',
-      expectedBytes: 132120576,
-      estimatedSizeLabel: '126MB',
-    ),
-    RuntimeModelFileSpec(
-      id: 'en_tts_lexicon',
-      section: ModelManagementSection.voiceEnglish,
-      logicalName: 'VITS Lexicon Inglese',
-      fileName: 'vits-tts-lexicon.txt',
-      relativeDirectory: 'models/en',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-lexicon.txt',
-      expectedBytes: 2097152,
-      estimatedSizeLabel: '2MB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-eng/vits-mms-eng.onnx',
+      expectedBytes: 125 * 1024 * 1024,
+      estimatedSizeLabel: '125MB',
     ),
     RuntimeModelFileSpec(
       id: 'en_tts_tokens',
@@ -179,9 +167,10 @@ class ModelRuntimeManifest {
       logicalName: 'VITS Tokens Inglese',
       fileName: 'vits-tts-tokens.txt',
       relativeDirectory: 'models/en',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/vits-tts-tokens.txt',
-      expectedBytes: 94208,
-      estimatedSizeLabel: '92KB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-mms-eng/tokens.txt',
+      expectedBytes: 10 * 1024,
+      estimatedSizeLabel: '10KB',
     ),
   ];
 }

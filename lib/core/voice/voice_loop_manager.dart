@@ -44,12 +44,25 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   CancellationToken? _activeCancellation;
   bool _sessionActive = false;
+  bool _disposed = false;
 
   /// The session-level cancellation token; exposed so callers can integrate
   /// with external lifecycle events (e.g. app backgrounding).
   CancellationToken? get activeCancellationToken => _activeCancellation;
 
   bool get isSessionActive => _sessionActive;
+
+  /// Stops any active session and marks this manager as disposed.
+  ///
+  /// After [dispose] returns, calls to [startLiveSession] are silently ignored
+  /// so that in-flight audio callbacks cannot restart the loop after the
+  /// owning widget is unmounted.
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    await stopLiveSession();
+    logEvent(_tag, '[DISPOSED]');
+  }
 
   /// Starts the live Voice-to-Voice loop.
   ///
@@ -67,6 +80,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
   }) async {
     if (_sessionActive) {
       logEvent(_tag, '[SESSION_START_SKIPPED] session already active');
+      return;
+    }
+    if (_disposed) {
+      logEvent(_tag, '[SESSION_START_SKIPPED] manager is disposed');
       return;
     }
 
