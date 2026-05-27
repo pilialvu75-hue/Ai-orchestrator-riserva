@@ -277,7 +277,7 @@ class ModelManagementService {
         await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_TRUNCATED]');
         throw ModelDownloadFailureException(
           'Download truncated: ${spec.fileName} '
-          '($bytesWritten byte ricevuti, server ha dichiarato $serverContentLength)',
+          '($bytesWritten bytes ricevuti, server ha dichiarato $serverContentLength)',
         );
       }
 

@@ -325,7 +325,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (serverContentLength > 0 && bytesWritten < serverContentLength) {
       throw VoiceAssetException(
         'Download truncated: ${spec.fileName} '
-        '($bytesWritten byte ricevuti, server ha dichiarato $serverContentLength).',
+        '($bytesWritten bytes ricevuti, server ha dichiarato $serverContentLength).',
       );
     }
 
@@ -339,7 +339,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (bytesWritten < minBytes) {
       throw VoiceAssetException(
         'File vocale incompleto o corrotto: ${spec.fileName} '
-        '($bytesWritten byte ricevuti, attesi almeno $minBytes).',
+        '($bytesWritten bytes ricevuti, attesi almeno $minBytes).',
       );
     }
 
@@ -476,7 +476,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (length < minBytes) {
       throw VoiceAssetException(
         'File vocale incompleto dopo il rename: ${spec.fileName} '
-        '($length byte rilevati, attesi almeno $minBytes).',
+        '($length bytes rilevati, attesi almeno $minBytes).',
       );
     }
   }
@@ -508,30 +508,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       } catch (error) {
         logEvent(_tag, '[CLEANUP_TEMP_WARN] failed to delete ${tempFile.path}: $error');
       }
-
-      bool _isInterruption(DioException error) {
-        return error.type == DioExceptionType.connectionError ||
-            error.type == DioExceptionType.connectionTimeout ||
-            error.type == DioExceptionType.sendTimeout ||
-            error.type == DioExceptionType.receiveTimeout ||
-            error.type == DioExceptionType.cancel ||
-            error.type == DioExceptionType.unknown;
-      }
-
-      String _classifyInterruptionCause(DioException error) {
-        if (error.type == DioExceptionType.cancel) {
-          return 'cancelled';
-        }
-        if (error.type == DioExceptionType.connectionTimeout ||
-            error.type == DioExceptionType.sendTimeout ||
-            error.type == DioExceptionType.receiveTimeout) {
-          return 'timeout';
-        }
-        if (error.type == DioExceptionType.connectionError) {
-          return 'connectivity_loss';
-        }
-        return 'unknown_interrupt';
-      }
     }
     if (await destinationFile.exists()) {
       logEvent(
@@ -547,6 +523,30 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         );
       }
     }
+  }
+
+  bool _isInterruption(DioException error) {
+    return error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.cancel ||
+        error.type == DioExceptionType.unknown;
+  }
+
+  String _classifyInterruptionCause(DioException error) {
+    if (error.type == DioExceptionType.cancel) {
+      return 'cancelled';
+    }
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return 'timeout';
+    }
+    if (error.type == DioExceptionType.connectionError) {
+      return 'connectivity_loss';
+    }
+    return 'unknown_interrupt';
   }
 
   List<_VoiceModelDownloadSpec> get _voiceModelSpecs => const <_VoiceModelDownloadSpec>[
