@@ -64,6 +64,7 @@ class ModelDownloadBloc
       StartModelDownload event, Emitter<ModelDownloadState> emit) async {
     final current = state;
     if (current is! ModelsLoaded) return;
+    if (current.downloadProgress.containsKey(event.model.id)) return;
 
     // Emit initial progress so the UI shows the progress bar immediately.
     emit(current.copyWith(
@@ -132,6 +133,7 @@ class ModelDownloadBloc
         ? uri!.pathSegments.last
         : fallbackName;
     final modelId = 'custom_${fileName.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}';
+    if (current.downloadProgress.containsKey(modelId)) return;
 
     emit(current.copyWith(
       downloadProgress: {...current.downloadProgress, modelId: 0.0},

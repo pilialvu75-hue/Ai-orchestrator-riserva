@@ -69,6 +69,7 @@ class ModelManagementService {
   final Dio _dio;
   final LocalAiRepository _localAiRepository;
   final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
+  final Map<String, Future<ModelFileInspection>> _inFlightDownloads = {};
 
   // Minimum acceptable fraction of expectedBytes for a file to be considered
   // present and usable.  Files below this threshold are treated as incomplete
@@ -152,6 +153,33 @@ class ModelManagementService {
   Future<ModelFileInspection> forceDownload(
     RuntimeModelFileSpec spec, {
     required void Function(double progress) onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    final existing = _inFlightDownloads[spec.id];
+    if (existing != null) {
+      _log('[FORCE_DL_JOIN] file=${spec.fileName} reason=already_in_progress');
+      return existing;
+    }
+
+    final future = _forceDownloadInternal(
+      spec,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+    _inFlightDownloads[spec.id] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_inFlightDownloads[spec.id], future)) {
+        _inFlightDownloads.remove(spec.id);
+      }
+    }
+  }
+
+  Future<ModelFileInspection> _forceDownloadInternal(
+    RuntimeModelFileSpec spec, {
+    required void Function(double progress) onProgress,
+    CancelToken? cancelToken,
   }) async {
     final destination = await _resolvePrivateFile(spec);
     final destinationDir = destination.parent;
@@ -180,6 +208,7 @@ class ModelManagementService {
       // Stream-based GET for explicit flush control (see VoiceModelDownloader).
       final response = await _dio.get<ResponseBody>(
         spec.downloadUrl,
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.stream,
           followRedirects: true,
@@ -213,10 +242,21 @@ class ModelManagementService {
 
         _log('[BYTES_WRITTEN] file=${spec.fileName} bytesWritten=$bytesWritten');
 
+        final flushStopwatch = Stopwatch()..start();
         await sink.flush();
+        flushStopwatch.stop();
         _log('[FILE_FLUSHED] file=${spec.fileName}');
+        _log(
+          '[FORENSIC_TIMING] file=${spec.fileName} phase=flush durationMs=${flushStopwatch.elapsedMilliseconds}',
+        );
+
+        final closeStopwatch = Stopwatch()..start();
         await sink.close();
+        closeStopwatch.stop();
         _log('[STREAM_CLOSED] file=${spec.fileName}');
+        _log(
+          '[FORENSIC_TIMING] file=${spec.fileName} phase=close durationMs=${closeStopwatch.elapsedMilliseconds}',
+        );
       } catch (streamError) {
         try {
           await sink.close();
@@ -264,7 +304,12 @@ class ModelManagementService {
         '[TEMP_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destination.path}',
       );
       try {
+        final renameStopwatch = Stopwatch()..start();
         await tempFile.rename(destination.path);
+        renameStopwatch.stop();
+        _log(
+          '[FORENSIC_TIMING] file=${spec.fileName} phase=rename durationMs=${renameStopwatch.elapsedMilliseconds}',
+        );
       } catch (renameError) {
         _log(
           '[TEMP_RENAME_FAIL] file=${spec.fileName} error=$renameError',
@@ -274,11 +319,16 @@ class ModelManagementService {
       _log('[TEMP_RENAME_OK] file=${spec.fileName}');
 
       onProgress(1.0);
+      final validationStopwatch = Stopwatch()..start();
       final inspection = await inspect(spec);
+      validationStopwatch.stop();
       _log(
         '[DOWNLOAD_FINALIZED] file=${spec.fileName} '
         'status=${inspection.status} '
         'actualBytes=${inspection.actualBytes ?? "unknown"}',
+      );
+      _log(
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=validation durationMs=${validationStopwatch.elapsedMilliseconds}',
       );
       return inspection;
     } on DioException catch (error) {
@@ -290,6 +340,14 @@ class ModelManagementService {
         'message=${error.message}',
       );
       if (_isInterruption(error)) {
+        final interruptionCause =
+            _classifyInterruptionCause(error, cancelToken: cancelToken);
+        _log(
+          '[LIFECYCLE_INTERRUPT] file=${spec.fileName} '
+          'cause=$interruptionCause '
+          'dioType=${error.type} '
+          'message=${error.message}',
+        );
         throw ModelDownloadInterruptedException(
           'Download interrotto - Clicca per riprovare',
         );
@@ -382,6 +440,24 @@ class ModelManagementService {
         error.type == DioExceptionType.receiveTimeout ||
         error.type == DioExceptionType.cancel ||
         error.type == DioExceptionType.unknown;
+  }
+
+  String _classifyInterruptionCause(
+    DioException error, {
+    CancelToken? cancelToken,
+  }) {
+    if (cancelToken?.isCancelled == true || error.type == DioExceptionType.cancel) {
+      return 'cancelled';
+    }
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return 'timeout';
+    }
+    if (error.type == DioExceptionType.connectionError) {
+      return 'connectivity_loss';
+    }
+    return 'unknown_interrupt';
   }
 
   Future<RuntimeModelResolution> _resolveFile(RuntimeModelFileSpec spec) {

@@ -136,6 +136,15 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         );
       } on DioException catch (error) {
         await _cleanupTempFiles(tempFile, destinationFile);
+        if (_isInterruption(error)) {
+          logEvent(
+            _tag,
+            '[LIFECYCLE_INTERRUPT] file=${spec.fileName} '
+            'cause=${_classifyInterruptionCause(error)} '
+            'dioType=${error.type} '
+            'message=${error.message}',
+          );
+        }
         final statusCode = error.response?.statusCode;
         final message = statusCode == null
             ? 'Download del modello vocale fallito: ${spec.fileName}. ${error.message ?? "Errore di rete"}'
@@ -276,10 +285,22 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       // cache, then close to trigger the underlying file descriptor close.
       // On Android, closing an IOSink backed by a RandomAccessFile calls
       // fsync internally, ensuring writes survive a subsequent app kill.
+      final flushStopwatch = Stopwatch()..start();
       await sink.flush();
+      flushStopwatch.stop();
       logEvent(_tag, '[FILE_FLUSHED] file=${spec.fileName}');
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=flush durationMs=${flushStopwatch.elapsedMilliseconds}',
+      );
+      final closeStopwatch = Stopwatch()..start();
       await sink.close();
+      closeStopwatch.stop();
       logEvent(_tag, '[STREAM_CLOSED] file=${spec.fileName}');
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=close durationMs=${closeStopwatch.elapsedMilliseconds}',
+      );
     } catch (error) {
       try {
         await sink.close();
@@ -329,7 +350,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       '[TEMP_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destinationFile.path}',
     );
     try {
+      final renameStopwatch = Stopwatch()..start();
       await tempFile.rename(destinationFile.path);
+      renameStopwatch.stop();
+      logEvent(
+        _tag,
+        '[FORENSIC_TIMING] file=${spec.fileName} phase=rename durationMs=${renameStopwatch.elapsedMilliseconds}',
+      );
     } catch (renameError) {
       logEvent(
         _tag,
@@ -341,7 +368,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     // Post-rename integrity check: verify the final file is readable and
     // meets the minimum size threshold before reporting success.
+    final validationStopwatch = Stopwatch()..start();
     await _validateFinalFile(spec, destinationFile);
+    validationStopwatch.stop();
+    logEvent(
+      _tag,
+      '[FORENSIC_TIMING] file=${spec.fileName} phase=validation durationMs=${validationStopwatch.elapsedMilliseconds}',
+    );
     logEvent(
       _tag,
       '[DOWNLOAD_FINALIZED] file=${spec.fileName} '
@@ -474,6 +507,30 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         await tempFile.delete();
       } catch (error) {
         logEvent(_tag, '[CLEANUP_TEMP_WARN] failed to delete ${tempFile.path}: $error');
+      }
+
+      bool _isInterruption(DioException error) {
+        return error.type == DioExceptionType.connectionError ||
+            error.type == DioExceptionType.connectionTimeout ||
+            error.type == DioExceptionType.sendTimeout ||
+            error.type == DioExceptionType.receiveTimeout ||
+            error.type == DioExceptionType.cancel ||
+            error.type == DioExceptionType.unknown;
+      }
+
+      String _classifyInterruptionCause(DioException error) {
+        if (error.type == DioExceptionType.cancel) {
+          return 'cancelled';
+        }
+        if (error.type == DioExceptionType.connectionTimeout ||
+            error.type == DioExceptionType.sendTimeout ||
+            error.type == DioExceptionType.receiveTimeout) {
+          return 'timeout';
+        }
+        if (error.type == DioExceptionType.connectionError) {
+          return 'connectivity_loss';
+        }
+        return 'unknown_interrupt';
       }
     }
     if (await destinationFile.exists()) {
