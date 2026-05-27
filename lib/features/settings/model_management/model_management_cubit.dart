@@ -53,6 +53,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
       final integrity = state.integrityByFileId[file.id];
       return integrity == ModelFileIntegrityStatus.missing ||
           integrity == ModelFileIntegrityStatus.corrupted ||
+          integrity == ModelFileIntegrityStatus.incomplete ||
           integrity == ModelFileIntegrityStatus.interrupted ||
           integrity == ModelFileIntegrityStatus.failed ||
           integrity == ModelFileIntegrityStatus.unknown;

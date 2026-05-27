@@ -110,11 +110,21 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
 
       try {
+        int? serverContentLength;
+
         await _dio.download(
           spec.url,
           tempFile.path,
           deleteOnError: true,
           onReceiveProgress: (received, total) {
+            if (total > 0 && serverContentLength == null) {
+              serverContentLength = total;
+              logEvent(
+                _tag,
+                '[DOWNLOAD_CONTENT_LENGTH] file=${spec.fileName} '
+                'content-length=$total expectedBytes=${spec.expectedBytes}',
+              );
+            }
             final denominator = total > 0 ? total : spec.expectedBytes;
             final fileProgress = (received / denominator).clamp(0.0, 1.0);
             final aggregate =
@@ -123,8 +133,28 @@ class VoiceModelDownloader with RuntimeEventEmitter {
             onProgress(aggregate.clamp(0.0, 1.0).toDouble());
           },
         );
+
+        final savedBytes = await tempFile.exists() ? await tempFile.length() : 0;
+        logEvent(
+          _tag,
+          '[DOWNLOAD_SAVED_BYTES] file=${spec.fileName} '
+          'savedBytes=$savedBytes '
+          'serverContentLength=${serverContentLength ?? "unknown"} '
+          'expectedBytes=${spec.expectedBytes}',
+        );
+
         await _validateDownloadedFile(spec, tempFile);
+
+        logEvent(
+          _tag,
+          '[DOWNLOAD_RENAME_BEGIN] temp=${tempFile.path} -> dest=${destinationFile.path}',
+        );
         await tempFile.rename(destinationFile.path);
+        logEvent(
+          _tag,
+          '[DOWNLOAD_RENAME_OK] file=${spec.fileName}',
+        );
+
         await _validateDownloadedFile(spec, destinationFile);
         logEvent(
           _tag,
@@ -276,9 +306,17 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
   Future<void> _cleanupTempFiles(File tempFile, File destinationFile) async {
     if (await tempFile.exists()) {
+      logEvent(
+        _tag,
+        '[CLEANUP_TEMP] deleting temp file: ${tempFile.path}',
+      );
       await tempFile.delete();
     }
     if (await destinationFile.exists()) {
+      logEvent(
+        _tag,
+        '[CLEANUP_DEST] deleting partial destination: ${destinationFile.path}',
+      );
       await destinationFile.delete();
     }
   }

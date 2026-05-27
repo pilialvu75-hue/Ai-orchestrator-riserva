@@ -150,7 +150,6 @@ class AppConstants {
       'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
   static const String sttZipformerBaseUrl =
       'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
-  static const String llmModelFile = 'gemma-2b-it.onnx';
   static const String ttsModelFile = 'vits-tts-it.onnx';
   static const String ttsLexiconFile = 'vits-tts-lexicon.txt';
   static const String ttsTokensFile = 'vits-tts-tokens.txt';

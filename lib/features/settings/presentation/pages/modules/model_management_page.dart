@@ -330,10 +330,12 @@ class _FileRow extends StatelessWidget {
         return ('Presente (Storage Interno)', const Color(0xFF60A5FA));
       case ModelFileIntegrityStatus.missing:
         return ('Mancante', const Color(0xFFEF4444));
+      case ModelFileIntegrityStatus.incomplete:
+        return ('Download Incompleto — Riprova', const Color(0xFFF59E0B));
       case ModelFileIntegrityStatus.corrupted:
-        return ('Corrotto / Dimensioni Errate', const Color(0xFFF59E0B));
+        return ('Corrotto / Dati Non Validi', const Color(0xFFF59E0B));
       case ModelFileIntegrityStatus.interrupted:
-        return ('Download Interrotto - Clicca per Riprovare', const Color(0xFFF59E0B));
+        return ('Download Interrotto — Fare clic per Riprovare', const Color(0xFFF59E0B));
       case ModelFileIntegrityStatus.failed:
         return ('Errore verifica/download', const Color(0xFFFB7185));
       case ModelFileIntegrityStatus.unknown:

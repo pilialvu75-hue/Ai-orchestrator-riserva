@@ -12,6 +12,9 @@ enum ModelFileIntegrityStatus {
   unknown,
   presentPublicStorage,
   presentInternalStorage,
+  // File is present but below the minimum acceptable size threshold (< 85% of
+  // expected).  This indicates a previously interrupted or truncated download.
+  incomplete,
   missing,
   corrupted,
   interrupted,
@@ -65,6 +68,12 @@ class ModelManagementService {
   final LocalAiRepository _localAiRepository;
   final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
 
+  // Minimum acceptable fraction of expectedBytes for a file to be considered
+  // present and usable.  Files below this threshold are treated as incomplete
+  // (interrupted download).  This mirrors the same constant used by
+  // VoiceModelDownloader so both pipelines apply identical acceptance criteria.
+  static const double _minAcceptableFraction = 0.85;
+
   Future<List<ModelFileInspection>> inspectAll() async {
     final inspections = <ModelFileInspection>[];
     for (final spec in ModelRuntimeManifest.files) {
@@ -86,14 +95,26 @@ class ModelManagementService {
         );
       }
       final fileLength = await file.length();
-      if (fileLength != spec.expectedBytes) {
+      if (fileLength <= 0) {
         return ModelFileInspection(
           spec: spec,
-          status: ModelFileIntegrityStatus.corrupted,
+          status: ModelFileIntegrityStatus.missing,
+          path: fullPath,
+          actualBytes: fileLength,
+          message: 'File vuoto (0 byte rilevati)',
+        );
+      }
+      final minBytes = (spec.expectedBytes * _minAcceptableFraction).toInt();
+      if (fileLength < minBytes) {
+        return ModelFileInspection(
+          spec: spec,
+          status: ModelFileIntegrityStatus.incomplete,
           path: fullPath,
           actualBytes: fileLength,
           message:
-              'Dimensione errata: ${_formatBytes(fileLength)} / ${_formatBytes(spec.expectedBytes)}',
+              'Download incompleto: ${_formatBytes(fileLength)} rilevati, '
+              'attesi almeno ${_formatBytes(minBytes)} '
+              '(${_formatBytes(spec.expectedBytes)} stimati)',
         );
       }
       return ModelFileInspection(
@@ -126,16 +147,33 @@ class ModelManagementService {
 
     final tempFile = File('${destination.path}.part');
     if (await tempFile.exists()) {
+      _log('[FORCE_DL_TEMP_CLEANUP] removing stale temp file: ${tempFile.path}');
       await tempFile.delete();
     }
 
+    _log(
+      '[FORCE_DL_BEGIN] file=${spec.fileName} '
+      'url=${spec.downloadUrl} '
+      'expectedBytes=${spec.expectedBytes} '
+      'dest=${destination.path}',
+    );
+
     try {
+      int? serverContentLength;
+
       await _dio.download(
         spec.downloadUrl,
         tempFile.path,
         deleteOnError: true,
         options: Options(headers: const <String, dynamic>{}),
         onReceiveProgress: (received, total) {
+          if (total > 0 && serverContentLength == null) {
+            serverContentLength = total;
+            _log(
+              '[FORCE_DL_CONTENT_LENGTH] file=${spec.fileName} '
+              'content-length=$total expectedBytes=${spec.expectedBytes}',
+            );
+          }
           final denominator = total > 0 ? total : spec.expectedBytes;
           final progress = (received / denominator).clamp(0.0, 1.0).toDouble();
           onProgress(progress);
@@ -143,23 +181,54 @@ class ModelManagementService {
       );
 
       final length = await tempFile.length();
-      if (length != spec.expectedBytes) {
-        await tempFile.delete();
+      _log(
+        '[FORCE_DL_DOWNLOADED] file=${spec.fileName} '
+        'savedBytes=$length '
+        'serverContentLength=${serverContentLength ?? "unknown"} '
+        'expectedBytes=${spec.expectedBytes}',
+      );
+
+      final minBytes = (spec.expectedBytes * _minAcceptableFraction).toInt();
+      if (length <= 0) {
+        await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_EMPTY]');
         throw ModelDownloadFailureException(
-          'File corrotto dopo download: ${_formatBytes(length)} / ${_formatBytes(spec.expectedBytes)}',
+          'File vuoto dopo download: ${spec.fileName}',
+        );
+      }
+      if (length < minBytes) {
+        await _safeDeleteFile(tempFile, '[FORCE_DL_REJECT_INCOMPLETE]');
+        throw ModelDownloadFailureException(
+          'Download incompleto: ${_formatBytes(length)} ricevuti, '
+          'attesi almeno ${_formatBytes(minBytes)} '
+          '(${_formatBytes(spec.expectedBytes)} stimati) — ${spec.fileName}',
         );
       }
 
       if (await destination.exists()) {
         await destination.delete();
       }
+      _log(
+        '[FORCE_DL_RENAME] temp=${tempFile.path} -> dest=${destination.path}',
+      );
       await tempFile.rename(destination.path);
+      _log('[FORCE_DL_RENAME_OK] file=${spec.fileName}');
+
       onProgress(1.0);
-      return inspect(spec);
+      final inspection = await inspect(spec);
+      _log(
+        '[FORCE_DL_COMPLETE] file=${spec.fileName} '
+        'status=${inspection.status} '
+        'actualBytes=${inspection.actualBytes ?? "unknown"}',
+      );
+      return inspection;
     } on DioException catch (error) {
-      if (await tempFile.exists()) {
-        await tempFile.delete();
-      }
+      await _safeDeleteFile(tempFile, '[FORCE_DL_DIO_ERROR_CLEANUP]');
+      _log(
+        '[FORCE_DL_FAIL] file=${spec.fileName} '
+        'dioType=${error.type} '
+        'statusCode=${error.response?.statusCode ?? "N/A"} '
+        'message=${error.message}',
+      );
       if (_isInterruption(error)) {
         throw ModelDownloadInterruptedException(
           'Download interrotto - Clicca per riprovare',
@@ -169,9 +238,8 @@ class ModelManagementService {
         'Download fallito (${error.response?.statusCode ?? "N/A"}): ${error.message}',
       );
     } catch (error) {
-      if (await tempFile.exists()) {
-        await tempFile.delete();
-      }
+      await _safeDeleteFile(tempFile, '[FORCE_DL_ERROR_CLEANUP]');
+      _log('[FORCE_DL_FAIL] file=${spec.fileName} error=$error');
       if (error is ModelDownloadInterruptedException ||
           error is ModelDownloadFailureException) {
         rethrow;
@@ -363,6 +431,24 @@ class ModelManagementService {
     }
     return '${bytes}B';
   }
+
+  // Deletes a file if it exists, logging the action with the provided tag.
+  // Deletion failures are logged but not rethrown: a failed cleanup is not
+  // a fatal error (the partial file may be re-deleted on next attempt), and
+  // the original download exception must propagate unmodified to the caller.
+  Future<void> _safeDeleteFile(File file, String logTag) async {
+    if (await file.exists()) {
+      _log('$logTag path=${file.path}');
+      try {
+        await file.delete();
+      } catch (deleteError) {
+        _log('$logTag DELETE_WARN unable to delete file: $deleteError');
+      }
+    }
+  }
+
+  // ignore: avoid_print
+  static void _log(String message) => print('[MODEL_MGMT] $message');
 }
 
 class _ExportCopyJob {
