@@ -808,6 +808,8 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
     if (status.readyForInput && status.readyForOutput) {
       await widget.voiceModelDownloader.validateDownloadedAssets();
     } else {
+      // Safe-mode behavior: allow STT-only startup to keep Live Mode usable
+      // while TTS assets are still downloading/recovering.
       RuntimeEventLog.instance.emit(
         '[VOICE_LIVE_ASSET_CHECK_PARTIAL] Live Mode in partial readiness: '
         'readyForInput=${status.readyForInput} readyForOutput=${status.readyForOutput}',

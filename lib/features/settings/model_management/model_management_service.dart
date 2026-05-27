@@ -338,10 +338,10 @@ class ModelManagementService {
   }
 
   Future<String> _resolveDownloadUrl(RuntimeModelFileSpec spec) async {
+    final fallbackUrl = spec.fallbackDownloadUrl?.trim();
     final candidates = <String>[
       spec.downloadUrl,
-      if ((spec.fallbackDownloadUrl ?? '').trim().isNotEmpty)
-        spec.fallbackDownloadUrl!.trim(),
+      if ((fallbackUrl ?? '').isNotEmpty) fallbackUrl!,
     ];
     for (final candidate in candidates) {
       final available = await _isDownloadSourceAvailable(candidate);
@@ -364,7 +364,7 @@ class ModelManagementService {
         url,
         options: Options(
           headers: const <String, dynamic>{},
-          validateStatus: (status) => status != null && status >= 200 && status < 400,
+          validateStatus: (status) => status == 200,
           followRedirects: true,
         ),
       );

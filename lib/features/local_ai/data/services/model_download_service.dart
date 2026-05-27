@@ -797,6 +797,8 @@ class ModelDownloadService {
       return <String>[trimmed];
     }
     final candidates = <String>[trimmed];
+    // Heuristic fallback for common public model hosts (e.g. Hugging Face):
+    // retry by toggling `download=true` without assuming auth/session cookies.
     if (uri.queryParameters['download'] == 'true') {
       final withoutDownload = uri.replace(
         queryParameters: Map<String, String>.from(uri.queryParameters)
@@ -819,7 +821,7 @@ class ModelDownloadService {
         url,
         options: Options(
           headers: const <String, dynamic>{},
-          validateStatus: (status) => status != null && status >= 200 && status < 400,
+          validateStatus: (status) => status == 200,
           followRedirects: true,
         ),
       );

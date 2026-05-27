@@ -348,7 +348,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         url,
         options: Options(
           headers: const <String, dynamic>{},
-          validateStatus: (status) => status != null && status >= 200 && status < 400,
+          validateStatus: (status) => status == 200,
           followRedirects: true,
         ),
       );
