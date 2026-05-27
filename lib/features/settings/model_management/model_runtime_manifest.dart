@@ -1,3 +1,5 @@
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+
 enum ModelManagementSection {
   voiceBaseEnStt,
   voiceItalian,
@@ -29,8 +31,6 @@ class RuntimeModelFileSpec {
 
 class ModelRuntimeManifest {
   const ModelRuntimeManifest._();
-  static const String _zipformerSttBaseUrl =
-      'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main';
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
@@ -56,7 +56,8 @@ class ModelRuntimeManifest {
       logicalName: 'Zipformer STT Encoder',
       fileName: 'encoder.onnx',
       relativeDirectory: 'models/stt_zipformer',
-      downloadUrl: '$_zipformerSttBaseUrl/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      downloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 170 * 1024 * 1024,
       estimatedSizeLabel: '170MB',
     ),
@@ -66,7 +67,8 @@ class ModelRuntimeManifest {
       logicalName: 'Zipformer STT Decoder',
       fileName: 'decoder.onnx',
       relativeDirectory: 'models/stt_zipformer',
-      downloadUrl: '$_zipformerSttBaseUrl/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      downloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 400 * 1024,
       estimatedSizeLabel: '400KB',
     ),
@@ -76,7 +78,8 @@ class ModelRuntimeManifest {
       logicalName: 'Zipformer STT Joiner',
       fileName: 'joiner.onnx',
       relativeDirectory: 'models/stt_zipformer',
-      downloadUrl: '$_zipformerSttBaseUrl/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+      downloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 18 * 1024 * 1024,
       estimatedSizeLabel: '18MB',
     ),
@@ -86,7 +89,7 @@ class ModelRuntimeManifest {
       logicalName: 'Zipformer STT Tokens',
       fileName: 'tokens.txt',
       relativeDirectory: 'models/stt_zipformer',
-      downloadUrl: '$_zipformerSttBaseUrl/tokens.txt',
+      downloadUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
       expectedBytes: 7 * 1024,
       estimatedSizeLabel: '7KB',
     ),

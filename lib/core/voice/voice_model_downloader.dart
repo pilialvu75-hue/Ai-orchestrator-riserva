@@ -30,10 +30,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
        _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
 
   static const String _tag = 'VOICE_DOWNLOAD';
-  static const String _sttZipformerEnRepository =
-      'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
-  static const String _sttZipformerBaseUrl =
-      'https://huggingface.co/$_sttZipformerEnRepository/resolve/main';
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
@@ -67,7 +63,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
     logEvent(
       _tag,
-      '[URL_GENERATION] sttRepository=$_sttZipformerEnRepository baseUrl=$_sttZipformerBaseUrl',
+      '[URL_GENERATION] sttRepository=${AppConstants.sttZipformerEnRepository} '
+      'baseUrl=${AppConstants.sttZipformerBaseUrl}',
     );
     final specs = _voiceModelSpecs;
 
@@ -290,24 +287,24 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttEncoderFile,
           url:
-              '$_sttZipformerBaseUrl/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+              '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
           expectedBytes: 170 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttDecoderFile,
           url:
-              '$_sttZipformerBaseUrl/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+              '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
           expectedBytes: 400 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttJoinerFile,
           url:
-              '$_sttZipformerBaseUrl/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+              '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
           expectedBytes: 18 * 1024 * 1024,
         ),
         _VoiceModelDownloadSpec(
           fileName: AppConstants.sttTokensFile,
-          url: '$_sttZipformerBaseUrl/tokens.txt',
+          url: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
           expectedBytes: 7 * 1024,
         ),
         _VoiceModelDownloadSpec(
