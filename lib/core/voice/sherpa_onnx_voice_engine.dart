@@ -241,19 +241,19 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       AppConstants.ttsTokensFile: _isReadableAssetFileSync(ttsTokensPath),
     };
     final allChecks = <String, bool>{...sttAssetChecks, ...ttsAssetChecks};
-    final missingModelPaths = allChecks.entries
+    final failedAssetChecks = allChecks.entries
        .where((entry) => !entry.value)
        .map((entry) => entry.key)
        .toList();
-    final assetsReady = missingModelPaths.isEmpty;
+    final assetsReady = failedAssetChecks.isEmpty;
     if (!assetsReady) {
       const msg = 'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
       logEvent(
        _tag,
-       '[ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
+       '[ASSET_CHECK_FAIL] $msg missing=${failedAssetChecks.join(", ")}',
       );
       _forensicPrint(
-       '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${missingModelPaths.join(", ")}',
+       '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${failedAssetChecks.join(", ")}',
       );
       _status = VoiceEngineStatus(
        engineId: sherpaOnnxEngineId,

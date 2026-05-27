@@ -303,7 +303,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     // received fewer bytes, the file is truncated — reject it immediately.
     if (serverContentLength > 0 && bytesWritten < serverContentLength) {
       throw VoiceAssetException(
-        'Download troncato: ${spec.fileName} '
+        'Download truncated: ${spec.fileName} '
         '($bytesWritten byte ricevuti, server ha dichiarato $serverContentLength).',
       );
     }
