@@ -1,11 +1,6 @@
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 
-// Runtime-supported Voice Engine sections.
-// NOTE: Only the sections below reflect the ACTUAL current runtime architecture:
-//   - voiceStt: Sherpa-ONNX streaming Zipformer2 transducer (English, online)
-//   - voiceTtsItalian: VITS ONNX TTS for Italian (Paola), the active TTS voice
-// Additional TTS languages (FR, EN) are NOT currently loaded by the runtime
-// and are intentionally excluded to keep the manifest consistent with reality.
+// Runtime voice-model sections currently managed by the in-app recovery page.
 enum ModelManagementSection {
   voiceStt,
   voiceTtsItalian,
@@ -18,8 +13,12 @@ class RuntimeModelFileSpec {
     required this.logicalName,
     required this.fileName,
     required this.downloadUrl,
+    this.fallbackDownloadUrl,
     required this.expectedBytes,
     required this.estimatedSizeLabel,
+    this.requiredAtRuntime = true,
+    this.downloadable = true,
+    this.optionalCache = false,
   });
 
   final String id;
@@ -27,8 +26,12 @@ class RuntimeModelFileSpec {
   final String logicalName;
   final String fileName;
   final String downloadUrl;
+  final String? fallbackDownloadUrl;
   final int expectedBytes;
   final String estimatedSizeLabel;
+  final bool requiredAtRuntime;
+  final bool downloadable;
+  final bool optionalCache;
 
   // All voice model files are stored flat in the private models directory
   // (appDir/models/<fileName>).  There is no subdirectory layering so that
@@ -67,8 +70,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.sttEncoderFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      fallbackDownloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
       expectedBytes: 170 * 1024 * 1024,
       estimatedSizeLabel: '~170 MB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_decoder',
@@ -77,8 +85,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.sttDecoderFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      fallbackDownloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
       expectedBytes: 400 * 1024,
       estimatedSizeLabel: '~400 KB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_joiner',
@@ -87,8 +100,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.sttJoinerFile,
       downloadUrl:
           '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+      fallbackDownloadUrl:
+          '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx?download=true',
       expectedBytes: 18 * 1024 * 1024,
       estimatedSizeLabel: '~18 MB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_tokens',
@@ -96,8 +114,12 @@ class ModelRuntimeManifest {
       logicalName: 'Zipformer2 Transducer — Tokens',
       fileName: AppConstants.sttTokensFile,
       downloadUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
+      fallbackDownloadUrl: '${AppConstants.sttZipformerBaseUrl}/tokens.txt?download=true',
       expectedBytes: 7 * 1024,
       estimatedSizeLabel: '~7 KB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     // ── VITS TTS — Italiano (Paola) ────────────────────────────────────────
     // Source: csukuangfj/vits-models — vits-tts-it-paola
@@ -110,8 +132,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.ttsModelFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx',
+      fallbackDownloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx?download=true',
       expectedBytes: 120 * 1024 * 1024,
       estimatedSizeLabel: '~120 MB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_lexicon',
@@ -120,8 +147,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.ttsLexiconFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt',
+      fallbackDownloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt?download=true',
       expectedBytes: 1 * 1024 * 1024,
       estimatedSizeLabel: '~1 MB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_tokens',
@@ -130,8 +162,13 @@ class ModelRuntimeManifest {
       fileName: AppConstants.ttsTokensFile,
       downloadUrl:
           'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt',
+      fallbackDownloadUrl:
+          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt?download=true',
       expectedBytes: 85 * 1024,
       estimatedSizeLabel: '~85 KB',
+      requiredAtRuntime: true,
+      downloadable: true,
+      optionalCache: false,
     ),
   ];
 }

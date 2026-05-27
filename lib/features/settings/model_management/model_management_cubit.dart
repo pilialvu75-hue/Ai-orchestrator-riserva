@@ -50,12 +50,14 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     emit(state.copyWith(repairingAll: true));
     await scanIntegrity();
     final toRepair = ModelRuntimeManifest.files.where((file) {
+      if (!file.downloadable) return false;
       final integrity = state.integrityByFileId[file.id];
       return integrity == ModelFileIntegrityStatus.missing ||
           integrity == ModelFileIntegrityStatus.corrupted ||
           integrity == ModelFileIntegrityStatus.incomplete ||
           integrity == ModelFileIntegrityStatus.interrupted ||
           integrity == ModelFileIntegrityStatus.failed ||
+          integrity == ModelFileIntegrityStatus.unavailable ||
           integrity == ModelFileIntegrityStatus.unknown;
     }).toList();
 
@@ -182,6 +184,22 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
           integrityByFileId: <String, ModelFileIntegrityStatus>{
             ...state.integrityByFileId,
             spec.id: ModelFileIntegrityStatus.failed,
+          },
+          messageByFileId: <String, String?>{
+            ...state.messageByFileId,
+            spec.id: error.message,
+          },
+        ),
+      );
+    } on ModelSourceUnavailableException catch (error) {
+      final newProgress = Map<String, double>.from(state.progressByFileId)
+        ..remove(spec.id);
+      emit(
+        state.copyWith(
+          progressByFileId: newProgress,
+          integrityByFileId: <String, ModelFileIntegrityStatus>{
+            ...state.integrityByFileId,
+            spec.id: ModelFileIntegrityStatus.unavailable,
           },
           messageByFileId: <String, String?>{
             ...state.messageByFileId,

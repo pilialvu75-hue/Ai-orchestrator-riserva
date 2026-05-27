@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -146,13 +147,17 @@ class ModelDownloadService {
 
     final modelsDir = await _modelsDirectory();
     final filePath = '${modelsDir.path}/${model.fileName}';
+    final resolvedDownloadUrl = await _resolveDownloadSourceUrl(
+      primaryUrl: model.downloadUrl,
+      modelId: model.id,
+    );
 
     final cancelToken = CancelToken();
     _cancelTokens[model.id] = cancelToken;
 
     try {
       await _dio.download(
-        model.downloadUrl,
+        resolvedDownloadUrl,
         filePath,
         cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
@@ -220,13 +225,17 @@ class ModelDownloadService {
   }) async {
     final modelsDir = await _modelsDirectory();
     final filePath = '${modelsDir.path}/$fileName';
+    final resolvedDownloadUrl = await _resolveDownloadSourceUrl(
+      primaryUrl: url,
+      modelId: modelId,
+    );
 
     final cancelToken = CancelToken();
     _cancelTokens[modelId] = cancelToken;
 
     try {
       await _dio.download(
-        url,
+        resolvedDownloadUrl,
         filePath,
         cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
@@ -760,4 +769,76 @@ class ModelDownloadService {
     }
     return dir;
   }
+
+  Future<String> _resolveDownloadSourceUrl({
+    required String primaryUrl,
+    required String modelId,
+  }) async {
+    final candidates = _buildDownloadUrlCandidates(primaryUrl);
+    for (final candidate in candidates) {
+      final available = await _isDownloadSourceAvailable(candidate);
+      _log(
+        '[ModelDownloadService] Source check for $modelId: '
+        'url=$candidate available=$available',
+      );
+      if (available) {
+        return candidate;
+      }
+    }
+    throw DownloadException(
+      'Model source unavailable for $modelId (primary+fallback).',
+    );
+  }
+
+  List<String> _buildDownloadUrlCandidates(String primaryUrl) {
+    final trimmed = primaryUrl.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
+      _log(
+        '[ModelDownloadService] Invalid URL for fallback generation: "$primaryUrl"',
+      );
+      return <String>[trimmed];
+    }
+    final candidates = <String>[trimmed];
+    // Heuristic fallback for common public model hosts (e.g. Hugging Face):
+    // retry by toggling `download=true` without assuming auth/session cookies.
+    if (uri.queryParameters['download'] == 'true') {
+      final withoutDownload = uri.replace(
+        queryParameters: Map<String, String>.from(uri.queryParameters)
+          ..remove('download'),
+      );
+      candidates.add(withoutDownload.toString());
+    } else {
+      final withDownload = uri.replace(
+        queryParameters: Map<String, String>.from(uri.queryParameters)
+          ..['download'] = 'true',
+      );
+      candidates.add(withDownload.toString());
+    }
+    if (candidates.length > 1 && candidates[0] == candidates[1]) {
+      return <String>[candidates[0]];
+    }
+    return candidates;
+  }
+
+  Future<bool> _isDownloadSourceAvailable(String url) async {
+    try {
+      final response = await _dio.head(
+        url,
+        options: Options(
+          headers: const <String, dynamic>{},
+          validateStatus: (status) => status == 200,
+          followRedirects: true,
+        ),
+      );
+      return response.statusCode == 200;
+    } on DioException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static void _log(String message) =>
+      developer.log(message, name: 'ModelDownloadService');
 }
