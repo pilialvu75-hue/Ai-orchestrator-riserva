@@ -29,6 +29,8 @@ class RuntimeModelFileSpec {
 
 class ModelRuntimeManifest {
   const ModelRuntimeManifest._();
+  static const String _zipformerSttBaseUrl =
+      'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main';
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
@@ -49,46 +51,42 @@ class ModelRuntimeManifest {
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     RuntimeModelFileSpec(
-      id: 'it_stt_encoder',
+      id: 'stt_zipformer_encoder',
       section: ModelManagementSection.voiceMultilingualStt,
       logicalName: 'Zipformer STT Encoder',
       fileName: 'encoder.onnx',
-      relativeDirectory: 'models/it',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl: '$_zipformerSttBaseUrl/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 170 * 1024 * 1024,
       estimatedSizeLabel: '170MB',
     ),
     RuntimeModelFileSpec(
-      id: 'it_stt_decoder',
+      id: 'stt_zipformer_decoder',
       section: ModelManagementSection.voiceMultilingualStt,
       logicalName: 'Zipformer STT Decoder',
       fileName: 'decoder.onnx',
-      relativeDirectory: 'models/it',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl: '$_zipformerSttBaseUrl/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 400 * 1024,
       estimatedSizeLabel: '400KB',
     ),
     RuntimeModelFileSpec(
-      id: 'it_stt_joiner',
+      id: 'stt_zipformer_joiner',
       section: ModelManagementSection.voiceMultilingualStt,
       logicalName: 'Zipformer STT Joiner',
       fileName: 'joiner.onnx',
-      relativeDirectory: 'models/it',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl: '$_zipformerSttBaseUrl/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
       expectedBytes: 18 * 1024 * 1024,
       estimatedSizeLabel: '18MB',
     ),
     RuntimeModelFileSpec(
-      id: 'it_stt_tokens',
+      id: 'stt_zipformer_tokens',
       section: ModelManagementSection.voiceMultilingualStt,
       logicalName: 'Zipformer STT Tokens',
       fileName: 'tokens.txt',
-      relativeDirectory: 'models/it',
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt',
+      relativeDirectory: 'models/stt_zipformer',
+      downloadUrl: '$_zipformerSttBaseUrl/tokens.txt',
       expectedBytes: 7 * 1024,
       estimatedSizeLabel: '7KB',
     ),
