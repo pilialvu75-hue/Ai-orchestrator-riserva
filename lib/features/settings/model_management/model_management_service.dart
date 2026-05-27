@@ -64,9 +64,6 @@ class ModelManagementService {
   final Dio _dio;
   final LocalAiRepository _localAiRepository;
   final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
-  // Remote providers occasionally vary raw payload length (headers/repacking),
-  // so integrity checks accept files at or above 85% of expected size.
-  static const double _minExpectedBytesRatio = 0.85;
 
   Future<List<ModelFileInspection>> inspectAll() async {
     final inspections = <ModelFileInspection>[];
@@ -89,15 +86,14 @@ class ModelManagementService {
         );
       }
       final fileLength = await file.length();
-      final minBytes = (spec.expectedBytes * _minExpectedBytesRatio).toInt();
-      if (fileLength < minBytes) {
+      if (fileLength != spec.expectedBytes) {
         return ModelFileInspection(
           spec: spec,
           status: ModelFileIntegrityStatus.corrupted,
           path: fullPath,
           actualBytes: fileLength,
           message:
-              'Dimensione insufficiente: ${_formatBytes(fileLength)} (attesi circa ${_formatBytes(spec.expectedBytes)})',
+              'Dimensione errata: ${_formatBytes(fileLength)} / ${_formatBytes(spec.expectedBytes)}',
         );
       }
       return ModelFileInspection(
@@ -147,11 +143,10 @@ class ModelManagementService {
       );
 
       final length = await tempFile.length();
-      final minBytes = (spec.expectedBytes * _minExpectedBytesRatio).toInt();
-      if (length < minBytes) {
+      if (length != spec.expectedBytes) {
         await tempFile.delete();
         throw ModelDownloadFailureException(
-          'File corrotto dopo download: ${_formatBytes(length)} (attesi circa ${_formatBytes(spec.expectedBytes)})',
+          'File corrotto dopo download: ${_formatBytes(length)} / ${_formatBytes(spec.expectedBytes)}',
         );
       }
 

@@ -1,5 +1,5 @@
 enum ModelManagementSection {
-  voiceMultilingualStt,
+  voiceBaseEnStt,
   voiceItalian,
   voiceFrench,
   voiceEnglish,
@@ -34,7 +34,7 @@ class ModelRuntimeManifest {
 
   static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
-    ModelManagementSection.voiceMultilingualStt,
+    ModelManagementSection.voiceBaseEnStt,
     ModelManagementSection.voiceItalian,
     ModelManagementSection.voiceFrench,
     ModelManagementSection.voiceEnglish,
@@ -42,7 +42,7 @@ class ModelRuntimeManifest {
 
   static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
-    ModelManagementSection.voiceMultilingualStt:
+    ModelManagementSection.voiceBaseEnStt:
         'Voice Engine - STT Zipformer (Base EN)',
     ModelManagementSection.voiceItalian: 'Voice Engine - Italiano',
     ModelManagementSection.voiceFrench: 'Voice Engine - Francese',
@@ -52,7 +52,7 @@ class ModelRuntimeManifest {
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     RuntimeModelFileSpec(
       id: 'stt_zipformer_encoder',
-      section: ModelManagementSection.voiceMultilingualStt,
+      section: ModelManagementSection.voiceBaseEnStt,
       logicalName: 'Zipformer STT Encoder',
       fileName: 'encoder.onnx',
       relativeDirectory: 'models/stt_zipformer',
@@ -62,7 +62,7 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_decoder',
-      section: ModelManagementSection.voiceMultilingualStt,
+      section: ModelManagementSection.voiceBaseEnStt,
       logicalName: 'Zipformer STT Decoder',
       fileName: 'decoder.onnx',
       relativeDirectory: 'models/stt_zipformer',
@@ -72,7 +72,7 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_joiner',
-      section: ModelManagementSection.voiceMultilingualStt,
+      section: ModelManagementSection.voiceBaseEnStt,
       logicalName: 'Zipformer STT Joiner',
       fileName: 'joiner.onnx',
       relativeDirectory: 'models/stt_zipformer',
@@ -82,7 +82,7 @@ class ModelRuntimeManifest {
     ),
     RuntimeModelFileSpec(
       id: 'stt_zipformer_tokens',
-      section: ModelManagementSection.voiceMultilingualStt,
+      section: ModelManagementSection.voiceBaseEnStt,
       logicalName: 'Zipformer STT Tokens',
       fileName: 'tokens.txt',
       relativeDirectory: 'models/stt_zipformer',
