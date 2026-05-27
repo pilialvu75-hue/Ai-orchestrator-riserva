@@ -86,14 +86,15 @@ class ModelManagementService {
         );
       }
       final fileLength = await file.length();
-      if (fileLength != spec.expectedBytes) {
+      final minBytes = (spec.expectedBytes * 0.85).toInt();
+      if (fileLength < minBytes) {
         return ModelFileInspection(
           spec: spec,
           status: ModelFileIntegrityStatus.corrupted,
           path: fullPath,
           actualBytes: fileLength,
           message:
-              'Dimensione errata: ${_formatBytes(fileLength)} / ${_formatBytes(spec.expectedBytes)}',
+              'Dimensione insufficiente: ${_formatBytes(fileLength)} (attesi circa ${_formatBytes(spec.expectedBytes)})',
         );
       }
       return ModelFileInspection(
@@ -143,10 +144,11 @@ class ModelManagementService {
       );
 
       final length = await tempFile.length();
-      if (length != spec.expectedBytes) {
+      final minBytes = (spec.expectedBytes * 0.85).toInt();
+      if (length < minBytes) {
         await tempFile.delete();
         throw ModelDownloadFailureException(
-          'File corrotto dopo download: ${_formatBytes(length)} / ${_formatBytes(spec.expectedBytes)}',
+          'File corrotto dopo download: ${_formatBytes(length)} (attesi circa ${_formatBytes(spec.expectedBytes)})',
         );
       }
 

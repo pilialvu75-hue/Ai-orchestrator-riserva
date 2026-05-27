@@ -45,25 +45,48 @@ class ModelRuntimeManifest {
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     RuntimeModelFileSpec(
-      id: 'it_stt_model',
+      id: 'it_stt_encoder',
       section: ModelManagementSection.voiceItalian,
-      logicalName: 'Whisper STT Italiano',
-      fileName: 'whisper-tiny-en.onnx',
+      logicalName: 'Zipformer STT Encoder',
+      fileName: 'encoder.onnx',
       relativeDirectory: 'models/it',
-      downloadUrl: 'https://pub-models.riconoscimento.ai/whisper-tiny-en.onnx',
-      expectedBytes: 81788928,
-      estimatedSizeLabel: '78MB',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 170 * 1024 * 1024,
+      estimatedSizeLabel: '170MB',
+    ),
+    RuntimeModelFileSpec(
+      id: 'it_stt_decoder',
+      section: ModelManagementSection.voiceItalian,
+      logicalName: 'Zipformer STT Decoder',
+      fileName: 'decoder.onnx',
+      relativeDirectory: 'models/it',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 400 * 1024,
+      estimatedSizeLabel: '400KB',
+    ),
+    RuntimeModelFileSpec(
+      id: 'it_stt_joiner',
+      section: ModelManagementSection.voiceItalian,
+      logicalName: 'Zipformer STT Joiner',
+      fileName: 'joiner.onnx',
+      relativeDirectory: 'models/it',
+      downloadUrl:
+          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
+      expectedBytes: 18 * 1024 * 1024,
+      estimatedSizeLabel: '18MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_stt_tokens',
       section: ModelManagementSection.voiceItalian,
-      logicalName: 'Whisper STT Tokens',
-      fileName: 'whisper-tiny-en-tokens.txt',
+      logicalName: 'Zipformer STT Tokens',
+      fileName: 'tokens.txt',
       relativeDirectory: 'models/it',
       downloadUrl:
-          'https://pub-models.riconoscimento.ai/whisper-tiny-en-tokens.txt',
-      expectedBytes: 49152,
-      estimatedSizeLabel: '48KB',
+          'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt',
+      expectedBytes: 7 * 1024,
+      estimatedSizeLabel: '7KB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_model',
