@@ -590,6 +590,63 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final attemptId =
           'fta_${DateTime.now().microsecondsSinceEpoch}_${sessionId.hashCode.toRadixString(16)}';
       _currentFirstTokenAttemptId = attemptId;
+      // Attempt telemetry captured by the unified forensic cleanup boundary.
+      var estimatedTokens = 0;
+      var pollIterations = 0;
+      DateTime? firstTokenAt;
+
+      // Runtime recovery classification captured even when reset happens later.
+      var runtimeNeedsReset = false;
+      String? runtimeResetReason;
+      var runtimeResetRequested = false;
+
+      // Termination classification is cumulative: once detected, flags stay set
+      // so ATTEMPT_END reports every condition observed across the attempt.
+      var cancellationDetected = false;
+      var exceptionDetected = false;
+      var terminationReason = 'attempt_incomplete';
+      var terminalBoundary = 'stream_scope';
+      var firstTokenAttemptClosed = false;
+      void classifyFirstTokenTermination({
+        required String reason,
+        required String boundary,
+        bool cancellation = false,
+        bool exception = false,
+        bool runtimeReset = false,
+      }) {
+        terminationReason = reason;
+        terminalBoundary = boundary;
+        cancellationDetected = cancellationDetected || cancellation;
+        exceptionDetected = exceptionDetected || exception;
+        runtimeResetRequested = runtimeResetRequested || runtimeReset;
+      }
+
+      void finalizeFirstTokenAttempt() {
+        if (firstTokenAttemptClosed) {
+          return;
+        }
+        firstTokenAttemptClosed = true;
+        final endAttemptId = _currentFirstTokenAttemptId ?? attemptId;
+        final preFirstTokenActiveAtEnd = _preFirstTokenActive;
+        final runtimeResetRequestedAtEnd =
+            runtimeResetRequested || runtimeNeedsReset;
+        _log(
+          '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
+          ' sessionId=$sessionId generated_tokens=$estimatedTokens'
+          ' termination_reason=$terminationReason'
+          ' terminal_boundary=$terminalBoundary'
+          ' first_token_received=${firstTokenAt != null}'
+          ' pre_first_token_active=$preFirstTokenActiveAtEnd'
+          ' runtime_reset_requested=$runtimeResetRequestedAtEnd'
+          ' cancellation_detected=$cancellationDetected'
+          ' exception_detected=$exceptionDetected'
+          ' runtime_needs_reset=$runtimeNeedsReset'
+          ' reset_reason=${runtimeResetReason ?? 'none'}',
+        );
+        _preFirstTokenActive = false;
+        _currentFirstTokenAttemptId = null;
+      }
+
       _log(
         '[FIRST_TOKEN_ATTEMPT_BEGIN] attemptId=$attemptId sessionId=$sessionId'
         ' modelId=${request.modelId} is_verification=$isVerificationSession',
@@ -605,6 +662,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[DART_STREAM_LISTEN] elapsed_ms=0 thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=0 session=$sessionId',
       );
       if (!isVerificationSession && !_claimInferenceSlot(sessionId)) {
+        classifyFirstTokenTermination(
+          reason: 'recursive_inference_guard',
+          boundary: 'recursive_inference_guard',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
         _log('[SESSION] recursive_guard_triggered session=$sessionId');
         await fatalEarlyExit(
@@ -626,6 +687,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       try {
       if (cancellationToken.isCancelled) {
+        classifyFirstTokenTermination(
+          reason: 'preflight_cancellation',
+          boundary: 'cancelled',
+          cancellation: true,
+        );
         _log('[FFI_BRANCH] session=$sessionId name=preflight_cancellation');
         await fatalEarlyExit(
           sessionId,
@@ -656,6 +722,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (modelPath == null || modelPath.isEmpty || modelId == null) {
+        classifyFirstTokenTermination(
+          reason: 'request_validation_missing_path_or_id',
+          boundary: 'request_validation',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
         _log('[MODEL_PATH] ABORT: path or modelId is null/empty');
         _log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
@@ -708,6 +778,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           );
           _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=developer_mode_unvalidated_model modelId=$modelId');
         } else {
+          classifyFirstTokenTermination(
+            reason: 'unsupported_model_guard',
+            boundary: 'model_guard',
+          );
           _log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
           clearRuntimeVerification();
           const unsupportedAndroidModelMessage =
@@ -742,6 +816,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         modelValidationError = _validateModelFileForRuntime(modelPath);
         _log('[MODEL_VALIDATION_OK] session=$sessionId task=model_validation');
       } catch (error, stackTrace) {
+        classifyFirstTokenTermination(
+          reason: 'model_validation_failed_unexpected',
+          boundary: 'model_validation',
+          exception: true,
+        );
         _log('[MODEL_VALIDATION_FAIL] session=$sessionId task=model_validation error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stage=model_validation stack=$stackTrace');
         await fatalEarlyExit(
@@ -754,6 +833,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
       if (modelValidationError != null) {
+        classifyFirstTokenTermination(
+          reason: 'model_validation_failed',
+          boundary: 'model_validation',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=model_validation_failed');
         _log('[GGUF] validation=failed path=$modelPath reason=$modelValidationError');
         _log('[TERMINAL_STATE] state=failed reason=model_validation'
@@ -796,6 +879,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (!_ensureLibraryLoaded()) {
+        classifyFirstTokenTermination(
+          reason: 'library_load_failed',
+          boundary: 'library_load',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=library_load_failed');
         _log('[TERMINAL_STATE] state=ffiMissing reason=library_load_failed');
         clearRuntimeVerification();
@@ -854,6 +941,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         firstFfiInvocationCompleted = true;
         _log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
       } catch (error) {
+        classifyFirstTokenTermination(
+          reason: error is TimeoutException
+              ? 'session_create_timeout'
+              : 'session_create_exception',
+          boundary: 'session_create',
+          exception: true,
+        );
         _log('[FFI_EXCEPTION] session=$sessionId stage=session_create error=$error');
         _log('[SESSION_CREATE_FAIL] path=$modelPath exception=$error');
         _log('[TERMINAL_STATE] state=failed reason=session_create_exception');
@@ -880,6 +974,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[NATIVE_MODEL_LOAD_RESULT] llb_session_is_active after create: $activeAfterCreate');
 
       if (nativeSessionId <= 0 || activeAfterCreate != 1) {
+        classifyFirstTokenTermination(
+          reason: 'session_create_invalid_or_inactive',
+          boundary: 'session_create',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=session_create_invalid_or_inactive');
         final errMsg = _safeLastError(bindings, nativeSessionId);
         _log('[SESSION_CREATE_FAIL] code=$nativeSessionId error=$errMsg path=$modelPath');
@@ -911,6 +1009,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           .where((token) => token.isNotEmpty)
           .length;
       if (promptWordEstimate <= 0) {
+        classifyFirstTokenTermination(
+          reason: 'tokenizer_readiness_failed',
+          boundary: 'tokenizer_readiness',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=tokenizer_readiness_failed');
         clearRuntimeVerification();
         _updateRuntimeStatus(
@@ -961,6 +1063,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final loadedCheck = bindings.sessionIsActive(nativeSessionId);
       _log('[MODEL_EXECUTION] llb_session_is_active before start_generation: $loadedCheck');
       if (loadedCheck != 1) {
+        classifyFirstTokenTermination(
+          reason: 'session_inactive_before_start',
+          boundary: 'start_generation_preflight',
+        );
         _log('[FFI_BRANCH] session=$sessionId name=session_inactive_before_start');
         clearRuntimeVerification();
         final nativeErr = _safeLastError(bindings, nativeSessionId);
@@ -1045,6 +1151,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       } catch (error) {
         startupWatch.stop();
         freePromptNativePtr();
+        classifyFirstTokenTermination(
+          reason: error is TimeoutException
+              ? 'start_generation_timeout'
+              : 'start_generation_exception',
+          boundary: 'start_generation',
+          exception: true,
+          runtimeReset: true,
+        );
         _log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
         clearRuntimeVerification();
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
@@ -1076,6 +1190,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[MODEL_EXECUTION] llb_session_start_gen returned: $startResult');
 
       if (startupWatch.elapsed > _startGenerationTimeout) {
+        classifyFirstTokenTermination(
+          reason: 'start_generation_timeout',
+          boundary: 'start_generation_postcheck',
+          runtimeReset: true,
+        );
         _log(
           '[FFI_TIMEOUT] session=$sessionId stage=start_generation_postcheck'
           ' timeout_ms=${_startGenerationTimeout.inMilliseconds}',
@@ -1100,6 +1219,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       if (startResult != 0) {
+        classifyFirstTokenTermination(
+          reason: 'start_generation_failed_code',
+          boundary: 'start_generation',
+          runtimeReset: true,
+        );
         _log('[FFI_BRANCH] session=$sessionId name=start_generation_failed_code');
         freePromptNativePtr();
         clearRuntimeVerification();
@@ -1125,18 +1249,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // ── Step 3: Poll for tokens ──────────────────────────────────────────────
       final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
       final tokenBuf = tokenBufRaw.cast<Utf8>();
-      var estimatedTokens = 0;
       var repeatedTokenCount = 0;
       var consecutiveInvalidTokens = 0;
-      var pollIterations = 0;
       String? lastPiece;
       final fullText = StringBuffer();
       final startedAt = DateTime.now();
-      DateTime? firstTokenAt;
       var lastTokenProgressAt = startedAt;
       var consecutiveIdlePolls = 0;
-      var runtimeNeedsReset = false;
-      String? runtimeResetReason;
       _updateRuntimeStatus(
         LocalRuntimeStatus.inferencing,
         message: 'Generating',
@@ -1188,6 +1307,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
           }
           if (cancellationToken.isCancelled) {
+            classifyFirstTokenTermination(
+              reason: 'poll_cancellation',
+              boundary: 'poll_loop',
+              cancellation: true,
+            );
             _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             _log(
@@ -1211,6 +1335,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           }
 
           if (elapsed > _generationTimeout) {
+            classifyFirstTokenTermination(
+              reason: firstTokenAt == null
+                  ? 'generation_timeout_no_first_token'
+                  : 'generation_timeout',
+              boundary: 'poll_loop',
+              runtimeReset: true,
+            );
             _log(
               '[FFI_TIMEOUT] session=$sessionId stage=generation_timeout'
               ' timeout_ms=${_generationTimeout.inMilliseconds}',
@@ -1254,6 +1385,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           }
           if (firstTokenAt == null && elapsed > firstTokenDeadline) {
+            classifyFirstTokenTermination(
+              reason: 'first_token_watchdog',
+              boundary: 'poll_loop',
+              runtimeReset: true,
+            );
             _log(
               '[FFI_TIMEOUT] session=$sessionId stage=first_token_watchdog'
               ' timeout_ms=${firstTokenDeadline.inMilliseconds}',
@@ -1302,6 +1438,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           }
           if (firstTokenAt != null &&
               sinceLastTokenProgress > _noTokenProgressTimeout) {
+            classifyFirstTokenTermination(
+              reason: 'token_progress_watchdog',
+              boundary: 'poll_loop',
+              runtimeReset: true,
+            );
             _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
@@ -1340,6 +1481,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             break;
           }
           if (consecutiveIdlePolls >= _maxIdlePollIterations) {
+            classifyFirstTokenTermination(
+              reason: 'poll_loop_watchdog',
+              boundary: 'poll_loop',
+              runtimeReset: true,
+            );
             _safeCancel(bindings, nativeSessionId);
             clearRuntimeVerification();
             runtimeNeedsReset = true;
@@ -1390,6 +1536,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             status = bindings.pollToken(nativeSessionId, tokenBuf);
           } catch (error) {
+            classifyFirstTokenTermination(
+              reason: 'poll_token_exception',
+              boundary: 'poll_token',
+              exception: true,
+              runtimeReset: true,
+            );
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_token_exception';
@@ -1420,6 +1572,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               _log('[TOKENIZER_DECODE_FAIL] stage=dart_utf8_decode error=$error');
               consecutiveInvalidTokens++;
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
+                classifyFirstTokenTermination(
+                  reason: 'token_decode_exception',
+                  boundary: 'token_decode',
+                  exception: true,
+                  runtimeReset: true,
+                );
                 _safeCancel(bindings, nativeSessionId);
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
@@ -1518,6 +1676,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               if (piece == lastPiece) {
                 repeatedTokenCount++;
                 if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
+                  classifyFirstTokenTermination(
+                    reason: 'repeated_token_loop',
+                    boundary: 'generation_loop',
+                    runtimeReset: true,
+                  );
                   _safeCancel(bindings, nativeSessionId);
                   clearRuntimeVerification();
                   runtimeNeedsReset = true;
@@ -1592,6 +1755,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 '[TOKEN_STREAM] empty token iteration=$pollIterations consecutive_empty=$consecutiveInvalidTokens',
               );
               if (consecutiveInvalidTokens >= _maxConsecutiveInvalidTokens) {
+                classifyFirstTokenTermination(
+                  reason: 'empty_token_loop',
+                  boundary: 'token_decode',
+                  runtimeReset: true,
+                );
                 _log('[TOKENIZER_DECODE_FAIL] stage=empty_piece_loop');
                 _safeCancel(bindings, nativeSessionId);
                 clearRuntimeVerification();
@@ -1618,6 +1786,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               }
             }
           } else if (status == 2) {
+            classifyFirstTokenTermination(
+              reason: 'completed',
+              boundary: 'poll_loop',
+            );
             // EOS or max-tokens: generation complete.
             final completedElapsed = DateTime.now().difference(startedAt);
             recordVerificationSuccess(
@@ -1657,6 +1829,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             break;
           } else if (status == -99) {
+            classifyFirstTokenTermination(
+              reason: 'native_cancelled',
+              boundary: 'poll_loop',
+              cancellation: true,
+            );
             // Cancelled by the native thread.
             _log('[GENERATION_END] state=cancelled generated_tokens=$estimatedTokens');
             _log(
@@ -1679,6 +1856,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled_status');
             break;
           } else if (status == -1) {
+            classifyFirstTokenTermination(
+              reason: 'native_error',
+              boundary: 'poll_loop',
+              runtimeReset: true,
+            );
             clearRuntimeVerification();
             final err = _safeLastError(bindings, nativeSessionId);
             _log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
@@ -1751,21 +1933,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         // timeouts, cancellations, and native errors that fire before the
         // first token is produced).
         freePromptNativePtr();
-        // ── First Token Attempt Isolation: cleanup ─────────────────────────
-        // Capture the attempt ID before clearing so the ATTEMPT_END log can
-        // reference it even after the field is nulled out.
-        final endAttemptId = _currentFirstTokenAttemptId ?? 'unknown';
-        _log(
-          '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
-          ' sessionId=$sessionId generated_tokens=$estimatedTokens'
-          ' first_token_received=${firstTokenAt != null}'
-          ' pre_first_token_active=$_preFirstTokenActive'
-          ' runtime_needs_reset=$runtimeNeedsReset'
-          ' reset_reason=${runtimeResetReason ?? 'none'}',
-        );
-        _preFirstTokenActive = false;
-        _currentFirstTokenAttemptId = null;
-        // ─────────────────────────────────────────────────────────────────
         if (runtimeNeedsReset) {
           _safeResetRuntime(
             bindings,
@@ -1807,6 +1974,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         }
       }
       } catch (error, stackTrace) {
+        classifyFirstTokenTermination(
+          reason: firstFfiInvocationAttempted
+              ? 'stream_inference_unhandled_post_ffi'
+              : 'stream_inference_unhandled_pre_ffi',
+          boundary: 'stream_inference',
+          cancellation: cancellationToken.isCancelled,
+          exception: true,
+        );
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
         if (!firstFfiInvocationAttempted) {
@@ -1832,6 +2007,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           );
         }
       } finally {
+        finalizeFirstTokenAttempt();
         _log(
           '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=$firstFfiInvocationAttempted'
           ' first_ffi_completed=$firstFfiInvocationCompleted controller_closed=${controller.isClosed}',
