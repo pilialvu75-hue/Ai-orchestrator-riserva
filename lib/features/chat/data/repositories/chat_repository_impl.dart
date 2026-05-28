@@ -94,6 +94,10 @@ class ChatRepositoryImpl implements ChatRepository {
             );
 
             if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
+              final forensicMessage =
+                  '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=orchestrator.handleStream_skipped attachments=${attachments.length}';
+              _log(forensicMessage);
+              RuntimeEventLog.instance.emit(forensicMessage);
               return userMsg;
             }
 
