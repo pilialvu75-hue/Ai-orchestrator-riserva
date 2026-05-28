@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
@@ -240,6 +241,7 @@ class _AppShellState extends State<AppShell> {
       appBar: _AppShellAppBar(
         resolveActiveModel: (state) => _resolveActiveModel(context, state),
         onSettings: () => _openSettings(context),
+        onHeaderTap: DebugLabController.instance.registerHeaderTap,
       ),
       body: const ChatPage(),
     );
@@ -250,10 +252,12 @@ class _AppShellAppBar extends StatelessWidget implements PreferredSizeWidget {
   const _AppShellAppBar({
     required this.resolveActiveModel,
     required this.onSettings,
+    required this.onHeaderTap,
   });
 
   final String Function(ModelDownloadState) resolveActiveModel;
   final VoidCallback onSettings;
+  final VoidCallback onHeaderTap;
 
   @override
   Size get preferredSize => const Size.fromHeight(72);
@@ -295,7 +299,7 @@ class _AppShellAppBar extends StatelessWidget implements PreferredSizeWidget {
             alignment: Alignment.centerLeft,
             child: _AnimatedModelChip(
               label: _removeSizeSuffixFromLabel(resolveActiveModel(modelState)),
-              onTap: onSettings,
+              onTap: onHeaderTap,
             ),
           );
         },
