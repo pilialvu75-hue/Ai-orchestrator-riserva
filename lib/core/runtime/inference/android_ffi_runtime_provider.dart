@@ -2045,6 +2045,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         rethrow;
       }
     }, (error, stack) {
+      // Forensic-only: uncaught async errors that escape the zone are logged
+      // for crash classification but are NOT surfaced to the StreamController.
+      // The action already has an inner try/catch that routes all handled errors
+      // to the controller; any error reaching here indicates an isolate-level
+      // uncaught async exception (crash type 2) rather than a Dart exception
+      // that was already handled and routed through fatalEarlyExit.
       _log('[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack');
     });
 
