@@ -579,8 +579,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _log('[CANCELLATION_HANDLER_REGISTERED] sessionId=${request.sessionId}');
 
     _log('[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} inferenceTailHash=${_inferenceTail.hashCode}');
-    runZonedGuarded(() {
-    () async {
+    runZonedGuarded(() async {
       _log('[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()}');
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
@@ -2045,7 +2044,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         rethrow;
       }
-    }();
     }, (error, stack) {
       _log('[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack');
     });
