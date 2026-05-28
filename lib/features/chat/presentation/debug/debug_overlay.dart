@@ -55,8 +55,7 @@ class _DebugOverlayState extends State<DebugOverlay> {
     RuntimeEventLog.instance.emit(
       '[DEBUG_LAB_FORENSIC_INIT] provider_type=${_runtimeProvider.runtimeType}'
       ' provider_hash=${_runtimeProvider.hashCode.toRadixString(16)}'
-      ' note=fake_voice_to_llm_calls_this_provider_directly'
-      '_bypassing_InferenceService_OrchestratorStateEngine_ChatRepository',
+      ' note=fake_voice_to_llm_calls_this_provider_directly_bypassing_InferenceService_OrchestratorStateEngine_ChatRepository',
     );
   }
 
@@ -247,8 +246,7 @@ class _DebugOverlayState extends State<DebugOverlay> {
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_FORENSIC] test=fake_chat_message'
           ' dispatch_path=CHAT_PIPELINE_FIRE_AND_FORGET'
-          ' note=dispatches_SendMessageEvent_returns_after_250ms'
-          '_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
+          ' note=dispatches_SendMessageEvent_returns_after_250ms_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
         );
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_chat_message'
@@ -314,8 +312,7 @@ class _DebugOverlayState extends State<DebugOverlay> {
           '[DEBUG_LAB_FORENSIC] test=fake_vision_request'
           ' dispatch_path=CHAT_PIPELINE_FIRE_AND_FORGET'
           ' attachment_bytes=${bytes.length}'
-          ' note=dispatches_SendMessageEvent_with_image_returns_after_250ms'
-          '_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
+          ' note=dispatches_SendMessageEvent_with_image_returns_after_250ms_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
         );
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_vision_request'
