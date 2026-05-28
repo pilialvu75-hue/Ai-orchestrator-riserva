@@ -250,7 +250,21 @@ class InferenceService {
     InferenceRequest request,
     AiModel? selectedModel,
   ) {
-    if (selectedModel == null || selectedModel.localPath == null) return null;
+    if (selectedModel == null) {
+      _log(
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_unavailable state=model_not_selected',
+      );
+      return null;
+    }
+    if (selectedModel.localPath == null) {
+      _log(
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_missing_local_path modelId=${selectedModel.id}',
+      );
+      return null;
+    }
+    _log(
+      '[PRE_STREAM_LOCAL_REQUEST_READY] session=${request.sessionId} modelId=${selectedModel.effectiveRuntimeModelId} modelPath=${selectedModel.localPath}',
+    );
     return request.copyWith(
       modelId: selectedModel.effectiveRuntimeModelId,
       modelPath: selectedModel.localPath,
@@ -272,7 +286,9 @@ class InferenceService {
     _log(
       '[PRE_INFERENCE_GATE] runtime_state=$runtimeState provider_hash=${_runtimeProvider.hashCode.toRadixString(16)} verification_state=$verificationState active_transition_id=$activeTransitionId',
     );
-    _log('[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType}');
+    _log(
+      '[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType} modelId=${localRequest.modelId} modelPath=${localRequest.modelPath}',
+    );
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: cancellationToken,
@@ -397,6 +413,9 @@ class InferenceService {
           'local_request_available=${localRequest != null}',
         );
         if (localRequest != null) {
+          _log(
+            '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=inference_service._streamLocalInference',
+          );
           return _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
@@ -404,6 +423,9 @@ class InferenceService {
             allowCloudFallback: false,
           );
         }
+        _log(
+          '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} reason=local_request_unavailable target=inference_service._streamLocalInference_not_invoked',
+        );
         return Stream<InferenceResponse>.value(
           InferenceResponse.error(
             'Local AI mode requires a downloaded validated model. Please download one in Settings > Models or switch to Cloud or Hybrid mode.',
@@ -414,6 +436,9 @@ class InferenceService {
         _log(
           '[RUNTIME_PROVIDER_BRANCH] provider=${_cloudRuntimeProvider.runtimeType} '
           'runtime_mode=${runtimeMode.name} branch=cloud local_request_available=false',
+        );
+        _log(
+          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=cloud_runtime_provider.streamInference',
         );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
@@ -427,6 +452,9 @@ class InferenceService {
           '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType}|${_cloudRuntimeProvider.runtimeType} '
           'runtime_mode=${runtimeMode.name} branch=hybrid '
           'local_request_available=${localRequest != null}',
+        );
+        _log(
+          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=automatic_orchestration local_request_available=${localRequest != null}',
         );
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
@@ -518,6 +546,9 @@ class InferenceService {
         _log(
           'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=offline',
         );
+        _log(
+          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline target=inference_service._streamLocalInference',
+        );
         yield* _streamLocalInference(
           localRequest: localRequest,
           cloudRequest: cloudRequest,
@@ -526,6 +557,9 @@ class InferenceService {
         );
         return;
       }
+      _log(
+        '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=inference_service._streamLocalInference_not_invoked',
+      );
       yield InferenceResponse.error(
         'Device is offline and no validated local model is selected.',
       );
@@ -539,6 +573,9 @@ class InferenceService {
       _log(
         'routing session=${cloudRequest.sessionId} mode=local-first cloudPreferred=$shouldPreferCloud',
       );
+      _log(
+        '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=hybrid_local_first target=inference_service._streamLocalInference',
+      );
       yield* _streamLocalInference(
         localRequest: localRequest,
         cloudRequest: cloudRequest,
@@ -548,6 +585,9 @@ class InferenceService {
       return;
     }
 
+    _log(
+      '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=${forceCloudPrimary ? 'force_cloud_primary' : 'cloud_preferred'} target=cloud_runtime_provider.streamInference local_request_available=${localRequest != null}',
+    );
     await for (final chunk in _cloudRuntimeProvider.streamInference(
       request: cloudRequest,
       cancellationToken: cancellationToken,
@@ -561,6 +601,9 @@ class InferenceService {
             _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
           _log(
             'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=${chunk.errorMessage}',
+          );
+          _log(
+            '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=cloud_error_fallback target=inference_service._streamLocalInference',
           );
           final notice = _cloudRuntimeProvider.consumeRuntimeNotice();
           if (notice != null) {

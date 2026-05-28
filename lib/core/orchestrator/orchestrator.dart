@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
 import 'package:flutter/foundation.dart';
@@ -66,21 +67,33 @@ class Orchestrator {
     int maxTokens = 256,
     double temperature = 0.7,
   }) {
-    debugPrint(
+    _logForensic(
       '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_lines=${context.length}',
     );
     final type = _analyzer.analyze(input);
+    _logForensic(
+      '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name} will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
+    );
 
     if (type == TaskType.command) {
+      _logForensic(
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_command target=_executeCommand',
+      );
       return Stream<InferenceResponse>.fromFuture(_executeCommand(input));
     }
 
     if (type == TaskType.plan || type == TaskType.coding) {
+      _logForensic(
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_${type.name} target=_executePlan',
+      );
       return Stream<InferenceResponse>.fromFuture(
         _executePlan(input, isOffline: isOffline),
       );
     }
 
+    _logForensic(
+      '[PRE_STREAM_FORWARD] session=$sessionId boundary=orchestrator.intent_route target=inference_service.stream task_type=${type.name}',
+    );
     return _inferenceService.stream(
       InferenceRequest(
         sessionId: sessionId,
@@ -92,6 +105,11 @@ class Orchestrator {
         temperature: temperature,
       ),
     );
+  }
+
+  static void _logForensic(String message) {
+    debugPrint(message);
+    RuntimeEventLog.instance.emit(message);
   }
 
   Future<InferenceResponse> _executeCommand(String input) async {
