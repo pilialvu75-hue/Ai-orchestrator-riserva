@@ -52,6 +52,12 @@ class _DebugOverlayState extends State<DebugOverlay> {
     super.initState();
     _runtimeProvider = di.sl<LocalRuntimeProvider>();
     _localAiRepository = di.sl<LocalAiRepository>();
+    RuntimeEventLog.instance.emit(
+      '[DEBUG_LAB_FORENSIC_INIT] provider_type=${_runtimeProvider.runtimeType}'
+      ' provider_hash=${_runtimeProvider.hashCode.toRadixString(16)}'
+      ' note=fake_voice_to_llm_calls_this_provider_directly'
+      '_bypassing_InferenceService_OrchestratorStateEngine_ChatRepository',
+    );
   }
 
   Future<void> _runTest({
@@ -113,6 +119,26 @@ class _DebugOverlayState extends State<DebugOverlay> {
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_STAGE] test=fake_voice_to_llm stage=runtime_inference_only',
         );
+        // ── Forensic: direct runtime path ─────────────────────────────────────
+        // This test calls _runtimeProvider.streamInference() directly.
+        // It bypasses InferenceService, OrchestratorStateEngine, and
+        // ChatRepository entirely.  As a consequence, the following events are
+        // intentionally absent from the log:
+        //   PRE_STREAM_FORWARD, PRE_STREAM_BYPASS, PRE_STREAM_INFERENCE
+        // (all emitted only inside InferenceService._streamWithRetryAndGuards /
+        //  _streamLocalInference).
+        // FIRST_TOKEN_ATTEMPT_BEGIN is emitted inside
+        // AndroidFfiRuntimeProvider._runInferenceSerially and WILL appear when
+        // the serial-queue action executes.
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC] test=fake_voice_to_llm'
+          ' dispatch_path=DIRECT_RUNTIME_PROVIDER'
+          ' provider=${_runtimeProvider.runtimeType}'
+          ' provider_hash=${_runtimeProvider.hashCode.toRadixString(16)}'
+          ' note=bypasses_InferenceService_OrchestratorStateEngine_ChatRepository'
+          ' expected_absent=PRE_STREAM_FORWARD+PRE_STREAM_BYPASS+PRE_STREAM_INFERENCE',
+        );
+        // ──────────────────────────────────────────────────────────────────────
         final selectedResult = await _localAiRepository.getSelectedModel();
         final selectedModel = selectedResult.fold(
           (failure) => throw StateError('Selected model lookup failed: $failure'),
@@ -126,12 +152,23 @@ class _DebugOverlayState extends State<DebugOverlay> {
           throw StateError('Selected model path missing.');
         }
 
+        final sessionId =
+            'debug-lab-voice-${DateTime.now().millisecondsSinceEpoch}';
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DIRECT_CALL] test=fake_voice_to_llm'
+          ' target=_runtimeProvider.streamInference'
+          ' sessionId=$sessionId'
+          ' modelId=${selectedModel.effectiveRuntimeModelId}'
+          ' modelPath=$modelPath',
+        );
         final cancellationToken = CancellationToken();
         final streamedText = StringBuffer();
         String? finalChunkText;
+        var chunkCount = 0;
+        var firstChunkLogged = false;
         await for (final chunk in _runtimeProvider.streamInference(
           request: InferenceRequest(
-            sessionId: 'debug-lab-voice-${DateTime.now().millisecondsSinceEpoch}',
+            sessionId: sessionId,
             prompt: prompt,
             modelId: selectedModel.effectiveRuntimeModelId,
             modelPath: modelPath,
@@ -140,12 +177,26 @@ class _DebugOverlayState extends State<DebugOverlay> {
           ),
           cancellationToken: cancellationToken,
         )) {
+          chunkCount++;
+          if (!firstChunkLogged) {
+            firstChunkLogged = true;
+            RuntimeEventLog.instance.emit(
+              '[DEBUG_LAB_FORENSIC_FIRST_CHUNK] test=fake_voice_to_llm'
+              ' sessionId=$sessionId'
+              ' isFinal=${chunk.isFinal} isError=${chunk.isError}'
+              ' text_chars=${chunk.text.length}',
+            );
+          }
           if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
             RuntimeEventLog.instance.emit(
               '[DEBUG_LAB_STAGE] test=fake_voice_to_llm notice="${chunk.runtimeNotice}"',
             );
           }
           if (chunk.isError) {
+            RuntimeEventLog.instance.emit(
+              '[DEBUG_LAB_FORENSIC_STREAM_ERROR] test=fake_voice_to_llm'
+              ' sessionId=$sessionId error="${chunk.errorMessage}"',
+            );
             throw StateError(chunk.errorMessage ?? 'Runtime inference failed.');
           }
           if (chunk.isFinal) {
@@ -157,6 +208,14 @@ class _DebugOverlayState extends State<DebugOverlay> {
         final response = (finalChunkText ?? '').trim().isNotEmpty
             ? finalChunkText!.trim()
             : streamedText.toString().trim();
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DIRECT_RESULT] test=fake_voice_to_llm'
+          ' sessionId=$sessionId'
+          ' total_chunks=$chunkCount'
+          ' response_chars=${response.length}'
+          ' streamed_chars=${streamedText.length}'
+          ' final_chunk=${finalChunkText != null}',
+        );
         if (response.isEmpty) {
           throw const FormatException('Runtime returned empty response.');
         }
@@ -176,11 +235,40 @@ class _DebugOverlayState extends State<DebugOverlay> {
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_STAGE] test=fake_chat_message stage=dispatch_send_event',
         );
+        // ── Forensic: fire-and-forget chat pipeline dispatch ───────────────────
+        // onSendThroughChatPipeline → ChatPage._onSend → OrchestratorStateEngine
+        // .add(SendMessageEvent) → ChatRepositoryImpl.sendMessage →
+        // Orchestrator.handleStream → InferenceService.stream →
+        // runtimeProvider.streamInference.
+        // The action returns after a 250 ms yield; the test is marked SUCCESS at
+        // that point without waiting for inference to complete.  PRE_STREAM_*
+        // and FIRST_TOKEN_ATTEMPT_BEGIN will appear in the log asynchronously
+        // AFTER this test has already emitted DEBUG_LAB_SUCCESS.
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC] test=fake_chat_message'
+          ' dispatch_path=CHAT_PIPELINE_FIRE_AND_FORGET'
+          ' note=dispatches_SendMessageEvent_returns_after_250ms'
+          '_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
+        );
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_chat_message'
+          ' target=onSendThroughChatPipeline stage=pre_invoke',
+        );
         widget.onSendThroughChatPipeline(
           'Debug Lab test: rispondi con un saluto breve e gentile.',
           const <ChatAttachment>[],
         );
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_chat_message'
+          ' target=onSendThroughChatPipeline stage=post_return'
+          ' note=callback_returned_synchronously_inference_continues_in_background',
+        );
+        // ──────────────────────────────────────────────────────────────────────
         await Future<void>.delayed(const Duration(milliseconds: 250));
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_chat_message'
+          ' stage=250ms_yield_complete_action_exiting_without_inference_result',
+        );
       },
     );
   }
@@ -216,11 +304,39 @@ class _DebugOverlayState extends State<DebugOverlay> {
         RuntimeEventLog.instance.emit(
           '[DEBUG_LAB_STAGE] test=fake_vision_request stage=dispatch_with_attachment path=${imageFile.path}',
         );
+        // ── Forensic: fire-and-forget chat pipeline dispatch (with attachment) ─
+        // Same dispatch path as fake_chat_message but with an image attachment.
+        // onSendThroughChatPipeline → ChatPage._onSend → OrchestratorStateEngine
+        // .add(SendMessageEvent) → ChatRepositoryImpl.sendMessage →
+        // Orchestrator.handleStream → InferenceService.stream.
+        // The action returns after a 250 ms yield without waiting for inference.
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC] test=fake_vision_request'
+          ' dispatch_path=CHAT_PIPELINE_FIRE_AND_FORGET'
+          ' attachment_bytes=${bytes.length}'
+          ' note=dispatches_SendMessageEvent_with_image_returns_after_250ms'
+          '_inference_runs_async_PRE_STREAM_events_appear_after_SUCCESS',
+        );
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_vision_request'
+          ' target=onSendThroughChatPipeline stage=pre_invoke'
+          ' attachments=1',
+        );
         widget.onSendThroughChatPipeline(
           'Debug Lab vision test: descrivi questa immagine di test.',
           <ChatAttachment>[attachment],
         );
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_vision_request'
+          ' target=onSendThroughChatPipeline stage=post_return'
+          ' note=callback_returned_synchronously_inference_continues_in_background',
+        );
+        // ──────────────────────────────────────────────────────────────────────
         await Future<void>.delayed(const Duration(milliseconds: 250));
+        RuntimeEventLog.instance.emit(
+          '[DEBUG_LAB_FORENSIC_DISPATCH] test=fake_vision_request'
+          ' stage=250ms_yield_complete_action_exiting_without_inference_result',
+        );
       },
     );
   }
