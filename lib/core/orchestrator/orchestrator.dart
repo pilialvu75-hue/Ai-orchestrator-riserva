@@ -77,14 +77,14 @@ class Orchestrator {
 
     if (type == TaskType.command) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_command target=execution_engine.streamInference_skipped',
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_command target=_executeCommand',
       );
       return Stream<InferenceResponse>.fromFuture(_executeCommand(input));
     }
 
     if (type == TaskType.plan || type == TaskType.coding) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_${type.name} target=planner.streamInference_skipped',
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_${type.name} target=_executePlan',
       );
       return Stream<InferenceResponse>.fromFuture(
         _executePlan(input, isOffline: isOffline),
