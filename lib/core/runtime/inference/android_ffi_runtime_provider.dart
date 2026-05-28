@@ -590,12 +590,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final attemptId =
           'fta_${DateTime.now().microsecondsSinceEpoch}_${sessionId.hashCode.toRadixString(16)}';
       _currentFirstTokenAttemptId = attemptId;
+      // Attempt telemetry captured by the unified forensic cleanup boundary.
       var estimatedTokens = 0;
       var pollIterations = 0;
       DateTime? firstTokenAt;
+
+      // Runtime recovery classification captured even when reset happens later.
       var runtimeNeedsReset = false;
       String? runtimeResetReason;
       var runtimeResetRequested = false;
+
+      // Termination classification is cumulative: once detected, flags stay set
+      // so ATTEMPT_END reports every condition observed across the attempt.
       var cancellationDetected = false;
       var exceptionDetected = false;
       var terminationReason = 'attempt_incomplete';
