@@ -24,6 +24,10 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+part 'android_ffi_runtime_provider_lifecycle_subsystem.dart';
+part 'android_ffi_runtime_provider_native_session_subsystem.dart';
+part 'android_ffi_runtime_provider_warmup_subsystem.dart';
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 /// Android inference provider that drives GGUF model execution through the
@@ -149,6 +153,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
   final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
+  late final _AndroidFfiLifecycleSubsystem _lifecycleSubsystem =
+      _AndroidFfiLifecycleSubsystem(this);
+  late final _AndroidFfiNativeSessionSubsystem _nativeSessionSubsystem =
+      _AndroidFfiNativeSessionSubsystem(this);
+  late final _AndroidFfiWarmupSubsystem _warmupSubsystem =
+      _AndroidFfiWarmupSubsystem(this);
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -2060,172 +2070,32 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   // ── Private helpers ───────────────────────────────────────────────────────────
 
-  int _ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) {
-    try {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1952 | Function: _ensureNativeSession() | BEFORE entry',
-      );
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1955 | Function: _ensureNativeSession() | BEFORE reuse check',
-      );
-      final existingSessionId = _nativeSessionsByModel[modelPath];
-      if (existingSessionId != null && bindings.sessionIsActive(existingSessionId) == 1) {
-        _markSessionAsMostRecentlyUsed(modelPath);
-        _nativeSessionId = existingSessionId;
-        _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
-        _log('[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
-        _log(
-          '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1963 | Function: _ensureNativeSession() | AFTER reuse return',
-        );
-        return existingSessionId;
-      }
-
-      if (existingSessionId != null) {
-        _releaseNativeSessionByModelPath(
-          bindings,
-          modelPath,
-          reason: 'inactive_existing_session',
-        );
-      }
-
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1969 | Function: _ensureNativeSession() | BEFORE LRU eviction check',
-      );
-      _evictLeastRecentlyUsedSessionIfNeeded(bindings);
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
-      );
-
-      _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
-      );
-      // ── GPU-accelerated session (Vulkan) with CPU fallback ───────────────────
-      // Attempt to create a session with GPU layers (Vulkan). If session
-      // creation fails, the native bridge may not support Vulkan on this device
-      // or build; retry with 0 GPU layers so inference continues on CPU.
-      const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
-      _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
-      int created = bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
-      );
-      _log('[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=$desiredGpuLayers');
-
-      if (created <= 0 && desiredGpuLayers > 0) {
-        // GPU session creation failed — fall back to CPU.
-        _log(
-          '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers failed=$created'
-          ' reason=session_create_error retrying_with_cpu',
-        );
-        created = bindings.createSession(modelPath, nGpuLayers: 0);
-        _log(
-          '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=0 fallback=cpu',
-        );
-      }
-      if (created <= 0) {
-        _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
-        final err = _safeLastError(bindings, created);
-        throw StateError('Native session creation failed: $err');
-      }
-      if (bindings.sessionIsActive(created) != 1) {
-        _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
-        final err = _safeLastError(bindings, created);
-        throw StateError('Native session inactive after create: $err');
-      }
-
-      _nativeSessionId = created;
-      _nativeSessionsByModel[modelPath] = created;
-      _markSessionAsMostRecentlyUsed(modelPath);
-      _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
-      _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2001 | Function: _ensureNativeSession() | AFTER exit',
-      );
-      return created;
-    } catch (e, stackTrace) {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2006 | Function: _ensureNativeSession() | BEFORE rethrow after exception: $e \n $stackTrace',
-      );
-      rethrow;
-    }
-  }
+  int _ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) =>
+      _nativeSessionSubsystem.ensureNativeSession(bindings, modelPath);
 
   void _releaseNativeSessionByModelPath(
     LlamaBridgeBindings bindings,
     String modelPath, {
     required String reason,
-  }) {
-    final sessionId = _nativeSessionsByModel.remove(modelPath);
-    if (sessionId == null) return;
-    try {
-      _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
-      bindings.releaseSession(sessionId);
-    } catch (error) {
-      _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason failed: $error');
-    } finally {
-      if (_nativeSessionId == sessionId) {
-        _nativeSessionId = null;
-      }
-    }
-  }
-
-  void _evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) {
-    if (_nativeSessionsByModel.length < _maxActiveNativeSessions) {
-      return;
-    }
-    final evictedModelPath = _nativeSessionsByModel.keys.first;
-    final evictedSessionId = _nativeSessionsByModel.remove(evictedModelPath);
-    if (evictedSessionId == null) {
-      return;
-    }
-    _log(
-      '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=$_maxActiveNativeSessions',
-    );
-    try {
-      bindings.releaseSession(evictedSessionId);
-    } catch (error) {
-      _log(
-        '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
+  }) => _nativeSessionSubsystem.releaseNativeSessionByModelPath(
+        bindings,
+        modelPath,
+        reason: reason,
       );
-    } finally {
-      if (_nativeSessionId == evictedSessionId) {
-        _nativeSessionId = null;
-      }
-    }
-  }
 
-  void _markSessionAsMostRecentlyUsed(String modelPath) {
-    // LRU ordering is encoded in LinkedHashMap insertion order. Re-inserting
-    // the same key moves it to the end and marks it as most recently used.
-    final lastModelPath =
-        _nativeSessionsByModel.isEmpty ? null : _nativeSessionsByModel.keys.last;
-    if (lastModelPath == modelPath) return;
-    final sessionId = _nativeSessionsByModel.remove(modelPath);
-    if (sessionId == null) return;
-    _nativeSessionsByModel[modelPath] = sessionId;
-  }
+  void _evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) =>
+      _nativeSessionSubsystem.evictLeastRecentlyUsedSessionIfNeeded(bindings);
+
+  void _markSessionAsMostRecentlyUsed(String modelPath) =>
+      _nativeSessionSubsystem.markSessionAsMostRecentlyUsed(modelPath);
 
   void _releaseAllNativeSessions(
     LlamaBridgeBindings bindings, {
     required String reason,
-  }) {
-    final entries = _nativeSessionsByModel.entries.toList(growable: false);
-    for (final entry in entries) {
-      try {
-        _log(
-          '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason',
-        );
-        bindings.releaseSession(entry.value);
-      } catch (error) {
-        _log(
-          '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason failed: $error',
-        );
-      }
-    }
-    _nativeSessionsByModel.clear();
-    _nativeSessionId = null;
-  }
+  }) => _nativeSessionSubsystem.releaseAllNativeSessions(
+        bindings,
+        reason: reason,
+      );
 
   Future<void> _runInferenceSerially(Future<void> Function() action) {
     try {
@@ -2282,15 +2152,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String stage,
     required Duration timeout,
     required T Function() call,
-  }) async {
-    _log('[WARMUP] native_call stage=$stage timeout_ms=${timeout.inMilliseconds}');
-    return Future<T>.sync(call).timeout(
-      timeout,
-      onTimeout: () => throw TimeoutException(
-        'Native call timed out at stage=$stage after ${timeout.inSeconds}s.',
-      ),
-    );
-  }
+  }) =>
+      _warmupSubsystem.runNativeCallWithTimeout(
+        stage: stage,
+        timeout: timeout,
+        call: call,
+      );
 
   bool _claimInferenceSlot(String sessionId) {
     if (_activeInferenceSessions.contains(sessionId)) return false;
@@ -2308,194 +2175,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   Future<bool> _ensureWarmup({
     required String sessionId,
     required String modelPath,
-  }) async {
-    _log(
-      '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2110 | Function: _ensureWarmup() | BEFORE entry',
-    );
-    if (shouldReuseRuntimeVerification(modelPath: modelPath)) {
-      verificationMonitor.update(
-        RuntimeVerificationPhase.passed,
-        message: 'Runtime verification reused.',
+  }) =>
+      _warmupSubsystem.ensureWarmup(
+        sessionId: sessionId,
+        modelPath: modelPath,
       );
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2118 | Function: _ensureWarmup() | AFTER reuse short-circuit',
-      );
-      return true;
-    }
-    if (_warmupFuture == null || _warmupModelPath != modelPath) {
-      _warmupModelPath = modelPath;
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2125 | Function: _ensureWarmup() | BEFORE assigning _runWarmup() future',
-      );
-      _warmupFuture = _runWarmup(modelPath: modelPath);
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2129 | Function: _ensureWarmup() | AFTER assigning _runWarmup() future',
-      );
-    }
-    _log('[WARMUP] await session=$sessionId');
-    try {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2135 | Function: _ensureWarmup() | BEFORE awaiting _warmupFuture',
-      );
-      await _warmupFuture!;
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2139 | Function: _ensureWarmup() | AFTER awaiting _warmupFuture',
-      );
-      _log('[WARMUP] complete session=$sessionId');
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2143 | Function: _ensureWarmup() | AFTER exit success',
-      );
-      return true;
-    } catch (error) {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2148 | Function: _ensureWarmup() | AFTER catch observational path exception: $error',
-      );
-      _warmupFuture = null;
-      verificationMonitor.update(
-        RuntimeVerificationPhase.failed,
-        message: 'Runtime warmup failed: $error',
-      );
-      clearRuntimeVerification();
-      _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=warmup_failed error=$error');
-      _updateRuntimeStatus(
-        LocalRuntimeStatus.runtimeUnavailable,
-        message: 'Runtime warmup failed: $error',
-      );
-      _log(
-        '[FFI_BRANCH] session=$sessionId name=warmup_failed_observational'
-        ' action=continue_to_create_session',
-      );
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2166 | Function: _ensureWarmup() | AFTER exit failure_observational',
-      );
-      return false;
-    }
-  }
 
-  Future<void> _runWarmup({required String modelPath}) async {
-    _log(
-      '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2174 | Function: _runWarmup() | BEFORE entry',
-    );
-    _log('[BOOT] runtime warmup begin');
-    verificationMonitor.update(
-      RuntimeVerificationPhase.loading,
-      message: 'Runtime warmup started.',
-    );
-    _updateRuntimeStatus(
-      LocalRuntimeStatus.loading,
-      message: 'Runtime warmup in progress...',
-      resetProgress: true,
-    );
-    if (!LlamaFfiLoader.isCurrentPlatformSupported) {
-      throw StateError('Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).');
-    }
-    if (!_ensureLibraryLoaded()) {
-      throw StateError('libllama_bridge.so is missing for this Android build.');
-    }
-    final bindings = _bindings!;
-    _log('[BOOT] runtime warmup library ready');
-    verificationMonitor.update(
-      RuntimeVerificationPhase.running,
-      message: 'Runtime warmup inference running.',
-    );
-    _log('[WARMUP] resolving shared native session path=$modelPath');
-    final warmupSessionId = _ensureNativeSession(bindings, modelPath);
-    if (bindings.sessionIsActive(warmupSessionId) != 1) {
-      throw StateError(
-        'Warmup session inactive: ${_safeLastError(bindings, warmupSessionId)}',
-      );
-    }
-    _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId');
-    final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
-    final tokenBuf = tokenBufRaw.cast<Utf8>();
-    var firstTokenSeen = false;
-    final stopwatch = Stopwatch()..start();
-    // Keep the warmup prompt pointer alive until the first token is polled.
-    final warmupPromptPtr = _warmupPrompt.toNativeUtf8(allocator: calloc);
-    // Nullable sentinel: set to null after freeing to prevent double-free.
-    Pointer<Utf8>? warmupPromptPtrOrNull = warmupPromptPtr;
-    void freeWarmupPromptPtr() {
-      final ptr = warmupPromptPtrOrNull;
-      if (ptr != null) {
-        calloc.free(ptr);
-        warmupPromptPtrOrNull = null;
-      }
-    }
-    try {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2218 | Function: _runWarmup() | BEFORE warmup startGeneration',
-      );
-      _log('[FFI_START_GEN] entering startGeneration session=$warmupSessionId warmup=true');
-      final start = bindings.startGeneration(
-        warmupSessionId,
-        warmupPromptPtr,
-        _warmupMaxTokens,
-        _warmupTemperature,
-      );
-      if (start != 0) {
-        throw StateError(
-          'Warmup generation start failed: ${_safeLastError(bindings, warmupSessionId)}',
-        );
-      }
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2233 | Function: _runWarmup() | AFTER warmup startGeneration',
-      );
-      while (stopwatch.elapsed < _verificationFirstTokenTimeout) {
-        _log(
-          '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2237 | Function: _runWarmup() | BEFORE warmup pollToken loop iteration',
-        );
-        _log('[FFI_POLL_BEGIN] entering pollToken session=$warmupSessionId warmup=true');
-        final status = bindings.pollToken(warmupSessionId, tokenBuf);
-        _log(
-          '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2242 | Function: _runWarmup() | AFTER warmup pollToken loop iteration status=$status',
-        );
-        if (status == 1) {
-          final token = tokenBuf.toDartString();
-          if (token.trim().isNotEmpty) {
-            // Ingestion complete; safe to free the prompt pointer.
-            freeWarmupPromptPtr();
-            firstTokenSeen = true;
-            _log(
-              '[FFI_FIRST_TOKEN] warmup session=$warmupSessionId elapsed_ms=${stopwatch.elapsedMilliseconds}',
-            );
-            break;
-          }
-        } else if (status == 2) {
-          break;
-        } else if (status == -1) {
-          throw StateError(
-            'Warmup generation failed: ${_safeLastError(bindings, warmupSessionId)}',
-          );
-        } else if (status == -99) {
-          throw StateError('Warmup generation cancelled before first token.');
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 24));
-      }
-      if (!firstTokenSeen) {
-        throw StateError('FIRST_TOKEN_TIMEOUT');
-      }
-      verificationMonitor.update(
-        RuntimeVerificationPhase.passed,
-        message: 'Runtime warmup passed.',
-      );
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2272 | Function: _runWarmup() | AFTER exit success',
-      );
-    } catch (e, stackTrace) {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2276 | Function: _runWarmup() | BEFORE rethrow after exception: $e \n $stackTrace',
-      );
-      rethrow;
-    } finally {
-      freeWarmupPromptPtr();
-      calloc.free(tokenBufRaw);
-      _log('[FFI_CANCEL] warmup session=$warmupSessionId');
-      bindings.cancelSession(warmupSessionId);
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2286 | Function: _runWarmup() | AFTER finally cleanup',
-      );
-    }
-  }
+  Future<void> _runWarmup({required String modelPath}) =>
+      _warmupSubsystem.runWarmup(modelPath: modelPath);
 
   static void _finishWithError(
     StreamController<InferenceResponse> ctrl,
@@ -2642,31 +2329,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  void _safeCancel(LlamaBridgeBindings bindings, int sessionId) {
-    try {
-      _log('[FFI_CANCEL] session=$sessionId');
-      bindings.cancelSession(sessionId);
-    } catch (error) {
-      _log('[MODEL_EXECUTION] llb_session_cancel failed: $error');
-    }
-  }
+  void _safeCancel(LlamaBridgeBindings bindings, int sessionId) =>
+      _nativeSessionSubsystem.safeCancel(bindings, sessionId);
 
   void _safeResetRuntime(
     LlamaBridgeBindings bindings, {
     required String reason,
-  }) {
-    try {
-      _log('[MODEL_EXECUTION] resetting native runtime: $reason');
-      final sessionId = _nativeSessionId;
-      if (sessionId != null) {
-        _log('[MODEL_EXECUTION] llb_session_is_active before reset: ${bindings.sessionIsActive(sessionId)}');
-        _safeCancel(bindings, sessionId);
-      }
-      _releaseAllNativeSessions(bindings, reason: reason);
-    } catch (error) {
-      _log('[MODEL_EXECUTION] runtime reset failed: $error');
-    }
-  }
+  }) =>
+      _nativeSessionSubsystem.safeResetRuntime(
+        bindings,
+        reason: reason,
+      );
 
   static void _log(String message) {
     RuntimeEventLog.instance.emit(message);
@@ -2714,72 +2387,27 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     bool resetProgress = false,
     String reason = _autoTransitionReason,
     String origin = 'AndroidFfiRuntimeProvider',
-  }) {
-    if (_inVerificationScope) {
-      _log(
-        '[VERIFICATION_UI_IGNORED] verification_scope=true status=${status.name} reason=$reason origin=$origin',
+  }) => _lifecycleSubsystem.updateRuntimeStatus(
+        status,
+        message: message,
+        tokensGenerated: tokensGenerated,
+        elapsed: elapsed,
+        startedAt: startedAt,
+        resetProgress: resetProgress,
+        reason: reason,
+        origin: origin,
       );
-      return;
-    }
-    final previous = monitor.state.status;
-    final transitionReason =
-        reason == _autoTransitionReason ? _defaultReasonFor(status) : reason;
-    monitor.update(
-      status,
-      message: message,
-      tokensGenerated: tokensGenerated,
-      elapsed: elapsed,
-      startedAt: startedAt,
-      resetProgress: resetProgress,
-    );
-    _traceStatePath(
-      from: previous,
-      to: status,
-      reason: transitionReason,
-      origin: origin,
-    );
-    _syncLifecycleState(status, reason: transitionReason, origin: origin);
-  }
 
   void _syncLifecycleState(
     LocalRuntimeStatus status, {
     required String reason,
     required String origin,
-  }) {
-    switch (status) {
-      case LocalRuntimeStatus.uninitialized:
-      case LocalRuntimeStatus.modelMissing:
-        runtimeStateMachine.reset();
-        _emitStateReset(reason: reason, origin: origin);
-        return;
-      case LocalRuntimeStatus.runtimeUnavailable:
-        // Non-terminal state: model/FFI prerequisites can be present while no
-        // successful first-token verification has been observed yet.
-        // Keep lifecycle recoverable (healthy) instead of reset/failed.
-        runtimeStateMachine.markHealthy();
-        return;
-      case LocalRuntimeStatus.loading:
-      case LocalRuntimeStatus.tokenizing:
-        runtimeStateMachine.markLoading();
-        return;
-      case LocalRuntimeStatus.ready:
-        runtimeStateMachine.markVerified();
-        return;
-      case LocalRuntimeStatus.completed:
-        runtimeStateMachine.markInferenceCompleted();
-        return;
-      case LocalRuntimeStatus.inferencing:
-      case LocalRuntimeStatus.streaming:
-        runtimeStateMachine.markInferencing();
-        return;
-      case LocalRuntimeStatus.timedOut:
-      case LocalRuntimeStatus.stalled:
-      case LocalRuntimeStatus.ffiMissing:
-      case LocalRuntimeStatus.failed:
-        runtimeStateMachine.markFailed();
-        return;
-    }
-  }
+  }) =>
+      _lifecycleSubsystem.syncLifecycleState(
+        status,
+        reason: reason,
+        origin: origin,
+      );
 
   @override
   void recordVerificationSuccess({
@@ -2818,104 +2446,35 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  String _defaultReasonFor(LocalRuntimeStatus status) {
-    switch (status) {
-      case LocalRuntimeStatus.loading:
-        return 'runtime_check_begin';
-      case LocalRuntimeStatus.runtimeUnavailable:
-        return 'runtime_not_verified';
-      case LocalRuntimeStatus.uninitialized:
-        return 'runtime_reset';
-      case LocalRuntimeStatus.ready:
-        return 'runtime_verified';
-      default:
-        return 'status_update';
-    }
-  }
+  String _defaultReasonFor(LocalRuntimeStatus status) =>
+      _lifecycleSubsystem.defaultReasonFor(status);
 
-  String _expectedNextFor(LocalRuntimeStatus status) {
-    switch (status) {
-      case LocalRuntimeStatus.loading:
-        return 'runtime_unavailable_or_ready';
-      case LocalRuntimeStatus.runtimeUnavailable:
-        return 'ready_or_pre_stream_inference';
-      case LocalRuntimeStatus.uninitialized:
-        return 'loading';
-      case LocalRuntimeStatus.ready:
-        return 'pre_stream_inference_or_inferencing';
-      default:
-        return 'runtime_progression';
-    }
-  }
+  String _expectedNextFor(LocalRuntimeStatus status) =>
+      _lifecycleSubsystem.expectedNextFor(status);
 
   void _traceStatePath({
     required LocalRuntimeStatus from,
     required LocalRuntimeStatus to,
     required String reason,
     required String origin,
-  }) {
-    final now = DateTime.now();
-    final elapsedSinceLast =
-        _lastTransitionAt == null ? null : now.difference(_lastTransitionAt!);
-    final repeated = from == to;
-    _transitionCounter++;
-    _activeTransitionId = _transitionCounter;
-    _lastTransitionAt = now;
-    _lastTransitionReason = reason;
-    _lastTransitionOrigin = origin;
-    _log(
-      '[STATE_PATH] path=${from.name}->${to.name} reason=$reason origin=$origin transition_id=$_activeTransitionId transition_ts=${now.toIso8601String()} elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1} repeated=$repeated',
-    );
-    _log('[EXPECTED_NEXT] current=${to.name} next=${_expectedNextFor(to)}');
-
-    if (from == LocalRuntimeStatus.runtimeUnavailable &&
-        to == LocalRuntimeStatus.loading &&
-        elapsedSinceLast != null &&
-        elapsedSinceLast < _reentryWarnThreshold) {
-      _reentryCount++;
-      _log(
-        '[REENTRY_DETECTED] from=${from.name} to=${to.name} elapsed_ms=${elapsedSinceLast.inMilliseconds} origin=$origin reentry_count=$_reentryCount',
+  }) =>
+      _lifecycleSubsystem.traceStatePath(
+        from: from,
+        to: to,
+        reason: reason,
+        origin: origin,
       );
-    }
-
-    if (to == LocalRuntimeStatus.runtimeUnavailable && !_streamInferenceEntered) {
-      // Kept as separate markers intentionally so log parsers can key on both:
-      // interruption classification and first-response boundary reporting.
-      _log(
-        '[LIFECYCLE_INTERRUPTION] expected_next=PRE_STREAM_INFERENCE last_state=${to.name} last_transition_id=$_activeTransitionId reason=unexpected_reset_before_inference',
-      );
-      _log(
-        '[FIRST_RESPONSE_BLOCKED] boundary=pre_stream_inference last_known_state=${to.name} last_transition_reason=$_lastTransitionReason last_transition_origin=$_lastTransitionOrigin',
-      );
-      if (_reentryCount >= _reentryLoopBlockThreshold) {
-        _log(
-          '[FIRST_RESPONSE_BLOCKED] boundary=runtime_verification_loop reentry_count=$_reentryCount elapsed_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
-        );
-      }
-    }
-  }
 
   void _emitStateReset({
     required String reason,
     required String origin,
-  }) {
-    final now = DateTime.now();
-    final elapsedSinceLast =
-        _lastTransitionAt == null ? null : now.difference(_lastTransitionAt!);
-    _log(
-      '[STATE_RESET] reason=$reason origin=$origin elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
-    );
-  }
+  }) =>
+      _lifecycleSubsystem.emitStateReset(
+        reason: reason,
+        origin: origin,
+      );
 
-  String _inferCallerFromStack() {
-    final lines = StackTrace.current.toString().split('\n');
-    // 0=current helper frame, 1=clearRuntimeVerification frame, 2=actual caller.
-    if (lines.length <= _clearVerificationCallerFrameIndex) {
-      return 'unknown_caller';
-    }
-    final caller = lines[_clearVerificationCallerFrameIndex].trim();
-    return caller.isEmpty ? 'unknown_caller' : caller;
-  }
+  String _inferCallerFromStack() => _lifecycleSubsystem.inferCallerFromStack();
 
   Future<String> _resolveHybridModelPath(String rawModelPath) async {
     final trimmedPath = rawModelPath.trim();
