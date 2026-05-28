@@ -622,6 +622,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         firstTokenAttemptClosed = true;
         final endAttemptId = _currentFirstTokenAttemptId ?? attemptId;
         final preFirstTokenActiveAtEnd = _preFirstTokenActive;
+        final runtimeResetRequestedAtEnd =
+            runtimeResetRequested || runtimeNeedsReset;
         _log(
           '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
           ' sessionId=$sessionId generated_tokens=$estimatedTokens'
@@ -629,7 +631,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ' terminal_boundary=$terminalBoundary'
           ' first_token_received=${firstTokenAt != null}'
           ' pre_first_token_active=$preFirstTokenActiveAtEnd'
-          ' runtime_reset_requested=${runtimeResetRequested || runtimeNeedsReset}'
+          ' runtime_reset_requested=$runtimeResetRequestedAtEnd'
           ' cancellation_detected=$cancellationDetected'
           ' exception_detected=$exceptionDetected'
           ' runtime_needs_reset=$runtimeNeedsReset'
@@ -1153,7 +1155,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         _log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
         clearRuntimeVerification();
-        runtimeResetRequested = true;
         _safeResetRuntime(bindings, reason: 'start_generation_exception');
         _updateRuntimeStatus(
           error is TimeoutException
@@ -1195,7 +1196,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         freePromptNativePtr();
         _safeCancel(bindings, nativeSessionId);
         clearRuntimeVerification();
-        runtimeResetRequested = true;
         _safeResetRuntime(bindings, reason: 'start_generation_timeout');
         _updateRuntimeStatus(
           LocalRuntimeStatus.timedOut,
@@ -1222,7 +1222,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         freePromptNativePtr();
         clearRuntimeVerification();
         final err = _safeLastError(bindings, nativeSessionId);
-        runtimeResetRequested = true;
         _safeResetRuntime(bindings, reason: 'start_generation_failed');
         _updateRuntimeStatus(LocalRuntimeStatus.failed, message: err);
         _finishWithRuntimeError(
@@ -1345,7 +1344,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'generation_timeout';
-            runtimeResetRequested = true;
             if (firstTokenAt == null) {
               _log(
                 '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
@@ -1394,7 +1392,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'first_token_watchdog';
-            runtimeResetRequested = true;
             _log(
               '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
               ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionId',
@@ -1444,7 +1441,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'token_progress_watchdog';
-            runtimeResetRequested = true;
             _log(
               '[STALL] reason=token_progress_watchdog'
               ' generated_tokens=$estimatedTokens'
@@ -1488,7 +1484,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_loop_watchdog';
-            runtimeResetRequested = true;
             _log(
               '[STREAM_TIMEOUT] reason=poll_loop_idle idle_polls=$consecutiveIdlePolls'
               ' elapsed_ms=${elapsed.inMilliseconds} session=$sessionId',
@@ -1544,7 +1539,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'poll_token_exception';
-            runtimeResetRequested = true;
             _updateRuntimeStatus(
               LocalRuntimeStatus.failed,
               message: 'Native poll_token failed: $error',
@@ -1582,7 +1576,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'token_decode_exception';
-                runtimeResetRequested = true;
                 _log(
                   '[TERMINAL_STATE] state=failed reason=token_decode_exception'
                   ' generated_tokens=$estimatedTokens'
@@ -1686,7 +1679,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   clearRuntimeVerification();
                   runtimeNeedsReset = true;
                   runtimeResetReason = 'repeated_token_loop';
-                  runtimeResetRequested = true;
                   _log(
                     '[STREAM_LOOP] reason=repeated_token'
                     ' count=$repeatedTokenCount token="${piece.replaceAll('\n', r'\n')}"'
@@ -1767,7 +1759,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 clearRuntimeVerification();
                 runtimeNeedsReset = true;
                 runtimeResetReason = 'empty_token_loop';
-                runtimeResetRequested = true;
                 _log(
                   '[TERMINAL_STATE] state=failed reason=empty_token_loop'
                   ' generated_tokens=$estimatedTokens'
@@ -1870,7 +1861,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             final statusLower = err.toLowerCase();
             runtimeNeedsReset = true;
             runtimeResetReason = 'native_error';
-            runtimeResetRequested = true;
             _log(
               '[TERMINAL_STATE] state=native_error generated_tokens=$estimatedTokens'
               ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
