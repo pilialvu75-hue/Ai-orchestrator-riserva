@@ -532,7 +532,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
     );
     _streamInferenceEntered = true;
+    _log('[FORENSIC_STREAM_INFERENCE_ACTIVE] streamInferenceEntered=true sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()}');
     final controller = StreamController<InferenceResponse>();
+    _log('[STREAM_CONTROLLER_CREATED] sessionId=${request.sessionId} modelId=${request.modelId}');
     var firstFfiInvocationAttempted = false;
     var firstFfiInvocationCompleted = false;
 
@@ -574,13 +576,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ' first_ffi_attempted=$firstFfiInvocationAttempted',
       );
     };
+    _log('[CANCELLATION_HANDLER_REGISTERED] sessionId=${request.sessionId}');
 
+    _log('[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} inferenceTailHash=${_inferenceTail.hashCode}');
+    runZonedGuarded(() {
     () async {
+      _log('[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()}');
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
       );
       try {
         await _runInferenceSerially(() async {
+      _log('[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}');
       final sessionId = request.sessionId.trim().isEmpty
           ? 'unknown'
           : request.sessionId.trim();
@@ -647,6 +654,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _currentFirstTokenAttemptId = null;
       }
 
+      _log('[ACTION_VARS_INITIALIZED] sessionId=$sessionId modelId=${request.modelId} attemptId=$attemptId dartThreadId=$dartThreadId isolateHash=${_currentThreadId()} nativeSessionId=${_nativeSessionId ?? 'null'} sessionCacheSize=${_nativeSessionsByModel.length} ts=${DateTime.now().microsecondsSinceEpoch}');
       _log(
         '[FIRST_TOKEN_ATTEMPT_BEGIN] attemptId=$attemptId sessionId=$sessionId'
         ' modelId=${request.modelId} is_verification=$isVerificationSession',
@@ -2038,6 +2046,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         rethrow;
       }
     }();
+    }, (error, stack) {
+      _log('[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack');
+    });
 
     _log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1666 | Function: streamInference() | AFTER exit',
@@ -2374,7 +2385,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2030 | Function: _runInferenceSerially() | BEFORE entry',
       );
+      _log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${_inferenceTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
       final next = _inferenceTail.then((_) async {
+        _log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
         _log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2034 | Function: _runInferenceSerially() | BEFORE action()',
         );
