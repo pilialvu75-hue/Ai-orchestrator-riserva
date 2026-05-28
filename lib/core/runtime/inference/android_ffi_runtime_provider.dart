@@ -145,6 +145,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
+  // ── First Token Attempt Isolation ─────────────────────────────────────────
+  // Unique ID assigned at the start of every streamInference serial-queue
+  // execution. Cleared in the poll-loop finally block. Allows forensic log
+  // correlation of the complete first-token path across all boundary events.
+  String? _currentFirstTokenAttemptId;
+  // True from the moment we enter the poll loop until either the first token
+  // is received or the loop exits (timeout, failure, or cancellation).
+  // Dart's single-threaded event-loop means no synchronisation is needed;
+  // all mutations occur on the same isolate.
+  // The flag is cleared eagerly on first-token success (so any code later
+  // in the same loop iteration sees the correct value) and also in the
+  // poll-loop finally block as a catch-all for every non-success exit path.
+  bool _preFirstTokenActive = false;
+  // ─────────────────────────────────────────────────────────────────────────
   bool _inVerificationScope = false;
   final Set<String> _activeInferenceSessions = <String>{};
   String? _verifiedRuntimeAbi;
@@ -458,6 +472,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _log(
       '[VERIFICATION_STATE_ISOLATED] verification_scope=true ui_lifecycle_mutation=false runtime_state_machine_mutation=false',
     );
+    _log(
+      '[FIRST_TOKEN_VERIFICATION_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'none'}'
+      ' model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+    );
     try {
       return await action();
     } finally {
@@ -484,6 +502,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _log(
         '[VERIFICATION_SCOPE_EXIT] verification_scope=$_inVerificationScope model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}',
+      );
+      _log(
+        '[FIRST_TOKEN_VERIFICATION_END] attemptId=${_currentFirstTokenAttemptId ?? 'none'}'
+        ' model_path=${modelPath == null ? 'unknown' : _normalizePathForLogs(modelPath)}'
+        ' scope_restored=$_inVerificationScope',
       );
     }
   }
@@ -563,6 +586,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           : request.sessionId.trim();
       final isVerificationSession = sessionId == _forensicSelfTestSessionId;
       final dartThreadId = _currentThreadId();
+      // ── First Token Attempt Isolation: assign attempt ID ──────────────────
+      final attemptId =
+          'fta_${DateTime.now().microsecondsSinceEpoch}_${sessionId.hashCode.toRadixString(16)}';
+      _currentFirstTokenAttemptId = attemptId;
+      _log(
+        '[FIRST_TOKEN_ATTEMPT_BEGIN] attemptId=$attemptId sessionId=$sessionId'
+        ' modelId=${request.modelId} is_verification=$isVerificationSession',
+      );
+      // ─────────────────────────────────────────────────────────────────────
       _log('[FFI_FLOW_ENTER] session=$sessionId thread_id=$dartThreadId');
       _log(
         '[RUNTIME_PROVIDER_BRANCH] provider=$runtimeType runtime_mode=local '
@@ -800,6 +832,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log(
           '[FORENSIC_BEFORE_CREATE_SESSION] sessionId=$sessionId modelId=$modelId modelPath=$modelPath',
         );
+        _log(
+          '[FIRST_TOKEN_SESSION_CREATE_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+          ' sessionId=$sessionId modelId=$modelId',
+        );
         // This flag marks the first native entry point for this inference flow.
         firstFfiInvocationAttempted = true;
         _log('[FFI_CREATE_SESSION] path=$modelPath');
@@ -810,6 +846,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         _log(
           '[FORENSIC_AFTER_CREATE_SESSION] nativeSessionId=$nativeSessionId',
+        );
+        _log(
+          '[FIRST_TOKEN_SESSION_CREATE_END] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId',
         );
         firstFfiInvocationCompleted = true;
         _log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
@@ -979,6 +1019,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       try {
         _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
         _log('[FORENSIC_BEFORE_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId');
+        _log(
+          '[FIRST_TOKEN_START_GENERATION_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId',
+        );
         startResult = await _runNativeCallWithTimeout<int>(
           stage: 'start_generation',
           timeout: _startGenerationTimeout,
@@ -990,6 +1034,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ),
         );
         _log('[FORENSIC_AFTER_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult');
+        _log(
+          '[FIRST_TOKEN_START_GENERATION_END] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult',
+        );
         _log(
           '[FFI_POST_START] session=$sessionId native_session=$nativeSessionId result=$startResult'
           ' elapsed_ms=${startupWatch.elapsedMilliseconds}',
@@ -1102,6 +1150,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[TOKEN_LOOP] phase=start max_tokens=$maxTokens');
       _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
       _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
+      _preFirstTokenActive = true;
+      _log(
+        '[FIRST_TOKEN_POLL_LOOP_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+        ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+        ' pre_first_token_active=true max_tokens=$maxTokens',
+      );
 
       try {
         while (true) {
@@ -1165,6 +1219,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             clearRuntimeVerification();
             runtimeNeedsReset = true;
             runtimeResetReason = 'generation_timeout';
+            if (firstTokenAt == null) {
+              _log(
+                '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+                ' sessionId=$sessionId reason=generation_timeout_no_first_token'
+                ' elapsed_ms=${elapsed.inMilliseconds}'
+                ' timeout_ms=${_generationTimeout.inMilliseconds}'
+                ' poll_iterations=$pollIterations',
+              );
+            }
             _log(
               '[TERMINAL_STATE] state=timedOut reason=generation_timeout'
               ' generated_tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
@@ -1209,6 +1272,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             );
             _log(
               '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations timeout_ms=${firstTokenDeadline.inMilliseconds}',
+            );
+            _log(
+              '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+              ' sessionId=$sessionId reason=first_token_watchdog'
+              ' elapsed_ms=${elapsed.inMilliseconds} timeout_ms=${firstTokenDeadline.inMilliseconds}'
+              ' poll_iterations=$pollIterations pre_first_token_active=$_preFirstTokenActive',
             );
             _log(
               '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
@@ -1401,6 +1470,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 // The native ingestion phase is now complete: the prompt
                 // pointer is safe to release.
                 freePromptNativePtr();
+                // Eagerly clear the flag so any remaining iterations in this
+                // same loop body observe the correct "post-first-token" state.
+                // The finally block clears it again as a catch-all for all
+                // non-success exit paths (timeout, failure, cancellation).
+                _preFirstTokenActive = false;
                 _log(
                   '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
                 );
@@ -1414,6 +1488,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   ' thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length}'
                   ' queue_size=-1 poll_iteration=$pollIterations'
                   ' token="${piece.replaceAll('\n', r'\n')}" token_count=$estimatedTokens',
+                );
+                _log(
+                  '[FIRST_TOKEN_SUCCESS] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
+                  ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+                  ' elapsed_ms=${streamingElapsed.inMilliseconds}'
+                  ' chars=${piece.length} poll_iterations=$pollIterations'
+                  ' pre_first_token_active=false',
                 );
               }
               _log(
@@ -1670,6 +1751,21 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         // timeouts, cancellations, and native errors that fire before the
         // first token is produced).
         freePromptNativePtr();
+        // ── First Token Attempt Isolation: cleanup ─────────────────────────
+        // Capture the attempt ID before clearing so the ATTEMPT_END log can
+        // reference it even after the field is nulled out.
+        final endAttemptId = _currentFirstTokenAttemptId ?? 'unknown';
+        _log(
+          '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
+          ' sessionId=$sessionId generated_tokens=$estimatedTokens'
+          ' first_token_received=${firstTokenAt != null}'
+          ' pre_first_token_active=$_preFirstTokenActive'
+          ' runtime_needs_reset=$runtimeNeedsReset'
+          ' reset_reason=${runtimeResetReason ?? 'none'}',
+        );
+        _preFirstTokenActive = false;
+        _currentFirstTokenAttemptId = null;
+        // ─────────────────────────────────────────────────────────────────
         if (runtimeNeedsReset) {
           _safeResetRuntime(
             bindings,
