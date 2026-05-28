@@ -152,6 +152,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String? _currentFirstTokenAttemptId;
   // True from the moment we enter the poll loop until either the first token
   // is received or the loop exits (timeout, failure, or cancellation).
+  // Dart's single-threaded event-loop means no synchronisation is needed;
+  // all mutations occur on the same isolate.
+  // The flag is cleared eagerly on first-token success (so any code later
+  // in the same loop iteration sees the correct value) and also in the
+  // poll-loop finally block as a catch-all for every non-success exit path.
   bool _preFirstTokenActive = false;
   // ─────────────────────────────────────────────────────────────────────────
   bool _inVerificationScope = false;
@@ -1465,6 +1470,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 // The native ingestion phase is now complete: the prompt
                 // pointer is safe to release.
                 freePromptNativePtr();
+                // Eagerly clear the flag so any remaining iterations in this
+                // same loop body observe the correct "post-first-token" state.
+                // The finally block clears it again as a catch-all for all
+                // non-success exit paths (timeout, failure, cancellation).
                 _preFirstTokenActive = false;
                 _log(
                   '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
