@@ -22,6 +22,8 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/settings_pa
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
@@ -475,7 +477,53 @@ class _ChatBody extends StatefulWidget {
 }
 
 class _ChatBodyState extends State<_ChatBody> {
+  final List<ChatMessage> _debugLabMessages = <ChatMessage>[];
+  final DebugLabController _debugLabController = DebugLabController.instance;
   String? _lastSpokenAssistantMessageId;
+
+  @override
+  void initState() {
+    super.initState();
+    _debugLabController.addListener(_handleDebugLabVisibilityChanged);
+  }
+
+  @override
+  void dispose() {
+    _debugLabController.removeListener(_handleDebugLabVisibilityChanged);
+    super.dispose();
+  }
+
+  void _handleDebugLabVisibilityChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _appendDebugLabConversation({
+    required String prompt,
+    required String response,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    setState(() {
+      _debugLabMessages.addAll([
+        ChatMessage(
+          id: 'debug-lab-user-$now',
+          sessionId: 'debug-lab',
+          role: 'user',
+          content: prompt,
+          timestamp: now,
+        ),
+        ChatMessage(
+          id: 'debug-lab-assistant-${now + 1}',
+          sessionId: 'debug-lab',
+          role: 'assistant',
+          content: response,
+          timestamp: now + 1,
+          provider: 'debug-lab',
+        ),
+      ]);
+    });
+    widget.scrollToBottom();
+  }
 
   Future<void> _speakAssistantResponse(String text) async {
     try {
@@ -551,6 +599,10 @@ class _ChatBodyState extends State<_ChatBody> {
         final List<ChatMessage> messages = state is ChatLoaded
             ? state.messages
             : (state is ChatSending ? state.messages : const <ChatMessage>[]);
+        final List<ChatMessage> combinedMessages = <ChatMessage>[
+          ...messages,
+          ..._debugLabMessages,
+        ];
         final isLoading = state is ChatSending;
 
         return Column(
@@ -570,11 +622,11 @@ class _ChatBodyState extends State<_ChatBody> {
                         ],
                       ),
                     ),
-                    child: messages.isEmpty
+                    child: combinedMessages.isEmpty
                         ? _buildEmptyState(context)
                         : _HighPerformanceChatList(
                             controller: widget.scrollController,
-                            messages: messages,
+                            messages: combinedMessages,
                           ),
                   ),
                   Positioned(
@@ -590,6 +642,23 @@ class _ChatBodyState extends State<_ChatBody> {
                       ),
                     ),
                   ),
+                  if (_debugLabController.isVisible)
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: DebugOverlay(
+                        onSendThroughChatPipeline: widget.onSend,
+                        onRenderVoiceInference: ({
+                          required String prompt,
+                          required String response,
+                        }) {
+                          _appendDebugLabConversation(
+                            prompt: prompt,
+                            response: response,
+                          );
+                        },
+                      ),
+                    ),
                 ],
               ),
             ),
