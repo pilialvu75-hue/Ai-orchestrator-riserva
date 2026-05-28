@@ -252,7 +252,7 @@ class InferenceService {
   ) {
     if (selectedModel == null) {
       _log(
-        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_unavailable runtime_mode_pending_provider_selection',
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_unavailable state=runtime_mode_pending_provider_selection',
       );
       return null;
     }
@@ -424,7 +424,7 @@ class InferenceService {
           );
         }
         _log(
-          '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} reason=local_request_unavailable target=local_runtime_provider.streamInference_skipped',
+          '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} reason=local_request_unavailable target=local_runtime_provider_not_invoked',
         );
         return Stream<InferenceResponse>.value(
           InferenceResponse.error(
@@ -558,7 +558,7 @@ class InferenceService {
         return;
       }
       _log(
-        '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=runtime_provider.streamInference_skipped',
+        '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=local_runtime_provider_not_invoked',
       );
       yield InferenceResponse.error(
         'Device is offline and no validated local model is selected.',
