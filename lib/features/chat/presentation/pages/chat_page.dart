@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
@@ -750,7 +749,7 @@ class _ChatBodyState extends State<_ChatBody> {
                       ),
                     ),
                   ),
-                  if (kDebugMode && _debugLabController.isVisible)
+                  if (_debugLabController.isVisible)
                     Positioned(
                       top: 10,
                       left: 10,
