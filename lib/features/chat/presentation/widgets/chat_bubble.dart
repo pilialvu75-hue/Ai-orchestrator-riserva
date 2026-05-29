@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
@@ -88,7 +89,14 @@ class ChatBubble extends StatelessWidget {
                                 _isUser ? 15 : assistantTextSize.fontSize,
                             height: 1.45,
                           ),
-                        ),
+                        )
+                      else if (!_isUser && message.isPending)
+                        // Show animated typing dots while the assistant
+                        // placeholder has no content yet (pre-first-token
+                        // phase).  Without this, the bubble renders as an
+                        // invisible empty container for up to 140 seconds
+                        // during model warmup.
+                        const _TypingIndicator(),
                     ],
                   ),
                 ),
@@ -244,6 +252,73 @@ class _Avatar extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Animated three-dot typing indicator shown in the assistant bubble while
+/// a [ChatMessage.isPending] placeholder has empty content (pre-first-token
+/// phase).  Each dot fades in/out with a staggered 160 ms phase offset, giving
+/// a natural "thinking" rhythm without requiring external animation packages.
+class _TypingIndicator extends StatefulWidget {
+  const _TypingIndicator();
+
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 960),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 20,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(3, (i) {
+          return AnimatedBuilder(
+            animation: _controller,
+            builder: (_, __) {
+              // Each dot lags 160 ms behind the previous one.
+              final phase = (_controller.value - i * (160 / 960)) % 1.0;
+              // Sine wave maps 0→0→1→0 over one cycle.
+              final opacity = (math.sin(phase * 2 * math.pi) * 0.5 + 0.5)
+                  .clamp(0.25, 1.0);
+              return Padding(
+                padding: EdgeInsets.only(right: i < 2 ? 5 : 0),
+                child: Opacity(
+                  opacity: opacity,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF8AB4F8),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        }),
       ),
     );
   }

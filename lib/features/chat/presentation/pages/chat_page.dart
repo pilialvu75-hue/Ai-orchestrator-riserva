@@ -47,6 +47,13 @@ class _ChatPageState extends State<ChatPage> {
   static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
   static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
+  // _debugLabMessages is owned here (not in _ChatBodyState) so that it
+  // survives narrow↔wide layout transitions.  When the viewport crosses the
+  // 720 px breakpoint Flutter rebuilds a different widget branch
+  // (_NarrowLayout vs _WideLayout), which destroys and recreates
+  // _ChatBodyState.  Keeping the list here prevents debug lab messages from
+  // disappearing on orientation change or window resize.
+  final List<ChatMessage> _debugLabMessages = <ChatMessage>[];
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
@@ -216,8 +223,42 @@ class _ChatPageState extends State<ChatPage> {
     _cancelUiDeadlockGuard();
   }
 
-  void _openSettings() {
-    Navigator.of(context).push(
+  // Called by DebugOverlay (via _ChatBody) to append a fake voice→LLM result
+  // to the in-memory debug lab conversation list.  Lives here so the list
+  // survives layout switches (narrow↔wide).
+  void _appendDebugLabConversation({
+    required String prompt,
+    required String response,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    setState(() {
+      _debugLabMessages.addAll([
+        ChatMessage(
+          id: 'debug-lab-user-$now',
+          sessionId: 'debug-lab',
+          role: 'user',
+          content: prompt,
+          timestamp: now,
+        ),
+        ChatMessage(
+          id: 'debug-lab-assistant-${now + 1}',
+          sessionId: 'debug-lab',
+          role: 'assistant',
+          content: response,
+          timestamp: now + 1,
+          provider: 'debug-lab',
+        ),
+      ]);
+    });
+    _scrollToBottom();
+  }
+
+  void _clearDebugLabMessages() {
+    if (!mounted) return;
+    setState(() => _debugLabMessages.clear());
+  }
+
+  void _openSettings() {    Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BlocProvider.value(
           value: context.read<ModelDownloadBloc>(),
@@ -285,6 +326,9 @@ class _ChatPageState extends State<ChatPage> {
                     runtimeModeName: _runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
+                    debugLabMessages: _debugLabMessages,
+                    onAppendDebugLabConversation: _appendDebugLabConversation,
+                    onClearDebugLabMessages: _clearDebugLabMessages,
                   )
                 : _NarrowLayout(
                     scrollController: _scrollController,
@@ -298,6 +342,9 @@ class _ChatPageState extends State<ChatPage> {
                     runtimeModeName: _runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
+                    debugLabMessages: _debugLabMessages,
+                    onAppendDebugLabConversation: _appendDebugLabConversation,
+                    onClearDebugLabMessages: _clearDebugLabMessages,
                   );
           }),
     );
@@ -323,6 +370,9 @@ class _NarrowLayout extends StatelessWidget {
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
+    required this.debugLabMessages,
+    required this.onAppendDebugLabConversation,
+    required this.onClearDebugLabMessages,
   });
 
   final ScrollController scrollController;
@@ -336,6 +386,10 @@ class _NarrowLayout extends StatelessWidget {
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
+  final List<ChatMessage> debugLabMessages;
+  final void Function({required String prompt, required String response})
+      onAppendDebugLabConversation;
+  final VoidCallback onClearDebugLabMessages;
 
   @override
   Widget build(BuildContext context) {
@@ -351,6 +405,9 @@ class _NarrowLayout extends StatelessWidget {
       runtimeModeName: runtimeModeName,
       onStartLiveSession: onStartLiveSession,
       liveSessionEnabled: liveSessionEnabled,
+      debugLabMessages: debugLabMessages,
+      onAppendDebugLabConversation: onAppendDebugLabConversation,
+      onClearDebugLabMessages: onClearDebugLabMessages,
     );
   }
 }
@@ -370,6 +427,9 @@ class _WideLayout extends StatelessWidget {
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
+    required this.debugLabMessages,
+    required this.onAppendDebugLabConversation,
+    required this.onClearDebugLabMessages,
   });
 
   final ScrollController scrollController;
@@ -383,6 +443,10 @@ class _WideLayout extends StatelessWidget {
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
+  final List<ChatMessage> debugLabMessages;
+  final void Function({required String prompt, required String response})
+      onAppendDebugLabConversation;
+  final VoidCallback onClearDebugLabMessages;
 
   @override
   Widget build(BuildContext context) {
@@ -440,6 +504,9 @@ class _WideLayout extends StatelessWidget {
              runtimeModeName: runtimeModeName,
              onStartLiveSession: onStartLiveSession,
              liveSessionEnabled: liveSessionEnabled,
+             debugLabMessages: debugLabMessages,
+             onAppendDebugLabConversation: onAppendDebugLabConversation,
+             onClearDebugLabMessages: onClearDebugLabMessages,
            ),
         ),
       ],
@@ -460,6 +527,9 @@ class _ChatBody extends StatefulWidget {
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
+    required this.debugLabMessages,
+    required this.onAppendDebugLabConversation,
+    required this.onClearDebugLabMessages,
   });
 
   final ScrollController scrollController;
@@ -473,13 +543,17 @@ class _ChatBody extends StatefulWidget {
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
+  // Owned by _ChatPageState and passed in so it survives layout transitions.
+  final List<ChatMessage> debugLabMessages;
+  final void Function({required String prompt, required String response})
+      onAppendDebugLabConversation;
+  final VoidCallback onClearDebugLabMessages;
 
   @override
   State<_ChatBody> createState() => _ChatBodyState();
 }
 
 class _ChatBodyState extends State<_ChatBody> {
-  final List<ChatMessage> _debugLabMessages = <ChatMessage>[];
   final DebugLabController _debugLabController = DebugLabController.instance;
   late final ChatUiPreferencesService _chatUiPreferencesService;
   String? _lastSpokenAssistantMessageId;
@@ -502,33 +576,6 @@ class _ChatBodyState extends State<_ChatBody> {
   void _handleDebugLabVisibilityChanged() {
     if (!mounted) return;
     setState(() {});
-  }
-
-  void _appendDebugLabConversation({
-    required String prompt,
-    required String response,
-  }) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    setState(() {
-      _debugLabMessages.addAll([
-        ChatMessage(
-          id: 'debug-lab-user-$now',
-          sessionId: 'debug-lab',
-          role: 'user',
-          content: prompt,
-          timestamp: now,
-        ),
-        ChatMessage(
-          id: 'debug-lab-assistant-${now + 1}',
-          sessionId: 'debug-lab',
-          role: 'assistant',
-          content: response,
-          timestamp: now + 1,
-          provider: 'debug-lab',
-        ),
-      ]);
-    });
-    widget.scrollToBottom();
   }
 
   void _loadAssistantTextSize() {
@@ -566,7 +613,9 @@ class _ChatBodyState extends State<_ChatBody> {
     context.read<OrchestratorStateEngine>().add(
           const DebugClearChatEvent(sessionId: _kDefaultSessionId),
         );
-    setState(() => _debugLabMessages.clear());
+    // Delegate debug-lab message clearing to _ChatPageState so the list
+    // is cleared at the correct owner level (not the layout-specific state).
+    widget.onClearDebugLabMessages();
   }
 
   void _uiDebugLog({
@@ -658,7 +707,7 @@ class _ChatBodyState extends State<_ChatBody> {
             : (state is ChatSending ? state.messages : const <ChatMessage>[]);
         final List<ChatMessage> combinedMessages = <ChatMessage>[
           ...messages,
-          ..._debugLabMessages,
+          ...widget.debugLabMessages,
         ];
         final isLoading = state is ChatSending;
 
@@ -710,7 +759,7 @@ class _ChatBodyState extends State<_ChatBody> {
                           required String prompt,
                           required String response,
                         }) {
-                          _appendDebugLabConversation(
+                          widget.onAppendDebugLabConversation(
                             prompt: prompt,
                             response: response,
                           );
