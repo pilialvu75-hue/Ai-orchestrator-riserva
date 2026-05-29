@@ -371,7 +371,7 @@ void run_generation(
         set_state_if_epoch(session, kStateFailed, owner_epoch, "ctx_size_invalid");
         return;
     }
-    const int n_batch = n_ctx;
+    const int prefill_n_batch = n_ctx;
 
     auto tokenize_prompt = [&](const std::string& text, std::vector<llama_token>* out_tokens) {
         std::vector<llama_token> local_tokens(static_cast<size_t>(n_ctx));
@@ -423,7 +423,7 @@ void run_generation(
          session->id,
          owner_epoch,
          n_tokens,
-         n_batch,
+         prefill_n_batch,
          n_ctx);
     LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] after session=%" PRId64 " epoch=%" PRIu64
          " prompt_tokens=%d",
@@ -456,7 +456,7 @@ void run_generation(
          session->id,
          owner_epoch,
          prefill_batch.batch.n_tokens,
-         n_batch,
+         prefill_n_batch,
          n_ctx);
     const int prefill_status = llama_decode(ctx, prefill_batch.batch);
     LOGI("[FORENSIC_AFTER_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
