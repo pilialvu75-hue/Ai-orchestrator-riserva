@@ -107,6 +107,24 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           // every runtime notice wiped the streamed content because it
           // emitted optimisticAssistantMessage.content (always '').
           var latestPartialContent = '';
+          void emitTransientSendingState() {
+            final shouldRenderAssistantBubble =
+                shouldShowAssistantPlaceholder ||
+                latestPartialContent.trim().isNotEmpty;
+            emit(
+              ChatSending(
+                messages: List.unmodifiable(<ChatMessage>[
+                  ..._messages,
+                  optimisticUserMessage,
+                  if (shouldRenderAssistantBubble)
+                    optimisticAssistantMessage.copyWith(
+                      content: latestPartialContent,
+                    ),
+                ]),
+                runtimeMessage: runtimeNotice,
+              ),
+            );
+          }
           emit(
             ChatSending(
               messages: List.unmodifiable(<ChatMessage>[
@@ -134,16 +152,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 _log(
                   'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
                 );
-                emit(
-                  ChatSending(
-                    messages: List.unmodifiable(<ChatMessage>[
-                      ..._messages,
-                      optimisticUserMessage,
-                      optimisticAssistantMessage.copyWith(content: partialText),
-                    ]),
-                    runtimeMessage: runtimeNotice,
-                  ),
-                );
+                emitTransientSendingState();
               },
               onRuntimeNotice: (notice) {
                 runtimeNotice = notice;
@@ -154,19 +163,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 // Use latestPartialContent to preserve accumulated streaming
                 // text.  Using optimisticAssistantMessage.content (always '')
                 // would erase all streamed tokens whenever a notice fires.
-                emit(
-                  ChatSending(
-                    messages: List.unmodifiable(<ChatMessage>[
-                      ..._messages,
-                      optimisticUserMessage,
-                      if (shouldShowAssistantPlaceholder)
-                        optimisticAssistantMessage.copyWith(
-                          content: latestPartialContent,
-                        ),
-                    ]),
-                    runtimeMessage: runtimeNotice,
-                  ),
-                );
+                emitTransientSendingState();
               },
             );
             await sendFuture.timeout(

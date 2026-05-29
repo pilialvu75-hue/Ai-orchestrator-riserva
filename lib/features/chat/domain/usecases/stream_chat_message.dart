@@ -15,7 +15,14 @@ class StreamChatMessage {
   Stream<ChatMessage> call(StreamChatMessageParams params) {
     late final StreamController<ChatMessage> controller;
     final emittedAt = DateTime.now().millisecondsSinceEpoch;
-    final provisionalAssistantId = 'stream-assistant-$emittedAt';
+    final provisionalAssistantMessage = ChatMessage(
+      id: 'stream-assistant-$emittedAt',
+      sessionId: params.sessionId,
+      role: 'assistant',
+      content: '',
+      timestamp: emittedAt,
+      provider: params.activeProvider,
+    );
 
     controller = StreamController<ChatMessage>(
       onListen: () async {
@@ -28,14 +35,7 @@ class StreamChatMessage {
             onPartialResponse: (partialText) {
               if (controller.isClosed || partialText.isEmpty) return;
               controller.add(
-                ChatMessage(
-                  id: provisionalAssistantId,
-                  sessionId: params.sessionId,
-                  role: 'assistant',
-                  content: partialText,
-                  timestamp: emittedAt,
-                  provider: params.activeProvider,
-                ),
+                provisionalAssistantMessage.copyWith(content: partialText),
               );
             },
           );
