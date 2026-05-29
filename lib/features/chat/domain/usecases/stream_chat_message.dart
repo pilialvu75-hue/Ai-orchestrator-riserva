@@ -16,7 +16,7 @@ class StreamChatMessage {
     late final StreamController<ChatMessage> controller;
     final emittedAt = DateTime.now().millisecondsSinceEpoch;
     final provisionalAssistantMessage = ChatMessage(
-      id: 'stream-assistant-$emittedAt',
+      id: 'pending-assistant-$emittedAt',
       sessionId: params.sessionId,
       role: 'assistant',
       content: '',
