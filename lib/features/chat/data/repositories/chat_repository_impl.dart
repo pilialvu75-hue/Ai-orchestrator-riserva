@@ -205,12 +205,12 @@ class ChatRepositoryImpl implements ChatRepository {
             );
             _activeInferenceSubscriptionSessionId = sessionId;
             try {
-              final abortedByDebugReset = await Future.any<bool>([
+              final wasAborted = await Future.any<bool>([
                 streamCompleter.future.then((_) => false),
                 abortSignal.future.then((_) => true),
               ]);
-              if (abortedByDebugReset) {
-                _log('[UI_DEBUG] action=clear_chat_abort_stream session=$sessionId');
+              if (wasAborted) {
+                _log('[CHAT_PIPELINE] action=stream_aborted session=$sessionId');
                 return userMsg;
               }
             } finally {
