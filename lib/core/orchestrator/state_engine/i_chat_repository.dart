@@ -21,4 +21,6 @@ abstract class IChatRepository {
     int maxAgeDays,
     int maxRows,
   });
+
+  Future<void> clearSession(String sessionId);
 }

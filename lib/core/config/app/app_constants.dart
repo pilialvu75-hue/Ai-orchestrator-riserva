@@ -68,6 +68,8 @@ class AppConstants {
   static const String prefAiMode = 'ai_mode';
   static const String prefReleaseChannel = 'release_channel';
   static const String prefDeveloperMode = 'developer_mode';
+  static const String prefAssistantTextSize = 'chat.assistant_text_size';
+  static const String prefLlmRoleBindingPrefix = 'llm.role.binding.';
 
   // ── AI providers ─────────────────────────────────────────────────────────────
   static const String openAiBaseUrl = 'https://api.openai.com/v1';

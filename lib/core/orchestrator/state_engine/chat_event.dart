@@ -52,3 +52,12 @@ class RecoverFromStuckUiEvent extends ChatEvent {
   @override
   List<Object?> get props => [sessionId, runtimeMessage];
 }
+
+class DebugClearChatEvent extends ChatEvent {
+  const DebugClearChatEvent({required this.sessionId});
+
+  final String sessionId;
+
+  @override
+  List<Object?> get props => [sessionId];
+}

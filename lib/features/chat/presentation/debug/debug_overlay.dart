@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -20,6 +21,9 @@ class DebugOverlay extends StatefulWidget {
     super.key,
     required this.onSendThroughChatPipeline,
     required this.onRenderVoiceInference,
+    required this.onClearChat,
+    required this.assistantTextSize,
+    required this.onAssistantTextSizeChanged,
   });
 
   final void Function(String text, List<ChatAttachment> attachments)
@@ -28,6 +32,9 @@ class DebugOverlay extends StatefulWidget {
     required String prompt,
     required String response,
   }) onRenderVoiceInference;
+  final VoidCallback onClearChat;
+  final AssistantMessageTextSize assistantTextSize;
+  final ValueChanged<AssistantMessageTextSize> onAssistantTextSizeChanged;
 
   @override
   State<DebugOverlay> createState() => _DebugOverlayState();
@@ -425,6 +432,42 @@ class _DebugOverlayState extends State<DebugOverlay> {
             FilledButton(
               onPressed: _running ? null : _runFakeVisionRequest,
               child: const Text('Fake Vision Request'),
+            ),
+            const SizedBox(height: 6),
+            FilledButton(
+              onPressed: _running ? null : widget.onClearChat,
+              child: const Text('Clear Chat'),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<AssistantMessageTextSize>(
+              value: widget.assistantTextSize,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                filled: true,
+                fillColor: Color(0x1AFFFFFF),
+                border: OutlineInputBorder(),
+                isDense: true,
+                labelText: 'Text Size',
+                labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              dropdownColor: const Color(0xFF101723),
+              style: const TextStyle(color: Colors.white),
+              items: AssistantMessageTextSize.values
+                  .map(
+                    (size) => DropdownMenuItem<AssistantMessageTextSize>(
+                      value: size,
+                      child: Text(
+                        '${size.name[0].toUpperCase()}${size.name.substring(1)}',
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: _running
+                  ? null
+                  : (size) {
+                      if (size == null) return;
+                      widget.onAssistantTextSizeChanged(size);
+                    },
             ),
           ],
         ),

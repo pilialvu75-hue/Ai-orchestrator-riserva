@@ -1,14 +1,20 @@
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class ChatBubble extends StatelessWidget {
-  const ChatBubble({super.key, required this.message});
+  const ChatBubble({
+    super.key,
+    required this.message,
+    this.assistantTextSize = AssistantMessageTextSize.medium,
+  });
 
   final ChatMessage message;
+  final AssistantMessageTextSize assistantTextSize;
 
   bool get _isUser => message.role == 'user';
 
@@ -76,9 +82,10 @@ class ChatBubble extends StatelessWidget {
                       if (message.content.trim().isNotEmpty)
                         Text(
                           message.content,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Colors.white,
-                            fontSize: 15,
+                            fontSize:
+                                _isUser ? 15 : assistantTextSize.fontSize,
                             height: 1.45,
                           ),
                         ),

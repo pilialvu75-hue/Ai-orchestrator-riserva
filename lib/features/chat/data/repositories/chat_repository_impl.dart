@@ -32,6 +32,8 @@ class ChatRepositoryImpl implements ChatRepository {
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
+  final Map<String, Completer<void>> _sessionAbortSignals =
+      <String, Completer<void>>{};
   StreamSubscription<InferenceResponse>? _activeInferenceSubscription;
   String? _activeInferenceSubscriptionSessionId;
 
@@ -137,6 +139,8 @@ class ChatRepositoryImpl implements ChatRepository {
               systemPrompt: systemPrompt,
             );
             final streamCompleter = Completer<void>();
+            final abortSignal = Completer<void>();
+            _sessionAbortSignals[sessionId] = abortSignal;
             _log(
               '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
             );
@@ -201,11 +205,19 @@ class ChatRepositoryImpl implements ChatRepository {
             );
             _activeInferenceSubscriptionSessionId = sessionId;
             try {
-              await streamCompleter.future;
+              final wasAborted = await Future.any<bool>([
+                streamCompleter.future.then((_) => false),
+                abortSignal.future.then((_) => true),
+              ]);
+              if (wasAborted) {
+                _log('[CHAT_PIPELINE] action=stream_aborted session=$sessionId');
+                return userMsg;
+              }
             } finally {
               await _activeInferenceSubscription?.cancel();
               _activeInferenceSubscription = null;
               _activeInferenceSubscriptionSessionId = null;
+              _sessionAbortSignals.remove(sessionId);
             }
 
             final responseText = streamedResponse.toString().trim();
@@ -274,6 +286,16 @@ class ChatRepositoryImpl implements ChatRepository {
   @override
   Future<void> clearSession(String sessionId) async {
     try {
+      final abortSignal = _sessionAbortSignals.remove(sessionId);
+      if (abortSignal != null && !abortSignal.isCompleted) {
+        abortSignal.complete();
+      }
+      if (_activeInferenceSubscriptionSessionId == sessionId) {
+        await _activeInferenceSubscription?.cancel();
+        _activeInferenceSubscription = null;
+        _activeInferenceSubscriptionSessionId = null;
+      }
+      _activeSendSessions.remove(sessionId);
       await localDataSource.clearSession(sessionId);
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
