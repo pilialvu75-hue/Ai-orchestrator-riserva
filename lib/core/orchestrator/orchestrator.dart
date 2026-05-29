@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/task_type.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/prompt_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -62,6 +63,8 @@ class Orchestrator {
     String input, {
     required String sessionId,
     List<String> context = const <String>[],
+    List<PromptTurn> contextTurns = const <PromptTurn>[],
+    List<String> recalledContext = const <String>[],
     String? systemPrompt,
     bool isOffline = false,
     int maxTokens = 256,
@@ -100,6 +103,8 @@ class Orchestrator {
         prompt: input,
         systemPrompt: systemPrompt,
         context: context,
+        contextTurns: contextTurns,
+        recalledContext: recalledContext,
         isOffline: isOffline,
         maxTokens: maxTokens,
         temperature: temperature,

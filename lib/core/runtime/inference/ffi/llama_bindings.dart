@@ -74,8 +74,17 @@ class LlamaBridgeBindings {
     Pointer<Utf8> promptPtr,
     int maxTokens,
     double temperature,
+    int repeatPenaltyLastN,
+    double repeatPenalty,
   ) {
-    return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
+    return _sessionStartGen(
+      sessionId,
+      promptPtr,
+      maxTokens,
+      temperature,
+      repeatPenaltyLastN,
+      repeatPenalty,
+    );
   }
 
   int pollToken(int sessionId, Pointer<Utf8> buf) =>

@@ -294,6 +294,8 @@ void run_generation(
     std::string prompt,
     int32_t max_tokens,
     float temperature,
+    int32_t repeat_penalty_last_n,
+    float repeat_penalty,
     const uint64_t owner_epoch
 ) {
     LOGI("[FORENSIC] [RUN_GENERATION] before session=%" PRId64 " epoch=%" PRIu64
@@ -511,6 +513,17 @@ void run_generation(
 
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_p(0.9f, 1));
+    if (repeat_penalty_last_n > 0 && repeat_penalty > 1.0f) {
+        llama_sampler_chain_add(
+            sampler.get(),
+            llama_sampler_init_penalties(
+                repeat_penalty_last_n,
+                repeat_penalty,
+                0.0f,
+                0.0f
+            )
+        );
+    }
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
@@ -863,7 +876,9 @@ int32_t llb_session_start_gen(
     int64_t session_id,
     const char* prompt,
     int32_t max_tokens,
-    float temperature
+    float temperature,
+    int32_t repeat_penalty_last_n,
+    float repeat_penalty
 ) {
     LOGI("[FORENSIC] [LLB_SESSION_START_GEN] before session=%" PRId64 " max_tokens=%d temp=%.3f",
          session_id,
@@ -915,11 +930,13 @@ int32_t llb_session_start_gen(
              sanitized_prompt.c_str());
     }
 
-    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f",
+    LOGI("[SESSION_START_GEN] session=%" PRId64 " epoch=%" PRIu64 " max_tokens=%d temp=%.3f repeat_penalty_last_n=%d repeat_penalty=%.3f",
          session_id,
          owner_epoch,
          max_tokens,
-         static_cast<double>(temperature));
+         static_cast<double>(temperature),
+         repeat_penalty_last_n,
+         static_cast<double>(repeat_penalty));
 
     try {
         LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] before session=%" PRId64 " epoch=%" PRIu64,
@@ -931,6 +948,8 @@ int32_t llb_session_start_gen(
             sanitized_prompt,
             max_tokens,
             temperature,
+            repeat_penalty_last_n,
+            repeat_penalty,
             owner_epoch
         );
         LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] after session=%" PRId64 " epoch=%" PRIu64,

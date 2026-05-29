@@ -87,13 +87,6 @@ class ChatRepositoryImpl implements ChatRepository {
             );
             await localDataSource.insertMessage(userMsg);
             _log('message persistence session=$sessionId role=user id=${userMsg.id}');
-            await conversationMemoryService.storeMessageEmbedding(
-              sessionId: sessionId,
-              messageId: userMsg.id,
-              role: userMsg.role,
-              content: userMsg.content,
-              timestamp: userMsg.timestamp,
-            );
 
             if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
               final forensicMessage =
@@ -112,7 +105,14 @@ class ChatRepositoryImpl implements ChatRepository {
               excludedMessageId: userMsg.id,
             );
             _log(
-              'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
+              'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.contextLines.length} turns=${context.contextTurns.length} recalled=${context.recalledLines.length}',
+            );
+            await conversationMemoryService.storeMessageEmbedding(
+              sessionId: sessionId,
+              messageId: userMsg.id,
+              role: userMsg.role,
+              content: userMsg.content,
+              timestamp: userMsg.timestamp,
             );
 
             final streamedResponse = StringBuffer();
@@ -135,7 +135,9 @@ class ChatRepositoryImpl implements ChatRepository {
             final stream = orchestrator.handleStream(
               normalizedPrompt,
               sessionId: sessionId,
-              context: context,
+              context: context.contextLines,
+              contextTurns: context.contextTurns,
+              recalledContext: context.recalledLines,
               systemPrompt: systemPrompt,
             );
             final streamCompleter = Completer<void>();

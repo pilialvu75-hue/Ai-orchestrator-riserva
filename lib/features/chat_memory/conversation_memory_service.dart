@@ -1,8 +1,21 @@
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/inference/prompt_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
 import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
 import 'package:flutter/foundation.dart';
+
+class ConversationContextSnapshot {
+  const ConversationContextSnapshot({
+    required this.contextLines,
+    required this.contextTurns,
+    required this.recalledLines,
+  });
+
+  final List<String> contextLines;
+  final List<PromptTurn> contextTurns;
+  final List<String> recalledLines;
+}
 
 class ConversationMemoryService {
   const ConversationMemoryService({
@@ -17,7 +30,7 @@ class ConversationMemoryService {
   final SemanticWorkspaceIndex _semanticWorkspaceIndex;
   final WorkspaceEmbeddingService _embeddingService;
 
-  Future<List<String>> buildContext({
+  Future<ConversationContextSnapshot> buildContext({
     required String sessionId,
     required List<ChatMessage> messages,
     required String userPrompt,
@@ -50,7 +63,11 @@ class ConversationMemoryService {
     debugPrint(
       '[CONTEXT_REBUILD] session=$sessionId context_lines=${result.contextLines.length} recall_lines=${recalled.length}',
     );
-    return result.contextLines;
+    return ConversationContextSnapshot(
+      contextLines: result.contextLines,
+      contextTurns: result.contextTurns,
+      recalledLines: result.recalledLines,
+    );
   }
 
   Future<void> storeMessageEmbedding({
@@ -110,4 +127,3 @@ class ConversationMemoryService {
 
   String _workspaceId(String sessionId) => 'chat_memory:$sessionId';
 }
-

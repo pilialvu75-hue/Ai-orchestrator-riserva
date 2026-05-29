@@ -8,8 +8,22 @@ typedef LlbInitBackendDart = void Function();
 typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32, Int32);
 typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
 
-typedef LlbSessionStartGenNative = Int32 Function(Int64, Pointer<Utf8>, Int32, Float);
-typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
+typedef LlbSessionStartGenNative = Int32 Function(
+  Int64,
+  Pointer<Utf8>,
+  Int32,
+  Float,
+  Int32,
+  Float,
+);
+typedef LlbSessionStartGenDart = int Function(
+  int,
+  Pointer<Utf8>,
+  int,
+  double,
+  int,
+  double,
+);
 
 typedef LlbSessionPollTokenNative = Int32 Function(Int64, Pointer<Utf8>, Int32);
 typedef LlbSessionPollTokenDart = int Function(int, Pointer<Utf8>, int);
@@ -38,6 +52,8 @@ abstract final class LlamaNativeDefaults {
   static const double temperature = 0.7;
   static const int topK = 40;
   static const double topP = 0.9;
+  static const int repeatPenaltyLastN = 64;
+  static const double repeatPenalty = 1.05;
   static const int tokenBufferSize = 256;
   // Number of model layers to request for GPU offload when Vulkan is available.
   // 99 exceeds the layer count of most GGUF models in use; llama.cpp clamps

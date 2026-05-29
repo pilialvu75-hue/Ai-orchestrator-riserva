@@ -1062,6 +1062,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
       final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
       final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
+      final effectiveRepeatPenaltyLastN =
+          isForensicSelfTest ? 0 : LlamaNativeDefaults.repeatPenaltyLastN;
+      final effectiveRepeatPenalty =
+          isForensicSelfTest ? 1.0 : LlamaNativeDefaults.repeatPenalty;
       final firstTokenDeadline =
           isForensicSelfTest ? _verificationFirstTokenTimeout : _firstTokenTimeout;
       if (request.maxTokens > _safeMaxTokens) {
@@ -1098,7 +1102,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[FFI_START_GEN] entering startGeneration session=$nativeSessionId '
         'prompt_chars=${prompt.length} max_tokens=$maxTokens '
-        'temperature=$effectiveTemperature',
+        'temperature=$effectiveTemperature '
+        'repeat_penalty_last_n=$effectiveRepeatPenaltyLastN '
+        'repeat_penalty=$effectiveRepeatPenalty',
       );
       _log(
         '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
@@ -1107,7 +1113,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         ' n_batch=${LlamaNativeDefaults.nBatch}'
         ' n_ctx=${LlamaNativeDefaults.nCtx}'
         ' top_k=$effectiveTopK'
-        ' top_p=$effectiveTopP',
+        ' top_p=$effectiveTopP'
+        ' repeat_penalty_last_n=$effectiveRepeatPenaltyLastN'
+        ' repeat_penalty=$effectiveRepeatPenalty',
       );
       _logAi('starting inference...');
 
@@ -1162,6 +1170,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             promptNativePtr,
             maxTokens,
             effectiveTemperature,
+            effectiveRepeatPenaltyLastN,
+            effectiveRepeatPenalty,
           ),
         );
         _log('[FORENSIC_AFTER_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult');
@@ -2236,6 +2246,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 verificationPromptPtr,
                 request.maxTokens.clamp(1, _safeMaxTokens),
                 request.temperature,
+                0,
+                1.0,
               );
               if (startResult != 0) {
                 freeVerificationPromptPtr();
@@ -2646,6 +2658,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
       context: request.context,
+      contextTurns: request.contextTurns,
+      recalledContext: request.recalledContext,
     );
   }
 
