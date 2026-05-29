@@ -100,6 +100,31 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           );
 
           String? runtimeNotice;
+          // Tracks the latest accumulated streaming content so that
+          // onRuntimeNotice can re-emit the correct partial text instead of
+          // resetting the assistant bubble to empty.  This variable is the
+          // fix for the Fake Message Menu content regression: previously,
+          // every runtime notice wiped the streamed content because it
+          // emitted optimisticAssistantMessage.content (always '').
+          var latestPartialContent = '';
+          void emitTransientSendingState() {
+            final shouldRenderAssistantBubble =
+                shouldShowAssistantPlaceholder ||
+                latestPartialContent.trim().isNotEmpty;
+            emit(
+              ChatSending(
+                messages: List.unmodifiable(<ChatMessage>[
+                  ..._messages,
+                  optimisticUserMessage,
+                  if (shouldRenderAssistantBubble)
+                    optimisticAssistantMessage.copyWith(
+                      content: latestPartialContent,
+                    ),
+                ]),
+                runtimeMessage: runtimeNotice,
+              ),
+            );
+          }
           emit(
             ChatSending(
               messages: List.unmodifiable(<ChatMessage>[
@@ -119,6 +144,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               attachments: event.attachments,
               onPartialResponse: (partialText) {
                 if (emit.isDone) return;
+                latestPartialContent = partialText;
                 if (partialText.trim().isNotEmpty && !streamStarted) {
                   streamStarted = true;
                   _log('[UI_STREAM_BEGIN] session=${event.sessionId}');
@@ -126,23 +152,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 _log(
                   'streaming callbacks session=${event.sessionId} partial_chars=${partialText.length}',
                 );
-                emit(
-                  ChatSending(
-                    messages: List.unmodifiable(<ChatMessage>[
-                      ..._messages,
-                      optimisticUserMessage,
-                      ChatMessage(
-                        id: optimisticAssistantMessage.id,
-                        sessionId: optimisticAssistantMessage.sessionId,
-                        role: optimisticAssistantMessage.role,
-                        content: partialText,
-                        timestamp: optimisticAssistantMessage.timestamp,
-                        provider: optimisticAssistantMessage.provider,
-                      ),
-                    ]),
-                    runtimeMessage: runtimeNotice,
-                  ),
-                );
+                emitTransientSendingState();
               },
               onRuntimeNotice: (notice) {
                 runtimeNotice = notice;
@@ -150,24 +160,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 _log(
                   'streaming callbacks session=${event.sessionId} runtime_notice="$notice"',
                 );
-                emit(
-                  ChatSending(
-                    messages: List.unmodifiable(<ChatMessage>[
-                      ..._messages,
-                      optimisticUserMessage,
-                      if (shouldShowAssistantPlaceholder)
-                        ChatMessage(
-                          id: optimisticAssistantMessage.id,
-                          sessionId: optimisticAssistantMessage.sessionId,
-                          role: optimisticAssistantMessage.role,
-                          content: optimisticAssistantMessage.content,
-                          timestamp: optimisticAssistantMessage.timestamp,
-                          provider: optimisticAssistantMessage.provider,
-                        ),
-                    ]),
-                    runtimeMessage: runtimeNotice,
-                  ),
-                );
+                // Use latestPartialContent to preserve accumulated streaming
+                // text.  Using optimisticAssistantMessage.content (always '')
+                // would erase all streamed tokens whenever a notice fires.
+                emitTransientSendingState();
               },
             );
             await sendFuture.timeout(
