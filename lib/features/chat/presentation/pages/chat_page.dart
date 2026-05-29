@@ -258,7 +258,8 @@ class _ChatPageState extends State<ChatPage> {
     setState(() => _debugLabMessages.clear());
   }
 
-  void _openSettings() {    Navigator.of(context).push(
+  void _openSettings() {
+    Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BlocProvider.value(
           value: context.read<ModelDownloadBloc>(),

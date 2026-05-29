@@ -106,7 +106,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           // fix for the Fake Message Menu content regression: previously,
           // every runtime notice wiped the streamed content because it
           // emitted optimisticAssistantMessage.content (always '').
-          var _latestPartialContent = '';
+          var latestPartialContent = '';
           emit(
             ChatSending(
               messages: List.unmodifiable(<ChatMessage>[
@@ -126,7 +126,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               attachments: event.attachments,
               onPartialResponse: (partialText) {
                 if (emit.isDone) return;
-                _latestPartialContent = partialText;
+                latestPartialContent = partialText;
                 if (partialText.trim().isNotEmpty && !streamStarted) {
                   streamStarted = true;
                   _log('[UI_STREAM_BEGIN] session=${event.sessionId}');
@@ -151,7 +151,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 _log(
                   'streaming callbacks session=${event.sessionId} runtime_notice="$notice"',
                 );
-                // Use _latestPartialContent to preserve accumulated streaming
+                // Use latestPartialContent to preserve accumulated streaming
                 // text.  Using optimisticAssistantMessage.content (always '')
                 // would erase all streamed tokens whenever a notice fires.
                 emit(
@@ -161,7 +161,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                       optimisticUserMessage,
                       if (shouldShowAssistantPlaceholder)
                         optimisticAssistantMessage.copyWith(
-                          content: _latestPartialContent,
+                          content: latestPartialContent,
                         ),
                     ]),
                     runtimeMessage: runtimeNotice,
