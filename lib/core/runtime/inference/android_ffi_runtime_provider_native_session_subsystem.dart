@@ -5,19 +5,54 @@ class _AndroidFfiNativeSessionSubsystem {
 
   final AndroidFfiRuntimeProvider _owner;
 
-  int ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) {
+  int ensureNativeSession(
+    LlamaBridgeBindings bindings,
+    String modelPath, {
+    String? modelId,
+  }) {
     try {
+      final isolateHash = AndroidFfiRuntimeProvider._currentThreadId();
+      final cacheSizeBeforeLookup = _owner._nativeSessionsByModel.length;
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1952 | Function: _ensureNativeSession() | BEFORE entry',
       );
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1955 | Function: _ensureNativeSession() | BEFORE reuse check',
       );
+      _log(
+        '[NATIVE_SESSION_CACHE_LOOKUP] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+        ' isolateHash=$isolateHash session_cache_size=$cacheSizeBeforeLookup'
+        ' active_inference_sessions=${_owner._activeInferenceSessions.length}',
+      );
+      if (_owner._activeInferenceSessions.length > 1) {
+        _log(
+          '[NATIVE_SESSION_CONCURRENT_ACCESS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' active_inference_sessions=${_owner._activeInferenceSessions.length}'
+          ' isolateHash=$isolateHash',
+        );
+      }
       final existingSessionId = _owner._nativeSessionsByModel[modelPath];
       if (existingSessionId != null &&
           bindings.sessionIsActive(existingSessionId) == 1) {
+        final reusedPointerHex =
+            '0x${existingSessionId.toUnsigned(64).toRadixString(16)}';
+        final reusedPointerAddress = existingSessionId > 0
+            ? Pointer<Void>.fromAddress(existingSessionId).address
+            : 0;
         markSessionAsMostRecentlyUsed(modelPath);
         _owner._nativeSessionId = existingSessionId;
+        _log(
+          '[NATIVE_SESSION_CACHE_HIT] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' nativeSessionId=$existingSessionId pointer_hex=$reusedPointerHex'
+          ' pointer_address=$reusedPointerAddress session_active=1'
+          ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
+        );
+        _log(
+          '[NATIVE_SESSION_REUSE] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' nativeSessionId=$existingSessionId pointer_hex=$reusedPointerHex'
+          ' pointer_address=$reusedPointerAddress session_active=1'
+          ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
+        );
         _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
         _log(
             '[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
@@ -28,10 +63,36 @@ class _AndroidFfiNativeSessionSubsystem {
       }
 
       if (existingSessionId != null) {
+        final stalePointerHex =
+            '0x${existingSessionId.toUnsigned(64).toRadixString(16)}';
+        final stalePointerAddress = existingSessionId > 0
+            ? Pointer<Void>.fromAddress(existingSessionId).address
+            : 0;
+        final staleActiveState = bindings.sessionIsActive(existingSessionId);
+        _log(
+          '[NATIVE_SESSION_CACHE_MISS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' reason=inactive_cached_session nativeSessionId=$existingSessionId'
+          ' pointer_hex=$stalePointerHex pointer_address=$stalePointerAddress'
+          ' session_active=$staleActiveState isolateHash=$isolateHash'
+          ' session_cache_size=${_owner._nativeSessionsByModel.length}',
+        );
+        _log(
+          '[NATIVE_SESSION_STALE_POINTER] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' nativeSessionId=$existingSessionId pointer_hex=$stalePointerHex'
+          ' pointer_address=$stalePointerAddress session_active=$staleActiveState'
+          ' isolateHash=$isolateHash',
+        );
         releaseNativeSessionByModelPath(
           bindings,
           modelPath,
           reason: 'inactive_existing_session',
+        );
+      } else {
+        _log(
+          '[NATIVE_SESSION_CACHE_MISS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' reason=not_cached nativeSessionId=null pointer_hex=0x0 pointer_address=0'
+          ' session_active=0 isolateHash=$isolateHash'
+          ' session_cache_size=${_owner._nativeSessionsByModel.length}',
         );
       }
 
@@ -45,6 +106,12 @@ class _AndroidFfiNativeSessionSubsystem {
 
       _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
       _log(
+        '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+        ' nativeSessionId=0 pointer_hex=0x0 pointer_address=0'
+        ' session_active=0 isolateHash=$isolateHash'
+        ' thread_id=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
+      );
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
       );
       const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
@@ -54,6 +121,18 @@ class _AndroidFfiNativeSessionSubsystem {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
       );
+      final createdPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
+      final createdPointerAddress =
+          created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
+      final createdActiveState =
+          created > 0 ? bindings.sessionIsActive(created) : 0;
+      _log(
+        '[FORENSIC_AFTER_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+        ' nativeSessionId=$created pointer_hex=$createdPointerHex'
+        ' pointer_address=$createdPointerAddress session_active=$createdActiveState'
+        ' isolateHash=$isolateHash thread_id=$isolateHash'
+        ' session_cache_size=${_owner._nativeSessionsByModel.length}',
+      );
       _log(
           '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=$desiredGpuLayers');
 
@@ -61,7 +140,27 @@ class _AndroidFfiNativeSessionSubsystem {
         _log(
           '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers failed=$created reason=session_create_error retrying_with_cpu',
         );
+        _log(
+          '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' nativeSessionId=0 pointer_hex=0x0 pointer_address=0'
+          ' session_active=0 isolateHash=$isolateHash'
+          ' thread_id=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}'
+          ' fallback=cpu',
+        );
         created = bindings.createSession(modelPath, nGpuLayers: 0);
+        final fallbackPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
+        final fallbackPointerAddress =
+            created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
+        final fallbackActiveState =
+            created > 0 ? bindings.sessionIsActive(created) : 0;
+        _log(
+          '[FORENSIC_AFTER_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+          ' nativeSessionId=$created pointer_hex=$fallbackPointerHex'
+          ' pointer_address=$fallbackPointerAddress session_active=$fallbackActiveState'
+          ' isolateHash=$isolateHash thread_id=$isolateHash'
+          ' session_cache_size=${_owner._nativeSessionsByModel.length}'
+          ' fallback=cpu',
+        );
         _log(
           '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=0 fallback=cpu',
         );
@@ -81,6 +180,15 @@ class _AndroidFfiNativeSessionSubsystem {
       _owner._nativeSessionId = created;
       _owner._nativeSessionsByModel[modelPath] = created;
       markSessionAsMostRecentlyUsed(modelPath);
+      final storedPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
+      final storedPointerAddress =
+          created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
+      _log(
+        '[NATIVE_SESSION_CACHE_STORE] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
+        ' nativeSessionId=$created pointer_hex=$storedPointerHex'
+        ' pointer_address=$storedPointerAddress session_active=1'
+        ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
+      );
       _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
       _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
       _log(
@@ -101,8 +209,27 @@ class _AndroidFfiNativeSessionSubsystem {
     required String reason,
   }) {
     final sessionId = _owner._nativeSessionsByModel.remove(modelPath);
-    if (sessionId == null) return;
+    if (sessionId == null) {
+      _log(
+        '[NATIVE_SESSION_DOUBLE_RELEASE_SUSPECT] model_path=$modelPath reason=$reason'
+        ' nativeSessionId=null pointer_hex=0x0 pointer_address=0'
+        ' session_active=0 isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
+        ' session_cache_size=${_owner._nativeSessionsByModel.length}',
+      );
+      return;
+    }
     try {
+      final pointerHex = '0x${sessionId.toUnsigned(64).toRadixString(16)}';
+      final pointerAddress =
+          sessionId > 0 ? Pointer<Void>.fromAddress(sessionId).address : 0;
+      final activeState = bindings.sessionIsActive(sessionId);
+      _log(
+        '[NATIVE_SESSION_RELEASE_BEGIN] model_path=$modelPath reason=$reason'
+        ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
+        ' pointer_address=$pointerAddress session_active=$activeState'
+        ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
+        ' session_cache_size=${_owner._nativeSessionsByModel.length}',
+      );
       _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
       bindings.releaseSession(sessionId);
     } catch (error) {
