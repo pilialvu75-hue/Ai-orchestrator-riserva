@@ -680,30 +680,6 @@ void run_generation(
          n_decode);
 }
 
-void release_session_async(const std::shared_ptr<RuntimeSession>& session) {
-    std::thread cleanup_worker([session]() {
-        LOGI("[CLEANUP] session=%" PRId64 " release_worker_start", session->id);
-
-        session->cancel_requested.store(true, std::memory_order_release);
-        session->gen_state.store(kStateCancelled, std::memory_order_release);
-
-        {
-            std::lock_guard<std::mutex> lock(session->generation_mutex);
-            if (session->gen_thread.joinable()) {
-                LOGI("[CLEANUP_JOIN] session=%" PRId64 " joining_worker=true", session->id);
-                session->gen_thread.join();
-            }
-        }
-
-        session->clear_queue();
-        session->destroy_native_resources();
-
-        LOGI("[SESSION_DESTROY] session=%" PRId64 " destroyed=true", session->id);
-    });
-
-    cleanup_worker.detach();
-}
-
 }  // namespace
 
 extern "C" {
@@ -1072,7 +1048,36 @@ void llb_release_session(int64_t session_id) {
     }
 
     LOGI("[SESSION_DESTROY] session=%" PRId64 " releasing=true", session_id);
-    release_session_async(session);
+
+    // Signal cancellation so the gen thread exits its decode loop promptly.
+    session->cancel_requested.store(true, std::memory_order_release);
+    session->gen_state.store(kStateCancelled, std::memory_order_release);
+    // Wake any llb_session_poll_token caller waiting on the first-token CV.
+    // This is a no-op when cancelSession was already called (the common path),
+    // but is needed for correctness when releaseSession is called without a prior
+    // cancelSession (e.g. LRU eviction).  It is idempotent and harmless.
+    notify_first_token_waiters(session);
+
+    // Synchronous cleanup: block the caller (Dart FFI isolate thread) until the
+    // gen_thread has fully exited and all native resources are freed.  This is the
+    // minimal change that eliminates the race between the old gen_thread still
+    // running llama_decode and a new llb_session_start_gen starting on a freshly
+    // created context — both would otherwise race through GGML's shared CPU thread
+    // pool, causing SIGSEGV at the start of the new generation.
+    LOGI("[SESSION_RELEASE_WAIT_BEGIN] session=%" PRId64, session_id);
+
+    {
+        std::lock_guard<std::mutex> lock(session->generation_mutex);
+        if (session->gen_thread.joinable()) {
+            LOGI("[SESSION_NATIVE_THREAD_JOIN] session=%" PRId64 " joining=true", session_id);
+            session->gen_thread.join();
+        }
+    }
+
+    session->clear_queue();
+    session->destroy_native_resources();
+
+    LOGI("[SESSION_RELEASE_WAIT_END] session=%" PRId64 " destroyed=true", session_id);
 }
 
 int32_t llb_session_is_active(int64_t session_id) {
