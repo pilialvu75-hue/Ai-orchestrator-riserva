@@ -558,6 +558,7 @@ class _ChatBodyState extends State<_ChatBody> {
   }
 
   Future<void> _clearChatDebug() {
+    if (!mounted) return Future<void>.value();
     _uiDebugLog(
       action: 'clear_chat_triggered',
       sessionId: _kDefaultSessionId,
@@ -565,7 +566,6 @@ class _ChatBodyState extends State<_ChatBody> {
     context.read<OrchestratorStateEngine>().add(
           const DebugClearChatEvent(sessionId: _kDefaultSessionId),
         );
-    if (!mounted) return Future<void>.value();
     setState(() => _debugLabMessages.clear());
     return Future<void>.value();
   }
