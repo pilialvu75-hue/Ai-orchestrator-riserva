@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -479,12 +481,16 @@ class _ChatBody extends StatefulWidget {
 class _ChatBodyState extends State<_ChatBody> {
   final List<ChatMessage> _debugLabMessages = <ChatMessage>[];
   final DebugLabController _debugLabController = DebugLabController.instance;
+  late final ChatUiPreferencesService _chatUiPreferencesService;
   String? _lastSpokenAssistantMessageId;
+  AssistantMessageTextSize _assistantTextSize = AssistantMessageTextSize.medium;
 
   @override
   void initState() {
     super.initState();
+    _chatUiPreferencesService = di.sl<ChatUiPreferencesService>();
     _debugLabController.addListener(_handleDebugLabVisibilityChanged);
+    _loadAssistantTextSize();
   }
 
   @override
@@ -523,6 +529,50 @@ class _ChatBodyState extends State<_ChatBody> {
       ]);
     });
     widget.scrollToBottom();
+  }
+
+  void _loadAssistantTextSize() {
+    if (!mounted) return;
+    setState(() {
+      _assistantTextSize = _chatUiPreferencesService.assistantMessageTextSize;
+    });
+  }
+
+  Future<void> _setAssistantTextSize(AssistantMessageTextSize size) async {
+    await _chatUiPreferencesService.setAssistantMessageTextSize(size);
+    if (!mounted) return;
+    setState(() => _assistantTextSize = size);
+    _uiDebugLog(
+      action: 'assistant_text_size_changed',
+      sessionId: _kDefaultSessionId,
+      details: 'size=${size.name}',
+    );
+  }
+
+  Future<void> _clearChatDebug() {
+    _uiDebugLog(
+      action: 'clear_chat_triggered',
+      sessionId: _kDefaultSessionId,
+    );
+    context.read<OrchestratorStateEngine>().add(
+          const DebugClearChatEvent(sessionId: _kDefaultSessionId),
+        );
+    if (!mounted) return Future<void>.value();
+    setState(() => _debugLabMessages.clear());
+    return Future<void>.value();
+  }
+
+  void _uiDebugLog({
+    required String action,
+    required String sessionId,
+    String? details,
+  }) {
+    final timestamp = DateTime.now().toIso8601String();
+    final suffix = details == null ? '' : ' $details';
+    final message =
+        '[UI_DEBUG] action=$action timestamp=$timestamp session_id=$sessionId$suffix';
+    debugPrint(message);
+    RuntimeEventLog.instance.emit(message);
   }
 
   Future<void> _speakAssistantResponse(String text) async {
@@ -627,6 +677,7 @@ class _ChatBodyState extends State<_ChatBody> {
                         : _HighPerformanceChatList(
                             controller: widget.scrollController,
                             messages: combinedMessages,
+                            assistantTextSize: _assistantTextSize,
                           ),
                   ),
                   Positioned(
@@ -642,7 +693,7 @@ class _ChatBodyState extends State<_ChatBody> {
                       ),
                     ),
                   ),
-                  if (_debugLabController.isVisible)
+                  if (kDebugMode && _debugLabController.isVisible)
                     Positioned(
                       top: 10,
                       left: 10,
@@ -657,6 +708,9 @@ class _ChatBodyState extends State<_ChatBody> {
                             response: response,
                           );
                         },
+                        onClearChat: _clearChatDebug,
+                        assistantTextSize: _assistantTextSize,
+                        onAssistantTextSizeChanged: _setAssistantTextSize,
                       ),
                     ),
                 ],
@@ -743,10 +797,12 @@ class _HighPerformanceChatList extends StatelessWidget {
   const _HighPerformanceChatList({
     required this.controller,
     required this.messages,
+    required this.assistantTextSize,
   });
 
   final ScrollController controller;
   final List<ChatMessage> messages;
+  final AssistantMessageTextSize assistantTextSize;
 
   @override
   Widget build(BuildContext context) {
@@ -761,7 +817,10 @@ class _HighPerformanceChatList extends StatelessWidget {
           return RepaintBoundary(
             child: _AnimatedBubble(
               key: ValueKey(message.id),
-              child: ChatBubble(message: message),
+              child: ChatBubble(
+                message: message,
+                assistantTextSize: assistantTextSize,
+              ),
             ),
           );
         },

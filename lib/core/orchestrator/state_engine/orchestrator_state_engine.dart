@@ -32,6 +32,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     on<SendMessageEvent>(_onSendMessage);
     on<PruneHistoryEvent>(_onPruneHistory);
     on<RecoverFromStuckUiEvent>(_onRecoverFromStuckUi);
+    on<DebugClearChatEvent>(_onDebugClearChat);
   }
 
   final IChatRepository _chatRepository;
@@ -247,6 +248,31 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       ),
     );
     _log('[ORCHESTRATOR_END] session=${event.sessionId} recovery=forced_ui_unlock');
+  }
+
+  Future<void> _onDebugClearChat(
+    DebugClearChatEvent event,
+    Emitter<ChatState> emit,
+  ) async {
+    _log('[UI_DEBUG] action=clear_chat_reset_begin session=${event.sessionId}');
+    try {
+      await _chatRepository.clearSession(event.sessionId);
+      _messages = <ChatMessage>[];
+      _sendInFlight = false;
+      emit(const ChatLoaded(messages: <ChatMessage>[]));
+      _log('[UI_DEBUG] action=clear_chat_reset_done session=${event.sessionId}');
+    } catch (error) {
+      _log(
+        '[UI_DEBUG] action=clear_chat_reset_failed session=${event.sessionId} error=$error',
+      );
+      emit(
+        ChatLoaded(
+          messages: List.unmodifiable(_messages),
+          runtimeMessage: _extractErrorMessage(error),
+          suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
+        ),
+      );
+    }
   }
 
   String _extractErrorMessage(Object error) {

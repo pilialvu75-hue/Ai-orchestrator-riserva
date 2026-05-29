@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -241,7 +242,8 @@ class _AppShellState extends State<AppShell> {
       appBar: _AppShellAppBar(
         resolveActiveModel: (state) => _resolveActiveModel(context, state),
         onSettings: () => _openSettings(context),
-        onHeaderTap: DebugLabController.instance.registerHeaderTap,
+        onHeaderTap:
+            kDebugMode ? DebugLabController.instance.registerHeaderTap : () {},
       ),
       body: const ChatPage(),
     );

@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_stat
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/plugins/plugin_registry.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
@@ -22,6 +23,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
+import 'package:ai_orchestrator/core/runtime/llm_role_assignment_service.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
@@ -122,6 +124,12 @@ Future<void> initDependencies({
   );
   sl.registerLazySingleton<AiRuntimeSettingsService>(
     () => AiRuntimeSettingsService(configRepository: sl<ConfigRepository>()),
+  );
+  sl.registerLazySingleton<ChatUiPreferencesService>(
+    () => ChatUiPreferencesService(configRepository: sl<ConfigRepository>()),
+  );
+  sl.registerLazySingleton<LlmRoleAssignmentService>(
+    () => LlmRoleAssignmentService(configRepository: sl<ConfigRepository>()),
   );
   final languageService =
       LanguageService(configRepository: sl<ConfigRepository>());
