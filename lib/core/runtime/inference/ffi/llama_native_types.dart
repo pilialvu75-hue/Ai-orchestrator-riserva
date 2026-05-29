@@ -32,7 +32,9 @@ abstract final class LlamaNativeDefaults {
   // Keep Android runtime thread usage bounded for thermals/stability.
   // This mirrors the native-side safe defaults used by llama_bridge.cpp.
   static const int nThreads = 2;
-  static const int nBatch = 32;
+  // Native prefill now sizes the batch to the active context instead of using
+  // a fixed clamp, so the surfaced batch diagnostic mirrors n_ctx.
+  static const int nBatch = nCtx;
   static const double temperature = 0.7;
   static const int topK = 40;
   static const double topP = 0.9;

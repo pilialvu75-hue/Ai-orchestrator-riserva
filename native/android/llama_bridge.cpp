@@ -30,7 +30,6 @@
 namespace {
 
 constexpr size_t kRingCapacity = 256;
-constexpr int32_t kSafeNBatch = 32;
 constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr size_t kMinPromptLength = 2;
 constexpr int64_t kDecodeStallLogMillis = 5000;
@@ -418,6 +417,13 @@ void run_generation(
          session->id,
          owner_epoch,
          n_tokens);
+    LOGI("[FORENSIC_BATCH_PARAMS] session=%" PRId64 " epoch=%" PRIu64
+         " stage=prefill prompt_tokens=%d n_batch=%d n_ctx=%d",
+         session->id,
+         owner_epoch,
+         n_tokens,
+         n_ctx,
+         n_ctx);
     LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] after session=%" PRId64 " epoch=%" PRIu64
          " prompt_tokens=%d",
          session->id,
@@ -444,7 +450,20 @@ void run_generation(
     prefill_batch.batch.n_tokens = static_cast<int32_t>(tokens.size());
 
     const auto prefill_started_at = std::chrono::steady_clock::now();
+    LOGI("[FORENSIC_BEFORE_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
+         " stage=prefill batch_n_tokens=%d n_batch=%d n_ctx=%d",
+         session->id,
+         owner_epoch,
+         prefill_batch.batch.n_tokens,
+         n_ctx,
+         n_ctx);
     const int prefill_status = llama_decode(ctx, prefill_batch.batch);
+    LOGI("[FORENSIC_AFTER_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
+         " stage=prefill status=%d batch_n_tokens=%d",
+         session->id,
+         owner_epoch,
+         prefill_status,
+         prefill_batch.batch.n_tokens);
     if (prefill_status != 0) {
         session->set_error("Prompt prefill decode failed");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_decode_failed");
@@ -773,13 +792,25 @@ int64_t llb_create_session(
     }
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
-    cparams.n_threads = n_threads > 0 ? n_threads : 2;
-    cparams.n_threads_batch = n_threads > 0 ? n_threads : 2;
-    cparams.n_batch = kSafeNBatch;
-    cparams.n_ubatch = kSafeNBatch;
+    const uint32_t effective_n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
+    const int32_t effective_n_threads = n_threads > 0 ? n_threads : 2;
+    cparams.n_ctx = effective_n_ctx;
+    cparams.n_threads = effective_n_threads;
+    cparams.n_threads_batch = effective_n_threads;
+    cparams.n_batch = effective_n_ctx;
+    cparams.n_ubatch = effective_n_ctx;
     cparams.embeddings = false;
     cparams.offload_kqv = true;
+    LOGI("[FORENSIC_CTX_PARAMS] session=%" PRId64
+         " requested_n_ctx=%d effective_n_ctx=%u requested_n_threads=%d effective_n_threads=%d"
+         " n_batch=%u n_ubatch=%u",
+         session_id,
+         n_ctx,
+         effective_n_ctx,
+         n_threads,
+         effective_n_threads,
+         cparams.n_batch,
+         cparams.n_ubatch);
 
     {
         std::lock_guard<std::mutex> lock(session->native_mutex);
