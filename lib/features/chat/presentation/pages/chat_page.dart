@@ -557,8 +557,8 @@ class _ChatBodyState extends State<_ChatBody> {
     }
   }
 
-  Future<void> _clearChatDebug() {
-    if (!mounted) return Future<void>.value();
+  void _clearChatDebug() {
+    if (!mounted) return;
     _uiDebugLog(
       action: 'clear_chat_triggered',
       sessionId: _kDefaultSessionId,
@@ -567,7 +567,6 @@ class _ChatBodyState extends State<_ChatBody> {
           const DebugClearChatEvent(sessionId: _kDefaultSessionId),
         );
     setState(() => _debugLabMessages.clear());
-    return Future<void>.value();
   }
 
   void _uiDebugLog({
@@ -718,7 +717,9 @@ class _ChatBodyState extends State<_ChatBody> {
                         },
                         onClearChat: _clearChatDebug,
                         assistantTextSize: _assistantTextSize,
-                        onAssistantTextSizeChanged: _setAssistantTextSize,
+                        onAssistantTextSizeChanged: (size) {
+                          unawaited(_setAssistantTextSize(size));
+                        },
                       ),
                     ),
                 ],

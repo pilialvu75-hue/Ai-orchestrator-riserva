@@ -32,10 +32,9 @@ class DebugOverlay extends StatefulWidget {
     required String prompt,
     required String response,
   }) onRenderVoiceInference;
-  final Future<void> Function() onClearChat;
+  final VoidCallback onClearChat;
   final AssistantMessageTextSize assistantTextSize;
-  final Future<void> Function(AssistantMessageTextSize size)
-      onAssistantTextSizeChanged;
+  final ValueChanged<AssistantMessageTextSize> onAssistantTextSizeChanged;
 
   @override
   State<DebugOverlay> createState() => _DebugOverlayState();
@@ -467,7 +466,7 @@ class _DebugOverlayState extends State<DebugOverlay> {
                   ? null
                   : (size) {
                       if (size == null) return;
-                      unawaited(widget.onAssistantTextSizeChanged(size));
+                      widget.onAssistantTextSizeChanged(size);
                     },
             ),
           ],
