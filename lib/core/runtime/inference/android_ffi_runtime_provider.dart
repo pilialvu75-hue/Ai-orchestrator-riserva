@@ -936,7 +936,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         nativeSessionId = await _runNativeCallWithTimeout<int>(
           stage: 'session_create',
           timeout: _modelLoadTimeout,
-          call: () => _ensureNativeSession(bindings, modelPath),
+          call: () => _ensureNativeSession(
+            bindings,
+            modelPath,
+            modelId: modelId,
+          ),
         );
         _log(
           '[FORENSIC_AFTER_CREATE_SESSION] nativeSessionId=$nativeSessionId',
@@ -1130,6 +1134,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
+        final nativeHandleHex =
+            '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
+        final nativeHandleAddress =
+            nativeSessionId > 0 ? Pointer<Void>.fromAddress(nativeSessionId).address : 0;
+        final activeBeforeStart = bindings.sessionIsActive(nativeSessionId);
+        _log(
+          '[FORENSIC_BEFORE_LLB_SESSION_START_GEN] modelId=$modelId modelPath=$modelPath'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+          ' pointer_hex=$nativeHandleHex pointer_address=$nativeHandleAddress'
+          ' session_active=$activeBeforeStart isolateHash=${_currentThreadId()}'
+          ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
+          ' prompt_pointer_hex=0x${promptNativePtr.address.toUnsigned(64).toRadixString(16)}'
+          ' prompt_pointer_address=${promptNativePtr.address}',
+        );
         _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
         _log('[FORENSIC_BEFORE_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId');
         _log(
@@ -1147,6 +1165,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           ),
         );
         _log('[FORENSIC_AFTER_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult');
+        final activeAfterStart = bindings.sessionIsActive(nativeSessionId);
+        _log(
+          '[FORENSIC_AFTER_LLB_SESSION_START_GEN] modelId=$modelId modelPath=$modelPath'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult'
+          ' pointer_hex=$nativeHandleHex pointer_address=$nativeHandleAddress'
+          ' session_active=$activeAfterStart isolateHash=${_currentThreadId()}'
+          ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
+          ' prompt_pointer_hex=0x${promptNativePtr.address.toUnsigned(64).toRadixString(16)}'
+          ' prompt_pointer_address=${promptNativePtr.address}',
+        );
         _log(
           '[FIRST_TOKEN_START_GENERATION_END] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
           ' sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult',
@@ -1277,6 +1305,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
       _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
       _preFirstTokenActive = true;
+      var firstPollBoundaryLogged = false;
+      var firstPollBoundaryFinished = false;
       _log(
         '[FIRST_TOKEN_POLL_LOOP_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
         ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
@@ -1538,10 +1568,46 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId '
               'iteration=$pollIterations',
             );
+            if (!firstPollBoundaryLogged) {
+              firstPollBoundaryLogged = true;
+              final pollHandleHex =
+                  '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
+              final pollHandleAddress = nativeSessionId > 0
+                  ? Pointer<Void>.fromAddress(nativeSessionId).address
+                  : 0;
+              final activeBeforeFirstPoll = bindings.sessionIsActive(nativeSessionId);
+              _log(
+                '[FORENSIC_BEFORE_FIRST_LLB_SESSION_POLL_TOKEN] modelId=$modelId modelPath=$modelPath'
+                ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+                ' pointer_hex=$pollHandleHex pointer_address=$pollHandleAddress'
+                ' session_active=$activeBeforeFirstPoll isolateHash=${_currentThreadId()}'
+                ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
+                ' token_buffer_pointer_hex=0x${tokenBufRaw.address.toUnsigned(64).toRadixString(16)}'
+                ' token_buffer_pointer_address=${tokenBufRaw.address}',
+              );
+            }
             _log(
               '[FFI_CALLBACK_ENTER] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=$pollIterations',
             );
             status = bindings.pollToken(nativeSessionId, tokenBuf);
+            if (!firstPollBoundaryFinished) {
+              firstPollBoundaryFinished = true;
+              final pollHandleHex =
+                  '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
+              final pollHandleAddress = nativeSessionId > 0
+                  ? Pointer<Void>.fromAddress(nativeSessionId).address
+                  : 0;
+              final activeAfterFirstPoll = bindings.sessionIsActive(nativeSessionId);
+              _log(
+                '[FORENSIC_AFTER_FIRST_LLB_SESSION_POLL_TOKEN] modelId=$modelId modelPath=$modelPath'
+                ' sessionId=$sessionId nativeSessionId=$nativeSessionId status=$status'
+                ' pointer_hex=$pollHandleHex pointer_address=$pollHandleAddress'
+                ' session_active=$activeAfterFirstPoll isolateHash=${_currentThreadId()}'
+                ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
+                ' token_buffer_pointer_hex=0x${tokenBufRaw.address.toUnsigned(64).toRadixString(16)}'
+                ' token_buffer_pointer_address=${tokenBufRaw.address}',
+              );
+            }
           } catch (error) {
             classifyFirstTokenTermination(
               reason: 'poll_token_exception',
@@ -2357,8 +2423,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   // ── Private helpers ───────────────────────────────────────────────────────────
 
-  int _ensureNativeSession(LlamaBridgeBindings bindings, String modelPath) =>
-      _nativeSessionSubsystem.ensureNativeSession(bindings, modelPath);
+  int _ensureNativeSession(
+    LlamaBridgeBindings bindings,
+    String modelPath, {
+    String? modelId,
+  }) =>
+      _nativeSessionSubsystem.ensureNativeSession(
+        bindings,
+        modelPath,
+        modelId: modelId,
+      );
 
   void _releaseNativeSessionByModelPath(
     LlamaBridgeBindings bindings,
