@@ -539,14 +539,22 @@ class _ChatBodyState extends State<_ChatBody> {
   }
 
   Future<void> _setAssistantTextSize(AssistantMessageTextSize size) async {
-    await _chatUiPreferencesService.setAssistantMessageTextSize(size);
-    if (!mounted) return;
-    setState(() => _assistantTextSize = size);
-    _uiDebugLog(
-      action: 'assistant_text_size_changed',
-      sessionId: _kDefaultSessionId,
-      details: 'size=${size.name}',
-    );
+    try {
+      await _chatUiPreferencesService.setAssistantMessageTextSize(size);
+      if (!mounted) return;
+      setState(() => _assistantTextSize = size);
+      _uiDebugLog(
+        action: 'assistant_text_size_changed',
+        sessionId: _kDefaultSessionId,
+        details: 'size=${size.name}',
+      );
+    } catch (error) {
+      _uiDebugLog(
+        action: 'assistant_text_size_change_failed',
+        sessionId: _kDefaultSessionId,
+        details: 'error=$error',
+      );
+    }
   }
 
   Future<void> _clearChatDebug() {

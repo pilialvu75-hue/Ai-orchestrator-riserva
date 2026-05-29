@@ -138,7 +138,6 @@ class ChatRepositoryImpl implements ChatRepository {
               context: context,
               systemPrompt: systemPrompt,
             );
-            var abortedByDebugReset = false;
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
@@ -206,12 +205,10 @@ class ChatRepositoryImpl implements ChatRepository {
             );
             _activeInferenceSubscriptionSessionId = sessionId;
             try {
-              await Future.any<void>([
-                streamCompleter.future,
-                abortSignal.future,
+              final abortedByDebugReset = await Future.any<bool>([
+                streamCompleter.future.then((_) => false),
+                abortSignal.future.then((_) => true),
               ]);
-              abortedByDebugReset =
-                  abortSignal.isCompleted && !streamCompleter.isCompleted;
               if (abortedByDebugReset) {
                 _log('[UI_DEBUG] action=clear_chat_abort_stream session=$sessionId');
                 return userMsg;
