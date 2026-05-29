@@ -11,7 +11,7 @@ class _AndroidFfiNativeSessionSubsystem {
     String? modelId,
   }) {
     try {
-      final isolateHash = _owner._currentThreadId();
+      final isolateHash = AndroidFfiRuntimeProvider._currentThreadId();
       final cacheSizeBeforeLookup = _owner._nativeSessionsByModel.length;
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1952 | Function: _ensureNativeSession() | BEFORE entry',
@@ -213,7 +213,7 @@ class _AndroidFfiNativeSessionSubsystem {
       _log(
         '[NATIVE_SESSION_DOUBLE_RELEASE_SUSPECT] model_path=$modelPath reason=$reason'
         ' nativeSessionId=null pointer_hex=0x0 pointer_address=0'
-        ' session_active=0 isolateHash=${_owner._currentThreadId()}'
+        ' session_active=0 isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
         ' session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
       return;
@@ -227,7 +227,7 @@ class _AndroidFfiNativeSessionSubsystem {
         '[NATIVE_SESSION_RELEASE_BEGIN] model_path=$modelPath reason=$reason'
         ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
         ' pointer_address=$pointerAddress session_active=$activeState'
-        ' isolateHash=${_owner._currentThreadId()}'
+        ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
         ' session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
       _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
