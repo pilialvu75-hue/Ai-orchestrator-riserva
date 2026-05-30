@@ -67,6 +67,7 @@ class ConversationMemoryService {
     required int timestamp,
   }) async {
     final normalized = content.trim();
+
     if (normalized.isEmpty) return;
 
     final semanticText = '$role: $normalized';
@@ -94,7 +95,10 @@ class ConversationMemoryService {
     int topK = 4,
   }) async {
     final normalized = query.trim();
-    if (normalized.isEmpty) return const <String>[];
+
+    if (normalized.isEmpty) {
+      return const <String>[];
+    }
 
     final queryVector = await _embeddingService.embedTextAsync(normalized);
 
@@ -113,24 +117,26 @@ class ConversationMemoryService {
 
     for (final match in matches) {
       final value = match.chunkText.trim();
+
       if (value.isEmpty) continue;
 
+      // Evita che il sistema richiami immediatamente
+      // lo stesso contenuto appena scritto dall'utente.
       final cleanContent = value
           .replaceFirst(
-            RegExp(r'^(user|assistant|system):\s*', caseSensitive: false),
+            RegExp(
+              r'^(user|assistant|system):\s*',
+              caseSensitive: false,
+            ),
             '',
           )
           .trim();
 
-      // Phase 1B guardrail: only block direct user echo
-      final isUserEcho =
-          value.startsWith('user:') &&
-          cleanContent.toLowerCase() == normalized.toLowerCase();
+      if (cleanContent.toLowerCase() == normalized.toLowerCase()) {
+        continue;
+      }
 
-      if (isUserEcho) continue;
-
-      final key = cleanContent.toLowerCase();
-      if (!seen.add(key)) continue;
+      if (!seen.add(value)) continue;
 
       recalled.add(value);
     }
