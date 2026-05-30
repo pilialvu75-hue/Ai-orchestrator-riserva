@@ -29,6 +29,7 @@ class ConversationMemoryService {
       query: userPrompt,
       topK: 4,
     );
+
     final result = _rollingContextBuilder.build(
       messages: messages,
       userPrompt: userPrompt,
@@ -36,20 +37,25 @@ class ConversationMemoryService {
       excludedMessageId: excludedMessageId,
       recalledContext: recalled,
     );
+
     debugPrint(
       '[MEMORY_WINDOW] session=$sessionId lines=${result.contextLines.length} trimmed=${result.trimmedLines} total_chars=${result.totalChars}',
     );
+
     if (result.trimmedLines > 0) {
       debugPrint(
         '[MEMORY_TRIM] session=$sessionId trimmed_lines=${result.trimmedLines}',
       );
     }
+
     if (result.overflowDetected) {
       debugPrint('[CONTEXT_OVERFLOW] session=$sessionId detected=true');
     }
+
     debugPrint(
       '[CONTEXT_REBUILD] session=$sessionId context_lines=${result.contextLines.length} recall_lines=${recalled.length}',
     );
+
     return result.contextLines;
   }
 
@@ -62,9 +68,13 @@ class ConversationMemoryService {
   }) async {
     final normalized = content.trim();
     if (normalized.isEmpty) return;
+
     final semanticText = '$role: $normalized';
+
     final embedding = await _embeddingService.embedTextAsync(semanticText);
+
     final workspaceId = _workspaceId(sessionId);
+
     await _semanticWorkspaceIndex.upsertChunk(
       workspaceId: workspaceId,
       documentPath: 'chat://$sessionId/$messageId',
@@ -72,6 +82,7 @@ class ConversationMemoryService {
       chunkText: semanticText,
       vector: embedding,
     );
+
     debugPrint(
       '[EMBEDDING_STORE] scope=chat session=$sessionId message=$messageId dims=${embedding.length}',
     );
@@ -86,28 +97,50 @@ class ConversationMemoryService {
     if (normalized.isEmpty) return const <String>[];
 
     final queryVector = await _embeddingService.embedTextAsync(normalized);
+
     final matches = await _semanticWorkspaceIndex.search(
       queryVector: queryVector,
       workspaceId: _workspaceId(sessionId),
       topK: topK,
     );
+
     debugPrint(
       '[SEMANTIC_RETRIEVE] scope=chat session=$sessionId top_k=$topK matches=${matches.length}',
     );
+
     final recalled = <String>[];
     final seen = <String>{};
+
     for (final match in matches) {
       final value = match.chunkText.trim();
       if (value.isEmpty) continue;
-      if (!seen.add(value)) continue;
+
+      final cleanContent = value
+          .replaceFirst(
+            RegExp(r'^(user|assistant|system):\s*', caseSensitive: false),
+            '',
+          )
+          .trim();
+
+      // Phase 1B guardrail: only block direct user echo
+      final isUserEcho =
+          value.startsWith('user:') &&
+          cleanContent.toLowerCase() == normalized.toLowerCase();
+
+      if (isUserEcho) continue;
+
+      final key = cleanContent.toLowerCase();
+      if (!seen.add(key)) continue;
+
       recalled.add(value);
     }
+
     debugPrint(
       '[MEMORY_RECALL] session=$sessionId recalled_lines=${recalled.length}',
     );
+
     return recalled;
   }
 
   String _workspaceId(String sessionId) => 'chat_memory:$sessionId';
 }
-
