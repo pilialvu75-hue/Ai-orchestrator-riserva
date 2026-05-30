@@ -32,18 +32,25 @@ class RollingContextBuilder {
     final seen = <String>{};
     final lines = <String>[];
 
+    // 1. Inject recalled context FIRST (semantic memory)
     for (final recalled in recalledContext) {
       final normalized = recalled.trim();
       if (normalized.isEmpty) continue;
-      if (!seen.add(normalized)) continue;
+
+      if (!seen.add(normalized.toLowerCase())) continue;
+
       lines.add(normalized);
     }
 
+    // 2. Inject conversation history (chronological truth)
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) continue;
+
       final normalized = '${message.role}: ${message.content}'.trim();
       if (normalized.isEmpty) continue;
-      if (!seen.add(normalized)) continue;
+
+      if (!seen.add(normalized.toLowerCase())) continue;
+
       lines.add(normalized);
     }
 
@@ -61,4 +68,3 @@ class RollingContextBuilder {
     );
   }
 }
-
