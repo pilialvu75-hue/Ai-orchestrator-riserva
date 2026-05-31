@@ -28,6 +28,16 @@ part 'android_ffi_runtime_provider_lifecycle_subsystem.dart';
 part 'android_ffi_runtime_provider_native_session_subsystem.dart';
 part 'android_ffi_runtime_provider_warmup_subsystem.dart';
 
+// ── FSM Fasi Native/FFI ───────────────────────────────────────────────────────
+enum FfiPhase {
+  idle,
+  sessionCreating,
+  generationStarting,
+  promptIngestion,
+  streamingTokens,
+  terminating
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 /// Android inference provider that drives GGUF model execution through the
@@ -107,6 +117,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     LocalInferenceModelIds.deepSeekR1_1_5b,
     LocalInferenceModelIds.qwen3_1_7b,
   };
+  
+  // Sanity Layer: Tag speciali e di sistema da rilevare e sopprimere all'istante
+  static const Set<String> _systemSanityTags = <String>{
+    '<|im_start|>',
+    '<|im_end|>',
+    '<|endoftext|>',
+    '<think>',
+    '</think>',
+    '<|EOT|>',
+    '<|pinned_banner|>'
+  };
+
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
   static int _printCounter = 0;
 
@@ -145,6 +167,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
+  
+  // FSM Interna per il monitoraggio nativo delle fasi
+  FfiPhase _currentFfiPhase = FfiPhase.idle;
+
   // ── First Token Attempt Isolation ─────────────────────────────────────────
   // Unique ID assigned at the start of every streamInference serial-queue
   // execution. Cleared in the poll-loop finally block. Allows forensic log
@@ -921,7 +947,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
       int nativeSessionId;
       try {
-        _log('[FIRST_FFI_CALL_BEGIN] session=$sessionId stage=session_create');
+        _currentFfiPhase = FfiPhase.sessionCreating; // FSM Transition
+        _log('[FIRST_FFI_CALL_BEGIN] stage=session_create phase=$_currentFfiPhase');
         _log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
         _log(
           '[FORENSIC_BEFORE_CREATE_SESSION] sessionId=$sessionId modelId=$modelId modelPath=$modelPath',
@@ -1134,6 +1161,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       int startResult;
       final startupWatch = Stopwatch()..start();
       try {
+        _currentFfiPhase = FfiPhase.generationStarting; // FSM Transition
         final nativeHandleHex =
             '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
         final nativeHandleAddress =
@@ -1141,7 +1169,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         final activeBeforeStart = bindings.sessionIsActive(nativeSessionId);
         _log(
           '[FORENSIC_BEFORE_LLB_SESSION_START_GEN] modelId=$modelId modelPath=$modelPath'
-          ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+          ' sessionId=$sessionId nativeSessionId=$nativeSessionId phase=$_currentFfiPhase'
           ' pointer_hex=$nativeHandleHex pointer_address=$nativeHandleAddress'
           ' session_active=$activeBeforeStart isolateHash=${_currentThreadId()}'
           ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
@@ -1305,11 +1333,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log('[FFI_PRE_POLL] session=$sessionId native_session=$nativeSessionId');
       _log('[FFI_POLL_BEGIN] session=$nativeSessionId');
       _preFirstTokenActive = true;
+      _currentFfiPhase = FfiPhase.promptIngestion; // FSM Transition: Ingestion prima del primo token
       var firstPollBoundaryLogged = false;
       var firstPollBoundaryFinished = false;
       _log(
         '[FIRST_TOKEN_POLL_LOOP_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-        ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+        ' sessionId=$sessionId nativeSessionId=$nativeSessionId phase=$_currentFfiPhase'
         ' pre_first_token_active=true max_tokens=$maxTokens',
       );
 
@@ -1326,7 +1355,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           final sinceLastTokenProgress = now.difference(lastTokenProgressAt);
           _throttledLoopLog(
             '[TOKEN_STREAM] poll iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}'
-            ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls',
+            ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=$consecutiveIdlePolls phase=$_currentFfiPhase',
           );
           _throttledLoopLog(
             '[TOKEN_LOOP] iteration=$pollIterations tokens=$estimatedTokens elapsed_ms=${elapsed.inMilliseconds}',
@@ -1343,7 +1372,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[FIRST_TOKEN_WAIT] iteration=$pollIterations waited_ms=${elapsed.inMilliseconds}',
             );
           }
-          if (cancellationToken.isCancelled) {
+          if (cancellationToken.isCancelled || controller.isClosed) {
             classifyFirstTokenTermination(
               reason: 'poll_cancellation',
               boundary: 'poll_loop',
@@ -1355,12 +1384,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
               ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
             );
-            _finishWithRuntimeError(
-              controller,
-              stage: 'cancelled',
-              message: 'Inference cancelled.',
-              state: InferenceTerminalState.cancelled,
-            );
+            if (!controller.isClosed) {
+              _finishWithRuntimeError(
+                controller,
+                stage: 'cancelled',
+                message: 'Inference cancelled.',
+                state: InferenceTerminalState.cancelled,
+              );
+            }
             _updateRuntimeStatus(
               LocalRuntimeStatus.runtimeUnavailable,
               message: 'Cancelled',
@@ -1566,7 +1597,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           try {
             _throttledLoopLog(
               '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId '
-              'iteration=$pollIterations',
+              'iteration=$pollIterations phase=$_currentFfiPhase',
             );
             if (!firstPollBoundaryLogged) {
               firstPollBoundaryLogged = true;
@@ -1678,13 +1709,32 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               continue;
             }
             if (piece.isNotEmpty) {
+              // ── Sanity Layer: Intercettazione e blocco Tag di Sistema ──────
+              var sanitizedPiece = piece;
+              var tagDetected = false;
+              for (final tag in _systemSanityTags) {
+                if (sanitizedPiece.contains(tag)) {
+                  _log('[SANITY_LAYER] Intercepted and blocked native system sequence: $tag');
+                  sanitizedPiece = sanitizedPiece.replaceAll(tag, '');
+                  tagDetected = true;
+                }
+              }
+              if (sanitizedPiece.isEmpty) {
+                if (tagDetected) {
+                  _log('[SANITY_LAYER] Raw token suppressed completely by safety filter rules.');
+                }
+                consecutiveInvalidTokens++;
+                continue; 
+              }
+              // ───────────────────────────────────────────────────────────────
+
               _resetIdleBackoff();
               final isFirstToken = firstTokenAt == null;
               firstTokenAt ??= DateTime.now();
               consecutiveInvalidTokens = 0;
               consecutiveIdlePolls = 0;
               lastTokenProgressAt = DateTime.now();
-              fullText.write(piece);
+              fullText.write(sanitizedPiece);
               estimatedTokens++;
               recordVerificationSuccess(
                 modelPath: modelPath,
@@ -1692,61 +1742,56 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               );
               final streamingElapsed = DateTime.now().difference(startedAt);
               _log(
-                '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations status=$status',
+                '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} poll_iteration=$pollIterations status=$status',
               );
               _log(
-                '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
+                '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
               );
               if (isFirstToken) {
-                // The native ingestion phase is now complete: the prompt
-                // pointer is safe to release.
                 freePromptNativePtr();
-                // Eagerly clear the flag so any remaining iterations in this
-                // same loop body observe the correct "post-first-token" state.
-                // The finally block clears it again as a catch-all for all
-                // non-success exit paths (timeout, failure, cancellation).
                 _preFirstTokenActive = false;
+                _currentFfiPhase = FfiPhase.streamingTokens; // FSM Transition: passiamo alla fase di stream attivo
                 _log(
-                  '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${piece.length}',
+                  '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${sanitizedPiece.length} phase=$_currentFfiPhase',
                 );
                 _log(
                   '[FIRST_TOKEN] elapsed_ms=${streamingElapsed.inMilliseconds}'
-                  ' token_text_length=${piece.length}'
+                  ' token_text_length=${sanitizedPiece.length}'
                   ' poll_iteration=$pollIterations session=$sessionId',
                 );
                 _log(
                   '[FIRST_TOKEN_REAL] elapsed_ms=${streamingElapsed.inMilliseconds}'
-                  ' thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length}'
+                  ' thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length}'
                   ' queue_size=-1 poll_iteration=$pollIterations'
-                  ' token="${piece.replaceAll('\n', r'\n')}" token_count=$estimatedTokens',
+                  ' token="${sanitizedPiece.replaceAll('\n', r'\n')}" token_count=$estimatedTokens',
                 );
                 _log(
                   '[FIRST_TOKEN_SUCCESS] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
                   ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
                   ' elapsed_ms=${streamingElapsed.inMilliseconds}'
-                  ' chars=${piece.length} poll_iterations=$pollIterations'
+                  ' chars=${sanitizedPiece.length} poll_iterations=$pollIterations'
                   ' pre_first_token_active=false',
                 );
               }
               _log(
-                '[DART_TOKEN_RECEIVED] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations',
+                '[DART_TOKEN_RECEIVED] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} queue_size=-1 poll_iteration=$pollIterations',
               );
-              _log('[FFI_TOKEN] session=$nativeSessionId chars=${piece.length}');
+              _log('[FFI_TOKEN] session=$nativeSessionId chars=${sanitizedPiece.length}');
               if (estimatedTokens % 16 == 0) {
                 _log('[TOKEN_STREAM] token_count=$estimatedTokens');
               }
               _log(
-                '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${piece.replaceAll('\n', r'\n')}"'
+                '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${sanitizedPiece.replaceAll('\n', r'\n')}"'
                 ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
               );
               _log(
                 '[TOKEN_EVAL] token_index=$estimatedTokens elapsed_ms=${streamingElapsed.inMilliseconds}',
               );
               _log(
-                '[TOKEN_DECODE] token_index=$estimatedTokens chars=${piece.length}'
-                ' text="${piece.replaceAll('\n', r'\n')}"',
+                '[TOKEN_DECODE] token_index=$estimatedTokens chars=${sanitizedPiece.length}'
+                ' text="${sanitizedPiece.replaceAll('\n', r'\n')}"',
               );
-              if (piece == lastPiece) {
+              if (sanitizedPiece == lastPiece) {
                 repeatedTokenCount++;
                 if (repeatedTokenCount >= _maxRepeatedTokenLoop) {
                   classifyFirstTokenTermination(
@@ -1760,7 +1805,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   runtimeResetReason = 'repeated_token_loop';
                   _log(
                     '[STREAM_LOOP] reason=repeated_token'
-                    ' count=$repeatedTokenCount token="${piece.replaceAll('\n', r'\n')}"'
+                    ' count=$repeatedTokenCount token="${sanitizedPiece.replaceAll('\n', r'\n')}"'
                     ' generated_tokens=$estimatedTokens session=$sessionId',
                   );
                   _log(
@@ -1779,12 +1824,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     controller,
                     stage: 'generation_loop',
                     message: 'Repeated-token loop detected.',
-                    details: 'token="$piece"',
+                    details: 'token="$sanitizedPiece"',
                   );
                   break;
                 }
               } else {
-                lastPiece = piece;
+                lastPiece = sanitizedPiece;
                 repeatedTokenCount = 0;
               }
               _updateRuntimeStatus(
@@ -1795,26 +1840,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 startedAt: startedAt,
               );
               _log(
-                '[TOKEN_EMIT] token_index=$estimatedTokens chars=${piece.length}'
+                '[TOKEN_EMIT] token_index=$estimatedTokens chars=${sanitizedPiece.length}'
                 ' session=$sessionId',
               );
               _log(
-                '[DART_STREAM_RENDER] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${piece.length} queue_size=-1 poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
+                '[DART_STREAM_RENDER] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} queue_size=-1 poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
               );
               _log('[STREAM_ADD] event=token session=$sessionId');
               final flushWatch = Stopwatch()..start();
               try {
-                // Emit synchronously. Deferring via microtask can starve token
-                // delivery until after the polling loop closes the stream.
                 if (!controller.isClosed) {
                   controller.add(
                     InferenceResponse.token(
-                      text: piece,
+                      text: sanitizedPiece,
                       model: modelId,
                     ),
                   );
                   if (isFirstToken) {
-                    _log('[FORENSIC_FIRST_TOKEN] sessionId=$sessionId nativeSessionId=$nativeSessionId chars=${piece.length}');
+                    _log('[FORENSIC_FIRST_TOKEN] sessionId=$sessionId nativeSessionId=$nativeSessionId chars=${sanitizedPiece.length}');
                   }
                 }
               } catch (_) {}
@@ -1884,11 +1927,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             _logAi('inference completed');
             _log('[STREAM_ADD] event=final_chunk session=$sessionId');
             final flushWatch = Stopwatch()..start();
-            controller.add(InferenceResponse.finalChunk(
-              text: fullText.toString(),
-              tokensGenerated: estimatedTokens,
-              model: modelId,
-            ));
+            if (!controller.isClosed) {
+              controller.add(InferenceResponse.finalChunk(
+                text: fullText.toString(),
+                tokensGenerated: estimatedTokens,
+                model: modelId,
+              ));
+            }
             flushWatch.stop();
             _log(
               '[STREAM_FLUSH] event=final_chunk session=$sessionId flush_us=${flushWatch.elapsedMicroseconds}',
@@ -1907,26 +1952,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               boundary: 'poll_loop',
               cancellation: true,
             );
-            // Cancelled by the native thread.
             _log('[GENERATION_END] state=cancelled generated_tokens=$estimatedTokens');
             _log(
               '[TERMINAL_STATE] state=cancelled generated_tokens=$estimatedTokens'
               ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}',
             );
             clearRuntimeVerification();
-            _finishWithRuntimeError(
-              controller,
-              stage: 'cancelled',
-              message: 'Inference cancelled.',
-              state: InferenceTerminalState.cancelled,
-            );
+            if (!controller.isClosed) {
+              _finishWithRuntimeError(
+                controller,
+                stage: 'cancelled',
+                message: 'Inference cancelled.',
+                state: InferenceTerminalState.cancelled,
+              );
+            }
             _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled');
             _updateRuntimeStatus(
               LocalRuntimeStatus.runtimeUnavailable,
               tokensGenerated: estimatedTokens,
               elapsed: DateTime.now().difference(startedAt),
             );
-            _log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled_status');
             break;
           } else if (status == -1) {
             classifyFirstTokenTermination(
@@ -1975,36 +2020,40 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 partialTerminalState: InferenceTerminalState.timeout,
               );
             } else {
-              _finishWithRuntimeError(
-                controller,
-                stage: 'generation',
-                message: err.isNotEmpty ? err : 'Inference failed.',
-              );
+              if (!controller.isClosed) {
+                _finishWithRuntimeError(
+                  controller,
+                  stage: 'generation',
+                  message: err.isNotEmpty ? err : 'Inference failed.',
+                );
+              }
             }
             break;
           } else {
-            // status == 0: no token ready yet; yield to the Flutter event loop.
-            // Use a small non-zero delay to avoid excessive CPU churn during
-            // periods when the generation thread has not yet produced output.
+            // status == 0: nessun token pronto; rilasciamo il controllo all'event loop.
             consecutiveIdlePolls++;
             if (consecutiveIdlePolls % 120 == 0) {
               _throttledLoopLog(
                 '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
                 'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
               );
-              _throttledLoopLog(
-                '[GENERATION_IDLE] idle_polls=$consecutiveIdlePolls idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
-              );
             }
-            _increaseIdleBackoff();
-            await Future<void>.delayed(Duration(milliseconds: _idleBackoffMs));
+            
+            // ── CRITICAL FIRST TOKEN FIX: Ottimizzazione della Latenza Iniziale ──────
+            if (_preFirstTokenActive) {
+              // Durante l'ingestion e prima del primo token, usiamo un delay immediato
+              // (Duration.zero) per massimizzare la reattività e non ritardare la UI mobile.
+              await Future<void>.delayed(Duration.zero);
+            } else {
+              // Dopo il primo token, applichiamo il meccanismo di backoff adattivo
+              _increaseIdleBackoff();
+              await Future<void>.delayed(Duration(milliseconds: _idleBackoffMs));
+            }
+            // ─────────────────────────────────────────────────────────────────────────
           }
         }
       } finally {
-        // Guard: free the prompt pointer if it was not yet freed by the
-        // isFirstToken path (covers all early-exit branches such as
-        // timeouts, cancellations, and native errors that fire before the
-        // first token is produced).
+        _currentFfiPhase = FfiPhase.terminating; // FSM Transition
         freePromptNativePtr();
         if (runtimeNeedsReset) {
           _safeResetRuntime(
@@ -2017,7 +2066,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[TERMINAL_STATE] state=${terminalState.name}'
           ' generated_tokens=$estimatedTokens'
           ' elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds}'
-          ' first_token=${firstTokenAt != null}',
+          ' first_token=${firstTokenAt != null} ffi_phase=$_currentFfiPhase',
         );
         if (terminalState == LocalRuntimeStatus.loading ||
             terminalState == LocalRuntimeStatus.tokenizing ||
@@ -2033,18 +2082,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           );
         }
         calloc.free(tokenBufRaw);
+        
+        // ── Gestione Centralizzata e Sicura di Chiusura dello Stream ───────────
         if (!controller.isClosed) {
           _log('[FFI_STREAM_CLOSE] session=$sessionId reason=stream_finally_close');
           _log(
             '[DART_STREAM_CLOSE] elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations session=$sessionId',
           );
-          _log('[STREAM_CLOSE] session=$sessionId');
-          if (!controller.isClosed) {
-            try {
-              await controller.close();
-            } catch (_) {}
-          }
+          try {
+            await controller.close();
+          } catch (_) {}
         }
+        _currentFfiPhase = FfiPhase.idle; // FSM Reset definitivo
+        // ───────────────────────────────────────────────────────────────────────
       }
       } catch (error, stackTrace) {
         classifyFirstTokenTermination(
@@ -2058,7 +2108,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _log('[FFI_EXCEPTION] session=$sessionId stage=stream_inference_unhandled error=$error');
         _log('[FFI_EXCEPTION] session=$sessionId stack=$stackTrace');
         if (!firstFfiInvocationAttempted) {
-          // Classification is based on whether session_create has been attempted yet.
           await fatalEarlyExit(
             sessionId,
             branch: 'stream_inference_unhandled_pre_ffi',
@@ -2073,11 +2122,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             message: 'Unhandled runtime exception.',
             details: '$error',
           );
-        } else {
-          _log(
-            '[FFI_EXCEPTION] session=$sessionId stage=stream_inference_post_ffi_controller_closed'
-            ' error=$error',
-          );
         }
       } finally {
         finalizeFirstTokenAttempt();
@@ -2087,12 +2131,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         );
         if (!firstFfiInvocationAttempted) {
           _log(
-            '[FFI_FATAL_EARLY_EXIT] session=$sessionId reason=stream_exit_before_first_ffi'
-            ' controller_closed=${controller.isClosed}',
-          );
-          _log(
-            '[PRE_FFI_ISOLATE_FAILURE_ASSERT] session=$sessionId first_ffi_attempted=false'
-            ' fatal=true',
+            '[PRE_FFI_ISOLATE_FAILURE_ASSERT] session=$sessionId first_ffi_attempted=false fatal=true',
           );
         }
         if (!isVerificationSession) {
@@ -2111,12 +2150,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         rethrow;
       }
     }, (error, stack) {
-      // Forensic-only: uncaught async errors that escape the zone are logged
-      // for crash classification but are NOT surfaced to the StreamController.
-      // The action already has an inner try/catch that routes all handled errors
-      // to the controller; any error reaching here indicates an isolate-level
-      // uncaught async exception (crash type 2) rather than a Dart exception
-      // that was already handled and routed through fatalEarlyExit.
       _log('[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack');
     });
 
@@ -2127,9 +2160,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     } catch (e, stackTrace) {
       _log(
         '[FORENSIC_UNHANDLED_EXCEPTION] error=$e stackTrace=$stackTrace',
-      );
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1671 | Function: streamInference() | BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
     }
@@ -2260,15 +2290,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               final startedAt = DateTime.now();
               var verificationFirstTokenReceived = false;
               while (true) {
-                if (cancellationToken.isCancelled) {
+                if (cancellationToken.isCancelled || controller.isClosed) {
                   freeVerificationPromptPtr();
                   _safeCancel(bindings, verificationSessionId);
-                  _finishWithRuntimeError(
-                    controller,
-                    stage: 'verification_cancelled',
-                    message: 'Verification cancelled.',
-                    state: InferenceTerminalState.cancelled,
-                  );
+                  if (!controller.isClosed) {
+                    _finishWithRuntimeError(
+                      controller,
+                      stage: 'verification_cancelled',
+                      message: 'Verification cancelled.',
+                      state: InferenceTerminalState.cancelled,
+                    );
+                  }
                   verificationMonitor.update(
                     RuntimeVerificationPhase.failed,
                     message: 'Verification cancelled.',
@@ -2302,17 +2334,23 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 if (status == 1) {
                   final piece = tokenBuf.toDartString();
                   if (piece.isNotEmpty) {
+                    // Sanity layer anche per lo stream di verifica
+                    var sanitizedPiece = piece;
+                    for (final tag in _systemSanityTags) {
+                      sanitizedPiece = sanitizedPiece.replaceAll(tag, '');
+                    }
+                    if (sanitizedPiece.isEmpty) continue;
+
                     if (!verificationFirstTokenReceived) {
-                      // Ingestion phase is done; safe to release the pointer.
                       freeVerificationPromptPtr();
                       verificationFirstTokenReceived = true;
                     }
                     emittedTokens++;
-                    fullText.write(piece);
+                    fullText.write(sanitizedPiece);
                     if (!controller.isClosed) {
                       controller.add(
                         InferenceResponse.token(
-                          text: piece,
+                          text: sanitizedPiece,
                           model: modelId,
                         ),
                       );
@@ -2387,11 +2425,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_exception error=$error',
                 );
               }
-              if (!released) {
-                _log(
-                  '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_failed_no_production_impact',
-                );
-              }
             }
           },
         );
@@ -2403,9 +2436,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1926 | Function: streamVerificationInference() | AFTER calling _runInferenceSerially()',
           );
         } catch (e, stackTrace) {
-          _log(
-            '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1930 | Function: streamVerificationInference() | BEFORE rethrow after async execution exception: $e \n $stackTrace',
-          );
           rethrow;
         }
       }();
@@ -2414,9 +2444,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return controller.stream;
     } catch (e, stackTrace) {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1941 | Function: streamVerificationInference() | BEFORE rethrow after exception: $e \n $stackTrace',
-      );
       rethrow;
     }
   }
@@ -2475,9 +2502,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2039 | Function: _runInferenceSerially() | AFTER action()',
           );
         } catch (e, st) {
-          _log(
-            '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2043 | Function: _runInferenceSerially() | BEFORE rethrow after exception in action: $e \n $st',
-          );
           _log('[SERIAL_QUEUE_ERROR] $e $st');
           rethrow;
         }
@@ -2488,11 +2512,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return next;
     } catch (e, stackTrace) {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2056 | Function: _runInferenceSerially() | BEFORE rethrow after exception: $e \n $stackTrace',
-      );
       rethrow;
     }
+  }
+
+  void _traceFfiPhase(FfiPhase phase) {
+    _log('[FFI_PHASE_TRANSITION] phase=${phase.name} ts=${DateTime.now().microsecondsSinceEpoch}');
   }
 
   void _throttledLoopLog(String message) {
@@ -2558,7 +2583,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     _log(
       '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=finish_with_error',
     );
-    _log('[STREAM_CLOSE] reason=finish_with_error');
     ctrl.close();
   }
 
@@ -2616,10 +2640,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           await ctrl.close();
         } catch (_) {}
       }
-      _log(
-        '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=partial_or_runtime_error',
-      );
-      _log('[STREAM_CLOSE] reason=partial_or_runtime_error');
       return;
     }
     _finishWithRuntimeError(
@@ -2789,17 +2809,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     final status = monitor.state.status;
     if (status == LocalRuntimeStatus.runtimeUnavailable ||
         status == LocalRuntimeStatus.uninitialized) {
-      // Verification evidence arrived while runtime was still in pre-verified
-      // status; promote to ready/verified immediately.
       _updateRuntimeStatus(
         LocalRuntimeStatus.ready,
         message: 'Runtime verified and ready for inference.',
       );
     } else if (status == LocalRuntimeStatus.failed ||
         status == LocalRuntimeStatus.completed) {
-      // `completed` is a terminal snapshot of the last run; switch back to
-      // `ready` so diagnostics/UI do not stay pinned to terminal status after
-      // verification is reconfirmed by a new signal.
       _updateRuntimeStatus(
         LocalRuntimeStatus.ready,
         message: 'Runtime re-verified and ready for inference.',
@@ -2858,5 +2873,4 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       return trimmed;
     }
   }
-
 }
