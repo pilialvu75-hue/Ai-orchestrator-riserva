@@ -4,53 +4,84 @@ class _AndroidFfiTokenStreamProcessor {
   _AndroidFfiTokenStreamProcessor(this._owner);
 
   final AndroidFfiRuntimeProvider _owner;
+  String _pendingStructuralTemplateOutput = '';
+
+  static const List<String> _structuralTemplateTokens = <String>[
+    '<|start_header_id|>assistant<|end_header_id|>',
+    '&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;assistant&amp;lt;|end_header_id|&gt;',
+    '<|start_header_id|>user<|end_header_id|>',
+    '&lt;|start_header_id|&gt;user&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;user&amp;lt;|end_header_id|&gt;',
+    '<|start_header_id|>system<|end_header_id|>',
+    '&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;system&amp;lt;|end_header_id|&gt;',
+    '<|eot_id|>',
+    '&lt;|eot_id|&gt;',
+    '&amp;lt;|eot_id|&gt;',
+    '<|start_header_id|>',
+    '&lt;|start_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;',
+    '<|end_header_id|>',
+    '&lt;|end_header_id|&gt;',
+    '&amp;lt;|end_header_id|&gt;',
+    '<|im_start|>',
+    '&lt;|im_start|&gt;',
+    '&amp;lt;|im_start|&amp;gt;',
+    '<|im_end|>',
+    '&lt;|im_end|&gt;',
+    '&amp;lt;|im_end|&amp;gt;',
+    '<think>',
+    '</think>',
+    '&lt;think&gt;',
+    '&lt;/think&gt;',
+    '<|endoftext|>',
+    '<|EOT|>',
+    '<|pinned_banner|>',
+  ];
 
   String sanitizeStructuralTemplateOutput(String input) {
-    if (input.isEmpty) {
-      return input;
+    if (input.isEmpty && _pendingStructuralTemplateOutput.isEmpty) {
+      return '';
     }
-    final normalizedLines = <String>[];
-    for (final rawLine in input.split('\n')) {
-      normalizedLines.add(rawLine.replaceAll('\r', ''));
+
+    final combined =
+        '$_pendingStructuralTemplateOutput$input'.replaceAll('\r', '').replaceAll('\u0000', '');
+    _pendingStructuralTemplateOutput = '';
+    if (combined.isEmpty) {
+      return '';
     }
-    final sanitizedLines = <String>[];
-    final pendingRoleLabelIndices = <int>[];
-    final skippedRoleLabelIndices = <int>{};
-    var hasSeenStructuralMarker = false;
-    for (final line in normalizedLines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) {
-        sanitizedLines.add(line);
+
+    final output = StringBuffer();
+    var index = 0;
+    while (index < combined.length) {
+      final matchedToken = _matchStructuralTemplateToken(combined, index);
+      if (matchedToken != null) {
+        index += matchedToken.length;
         continue;
       }
-      if (AndroidFfiRuntimeProvider._structuralMarkerLines.contains(trimmed)) {
-        hasSeenStructuralMarker = true;
-        if (pendingRoleLabelIndices.isNotEmpty) {
-          for (final index in pendingRoleLabelIndices) {
-            skippedRoleLabelIndices.add(index);
-          }
-          pendingRoleLabelIndices.clear();
-        }
-        continue;
+
+      final pendingTail = _pendingStructuralTemplateTail(combined, index);
+      if (pendingTail != null) {
+        _pendingStructuralTemplateOutput = pendingTail;
+        break;
       }
-      if (AndroidFfiRuntimeProvider._structuralRoleLabelLines.contains(trimmed)) {
-        if (hasSeenStructuralMarker) {
-          continue;
-        }
-        final roleLabelIndex = sanitizedLines.length;
-        pendingRoleLabelIndices.add(roleLabelIndex);
-        sanitizedLines.add(line);
-        continue;
-      }
-      sanitizedLines.add(line);
+
+      output.writeCharCode(combined.codeUnitAt(index));
+      index++;
     }
-    final outputLines = <String>[];
-    for (var i = 0; i < sanitizedLines.length; i++) {
-      if (!skippedRoleLabelIndices.contains(i)) {
-        outputLines.add(sanitizedLines[i]);
-      }
+
+    return output.toString();
+  }
+
+  String flushStructuralTemplateOutput() {
+    if (_pendingStructuralTemplateOutput.isEmpty) {
+      return '';
     }
-    return outputLines.join('\n');
+
+    final pending = _pendingStructuralTemplateOutput;
+    _pendingStructuralTemplateOutput = '';
+    return pending;
   }
 
   bool isNoiseToken(String piece) {
@@ -88,5 +119,24 @@ class _AndroidFfiTokenStreamProcessor {
 
   void _log(String message) {
     AndroidFfiRuntimeProvider._log(message);
+  }
+
+  String? _matchStructuralTemplateToken(String text, int index) {
+    for (final token in _structuralTemplateTokens) {
+      if (text.startsWith(token, index)) {
+        return token;
+      }
+    }
+    return null;
+  }
+
+  String? _pendingStructuralTemplateTail(String text, int index) {
+    final remaining = text.substring(index);
+    for (final token in _structuralTemplateTokens) {
+      if (remaining.length < token.length && token.startsWith(remaining)) {
+        return remaining;
+      }
+    }
+    return null;
   }
 }

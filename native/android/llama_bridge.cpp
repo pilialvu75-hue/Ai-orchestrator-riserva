@@ -154,6 +154,15 @@ bool looks_like_chat_template_control_piece(const char* piece, const int32_t pie
     return false;
 }
 
+int32_t decode_token_piece(
+    const llama_vocab* vocab,
+    const llama_token token,
+    char* piece_buf,
+    const int32_t piece_buf_len
+) {
+    return llama_token_to_piece(vocab, token, piece_buf, piece_buf_len, 0, false);
+}
+
 struct BatchGuard {
     llama_batch batch{};
     bool initialized{false};
@@ -696,13 +705,11 @@ void run_generation(
         }
 
         char piece_buf[256];
-        const int32_t piece_len = llama_token_to_piece(
+        const int32_t piece_len = decode_token_piece(
             vocab,
             next_token,
             piece_buf,
-            static_cast<int32_t>(sizeof(piece_buf)) - 1,
-            0,
-            false
+            static_cast<int32_t>(sizeof(piece_buf)) - 1
         );
 
         if (piece_len < 0) {

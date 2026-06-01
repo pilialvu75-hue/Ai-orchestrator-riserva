@@ -150,35 +150,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|pinned_banner|>'
   };
 
-  static const Set<String> _structuralMarkerLines = <String>{
-    // These marker variants are observed in streamed output at different
-    // encoding layers, so we strip the exact structural forms only.
-    '<|eot_id|>',
-    '&lt;|eot_id|&gt;',
-    '&amp;lt;|eot_id|&gt;',
-    '<|start_header_id|>',
-    '&lt;|start_header_id|&gt;',
-    '&amp;lt;|start_header_id|&gt;',
-    '<|end_header_id|>',
-    '&lt;|end_header_id|&gt;',
-    '&amp;lt;|end_header_id|&gt;',
-    '<|start_header_id|>assistant<|end_header_id|>',
-    '&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;',
-    '&amp;lt;|start_header_id|&gt;assistant&amp;lt;|end_header_id|&gt;',
-    '<|start_header_id|>user<|end_header_id|>',
-    '&lt;|start_header_id|&gt;user&lt;|end_header_id|&gt;',
-    '&amp;lt;|start_header_id|&gt;user&amp;lt;|end_header_id|&gt;',
-    '<|start_header_id|>system<|end_header_id|>',
-    '&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;',
-    '&amp;lt;|start_header_id|&gt;system&amp;lt;|end_header_id|&gt;',
-  };
-
-  static const Set<String> _structuralRoleLabelLines = <String>{
-    'assistant:',
-    'user:',
-    'system:',
-  };
-
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
   static int _printCounter = 0;
 
@@ -683,8 +654,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             var estimatedTokens = 0;
             var pollIterations = 0;
             DateTime? firstTokenAt;
-            String _tokenBuffer = '';
-
             // Runtime recovery classification captured even when reset happens later.
             var runtimeNeedsReset = false;
             String? runtimeResetReason;
@@ -1492,12 +1461,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       startedAt: startedAt,
                     );
                     _logAi('inference timeout');
+                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'timeout',
                       message: 'Local generation timed out.',
                       modelId: modelId,
-                      fullText: fullText.toString(),
+                      fullText: partialText,
                       tokensGenerated: estimatedTokens,
                       notice:
                           'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
@@ -1593,12 +1563,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       elapsed: elapsed,
                       startedAt: startedAt,
                     );
+                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'stalled',
                       message: 'Token stream stalled during local inference.',
                       modelId: modelId,
-                      fullText: fullText.toString(),
+                      fullText: partialText,
                       tokensGenerated: estimatedTokens,
                       notice:
                           'Token stream stalled after ${sinceLastTokenProgress.inSeconds}s. Returning partial response.',
@@ -1638,12 +1609,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       elapsed: elapsed,
                       startedAt: startedAt,
                     );
+                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'poll_loop',
                       message: 'Token polling stalled in local runtime.',
                       modelId: modelId,
-                      fullText: fullText.toString(),
+                      fullText: partialText,
                       tokensGenerated: estimatedTokens,
                       notice:
                           'No token progress detected in polling loop. Returning partial response.',
@@ -1768,54 +1740,21 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       }
                       continue;
                     }
-                    _tokenBuffer += piece;
-                    _tokenBuffer = _tokenBuffer.replaceAll('\r', '').replaceAll('\u0000', '');
-
-                    const blockedPatterns = [
-                      '<think>',
-                      '</think>',
-                      '<|im_start|>',
-                      '<|im_end|>',
-                    ];
-
-                    for (final pattern in blockedPatterns) {
-                      _tokenBuffer = _tokenBuffer.replaceAll(pattern, '');
-                    }
-
-                    final lastOpen = _tokenBuffer.lastIndexOf('<');
-                    final lastClose = _tokenBuffer.lastIndexOf('>');
-                    final inTagCandidate = lastOpen != -1 && lastOpen > lastClose;
-                    if (inTagCandidate) {
-                      final tail = _tokenBuffer.substring(lastOpen);
-
-                      final isPartialKnownTag = blockedPatterns.any(
-                        (pattern) => pattern.startsWith(tail),
-                      );
-
-                      if (isPartialKnownTag) {
-                        continue;
-                      }
-                    }
-
-                    final safeOutput = _tokenBuffer;
-                    final trimmedPiece = safeOutput.trim();
+                    final trimmedPiece = piece.trim();
                     final tokenObservedAt = DateTime.now();
                     lastNativeActivityAt = tokenObservedAt;
                     if (_shouldIgnoreToken(trimmedPiece)) {
-                      _tokenBuffer = '';
                       continue;
                     }
-                    final sanitizedPiece = _sanitizeStructuralTemplateOutput(safeOutput);
+                    final sanitizedPiece = _sanitizeStructuralTemplateOutput(piece);
                     final trimmedSanitizedPiece = sanitizedPiece.trim();
                     if (trimmedSanitizedPiece.isEmpty) {
-                      _tokenBuffer = '';
                       continue;
                     }
                     if (_isDeveloperMode) {
-                      _log('RAW_TOKEN: "${safeOutput.replaceAll('\n', r'\n')}"');
+                      _log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
                       _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
                     }
-                    _tokenBuffer = '';
 
                     _resetIdleBackoff();
                     final isFirstToken = firstTokenAt == null;
@@ -1988,8 +1927,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     _log('[STREAM_ADD] event=final_chunk session=$sessionId');
                     final flushWatch = Stopwatch()..start();
                     if (!controller.isClosed) {
-                      final finalText = fullText.toString();
-                      final sanitizedFinalText = _sanitizeStructuralTemplateOutput(finalText);
+                      final sanitizedFinalText =
+                          fullText.toString() + _drainStructuralTemplateOutput();
                       _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
                         controller,
                         text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText,
@@ -2074,12 +2013,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     }
                     if ((statusLower.contains('timeout') || statusLower.contains('stalled')) &&
                         fullText.toString().trim().isNotEmpty) {
+                      final partialText = fullText.toString() + _drainStructuralTemplateOutput();
                       await _finishWithPartialOrRuntimeError(
                         controller,
                         stage: 'generation',
                         message: err.isNotEmpty ? err : 'Inference failed.',
                         modelId: modelId,
-                        fullText: fullText.toString(),
+                        fullText: partialText,
                         tokensGenerated: estimatedTokens,
                         notice: err,
                         partialTerminalState: InferenceTerminalState.timeout,
@@ -2119,6 +2059,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 }
               } finally {
                 freePromptNativePtr();
+                _drainStructuralTemplateOutput();
                 if (runtimeNeedsReset) {
                   _safeResetRuntime(
                     bindings,
@@ -2475,7 +2416,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     message: 'Runtime verification passed.',
                   );
                   if (!controller.isClosed) {
-                    final finalText = fullText.toString();
+                    final finalText = fullText.toString() + _drainStructuralTemplateOutput();
                     _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
                       controller,
                       text: finalText.isEmpty ? '\u200B' : finalText,
@@ -2486,6 +2427,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   }
                 } finally {
                   freeVerificationPromptPtr();
+                  _drainStructuralTemplateOutput();
                   calloc.free(tokenBufRaw);
                   _safeCancel(bindings, verificationSessionId);
                   try {
@@ -2592,6 +2534,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   String _sanitizeStructuralTemplateOutput(String input) =>
       _tokenStreamProcessor.sanitizeStructuralTemplateOutput(input);
+
+  String _drainStructuralTemplateOutput() =>
+      _tokenStreamProcessor.flushStructuralTemplateOutput();
 
   bool _isNoiseToken(String piece) => _tokenStreamProcessor.isNoiseToken(piece);
 
