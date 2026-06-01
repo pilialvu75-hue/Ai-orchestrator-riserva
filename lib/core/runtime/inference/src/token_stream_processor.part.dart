@@ -87,6 +87,10 @@ class _AndroidFfiTokenStreamProcessor {
     return pending;
   }
 
+  void discardStructuralTemplateOutput() {
+    _pendingStructuralTemplateOutput = '';
+  }
+
   bool isNoiseToken(String piece) {
     return piece.isEmpty || AndroidFfiRuntimeProvider._systemSanityTags.contains(piece);
   }
