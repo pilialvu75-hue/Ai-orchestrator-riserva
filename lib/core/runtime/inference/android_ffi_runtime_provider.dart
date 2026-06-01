@@ -166,7 +166,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       LinkedHashMap<String, int>();
   bool _loadAttempted = false;
   bool _libraryLoadInProgress = false;
-  Future<void> _inferenceTail = Future<void>.value();
+  Future<void>? _inferenceTail;
   Future<void>? _warmupFuture;
   String? _warmupModelPath;
   // Soft lifecycle-tracking state used strictly for diagnostics:
@@ -622,7 +622,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       };
       _log('[CANCELLATION_HANDLER_REGISTERED] sessionId=${request.sessionId}');
 
-      _log('[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} inferenceTailHash=${_inferenceTail.hashCode}');
+      _log('[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} inferenceTailHash=${(_inferenceTail ?? Future<void>.value()).hashCode}');
       runZonedGuarded(() async {
         _log('[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()}');
         _log(
@@ -644,6 +644,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             var estimatedTokens = 0;
             var pollIterations = 0;
             DateTime? firstTokenAt;
+            String _tokenBuffer = '';
 
             // Runtime recovery classification captured even when reset happens later.
             var runtimeNeedsReset = false;
@@ -1728,16 +1729,50 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       }
                       continue;
                     }
-                    final trimmedPiece = piece.trim();
+                    _tokenBuffer += piece;
+                    _tokenBuffer = _tokenBuffer.replaceAll('\r', '').replaceAll('\u0000', '');
+
+                    const blockedPatterns = [
+                      '<think>',
+                      '</think>',
+                      '<|im_start|>',
+                      '<|im_end|>',
+                    ];
+
+                    for (final pattern in blockedPatterns) {
+                      if (_tokenBuffer.contains(pattern)) {
+                        _tokenBuffer = _tokenBuffer.replaceAll(pattern, '');
+                      }
+                    }
+
+                    final inTagCandidate = _tokenBuffer.contains('<') && !_tokenBuffer.contains('>');
+                    if (inTagCandidate) {
+                      final lastOpen = _tokenBuffer.lastIndexOf('<');
+                      final tail = _tokenBuffer.substring(lastOpen);
+
+                      final isPartialKnownTag =
+                          '<think>'.startsWith(tail) ||
+                          '</think>'.startsWith(tail) ||
+                          '<|im_start|>'.startsWith(tail) ||
+                          '<|im_end|>'.startsWith(tail);
+
+                      if (isPartialKnownTag) {
+                        continue;
+                      }
+                    }
+
+                    final safeOutput = _tokenBuffer;
+                    _tokenBuffer = '';
+                    final trimmedPiece = safeOutput.trim();
                     final tokenObservedAt = DateTime.now();
                     lastNativeActivityAt = tokenObservedAt;
                     if (_shouldIgnoreToken(trimmedPiece)) {
-                    continue;
+                      continue;
                     }
-                    final sanitizedPiece = _sanitizeLlmOutput(piece);
+                    final sanitizedPiece = _sanitizeLlmOutput(safeOutput);
                     final trimmedSanitizedPiece = sanitizedPiece.trim();
                     if (trimmedSanitizedPiece.isEmpty) {
-                    continue;
+                      continue;
                     }
 
                     _resetIdleBackoff();
@@ -2070,15 +2105,22 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 calloc.free(tokenBufRaw);
                 
                 // ── Gestione Centralizzata e Sicura di Chiusura dello Stream ───────────
-                if (!controller.isClosed) {
-                  _log('[FFI_STREAM_CLOSE] session=$sessionId reason=stream_finally_close');
-                  _log(
-                    '[DART_STREAM_CLOSE] elapsed_ms=${DateTime.now().difference(startedAt).inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=$pollIterations session=$sessionId',
-                  );
-                  try {
-                    await controller.close();
-                  } catch (_) {}
+                try {
+                  _releaseInferenceSlot(sessionId);
+                } catch (e, st) {
+                  _log('Slot release failed but forced continuation: $e\n$st');
                 }
+
+                final currentController = controller;
+                unawaited(Future(() async {
+                  try {
+                    if (!currentController.isClosed) {
+                      await currentController.close();
+                    }
+                  } catch (e, st) {
+                    _log('Controller close non-fatal error swallowed safely: $e\n$st');
+                  }
+                }));
                 // ───────────────────────────────────────────────────────────────────────
               }
             } catch (error, stackTrace) {
@@ -2118,9 +2160,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 _log(
                   '[PRE_FFI_ISOLATE_FAILURE_ASSERT] session=$sessionId first_ffi_attempted=false fatal=true',
                 );
-              }
-              if (!isVerificationSession) {
-                _releaseInferenceSlot(sessionId);
               }
               _log('[SESSION] end session=$sessionId');
             }
@@ -2479,27 +2518,34 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2030 | Function: _runInferenceSerially() | BEFORE entry',
       );
-      _log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${_inferenceTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
-      final next = _inferenceTail.then((_) async {
-        _log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
-        _log(
-          '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2034 | Function: _runInferenceSerially() | BEFORE action()',
-        );
-        try {
-          await action();
-          _log(
-            '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2039 | Function: _runInferenceSerially() | AFTER action()',
-          );
-        } catch (e, st) {
-          _log('[SERIAL_QUEUE_ERROR] $e $st');
-          rethrow;
-        }
-      });
-      _inferenceTail = next.catchError((_) {});
+      final previousTail = _inferenceTail ?? Future<void>.value();
+      _log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${previousTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
+      _inferenceTail = previousTail
+          .catchError((e, st) {
+            _log(
+              'Inference queue upstream error swallowed safely to protect pipeline continuity: $e\n$st',
+            );
+          })
+          .then((_) async {
+            try {
+              _log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
+              _log(
+                '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2034 | Function: _runInferenceSerially() | BEFORE action()',
+              );
+              await action();
+              _log(
+                '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2039 | Function: _runInferenceSerially() | AFTER action()',
+              );
+            } catch (e, st) {
+              _log(
+                'Inference task failed safely within protected serial queue execution: $e\n$st',
+              );
+            }
+          });
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2051 | Function: _runInferenceSerially() | AFTER exit',
       );
-      return next;
+      return _inferenceTail!;
     } catch (e, stackTrace) {
       rethrow;
     }
