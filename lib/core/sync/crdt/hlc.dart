@@ -112,6 +112,7 @@ class Hlc implements Comparable<Hlc> {
     return nodeId.compareTo(other.nodeId);
   }
 
+  /// Total ordering for HLC values, including the node ID tie-breaker.
   bool operator >(Hlc other) => compareTo(other) > 0;
   bool operator <(Hlc other) => compareTo(other) < 0;
   bool operator >=(Hlc other) => compareTo(other) >= 0;
