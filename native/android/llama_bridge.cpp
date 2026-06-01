@@ -68,12 +68,16 @@ std::string get_global_error_copy() {
     return g_global_last_error;
 }
 
+// Llama-3 chat-template boundary markers that must stop generation instead of
+// being surfaced as normal text.
 constexpr const char* kChatTemplateControlTokens[] = {
     "<|eot_id|>",
     "<|start_header_id|>",
     "<|end_header_id|>",
 };
 
+// Returns true when the sampled token resolves to a known chat-template control
+// token in the loaded vocabulary.
 bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token token) {
     if (vocab == nullptr) {
         return false;
@@ -93,8 +97,12 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
     return false;
 }
 
+constexpr int32_t kMinChatTemplateControlPieceLength = 4;
+
+// Defensive fallback for decoded pieces that still look like chat-template
+// control sequences.
 bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
-    if (piece == nullptr || piece_len < 4) {
+    if (piece == nullptr || piece_len < kMinChatTemplateControlPieceLength) {
         return false;
     }
 
