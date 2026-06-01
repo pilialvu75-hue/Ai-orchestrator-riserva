@@ -75,6 +75,8 @@ constexpr const char* kChatTemplateControlTokens[] = {
     "<|start_header_id|>",
     "<|end_header_id|>",
 };
+constexpr const char* kChatTemplateControlPrefix = "<|";
+constexpr const char* kChatTemplateControlSuffix = "|>";
 
 // Returns true when the sampled token resolves to a known chat-template control
 // token in the loaded vocabulary.
@@ -83,13 +85,14 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
         return false;
     }
 
-    const char* token_text = llama_vocab_token_to_str(vocab, token);
-    if (token_text == nullptr) {
+    const char* token_text_cstr = llama_vocab_token_to_str(vocab, token);
+    if (token_text_cstr == nullptr) {
         return false;
     }
+    const std::string token_text(token_text_cstr);
 
     for (const char* control_token : kChatTemplateControlTokens) {
-        if (std::strcmp(token_text, control_token) == 0) {
+        if (token_text == control_token) {
             return true;
         }
     }
@@ -106,8 +109,8 @@ bool looks_like_chat_template_control_piece(const char* piece, const int32_t pie
         return false;
     }
 
-    return piece[0] == '<' && piece[1] == '|' &&
-           piece[piece_len - 2] == '|' && piece[piece_len - 1] == '>';
+    return std::strncmp(piece, kChatTemplateControlPrefix, 2) == 0 &&
+           std::strncmp(piece + piece_len - 2, kChatTemplateControlSuffix, 2) == 0;
 }
 
 struct BatchGuard {
