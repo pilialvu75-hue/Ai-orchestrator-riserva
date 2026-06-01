@@ -139,8 +139,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|im_end|>',
     '&lt;|im_start|&gt;',
     '&lt;|im_end|&gt;',
-    '&amp;lt;|im_start|&amp;gt;',
-    '&amp;lt;|im_end|&amp;gt;',
+    '&amp;lt;|im_start|&gt;',
+    '&amp;lt;|im_end|&gt;',
     '<|endoftext|>',
     '<think>',
     '</think>',
@@ -1461,7 +1461,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       startedAt: startedAt,
                     );
                     _logAi('inference timeout');
-                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
+                    final partialText = _finalizeStructuralTemplateOutput(fullText);
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'timeout',
@@ -1563,7 +1563,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       elapsed: elapsed,
                       startedAt: startedAt,
                     );
-                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
+                    final partialText = _finalizeStructuralTemplateOutput(fullText);
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'stalled',
@@ -1609,7 +1609,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       elapsed: elapsed,
                       startedAt: startedAt,
                     );
-                    final partialText = fullText.toString() + _drainStructuralTemplateOutput();
+                    final partialText = _finalizeStructuralTemplateOutput(fullText);
                     await _finishWithPartialOrRuntimeError(
                       controller,
                       stage: 'poll_loop',
@@ -1928,7 +1928,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     final flushWatch = Stopwatch()..start();
                     if (!controller.isClosed) {
                       final sanitizedFinalText =
-                          fullText.toString() + _drainStructuralTemplateOutput();
+                          _finalizeStructuralTemplateOutput(fullText);
                       _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
                         controller,
                         text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText,
@@ -2013,7 +2013,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     }
                     if ((statusLower.contains('timeout') || statusLower.contains('stalled')) &&
                         fullText.toString().trim().isNotEmpty) {
-                      final partialText = fullText.toString() + _drainStructuralTemplateOutput();
+                      final partialText = _finalizeStructuralTemplateOutput(fullText);
                       await _finishWithPartialOrRuntimeError(
                         controller,
                         stage: 'generation',
@@ -2416,7 +2416,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     message: 'Runtime verification passed.',
                   );
                   if (!controller.isClosed) {
-                    final finalText = fullText.toString() + _drainStructuralTemplateOutput();
+                    final finalText = _finalizeStructuralTemplateOutput(fullText);
                     _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
                       controller,
                       text: finalText.isEmpty ? '\u200B' : finalText,
@@ -2537,6 +2537,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   String _drainStructuralTemplateOutput() =>
       _tokenStreamProcessor.flushStructuralTemplateOutput();
+
+  String _finalizeStructuralTemplateOutput(StringBuffer fullText) =>
+      fullText.toString() + _drainStructuralTemplateOutput();
 
   bool _isNoiseToken(String piece) => _tokenStreamProcessor.isNoiseToken(piece);
 
