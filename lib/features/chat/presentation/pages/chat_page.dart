@@ -46,12 +46,7 @@ class _ChatPageState extends State<ChatPage> {
   static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
   static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
-  // _debugLabMessages is owned here (not in _ChatBodyState) so that it
-  // survives narrow↔wide layout transitions.  When the viewport crosses the
-  // 720 px breakpoint Flutter rebuilds a different widget branch
-  // (_NarrowLayout vs _WideLayout), which destroys and recreates
-  // _ChatBodyState.  Keeping the list here prevents debug lab messages from
-  // disappearing on orientation change or window resize.
+  
   final List<ChatMessage> _debugLabMessages = <ChatMessage>[];
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   late final AiRuntimeSettingsService _runtimeSettings;
@@ -149,7 +144,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onSend(String text, List<ChatAttachment> attachments) {
-    // Log di ingresso forense per mappare lo scenario di tracciamento
     _uiLog('[FORENSIC_BEFORE_ONSEND] chars=${text.length} attachments=${attachments.length}');
 
     _uiSendBeganAt = DateTime.now();
@@ -166,7 +160,6 @@ class _ChatPageState extends State<ChatPage> {
           attachments: attachments,
         ));
 
-    // Log di uscita forense per verificare se l'esecuzione supera l'aggiunta all'Engine
     _uiLog('[FORENSIC_AFTER_ONSEND]');
   }
 
@@ -222,9 +215,6 @@ class _ChatPageState extends State<ChatPage> {
     _cancelUiDeadlockGuard();
   }
 
-  // Called by DebugOverlay (via _ChatBody) to append a fake voice→LLM result
-  // to the in-memory debug lab conversation list.  Lives here so the list
-  // survives layout switches (narrow↔wide).
   void _appendDebugLabConversation({
     required String prompt,
     required String response,
@@ -263,7 +253,7 @@ class _ChatPageState extends State<ChatPage> {
         builder: (_) => BlocProvider.value(
           value: context.read<ModelDownloadBloc>(),
           child: const SettingsPage(),
-        ),
+         ),
       ),
     );
   }
@@ -355,8 +345,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-// ── Narrow (mobile) layout — drawer ──────────────────────────────────────────
-
 class _NarrowLayout extends StatelessWidget {
   const _NarrowLayout({
     required this.scrollController,
@@ -412,8 +400,6 @@ class _NarrowLayout extends StatelessWidget {
   }
 }
 
-// ── Wide (tablet/desktop) layout — persistent sidebar ────────────────────────
-
 class _WideLayout extends StatelessWidget {
   const _WideLayout({
     required this.scrollController,
@@ -453,7 +439,6 @@ class _WideLayout extends StatelessWidget {
     final l10n = context.l10n;
     return Row(
       children: [
-        // Persistent sidebar
         SizedBox(
           width: 220,
           child: Container(
@@ -543,7 +528,6 @@ class _ChatBody extends StatefulWidget {
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
-  // Owned by _ChatPageState and passed in so it survives layout transitions.
   final List<ChatMessage> debugLabMessages;
   final void Function({required String prompt, required String response})
       onAppendDebugLabConversation;
@@ -558,6 +542,11 @@ class _ChatBodyState extends State<_ChatBody> {
   late final ChatUiPreferencesService _chatUiPreferencesService;
   String? _lastSpokenAssistantMessageId;
   AssistantMessageTextSize _assistantTextSize = AssistantMessageTextSize.medium;
+  
+  // Easter Egg 7-Click Counter & Font Size Dynamic Scale Tracker
+  int _7clickCounter = 0;
+  double _textScaleFactor = 1.0;
+  bool _localDebugOverlayVisible = false;
 
   @override
   void initState() {
@@ -613,8 +602,6 @@ class _ChatBodyState extends State<_ChatBody> {
     context.read<OrchestratorStateEngine>().add(
           const DebugClearChatEvent(sessionId: _kDefaultSessionId),
         );
-    // Delegate debug-lab message clearing to _ChatPageState so the list
-    // is cleared at the correct owner level (not the layout-specific state).
     widget.onClearDebugLabMessages();
   }
 
@@ -647,6 +634,10 @@ class _ChatBodyState extends State<_ChatBody> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= _kSidebarBreakpoint;
+    final backgroundColor = const Color(0xFF131314);
+    final surfaceColor = const Color(0xFF1E1F20);
+
     return BlocConsumer<OrchestratorStateEngine, ChatState>(
       listener: (context, state) {
         if (state is ChatLoaded || state is ChatSending) {
@@ -681,23 +672,27 @@ class _ChatBodyState extends State<_ChatBody> {
               latest.content.trim().isNotEmpty &&
               latest.id != _lastSpokenAssistantMessageId) {
             _lastSpokenAssistantMessageId = latest.id;
-            // Fire-and-forget to keep UI/inference flow non-blocking.
             unawaited(_speakAssistantResponse(latest.content));
           }
         }
       },
       builder: (context, state) {
         if (state is ChatInitial || state is ChatLoading) {
-          return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF8AB4F8)));
+          return const Scaffold(
+            backgroundColor: Color(0xFF131314),
+            body: Center(child: CircularProgressIndicator(color: Color(0xFF8AB4F8))),
+          );
         }
         if (state is ChatError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(state.message,
-                  style: const TextStyle(color: Colors.redAccent),
-                  textAlign: TextAlign.center),
+          return Scaffold(
+            backgroundColor: const Color(0xFF131314),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(state.message,
+                    style: const TextStyle(color: Colors.redAccent),
+                    textAlign: TextAlign.center),
+              ),
             ),
           );
         }
@@ -711,7 +706,8 @@ class _ChatBodyState extends State<_ChatBody> {
         ];
         final isLoading = state is ChatSending;
 
-        return Column(
+        // CONTENUTO PRINCIPALE DELLA CHAT
+        Widget chatMainContent = Column(
           children: [
             Expanded(
               child: Stack(
@@ -730,26 +726,20 @@ class _ChatBodyState extends State<_ChatBody> {
                     ),
                     child: combinedMessages.isEmpty
                         ? _buildEmptyState(context)
-                        : _HighPerformanceChatList(
-                            controller: widget.scrollController,
-                            messages: combinedMessages,
-                            assistantTextSize: _assistantTextSize,
+                        : MediaQuery(
+                            data: MediaQuery.of(context).copyWith(
+                              textScaleFactor: _textScaleFactor,
+                            ),
+                            child: _HighPerformanceChatList(
+                              controller: widget.scrollController,
+                              messages: combinedMessages,
+                              assistantTextSize: _assistantTextSize,
+                            ),
                           ),
                   ),
-                  Positioned(
-                    top: 10,
-                    right: 10,
-                     child: IgnorePointer(
-                      child: _RuntimeDebugOverlay(
-                        runtimeState: widget.runtimeState,
-                        voiceEngineActive: widget.voiceEngineActive,
-                        gpuAccelerationActive: widget.gpuAccelerationActive,
-                        gpuBackend: widget.gpuBackend,
-                        runtimeModeName: widget.runtimeModeName,
-                      ),
-                    ),
-                  ),
-                  if (_debugLabController.isVisible)
+                  
+                  // Easter Egg Debug Overlay
+                  if (_debugLabController.isVisible || _localDebugOverlayVisible)
                     Positioned(
                       top: 10,
                       left: 10,
@@ -781,6 +771,217 @@ class _ChatBodyState extends State<_ChatBody> {
               liveSessionEnabled: widget.liveSessionEnabled,
             ),
           ],
+        );
+
+        return Scaffold(
+          backgroundColor: backgroundColor,
+          // APP BAR IN STILE GEMINI
+          appBar: AppBar(
+            backgroundColor: backgroundColor,
+            elevation: 0,
+            leading: isWide 
+                ? null 
+                : Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white90),
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
+                  ),
+            centerTitle: true,
+            // 7-CLICK EASTER EGG SUL NOME DEL MODELLO
+            title: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _7clickCounter++;
+                  if (_7clickCounter >= 7) {
+                    _7clickCounter = 0;
+                    _localDebugOverlayVisible = !_localDebugOverlayVisible;
+                    try {
+                      _debugLabController.toggleVisibility();
+                    } catch (_) {}
+                  }
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.runtimeModeName.toUpperCase(),
+                      style: const TextStyle(color: Colors.whitee70, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_drop_down, color: Colors.white38, size: 16),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              // IL VECCHIO DIAGNOSTICS QUADRATO TRASFORMATO IN MENU A TENDINA
+              PopupMenuButton<int>(
+                icon: const Icon(Icons.analytics_outlined, color: Color(0xFF4ADE80)),
+                backgroundColor: surfaceColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    enabled: false,
+                    child: SizedBox(
+                      width: 210,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(color: Color(0xFF4ADE80), shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                "RUNTIME METRICS",
+                                style: TextStyle(color: Color(0xFF4ADE80), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          const Divider(color: Colors.white24),
+                          Text("Status: ${widget.runtimeState.status.name}", style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          Text("Tokens: ${widget.runtimeState.tokensGenerated}", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          Text("Time Elapsed: ${widget.runtimeState.elapsed.inSeconds}s", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          const Divider(color: Colors.white12),
+                          Text("Local Runtime: ${widget.runtimeState.status != LocalRuntimeStatus.ffiMissing ? 'ON' : 'OFF'}", 
+                              style: TextStyle(color: widget.runtimeState.status != LocalRuntimeStatus.ffiMissing ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80), fontSize: 11, fontWeight: FontWeight.w600)),
+                          Text("Voice Engine: ${widget.voiceEngineActive ? 'ON' : 'OFF'}", 
+                              style: TextStyle(color: widget.voiceEngineActive ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80), fontSize: 11, fontWeight: FontWeight.w600)),
+                          Text("GPU Backend: ${widget.gpuBackend.toUpperCase()}", 
+                              style: TextStyle(color: widget.gpuAccelerationActive ? const Color(0xFF4ADE80) : Colors.white38, fontSize: 11)),
+                          if ((widget.runtimeState.message ?? '').trim().isNotEmpty) ...[
+                            const Divider(color: Colors.white12),
+                            Text(widget.runtimeState.message!, maxLines: 2, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                          ]
+                        ],
+                      ),
+                    ),
+                  )
+                ],
+              ),
+            ],
+          ),
+          
+          // NUOVO DRAWER GEMINI PER MODALITA' PORTRAIT (MOBILE)
+          drawer: isWide ? null : Drawer(
+            backgroundColor: surfaceColor,
+            child: SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Bottone Nuova Chat Pillola
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Container(
+                      width: double.infinity,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131314),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: TextButton.icon(
+                        onPressed: () {
+                          _clearChatDebug();
+                          Navigator.of(context).pop();
+                        },
+                        icon: const Icon(Icons.add, color: Color(0xFF8AB4F8), size: 20),
+                        label: const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text("Nuova chat", style: TextStyle(color: Colors.white90, fontWeight: FontWeight.w600, fontSize: 14)),
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                  // Sezione Storico / Sessioni Attive
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.chat_bubble_outline, color: Color(0xFF8AB4F8), size: 18),
+                          title: const Text("Sessione predefinita", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                          selected: true,
+                          selectedTileColor: Colors.white.withValues(alpha: 0.05),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onTap: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const Divider(color: Colors.white12, height: 1),
+                  
+                  // NUOVO SLIDER INTERFACCIA PER IL CAMBIO DIMENSIONE TESTO
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text("Scala caratteri chat", style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
+                            Text("${(_textScaleFactor * 100).toInt()}%", style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        Slider(
+                          value: _textScaleFactor,
+                          min: 0.7,
+                          max: 1.7,
+                          divisions: 10,
+                          activeColor: const Color(0xFF8AB4F8),
+                          inactiveColor: Colors.white10,
+                          onChanged: (double val) {
+                            setState(() {
+                              _textScaleFactor = val;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const Divider(color: Colors.white12, height: 1),
+
+                  // SEZIONI MIGRATE: DATI PERSONALI & PROMPT SISTEMA
+                  ListTile(
+                    leading: const Icon(Icons.account_circle_outlined, color: Colors.white70, size: 22),
+                    title: const Text("Dati personali (opzionale)", style: TextStyle(color: Colors.white90, fontSize: 14)),
+                    subtitle: const Text("Profilo utente locale", style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onSettings();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.terminal_outlined, color: Colors.white70, size: 22),
+                    title: const Text("Prompt di sistema", style: TextStyle(color: Colors.white90, fontSize: 14)),
+                    subtitle: const Text("Istruzioni di sistema LLM", style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onSettings();
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            ),
+          ),
+          body: chatMainContent,
         );
       },
     );
@@ -1295,235 +1496,6 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _RuntimeDebugOverlay extends StatefulWidget {
-  const _RuntimeDebugOverlay({
-    required this.runtimeState,
-    required this.voiceEngineActive,
-    required this.gpuAccelerationActive,
-    required this.gpuBackend,
-    required this.runtimeModeName,
-  });
-
-  final LocalRuntimeState runtimeState;
-  final bool voiceEngineActive;
-  final bool gpuAccelerationActive;
-  final String gpuBackend;
-  final String runtimeModeName;
-
-  @override
-  State<_RuntimeDebugOverlay> createState() => _RuntimeDebugOverlayState();
-}
-
-class _RuntimeDebugOverlayState extends State<_RuntimeDebugOverlay> {
-  @override
-  void initState() {
-    super.initState();
-    _scheduleTick();
-  }
-
-  void _scheduleTick() {
-    Future<void>.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() {});
-      _scheduleTick();
-    });
-  }
-
-  String _title(BuildContext context) {
-    final l10n = context.l10n;
-    final message = (widget.runtimeState.message ?? '').toLowerCase();
-    switch (widget.runtimeState.status) {
-      case LocalRuntimeStatus.uninitialized:
-        return l10n.t('runtime_idle');
-      case LocalRuntimeStatus.loading:
-        return l10n.t('runtime_loading');
-      case LocalRuntimeStatus.runtimeUnavailable:
-        return l10n.t('runtime_unverified');
-      case LocalRuntimeStatus.tokenizing:
-        return l10n.t('runtime_tokenizing');
-      case LocalRuntimeStatus.inferencing:
-        return l10n.t('runtime_generating');
-      case LocalRuntimeStatus.streaming:
-        return l10n.t('runtime_streaming');
-      case LocalRuntimeStatus.completed:
-        return l10n.t('runtime_completed');
-      case LocalRuntimeStatus.timedOut:
-        return l10n.t('runtime_timed_out');
-      case LocalRuntimeStatus.stalled:
-        return l10n.t('runtime_stalled');
-      case LocalRuntimeStatus.ready:
-        return l10n.t('runtime_ready');
-      case LocalRuntimeStatus.ffiMissing:
-      case LocalRuntimeStatus.modelMissing:
-      case LocalRuntimeStatus.failed:
-        if (message.startsWith('out of memory') || message.contains('out of memory')) {
-          return l10n.t('runtime_error');
-        }
-        return l10n.t('runtime_error');
-    }
-  }
-
-  Color get _color {
-    switch (widget.runtimeState.status) {
-      case LocalRuntimeStatus.uninitialized:
-        return const Color(0xFF6B7280);
-      case LocalRuntimeStatus.ready:
-        return const Color(0xFF8AB4F8);
-      case LocalRuntimeStatus.runtimeUnavailable:
-        return const Color(0xFFF9A826);
-      case LocalRuntimeStatus.completed:
-        return const Color(0xFF4ADE80);
-      case LocalRuntimeStatus.streaming:
-        return const Color(0xFF7DD3FC);
-      case LocalRuntimeStatus.inferencing:
-      case LocalRuntimeStatus.tokenizing:
-      case LocalRuntimeStatus.loading:
-        return const Color(0xFFF9A826);
-      case LocalRuntimeStatus.timedOut:
-        return const Color(0xFFFFB74D);
-      case LocalRuntimeStatus.stalled:
-      case LocalRuntimeStatus.ffiMissing:
-      case LocalRuntimeStatus.modelMissing:
-      case LocalRuntimeStatus.failed:
-        return const Color(0xFFFF8A80);
-    }
-  }
-
-  Duration get _displayElapsed {
-    final state = widget.runtimeState;
-    if (state.startedAt != null &&
-        (state.status == LocalRuntimeStatus.inferencing ||
-            state.status == LocalRuntimeStatus.streaming ||
-            state.status == LocalRuntimeStatus.tokenizing)) {
-      return DateTime.now().difference(state.startedAt!);
-    }
-    return state.elapsed;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _color;
-    final elapsed = _displayElapsed;
-    final l10n = context.l10n;
-    return Container(
-      width: 180,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F131A).withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.14),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _title(context),
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if ((widget.runtimeState.message ?? '').trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              widget.runtimeState.message!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 11,
-                height: 1.3,
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            '${l10n.t('tokens')} ${widget.runtimeState.tokensGenerated}',
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${l10n.t('time')} ${elapsed.inSeconds}s',
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-          const SizedBox(height: 8),
-          _statusPill(
-            icon: Icons.memory_rounded,
-            label: l10n.t('local_runtime'),
-            active: widget.runtimeState.status != LocalRuntimeStatus.ffiMissing &&
-                widget.runtimeState.status != LocalRuntimeStatus.runtimeUnavailable &&
-                widget.runtimeState.status != LocalRuntimeStatus.modelMissing &&
-                widget.runtimeState.status != LocalRuntimeStatus.failed,
-          ),
-          const SizedBox(height: 4),
-          _statusPill(
-            icon: Icons.mic_rounded,
-            label: l10n.t('voice_engine'),
-            active: widget.voiceEngineActive,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${l10n.t('mode')}: ${widget.runtimeModeName}',
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          _statusPill(
-            icon: Icons.developer_board_rounded,
-            label: 'GPU ${widget.gpuBackend}',
-            active: widget.gpuAccelerationActive,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusPill({
-    required IconData icon,
-    required String label,
-    required bool active,
-  }) {
-    final color = active ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80);
-    return Row(
-      children: [
-        Icon(icon, size: 12, color: color),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            '$label ${active ? 'ON' : 'OFF'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
