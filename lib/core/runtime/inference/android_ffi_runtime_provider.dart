@@ -27,6 +27,10 @@ import 'package:path/path.dart' as p;
 part 'android_ffi_runtime_provider_lifecycle_subsystem.dart';
 part 'android_ffi_runtime_provider_native_session_subsystem.dart';
 part 'android_ffi_runtime_provider_warmup_subsystem.dart';
+part 'src/inference_concurrency_manager.part.dart';
+part 'src/token_stream_processor.part.dart';
+part 'src/session_state_isolator.part.dart';
+part 'src/runtime_execution_boundary.part.dart';
 
 // ── FSM Fasi Native/FFI ───────────────────────────────────────────────────────
 enum FfiPhase {
@@ -246,6 +250,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _AndroidFfiNativeSessionSubsystem(this);
   late final _AndroidFfiWarmupSubsystem _warmupSubsystem =
       _AndroidFfiWarmupSubsystem(this);
+  late final _AndroidFfiConcurrencyManager _concurrencyManager =
+      _AndroidFfiConcurrencyManager(this);
+  late final _AndroidFfiTokenStreamProcessor _tokenStreamProcessor =
+      _AndroidFfiTokenStreamProcessor(this);
+  late final _AndroidFfiSessionStateIsolator _sessionStateIsolator =
+      _AndroidFfiSessionStateIsolator(this);
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -658,7 +668,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
         );
         try {
-          await _runInferenceSerially(() async {
+          await _concurrencyManager.runInferenceSerially(() async {
             _log('[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${_currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}');
             final sessionId = request.sessionId.trim().isEmpty
                 ? 'unknown'
@@ -1936,11 +1946,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     final flushWatch = Stopwatch()..start();
                     try {
                     if (!controller.isClosed) {
-                        controller.add(
-                          InferenceResponse.token(
-                            text: sanitizedPiece,
-                            model: modelId,
-                          ),
+                        _AndroidFfiRuntimeExecutionBoundary.emitTokenChunk(
+                          controller,
+                          text: sanitizedPiece,
+                          model: modelId,
                         );
                         if (firstTokenReceived) {
                           _log('[FORENSIC_FIRST_TOKEN] sessionId=$sessionId nativeSessionId=$nativeSessionId chars=${sanitizedPiece.length}');
@@ -1981,11 +1990,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     if (!controller.isClosed) {
                       final finalText = fullText.toString();
                       final sanitizedFinalText = _sanitizeStructuralTemplateOutput(finalText);
-                      controller.add(InferenceResponse.finalChunk(
+                      _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
+                        controller,
                         text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText,
                         tokensGenerated: estimatedTokens,
                         model: modelId,
-                      ));
+                      );
                     }
                     flushWatch.stop();
                     _log(
@@ -2236,7 +2246,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1688 | Function: streamVerificationInference() | BEFORE calling _runInferenceSerially()',
         );
         try {
-          await _runInferenceSerially(() async {
+          await _concurrencyManager.runInferenceSerially(() async {
             _log(
               '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1693 | Function: streamVerificationInference() | BEFORE calling _runInVerificationScope()',
             );
@@ -2409,14 +2419,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       }
                       emittedTokens++;
                       fullText.write(sanitizedPiece);
-                      if (!controller.isClosed) {
-                        controller.add(
-                          InferenceResponse.token(
-                            text: sanitizedPiece,
-                            model: modelId,
-                          ),
-                        );
-                      }
+                      _AndroidFfiRuntimeExecutionBoundary.emitTokenChunk(
+                        controller,
+                        text: sanitizedPiece,
+                        model: modelId,
+                      );
                       continue;
                     }
                     if (status == 2) {
@@ -2469,12 +2476,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   );
                   if (!controller.isClosed) {
                     final finalText = fullText.toString();
-                    controller.add(
-                      InferenceResponse.finalChunk(
-                        text: finalText.isEmpty ? '\u200B' : finalText,
-                        tokensGenerated: emittedTokens,
-                        model: modelId,
-                      ),
+                    _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk(
+                      controller,
+                      text: finalText.isEmpty ? '\u200B' : finalText,
+                      tokensGenerated: emittedTokens,
+                      model: modelId,
                     );
                     await controller.close();
                   }
@@ -2550,44 +2556,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         reason: reason,
       );
 
-  Future<void> _runInferenceSerially(Future<void> Function() action) {
-    try {
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2030 | Function: _runInferenceSerially() | BEFORE entry',
-      );
-      final previousTail = _inferenceTail ?? Future<void>.value();
-      _log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${previousTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
-      _inferenceTail = previousTail
-          .catchError((e, st) {
-            _log(
-              'Inference queue upstream error swallowed safely to protect pipeline continuity: $e\n$st',
-            );
-          })
-          .then((_) async {
-            try {
-              _log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${_currentThreadId()}');
-              _log(
-                '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2034 | Function: _runInferenceSerially() | BEFORE action()',
-              );
-              await action();
-              _log(
-                '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2039 | Function: _runInferenceSerially() | AFTER action()',
-              );
-            } catch (e, st) {
-              _log(
-                'Inference task failed safely within protected serial queue execution: $e\n$st',
-              );
-            }
-          });
-      _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2051 | Function: _runInferenceSerially() | AFTER exit',
-      );
-      return _inferenceTail!;
-    } catch (e, stackTrace) {
-      rethrow;
-    }
-  }
-
   void _traceFfiPhase(FfiPhase phase) {
     _log('[FFI_PHASE_TRANSITION] phase=${phase.name} ts=${DateTime.now().microsecondsSinceEpoch}');
   }
@@ -2622,97 +2590,23 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
   }
 
-  String _sanitizeStructuralTemplateOutput(String input) {
-    if (input.isEmpty) {
-      return input;
-    }
-    final normalizedLines = <String>[];
-    for (final rawLine in input.split('\n')) {
-      normalizedLines.add(rawLine.replaceAll('\r', ''));
-    }
-    final sanitizedLines = <String>[];
-    final pendingRoleLabelIndices = <int>[];
-    final skippedRoleLabelIndices = <int>{};
-    // Keep role labels tentatively so we can drop them only if the same chunk
-    // also contains structural template markers.
-    var hasSeenStructuralMarker = false;
-    for (final line in normalizedLines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) {
-        sanitizedLines.add(line);
-        continue;
-      }
-      if (_structuralMarkerLines.contains(trimmed)) {
-        // Drop whole structural marker lines instead of preserving blank rows.
-        hasSeenStructuralMarker = true;
-        if (pendingRoleLabelIndices.isNotEmpty) {
-          for (final index in pendingRoleLabelIndices) {
-            skippedRoleLabelIndices.add(index);
-          }
-          pendingRoleLabelIndices.clear();
-        }
-        continue;
-      }
-      if (_structuralRoleLabelLines.contains(trimmed)) {
-        if (hasSeenStructuralMarker) {
-          continue;
-        }
-        final roleLabelIndex = sanitizedLines.length;
-        pendingRoleLabelIndices.add(roleLabelIndex);
-        sanitizedLines.add(line);
-        continue;
-      }
-      sanitizedLines.add(line);
-    }
-    // Filter the deferred role-label indices after the scan so ordering stays
-    // stable and only template-like labels are dropped.
-    final outputLines = <String>[];
-    for (var i = 0; i < sanitizedLines.length; i++) {
-      if (!skippedRoleLabelIndices.contains(i)) {
-        outputLines.add(sanitizedLines[i]);
-      }
-    }
-    return outputLines.join('\n');
-  }
+  String _sanitizeStructuralTemplateOutput(String input) =>
+      _tokenStreamProcessor.sanitizeStructuralTemplateOutput(input);
 
-  bool _isNoiseToken(String piece) {
-    return piece.isEmpty || _systemSanityTags.contains(piece);
-  }
+  bool _isNoiseToken(String piece) => _tokenStreamProcessor.isNoiseToken(piece);
 
-  bool _shouldIgnoreToken(String piece) {
-    // Keep the raw noise predicate separate so future ignore heuristics can
-    // expand without reworking the sanitization path.
-    return _isNoiseToken(piece);
-  }
+  bool _shouldIgnoreToken(String piece) =>
+      _tokenStreamProcessor.isNoiseToken(piece);
 
-  DateTime? _handleFirstTokenIfNeeded(String piece) {
-    if (!_preFirstTokenActive) {
-      return null;
-    }
-    _preFirstTokenActive = false;
-    _setPhase(RuntimePhase.streaming);
-    final now = DateTime.now();
-    _log(
-      '[FIRST_TOKEN_PHASE] phase=${_runtimePhase.name} chars=${piece.length} ts=${now.microsecondsSinceEpoch}',
-    );
-    return now;
-  }
+  DateTime? _handleFirstTokenIfNeeded(String piece) =>
+      _tokenStreamProcessor.handleFirstTokenIfNeeded(piece);
 
-  void _throttledLoopLog(String message) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastLoopLogAtMs >= _loopLogThrottleMs) {
-      _lastLoopLogAtMs = now;
-      _log(message);
-    }
-  }
+  void _throttledLoopLog(String message) =>
+      _tokenStreamProcessor.throttledLoopLog(message);
 
-  void _increaseIdleBackoff() {
-    _idleBackoffMs = (_idleBackoffMs * 2).clamp(24, 200);
-  }
+  void _increaseIdleBackoff() => _tokenStreamProcessor.increaseIdleBackoff();
 
-  void _resetIdleBackoff() {
-    _idleBackoffMs = 24;
-  }
+  void _resetIdleBackoff() => _tokenStreamProcessor.resetIdleBackoff();
 
   Future<T> _runNativeCallWithTimeout<T>({
     required String stage,
@@ -2725,15 +2619,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         call: call,
       );
 
-  bool _claimInferenceSlot(String sessionId) {
-    if (_activeInferenceSessions.contains(sessionId)) return false;
-    _activeInferenceSessions.add(sessionId);
-    return true;
-  }
+  bool _claimInferenceSlot(String sessionId) =>
+      _concurrencyManager.claimInferenceSlot(sessionId);
 
-  void _releaseInferenceSlot(String sessionId) {
-    _activeInferenceSessions.remove(sessionId);
-  }
+  void _releaseInferenceSlot(String sessionId) =>
+      _concurrencyManager.releaseInferenceSlot(sessionId);
 
   /// Returns true when warmup succeeds.
   Future<bool> _ensureWarmup({
@@ -2752,15 +2642,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     StreamController<InferenceResponse> ctrl,
     String message, {
     InferenceTerminalState state = InferenceTerminalState.failed,
-  }) {
-    if (ctrl.isClosed) return;
-    ctrl.add(InferenceResponse.error(message, state: state));
-    _log('[FFI_STREAM_CLOSE] reason=finish_with_error');
-    _log(
-      '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${_currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=finish_with_error',
-    );
-    ctrl.close();
-  }
+  }) =>
+      _AndroidFfiRuntimeExecutionBoundary.finishWithError(
+        ctrl,
+        message,
+        state: state,
+      );
 
   static void _finishWithRuntimeError(
     StreamController<InferenceResponse> ctrl, {
@@ -2768,20 +2655,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String message,
     String? details,
     InferenceTerminalState state = InferenceTerminalState.failed,
-  }) {
-    final exception = RuntimeStageException(
-      stage: stage,
-      message: message,
-      details: details,
-    );
-    final payload = exception.toPayload();
-    _log('[GENERATION_ERROR] stage=$stage message=$message details=${details ?? ''}');
-    _logAi(
-      'runtime error: ${exception.toLogMessage()}',
-    );
-    _log(payload);
-    _finishWithError(ctrl, payload, state: state);
-  }
+  }) =>
+      _AndroidFfiRuntimeExecutionBoundary.finishWithRuntimeError(
+        ctrl,
+        stage: stage,
+        message: message,
+        details: details,
+        state: state,
+      );
 
   static Future<void> _finishWithPartialOrRuntimeError(
     StreamController<InferenceResponse> ctrl, {
@@ -2792,58 +2673,28 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required int tokensGenerated,
     String? notice,
     InferenceTerminalState partialTerminalState = InferenceTerminalState.failed,
-  }) async {
-    if (ctrl.isClosed) return;
-    if (fullText.trim().isNotEmpty) {
-      if (notice != null && notice.trim().isNotEmpty) {
-        _log('[STREAM_ADD] event=notice');
-        ctrl.add(InferenceResponse.notice(notice));
-      }
-      _log('[STREAM_ADD] event=final_partial');
-      ctrl.add(
-        InferenceResponse(
-          text: fullText,
-          model: modelId,
-          tokensGenerated: tokensGenerated,
-          timestamp: DateTime.now().millisecondsSinceEpoch,
-          isFinal: true,
-          terminalState: partialTerminalState,
-        ),
+  }) =>
+      _AndroidFfiRuntimeExecutionBoundary.finishWithPartialOrRuntimeError(
+        ctrl,
+        stage: stage,
+        message: message,
+        modelId: modelId,
+        fullText: fullText,
+        tokensGenerated: tokensGenerated,
+        notice: notice,
+        partialTerminalState: partialTerminalState,
       );
-      _log('[FFI_STREAM_CLOSE] reason=partial_or_runtime_error');
-      if (!ctrl.isClosed) {
-        try {
-          await ctrl.close();
-        } catch (_) {}
-      }
-      return;
-    }
-    _finishWithRuntimeError(
-      ctrl,
-      stage: stage,
-      message: message,
-      state: partialTerminalState,
-    );
-  }
 
   String _composePrompt(
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
-  }) {
-    if (bypassNonessentialLayers) {
-      _log(
-        '[FORENSIC_BYPASS] session=${request.sessionId} mode=raw_prompt_only semantic_memory=false embeddings=false workspace_indexing=false retrieval_augmentation=false conversation_rebuild=false',
+  }) =>
+      _sessionStateIsolator.composePrompt(
+        request,
+        modelId: modelId,
+        bypassNonessentialLayers: bypassNonessentialLayers,
       );
-      return request.prompt.trim();
-    }
-    return LocalPromptTemplates.compose(
-      modelId: modelId,
-      prompt: request.prompt,
-      systemPrompt: request.systemPrompt,
-      context: request.context,
-    );
-  }
 
   static String? _validateModelFileForRuntime(String modelPath) {
     final file = File(modelPath);
