@@ -146,6 +146,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|pinned_banner|>'
   };
 
+  static const Set<String> _structuralTemplateLines = <String>{
+    '<|eot_id|>',
+    '&lt;|eot_id|&gt;',
+    '&amp;lt;|eot_id|&gt;',
+    '<|start_header_id|>',
+    '&lt;|start_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;',
+    '<|end_header_id|>',
+    '&lt;|end_header_id|&gt;',
+    '&amp;lt;|end_header_id|&gt;',
+    'assistant',
+    'assistant:',
+    'user',
+    'user:',
+    'system',
+    'system:',
+    '<|start_header_id|>assistant<|end_header_id|>',
+    '&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;assistant&amp;lt;|end_header_id|&gt;',
+    '<|start_header_id|>user<|end_header_id|>',
+    '&lt;|start_header_id|&gt;user&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;user&amp;lt;|end_header_id|&gt;',
+    '<|start_header_id|>system<|end_header_id|>',
+    '&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;',
+    '&amp;lt;|start_header_id|&gt;system&amp;lt;|end_header_id|&gt;',
+  };
+
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
   static int _printCounter = 0;
 
@@ -1766,12 +1793,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       _tokenBuffer = '';
                       continue;
                     }
-                    final sanitizedPiece = _sanitizeLlmOutput(safeOutput);
+                    final sanitizedPiece = _sanitizeStructuralTemplateOutput(safeOutput);
                     final trimmedSanitizedPiece = sanitizedPiece.trim();
                     if (trimmedSanitizedPiece.isEmpty) {
                       _tokenBuffer = '';
                       continue;
                     }
+                    _log('RAW_TOKEN: "${safeOutput.replaceAll('\n', r'\n')}"');
+                    _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
                     _tokenBuffer = '';
 
                     _resetIdleBackoff();
@@ -1947,8 +1976,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     final flushWatch = Stopwatch()..start();
                     if (!controller.isClosed) {
                       final finalText = fullText.toString();
+                      final sanitizedFinalText = _sanitizeStructuralTemplateOutput(finalText);
                       controller.add(InferenceResponse.finalChunk(
-                        text: finalText.isEmpty ? '\u200B' : finalText,
+                        text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText,
                         tokensGenerated: estimatedTokens,
                         model: modelId,
                       ));
@@ -2359,10 +2389,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       if (_shouldIgnoreToken(trimmedPiece)) {
                         continue;
                       }
-                      final sanitizedPiece = _sanitizeLlmOutput(piece);
+                      final sanitizedPiece = _sanitizeStructuralTemplateOutput(piece);
                       if (sanitizedPiece.trim().isEmpty) {
                         continue;
                       }
+                      _log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
+                      _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
 
                       if (!verificationFirstTokenReceived) {
                         freeVerificationPromptPtr();
@@ -2584,12 +2616,24 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
   }
 
-  String _sanitizeLlmOutput(String input) {
-    var output = input;
-    for (final token in _systemSanityTags) {
-      output = output.replaceAll(token, '');
+  String _sanitizeStructuralTemplateOutput(String input) {
+    if (input.isEmpty) {
+      return input;
     }
-    return output;
+    final sanitizedLines = <String>[];
+    for (final rawLine in input.split('\n')) {
+      final line = rawLine.replaceAll('\r', '');
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        sanitizedLines.add('');
+        continue;
+      }
+      if (_structuralTemplateLines.contains(trimmed)) {
+        continue;
+      }
+      sanitizedLines.add(line);
+    }
+    return sanitizedLines.join('\n');
   }
 
   bool _isNoiseToken(String piece) {
