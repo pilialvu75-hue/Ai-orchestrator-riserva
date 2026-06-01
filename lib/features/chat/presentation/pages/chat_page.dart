@@ -1474,14 +1474,13 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              ),
                             ),
                           ),
                         ),
-                      ],
-                    );
-                  },
-                ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
