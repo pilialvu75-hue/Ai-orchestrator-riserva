@@ -68,6 +68,53 @@ std::string get_global_error_copy() {
     return g_global_last_error;
 }
 
+// Llama-3-specific chat-template boundary markers that must stop generation
+// instead of being surfaced as normal text.
+constexpr const char* kChatTemplateControlTokens[] = {
+    "<|eot_id|>",
+    "<|start_header_id|>",
+    "<|end_header_id|>",
+};
+
+// Returns true when the sampled token resolves to a known chat-template control
+// token in the loaded vocabulary.
+bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token token) {
+    if (vocab == nullptr) {
+        return false;
+    }
+
+    const char* token_text_cstr = llama_vocab_token_to_str(vocab, token);
+    if (token_text_cstr == nullptr) {
+        return false;
+    }
+    const std::string token_text(token_text_cstr);
+
+    for (const char* control_token : kChatTemplateControlTokens) {
+        if (token_text == control_token) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Defensive fallback for decoded pieces that still look like chat-template
+// control sequences.
+bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
+    if (piece == nullptr || piece_len <= 0) {
+        return false;
+    }
+
+    const std::string piece_text(piece, static_cast<size_t>(piece_len));
+    for (const char* control_token : kChatTemplateControlTokens) {
+        if (piece_text == control_token) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 struct BatchGuard {
     llama_batch batch{};
     bool initialized{false};
@@ -571,6 +618,17 @@ void run_generation(
 
         llama_sampler_accept(sampler.get(), next_token);
 
+        if (is_chat_template_control_token(vocab, next_token)) {
+            eos_reached = true;
+            LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64
+                 " eos_reached=true generated=%d reason=chat_template_control_token token_id=%d",
+                 session->id,
+                 owner_epoch,
+                 n_decode,
+                 static_cast<int>(next_token));
+            break;
+        }
+
         if (llama_vocab_is_eog(vocab, next_token)) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
                 initial_sample_retry_count < kMaxInitialSampleRetries) {
@@ -614,6 +672,17 @@ void run_generation(
 
         if (piece_len > 0) {
             piece_buf[piece_len] = '\0';
+            if (looks_like_chat_template_control_piece(piece_buf, piece_len)) {
+                eos_reached = true;
+                LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64
+                     " eos_reached=true generated=%d reason=chat_template_control_piece token_id=%d piece=%s",
+                     session->id,
+                     owner_epoch,
+                     n_decode,
+                     static_cast<int>(next_token),
+                     piece_buf);
+                break;
+            }
             const auto emit_now = std::chrono::steady_clock::now();
             const auto emit_interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 emit_now - last_token_emitted_at
