@@ -174,7 +174,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -219,88 +219,117 @@ class _ChatInputBarState extends State<ChatInputBar> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  // Pulsante allegati multimodale (Sinistra)
                   _MultimodalMenuButton(onTap: _openAttachmentSheet),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
+                  
+                  // Blocco Centrale: Campo di testo espanso ed ergonomico
                   Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
-                      maxLines: 5,
-                      minLines: 1,
-                      textInputAction: TextInputAction.newline,
-                      decoration: InputDecoration(
-                        hintText: l10n.t('message_hint'),
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 12,
-                        ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                       ),
-                      onSubmitted: (_) => _submit(),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  VoiceInputButton(
-                    voiceInputService: _voiceInputService,
-                    size: 42,
-                    onResult: (text, _) {
-                      final value = TextEditingValue(
-                        text: text,
-                        selection: TextSelection.collapsed(offset: text.length),
-                      );
-                      _controller.value = value;
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  Tooltip(
-                    message: 'Sessione Live',
-                    child: IconButton(
-                      style: IconButton.styleFrom(
-                        backgroundColor: widget.liveSessionEnabled
-                            ? const Color(0xFF1F2A44)
-                            : Colors.white.withValues(alpha: 0.08),
-                        foregroundColor:
-                            widget.liveSessionEnabled ? Colors.white : Colors.white30,
-                      ),
-                      onPressed: widget.liveSessionEnabled
-                          ? widget.onStartLiveSession
-                          : null,
-                      icon: const Icon(Icons.graphic_eq_rounded, size: 20),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  widget.isLoading
-                      ? const SizedBox(
-                          width: 42,
-                          height: 42,
-                          child: Padding(
-                            padding: EdgeInsets.all(9),
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF8AB4F8),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _controller,
+                              style: const TextStyle(color: Colors.white, fontSize: 15),
+                              maxLines: 5,
+                              minLines: 1,
+                              textInputAction: TextInputAction.newline,
+                              decoration: InputDecoration(
+                                hintText: l10n.t('message_hint'),
+                                hintStyle: const TextStyle(color: Colors.white38),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 12,
+                                ),
+                              ),
+                              onSubmitted: (_) => _submit(),
                             ),
                           ),
-                        )
-                      : Tooltip(
-                          message: _canSubmit
-                              ? l10n.t('send_message')
-                              : l10n.t('enter_message_to_send'),
-                          child: IconButton(
-                            style: IconButton.styleFrom(
-                              backgroundColor: _canSubmit
-                                  ? const Color(0xFF8AB4F8)
-                                  : Colors.white.withValues(alpha: 0.08),
-                              foregroundColor:
-                                  _canSubmit ? Colors.black : Colors.white30,
-                              shadowColor:
-                                  const Color(0xFF8AB4F8).withValues(alpha: 0.34),
-                              elevation: _canSubmit ? 12 : 0,
+                          // Il microfono di input vocale si sposta qui dentro per salvare spazio orizzontale
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 5, right: 4),
+                            child: VoiceInputButton(
+                              voiceInputService: _voiceInputService,
+                              size: 36,
+                              onResult: (text, _) {
+                                final value = TextEditingValue(
+                                  text: text,
+                                  selection: TextSelection.collapsed(offset: text.length),
+                                );
+                                _controller.value = value;
+                              },
                             ),
-                            onPressed: _canSubmit ? _submit : null,
-                            icon: const Icon(Icons.arrow_upward, size: 20),
                           ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  
+                  // Blocco Destro: Gruppo compatto dei pulsanti di azione della chat
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Tooltip(
+                        message: 'Sessione Live',
+                        child: IconButton(
+                          style: IconButton.styleFrom(
+                            backgroundColor: widget.liveSessionEnabled
+                                ? const Color(0xFF1F2A44)
+                                : Colors.white.withValues(alpha: 0.08),
+                            foregroundColor:
+                                widget.liveSessionEnabled ? Colors.white : Colors.white30,
+                          ),
+                          onPressed: widget.liveSessionEnabled
+                              ? widget.onStartLiveSession
+                              : null,
+                          icon: const Icon(Icons.graphic_eq_rounded, size: 20),
                         ),
+                      ),
+                      const SizedBox(width: 6),
+                      widget.isLoading
+                          ? const SizedBox(
+                              width: 42,
+                              height: 42,
+                              child: Padding(
+                                padding: EdgeInsets.all(9),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF8AB4F8),
+                                ),
+                              ),
+                            )
+                          : Tooltip(
+                              message: _canSubmit
+                                  ? l10n.t('send_message')
+                                  : l10n.t('enter_message_to_send'),
+                              child: IconButton(
+                                style: IconButton.styleFrom(
+                                  backgroundColor: _canSubmit
+                                      ? const Color(0xFF8AB4F8)
+                                      : Colors.white.withValues(alpha: 0.08),
+                                  foregroundColor:
+                                      _canSubmit ? Colors.black : Colors.white30,
+                                  shadowColor:
+                                      const Color(0xFF8AB4F8).withValues(alpha: 0.34),
+                                  elevation: _canSubmit ? 12 : 0,
+                                ),
+                                onPressed: _canSubmit ? _submit : null,
+                                icon: const Icon(Icons.arrow_upward, size: 20),
+                              ),
+                            ),
+                    ],
+                  ),
                 ],
               ),
             ],
