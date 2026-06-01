@@ -146,7 +146,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|pinned_banner|>'
   };
 
-  static const Set<String> _structuralTemplateLines = <String>{
+  static const Set<String> _structuralMarkerLines = <String>{
+    // These marker variants are observed in streamed output at different
+    // encoding layers, so we strip the exact structural forms only.
     '<|eot_id|>',
     '&lt;|eot_id|&gt;',
     '&amp;lt;|eot_id|&gt;',
@@ -156,12 +158,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|end_header_id|>',
     '&lt;|end_header_id|&gt;',
     '&amp;lt;|end_header_id|&gt;',
-    'assistant',
-    'assistant:',
-    'user',
-    'user:',
-    'system',
-    'system:',
     '<|start_header_id|>assistant<|end_header_id|>',
     '&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;',
     '&amp;lt;|start_header_id|&gt;assistant&amp;lt;|end_header_id|&gt;',
@@ -171,6 +167,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     '<|start_header_id|>system<|end_header_id|>',
     '&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;',
     '&amp;lt;|start_header_id|&gt;system&amp;lt;|end_header_id|&gt;',
+  };
+
+  static const Set<String> _structuralRoleLabelLines = <String>{
+    'assistant:',
+    'user:',
+    'system:',
   };
 
   static const String _forensicSelfTestSessionId = 'runtime_self_test';
@@ -1799,8 +1801,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       _tokenBuffer = '';
                       continue;
                     }
-                    _log('RAW_TOKEN: "${safeOutput.replaceAll('\n', r'\n')}"');
-                    _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
+                    if (_isDeveloperMode) {
+                      _log('RAW_TOKEN: "${safeOutput.replaceAll('\n', r'\n')}"');
+                      _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
+                    }
                     _tokenBuffer = '';
 
                     _resetIdleBackoff();
@@ -2393,8 +2397,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       if (sanitizedPiece.trim().isEmpty) {
                         continue;
                       }
-                      _log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
-                      _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
+                      if (_isDeveloperMode) {
+                        _log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
+                        _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
+                      }
 
                       if (!verificationFirstTokenReceived) {
                         freeVerificationPromptPtr();
@@ -2620,20 +2626,53 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (input.isEmpty) {
       return input;
     }
-    final sanitizedLines = <String>[];
+    final normalizedLines = <String>[];
     for (final rawLine in input.split('\n')) {
-      final line = rawLine.replaceAll('\r', '');
+      normalizedLines.add(rawLine.replaceAll('\r', ''));
+    }
+    final sanitizedLines = <String>[];
+    final pendingRoleLabelIndices = <int>[];
+    final skippedRoleLabelIndices = <int>{};
+    // Keep role labels tentatively so we can drop them only if the same chunk
+    // also contains structural template markers.
+    var hasSeenStructuralMarker = false;
+    for (final line in normalizedLines) {
       final trimmed = line.trim();
       if (trimmed.isEmpty) {
-        sanitizedLines.add('');
+        sanitizedLines.add(line);
         continue;
       }
-      if (_structuralTemplateLines.contains(trimmed)) {
+      if (_structuralMarkerLines.contains(trimmed)) {
+        // Drop whole structural marker lines instead of preserving blank rows.
+        hasSeenStructuralMarker = true;
+        if (pendingRoleLabelIndices.isNotEmpty) {
+          for (final index in pendingRoleLabelIndices) {
+            skippedRoleLabelIndices.add(index);
+          }
+          pendingRoleLabelIndices.clear();
+        }
+        continue;
+      }
+      if (_structuralRoleLabelLines.contains(trimmed)) {
+        if (hasSeenStructuralMarker) {
+          continue;
+        }
+        final roleLabelIndex = sanitizedLines.length;
+        pendingRoleLabelIndices.add(roleLabelIndex);
+        sanitizedLines.add(line);
         continue;
       }
       sanitizedLines.add(line);
     }
-    return sanitizedLines.join('\n');
+    // Filter the deferred role-label indices after the scan so ordering stays
+    // stable and only template-like labels are dropped.
+    final outputLines = <String>[];
+    for (var i = 0; i < sanitizedLines.length; i++) {
+      if (!skippedRoleLabelIndices.contains(i)) {
+        outputLines.add(sanitizedLines[i]);
+      }
+    }
+    return outputLines.join('\n');
   }
 
   bool _isNoiseToken(String piece) {
