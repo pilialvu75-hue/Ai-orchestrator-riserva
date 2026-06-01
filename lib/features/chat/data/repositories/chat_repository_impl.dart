@@ -70,12 +70,14 @@ class ChatRepositoryImpl implements ChatRepository {
             throw const ServerFailure('A response is already in progress for this session.');
           }
           try {
+            final attachmentsSnapshot =
+                List<ChatAttachment>.unmodifiable(attachments);
             RuntimeEventLog.instance.emit(
-              '[FORENSIC_CONVERSATION_START] session=$sessionId prompt_chars=${userPrompt.trim().length} attachments=${attachments.length}',
+              '[FORENSIC_CONVERSATION_START] session=$sessionId prompt_chars=${userPrompt.trim().length} attachments=${attachmentsSnapshot.length}',
             );
             final normalizedPrompt = userPrompt.trim();
             _log(
-              'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachments.length}',
+              'prompt creation session=$sessionId prompt_chars=${normalizedPrompt.length} attachments=${attachmentsSnapshot.length}',
             );
             final userMsg = ChatMessageModel(
               id: _uuid.v4(),
@@ -83,7 +85,7 @@ class ChatRepositoryImpl implements ChatRepository {
               role: 'user',
               content: normalizedPrompt,
               timestamp: DateTime.now().millisecondsSinceEpoch,
-              attachments: attachments,
+              attachments: attachmentsSnapshot,
             );
             await localDataSource.insertMessage(userMsg);
             _log('message persistence session=$sessionId role=user id=${userMsg.id}');
@@ -132,10 +134,11 @@ class ChatRepositoryImpl implements ChatRepository {
               _activeInferenceSubscription = null;
               _activeInferenceSubscriptionSessionId = null;
             }
+            final contextSnapshot = List<String>.unmodifiable(context);
             final stream = orchestrator.handleStream(
               normalizedPrompt,
               sessionId: sessionId,
-              context: context,
+              context: contextSnapshot,
               systemPrompt: systemPrompt,
             );
             final streamCompleter = Completer<void>();

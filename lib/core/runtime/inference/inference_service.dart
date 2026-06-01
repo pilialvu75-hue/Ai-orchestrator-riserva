@@ -46,62 +46,63 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
-    _log('[FORENSIC_INFERENCE_SERVICE_ENTRY] session=${request.sessionId} prompt_chars=${request.prompt.length} provider=${_runtimeProvider.runtimeType}');
-    _log('[ORCHESTRATOR_BEGIN] session=${request.sessionId}');
+    final isolatedRequest = request.copyWith();
+    _log('[FORENSIC_INFERENCE_SERVICE_ENTRY] session=${isolatedRequest.sessionId} prompt_chars=${isolatedRequest.prompt.length} provider=${_runtimeProvider.runtimeType}');
+    _log('[ORCHESTRATOR_BEGIN] session=${isolatedRequest.sessionId}');
     _log(
-      '[RUNTIME_PATH] stream_start session=${request.sessionId} provider=${_runtimeProvider.runtimeType}',
+      '[RUNTIME_PATH] stream_start session=${isolatedRequest.sessionId} provider=${_runtimeProvider.runtimeType}',
     );
-    final promptHash = _promptHash(request);
+    final promptHash = _promptHash(isolatedRequest);
     _log(
-      'prompt creation session=${request.sessionId} prompt_hash=$promptHash prompt_chars=${request.prompt.length} '
-      'context_lines=${request.context.length} offline=${request.isOffline}',
+      'prompt creation session=${isolatedRequest.sessionId} prompt_hash=$promptHash prompt_chars=${isolatedRequest.prompt.length} '
+      'context_lines=${isolatedRequest.context.length} offline=${isolatedRequest.isOffline}',
     );
-    _log('[RUNTIME_LOOKUP] session=${request.sessionId} stage=runtime_mode_load');
+    _log('[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=runtime_mode_load');
     if (_runtimeLookupInProgress) {
-      _log('[RUNTIME_INIT_RECURSION] session=${request.sessionId} scope=inference_service.runtime_lookup');
+      _log('[RUNTIME_INIT_RECURSION] session=${isolatedRequest.sessionId} scope=inference_service.runtime_lookup');
     }
     _runtimeLookupInProgress = true;
-    final session = _sessionManager.startSession(request.sessionId);
+    final session = _sessionManager.startSession(isolatedRequest.sessionId);
     try {
       final runtimeMode = await _loadRuntimeMode();
       _log(
-        '[RUNTIME_LOOKUP] session=${request.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
+       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
       );
       _log(
-        '[RUNTIME_PATH] routing session=${request.sessionId} mode=${runtimeMode.name} '
-        'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
+       '[RUNTIME_PATH] routing session=${isolatedRequest.sessionId} mode=${runtimeMode.name} '
+       'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
       );
 
       final selectedModel = await _resolveSelectedModelForLocalRuntime();
-      final localRequest = _buildLocalRequest(request, selectedModel);
+      final localRequest = _buildLocalRequest(isolatedRequest, selectedModel);
       _log(
-        '[RUNTIME_LOOKUP] session=${request.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
+       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
       );
       _log(
-        '[MODEL_LOAD] selection session=${request.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
-        'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
+       '[MODEL_LOAD] selection session=${isolatedRequest.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
+       'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
       );
       _log(
-        '[RUNTIME_LOOKUP] session=${request.sessionId} stage=request_construction local_request=${localRequest != null}',
+       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=request_construction local_request=${localRequest != null}',
       );
 
       yield* _streamWithRetryAndGuards(
-        runtimeMode: runtimeMode,
-        cloudRequest: request,
-        localRequest: localRequest,
-        cancellationToken: session.cancellationToken,
+       runtimeMode: runtimeMode,
+       cloudRequest: isolatedRequest,
+       localRequest: localRequest,
+       cancellationToken: session.cancellationToken,
       );
     } catch (error, stackTrace) {
-      _log('[ASYNC_FATAL] scope=inference_service.stream session=${request.sessionId} error=$error stack=$stackTrace');
+      _log('[ASYNC_FATAL] scope=inference_service.stream session=${isolatedRequest.sessionId} error=$error stack=$stackTrace');
       yield InferenceResponse.error(
-        'Inference service failed before runtime stream start: $error',
+       'Inference service failed before runtime stream start: $error',
       );
     } finally {
       _runtimeLookupInProgress = false;
       _sessionManager.complete(session);
-      _log('async listener cleanup session=${request.sessionId}');
-      _log('stream end session=${request.sessionId}');
-      _log('[ORCHESTRATOR_END] session=${request.sessionId}');
+      _log('async listener cleanup session=${isolatedRequest.sessionId}');
+      _log('stream end session=${isolatedRequest.sessionId}');
+      _log('[ORCHESTRATOR_END] session=${isolatedRequest.sessionId}');
     }
   }
 

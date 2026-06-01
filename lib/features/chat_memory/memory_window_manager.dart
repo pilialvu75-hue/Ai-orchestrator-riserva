@@ -48,7 +48,7 @@ class MemoryWindowManager {
     }
 
     return MemoryWindowResult(
-      contextLines: bounded,
+      contextLines: List<String>.unmodifiable(bounded),
       trimmedLines: trimmedLines,
       overflowDetected: overflowDetected,
       totalChars: runningChars + systemChars + userChars,
@@ -63,4 +63,3 @@ class MemoryWindowManager {
     return chars;
   }
 }
-
