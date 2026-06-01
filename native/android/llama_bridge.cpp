@@ -68,17 +68,13 @@ std::string get_global_error_copy() {
     return g_global_last_error;
 }
 
-// Llama-3 chat-template boundary markers that must stop generation instead of
-// being surfaced as normal text.
+// Llama-3-specific chat-template boundary markers that must stop generation
+// instead of being surfaced as normal text.
 constexpr const char* kChatTemplateControlTokens[] = {
     "<|eot_id|>",
     "<|start_header_id|>",
     "<|end_header_id|>",
 };
-constexpr const char* kChatTemplateControlPrefix = "<|";
-constexpr const char* kChatTemplateControlSuffix = "|>";
-constexpr size_t kChatTemplateControlDelimiterLength = 2;
-constexpr size_t kMinChatTemplateControlPiecePatternLength = 4;
 
 // Returns true when the sampled token resolves to a known chat-template control
 // token in the loaded vocabulary.
@@ -105,15 +101,18 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
 // Defensive fallback for decoded pieces that still look like chat-template
 // control sequences.
 bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
-    if (piece == nullptr ||
-        piece_len < static_cast<int32_t>(kMinChatTemplateControlPiecePatternLength)) {
+    if (piece == nullptr || piece_len <= 0) {
         return false;
     }
 
-    return std::memcmp(piece, kChatTemplateControlPrefix, kChatTemplateControlDelimiterLength) == 0 &&
-           std::memcmp(piece + piece_len - static_cast<int32_t>(kChatTemplateControlDelimiterLength),
-                       kChatTemplateControlSuffix,
-                       kChatTemplateControlDelimiterLength) == 0;
+    const std::string piece_text(piece, static_cast<size_t>(piece_len));
+    for (const char* control_token : kChatTemplateControlTokens) {
+        if (piece_text == control_token) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 struct BatchGuard {
