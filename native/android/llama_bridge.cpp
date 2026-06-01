@@ -78,7 +78,7 @@ constexpr const char* kChatTemplateControlTokens[] = {
 constexpr const char* kChatTemplateControlPrefix = "<|";
 constexpr const char* kChatTemplateControlSuffix = "|>";
 constexpr size_t kChatTemplateControlDelimiterLength = 2;
-constexpr size_t kChatTemplateControlPieceLength = 4;
+constexpr size_t kMinChatTemplateControlPiecePatternLength = 4;
 
 // Returns true when the sampled token resolves to a known chat-template control
 // token in the loaded vocabulary.
@@ -93,15 +93,20 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
     }
     const std::string token_text(token_text_cstr);
 
-    return token_text == kChatTemplateControlTokens[0] ||
-           token_text == kChatTemplateControlTokens[1] ||
-           token_text == kChatTemplateControlTokens[2];
+    for (const char* control_token : kChatTemplateControlTokens) {
+        if (token_text == control_token) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // Defensive fallback for decoded pieces that still look like chat-template
 // control sequences.
 bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
-    if (piece == nullptr || piece_len < static_cast<int32_t>(kChatTemplateControlPieceLength)) {
+    if (piece == nullptr ||
+        piece_len < static_cast<int32_t>(kMinChatTemplateControlPiecePatternLength)) {
         return false;
     }
 
