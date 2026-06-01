@@ -56,7 +56,7 @@ class ConversationMemoryService {
       '[CONTEXT_REBUILD] session=$sessionId context_lines=${result.contextLines.length} recall_lines=${recalled.length}',
     );
 
-    return result.contextLines;
+    return List<String>.unmodifiable(result.contextLines);
   }
 
   Future<void> storeMessageEmbedding({

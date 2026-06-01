@@ -36,7 +36,7 @@ class InferenceRequest {
       sessionId: sessionId ?? this.sessionId,
       prompt: prompt ?? this.prompt,
       systemPrompt: systemPrompt ?? this.systemPrompt,
-      context: context ?? this.context,
+      context: List<String>.unmodifiable(context ?? this.context),
       isOffline: isOffline ?? this.isOffline,
       maxTokens: maxTokens ?? this.maxTokens,
       temperature: temperature ?? this.temperature,

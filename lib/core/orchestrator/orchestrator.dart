@@ -74,6 +74,7 @@ class Orchestrator {
     _logForensic(
       '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name} will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
     );
+    final contextSnapshot = List<String>.unmodifiable(context);
 
     if (type == TaskType.command) {
       _logForensic(
@@ -99,7 +100,7 @@ class Orchestrator {
         sessionId: sessionId,
         prompt: input,
         systemPrompt: systemPrompt,
-        context: context,
+        context: contextSnapshot,
         isOffline: isOffline,
         maxTokens: maxTokens,
         temperature: temperature,
