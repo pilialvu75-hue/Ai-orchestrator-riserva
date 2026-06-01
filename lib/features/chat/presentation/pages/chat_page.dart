@@ -263,7 +263,7 @@ class _ChatPageState extends State<ChatPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.76),
+      barrierColor: Colors.black.withValues(alpha: 0.76),
       isDismissible: false,
       enableDrag: false,
       builder: (_) => _LiveVoiceOverlay(
@@ -543,7 +543,6 @@ class _ChatBodyState extends State<_ChatBody> {
   String? _lastSpokenAssistantMessageId;
   AssistantMessageTextSize _assistantTextSize = AssistantMessageTextSize.medium;
   
-  // Easter Egg 7-Click Counter & Font Size Dynamic Scale Tracker
   int _sevenClickCounter = 0;
   double _textScaleFactor = 1.0;
   bool _localDebugOverlayVisible = false;
@@ -706,7 +705,6 @@ class _ChatBodyState extends State<_ChatBody> {
         ];
         final isLoading = state is ChatSending;
 
-        // CONTENUTO PRINCIPALE DELLA CHAT
         Widget chatMainContent = Column(
           children: [
             Expanded(
@@ -718,8 +716,8 @@ class _ChatBodyState extends State<_ChatBody> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          const Color(0xFF101526).withOpacity(0.65),
-                          const Color(0xFF11192B).withOpacity(0.9),
+                          const Color(0xFF101526).withValues(alpha: 0.65),
+                          const Color(0xFF11192B).withValues(alpha: 0.9),
                           const Color(0xFF0B0F17),
                         ],
                       ),
@@ -738,7 +736,6 @@ class _ChatBodyState extends State<_ChatBody> {
                           ),
                   ),
                   
-                  // Easter Egg Debug Overlay
                   if (_debugLabController.isVisible || _localDebugOverlayVisible)
                     Positioned(
                       top: 10,
@@ -775,7 +772,6 @@ class _ChatBodyState extends State<_ChatBody> {
 
         return Scaffold(
           backgroundColor: backgroundColor,
-          // APP BAR IN STILE GEMINI
           appBar: AppBar(
             backgroundColor: backgroundColor,
             elevation: 0,
@@ -788,7 +784,6 @@ class _ChatBodyState extends State<_ChatBody> {
                     ),
                   ),
             centerTitle: true,
-            // 7-CLICK EASTER EGG SUL NOME DEL MODELLO
             title: GestureDetector(
               onTap: () {
                 setState(() {
@@ -820,7 +815,6 @@ class _ChatBodyState extends State<_ChatBody> {
               ),
             ),
             actions: [
-              // IL VECCHIO DIAGNOSTICS QUADRATO TRASFORMATO IN MENU A TENDINA
               PopupMenuButton<int>(
                 icon: const Icon(Icons.analytics_outlined, color: Color(0xFF4ADE80)),
                 color: surfaceColor,
@@ -871,14 +865,12 @@ class _ChatBodyState extends State<_ChatBody> {
             ],
           ),
           
-          // NUOVO DRAWER GEMINI PER MODALITA' PORTRAIT (MOBILE)
           drawer: isWide ? null : Drawer(
             backgroundColor: surfaceColor,
             child: SafeArea(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Bottone Nuova Chat Pillola
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Container(
@@ -903,7 +895,6 @@ class _ChatBodyState extends State<_ChatBody> {
                     ),
                   ),
                   
-                  // Sezione Storico / Sessioni Attive
                   Expanded(
                     child: ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -912,7 +903,7 @@ class _ChatBodyState extends State<_ChatBody> {
                           leading: const Icon(Icons.chat_bubble_outline, color: Color(0xFF8AB4F8), size: 18),
                           title: const Text("Sessione predefinita", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
                           selected: true,
-                          selectedTileColor: Colors.white.withOpacity(0.05),
+                          selectedTileColor: Colors.white.withValues(alpha: 0.05),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           onTap: () => Navigator.of(context).pop(),
                         ),
@@ -922,7 +913,6 @@ class _ChatBodyState extends State<_ChatBody> {
                   
                   const Divider(color: Colors.white12, height: 1),
                   
-                  // NUOVO SLIDER INTERFACCIA PER IL CAMBIO DIMENSIONE TESTO
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     child: Column(
@@ -954,7 +944,6 @@ class _ChatBodyState extends State<_ChatBody> {
                   
                   const Divider(color: Colors.white12, height: 1),
 
-                  // SEZIONI MIGRATE: DATI PERSONALI & PROMPT SISTEMA
                   ListTile(
                     leading: const Icon(Icons.account_circle_outlined, color: Colors.white70, size: 22),
                     title: const Text("Dati personali (opzionale)", style: TextStyle(color: Color(0xE6FFFFFF), fontSize: 14)),
@@ -997,11 +986,11 @@ class _ChatBodyState extends State<_ChatBody> {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  const Color(0xFF8AB4F8).withOpacity(0.28),
+                  const Color(0xFF8AB4F8).withValues(alpha: 0.28),
                   Colors.transparent,
                 ],
               ),
-              border: Border.all(color: const Color(0xFF8AB4F8).withOpacity(0.14)),
+              border: Border.all(color: const Color(0xFF8AB4F8).withValues(alpha: 0.14)),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x3315B6FF),
@@ -1025,19 +1014,19 @@ class _ChatBodyState extends State<_ChatBody> {
           const SizedBox(height: 8),
           Text(l10n.t('start_conversation'),
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.35), fontSize: 14)),
+                  color: Colors.white.withValues(alpha: 0.35), fontSize: 14)),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF151A29).withOpacity(0.82),
+              color: const Color(0xFF151A29).withValues(alpha: 0.82),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Text(
               l10n.t('chat_surface_tagline'),
               style: TextStyle(
-                color: Colors.white.withOpacity(0.52),
+                color: Colors.white.withValues(alpha: 0.52),
                 fontSize: 12,
                 letterSpacing: 0.2,
               ),
@@ -1064,7 +1053,8 @@ class _HighPerformanceChatList extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView.custom(
       controller: controller,
-      scrollCacheExtent: 1200,
+      // ignore: deprecated_member_use
+      cacheExtent: 1200.0,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
       childrenDelegate: SliverChildBuilderDelegate(
@@ -1315,11 +1305,11 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  const Color(0xFF0A0F1B).withOpacity(0.94),
-                  const Color(0xFF05070D).withOpacity(0.98),
+                  const Color(0xFF0A0F1B).withValues(alpha: 0.94),
+                  const Color(0xFF05070D).withValues(alpha: 0.98),
                 ],
               ),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
@@ -1333,7 +1323,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                           width: 52,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
@@ -1364,7 +1354,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                           child: LinearProgressIndicator(
                             value: _downloadProgress,
                             minHeight: 10,
-                            backgroundColor: Colors.white.withOpacity(0.14),
+                            backgroundColor: Colors.white.withValues(alpha: 0.14),
                             valueColor: const AlwaysStoppedAnimation<Color>(
                               Color(0xFF8AB4F8),
                             ),
@@ -1412,7 +1402,7 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                         width: 52,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
+                          color: Colors.white.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),
@@ -1423,14 +1413,14 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                         height: isActive ? 132 : 96,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: statusColor.withOpacity(0.12),
+                          color: statusColor.withValues(alpha: 0.12),
                           border: Border.all(
-                            color: statusColor.withOpacity(0.8),
+                            color: statusColor.withValues(alpha: 0.8),
                             width: 2,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: statusColor.withOpacity(0.35),
+                              color: statusColor.withValues(alpha: 0.35),
                               blurRadius: 28,
                               spreadRadius: 3,
                             ),
@@ -1497,7 +1487,6 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
   }
 }
 
-// Lightweight fade-in animation wrapping each chat bubble.
 class _AnimatedBubble extends StatefulWidget {
   const _AnimatedBubble({super.key, required this.child});
   final Widget child;
