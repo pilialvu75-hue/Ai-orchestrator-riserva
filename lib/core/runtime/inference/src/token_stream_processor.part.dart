@@ -40,13 +40,16 @@ class _AndroidFfiTokenStreamProcessor {
     '<|pinned_banner|>',
   ];
 
+  static final Map<int, List<String>> _structuralTemplateTokensByLeadingCodeUnit =
+      _buildStructuralTemplateTokensByLeadingCodeUnit();
+
   String sanitizeStructuralTemplateOutput(String input) {
     if (input.isEmpty && _pendingStructuralTemplateOutput.isEmpty) {
       return '';
     }
 
     final combined =
-        '$_pendingStructuralTemplateOutput$input'.replaceAll('\r', '').replaceAll('\u0000', '');
+        '$_pendingStructuralTemplateOutput$input'.replaceAll(RegExp(r'[\r\u0000]'), '');
     _pendingStructuralTemplateOutput = '';
     if (combined.isEmpty) {
       return '';
@@ -122,7 +125,9 @@ class _AndroidFfiTokenStreamProcessor {
   }
 
   String? _matchStructuralTemplateToken(String text, int index) {
-    for (final token in _structuralTemplateTokens) {
+    final candidates = _structuralTemplateTokensByLeadingCodeUnit[text.codeUnitAt(index)] ??
+        _structuralTemplateTokens;
+    for (final token in candidates) {
       if (text.startsWith(token, index)) {
         return token;
       }
@@ -132,11 +137,22 @@ class _AndroidFfiTokenStreamProcessor {
 
   String? _pendingStructuralTemplateTail(String text, int index) {
     final remaining = text.substring(index);
-    for (final token in _structuralTemplateTokens) {
+    final candidates = _structuralTemplateTokensByLeadingCodeUnit[remaining.codeUnitAt(0)] ??
+        _structuralTemplateTokens;
+    for (final token in candidates) {
       if (remaining.length < token.length && token.startsWith(remaining)) {
         return remaining;
       }
     }
     return null;
+  }
+
+  static Map<int, List<String>> _buildStructuralTemplateTokensByLeadingCodeUnit() {
+    final groupedTokens = <int, List<String>>{};
+    for (final token in _structuralTemplateTokens) {
+      final leadingCodeUnit = token.codeUnitAt(0);
+      groupedTokens.putIfAbsent(leadingCodeUnit, () => <String>[]).add(token);
+    }
+    return groupedTokens;
   }
 }
