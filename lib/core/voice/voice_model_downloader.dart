@@ -213,7 +213,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       resolvedDirectoryPath ??= file?.parent.path ?? resolution.privateFile.parent.path;
 
       final parentExists = file != null && await file.parent.exists();
-      if (!parentExists || file == null) {
+      if (!parentExists) {
         logEvent(
           _tag,
           '[ASSET_MISSING] file=${spec.fileName} expectedPrivate=${resolution.privateFile.path} expectedPublic=${resolution.publicFile.path}',
