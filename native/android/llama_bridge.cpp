@@ -83,14 +83,18 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
         return false;
     }
 
-    const char* token_text_cstr = llama_vocab_token_to_str(vocab, token);
-    if (token_text_cstr == nullptr) {
-        return false;
-    }
-    const std::string token_text(token_text_cstr);
-
+    llama_token control_token_buf[4]{};
     for (const char* control_token : kChatTemplateControlTokens) {
-        if (token_text == control_token) {
+        const int token_count = llama_tokenize(
+            vocab,
+            control_token,
+            static_cast<int32_t>(std::strlen(control_token)),
+            control_token_buf,
+            static_cast<int32_t>(sizeof(control_token_buf) / sizeof(control_token_buf[0])),
+            false,
+            true
+        );
+        if (token_count == 1 && control_token_buf[0] == token) {
             return true;
         }
     }
@@ -618,17 +622,6 @@ void run_generation(
 
         llama_sampler_accept(sampler.get(), next_token);
 
-        if (is_chat_template_control_token(vocab, next_token)) {
-            eos_reached = true;
-            LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64
-                 " eos_reached=true generated=%d reason=chat_template_control_token token_id=%d",
-                 session->id,
-                 owner_epoch,
-                 n_decode,
-                 static_cast<int>(next_token));
-            break;
-        }
-
         if (llama_vocab_is_eog(vocab, next_token)) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
                 initial_sample_retry_count < kMaxInitialSampleRetries) {
@@ -651,6 +644,17 @@ void run_generation(
                  session->id,
                  owner_epoch,
                  n_decode);
+            break;
+        }
+
+        if (is_chat_template_control_token(vocab, next_token)) {
+            eos_reached = true;
+            LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64
+                 " eos_reached=true generated=%d reason=chat_template_control_token token_id=%d",
+                 session->id,
+                 owner_epoch,
+                 n_decode,
+                 static_cast<int>(next_token));
             break;
         }
 
