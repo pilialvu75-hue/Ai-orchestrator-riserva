@@ -133,9 +133,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const Set<String> _systemSanityTags = <String>{
     '<|im_start|>',
     '<|im_end|>',
+    '&lt;|im_start|&gt;',
+    '&lt;|im_end|&gt;',
+    '&amp;lt;|im_start|&amp;gt;',
+    '&amp;lt;|im_end|&amp;gt;',
     '<|endoftext|>',
     '<think>',
     '</think>',
+    '&lt;think&gt;',
+    '&lt;/think&gt;',
     '<|EOT|>',
     '<|pinned_banner|>'
   };
@@ -1177,7 +1183,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   ' prompt_pointer_address=${promptNativePtr.address}',
                 );
                 _log('[FFI_PRE_START] session=$sessionId native_session=$nativeSessionId');
-                _setPhase(RuntimePhase.startingGeneration);
                 _log('[FORENSIC_BEFORE_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId');
                 _log(
                   '[FIRST_TOKEN_START_GENERATION_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
@@ -1323,6 +1328,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
               final fullText = StringBuffer();
               final startedAt = DateTime.now();
               var lastTokenProgressAt = startedAt;
+              var lastNativeActivityAt = startedAt;
               var consecutiveIdlePolls = 0;
               _updateRuntimeStatus(
                 LocalRuntimeStatus.inferencing,
@@ -1459,7 +1465,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     );
                     break;
                   }
-                  if (firstTokenAt == null && sinceLastTokenProgress > firstTokenDeadline) {
+                  final firstTokenWaitElapsed = now.difference(lastNativeActivityAt);
+                  if (firstTokenAt == null &&
+                      firstTokenWaitElapsed.inMilliseconds >
+                          firstTokenDeadline.inMilliseconds) {
                     classifyFirstTokenTermination(
                       reason: 'first_token_watchdog',
                       boundary: 'poll_loop',
@@ -1719,27 +1728,31 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                       }
                       continue;
                     }
-                    if (piece.trim().isEmpty || _shouldIgnoreToken(piece)) {
-                      _resetIdleBackoff();
-                      consecutiveInvalidTokens = 0;
-                      consecutiveIdlePolls = 0;
-                      lastTokenProgressAt = DateTime.now();
-                      continue;
+                    final trimmedPiece = piece.trim();
+                    final tokenObservedAt = DateTime.now();
+                    lastNativeActivityAt = tokenObservedAt;
+                    if (_shouldIgnoreToken(trimmedPiece)) {
+                    continue;
                     }
                     final sanitizedPiece = _sanitizeLlmOutput(piece);
-                    if (sanitizedPiece.trim().isEmpty) {
+                    final trimmedSanitizedPiece = sanitizedPiece.trim();
+                    if (trimmedSanitizedPiece.isEmpty) {
                     continue;
                     }
 
                     _resetIdleBackoff();
                     final isFirstToken = firstTokenAt == null;
-                    if (isFirstToken) {
-                    firstTokenAt = DateTime.now();
-                    _handleFirstTokenIfNeeded(sanitizedPiece);
+                    DateTime? firstTokenTimestamp;
+                    if (isFirstToken && _preFirstTokenActive) {
+                    firstTokenTimestamp = _handleFirstTokenIfNeeded(sanitizedPiece);
+                    if (firstTokenTimestamp != null) {
+                      firstTokenAt = firstTokenTimestamp;
                     }
+                    }
+                    final firstTokenReceived = firstTokenTimestamp != null;
                     consecutiveInvalidTokens = 0;
                     consecutiveIdlePolls = 0;
-                    lastTokenProgressAt = DateTime.now();
+                    lastTokenProgressAt = tokenObservedAt;
                     fullText.write(sanitizedPiece);
                     estimatedTokens++;
                     recordVerificationSuccess(
@@ -1753,7 +1766,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     _log(
                     '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} poll_iteration=$pollIterations subscription_alive=${!controller.isClosed}',
                     );
-                    if (isFirstToken) {
+                    if (firstTokenReceived) {
                     freePromptNativePtr();
                     _log(
                         '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${streamingElapsed.inMilliseconds} chars=${sanitizedPiece.length} phase=$_runtimePhase',
@@ -1855,14 +1868,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     _log('[STREAM_ADD] event=token session=$sessionId');
                     final flushWatch = Stopwatch()..start();
                     try {
-                    if (!controller.isClosed && sanitizedPiece.isNotEmpty) {
+                    if (!controller.isClosed) {
                         controller.add(
                           InferenceResponse.token(
                             text: sanitizedPiece,
                             model: modelId,
                           ),
                         );
-                        if (isFirstToken) {
+                        if (firstTokenReceived) {
                           _log('[FORENSIC_FIRST_TOKEN] sessionId=$sessionId nativeSessionId=$nativeSessionId chars=${sanitizedPiece.length}');
                         }
                     }
@@ -1898,9 +1911,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     _logAi('inference completed');
                     _log('[STREAM_ADD] event=final_chunk session=$sessionId');
                     final flushWatch = Stopwatch()..start();
-                    if (!controller.isClosed && fullText.toString().trim().isNotEmpty) {
+                    if (!controller.isClosed) {
+                      final finalText = fullText.toString();
                       controller.add(InferenceResponse.finalChunk(
-                        text: fullText.toString(),
+                        text: finalText.isEmpty ? '\u200B' : finalText,
                         tokensGenerated: estimatedTokens,
                         model: modelId,
                       ));
@@ -2303,7 +2317,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     );
                     if (status == 1) {
                       final piece = tokenBuf.toDartString();
-                      if (piece.trim().isEmpty || _shouldIgnoreToken(piece)) {
+                      final trimmedPiece = piece.trim();
+                      if (_shouldIgnoreToken(trimmedPiece)) {
                         continue;
                       }
                       final sanitizedPiece = _sanitizeLlmOutput(piece);
@@ -2376,10 +2391,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     RuntimeVerificationPhase.passed,
                     message: 'Runtime verification passed.',
                   );
-                  if (!controller.isClosed && fullText.toString().trim().isNotEmpty) {
+                  if (!controller.isClosed) {
+                    final finalText = fullText.toString();
                     controller.add(
                       InferenceResponse.finalChunk(
-                        text: fullText.toString(),
+                        text: finalText.isEmpty ? '\u200B' : finalText,
                         tokensGenerated: emittedTokens,
                         model: modelId,
                       ),
@@ -2525,46 +2541,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   String _sanitizeLlmOutput(String input) {
     var output = input;
-    for (final token in <String>[
-      '<|im_start|>',
-      '<|im_end|>',
-      '&lt;|im_start|&gt;',
-      '&lt;|im_end|&gt;',
-      '&amp;lt;|im_start|&amp;gt;',
-      '&amp;lt;|im_end|&amp;gt;',
-      '<think>',
-      '</think>',
-      '&lt;think&gt;',
-      '&lt;/think&gt;',
-      '<|endoftext|>',
-      '<|EOT|>',
-      '<|pinned_banner|>',
-    ]) {
+    for (final token in _systemSanityTags) {
       output = output.replaceAll(token, '');
     }
     return output;
   }
 
   bool _isNoiseToken(String piece) {
-    return piece.trim().isEmpty;
+    return piece.isEmpty || _systemSanityTags.contains(piece);
   }
 
   bool _shouldIgnoreToken(String piece) {
-    if (_isNoiseToken(piece)) {
-      return true;
-    }
-    return _sanitizeLlmOutput(piece).trim().isEmpty;
+    // Keep the raw noise predicate separate so future ignore heuristics can
+    // expand without reworking the sanitization path.
+    return _isNoiseToken(piece);
   }
 
-  void _handleFirstTokenIfNeeded(String piece) {
+  DateTime? _handleFirstTokenIfNeeded(String piece) {
     if (!_preFirstTokenActive) {
-      return;
+      return null;
     }
     _preFirstTokenActive = false;
     _setPhase(RuntimePhase.streaming);
+    final now = DateTime.now();
     _log(
-      '[FIRST_TOKEN_PHASE] phase=${_runtimePhase.name} chars=${piece.length} ts=${DateTime.now().microsecondsSinceEpoch}',
+      '[FIRST_TOKEN_PHASE] phase=${_runtimePhase.name} chars=${piece.length} ts=${now.microsecondsSinceEpoch}',
     );
+    return now;
   }
 
   void _throttledLoopLog(String message) {
