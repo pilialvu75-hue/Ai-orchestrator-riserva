@@ -4,6 +4,7 @@
 
 #include <android/log.h>
 
+#include <array>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -75,26 +77,59 @@ constexpr const char* kChatTemplateControlTokens[] = {
     "<|start_header_id|>",
     "<|end_header_id|>",
 };
+// One extra slot keeps the probe buffer safely above the three control tokens
+// while still avoiding any truncation if tokenization behaves unexpectedly.
+constexpr size_t kChatTemplateControlTokenBufferTokens = std::size(kChatTemplateControlTokens) + 1;
 
-// Returns true when the sampled token resolves to a known chat-template control
-// token in the loaded vocabulary.
-bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token token) {
+struct ChatTemplateControlTokenId {
+    llama_token token_id{};
+    bool resolved{false};
+};
+
+struct ChatTemplateControlTokenIds {
+    std::array<ChatTemplateControlTokenId, std::size(kChatTemplateControlTokens)> token_ids{};
+};
+
+// Returns the resolved chat-template control token ids for the loaded vocabulary.
+ChatTemplateControlTokenIds resolve_chat_template_control_token_ids(const llama_vocab* vocab) {
+    ChatTemplateControlTokenIds resolved{};
     if (vocab == nullptr) {
-        return false;
+        return resolved;
     }
 
-    llama_token control_token_buf[4]{};
-    for (const char* control_token : kChatTemplateControlTokens) {
+    // Reused for each control token probe; each result is consumed immediately.
+    std::array<llama_token, kChatTemplateControlTokenBufferTokens> control_token_buf{};
+    for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
+        const char* control_token = kChatTemplateControlTokens[i];
         const int token_count = llama_tokenize(
             vocab,
             control_token,
             static_cast<int32_t>(std::strlen(control_token)),
-            control_token_buf,
-            static_cast<int32_t>(sizeof(control_token_buf) / sizeof(control_token_buf[0])),
+            control_token_buf.data(),
+            static_cast<int32_t>(std::size(control_token_buf)),
             false,
             true
         );
-        if (token_count == 1 && control_token_buf[0] == token) {
+        if (token_count == 1) {
+            resolved.token_ids[i].token_id = control_token_buf[0];
+            resolved.token_ids[i].resolved = true;
+            continue;
+        }
+
+        LOGE("[CHAT_TEMPLATE_CONTROL_TOKEN_RESOLVE] token=%s token_count=%d expected=1",
+             control_token,
+             token_count);
+    }
+
+    return resolved;
+}
+
+// Returns true when the sampled token resolves to a known chat-template control
+// token in the loaded vocabulary.
+bool is_chat_template_control_token(const ChatTemplateControlTokenIds& control_tokens,
+                                   const llama_token token) {
+    for (const auto& control_token : control_tokens.token_ids) {
+        if (control_token.resolved && control_token.token_id == token) {
             return true;
         }
     }
@@ -415,6 +450,8 @@ void run_generation(
         set_state_if_epoch(session, kStateFailed, owner_epoch, "vocab_unavailable");
         return;
     }
+    const ChatTemplateControlTokenIds chat_template_control_tokens =
+        resolve_chat_template_control_token_ids(vocab);
 
     const int n_ctx = llama_n_ctx(ctx);
     if (n_ctx <= 0) {
@@ -647,7 +684,7 @@ void run_generation(
             break;
         }
 
-        if (is_chat_template_control_token(vocab, next_token)) {
+        if (is_chat_template_control_token(chat_template_control_tokens, next_token)) {
             eos_reached = true;
             LOGI("[DECODE] session=%" PRId64 " epoch=%" PRIu64
                  " eos_reached=true generated=%d reason=chat_template_control_token token_id=%d",
