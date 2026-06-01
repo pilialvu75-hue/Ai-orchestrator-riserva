@@ -2535,8 +2535,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _sanitizeStructuralTemplateOutput(String input) =>
       _tokenStreamProcessor.sanitizeStructuralTemplateOutput(input);
 
-  String _flushStructuralTemplateOutput() =>
-      _tokenStreamProcessor.flushStructuralTemplateOutput();
+  String _flushStructuralTemplateOutput(StringBuffer fullText) =>
+      fullText.toString() + _tokenStreamProcessor.flushStructuralTemplateOutput();
 
   void _discardStructuralTemplateOutput() =>
       _tokenStreamProcessor.discardStructuralTemplateOutput();
