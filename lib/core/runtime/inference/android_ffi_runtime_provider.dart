@@ -1740,21 +1740,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     ];
 
                     for (final pattern in blockedPatterns) {
-                      if (_tokenBuffer.contains(pattern)) {
-                        _tokenBuffer = _tokenBuffer.replaceAll(pattern, '');
-                      }
+                      _tokenBuffer = _tokenBuffer.replaceAll(pattern, '');
                     }
 
-                    final inTagCandidate = _tokenBuffer.contains('<') && !_tokenBuffer.contains('>');
+                    final lastOpen = _tokenBuffer.lastIndexOf('<');
+                    final lastClose = _tokenBuffer.lastIndexOf('>');
+                    final inTagCandidate = lastOpen != -1 && lastOpen > lastClose;
                     if (inTagCandidate) {
-                      final lastOpen = _tokenBuffer.lastIndexOf('<');
                       final tail = _tokenBuffer.substring(lastOpen);
 
-                      final isPartialKnownTag =
-                          '<think>'.startsWith(tail) ||
-                          '</think>'.startsWith(tail) ||
-                          '<|im_start|>'.startsWith(tail) ||
-                          '<|im_end|>'.startsWith(tail);
+                      final isPartialKnownTag = blockedPatterns.any(
+                        (pattern) => pattern.startsWith(tail),
+                      );
 
                       if (isPartialKnownTag) {
                         continue;
@@ -1762,18 +1759,20 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     }
 
                     final safeOutput = _tokenBuffer;
-                    _tokenBuffer = '';
                     final trimmedPiece = safeOutput.trim();
                     final tokenObservedAt = DateTime.now();
                     lastNativeActivityAt = tokenObservedAt;
                     if (_shouldIgnoreToken(trimmedPiece)) {
+                      _tokenBuffer = '';
                       continue;
                     }
                     final sanitizedPiece = _sanitizeLlmOutput(safeOutput);
                     final trimmedSanitizedPiece = sanitizedPiece.trim();
                     if (trimmedSanitizedPiece.isEmpty) {
+                      _tokenBuffer = '';
                       continue;
                     }
+                    _tokenBuffer = '';
 
                     _resetIdleBackoff();
                     final isFirstToken = firstTokenAt == null;
