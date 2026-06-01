@@ -77,6 +77,8 @@ constexpr const char* kChatTemplateControlTokens[] = {
 };
 constexpr const char* kChatTemplateControlPrefix = "<|";
 constexpr const char* kChatTemplateControlSuffix = "|>";
+constexpr size_t kChatTemplateControlDelimiterLength = 2;
+constexpr size_t kChatTemplateControlPieceLength = 4;
 
 // Returns true when the sampled token resolves to a known chat-template control
 // token in the loaded vocabulary.
@@ -91,26 +93,22 @@ bool is_chat_template_control_token(const llama_vocab* vocab, const llama_token 
     }
     const std::string token_text(token_text_cstr);
 
-    for (const char* control_token : kChatTemplateControlTokens) {
-        if (token_text == control_token) {
-            return true;
-        }
-    }
-
-    return false;
+    return token_text == kChatTemplateControlTokens[0] ||
+           token_text == kChatTemplateControlTokens[1] ||
+           token_text == kChatTemplateControlTokens[2];
 }
-
-constexpr int32_t kMinChatTemplateControlPieceLength = 4;
 
 // Defensive fallback for decoded pieces that still look like chat-template
 // control sequences.
 bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
-    if (piece == nullptr || piece_len < kMinChatTemplateControlPieceLength) {
+    if (piece == nullptr || piece_len < static_cast<int32_t>(kChatTemplateControlPieceLength)) {
         return false;
     }
 
-    return std::strncmp(piece, kChatTemplateControlPrefix, 2) == 0 &&
-           std::strncmp(piece + piece_len - 2, kChatTemplateControlSuffix, 2) == 0;
+    return std::memcmp(piece, kChatTemplateControlPrefix, kChatTemplateControlDelimiterLength) == 0 &&
+           std::memcmp(piece + piece_len - static_cast<int32_t>(kChatTemplateControlDelimiterLength),
+                       kChatTemplateControlSuffix,
+                       kChatTemplateControlDelimiterLength) == 0;
 }
 
 struct BatchGuard {
