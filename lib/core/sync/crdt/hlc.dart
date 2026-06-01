@@ -95,8 +95,22 @@ class Hlc implements Comparable<Hlc> {
 
   // ── Ordering ──────────────────────────────────────────────────────────────
 
+  /// Compares only the causal timestamp components (wall time + counter).
+  ///
+  /// The node ID is intentionally excluded so LWW resolution is driven by the
+  /// actual causal time, not by which peer happens to sort later.
+  int compareCausalTo(Hlc other) {
+    final wallComparison = wallMs.compareTo(other.wallMs);
+    if (wallComparison != 0) return wallComparison;
+    return counter.compareTo(other.counter);
+  }
+
   @override
-  int compareTo(Hlc other) => toString().compareTo(other.toString());
+  int compareTo(Hlc other) {
+    final causalComparison = compareCausalTo(other);
+    if (causalComparison != 0) return causalComparison;
+    return nodeId.compareTo(other.nodeId);
+  }
 
   bool operator >(Hlc other) => compareTo(other) > 0;
   bool operator <(Hlc other) => compareTo(other) < 0;

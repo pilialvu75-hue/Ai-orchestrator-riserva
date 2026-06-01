@@ -83,9 +83,9 @@ class CrdtDocument {
 
   /// Merges [incoming] records into this document.
   ///
-  /// Each record is applied only when its HLC is strictly greater than the
-  /// existing record for the same key (LWW). The local clock is advanced to
-  /// remain causally consistent.
+  /// Each record is applied only when its causal HLC time (wall time +
+  /// counter) is strictly greater than the existing record for the same key
+  /// (LWW). The local clock is advanced to remain causally consistent.
   void merge(List<CrdtRecord> incoming) {
     for (final record in incoming) {
       _clock = Hlc.recv(_clock, record.hlc);
@@ -100,7 +100,7 @@ class CrdtDocument {
     final result = <CrdtRecord>[];
     for (final bucket in _store.values) {
       for (final record in bucket.values) {
-        if (record.hlc > since) result.add(record);
+        if (record.hlc.compareCausalTo(since) > 0) result.add(record);
       }
     }
     result.sort((a, b) => a.hlc.compareTo(b.hlc));
@@ -121,7 +121,7 @@ class CrdtDocument {
   void _applyRecord(CrdtRecord record) {
     final bucket = _store.putIfAbsent(record.collection, () => {});
     final existing = bucket[record.key];
-    if (existing == null || record.hlc > existing.hlc) {
+    if (existing == null || record.hlc.compareCausalTo(existing.hlc) > 0) {
       bucket[record.key] = record;
     }
   }

@@ -110,7 +110,8 @@ class SyncManager {
       final record = CrdtRecord.fromJson(json);
       final existing = _document.get(record.collection, record.key);
       // Only persist if this record wins the LWW race.
-      if (existing == null || record.hlc > existing.hlc) {
+      if (existing == null ||
+          record.hlc.compareCausalTo(existing.hlc) > 0) {
         _document.merge([record]);
         await _persistRecord(record);
         applied++;
