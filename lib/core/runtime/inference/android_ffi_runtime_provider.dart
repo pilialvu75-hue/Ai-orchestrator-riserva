@@ -226,7 +226,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   late final _AndroidFfiTokenStreamProcessor _tokenStreamProcessor =
       _AndroidFfiTokenStreamProcessor(this);
   late final _AndroidFfiSessionStateIsolator _sessionStateIsolator =
-      _AndroidFfiSessionStateIsolator(this);
+      _AndroidFfiSessionStateIsolator();
 
   static Duration get _firstTokenTimeout =>
       kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
@@ -2254,7 +2254,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 final tokenBuf = tokenBufRaw.cast<Utf8>();
                 var emittedTokens = 0;
                 final fullText = StringBuffer();
-                var released = false;
                 
                 final verificationPromptPtr =
                     request.prompt.toNativeUtf8(allocator: calloc);
@@ -2432,7 +2431,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   _safeCancel(bindings, verificationSessionId);
                   try {
                     bindings.releaseSession(verificationSessionId);
-                    released = true;
                   } catch (error) {
                     _log(
                       '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_exception error=$error',
@@ -2448,7 +2446,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
           _log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1926 | Function: streamVerificationInference() | AFTER calling _runInferenceSerially()',
           );
-        } catch (e, stackTrace) {
+        } catch (_) {
           rethrow;
         }
       }();
@@ -2456,7 +2454,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1936 | Function: streamVerificationInference() | AFTER exit',
       );
       return controller.stream;
-    } catch (e, stackTrace) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -2473,34 +2471,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         modelPath,
         modelId: modelId,
       );
-
-  void _releaseNativeSessionByModelPath(
-    LlamaBridgeBindings bindings,
-    String modelPath, {
-    required String reason,
-  }) => _nativeSessionSubsystem.releaseNativeSessionByModelPath(
-        bindings,
-        modelPath,
-        reason: reason,
-      );
-
-  void _evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) =>
-      _nativeSessionSubsystem.evictLeastRecentlyUsedSessionIfNeeded(bindings);
-
-  void _markSessionAsMostRecentlyUsed(String modelPath) =>
-      _nativeSessionSubsystem.markSessionAsMostRecentlyUsed(modelPath);
-
-  void _releaseAllNativeSessions(
-    LlamaBridgeBindings bindings, {
-    required String reason,
-  }) => _nativeSessionSubsystem.releaseAllNativeSessions(
-        bindings,
-        reason: reason,
-      );
-
-  void _traceFfiPhase(FfiPhase phase) {
-    _log('[FFI_PHASE_TRANSITION] phase=${phase.name} ts=${DateTime.now().microsecondsSinceEpoch}');
-  }
 
   void _setPhase(RuntimePhase phase) {
     if (_runtimePhase == phase) {
@@ -2541,8 +2511,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void _discardStructuralTemplateOutput() =>
       _tokenStreamProcessor.discardStructuralTemplateOutput();
 
-  bool _isNoiseToken(String piece) => _tokenStreamProcessor.isNoiseToken(piece);
-
   bool _shouldIgnoreToken(String piece) =>
       _tokenStreamProcessor.isNoiseToken(piece);
 
@@ -2582,9 +2550,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         sessionId: sessionId,
         modelPath: modelPath,
       );
-
-  Future<void> _runWarmup({required String modelPath}) =>
-      _warmupSubsystem.runWarmup(modelPath: modelPath);
 
   static void _finishWithError(
     StreamController<InferenceResponse> ctrl,
@@ -2798,25 +2763,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       runtimeStateMachine.markVerified();
     }
   }
-
-  String _defaultReasonFor(LocalRuntimeStatus status) =>
-      _lifecycleSubsystem.defaultReasonFor(status);
-
-  String _expectedNextFor(LocalRuntimeStatus status) =>
-      _lifecycleSubsystem.expectedNextFor(status);
-
-  void _traceStatePath({
-    required LocalRuntimeStatus from,
-    required LocalRuntimeStatus to,
-    required String reason,
-    required String origin,
-  }) =>
-      _lifecycleSubsystem.traceStatePath(
-        from: from,
-        to: to,
-        reason: reason,
-        origin: origin,
-      );
 
   void _emitStateReset({
     required String reason,

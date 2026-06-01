@@ -109,10 +109,11 @@ class _DebugOverlayState extends State<DebugOverlay> {
       });
     } finally {
       RuntimeEventLog.instance.emit('[DEBUG_LAB_END] test=$testId status=${_status.name}');
-      if (!mounted) return;
-      setState(() {
-        _running = false;
-      });
+      if (mounted) {
+        setState(() {
+          _running = false;
+        });
+      }
     }
   }
 
@@ -440,7 +441,7 @@ class _DebugOverlayState extends State<DebugOverlay> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<AssistantMessageTextSize>(
-              value: widget.assistantTextSize,
+              initialValue: widget.assistantTextSize,
               isExpanded: true,
               decoration: const InputDecoration(
                 filled: true,

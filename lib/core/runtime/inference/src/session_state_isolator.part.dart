@@ -1,9 +1,7 @@
 part of '../android_ffi_runtime_provider.dart';
 
 class _AndroidFfiSessionStateIsolator {
-  _AndroidFfiSessionStateIsolator(this._owner);
-
-  final AndroidFfiRuntimeProvider _owner;
+  _AndroidFfiSessionStateIsolator();
 
   String composePrompt(
     InferenceRequest request, {
