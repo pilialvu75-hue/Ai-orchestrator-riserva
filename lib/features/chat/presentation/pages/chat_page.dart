@@ -382,6 +382,7 @@ class _NarrowLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ChatBody(
+      isWide: false,
       scrollController: scrollController,
       onSend: onSend,
       onSettings: onSettings,
@@ -478,6 +479,7 @@ class _WideLayout extends StatelessWidget {
         ),
         Expanded(
           child: _ChatBody(
+            isWide: true,
             scrollController: scrollController,
             onSend: onSend,
              onSettings: onSettings,
@@ -501,6 +503,7 @@ class _WideLayout extends StatelessWidget {
 
 class _ChatBody extends StatefulWidget {
   const _ChatBody({
+    required this.isWide,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -517,6 +520,7 @@ class _ChatBody extends StatefulWidget {
     required this.onClearDebugLabMessages,
   });
 
+  final bool isWide;
   final ScrollController scrollController;
   final void Function(String text, List<ChatAttachment> attachments) onSend;
   final VoidCallback onSettings;
@@ -633,7 +637,6 @@ class _ChatBodyState extends State<_ChatBody> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width >= _kSidebarBreakpoint;
     const backgroundColor = Color(0xFF131314);
     const surfaceColor = Color(0xFF1E1F20);
 
@@ -775,7 +778,7 @@ class _ChatBodyState extends State<_ChatBody> {
           appBar: AppBar(
             backgroundColor: backgroundColor,
             elevation: 0,
-            leading: isWide 
+            leading: widget.isWide 
                 ? null 
                 : Builder(
                     builder: (context) => IconButton(
@@ -865,7 +868,7 @@ class _ChatBodyState extends State<_ChatBody> {
             ],
           ),
           
-          drawer: isWide ? null : Drawer(
+          drawer: widget.isWide ? null : Drawer(
             backgroundColor: surfaceColor,
             child: SafeArea(
               child: Column(
@@ -1471,13 +1474,14 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
