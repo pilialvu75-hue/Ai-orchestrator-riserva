@@ -42,14 +42,15 @@ class _AndroidFfiTokenStreamProcessor {
 
   static final Map<int, List<String>> _structuralTemplateTokensByLeadingCodeUnit =
       _buildStructuralTemplateTokensByLeadingCodeUnit();
+  static final RegExp _controlCharPattern = RegExp(r'[\r\u0000]');
 
   String sanitizeStructuralTemplateOutput(String input) {
     if (input.isEmpty && _pendingStructuralTemplateOutput.isEmpty) {
       return '';
     }
 
-    final combined =
-        '$_pendingStructuralTemplateOutput$input'.replaceAll(RegExp(r'[\r\u0000]'), '');
+    final combined = '$_pendingStructuralTemplateOutput$input'
+        .replaceAll(_controlCharPattern, '');
     _pendingStructuralTemplateOutput = '';
     if (combined.isEmpty) {
       return '';
