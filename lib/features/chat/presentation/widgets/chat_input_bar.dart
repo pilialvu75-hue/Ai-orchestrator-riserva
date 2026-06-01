@@ -232,44 +232,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _controller,
-                              style: const TextStyle(color: Colors.white, fontSize: 15),
-                              maxLines: 5,
-                              minLines: 1,
-                              textInputAction: TextInputAction.newline,
-                              decoration: InputDecoration(
-                                hintText: l10n.t('message_hint'),
-                                hintStyle: const TextStyle(color: Colors.white38),
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12,
-                                ),
-                              ),
-                              onSubmitted: (_) => _submit(),
-                            ),
+                      child: TextField(
+                        controller: _controller,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                        maxLines: 5,
+                        minLines: 1,
+                        textInputAction: TextInputAction.newline,
+                        decoration: InputDecoration(
+                          hintText: l10n.t('message_hint'),
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
                           ),
-                          // Il microfono di input vocale si sposta qui dentro per salvare spazio orizzontale
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 5, right: 4),
-                            child: VoiceInputButton(
-                              voiceInputService: _voiceInputService,
-                              size: 36,
-                              onResult: (text, _) {
-                                final value = TextEditingValue(
-                                  text: text,
-                                  selection: TextSelection.collapsed(offset: text.length),
-                                );
-                                _controller.value = value;
-                              },
-                            ),
-                          ),
-                        ],
+                        ),
+                        onSubmitted: (_) => _submit(),
                       ),
                     ),
                   ),
@@ -278,24 +256,40 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   // Blocco Destro: Gruppo compatto dei pulsanti di azione della chat
                   Row(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Tooltip(
-                        message: 'Sessione Live',
-                        child: IconButton(
-                          style: IconButton.styleFrom(
-                            backgroundColor: widget.liveSessionEnabled
-                                ? const Color(0xFF1F2A44)
-                                : Colors.white.withValues(alpha: 0.08),
-                            foregroundColor:
-                                widget.liveSessionEnabled ? Colors.white : Colors.white30,
+                      // 🔀 SWITCH DINAMICO: Sovrapposizione perfetta basata sul testo
+                      if (!_hasText)
+                        Tooltip(
+                          message: 'Sessione Live',
+                          child: IconButton(
+                            style: IconButton.styleFrom(
+                              backgroundColor: widget.liveSessionEnabled
+                                  ? const Color(0xFF1F2A44)
+                                  : Colors.white.withValues(alpha: 0.08),
+                              foregroundColor:
+                                  widget.liveSessionEnabled ? Colors.white : Colors.white30,
+                              minimumSize: const Size(42, 42),
+                              maximumSize: const Size(42, 42),
+                            ),
+                            onPressed: widget.liveSessionEnabled
+                                ? widget.onStartLiveSession
+                                : null,
+                            icon: const Icon(Icons.graphic_eq_rounded, size: 20),
                           ),
-                          onPressed: widget.liveSessionEnabled
-                              ? widget.onStartLiveSession
-                              : null,
-                          icon: const Icon(Icons.graphic_eq_rounded, size: 20),
+                        )
+                      else
+                        VoiceInputButton(
+                          voiceInputService: _voiceInputService,
+                          size: 42,
+                          onResult: (text, _) {
+                            final value = TextEditingValue(
+                              text: text,
+                              selection: TextSelection.collapsed(offset: text.length),
+                            );
+                            _controller.value = value;
+                          },
                         ),
-                      ),
                       const SizedBox(width: 6),
                       widget.isLoading
                           ? const SizedBox(
@@ -323,6 +317,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   shadowColor:
                                       const Color(0xFF8AB4F8).withValues(alpha: 0.34),
                                   elevation: _canSubmit ? 12 : 0,
+                                  minimumSize: const Size(42, 42),
+                                  maximumSize: const Size(42, 42),
                                 ),
                                 onPressed: _canSubmit ? _submit : null,
                                 icon: const Icon(Icons.arrow_upward, size: 20),
