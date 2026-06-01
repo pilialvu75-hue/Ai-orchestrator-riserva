@@ -5,6 +5,22 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AndroidFfiRuntimeProvider.shouldReuseRuntimeVerification', () {
+    test('defines the runtime phase lifecycle markers', () {
+      expect(
+        RuntimePhase.values.map((phase) => phase.name).toList(),
+        containsAll(<String>[
+          'tokenizing',
+          'startingGeneration',
+          'waitingFirstToken',
+          'streaming',
+          'completed',
+          'failed',
+          'cancelled',
+          'stalled',
+        ]),
+      );
+    });
+
     test('promotes runtimeUnavailable snapshot to ready when reuse is valid', () {
       final stateMachine = RuntimeStateMachine();
       final provider = AndroidFfiRuntimeProvider(
