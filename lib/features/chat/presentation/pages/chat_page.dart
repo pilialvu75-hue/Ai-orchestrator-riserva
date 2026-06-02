@@ -1052,6 +1052,44 @@ class _HighPerformanceChatList extends StatelessWidget {
   final List<ChatMessage> messages;
   final AssistantMessageTextSize assistantTextSize;
 
+  // Funzione per generare il feedback aptico e mostrare il menu contestuale
+  Future<void> _showContextMenu(BuildContext context, Offset position, String text) async {
+    // Feedback Aptico (Opzione A)
+    HapticFeedback.lightImpact();
+
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    
+    // Configurazione Menu Contestuale (Opzione B)
+    final String? selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 30, 30),
+        Offset.zero & overlay.size,
+      ),
+      color: const Color(0xFF1E1F20),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Colors.white12, width: 1),
+      ),
+      items: [
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy_rounded, size: 20, color: Colors.white70),
+              SizedBox(width: 10),
+              Text('Copia', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (selected == 'copy') {
+      _copyToClipboard(context, text);
+    }
+  }
+
   void _copyToClipboard(BuildContext context, String text) {
     if (text.trim().isEmpty) return;
     Clipboard.setData(ClipboardData(text: text)).then((_) {
@@ -1097,7 +1135,12 @@ class _HighPerformanceChatList extends StatelessWidget {
               key: ValueKey(message.id),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onLongPress: () => _copyToClipboard(context, message.content),
+                // Tracciamento della posizione esatta del tocco sul Long Press
+                onLongPressStart: (details) => _showContextMenu(
+                  context, 
+                  details.globalPosition, 
+                  message.content,
+                ),
                 child: ChatBubble(
                   message: message,
                   assistantTextSize: assistantTextSize,
