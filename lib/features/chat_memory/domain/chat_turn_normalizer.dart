@@ -1,4 +1,4 @@
-import 'chat_turn.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 class ChatTurnNormalizer {
   const ChatTurnNormalizer();

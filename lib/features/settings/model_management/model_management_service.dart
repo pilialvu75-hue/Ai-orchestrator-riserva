@@ -230,7 +230,7 @@ class ModelManagementService {
         'message=${error.message}',
       );
       if (_isInterruption(error)) {
-        throw ModelDownloadInterruptedException(
+        throw const ModelDownloadInterruptedException(
           'Download interrotto - Clicca per riprovare',
         );
       }

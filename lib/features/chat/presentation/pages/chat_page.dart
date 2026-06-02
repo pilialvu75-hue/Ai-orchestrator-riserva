@@ -1085,6 +1085,7 @@ class _HighPerformanceChatList extends StatelessWidget {
       ],
     );
 
+    if (!context.mounted) return;
     if (selected == 'copy') {
       _copyToClipboard(context, text);
     }

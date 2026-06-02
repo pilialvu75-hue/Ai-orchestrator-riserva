@@ -57,7 +57,7 @@ void main() {
         final subscription = engine.stream.listen(emittedStates.add);
 
         engine.add(
-          SendMessageEvent(
+          const SendMessageEvent(
             sessionId: 'session-1',
             userPrompt: '',
             attachments: const <ChatAttachment>[
