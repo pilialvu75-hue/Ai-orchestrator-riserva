@@ -1,29 +1,32 @@
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('MemoryWindowManager', () {
     test('returns an isolated context snapshot', () {
-      final source = <String>[
-        'system: alpha',
-        'user: beta',
-        'assistant: gamma',
+      final source = <ChatTurn>[
+        const ChatTurn(role: ChatRole.system, content: 'alpha'),
+        const ChatTurn(role: ChatRole.user, content: 'beta'),
+        const ChatTurn(role: ChatRole.assistant, content: 'gamma'),
       ];
 
       final result = const MemoryWindowManager().trimToWindow(
         systemPrompt: 'stay focused',
         userPrompt: 'question',
-        contextLines: source,
+        contextTurns: source,
       );
 
-      source[0] = 'system: changed';
+      source[0] = const ChatTurn(role: ChatRole.system, content: 'changed');
 
-      expect(result.contextLines, <String>[
-        'system: alpha',
-        'user: beta',
-        'assistant: gamma',
+      expect(result.contextTurns, <ChatTurn>[
+        const ChatTurn(role: ChatRole.system, content: 'alpha'),
+        const ChatTurn(role: ChatRole.user, content: 'beta'),
+        const ChatTurn(role: ChatRole.assistant, content: 'gamma'),
       ]);
-      expect(() => result.contextLines.add('delta'), throwsUnsupportedError);
+      expect(() => result.contextTurns.add(
+        const ChatTurn(role: ChatRole.user, content: 'delta'),
+      ), throwsUnsupportedError);
     });
   });
 }

@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 
 class LocalPromptTemplates {
@@ -7,12 +8,15 @@ class LocalPromptTemplates {
     required String modelId,
     required String prompt,
     String? systemPrompt,
-    List<String> context = const <String>[],
+    List<ChatTurn> context = const <ChatTurn>[],
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     final cleanedContext = context
-        .map(_clean)
-        .whereType<String>()
+        .map((turn) => ChatTurn(
+              role: turn.role,
+              content: turn.content.trim(),
+            ))
+        .where((turn) => turn.content.isNotEmpty)
         .toList(growable: false);
     final userPrompt = prompt.trim();
 
@@ -45,8 +49,8 @@ class LocalPromptTemplates {
       buffer.writeln('System: $cleanedSystemPrompt');
       buffer.writeln();
     }
-    for (final line in cleanedContext) {
-      buffer.writeln(line);
+    for (final turn in cleanedContext) {
+      buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
     }
     if (cleanedContext.isNotEmpty) buffer.writeln();
     buffer.write('User: $userPrompt');
@@ -69,7 +73,7 @@ class LocalPromptTemplates {
   /// max-tokens budget without a meaningful answer.
   static String _buildLlama3Prompt({
     required String? systemPrompt,
-    required List<String> context,
+    required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
@@ -77,12 +81,12 @@ class LocalPromptTemplates {
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('<|eot_id|>');
-    buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
-    if (context.isNotEmpty) {
-      for (final line in context) {
-        buffer.writeln(line);
-      }
+    for (final turn in context) {
+      buffer.write('<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
+      buffer.write(turn.content);
+      buffer.write('<|eot_id|>');
     }
+    buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
     buffer.write('<|start_header_id|>assistant<|end_header_id|>\n\n');
@@ -101,13 +105,13 @@ class LocalPromptTemplates {
   /// chat template.
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
-    required List<String> context,
+    required List<ChatTurn> context,
     required String userPrompt,
     bool suppressThinking = false,
   }) {
     final contextualUserPrompt = context.isEmpty
         ? userPrompt
-        : '${context.join('\n')}\n$userPrompt';
+        : '${_serializeTurns(context)}\n$userPrompt';
     // Prepend /no_think for Qwen3 thinking models to avoid consuming all
     // available tokens on internal reasoning before the actual answer.
     final effectiveUserPrompt = suppressThinking
@@ -126,16 +130,48 @@ class LocalPromptTemplates {
 
   static String _buildGemmaPrompt({
     required String? systemPrompt,
-    required List<String> context,
+    required List<ChatTurn> context,
     required String userPrompt,
   }) {
-    final userSections = <String>[
-      if (systemPrompt != null) systemPrompt,
-      ...context,
-      userPrompt,
-    ];
-    final mergedUserContent = userSections.join('\n');
-    return '<start_of_turn>user\n$mergedUserContent\n<end_of_turn>\n'
-        '<start_of_turn>model\n';
+    final buffer = StringBuffer();
+    if (systemPrompt != null) {
+      buffer.write('<start_of_turn>user\n$systemPrompt\n<end_of_turn>\n');
+    }
+    for (final turn in context) {
+      buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
+      buffer.write('${turn.content}\n');
+      buffer.write('<end_of_turn>\n');
+    }
+    buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
+    buffer.write('<start_of_turn>model\n');
+    return buffer.toString();
+  }
+
+  static String _serializeTurns(List<ChatTurn> turns) {
+    return turns
+        .map((turn) => '${_roleName(turn.role)}: ${turn.content}')
+        .join('\n');
+  }
+
+  static String _roleName(ChatRole role) {
+    switch (role) {
+      case ChatRole.assistant:
+        return 'assistant';
+      case ChatRole.system:
+        return 'system';
+      case ChatRole.user:
+        return 'user';
+    }
+  }
+
+  static String _gemmaRoleName(ChatRole role) {
+    switch (role) {
+      case ChatRole.assistant:
+        return 'model';
+      case ChatRole.system:
+        return 'user';
+      case ChatRole.user:
+        return 'user';
+    }
   }
 }

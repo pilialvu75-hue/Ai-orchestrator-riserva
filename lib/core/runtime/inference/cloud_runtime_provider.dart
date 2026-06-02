@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxContextLines = 8;
@@ -155,12 +156,16 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   InferenceRequest _optimizeRequest(InferenceRequest request) {
-    final deduped = <String>[];
+    final deduped = <ChatTurn>[];
     final seen = <String>{};
     for (final item in request.context) {
-      final normalized = item.trim();
-      if (normalized.isEmpty) continue;
-      if (seen.add(normalized)) deduped.add(normalized);
+      final normalized = ChatTurn(
+        role: item.role,
+        content: item.content.trim(),
+      );
+      if (normalized.content.isEmpty) continue;
+      final key = '${normalized.role.name}:${normalized.content.toLowerCase()}';
+      if (seen.add(key)) deduped.add(normalized);
     }
 
     final recent = deduped.length > _maxContextLines
@@ -168,7 +173,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         : deduped;
     final older = deduped.length > _maxContextLines
         ? deduped.sublist(0, deduped.length - _maxContextLines)
-        : const <String>[];
+        : const <ChatTurn>[];
 
     final summary = older.isEmpty ? '' : _summarizeContext(older);
     final compressedPrompt = StringBuffer();
@@ -178,21 +183,22 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     }
     if (recent.isNotEmpty) {
       compressedPrompt.writeln('Recent context:');
-      for (final line in recent) {
-        compressedPrompt.writeln('- $line');
+      for (final turn in recent) {
+        compressedPrompt.writeln('- ${turn.role.name}: ${turn.content}');
       }
       compressedPrompt.writeln();
     }
     compressedPrompt.write(request.prompt.trim());
     return request.copyWith(
       prompt: compressedPrompt.toString(),
-      context: const <String>[],
+      context: const <ChatTurn>[],
     );
   }
 
-  String _summarizeContext(List<String> lines) {
+  String _summarizeContext(List<ChatTurn> turns) {
     final snippets = <String>[];
-    for (final line in lines.take(_summarySourceLines)) {
+    for (final turn in turns.take(_summarySourceLines)) {
+      final line = '${turn.role.name}: ${turn.content}';
       final words = line.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
       if (words.isEmpty) continue;
       snippets.add(words.take(_summaryWordsPerLine).join(' '));
@@ -201,7 +207,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   _TaskSignal _taskSignal(InferenceRequest request) {
-    final text = '${request.systemPrompt ?? ''}\n${request.prompt}'.toLowerCase();
+    final contextText = request.context
+        .map((turn) => '${turn.role.name}: ${turn.content}')
+        .join('\n');
+    final text = '${request.systemPrompt ?? ''}\n$contextText\n${request.prompt}'
+        .toLowerCase();
     if (_containsAny(text, _codingKeywords)) return _TaskSignal.coding;
     if (_containsAny(text, _reasoningKeywords)) return _TaskSignal.reasoning;
     return _TaskSignal.general;

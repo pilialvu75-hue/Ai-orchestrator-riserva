@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 class ChatRepositoryImpl implements ChatRepository {
   static const _logTag = 'CHAT_PIPELINE';
@@ -134,7 +135,7 @@ class ChatRepositoryImpl implements ChatRepository {
               _activeInferenceSubscription = null;
               _activeInferenceSubscriptionSessionId = null;
             }
-            final contextSnapshot = List<String>.unmodifiable(context);
+            final contextSnapshot = List<ChatTurn>.unmodifiable(context);
             final stream = orchestrator.handleStream(
               normalizedPrompt,
               sessionId: sessionId,
@@ -299,7 +300,23 @@ class ChatRepositoryImpl implements ChatRepository {
         _activeInferenceSubscriptionSessionId = null;
       }
       _activeSendSessions.remove(sessionId);
-      await localDataSource.clearSession(sessionId);
+      Object? error;
+      StackTrace? stackTrace;
+      try {
+        await localDataSource.clearSession(sessionId);
+      } catch (e, st) {
+        error ??= e;
+        stackTrace ??= st;
+      }
+      try {
+        await conversationMemoryService.clearSessionMemory(sessionId);
+      } catch (e, st) {
+        error ??= e;
+        stackTrace ??= st;
+      }
+      if (error != null) {
+        Error.throwWithStackTrace(error, stackTrace ?? StackTrace.current);
+      }
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
     } catch (e) {
