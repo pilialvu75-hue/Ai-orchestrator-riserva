@@ -254,11 +254,25 @@ class DatabaseHelper {
 
   Future<int> deleteChatSession(String sessionId) async {
     final db = await database;
-    return db.delete(
-      AppConstants.tableChatHistory,
-      where: '${AppConstants.colSessionId} = ?',
-      whereArgs: [sessionId],
-    );
+    
+    // Transazione atomica per eliminare sia i vettori matematici sia la cronologia messaggi
+    return await db.transaction<int>((txn) async {
+      // 1. Rimuove i vettori associati a questa sessione specifica da document_chunks
+      await txn.delete(
+        AppConstants.tableDocumentChunks,
+        where: '${AppConstants.colDocumentId} = ?',
+        whereArgs: [sessionId],
+      );
+
+      // 2. Rimuove la cronologia dei messaggi di testo
+      final rowsDeleted = await txn.delete(
+        AppConstants.tableChatHistory,
+        where: '${AppConstants.colSessionId} = ?',
+        whereArgs: [sessionId],
+      );
+
+      return rowsDeleted;
+    });
   }
 
   // ── document_chunks CRUD ─────────────────────────────────────────────────────
