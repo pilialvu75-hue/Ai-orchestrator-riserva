@@ -70,15 +70,19 @@ std::string get_global_error_copy() {
     return g_global_last_error;
 }
 
-// Llama-3-specific chat-template boundary markers that must stop generation
-// instead of being surfaced as normal text.
+// Supporto multi-modello esteso per impedire leak di token e cicli infiniti.
+// Include i token di controllo di Llama 3, ChatML (DeepSeek/Qwen) e Zephyr/TinyLlama.
 constexpr const char* kChatTemplateControlTokens[] = {
     "<|eot_id|>",
     "<|start_header_id|>",
     "<|end_header_id|>",
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|user|>",
+    "<|assistant|>",
+    "</s>"
 };
-// One extra slot keeps the probe buffer safely above the three control tokens
-// while still avoiding any truncation if tokenization behaves unexpectedly.
+// Garantisce uno spazio di manovra sicuro sopra l'array dei token di controllo esteso.
 constexpr size_t kChatTemplateControlTokenBufferTokens = std::size(kChatTemplateControlTokens) + 1;
 
 struct ChatTemplateControlTokenId {
@@ -479,7 +483,7 @@ void run_generation(
             local_tokens.data(),
             static_cast<int32_t>(local_tokens.size()),
             true,
-            false
+            true // CORRETTO: Cambiato da false a true per forzare il parsing dei tag speciali nativi
         );
         if (token_count > 0) {
             local_tokens.resize(static_cast<size_t>(token_count));
