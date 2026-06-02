@@ -1,10 +1,13 @@
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('InferenceRequest copyWith', () {
     test('clones the original context list', () {
-      final sourceContext = <String>['alpha'];
+      final sourceContext = <ChatTurn>[
+        const ChatTurn(role: ChatRole.user, content: 'alpha'),
+      ];
       final request = InferenceRequest(
         sessionId: 'session-1',
         prompt: 'hello',
@@ -13,25 +16,43 @@ void main() {
 
       final copy = request.copyWith();
 
-      sourceContext.add('beta');
+      sourceContext.add(
+        const ChatTurn(role: ChatRole.assistant, content: 'beta'),
+      );
 
-      expect(request.context, <String>['alpha', 'beta']);
-      expect(copy.context, <String>['alpha']);
+      expect(request.context, <ChatTurn>[
+        const ChatTurn(role: ChatRole.user, content: 'alpha'),
+        const ChatTurn(role: ChatRole.assistant, content: 'beta'),
+      ]);
+      expect(copy.context, <ChatTurn>[
+        const ChatTurn(role: ChatRole.user, content: 'alpha'),
+      ]);
     });
 
     test('clones the replacement context list', () {
-      final replacementContext = <String>['one'];
-      final request = InferenceRequest(
+      final replacementContext = <ChatTurn>[
+        const ChatTurn(role: ChatRole.user, content: 'one'),
+      ];
+      const request = InferenceRequest(
         sessionId: 'session-1',
         prompt: 'hello',
       );
 
       final copy = request.copyWith(context: replacementContext);
 
-      replacementContext.add('two');
+      replacementContext.add(
+        const ChatTurn(role: ChatRole.assistant, content: 'two'),
+      );
 
-      expect(copy.context, <String>['one']);
-      expect(() => copy.context.add('three'), throwsUnsupportedError);
+      expect(copy.context, <ChatTurn>[
+        const ChatTurn(role: ChatRole.user, content: 'one'),
+      ]);
+      expect(
+        () => copy.context.add(
+          const ChatTurn(role: ChatRole.user, content: 'three'),
+        ),
+        throwsUnsupportedError,
+      );
     });
   });
 }
