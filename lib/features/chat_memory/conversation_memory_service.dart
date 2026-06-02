@@ -73,7 +73,7 @@ class ConversationMemoryService {
 
     if (normalized.isEmpty) return;
 
-    final turnRole = _parseRole(role);
+    final turnRole = ChatTurnNormalizer.roleFromText(role);
     final semanticText = normalized;
     final embedding = await _embeddingService.embedTextAsync(semanticText);
 
@@ -156,27 +156,7 @@ class ConversationMemoryService {
 
   String _workspaceId(String sessionId) => 'chat_memory:$sessionId';
 
-  ChatRole _parseRole(String role) {
-    switch (role.trim().toLowerCase()) {
-      case 'assistant':
-        return ChatRole.assistant;
-      case 'system':
-        return ChatRole.system;
-      case 'user':
-      default:
-        return ChatRole.user;
-    }
-  }
-
   ChatRole _roleFromMetadata(String? value) {
-    switch (value?.trim().toLowerCase()) {
-      case 'assistant':
-        return ChatRole.assistant;
-      case 'system':
-        return ChatRole.system;
-      case 'user':
-      default:
-        return ChatRole.user;
-    }
+    return ChatTurnNormalizer.roleFromText(value);
   }
 }

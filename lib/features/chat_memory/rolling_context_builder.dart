@@ -49,7 +49,7 @@ class RollingContextBuilder {
 
       final turn = _normalizer.normalize(
         ChatTurn(
-          role: _parseRole(message.role),
+          role: ChatTurnNormalizer.roleFromText(message.role),
           content: message.content,
         ),
       );
@@ -70,18 +70,6 @@ class RollingContextBuilder {
       overflowDetected: result.overflowDetected,
       totalChars: result.totalChars,
     );
-  }
-
-  ChatRole _parseRole(String role) {
-    switch (role.trim().toLowerCase()) {
-      case 'assistant':
-        return ChatRole.assistant;
-      case 'system':
-        return ChatRole.system;
-      case 'user':
-      default:
-        return ChatRole.user;
-    }
   }
 
   String _turnKey(ChatTurn turn) =>

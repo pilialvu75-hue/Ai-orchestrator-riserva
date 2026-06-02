@@ -3,6 +3,22 @@ import 'chat_turn.dart';
 class ChatTurnNormalizer {
   const ChatTurnNormalizer();
 
+  static ChatRole roleFromText(
+    String? value, {
+    ChatRole fallbackRole = ChatRole.user,
+  }) {
+    switch (value?.trim().toLowerCase()) {
+      case 'assistant':
+        return ChatRole.assistant;
+      case 'system':
+        return ChatRole.system;
+      case 'user':
+        return ChatRole.user;
+      default:
+        return fallbackRole;
+    }
+  }
+
   ChatTurn normalize(ChatTurn turn) {
     return ChatTurn(
       role: turn.role,
@@ -97,10 +113,20 @@ class ChatTurnNormalizer {
 
   String _stripLeadingSeparators(String value) {
     var index = 0;
-    while (index < value.length && _startsWithSeparator(value.substring(index))) {
+    while (index < value.length && _isSeparatorCode(value.codeUnitAt(index))) {
       index++;
     }
     return value.substring(index);
+  }
+
+  bool _isSeparatorCode(int codeUnit) {
+    return codeUnit == 58 || // :
+        codeUnit == 45 || // -
+        codeUnit == 62 || // >
+        codeUnit == 32 || // space
+        codeUnit == 9 || // tab
+        codeUnit == 10 || // \n
+        codeUnit == 13; // \r
   }
 
   static const Map<String, ChatRole> _roleTokens = <String, ChatRole>{

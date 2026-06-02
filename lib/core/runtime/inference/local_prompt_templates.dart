@@ -76,18 +76,28 @@ class LocalPromptTemplates {
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
+    final turns = List<ChatTurn>.from(context);
+    ChatTurn? trailingUserTurn;
+    if (turns.isNotEmpty && turns.last.role == ChatRole.user) {
+      trailingUserTurn = turns.removeLast();
+    }
+    final effectiveUserTurn = trailingUserTurn == null
+        ? ChatTurn(role: ChatRole.user, content: userPrompt)
+        : trailingUserTurn.copyWith(
+            content: '${trailingUserTurn.content}\n$userPrompt'.trim(),
+          );
     final buffer = StringBuffer();
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('<|eot_id|>');
-    for (final turn in context) {
+    for (final turn in turns) {
       buffer.write('<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
     buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
-    buffer.write(userPrompt);
+    buffer.write(effectiveUserTurn.content);
     buffer.write('<|eot_id|>');
     buffer.write('<|start_header_id|>assistant<|end_header_id|>\n\n');
     return buffer.toString();
