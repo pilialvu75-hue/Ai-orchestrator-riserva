@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter/foundation.dart';
 
 /// Central routing layer for all AI calls.
@@ -61,20 +62,20 @@ class Orchestrator {
   TokenStream handleStream(
     String input, {
     required String sessionId,
-    List<String> context = const <String>[],
+    List<ChatTurn> context = const <ChatTurn>[],
     String? systemPrompt,
     bool isOffline = false,
     int maxTokens = 256,
     double temperature = 0.7,
   }) {
     _logForensic(
-      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_lines=${context.length}',
+      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_turns=${context.length}',
     );
     final type = _analyzer.analyze(input);
     _logForensic(
       '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name} will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
     );
-    final contextSnapshot = List<String>.unmodifiable(context);
+    final contextSnapshot = List<ChatTurn>.unmodifiable(context);
 
     if (type == TaskType.command) {
       _logForensic(

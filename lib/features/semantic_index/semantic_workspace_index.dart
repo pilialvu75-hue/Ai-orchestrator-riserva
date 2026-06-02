@@ -8,12 +8,14 @@ import 'package:uuid/uuid.dart';
 class SemanticChunkMatch {
   const SemanticChunkMatch({
     required this.documentPath,
+    required this.documentTitle,
     required this.chunkIndex,
     required this.chunkText,
     required this.score,
   });
 
   final String documentPath;
+  final String documentTitle;
   final int chunkIndex;
   final String chunkText;
   final double score;
@@ -30,6 +32,7 @@ class SemanticWorkspaceIndex {
   Future<void> upsertChunk({
     required String workspaceId,
     required String documentPath,
+    String? documentTitle,
     required int chunkIndex,
     required String chunkText,
     required List<double> vector,
@@ -38,7 +41,10 @@ class SemanticWorkspaceIndex {
       AppConstants.colId: _uuid.v4(),
       AppConstants.colDocumentId: workspaceId,
       AppConstants.colDocumentPath: documentPath,
-      AppConstants.colDocumentTitle: documentPath.split('/').last,
+      AppConstants.colDocumentTitle:
+          (documentTitle != null && documentTitle.trim().isNotEmpty)
+              ? documentTitle.trim()
+              : documentPath.split('/').last,
       AppConstants.colChunkIndex: chunkIndex,
       AppConstants.colChunkText: chunkText,
       AppConstants.colVectorJson: jsonEncode(vector),
@@ -71,6 +77,7 @@ class SemanticWorkspaceIndex {
       out.add(
         SemanticChunkMatch(
           documentPath: row[AppConstants.colDocumentPath] as String? ?? '',
+          documentTitle: row[AppConstants.colDocumentTitle] as String? ?? '',
           chunkIndex: row[AppConstants.colChunkIndex] as int? ?? 0,
           chunkText: row[AppConstants.colChunkText] as String? ?? '',
           score: score,

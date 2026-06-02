@@ -55,7 +55,7 @@ class InferenceService {
     final promptHash = _promptHash(isolatedRequest);
     _log(
       'prompt creation session=${isolatedRequest.sessionId} prompt_hash=$promptHash prompt_chars=${isolatedRequest.prompt.length} '
-      'context_lines=${isolatedRequest.context.length} offline=${isolatedRequest.isOffline}',
+      'context_turns=${isolatedRequest.context.length} offline=${isolatedRequest.isOffline}',
     );
     _log('[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=runtime_mode_load');
     if (_runtimeLookupInProgress) {
@@ -532,7 +532,9 @@ class InferenceService {
       request.sessionId,
       request.prompt.trim(),
       request.systemPrompt?.trim() ?? '',
-      request.context.join('\n'),
+      request.context
+          .map((turn) => '${turn.role.name}:${turn.content}')
+          .join('\n'),
     ).toRadixString(16);
   }
 
