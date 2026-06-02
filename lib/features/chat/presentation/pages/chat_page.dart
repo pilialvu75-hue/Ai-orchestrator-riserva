@@ -1052,6 +1052,35 @@ class _HighPerformanceChatList extends StatelessWidget {
   final List<ChatMessage> messages;
   final AssistantMessageTextSize assistantTextSize;
 
+  void _copyToClipboard(BuildContext context, String text) {
+    if (text.trim().isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text)).then((_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.assignment_turned_in_rounded, color: Color(0xFF4ADE80), size: 18),
+              SizedBox(width: 10),
+              Text(
+                'Risposta copiata negli appunti!',
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF1E1F20),
+          behavior: SnackBarBehavior.floating,
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: const BorderSide(color: Colors.white12, width: 1),
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView.custom(
@@ -1066,9 +1095,13 @@ class _HighPerformanceChatList extends StatelessWidget {
           return RepaintBoundary(
             child: _AnimatedBubble(
               key: ValueKey(message.id),
-              child: ChatBubble(
-                message: message,
-                assistantTextSize: assistantTextSize,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPress: () => _copyToClipboard(context, message.content),
+                child: ChatBubble(
+                  message: message,
+                  assistantTextSize: assistantTextSize,
+                ),
               ),
             ),
           );
@@ -1474,10 +1507,10 @@ class _LiveVoiceOverlayState extends State<_LiveVoiceOverlay> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   );
                 },
