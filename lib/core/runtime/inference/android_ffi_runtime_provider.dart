@@ -1578,6 +1578,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     break;
                   }
                   if (consecutiveIdlePolls >= _maxIdlePollIterations) {
+                    debugPrint(
+                      '[TOKEN_STREAM] Hard cap reached: consecutiveIdlePolls >= _maxIdlePollIterations. Aborting loop.',
+                    );
                     classifyFirstTokenTermination(
                       reason: 'poll_loop_watchdog',
                       boundary: 'poll_loop',
@@ -2096,15 +2099,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                 }
 
                 final currentController = controller;
-                unawaited(Future(() async {
-                  try {
-                    if (!currentController.isClosed) {
-                      await currentController.close();
-                    }
-                  } catch (e, st) {
-                    _log('Controller close non-fatal error swallowed safely: $e\n$st');
+                try {
+                  if (!currentController.isClosed) {
+                    await currentController.close();
                   }
-                }));
+                } catch (e, st) {
+                  _log('Controller close non-fatal error swallowed safely: $e\n$st');
+                }
                 // ───────────────────────────────────────────────────────────────────────
               }
             } catch (error, stackTrace) {
@@ -2517,8 +2518,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   DateTime? _handleFirstTokenIfNeeded(String piece) =>
       _tokenStreamProcessor.handleFirstTokenIfNeeded(piece);
 
-  void _throttledLoopLog(String message) =>
-      _tokenStreamProcessor.throttledLoopLog(message);
+  void _throttledLoopLog(String message) {
+    if (_isImmediateRuntimeTelemetry(message)) {
+      _log(message);
+      return;
+    }
+    _tokenStreamProcessor.throttledLoopLog(message);
+  }
 
   void _increaseIdleBackoff() => _tokenStreamProcessor.increaseIdleBackoff();
 
@@ -2667,6 +2673,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static void _log(String message) {
     RuntimeEventLog.instance.emit(message);
     if (message.contains('FORENSIC_')) return;
+    if (_isImmediateRuntimeTelemetry(message)) {
+      final safeMessage =
+          message.length > 220 ? message.substring(0, 220) : message;
+      debugPrint('[$_logTag] $safeMessage');
+      return;
+    }
     _printCounter++;
     if (_printCounter % 10 == 0) {
       final safeMessage =
@@ -2678,6 +2690,13 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static void _logAi(String message) {
     debugPrint('[AI] $message');
   }
+
+  static bool _isImmediateRuntimeTelemetry(String message) =>
+      message.startsWith('[TOKEN_STREAM]') ||
+      message.startsWith('[TOKEN_LOOP]') ||
+      message.startsWith('[GENERATION_STEP]') ||
+      message.startsWith('[GENERATION_ALIVE]') ||
+      message.startsWith('[FIRST_TOKEN_WAIT]');
 
   static int _currentThreadId() => Isolate.current.hashCode;
 
