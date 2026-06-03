@@ -1748,10 +1748,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     final isFirstToken = firstTokenAt == null;
                     DateTime? firstTokenTimestamp;
                     if (isFirstToken && _preFirstTokenActive) {
-                    firstTokenTimestamp = _handleFirstTokenIfNeeded(sanitizedPiece);
-                    if (firstTokenTimestamp != null) {
-                      firstTokenAt = firstTokenTimestamp;
-                    }
+                      firstTokenTimestamp =
+                          _handleFirstTokenIfNeeded(sanitizedPiece);
+                      if (firstTokenTimestamp != null) {
+                        firstTokenAt = firstTokenTimestamp;
+                      }
                     }
                     final firstTokenReceived = firstTokenTimestamp != null;
                     consecutiveInvalidTokens = 0;
