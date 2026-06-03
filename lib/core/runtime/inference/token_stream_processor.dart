@@ -1,4 +1,8 @@
-part of '../android_ffi_runtime_provider.dart';
+/// Token stream processing for Android FFI runtime output.
+///
+/// Handles structural template sanitization, buffering, and first-token
+/// transition bookkeeping without changing the runtime stream behavior.
+part of 'runtime_core.dart';
 
 class _AndroidFfiTokenStreamProcessor {
   _AndroidFfiTokenStreamProcessor(this._owner);
@@ -107,22 +111,6 @@ class _AndroidFfiTokenStreamProcessor {
       '[FIRST_TOKEN_PHASE] phase=${_owner._runtimePhase.name} chars=${piece.length} ts=${now.microsecondsSinceEpoch}',
     );
     return now;
-  }
-
-  void throttledLoopLog(String message) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _owner._lastLoopLogAtMs >= AndroidFfiRuntimeProvider._loopLogThrottleMs) {
-      _owner._lastLoopLogAtMs = now;
-      _log(message);
-    }
-  }
-
-  void increaseIdleBackoff() {
-    _owner._idleBackoffMs = (_owner._idleBackoffMs * 2).clamp(24, 200);
-  }
-
-  void resetIdleBackoff() {
-    _owner._idleBackoffMs = 24;
   }
 
   void _log(String message) {
