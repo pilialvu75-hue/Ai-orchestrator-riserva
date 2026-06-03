@@ -465,6 +465,40 @@ void run_generation(
     }
     const ChatTemplateControlTokenIds chat_template_control_tokens =
         resolve_chat_template_control_token_ids(vocab);
+    const llama_token bos_id = llama_vocab_bos(vocab);
+    const llama_token eos_id = llama_vocab_eos(vocab);
+    const llama_token eot_id = llama_vocab_eot(vocab);
+    LOGI("[FORENSIC_VOCAB] session=%" PRId64 " bos=%d eos=%d eot=%d",
+         session->id,
+         static_cast<int>(bos_id),
+         static_cast<int>(eos_id),
+         static_cast<int>(eot_id));
+    for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
+        const auto& ct = chat_template_control_tokens.token_ids[i];
+        char piece_check[128] = {0};
+        int decoded_len = -1;
+        if (ct.resolved) {
+            decoded_len = decode_token_piece(
+                vocab,
+                ct.token_id,
+                piece_check,
+                static_cast<int32_t>(sizeof(piece_check)) - 1
+            );
+            if (decoded_len >= 0) {
+                piece_check[decoded_len] = '\0';
+            } else {
+                piece_check[0] = '\0';
+            }
+        }
+        LOGI("[FORENSIC_CONTROL_TOKEN] session=%" PRId64
+             " token_str=%s resolved=%s token_id=%d decoded_piece=%s decoded_len=%d",
+             session->id,
+             kChatTemplateControlTokens[i],
+             ct.resolved ? "true" : "false",
+             ct.resolved ? static_cast<int>(ct.token_id) : -1,
+             ct.resolved && decoded_len >= 0 ? piece_check : "",
+             decoded_len);
+    }
 
     const int n_ctx = llama_n_ctx(ctx);
     if (n_ctx <= 0) {
@@ -502,6 +536,27 @@ void run_generation(
 
     std::vector<llama_token> tokens;
     int n_tokens = tokenize_prompt(prompt, &tokens);
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        char tok_piece[128] = {0};
+        int tok_len = decode_token_piece(
+            vocab,
+            tokens[i],
+            tok_piece,
+            static_cast<int32_t>(sizeof(tok_piece)) - 1
+        );
+        if (tok_len >= 0) {
+            tok_piece[tok_len] = '\0';
+        } else {
+            tok_piece[0] = '\0';
+        }
+        const bool is_eog = llama_vocab_is_eog(vocab, tokens[i]);
+        LOGI("[FORENSIC_PROMPT_TOKEN] session=%" PRId64 " idx=%d token_id=%d piece=\"%s\" is_eog=%s",
+             session->id,
+             static_cast<int>(i),
+             static_cast<int>(tokens[i]),
+             tok_len >= 0 ? tok_piece : "",
+             is_eog ? "true" : "false");
+    }
 
     LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
     // =======================================================
