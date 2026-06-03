@@ -1,3 +1,4 @@
+/// Event and phase models used by the Android FFI runtime provider.
 enum FfiPhase {
   idle,
   sessionCreating,

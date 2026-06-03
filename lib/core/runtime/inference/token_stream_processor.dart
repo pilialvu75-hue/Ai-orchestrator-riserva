@@ -1,3 +1,7 @@
+/// Token stream processing for Android FFI runtime output.
+///
+/// Handles structural template sanitization, buffering, and first-token
+/// transition bookkeeping without changing the runtime stream behavior.
 part of 'runtime_core.dart';
 
 class _AndroidFfiTokenStreamProcessor {

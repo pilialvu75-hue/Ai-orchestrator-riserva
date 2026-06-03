@@ -1,3 +1,7 @@
+/// Polling control for the Android FFI runtime token loop.
+///
+/// Owns idle backoff and loop telemetry helpers while preserving the original
+/// polling limits and timing behavior.
 part of 'runtime_core.dart';
 
 class _AndroidFfiRuntimePollingController {

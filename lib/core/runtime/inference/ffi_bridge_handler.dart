@@ -1,3 +1,7 @@
+/// FFI stream boundary helpers for the Android runtime provider.
+///
+/// Emits Dart token chunks and terminal responses while preserving the
+/// original FFI-facing error handling and stream closure order.
 part of 'runtime_core.dart';
 
 class _AndroidFfiRuntimeExecutionBoundary {

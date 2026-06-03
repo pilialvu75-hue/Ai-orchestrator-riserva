@@ -1,3 +1,8 @@
+/// Core implementation for the Android FFI runtime provider.
+///
+/// This library keeps the original runtime behavior intact while delegating
+/// token processing, polling control, FFI stream boundaries, and event models
+/// to dedicated modules.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:ffi';
