@@ -2041,7 +2041,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                     // status == 0: nessun token pronto; rilasciamo il controllo all'event loop.
                     consecutiveIdlePolls++;
                     if (consecutiveIdlePolls % 120 == 0) {
-                      _log(
+                      _throttledLoopLog(
                         '[TOKEN_STREAM] idle polling continues: idle_polls=$consecutiveIdlePolls '
                         'idle_ms=${DateTime.now().difference(lastTokenProgressAt).inMilliseconds}',
                       );
