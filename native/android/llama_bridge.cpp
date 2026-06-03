@@ -492,8 +492,19 @@ void run_generation(
         return token_count;
     };
 
+    // =======================================================
+    // DETECTIVE LOGS - ISPEZIONE PROMPT (S24 FE DEBUG)
+    // =======================================================
+    LOGI("[PROMPT_DEBUG] Caratteri totali ricevuti da Dart: %zu", prompt.size());
+    LOGI("[PROMPT_DEBUG] --- INIZIO PROMPT REALE ---");
+    LOGI("%s", prompt.c_str());
+    LOGI("[PROMPT_DEBUG] --- FINE PROMPT REALE ---");
+
     std::vector<llama_token> tokens;
     int n_tokens = tokenize_prompt(prompt, &tokens);
+
+    LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
+    // =======================================================
 
     if (n_tokens <= 1) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
