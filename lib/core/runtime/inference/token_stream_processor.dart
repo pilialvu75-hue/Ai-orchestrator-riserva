@@ -1,4 +1,4 @@
-part of '../android_ffi_runtime_provider.dart';
+part of 'runtime_core.dart';
 
 class _AndroidFfiTokenStreamProcessor {
   _AndroidFfiTokenStreamProcessor(this._owner);

@@ -1,0 +1,40 @@
+part of 'runtime_core.dart';
+
+class _AndroidFfiRuntimePollingController {
+  _AndroidFfiRuntimePollingController(this._owner);
+
+  final AndroidFfiRuntimeProvider _owner;
+
+  static const int maxIdlePollIterations = 2400;
+
+  bool isIdleLimitReached(int consecutiveIdlePolls) {
+    return consecutiveIdlePolls >= maxIdlePollIterations;
+  }
+
+  static bool isImmediateRuntimeTelemetry(String message) =>
+      message.startsWith('[TOKEN_STREAM]') ||
+      message.startsWith('[TOKEN_LOOP]') ||
+      message.startsWith('[GENERATION_STEP]') ||
+      message.startsWith('[GENERATION_ALIVE]') ||
+      message.startsWith('[FIRST_TOKEN_WAIT]');
+
+  void throttledLoopLog(String message) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _owner._lastLoopLogAtMs >= AndroidFfiRuntimeProvider._loopLogThrottleMs) {
+      _owner._lastLoopLogAtMs = now;
+      _log(message);
+    }
+  }
+
+  void increaseIdleBackoff() {
+    _owner._idleBackoffMs = (_owner._idleBackoffMs * 2).clamp(24, 200);
+  }
+
+  void resetIdleBackoff() {
+    _owner._idleBackoffMs = 24;
+  }
+
+  void _log(String message) {
+    AndroidFfiRuntimeProvider._log(message);
+  }
+}
