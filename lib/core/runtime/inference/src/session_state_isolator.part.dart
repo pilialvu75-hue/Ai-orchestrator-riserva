@@ -1,4 +1,4 @@
-part of 'runtime_core.dart';
+part of '../runtime_core.dart';
 
 class _AndroidFfiSessionStateIsolator {
   _AndroidFfiSessionStateIsolator();
