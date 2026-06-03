@@ -109,22 +109,6 @@ class _AndroidFfiTokenStreamProcessor {
     return now;
   }
 
-  void throttledLoopLog(String message) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _owner._lastLoopLogAtMs >= AndroidFfiRuntimeProvider._loopLogThrottleMs) {
-      _owner._lastLoopLogAtMs = now;
-      _log(message);
-    }
-  }
-
-  void increaseIdleBackoff() {
-    _owner._idleBackoffMs = (_owner._idleBackoffMs * 2).clamp(24, 200);
-  }
-
-  void resetIdleBackoff() {
-    _owner._idleBackoffMs = 24;
-  }
-
   void _log(String message) {
     AndroidFfiRuntimeProvider._log(message);
   }
