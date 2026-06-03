@@ -9,10 +9,10 @@ class _AndroidFfiRuntimePollingController {
 
   final AndroidFfiRuntimeProvider _owner;
 
-  static const int maxIdlePollIterations = 2400;
+  static const int _maxIdlePollIterations = 2400;
 
   bool isIdleLimitReached(int consecutiveIdlePolls) {
-    return consecutiveIdlePolls >= maxIdlePollIterations;
+    return consecutiveIdlePolls >= _maxIdlePollIterations;
   }
 
   static bool isImmediateRuntimeTelemetry(String message) =>

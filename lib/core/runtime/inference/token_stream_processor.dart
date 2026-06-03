@@ -101,7 +101,9 @@ class _AndroidFfiTokenStreamProcessor {
   }
 
   DateTime? handleFirstTokenIfNeeded(String piece) {
-    if (!_owner._preFirstTokenActive) return null;
+    if (!_owner._preFirstTokenActive) {
+      return null;
+    }
     _owner._preFirstTokenActive = false;
     _owner._setPhase(RuntimePhase.streaming);
     final now = DateTime.now();

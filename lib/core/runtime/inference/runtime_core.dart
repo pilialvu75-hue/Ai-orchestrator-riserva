@@ -1564,7 +1564,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
                   }
                   if (_pollingController.isIdleLimitReached(consecutiveIdlePolls)) {
                     debugPrint(
-                      '[TOKEN_STREAM] Hard cap reached: consecutiveIdlePolls >= ${_AndroidFfiRuntimePollingController.maxIdlePollIterations}. Aborting loop.',
+                      '[TOKEN_STREAM] Hard cap reached: consecutiveIdlePolls >= ${_AndroidFfiRuntimePollingController._maxIdlePollIterations}. Aborting loop.',
                     );
                     classifyFirstTokenTermination(
                       reason: 'poll_loop_watchdog',
