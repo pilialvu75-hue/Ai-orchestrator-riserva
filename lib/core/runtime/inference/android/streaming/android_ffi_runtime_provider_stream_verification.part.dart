@@ -1,4 +1,5 @@
-part of runtime_core;
+part of '../../runtime_core.dart';
+
 
 extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeProvider {
   TokenStream streamVerificationInference({
