@@ -1,4 +1,4 @@
-part of '../runtime_core.dart';
+part of runtime_core;
 
 class _AndroidFfiRuntimeDiagnosticsService {
   _AndroidFfiRuntimeDiagnosticsService(this._owner);

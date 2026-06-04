@@ -1,4 +1,4 @@
-part of '../runtime_core.dart';
+part of runtime_core;
 
 class _AndroidFfiNativeSessionSubsystem {
   _AndroidFfiNativeSessionSubsystem(this._owner);

@@ -2,7 +2,7 @@
 ///
 /// Emits Dart token chunks and terminal responses while preserving the
 /// original FFI-facing error handling and stream closure order.
-part of '../runtime_core.dart';
+part of runtime_core;
 
 class _AndroidFfiRuntimeExecutionBoundary {
   static void emitTokenChunk(

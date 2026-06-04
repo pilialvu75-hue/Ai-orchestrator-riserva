@@ -1,4 +1,4 @@
-part of '../runtime_core.dart';
+part of runtime_core;
 
 class _AndroidFfiWarmupSubsystem {
   _AndroidFfiWarmupSubsystem(this._owner);
