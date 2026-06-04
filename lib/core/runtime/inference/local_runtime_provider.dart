@@ -8,7 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: ORA UTILIZZATA CON SUCCESSO
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -234,7 +234,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // 1. BLOCCO IMMEDIATO: Se è Android, esce subito senza fare NIENTE altro
     if (Platform.isAndroid) {
       debugPrint('[$_localProviderTag] Android detected: Processo CLI bloccato.');
       final controller = StreamController<InferenceResponse>();
@@ -469,12 +468,20 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   bool _isModelAllowedOnPlatform(
     String modelId,
   ) {
-    final allowed =
+    // 1. Controlla prima i set statici di base delle piattaforme
+    final baseAllowed =
         _isDesktopPlatform()
             ? _desktopValidatedModelIds
             : _mobileValidatedModelIds;
 
-    return allowed.contains(modelId);
+    if (baseAllowed.contains(modelId)) {
+      return true;
+    }
+
+    // 2. Integrazione dinamica: Controlla se il modelId è presente in uno dei set di template dinamici
+    return LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId);
   }
 
   String _resolveLlamaExecutable() {
