@@ -8,7 +8,7 @@ LocalInferenceModelIds.deepSeekR1_1_5b,
 LocalInferenceModelIds.qwen3_1_7b,
 };
 
-extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
+extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 // ── Inference ────────────────────────────────────────────────────────────────
 
 @override
