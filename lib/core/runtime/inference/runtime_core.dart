@@ -642,16 +642,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         modelPath: modelPath,
       );
 
-  static void _finishWithError(
-    StreamController<InferenceResponse> ctrl,
-    String message, {
-    InferenceTerminalState state = InferenceTerminalState.failed,
-  }) =>
-      _AndroidFfiRuntimeExecutionBoundary.finishWithError(
-        ctrl,
-        message,
-        state: state,
-      );
+  
 
   static void _finishWithRuntimeError(
     StreamController<InferenceResponse> ctrl, {
