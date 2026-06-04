@@ -15,7 +15,7 @@ LocalInferenceModelIds.qwen3_1_7b,
 TokenStream streamInference({
 required InferenceRequest request,
 required CancellationToken cancellationToken,
-}) //{
+}) {
 try {
 AndroidFfiRuntimeProvider._log(
 '[FORENSIC_PROVIDER_ENTRY] sessionId=${request.sessionId} provider=$runtimeType modelId=${request.modelId} promptLength=${request.prompt.length}',
