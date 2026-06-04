@@ -1,4 +1,5 @@
-part of runtime_core;
+part of '../../runtime_core.dart';
+
 
 class _AndroidFfiRuntimeLoggingService {
   static void log(String message) {
