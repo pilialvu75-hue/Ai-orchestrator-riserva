@@ -1,6 +1,6 @@
 part of runtime_core;
 
-extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeProvider {
+extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeProvider {
   TokenStream streamVerificationInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
