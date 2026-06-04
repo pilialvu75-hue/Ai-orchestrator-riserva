@@ -1,10 +1,11 @@
-part of runtime_core;
+part of 'package:ai_orchestrator/core/runtime/inference/runtime_core.dart';
 
 // ─────────────────────────────────────────────────────────────
 // CONFIGURAZIONE STREAMING SAFE MODELS
 // ─────────────────────────────────────────────────────────────
+
 /// Set immutabile dei Model ID validati per l'esecuzione in streaming
-/// ottimizzata su architettura Android FFI. Evita regressioni di memoria.
+/// ottimizzata su architettura Android FFI.
 const Set<String> _androidSafeModelIds = <String>{
   LocalInferenceModelIds.llama1b,
   LocalInferenceModelIds.gemma2b,
@@ -14,10 +15,17 @@ const Set<String> _androidSafeModelIds = <String>{
 };
 
 // ─────────────────────────────────────────────────────────────
-// PARTS DISPATCHER (DIRETTIVE DI COMPILAZIONE)
+// FFI IMPORT SAFETY (necessario per evitare errori cascading)
 // ─────────────────────────────────────────────────────────────
-/// Separazione architetturale del runtime engine in blocchi logici isolati.
-/// Condividono lo stato privato di [AndroidFfiRuntimeProvider] senza leak.
 
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+
+// ─────────────────────────────────────────────────────────────
+// PARTS DISPATCHER
+// ─────────────────────────────────────────────────────────────
+
+/// Separazione architetturale del runtime engine in blocchi logici isolati.
+/// Condividono lo stato privato del runtime core.
 part 'android/streaming/android_ffi_runtime_provider_streaming.orchestrator.dart';
 part 'android/streaming/android_ffi_runtime_provider_streaming.loop.dart';
