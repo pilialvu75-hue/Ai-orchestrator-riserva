@@ -2,7 +2,8 @@
 ///
 /// Owns idle backoff and loop telemetry helpers while preserving the original
 /// polling limits and timing behavior.
-part of runtime_core;
+part of '../../runtime_core.dart';
+
 
 class _AndroidFfiRuntimePollingController {
   _AndroidFfiRuntimePollingController(this._owner);
