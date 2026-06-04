@@ -1,8 +1,8 @@
 part of runtime_core;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURAZIONI E ECOSISTEMA DI CONFIGURAZIONE STREAMING LOCAL AI
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CONFIGURAZIONE STREAMING SAFE MODELS
+// ─────────────────────────────────────────────────────────────
 
 const Set<String> _androidSafeModelIds = <String>{
   LocalInferenceModelIds.llama1b,
@@ -12,6 +12,9 @@ const Set<String> _androidSafeModelIds = <String>{
   LocalInferenceModelIds.qwen3_1_7b,
 };
 
-// Inclusione dei componenti atomici strutturali per mantenere i file sotto le 800 linee
-part 'android_ffi_runtime_provider_streaming.orchestrator.dart';
-part 'android_ffi_runtime_provider_streaming.loop.dart';
+// ─────────────────────────────────────────────────────────────
+// PARTS DISPATCHER
+// ─────────────────────────────────────────────────────────────
+
+part 'android/streaming/android_ffi_runtime_provider_streaming.orchestrator.dart';
+part 'android/streaming/android_ffi_runtime_provider_streaming.loop.dart';
