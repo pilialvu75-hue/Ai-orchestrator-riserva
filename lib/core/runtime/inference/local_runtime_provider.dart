@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -26,17 +27,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  static const Set<String> _mobileValidatedModelIds = <String>{
-    LocalInferenceModelIds.gemma2b,
-    LocalInferenceModelIds.gemma2_2bIt,
-    LocalInferenceModelIds.llama1b,
-    LocalInferenceModelIds.deepSeekR1_1_5b,
-    LocalInferenceModelIds.qwen3_1_7b,
-  };
+  static const Set<String> _mobileValidatedModelIds =
+      AndroidFfiRuntimeModelIds.validatedModelIds;
 
-  static const Set<String> _desktopValidatedModelIds = <String>{
-    ..._mobileValidatedModelIds,
-  };
+  static const Set<String> _desktopValidatedModelIds =
+      AndroidFfiRuntimeModelIds.validatedModelIds;
 
   final bool Function() _developerModeProvider;
 

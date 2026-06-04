@@ -1,4 +1,4 @@
-part of 'runtime_core.dart';
+part of '../runtime_core.dart';
 
 class _AndroidFfiNativeSessionSubsystem {
   _AndroidFfiNativeSessionSubsystem(this._owner);
@@ -167,13 +167,13 @@ class _AndroidFfiNativeSessionSubsystem {
       }
       if (created <= 0) {
         _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
-        final err = _safeLastError(bindings, created);
+        final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
         throw StateError('Native session creation failed: $err');
       }
       if (bindings.sessionIsActive(created) != 1) {
         _log(
             '[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
-        final err = _safeLastError(bindings, created);
+        final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
         throw StateError('Native session inactive after create: $err');
       }
 
@@ -324,10 +324,6 @@ class _AndroidFfiNativeSessionSubsystem {
     } catch (error) {
       _log('[MODEL_EXECUTION] runtime reset failed: $error');
     }
-  }
-
-  String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
-    return AndroidFfiRuntimeProvider._safeLastError(bindings, sessionId);
   }
 
   void _log(String message) {

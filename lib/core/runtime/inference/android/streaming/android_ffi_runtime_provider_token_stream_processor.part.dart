@@ -2,7 +2,7 @@
 ///
 /// Handles structural template sanitization, buffering, and first-token
 /// transition bookkeeping without changing the runtime stream behavior.
-part of 'runtime_core.dart';
+part of '../runtime_core.dart';
 
 class _AndroidFfiTokenStreamProcessor {
   _AndroidFfiTokenStreamProcessor(this._owner);

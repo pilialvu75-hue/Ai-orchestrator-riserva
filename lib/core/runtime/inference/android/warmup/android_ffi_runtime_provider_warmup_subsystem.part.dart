@@ -1,4 +1,4 @@
-part of 'runtime_core.dart';
+part of '../runtime_core.dart';
 
 class _AndroidFfiWarmupSubsystem {
   _AndroidFfiWarmupSubsystem(this._owner);
@@ -102,7 +102,7 @@ class _AndroidFfiWarmupSubsystem {
     final warmupSessionId = _owner._ensureNativeSession(bindings, modelPath);
     if (bindings.sessionIsActive(warmupSessionId) != 1) {
       throw StateError(
-        'Warmup session inactive: ${_safeLastError(bindings, warmupSessionId)}',
+        'Warmup session inactive: ${AndroidFfiRuntimeProvider._safeLastError(bindings, warmupSessionId)}',
       );
     }
     _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId');
@@ -135,7 +135,7 @@ class _AndroidFfiWarmupSubsystem {
       );
       if (start != 0) {
         throw StateError(
-          'Warmup generation start failed: ${_safeLastError(bindings, warmupSessionId)}',
+          'Warmup generation start failed: ${AndroidFfiRuntimeProvider._safeLastError(bindings, warmupSessionId)}',
         );
       }
       _log(
@@ -166,7 +166,7 @@ class _AndroidFfiWarmupSubsystem {
           break;
         } else if (status == -1) {
           throw StateError(
-            'Warmup generation failed: ${_safeLastError(bindings, warmupSessionId)}',
+            'Warmup generation failed: ${AndroidFfiRuntimeProvider._safeLastError(bindings, warmupSessionId)}',
           );
         } else if (status == -99) {
           throw StateError('Warmup generation cancelled before first token.');
@@ -211,10 +211,6 @@ class _AndroidFfiWarmupSubsystem {
         'Native call timed out at stage=$stage after ${timeout.inSeconds}s.',
       ),
     );
-  }
-
-  String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
-    return AndroidFfiRuntimeProvider._safeLastError(bindings, sessionId);
   }
 
   void _log(String message) {
