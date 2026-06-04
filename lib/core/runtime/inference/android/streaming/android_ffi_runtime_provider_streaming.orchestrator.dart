@@ -72,7 +72,7 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
         AndroidFfiRuntimeProvider._log('[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}');
         AndroidFfiRuntimeProvider._log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
-        );
+                );
         try {
           await _concurrencyManager.runInferenceSerially(() async {
             AndroidFfiRuntimeProvider._log('[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}');
@@ -569,6 +569,16 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 return;
               }
 
+              final promptNativePtr = prompt.toNativeUtf8(allocator: calloc);
+              Pointer<Utf8>? promptNativePtrOrNull = promptNativePtr;
+              void freePromptNativePtr() {
+                final ptr = promptNativePtrOrNull;
+                if (ptr != null) {
+                  calloc.free(ptr);
+                  promptNativePtrOrNull = null;
+                }
+              }
+
               AndroidFfiRuntimeProvider._log(
                 '[FFI_START_GEN] entering startGeneration session=$nativeSessionId '
                 'prompt_chars=${prompt.length} max_tokens=$maxTokens '
@@ -584,16 +594,6 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 ' top_p=$effectiveTopP',
               );
               AndroidFfiRuntimeProvider._logAi('starting inference...');
-
-              final promptNativePtr = prompt.toNativeUtf8(allocator: calloc);
-              Pointer<Utf8>? promptNativePtrOrNull = promptNativePtr;
-              void freePromptNativePtr() {
-                final ptr = promptNativePtrOrNull;
-                if (ptr != null) {
-                  calloc.free(ptr);
-                  promptNativePtrOrNull = null;
-                }
-              }
 
               int startResult;
               final startupWatch = Stopwatch()..start();
@@ -749,7 +749,8 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 
               cancellationToken.onCancel(() => _safeCancel(bindings, nativeSessionId));
 
-              // Deferimento strutturale e isolamento dell'hot-spot di polling loop nel file dedicato
+              // ── LOOP HANDOFF ────────────────────────────────────────────────
+              // Deferimento strutturale verso il hot-path nel file subordinato (.loop.dart)
               await _executeStreamingPollingLoop(
                 controller: controller,
                 bindings: bindings,
