@@ -1,4 +1,4 @@
-part of runtime_core;
+part of ../../runtime_core.dart';
 
 const Set<String> _androidSafeModelIds = <String>{
 LocalInferenceModelIds.llama1b,
