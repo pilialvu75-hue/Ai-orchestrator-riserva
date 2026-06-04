@@ -1,4 +1,5 @@
-part of runtime_core;
+part of '../../runtime_core.dart';
+
 
 class _AndroidFfiConcurrencyManager {
   _AndroidFfiConcurrencyManager(this._owner);
