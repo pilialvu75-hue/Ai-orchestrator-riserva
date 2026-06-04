@@ -60,7 +60,7 @@ void main() {
           const SendMessageEvent(
             sessionId: 'session-1',
             userPrompt: '',
-            attachments: const <ChatAttachment>[
+            attachments: <ChatAttachment>[
               ChatAttachment(
                 id: 'a1',
                 type: ChatAttachmentType.image,
