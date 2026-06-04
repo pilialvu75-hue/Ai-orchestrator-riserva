@@ -1,7 +1,7 @@
 part of '../runtime_core.dart';
 
 extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeProvider {
-TokenStream streamVerificationInference({
+  TokenStream streamVerificationInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
@@ -45,9 +45,6 @@ TokenStream streamVerificationInference({
                   );
                   return;
                 }
-}
-}
-}
                 if (!_ensureLibraryLoaded()) {
                   _finishWithRuntimeError(
                     controller,

@@ -60,10 +60,7 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
             state: state,
           );
         }
-}
-}
       }
-}
       controller.onCancel = () {
         if (!firstFfiInvocationAttempted) {
           _log(
