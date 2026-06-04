@@ -1022,7 +1022,7 @@ extension _AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                   }
                   if (_pollingController.isIdleLimitReached(consecutiveIdlePolls)) {
                     debugPrint(
-                      '[TOKEN_STREAM] Hard cap reached: consecutiveIdlePolls >= ${_AndroidFfiRuntimePollingController._maxIdlePollIterations}. Aborting loop.',
+                      '[TOKEN_STREAM] Hard cap reached: consecutiveIdlePolls >= ${_pollingController.maxIdlePollIterations}. Aborting loop.',
                     );
                     classifyFirstTokenTermination(
                       reason: 'poll_loop_watchdog',

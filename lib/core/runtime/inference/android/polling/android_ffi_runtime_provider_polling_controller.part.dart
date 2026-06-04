@@ -11,6 +11,8 @@ class _AndroidFfiRuntimePollingController {
 
   static const int _maxIdlePollIterations = 2400;
 
+  int get maxIdlePollIterations => _maxIdlePollIterations;
+
   bool isIdleLimitReached(int consecutiveIdlePolls) {
     return consecutiveIdlePolls >= _maxIdlePollIterations;
   }
