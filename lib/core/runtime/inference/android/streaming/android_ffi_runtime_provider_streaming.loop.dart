@@ -355,7 +355,7 @@ extension _AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
               '[FORENSIC_AFTER_FIRST_LLB_SESSION_POLL_TOKEN] modelId=$modelId modelPath=$modelPath'
               ' sessionId=$sessionId nativeSessionId=$nativeSessionId status=$status'
               ' pointer_hex=$pollHandleHex pointer_address=$pollHandleAddress'
-              ' session_active=$activeAfterAfterFirstPoll isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
+              ' session_active=$activeAfterFirstPoll isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
               ' thread_id=$dartThreadId session_cache_size=${_nativeSessionsByModel.length}'
               ' token_buffer_pointer_hex=0x${tokenBufRaw.address.toUnsigned(64).toRadixString(16)}'
               ' token_buffer_pointer_address=${tokenBufRaw.address}',
@@ -505,9 +505,10 @@ extension _AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           if (estimatedTokens % 16 == 0) {
             AndroidFfiRuntimeProvider._log('[TOKEN_STREAM] token_count=$estimatedTokens');
           }
+          final localSinceFirstToken = sinceFirstToken;
           AndroidFfiRuntimeProvider._log(
             '[TOKEN_STREAM] piece token_index=$estimatedTokens text="${sanitizedPiece.replaceAll('\n', r'\n')}"'
-            ' total_chars=${fullText.length} since_first_token_ms=${sinceFirstToken?.inMilliseconds ?? 0}',
+            ' total_chars=${fullText.length} since_first_token_ms=${localSinceFirstToken?.inMilliseconds ?? 0}',
           );
           AndroidFfiRuntimeProvider._log(
             '[TOKEN_EVAL] token_index=$estimatedTokens elapsed_ms=${streamingElapsed.inMilliseconds}',
