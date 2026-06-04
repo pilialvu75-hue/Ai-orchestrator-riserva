@@ -6,17 +6,17 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
     required CancellationToken cancellationToken,
   }) {
     try {
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1683 | Function: streamVerificationInference() | BEFORE entry',
       );
       final controller = StreamController<InferenceResponse>();
       () async {
-        _log(
+        AndroidFfiRuntimeProvider._log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1688 | Function: streamVerificationInference() | BEFORE calling _runInferenceSerially()',
         );
         try {
           await _concurrencyManager.runInferenceSerially(() async {
-            _log(
+            AndroidFfiRuntimeProvider._log(
               '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1693 | Function: streamVerificationInference() | BEFORE calling _runInVerificationScope()',
             );
             final verificationRawModelPath = request.modelPath;
@@ -34,7 +34,7 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                     modelPath.trim().isEmpty ||
                     modelId == null ||
                     modelId.trim().isEmpty) {
-                  _finishWithRuntimeError(
+                  AndroidFfiRuntimeProvider._finishWithRuntimeError(
                     controller,
                     stage: 'verification_request_validation',
                     message: 'Missing local model path.',
@@ -46,7 +46,7 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                   return;
                 }
                 if (!_ensureLibraryLoaded()) {
-                  _finishWithRuntimeError(
+                  AndroidFfiRuntimeProvider._finishWithRuntimeError(
                     controller,
                     stage: 'verification_library_load',
                     message: 'Local AI runtime library (libllama_bridge.so) not found.',
@@ -64,8 +64,8 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                 );
                 final verificationSessionId = bindings.createSession(modelPath);
                 if (verificationSessionId <= 0) {
-                  final err = _safeLastError(bindings, verificationSessionId);
-                  _finishWithRuntimeError(
+                  final err = AndroidFfiRuntimeProvider._safeLastError(bindings, verificationSessionId);
+                  AndroidFfiRuntimeProvider._finishWithRuntimeError(
                     controller,
                     stage: 'verification_session_create',
                     message: 'Verification session create failed.',
@@ -97,13 +97,13 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                   final startResult = bindings.startGeneration(
                     verificationSessionId,
                     verificationPromptPtr,
-                    request.maxTokens.clamp(1, _safeMaxTokens),
+                    request.maxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens),
                     request.temperature,
                   );
                   if (startResult != 0) {
                     freeVerificationPromptPtr();
-                    final err = _safeLastError(bindings, verificationSessionId);
-                    _finishWithRuntimeError(
+                    final err = AndroidFfiRuntimeProvider._safeLastError(bindings, verificationSessionId);
+                    AndroidFfiRuntimeProvider._finishWithRuntimeError(
                       controller,
                       stage: 'verification_start_generation',
                       message: 'Failed to start isolated runtime verification.',
@@ -127,7 +127,7 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                       freeVerificationPromptPtr();
                       _safeCancel(bindings, verificationSessionId);
                       if (!controller.isClosed) {
-                        _finishWithRuntimeError(
+                        AndroidFfiRuntimeProvider._finishWithRuntimeError(
                           controller,
                           stage: 'verification_cancelled',
                           message: 'Verification cancelled.',
@@ -141,11 +141,11 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                       return;
                     }
                     final elapsed = DateTime.now().difference(startedAt);
-                    if (elapsed > _generationTimeout) {
+                    if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
                       freeVerificationPromptPtr();
                       _setPhase(RuntimePhase.stalled);
                       _safeCancel(bindings, verificationSessionId);
-                      _finishWithRuntimeError(
+                      AndroidFfiRuntimeProvider._finishWithRuntimeError(
                         controller,
                         stage: 'verification_timeout',
                         message: 'Runtime verification timed out.',
@@ -158,11 +158,11 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                       clearRuntimeVerification();
                       return;
                     }
-                    _log(
+                    AndroidFfiRuntimeProvider._log(
                       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1813 | Function: streamVerificationInference() | BEFORE verification pollToken loop iteration',
                     );
                     final status = bindings.pollToken(verificationSessionId, tokenBuf);
-                    _log(
+                    AndroidFfiRuntimeProvider._log(
                       '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1817 | Function: streamVerificationInference() | AFTER verification pollToken loop iteration status=$status',
                     );
                     if (status == 1) {
@@ -176,8 +176,8 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                         continue;
                       }
                       if (_isDeveloperMode) {
-                        _log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
-                        _log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
+                        AndroidFfiRuntimeProvider._log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
+                        AndroidFfiRuntimeProvider._log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
                       }
 
                       if (!verificationFirstTokenReceived) {
@@ -202,8 +202,8 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                     if (status == -1) {
                       freeVerificationPromptPtr();
                       _setPhase(RuntimePhase.failed);
-                      final err = _safeLastError(bindings, verificationSessionId);
-                      _finishWithRuntimeError(
+                      final err = AndroidFfiRuntimeProvider._safeLastError(bindings, verificationSessionId);
+                      AndroidFfiRuntimeProvider._finishWithRuntimeError(
                         controller,
                         stage: 'verification_poll_token',
                         message: 'Verification poll_token failed.',
@@ -219,7 +219,7 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                     if (status == -99) {
                       freeVerificationPromptPtr();
                       _setPhase(RuntimePhase.cancelled);
-                      _finishWithRuntimeError(
+                      AndroidFfiRuntimeProvider._finishWithRuntimeError(
                         controller,
                         stage: 'verification_cancelled_native',
                         message: 'Verification cancelled by native runtime.',
@@ -260,25 +260,25 @@ extension _AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimeP
                   try {
                     bindings.releaseSession(verificationSessionId);
                   } catch (error) {
-                    _log(
+                    AndroidFfiRuntimeProvider._log(
                       '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_exception error=$error',
                     );
                   }
                 }
               },
             );
-            _log(
+            AndroidFfiRuntimeProvider._log(
               '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1922 | Function: streamVerificationInference() | AFTER calling _runInVerificationScope()',
             );
           });
-          _log(
+          AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1926 | Function: streamVerificationInference() | AFTER calling _runInferenceSerially()',
           );
         } catch (_) {
           rethrow;
         }
       }();
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1936 | Function: streamVerificationInference() | AFTER exit',
       );
       return controller.stream;
