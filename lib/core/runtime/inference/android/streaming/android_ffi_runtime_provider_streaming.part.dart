@@ -8,14 +8,13 @@ LocalInferenceModelIds.deepSeekR1_1_5b,
 LocalInferenceModelIds.qwen3_1_7b,
 };
 
-// extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
-// ── Inference ────────────────────────────────────────────────────────────────
+extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 
-@override
-TokenStream streamInference({
-required InferenceRequest request,
-required CancellationToken cancellationToken,
-}) {
+  Stream<InferenceResponse> streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+
 try {
 AndroidFfiRuntimeProvider._log(
 '[FORENSIC_PROVIDER_ENTRY] sessionId=${request.sessionId} provider=$runtimeType modelId=${request.modelId} promptLength=${request.prompt.length}',
