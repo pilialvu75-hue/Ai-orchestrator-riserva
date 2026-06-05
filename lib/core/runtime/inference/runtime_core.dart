@@ -73,7 +73,7 @@ part 'android/streaming/android_ffi_runtime_provider_stream_verification.part.da
 /// resulting `.so` in `android/app/src/main/jniLibs/<abi>/`, or configure
 /// `externalNativeBuild` in `android/app/build.gradle` to compile it
 /// automatically during `flutter build apk`.
-class AndroidFfiRuntimeProvider extends LocalRuntimeProvider with AndroidFfiRuntimeStreamingMixin {
+class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   AndroidFfiRuntimeProvider({
     RuntimeStateMachine? runtimeStateMachine,
     super.developerModeProvider,
