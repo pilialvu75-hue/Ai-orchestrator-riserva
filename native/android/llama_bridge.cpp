@@ -1,9 +1,6 @@
 #include "llama_bridge.h"
-
 #include "llama.h"
-
 #include <android/log.h>
-
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -21,7 +18,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -230,7 +226,7 @@ struct RuntimeSession {
             last_error = message;
         }
         set_global_error(message);
-        LOGE("[ERROR] session=%" PRId64 " message=%s", id, message.c_str());
+        LOGE("[SESSION_ERROR] session=%" PRId64 " message=%s", id, message.c_str());
     }
 
     std::string get_error_copy() const {
@@ -339,7 +335,7 @@ void set_state_if_epoch(
     const char* reason
 ) {
     if (!is_valid_state(desired_state)) {
-        LOGE("[ERROR] session=%" PRId64 " invalid_state=%d", session->id, desired_state);
+        LOGE("[INVALID_STATE] session=%" PRId64 " state=%d", session->id, desired_state);
         return;
     }
     if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
@@ -910,7 +906,7 @@ int64_t llb_create_session(
 
     if (model_path == nullptr || std::strlen(model_path) == 0) {
         set_global_error("Model path is empty");
-        LOGE("[ERROR] [SESSION_CREATE_BEGIN] model_path_empty");
+        LOGE("[SESSION_CREATE_BEGIN] model_path_empty");
         return -1;
     }
 
@@ -945,7 +941,7 @@ int64_t llb_create_session(
 
     if (!model_exists || !model_readable || model_size <= 0) {
         set_global_error("Invalid model file path or unreadable file");
-        LOGE("[ERROR] [SESSION_LOAD] invalid_model_file path=%s", model_path);
+        LOGE("[SESSION_LOAD] invalid_model_file path=%s", model_path);
         return -2;
     }
 
@@ -975,7 +971,7 @@ int64_t llb_create_session(
 
     if (session->model == nullptr) {
         session->set_error("Failed to load model");
-        LOGE("[ERROR] [SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
+        LOGE("[SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
         return -3;
     }
 
@@ -1008,7 +1004,7 @@ int64_t llb_create_session(
     if (session->ctx == nullptr) {
         session->set_error("Failed to create context");
         session->destroy_native_resources();
-        LOGE("[ERROR] [SESSION_LOAD] llama_init_from_model_failed");
+        LOGE("[SESSION_LOAD] llama_init_from_model_failed");
         return -4;
     }
 
@@ -1025,7 +1021,7 @@ int64_t llb_create_session(
     if (vocab == nullptr || ctx_size <= 0 || model_desc_len <= 0) {
         session->set_error("Bootstrap verification failed");
         session->destroy_native_resources();
-        LOGE("[ERROR] [SESSION_LOAD] bootstrap_verification_failed");
+        LOGE("[SESSION_LOAD] bootstrap_verification_failed");
         return -5;
     }
 
@@ -1060,7 +1056,7 @@ int32_t llb_session_start_gen(
     auto session = find_session(session_id);
     if (session == nullptr) {
         set_global_error("Session not found");
-        LOGE("[ERROR] [GEN_START] session_not_found session=%" PRId64, session_id);
+        LOGE("[GEN_START] session_not_found session=%" PRId64, session_id);
         return -1;
     }
 
@@ -1071,7 +1067,7 @@ int32_t llb_session_start_gen(
 
     if (max_tokens <= 0) {
         session->set_error("max_tokens must be > 0");
-        LOGE("[ERROR] [GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
+        LOGE("[GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
              session_id,
              max_tokens);
         return -4;
@@ -1126,7 +1122,7 @@ int32_t llb_session_start_gen(
     } catch (const std::exception& error) {
         session->set_error(error.what());
         session->gen_state.store(kStateFailed, std::memory_order_release);
-        LOGE("[ERROR] [THREAD_START] session=%" PRId64 " spawn_failed=%s",
+        LOGE("[THREAD_START] session=%" PRId64 " spawn_failed=%s",
              session_id,
              error.what());
         return -5;
@@ -1146,7 +1142,7 @@ int32_t llb_session_poll_token(
     auto session = find_session(session_id);
     if (session == nullptr) {
         set_global_error("Session not found");
-        LOGE("[ERROR] [TOKEN] session_not_found session=%" PRId64, session_id);
+        LOGE("[TOKEN] session_not_found session=%" PRId64, session_id);
         return -1;
     }
 
@@ -1233,7 +1229,7 @@ int32_t llb_session_poll_token(
         return -99;
     }
     if (state == kStateFailed) {
-        LOGE("[ERROR] [DECODE] session=%" PRId64 " poll_state=failed error=%s",
+        LOGE("[DECODE] session=%" PRId64 " poll_state=failed error=%s",
              session_id,
              session->get_error_copy().c_str());
         return -1;
@@ -1245,7 +1241,7 @@ int32_t llb_session_poll_token(
 void llb_session_cancel(int64_t session_id) {
     auto session = find_session(session_id);
     if (session == nullptr) {
-        LOGE("[ERROR] [CANCEL] session_not_found session=%" PRId64, session_id);
+        LOGE("[CANCEL] session_not_found session=%" PRId64, session_id);
         return;
     }
 
@@ -1272,17 +1268,9 @@ void llb_release_session(int64_t session_id) {
     session->cancel_requested.store(true, std::memory_order_release);
     session->gen_state.store(kStateCancelled, std::memory_order_release);
     // Wake any llb_session_poll_token caller waiting on the first-token CV.
-    // This is a no-op when cancelSession was already called (the common path),
-    // but is needed for correctness when releaseSession is called without a prior
-    // cancelSession (e.g. LRU eviction).  It is idempotent and harmless.
     notify_first_token_waiters(session);
 
-    // Synchronous cleanup: block the caller (Dart FFI isolate thread) until the
-    // gen_thread has fully exited and all native resources are freed.  This is the
-    // minimal change that eliminates the race between the old gen_thread still
-    // running llama_decode and a new llb_session_start_gen starting on a freshly
-    // created context — both would otherwise race through GGML's shared CPU thread
-    // pool, causing SIGSEGV at the start of the new generation.
+    // Synchronous cleanup to eliminate races through GGML's shared thread pool
     LOGI("[SESSION_RELEASE_WAIT_BEGIN] session=%" PRId64, session_id);
 
     {
