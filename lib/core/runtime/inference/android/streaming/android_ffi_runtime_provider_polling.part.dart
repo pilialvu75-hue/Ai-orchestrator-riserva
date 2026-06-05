@@ -69,18 +69,18 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             ? null
             : now.difference(attemptState.firstTokenAt!);
         final sinceLastTokenProgress = now.difference(state.lastTokenProgressAt);
-        _throttledLoopLog(
+        AndroidFfiRuntimeProvider._throttledLoopLog(
           '[TOKEN_STREAM] poll iteration=${attemptState.pollIterations} tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}'
           ' idle_ms=${sinceLastTokenProgress.inMilliseconds} idle_polls=${state.consecutiveIdlePolls} phase=$_currentFfiPhase',
         );
-        _throttledLoopLog(
+        AndroidFfiRuntimeProvider._throttledLoopLog(
           '[TOKEN_LOOP] iteration=${attemptState.pollIterations} tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}',
         );
-        _throttledLoopLog(
+        AndroidFfiRuntimeProvider._throttledLoopLog(
           '[GENERATION_STEP] iteration=${attemptState.pollIterations} elapsed_ms=${elapsed.inMilliseconds}'
           ' generated_tokens=${attemptState.estimatedTokens}',
         );
-        _throttledLoopLog(
+        AndroidFfiRuntimeProvider._throttledLoopLog(
           '[GENERATION_ALIVE] iteration=${attemptState.pollIterations} elapsed_ms=${elapsed.inMilliseconds} first_token=${attemptState.firstTokenAt != null}',
         );
         if (attemptState.firstTokenAt == null && attemptState.pollIterations % 25 == 0) {
@@ -300,7 +300,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         int status;
         try {
-          _throttledLoopLog( '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId ' 'iteration=${attemptState.pollIterations} phase=$_currentFfiPhase', );
+          AndroidFfiRuntimeProvider._throttledLoopLog( '[FFI_POLL_BEGIN] entering pollToken session=$nativeSessionId ' 'iteration=${attemptState.pollIterations} phase=$_currentFfiPhase', );
           if (!state.firstPollBoundaryLogged) {
             state.firstPollBoundaryLogged = true;
             final pollHandleHex = '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
@@ -327,7 +327,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'poll_token', message: 'Native poll_token failed.', details: error.toString(), );
           break;
         }
-        _throttledLoopLog( '[TOKEN_STREAM] poll status iteration=${attemptState.pollIterations} status=$status', );
+        AndroidFfiRuntimeProvider._throttledLoopLog( '[TOKEN_STREAM] poll status iteration=${attemptState.pollIterations} status=$status', );
         AndroidFfiRuntimeProvider._log( '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 poll_iteration=${attemptState.pollIterations} status=$status', );
         if (status == 1) {
           String piece;
@@ -497,7 +497,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         } else {
           state.consecutiveIdlePolls++;
           if (state.consecutiveIdlePolls % 120 == 0) {
-            _throttledLoopLog( '[TOKEN_STREAM] idle polling continues: idle_polls=${state.consecutiveIdlePolls} ' 'idle_ms=${DateTime.now().difference(state.lastTokenProgressAt).inMilliseconds}', );
+            AndroidFfiRuntimeProvider._throttledLoopLog( '[TOKEN_STREAM] idle polling continues: idle_polls=${state.consecutiveIdlePolls} ' 'idle_ms=${DateTime.now().difference(state.lastTokenProgressAt).inMilliseconds}', );
           }
           if (_preFirstTokenActive) {
             await Future<void>.delayed(Duration.zero);
