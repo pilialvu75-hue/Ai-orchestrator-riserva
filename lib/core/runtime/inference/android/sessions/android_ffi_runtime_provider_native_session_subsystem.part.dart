@@ -14,19 +14,19 @@ class _AndroidFfiNativeSessionSubsystem {
     try {
       final isolateHash = AndroidFfiRuntimeProvider._currentThreadId();
       final cacheSizeBeforeLookup = _owner._nativeSessionsByModel.length;
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1952 | Function: _ensureNativeSession() | BEFORE entry',
       );
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1955 | Function: _ensureNativeSession() | BEFORE reuse check',
       );
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[NATIVE_SESSION_CACHE_LOOKUP] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
         ' isolateHash=$isolateHash session_cache_size=$cacheSizeBeforeLookup'
         ' active_inference_sessions=${_owner._activeInferenceSessions.length}',
       );
       if (_owner._activeInferenceSessions.length > 1) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_CONCURRENT_ACCESS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' active_inference_sessions=${_owner._activeInferenceSessions.length}'
           ' isolateHash=$isolateHash',
@@ -42,22 +42,22 @@ class _AndroidFfiNativeSessionSubsystem {
             : 0;
         markSessionAsMostRecentlyUsed(modelPath);
         _owner._nativeSessionId = existingSessionId;
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_CACHE_HIT] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' nativeSessionId=$existingSessionId pointer_hex=$reusedPointerHex'
           ' pointer_address=$reusedPointerAddress session_active=1'
           ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
         );
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_REUSE] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' nativeSessionId=$existingSessionId pointer_hex=$reusedPointerHex'
           ' pointer_address=$reusedPointerAddress session_active=1'
           ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
         );
-        AndroidFfiRuntimeProvider._log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
-        AndroidFfiRuntimeProvider._log(
+        _log('[SESSION_CREATE_OK] reusing session=$existingSessionId path=$modelPath');
+        _log(
             '[FFI_CREATE_SESSION_OK] reusing=true session=$existingSessionId path=$modelPath');
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1963 | Function: _ensureNativeSession() | AFTER reuse return',
         );
         return existingSessionId;
@@ -70,14 +70,14 @@ class _AndroidFfiNativeSessionSubsystem {
             ? Pointer<Void>.fromAddress(existingSessionId).address
             : 0;
         final staleActiveState = bindings.sessionIsActive(existingSessionId);
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_CACHE_MISS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' reason=inactive_cached_session nativeSessionId=$existingSessionId'
           ' pointer_hex=$stalePointerHex pointer_address=$stalePointerAddress'
           ' session_active=$staleActiveState isolateHash=$isolateHash'
           ' session_cache_size=${_owner._nativeSessionsByModel.length}',
         );
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_STALE_POINTER] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' nativeSessionId=$existingSessionId pointer_hex=$stalePointerHex'
           ' pointer_address=$stalePointerAddress session_active=$staleActiveState'
@@ -89,7 +89,7 @@ class _AndroidFfiNativeSessionSubsystem {
           reason: 'inactive_existing_session',
         );
       } else {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[NATIVE_SESSION_CACHE_MISS] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' reason=not_cached nativeSessionId=null pointer_hex=0x0 pointer_address=0'
           ' session_active=0 isolateHash=$isolateHash'
@@ -97,29 +97,29 @@ class _AndroidFfiNativeSessionSubsystem {
         );
       }
 
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1969 | Function: _ensureNativeSession() | BEFORE LRU eviction check',
       );
       evictLeastRecentlyUsedSessionIfNeeded(bindings);
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
 
-      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
-      AndroidFfiRuntimeProvider._log(
+      _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
+      _log(
         '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
         ' nativeSessionId=0 pointer_hex=0x0 pointer_address=0'
         ' session_active=0 isolateHash=$isolateHash'
         ' thread_id=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
       );
       const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
-      AndroidFfiRuntimeProvider._log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
+      _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       int created =
           bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
       );
       final createdPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
@@ -127,21 +127,21 @@ class _AndroidFfiNativeSessionSubsystem {
           created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
       final createdActiveState =
           created > 0 ? bindings.sessionIsActive(created) : 0;
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[FORENSIC_AFTER_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
         ' nativeSessionId=$created pointer_hex=$createdPointerHex'
         ' pointer_address=$createdPointerAddress session_active=$createdActiveState'
         ' isolateHash=$isolateHash thread_id=$isolateHash'
         ' session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
-      AndroidFfiRuntimeProvider._log(
+      _log(
           '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=$desiredGpuLayers');
 
       if (created <= 0 && desiredGpuLayers > 0) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers failed=$created reason=session_create_error retrying_with_cpu',
         );
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' nativeSessionId=0 pointer_hex=0x0 pointer_address=0'
           ' session_active=0 isolateHash=$isolateHash'
@@ -154,7 +154,7 @@ class _AndroidFfiNativeSessionSubsystem {
             created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
         final fallbackActiveState =
             created > 0 ? bindings.sessionIsActive(created) : 0;
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FORENSIC_AFTER_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
           ' nativeSessionId=$created pointer_hex=$fallbackPointerHex'
           ' pointer_address=$fallbackPointerAddress session_active=$fallbackActiveState'
@@ -162,17 +162,17 @@ class _AndroidFfiNativeSessionSubsystem {
           ' session_cache_size=${_owner._nativeSessionsByModel.length}'
           ' fallback=cpu',
         );
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=0 fallback=cpu',
         );
       }
       if (created <= 0) {
-        AndroidFfiRuntimeProvider._log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
+        _log('[SESSION_CREATE_FAIL] path=$modelPath session=$created');
         final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
         throw StateError('Native session creation failed: $err');
       }
       if (bindings.sessionIsActive(created) != 1) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
             '[SESSION_CREATE_FAIL] path=$modelPath session=$created inactive_after_create');
         final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
         throw StateError('Native session inactive after create: $err');
@@ -184,20 +184,20 @@ class _AndroidFfiNativeSessionSubsystem {
       final storedPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
       final storedPointerAddress =
           created > 0 ? Pointer<Void>.fromAddress(created).address : 0;
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[NATIVE_SESSION_CACHE_STORE] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
         ' nativeSessionId=$created pointer_hex=$storedPointerHex'
         ' pointer_address=$storedPointerAddress session_active=1'
         ' isolateHash=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
-      AndroidFfiRuntimeProvider._log('[SESSION_CREATE_OK] path=$modelPath session=$created');
-      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
-      AndroidFfiRuntimeProvider._log(
+      _log('[SESSION_CREATE_OK] path=$modelPath session=$created');
+      _log('[FFI_CREATE_SESSION_OK] path=$modelPath session=$created');
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2001 | Function: _ensureNativeSession() | AFTER exit',
       );
       return created;
     } catch (e, stackTrace) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 2006 | Function: _ensureNativeSession() | BEFORE rethrow after exception: $e \n $stackTrace',
       );
       rethrow;
@@ -211,7 +211,7 @@ class _AndroidFfiNativeSessionSubsystem {
   }) {
     final sessionId = _owner._nativeSessionsByModel.remove(modelPath);
     if (sessionId == null) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[NATIVE_SESSION_DOUBLE_RELEASE_SUSPECT] model_path=$modelPath reason=$reason'
         ' nativeSessionId=null pointer_hex=0x0 pointer_address=0'
         ' session_active=0 isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
@@ -224,17 +224,17 @@ class _AndroidFfiNativeSessionSubsystem {
       final pointerAddress =
           sessionId > 0 ? Pointer<Void>.fromAddress(sessionId).address : 0;
       final activeState = bindings.sessionIsActive(sessionId);
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[NATIVE_SESSION_RELEASE_BEGIN] model_path=$modelPath reason=$reason'
         ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
         ' pointer_address=$pointerAddress session_active=$activeState'
         ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}'
         ' session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
-      AndroidFfiRuntimeProvider._log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
+      _log('[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason');
       bindings.releaseSession(sessionId);
     } catch (error) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
           '[FFI_RELEASE] session=$sessionId path=$modelPath reason=$reason failed: $error');
     } finally {
       if (_owner._nativeSessionId == sessionId) {
@@ -253,13 +253,13 @@ class _AndroidFfiNativeSessionSubsystem {
     if (evictedSessionId == null) {
       return;
     }
-    AndroidFfiRuntimeProvider._log(
+    _log(
       '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=${_owner._maxActiveNativeSessions}',
     );
     try {
       bindings.releaseSession(evictedSessionId);
     } catch (error) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
       );
     } finally {
@@ -286,12 +286,12 @@ class _AndroidFfiNativeSessionSubsystem {
     final entries = _owner._nativeSessionsByModel.entries.toList(growable: false);
     for (final entry in entries) {
       try {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason',
         );
         bindings.releaseSession(entry.value);
       } catch (error) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason failed: $error',
         );
       }
@@ -302,10 +302,10 @@ class _AndroidFfiNativeSessionSubsystem {
 
   void safeCancel(LlamaBridgeBindings bindings, int sessionId) {
     try {
-      AndroidFfiRuntimeProvider._log('[FFI_CANCEL] session=$sessionId');
+      _log('[FFI_CANCEL] session=$sessionId');
       bindings.cancelSession(sessionId);
     } catch (error) {
-      AndroidFfiRuntimeProvider._log('[MODEL_EXECUTION] llb_session_cancel failed: $error');
+      _log('[MODEL_EXECUTION] llb_session_cancel failed: $error');
     }
   }
 
@@ -314,16 +314,16 @@ class _AndroidFfiNativeSessionSubsystem {
     required String reason,
   }) {
     try {
-      AndroidFfiRuntimeProvider._log('[MODEL_EXECUTION] resetting native runtime: $reason');
+      _log('[MODEL_EXECUTION] resetting native runtime: $reason');
       final sessionId = _owner._nativeSessionId;
       if (sessionId != null) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
             '[MODEL_EXECUTION] llb_session_is_active before reset: ${bindings.sessionIsActive(sessionId)}');
         safeCancel(bindings, sessionId);
       }
       releaseAllNativeSessions(bindings, reason: reason);
     } catch (error) {
-      AndroidFfiRuntimeProvider._log('[MODEL_EXECUTION] runtime reset failed: $error');
+      _log('[MODEL_EXECUTION] runtime reset failed: $error');
     }
   }
 
