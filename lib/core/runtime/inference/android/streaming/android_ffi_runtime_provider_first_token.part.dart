@@ -78,7 +78,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     required Duration elapsed,
   }) {
     AndroidFfiRuntimeProvider._log(
-      '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${elapsed.inMilliseconds} chars=${sanitizedPiece.length} phase=$_runtimePhase',
+      '[FFI_FIRST_TOKEN] session=$_nativeSessionId elapsed_ms=${elapsed.inMilliseconds} chars=${sanitizedPiece.length} phase=$_runtimePhase',
     );
     AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN] elapsed_ms=${elapsed.inMilliseconds}'
