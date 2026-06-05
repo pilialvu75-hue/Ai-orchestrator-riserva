@@ -29,7 +29,7 @@ class _AndroidFfiRuntimePollingController {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _owner._lastLoopLogAtMs >= AndroidFfiRuntimeProvider._loopLogThrottleMs) {
       _owner._lastLoopLogAtMs = now;
-      AndroidFfiRuntimeProvider._log(message);
+      _log(message);
     }
   }
 
