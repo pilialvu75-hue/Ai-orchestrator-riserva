@@ -158,7 +158,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             startedAt: state.startedAt,
           );
           AndroidFfiRuntimeProvider._logAi('inference timeout');
-          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          final partialText = _flushStructuralTemplateOutput(state.fullText);
           await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'timeout',
@@ -233,7 +233,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             elapsed: elapsed,
             startedAt: state.startedAt,
           );
-          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          final partialText = _flushStructuralTemplateOutput(state.fullText);
           await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'stalled',
@@ -284,7 +284,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             elapsed: elapsed,
             startedAt: state.startedAt,
           );
-          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          final partialText = _flushStructuralTemplateOutput(state.fullText);
           await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'poll_loop',
@@ -448,7 +448,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           AndroidFfiRuntimeProvider._log('[STREAM_ADD] event=final_chunk session=$sessionId');
           final flushWatch = Stopwatch()..start();
           if (!controller.isClosed) {
-            final sanitizedFinalText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+            final sanitizedFinalText = _flushStructuralTemplateOutput(state.fullText);
             _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk( controller, text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText, tokensGenerated: attemptState.estimatedTokens, model: modelId, );
           }
           flushWatch.stop();
@@ -486,7 +486,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
           if ((statusLower.contains('timeout') || statusLower.contains('stalled')) &&
               state.fullText.toString().trim().isNotEmpty) {
-            final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+            final partialText = _flushStructuralTemplateOutput(state.fullText);
             await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError( controller, stage: 'generation', message: err.isNotEmpty ? err : 'Inference failed.', modelId: modelId, fullText: partialText, tokensGenerated: attemptState.estimatedTokens, notice: err, partialTerminalState: InferenceTerminalState.timeout, );
           } else {
             if (!controller.isClosed) {
@@ -509,7 +509,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
       }
     } finally {
       startup.freePromptNativePtr();
-      AndroidFfiRuntimeProvider._discardStructuralTemplateOutput();
+      _discardStructuralTemplateOutput();
       final context = _TerminalStateContext( controller: controller, bindings: bindings, sessionId: sessionId, modelId: modelId, startedAt: state.startedAt, estimatedTokens: attemptState.estimatedTokens, firstTokenAt: attemptState.firstTokenAt, runtimeNeedsReset: attemptState.runtimeNeedsReset, runtimeResetReason: attemptState.runtimeResetReason, tokenBufRaw: tokenBufRaw, attemptState: attemptState, );
       await _finalizeStreamingTerminalState(context);
     }
