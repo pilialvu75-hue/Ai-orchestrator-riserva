@@ -95,7 +95,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             cancellation: true,
           );
           _safeCancel(bindings, nativeSessionId);
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           AndroidFfiRuntimeProvider._log(
             '[TERMINAL_STATE] state=cancelled generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${DateTime.now().difference(state.startedAt).inMilliseconds}',
@@ -133,7 +133,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}',
           );
           _safeCancel(bindings, nativeSessionId);
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           _setPhase(RuntimePhase.failed);
           attemptState.runtimeNeedsReset = true;
           attemptState.runtimeResetReason = 'generation_timeout';
@@ -158,8 +158,8 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             startedAt: state.startedAt,
           );
           AndroidFfiRuntimeProvider._logAi('inference timeout');
-          final partialText = _flushStructuralTemplateOutput(state.fullText);
-          await _finishWithPartialOrRuntimeError(
+          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'timeout',
             message: 'Local generation timed out.',
@@ -210,7 +210,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           );
           _setPhase(RuntimePhase.stalled);
           _safeCancel(bindings, nativeSessionId);
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           attemptState.runtimeNeedsReset = true;
           attemptState.runtimeResetReason = 'token_progress_watchdog';
           AndroidFfiRuntimeProvider._log(
@@ -233,8 +233,8 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             elapsed: elapsed,
             startedAt: state.startedAt,
           );
-          final partialText = _flushStructuralTemplateOutput(state.fullText);
-          await _finishWithPartialOrRuntimeError(
+          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'stalled',
             message: 'Token stream stalled during local inference.',
@@ -260,7 +260,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           );
           _setPhase(RuntimePhase.stalled);
           _safeCancel(bindings, nativeSessionId);
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           attemptState.runtimeNeedsReset = true;
           attemptState.runtimeResetReason = 'poll_loop_watchdog';
           AndroidFfiRuntimeProvider._log(
@@ -284,8 +284,8 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             elapsed: elapsed,
             startedAt: state.startedAt,
           );
-          final partialText = _flushStructuralTemplateOutput(state.fullText);
-          await _finishWithPartialOrRuntimeError(
+          final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+          await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
             controller,
             stage: 'poll_loop',
             message: 'Token polling stalled in local runtime.',
@@ -319,7 +319,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
         } catch (error) {
           _classifyFirstTokenTermination( flowState: flowState, attemptState: attemptState, reason: 'poll_token_exception', boundary: 'poll_token', exception: true, runtimeReset: true, );
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           attemptState.runtimeNeedsReset = true;
           attemptState.runtimeResetReason = 'poll_token_exception';
           _setPhase(RuntimePhase.failed);
@@ -339,7 +339,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             if (state.consecutiveInvalidTokens >= AndroidFfiRuntimeProvider._maxConsecutiveInvalidTokens) {
               _classifyFirstTokenTermination( flowState: flowState, attemptState: attemptState, reason: 'token_decode_exception', boundary: 'token_decode', exception: true, runtimeReset: true, );
               _safeCancel(bindings, nativeSessionId);
-              AndroidFfiRuntimeProvider.clearRuntimeVerification();
+              clearRuntimeVerification();
               attemptState.runtimeNeedsReset = true;
               attemptState.runtimeResetReason = 'token_decode_exception';
               AndroidFfiRuntimeProvider._log( '[TERMINAL_STATE] state=failed reason=token_decode_exception' ' generated_tokens=${attemptState.estimatedTokens}' ' error=$error', );
@@ -375,7 +375,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           state.lastTokenProgressAt = tokenObservedAt;
           state.fullText.write(sanitizedPiece);
           attemptState.estimatedTokens++;
-          AndroidFfiRuntimeProvider.recordVerificationSuccess( modelPath: modelPath, source: 'first_token', );
+          recordVerificationSuccess( modelPath: modelPath, source: 'first_token', );
           final streamingElapsed = DateTime.now().difference(state.startedAt);
           AndroidFfiRuntimeProvider._log( '[FFI_CALLBACK_PAYLOAD] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} poll_iteration=${attemptState.pollIterations} status=$status', );
           AndroidFfiRuntimeProvider._log( '[DART_STREAM_RECEIVE] elapsed_ms=${streamingElapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length} poll_iteration=${attemptState.pollIterations} subscription_alive=${!controller.isClosed}', );
@@ -405,7 +405,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             if (state.repeatedTokenCount >= AndroidFfiRuntimeProvider._maxRepeatedTokenLoop) {
               _classifyFirstTokenTermination( flowState: flowState, attemptState: attemptState, reason: 'repeated_token_loop', boundary: 'generation_loop', runtimeReset: true, );
               _safeCancel(bindings, nativeSessionId);
-              AndroidFfiRuntimeProvider.clearRuntimeVerification();
+              clearRuntimeVerification();
               attemptState.runtimeNeedsReset = true;
               attemptState.runtimeResetReason = 'repeated_token_loop';
               _setPhase(RuntimePhase.failed);
@@ -439,7 +439,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           _classifyFirstTokenTermination( flowState: flowState, attemptState: attemptState, reason: 'completed', boundary: 'poll_loop', );
           _setPhase(RuntimePhase.completed);
           final completedElapsed = DateTime.now().difference(state.startedAt);
-          AndroidFfiRuntimeProvider.recordVerificationSuccess( modelPath: modelPath, source: 'eos', );
+          recordVerificationSuccess( modelPath: modelPath, source: 'eos', );
           AndroidFfiRuntimeProvider._log('[FFI_EOS] session=$nativeSessionId');
           AndroidFfiRuntimeProvider._log( '[GENERATION_END] state=success generated_tokens=${attemptState.estimatedTokens}' ' elapsed_ms=${completedElapsed.inMilliseconds}', );
           AndroidFfiRuntimeProvider._log( '[FINAL_RESPONSE] eos generated_tokens=${attemptState.estimatedTokens} elapsed_ms=${completedElapsed.inMilliseconds}', );
@@ -448,7 +448,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           AndroidFfiRuntimeProvider._log('[STREAM_ADD] event=final_chunk session=$sessionId');
           final flushWatch = Stopwatch()..start();
           if (!controller.isClosed) {
-            final sanitizedFinalText = _flushStructuralTemplateOutput(state.fullText);
+            final sanitizedFinalText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
             _AndroidFfiRuntimeExecutionBoundary.emitFinalChunk( controller, text: sanitizedFinalText.isEmpty ? '\u200B' : sanitizedFinalText, tokensGenerated: attemptState.estimatedTokens, model: modelId, );
           }
           flushWatch.stop();
@@ -460,7 +460,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           _setPhase(RuntimePhase.cancelled);
           AndroidFfiRuntimeProvider._log('[GENERATION_END] state=cancelled generated_tokens=${attemptState.estimatedTokens}');
           AndroidFfiRuntimeProvider._log( '[TERMINAL_STATE] state=cancelled generated_tokens=${attemptState.estimatedTokens}' ' elapsed_ms=${DateTime.now().difference(state.startedAt).inMilliseconds}', );
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           if (!controller.isClosed) {
             AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'cancelled', message: 'Inference cancelled.', state: InferenceTerminalState.cancelled, );
           }
@@ -470,7 +470,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         } else if (status == -1) {
           _classifyFirstTokenTermination( flowState: flowState, attemptState: attemptState, reason: 'native_error', boundary: 'poll_loop', runtimeReset: true, );
           _setPhase(RuntimePhase.failed);
-          AndroidFfiRuntimeProvider.clearRuntimeVerification();
+          clearRuntimeVerification();
           final err = AndroidFfiRuntimeProvider._safeLastError(bindings, nativeSessionId);
           AndroidFfiRuntimeProvider._log('[GENERATION_ERROR] stage=poll_token_native_error error=$err');
           final statusLower = err.toLowerCase();
@@ -486,8 +486,8 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
           if ((statusLower.contains('timeout') || statusLower.contains('stalled')) &&
               state.fullText.toString().trim().isNotEmpty) {
-            final partialText = _flushStructuralTemplateOutput(state.fullText);
-            await _finishWithPartialOrRuntimeError( controller, stage: 'generation', message: err.isNotEmpty ? err : 'Inference failed.', modelId: modelId, fullText: partialText, tokensGenerated: attemptState.estimatedTokens, notice: err, partialTerminalState: InferenceTerminalState.timeout, );
+            final partialText = AndroidFfiRuntimeProvider._flushStructuralTemplateOutput(state.fullText);
+            await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError( controller, stage: 'generation', message: err.isNotEmpty ? err : 'Inference failed.', modelId: modelId, fullText: partialText, tokensGenerated: attemptState.estimatedTokens, notice: err, partialTerminalState: InferenceTerminalState.timeout, );
           } else {
             if (!controller.isClosed) {
               AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'generation', message: err.isNotEmpty ? err : 'Inference failed.', );
@@ -509,7 +509,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
       }
     } finally {
       startup.freePromptNativePtr();
-      _discardStructuralTemplateOutput();
+      AndroidFfiRuntimeProvider._discardStructuralTemplateOutput();
       final context = _TerminalStateContext( controller: controller, bindings: bindings, sessionId: sessionId, modelId: modelId, startedAt: state.startedAt, estimatedTokens: attemptState.estimatedTokens, firstTokenAt: attemptState.firstTokenAt, runtimeNeedsReset: attemptState.runtimeNeedsReset, runtimeResetReason: attemptState.runtimeResetReason, tokenBufRaw: tokenBufRaw, attemptState: attemptState, );
       await _finalizeStreamingTerminalState(context);
     }
