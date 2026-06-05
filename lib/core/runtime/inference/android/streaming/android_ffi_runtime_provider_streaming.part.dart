@@ -8,8 +8,7 @@ LocalInferenceModelIds.deepSeekR1_1_5b,
 LocalInferenceModelIds.qwen3_1_7b,
 };
 
-mixin AndroidFfiRuntimeStreamingMixin on LocalRuntimeProvider { 
-  // (Sostituisci LocalRuntimeProvider con il nome esatto della tua classe base se è diverso)
+extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 
 
   Stream<InferenceResponse> streamInference({
