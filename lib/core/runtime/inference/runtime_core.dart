@@ -43,6 +43,7 @@ part 'android/logging/android_ffi_runtime_provider_ffi_bridge_handler.part.dart'
 part 'android/polling/android_ffi_runtime_provider_polling_controller.part.dart';
 part 'android/diagnostics/android_ffi_runtime_provider_diagnostics.part.dart';
 part 'android/streaming/android_ffi_runtime_provider_streaming.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_streaming_polling.part.dart';
 part 'android/streaming/android_ffi_runtime_provider_stream_verification.part.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
