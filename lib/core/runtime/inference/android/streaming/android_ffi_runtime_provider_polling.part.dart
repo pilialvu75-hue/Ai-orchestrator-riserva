@@ -109,7 +109,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             elapsed: DateTime.now().difference(state.startedAt),
           );
           AndroidFfiRuntimeProvider._log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=pre_poll_cancellation'); break; }
-        if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
+                if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,
@@ -124,6 +124,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             '[FFI_TIMEOUT] session=$sessionId stage=generation_timeout'
             ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}',
           );
+
           _safeCancel(bindings, nativeSessionId);
           clearRuntimeVerification();
           _setPhase(RuntimePhase.failed);
