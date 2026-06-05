@@ -14,24 +14,24 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
     required CancellationToken cancellationToken,
   }) {
     try {
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[FORENSIC_PROVIDER_ENTRY] sessionId=${request.sessionId} provider=$runtimeType modelId=${request.modelId} promptLength=${request.prompt.length}',
       );
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 457 | Function: streamInference() | BEFORE entry',
       );
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[FORENSIC_STREAM_ENTRY] sessionId=${request.sessionId} modelId=${request.modelId} promptLength=${request.prompt.length}',
       );
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[STREAM_INFERENCE_ENTER] session=${request.sessionId} provider=$runtimeType hash=${hashCode.toRadixString(16)}',
       );
       _streamInferenceEntered = true;
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[FORENSIC_STREAM_INFERENCE_ACTIVE] streamInferenceEntered=true sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
       );
       final controller = StreamController<InferenceResponse>();
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[STREAM_CONTROLLER_CREATED] sessionId=${request.sessionId} modelId=${request.modelId}',
       );
       final flowState = _StreamFlowControlState();
@@ -45,30 +45,30 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
       );
       controller.onCancel = () {
         if (!flowState.firstFfiInvocationAttempted) {
-          _log(
+          AndroidFfiRuntimeProvider._log(
             '[FFI_BRANCH_RETURN] session=${request.sessionId} branch=stream_listener_cancel'
             ' reason=stream listener detached before first FFI call',
           );
         }
-        _log(
+        AndroidFfiRuntimeProvider._log(
           '[FFI_BRANCH] session=${request.sessionId} name=stream_listener_cancel'
           ' first_ffi_attempted=${flowState.firstFfiInvocationAttempted}',
         );
       };
-      _log('[CANCELLATION_HANDLER_REGISTERED] sessionId=${request.sessionId}');
-      _log(
+      AndroidFfiRuntimeProvider._log('[CANCELLATION_HANDLER_REGISTERED] sessionId=${request.sessionId}');
+      AndroidFfiRuntimeProvider._log(
         '[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} inferenceTailHash=${(_inferenceTail ?? Future<void>.value()).hashCode}',
       );
       runZonedGuarded(() async {
-        _log(
+        AndroidFfiRuntimeProvider._log(
           '[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
         );
-        _log(
+        AndroidFfiRuntimeProvider._log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
         );
         try {
           await _concurrencyManager.runInferenceSerially(() async {
-            _log(
+            AndroidFfiRuntimeProvider._log(
               '[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}',
             );
             final sessionId = request.sessionId.trim().isEmpty
@@ -83,8 +83,8 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 reason: 'recursive_inference_guard',
                 boundary: 'recursive_inference_guard',
               );
-              _log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
-              _log('[SESSION] recursive_guard_triggered session=$sessionId');
+              AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
+              AndroidFfiRuntimeProvider._log('[SESSION] recursive_guard_triggered session=$sessionId');
               await _fatalEarlyExit(
                 flowState: flowState,
                 controller: controller,
@@ -93,14 +93,14 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 reason: 'Recursive inference call blocked for session $sessionId.',
                 stage: 'recursive_inference_guard',
               );
-              _log(
+              AndroidFfiRuntimeProvider._log(
                 '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
                 ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
               );
               return;
             }
             if (isForensicSelfTest) {
-              _log(
+              AndroidFfiRuntimeProvider._log(
                 '[VERIFICATION_UI_IGNORED] verification_scope=true reason=skip_activeInferenceSessions_tracking session=$sessionId',
               );
             }
@@ -116,7 +116,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               dartThreadId: AndroidFfiRuntimeProvider._currentThreadId(),
             );
             if (startup == null) {
-              _log(
+              AndroidFfiRuntimeProvider._log(
                 '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
                 ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
               );
@@ -128,16 +128,16 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               attemptState: firstTokenAttempt,
               flowState: flowState,
             );
-            _log(
+            AndroidFfiRuntimeProvider._log(
               '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
               ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
             );
           });
-          _log(
+          AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1655 | Function: streamInference() | AFTER calling _runInferenceSerially()',
           );
         } catch (e, stackTrace) {
-          _log(
+          AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1659 | Function: streamInference() | BEFORE rethrow after async execution exception: $e \n $stackTrace',
           );
           rethrow;
@@ -145,16 +145,16 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
           _finalizeFirstTokenAttempt(firstTokenAttempt);
         }
       }, (error, stack) {
-        _log(
+        AndroidFfiRuntimeProvider._log(
           '[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack',
         );
       });
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1666 | Function: streamInference() | AFTER exit',
       );
       return controller.stream;
     } catch (e, stackTrace) {
-      _log(
+      AndroidFfiRuntimeProvider._log(
         '[FORENSIC_UNHANDLED_EXCEPTION] error=$e stackTrace=$stackTrace',
       );
       rethrow;
