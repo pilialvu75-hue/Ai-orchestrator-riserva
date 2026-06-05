@@ -42,8 +42,8 @@ class _AndroidFfiRuntimeExecutionBoundary {
   }) {
     if (ctrl.isClosed) return;
     ctrl.add(InferenceResponse.error(message, state: state));
-    AndroidFfiRuntimeProvider._log('[FFI_STREAM_CLOSE] reason=finish_with_error');
-    AndroidFfiRuntimeProvider._log(
+    _log('[FFI_STREAM_CLOSE] reason=finish_with_error');
+    _log(
       '[DART_STREAM_CLOSE] elapsed_ms=0 thread_id=${AndroidFfiRuntimeProvider._currentThreadId()} token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=-1 reason=finish_with_error',
     );
     ctrl.close();
@@ -62,11 +62,11 @@ class _AndroidFfiRuntimeExecutionBoundary {
       details: details,
     );
     final payload = exception.toPayload();
-    AndroidFfiRuntimeProvider._log('[GENERATION_ERROR] stage=$stage message=$message details=${details ?? ''}');
-    AndroidFfiRuntimeProvider._logAi(
+    _log('[GENERATION_ERROR] stage=$stage message=$message details=${details ?? ''}');
+    _logAi(
       'runtime error: ${exception.toLogMessage()}',
     );
-    AndroidFfiRuntimeProvider._log(payload);
+    _log(payload);
     finishWithError(ctrl, payload, state: state);
   }
 
@@ -83,10 +83,10 @@ class _AndroidFfiRuntimeExecutionBoundary {
     if (ctrl.isClosed) return;
     if (fullText.trim().isNotEmpty) {
       if (notice != null && notice.trim().isNotEmpty) {
-        AndroidFfiRuntimeProvider._log('[STREAM_ADD] event=notice');
+        _log('[STREAM_ADD] event=notice');
         ctrl.add(InferenceResponse.notice(notice));
       }
-      AndroidFfiRuntimeProvider._log('[STREAM_ADD] event=final_partial');
+      _log('[STREAM_ADD] event=final_partial');
       ctrl.add(
         InferenceResponse(
           text: fullText,
@@ -97,7 +97,7 @@ class _AndroidFfiRuntimeExecutionBoundary {
           terminalState: partialTerminalState,
         ),
       );
-      AndroidFfiRuntimeProvider._log('[FFI_STREAM_CLOSE] reason=partial_or_runtime_error');
+      _log('[FFI_STREAM_CLOSE] reason=partial_or_runtime_error');
       if (!ctrl.isClosed) {
         try {
           await ctrl.close();
