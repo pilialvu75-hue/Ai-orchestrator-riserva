@@ -39,15 +39,15 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
     String? details,
     InferenceTerminalState state = InferenceTerminalState.failed,
   }) async {
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FFI_FATAL_EARLY_EXIT] session=$sessionId branch=$branch reason=$reason',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FFI_BRANCH_RETURN] session=$sessionId branch=$branch reason=$reason'
       ' first_ffi_attempted=${flowState.firstFfiInvocationAttempted} first_ffi_completed=${flowState.firstFfiInvocationCompleted}',
     );
     if (!controller.isClosed) {
-      _finishWithRuntimeError(
+      AndroidFfiRuntimeProvider._finishWithRuntimeError(
         controller,
         stage: stage,
         message: reason,
@@ -68,7 +68,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
       );
     }
     final terminalState = monitor.state.status;
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[TERMINAL_STATE] state=${terminalState.name}'
       ' generated_tokens=${context.estimatedTokens}'
       ' elapsed_ms=${now.difference(context.startedAt).inMilliseconds}'
@@ -91,7 +91,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
     try {
       _releaseInferenceSlot(context.sessionId);
     } catch (e, st) {
-      _log('Slot release failed but forced continuation: $e\n$st');
+      AndroidFfiRuntimeProvider._log('Slot release failed but forced continuation: $e\n$st');
     }
     final currentController = context.controller;
     try {
@@ -99,7 +99,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
         await currentController.close();
       }
     } catch (e, st) {
-      _log('Controller close non-fatal error swallowed safely: $e\n$st');
+      AndroidFfiRuntimeProvider._log('Controller close non-fatal error swallowed safely: $e\n$st');
     }
     _finalizeFirstTokenAttempt(context.attemptState);
   }

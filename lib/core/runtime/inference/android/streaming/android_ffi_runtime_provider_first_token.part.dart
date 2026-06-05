@@ -35,10 +35,10 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
       attemptId: attemptId,
       sessionId: sessionId,
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[ACTION_VARS_INITIALIZED] sessionId=$sessionId modelId=$modelId attemptId=$attemptId dartThreadId=$dartThreadId isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} nativeSessionId=${_nativeSessionId ?? 'null'} sessionCacheSize=${_nativeSessionsByModel.length} ts=${DateTime.now().microsecondsSinceEpoch}',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_ATTEMPT_BEGIN] attemptId=$attemptId sessionId=$sessionId'
       ' modelId=$modelId is_verification=$isForensicSelfTest',
     );
@@ -77,21 +77,21 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     required int estimatedTokens,
     required Duration elapsed,
   }) {
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FFI_FIRST_TOKEN] session=$nativeSessionId elapsed_ms=${elapsed.inMilliseconds} chars=${sanitizedPiece.length} phase=$_runtimePhase',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN] elapsed_ms=${elapsed.inMilliseconds}'
       ' token_text_length=${sanitizedPiece.length}'
       ' poll_iteration=$pollIterations session=$sessionKey',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_REAL] elapsed_ms=${elapsed.inMilliseconds}'
       ' thread_id=$dartThreadId token_id=-1 token_text_length=${sanitizedPiece.length}'
       ' queue_size=-1 poll_iteration=$pollIterations'
       ' token="${sanitizedPiece.replaceAll('\n', r'\n')}" token_count=$estimatedTokens',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_SUCCESS] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
       ' sessionId=$sessionKey nativeSessionId=$nativeSessionHandle'
       ' elapsed_ms=${elapsed.inMilliseconds}'
@@ -121,7 +121,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
       runtimeReset: true,
     );
     _setPhase(RuntimePhase.stalled);
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FFI_TIMEOUT] session=$sessionKey stage=first_token_watchdog'
       ' timeout_ms=${firstTokenDeadline.inMilliseconds}',
     );
@@ -130,24 +130,24 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     attemptState.runtimeNeedsReset = true;
     attemptState.runtimeResetReason = 'first_token_watchdog';
     final elapsed = DateTime.now().difference(startedAt);
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
       ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionKey',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
       ' no_token_produced=true session=$sessionKey',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=${attemptState.pollIterations} timeout_ms=${firstTokenDeadline.inMilliseconds}',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
       ' sessionId=$sessionKey reason=first_token_watchdog'
       ' elapsed_ms=${elapsed.inMilliseconds} timeout_ms=${firstTokenDeadline.inMilliseconds}'
       ' poll_iterations=${attemptState.pollIterations} pre_first_token_active=$_preFirstTokenActive',
     );
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
       ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
     );
@@ -158,8 +158,8 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
       elapsed: elapsed,
       startedAt: startedAt,
     );
-    _logAi('inference timeout');
-    _finishWithRuntimeError(
+    AndroidFfiRuntimeProvider._logAi('inference timeout');
+    AndroidFfiRuntimeProvider._finishWithRuntimeError(
       controller,
       stage: 'stalled',
       message: isForensicSelfTest
@@ -177,7 +177,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     final preFirstTokenActiveAtEnd = _preFirstTokenActive;
     final runtimeResetRequestedAtEnd =
         attemptState.runtimeResetRequested || attemptState.runtimeNeedsReset;
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
       ' sessionId=${attemptState.sessionId} generated_tokens=${attemptState.estimatedTokens}'
       ' termination_reason=${attemptState.terminationReason}'

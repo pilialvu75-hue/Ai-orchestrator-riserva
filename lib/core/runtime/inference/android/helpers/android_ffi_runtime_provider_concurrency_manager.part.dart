@@ -7,34 +7,34 @@ class _AndroidFfiConcurrencyManager {
   final AndroidFfiRuntimeProvider _owner;
 
   Future<void> runInferenceSerially(Future<void> Function() action) {
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: inference_concurrency_manager.part.dart | Function: runInferenceSerially() | BEFORE entry',
     );
     final previousTail = _owner._inferenceTail ?? Future<void>.value();
-    _log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${previousTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}');
+    AndroidFfiRuntimeProvider._log('[SERIAL_QUEUE_SCHEDULE] tail_hash=${previousTail.hashCode} schedule_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}');
     _owner._inferenceTail = previousTail
         .catchError((e, st) {
-          _log(
+          AndroidFfiRuntimeProvider._log(
             'Inference queue upstream error swallowed safely to protect pipeline continuity: $e\n$st',
           );
         })
         .then((_) async {
           try {
-            _log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}');
-            _log(
+            AndroidFfiRuntimeProvider._log('[SERIAL_QUEUE_DEQUEUE] dequeue_ts=${DateTime.now().microsecondsSinceEpoch} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}');
+            AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: inference_concurrency_manager.part.dart | Function: runInferenceSerially() | BEFORE action()',
             );
             await action();
-            _log(
+            AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: inference_concurrency_manager.part.dart | Function: runInferenceSerially() | AFTER action()',
             );
           } catch (e, st) {
-            _log(
+            AndroidFfiRuntimeProvider._log(
               'Inference task failed safely within protected serial queue execution: $e\n$st',
             );
           }
         });
-    _log(
+    AndroidFfiRuntimeProvider._log(
       '[AI_RUNTIME_MONITOR] FORENSIC - File: inference_concurrency_manager.part.dart | Function: runInferenceSerially() | AFTER exit',
     );
     return _owner._inferenceTail!;
