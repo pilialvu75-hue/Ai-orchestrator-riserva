@@ -69,8 +69,8 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
 
   void _logFirstTokenSuccessTelemetry({
     required _FirstTokenAttemptState attemptState,
-    required String sessionId,
-    required int nativeSessionId,
+    required String sessionKey,
+    required int nativeSessionHandle,
     required int dartThreadId,
     required String sanitizedPiece,
     required int pollIterations,
@@ -83,7 +83,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     _log(
       '[FIRST_TOKEN] elapsed_ms=${elapsed.inMilliseconds}'
       ' token_text_length=${sanitizedPiece.length}'
-      ' poll_iteration=$pollIterations session=$sessionId',
+      ' poll_iteration=$pollIterations session=$sessionKey',
     );
     _log(
       '[FIRST_TOKEN_REAL] elapsed_ms=${elapsed.inMilliseconds}'
@@ -93,7 +93,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     );
     _log(
       '[FIRST_TOKEN_SUCCESS] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-      ' sessionId=$sessionId nativeSessionId=$nativeSessionId'
+      ' sessionId=$sessionKey nativeSessionId=$nativeSessionHandle'
       ' elapsed_ms=${elapsed.inMilliseconds}'
       ' chars=${sanitizedPiece.length} poll_iterations=$pollIterations'
       ' pre_first_token_active=false',
@@ -105,9 +105,9 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     required _FirstTokenAttemptState attemptState,
     required StreamController<InferenceResponse> controller,
     required LlamaBridgeBindings bindings,
-    required String sessionId,
+    required String sessionKey,
     required String modelId,
-    required int nativeSessionId,
+    required int nativeSessionHandle,
     required DateTime startedAt,
     required Duration firstTokenDeadline,
     required int dartThreadId,
@@ -122,28 +122,28 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     );
     _setPhase(RuntimePhase.stalled);
     _log(
-      '[FFI_TIMEOUT] session=$sessionId stage=first_token_watchdog'
+      '[FFI_TIMEOUT] session=$sessionKey stage=first_token_watchdog'
       ' timeout_ms=${firstTokenDeadline.inMilliseconds}',
     );
-    _safeCancel(bindings, nativeSessionId);
+    _safeCancel(bindings, nativeSessionHandle);
     clearRuntimeVerification();
     attemptState.runtimeNeedsReset = true;
     attemptState.runtimeResetReason = 'first_token_watchdog';
     final elapsed = DateTime.now().difference(startedAt);
     _log(
       '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
-      ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionId',
+      ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionKey',
     );
     _log(
       '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
-      ' no_token_produced=true session=$sessionId',
+      ' no_token_produced=true session=$sessionKey',
     );
     _log(
       '[FIRST_TOKEN_TIMEOUT] elapsed_ms=${elapsed.inMilliseconds} thread_id=$dartThreadId token_id=-1 token_text_length=0 queue_size=-1 poll_iteration=${attemptState.pollIterations} timeout_ms=${firstTokenDeadline.inMilliseconds}',
     );
     _log(
       '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-      ' sessionId=$sessionId reason=first_token_watchdog'
+      ' sessionId=$sessionKey reason=first_token_watchdog'
       ' elapsed_ms=${elapsed.inMilliseconds} timeout_ms=${firstTokenDeadline.inMilliseconds}'
       ' poll_iterations=${attemptState.pollIterations} pre_first_token_active=$_preFirstTokenActive',
     );

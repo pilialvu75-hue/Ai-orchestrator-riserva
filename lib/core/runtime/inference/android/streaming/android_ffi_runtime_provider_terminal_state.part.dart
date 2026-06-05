@@ -60,6 +60,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
   Future<void> _finalizeStreamingTerminalState(
     _TerminalStateContext context,
   ) async {
+    final now = DateTime.now();
     if (context.runtimeNeedsReset) {
       _safeResetRuntime(
         context.bindings,
@@ -70,7 +71,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
     _log(
       '[TERMINAL_STATE] state=${terminalState.name}'
       ' generated_tokens=${context.estimatedTokens}'
-      ' elapsed_ms=${DateTime.now().difference(context.startedAt).inMilliseconds}'
+      ' elapsed_ms=${now.difference(context.startedAt).inMilliseconds}'
       ' first_token=${context.firstTokenAt != null} ffi_phase=$_currentFfiPhase',
     );
     if (terminalState == LocalRuntimeStatus.loading ||
