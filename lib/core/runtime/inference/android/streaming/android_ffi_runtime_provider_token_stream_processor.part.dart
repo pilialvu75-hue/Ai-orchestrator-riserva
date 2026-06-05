@@ -108,7 +108,7 @@ class _AndroidFfiTokenStreamProcessor {
     _owner._preFirstTokenActive = false;
     _owner._setPhase(RuntimePhase.streaming);
     final now = DateTime.now();
-    AndroidFfiRuntimeProvider._log(
+    _log(
       '[FIRST_TOKEN_PHASE] phase=${_owner._runtimePhase.name} chars=${piece.length} ts=${now.microsecondsSinceEpoch}',
     );
     return now;
