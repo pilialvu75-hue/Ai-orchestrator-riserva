@@ -1,6 +1,9 @@
 #include "llama_bridge.h"
+
 #include "llama.h"
+
 #include <android/log.h>
+
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -18,6 +21,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -226,7 +230,7 @@ struct RuntimeSession {
             last_error = message;
         }
         set_global_error(message);
-        LOGE("[SESSION_ERROR] session=%" PRId64 " message=%s", id, message.c_str());
+        LOGE("[ERROR] session=%" PRId64 " message=%s", id, message.c_str());
     }
 
     std::string get_error_copy() const {
@@ -274,9 +278,6 @@ struct RuntimeSession {
     }
 };
 
-// Trims prompt whitespace and guarantees a minimally usable prompt for the
-// first-token liveness path, falling back to kFallbackPrompt when input is
-// null, blank, or too short to reliably drive a decode step.
 std::string sanitize_prompt_for_generation(const char* prompt) {
     if (prompt == nullptr) {
         return std::string(kFallbackPrompt);
@@ -294,7 +295,6 @@ std::string sanitize_prompt_for_generation(const char* prompt) {
     return sanitized;
 }
 
-// Wakes any pollers waiting for the first token or an early terminal state.
 void notify_first_token_waiters(const std::shared_ptr<RuntimeSession>& session) {
     session->first_token_cv.notify_all();
 }
@@ -335,7 +335,7 @@ void set_state_if_epoch(
     const char* reason
 ) {
     if (!is_valid_state(desired_state)) {
-        LOGE("[INVALID_STATE] session=%" PRId64 " state=%d", session->id, desired_state);
+        LOGE("[ERROR] session=%" PRId64 " invalid_state=%d", session->id, desired_state);
         return;
     }
     if (session->epoch.load(std::memory_order_acquire) != owner_epoch) {
@@ -513,7 +513,7 @@ void run_generation(
             local_tokens.data(),
             static_cast<int32_t>(local_tokens.size()),
             true,
-            true // CORRETTO: Cambiato da false a true per forzare il parsing dei tag speciali nativi
+            true
         );
         if (token_count > 0) {
             local_tokens.resize(static_cast<size_t>(token_count));
@@ -522,9 +522,6 @@ void run_generation(
         return token_count;
     };
 
-    // =======================================================
-    // DETECTIVE LOGS - ISPEZIONE PROMPT (S24 FE DEBUG)
-    // =======================================================
     LOGI("[PROMPT_DEBUG] Caratteri totali ricevuti da Dart: %zu", prompt.size());
     LOGI("[PROMPT_DEBUG] --- INIZIO PROMPT REALE ---");
     LOGI("%s", prompt.c_str());
@@ -555,7 +552,6 @@ void run_generation(
     }
 
     LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
-    // =======================================================
 
     if (n_tokens <= 1) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
@@ -906,7 +902,7 @@ int64_t llb_create_session(
 
     if (model_path == nullptr || std::strlen(model_path) == 0) {
         set_global_error("Model path is empty");
-        LOGE("[SESSION_CREATE_BEGIN] model_path_empty");
+        LOGE("[ERROR] [SESSION_CREATE_BEGIN] model_path_empty");
         return -1;
     }
 
@@ -941,7 +937,7 @@ int64_t llb_create_session(
 
     if (!model_exists || !model_readable || model_size <= 0) {
         set_global_error("Invalid model file path or unreadable file");
-        LOGE("[SESSION_LOAD] invalid_model_file path=%s", model_path);
+        LOGE("[ERROR] [SESSION_LOAD] invalid_model_file path=%s", model_path);
         return -2;
     }
 
@@ -971,7 +967,7 @@ int64_t llb_create_session(
 
     if (session->model == nullptr) {
         session->set_error("Failed to load model");
-        LOGE("[SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
+        LOGE("[ERROR] [SESSION_LOAD] llama_model_load_from_file_failed path=%s", model_path);
         return -3;
     }
 
@@ -1004,7 +1000,7 @@ int64_t llb_create_session(
     if (session->ctx == nullptr) {
         session->set_error("Failed to create context");
         session->destroy_native_resources();
-        LOGE("[SESSION_LOAD] llama_init_from_model_failed");
+        LOGE("[ERROR] [SESSION_LOAD] llama_init_from_model_failed");
         return -4;
     }
 
@@ -1021,7 +1017,7 @@ int64_t llb_create_session(
     if (vocab == nullptr || ctx_size <= 0 || model_desc_len <= 0) {
         session->set_error("Bootstrap verification failed");
         session->destroy_native_resources();
-        LOGE("[SESSION_LOAD] bootstrap_verification_failed");
+        LOGE("[ERROR] [SESSION_LOAD] bootstrap_verification_failed");
         return -5;
     }
 
@@ -1056,7 +1052,7 @@ int32_t llb_session_start_gen(
     auto session = find_session(session_id);
     if (session == nullptr) {
         set_global_error("Session not found");
-        LOGE("[GEN_START] session_not_found session=%" PRId64, session_id);
+        LOGE("[ERROR] [GEN_START] session_not_found session=%" PRId64, session_id);
         return -1;
     }
 
@@ -1067,7 +1063,7 @@ int32_t llb_session_start_gen(
 
     if (max_tokens <= 0) {
         session->set_error("max_tokens must be > 0");
-        LOGE("[GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
+        LOGE("[ERROR] [GEN_START] invalid_max_tokens session=%" PRId64 " value=%d",
              session_id,
              max_tokens);
         return -4;
@@ -1122,7 +1118,7 @@ int32_t llb_session_start_gen(
     } catch (const std::exception& error) {
         session->set_error(error.what());
         session->gen_state.store(kStateFailed, std::memory_order_release);
-        LOGE("[THREAD_START] session=%" PRId64 " spawn_failed=%s",
+        LOGE("[ERROR] [THREAD_START] session=%" PRId64 " spawn_failed=%s",
              session_id,
              error.what());
         return -5;
@@ -1142,7 +1138,7 @@ int32_t llb_session_poll_token(
     auto session = find_session(session_id);
     if (session == nullptr) {
         set_global_error("Session not found");
-        LOGE("[TOKEN] session_not_found session=%" PRId64, session_id);
+        LOGE("[ERROR] [TOKEN] session_not_found session=%" PRId64, session_id);
         return -1;
     }
 
@@ -1229,7 +1225,7 @@ int32_t llb_session_poll_token(
         return -99;
     }
     if (state == kStateFailed) {
-        LOGE("[DECODE] session=%" PRId64 " poll_state=failed error=%s",
+        LOGE("[ERROR] [DECODE] session=%" PRId64 " poll_state=failed error=%s",
              session_id,
              session->get_error_copy().c_str());
         return -1;
@@ -1241,7 +1237,7 @@ int32_t llb_session_poll_token(
 void llb_session_cancel(int64_t session_id) {
     auto session = find_session(session_id);
     if (session == nullptr) {
-        LOGE("[CANCEL] session_not_found session=%" PRId64, session_id);
+        LOGE("[ERROR] [CANCEL] session_not_found session=%" PRId64, session_id);
         return;
     }
 
@@ -1264,13 +1260,10 @@ void llb_release_session(int64_t session_id) {
 
     LOGI("[SESSION_DESTROY] session=%" PRId64 " releasing=true", session_id);
 
-    // Signal cancellation so the gen thread exits its decode loop promptly.
     session->cancel_requested.store(true, std::memory_order_release);
     session->gen_state.store(kStateCancelled, std::memory_order_release);
-    // Wake any llb_session_poll_token caller waiting on the first-token CV.
     notify_first_token_waiters(session);
 
-    // Synchronous cleanup to eliminate races through GGML's shared thread pool
     LOGI("[SESSION_RELEASE_WAIT_BEGIN] session=%" PRId64, session_id);
 
     {
