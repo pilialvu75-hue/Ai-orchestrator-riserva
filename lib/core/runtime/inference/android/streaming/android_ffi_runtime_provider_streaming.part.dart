@@ -88,6 +88,72 @@ Future<void> fatalEarlyExit(
             ? 'unknown'
             : request.sessionId.trim();
         final dartThreadId = AndroidFfiRuntimeProvider._currentThreadId();
+        final isForensicSelfTest = request.sessionId.trim() == AndroidFfiRuntimeProvider._forensicSelfTestSessionId;
+          // ── First Token Attempt Isolation: assign attempt ID ──────────────────
+          final attemptId =
+              'fta_${DateTime.now().microsecondsSinceEpoch}_${sessionId.hashCode.toRadixString(16)}';
+          _currentFirstTokenAttemptId = attemptId;
+          // Attempt telemetry captured by the unified forensic cleanup boundary.
+          var estimatedTokens = 0;
+          var pollIterations = 0;
+          DateTime? firstTokenAt;
+          // Runtime recovery classification captured even when reset happens later.
+          var runtimeNeedsReset = false;
+          String? runtimeResetReason;
+          var runtimeResetRequested = false;
+
+          // Termination classification is cumulative: once detected, flags stay set
+          // so ATTEMPT_END reports every condition observed across the attempt.
+          var cancellationDetected = false;
+          var exceptionDetected = false;
+          var terminationReason = 'attempt_incomplete';
+          var terminalBoundary = 'stream_scope';
+          var firstTokenAttemptClosed = false;
+          void classifyFirstTokenTermination({
+            required String reason,
+            required String boundary,
+            bool cancellation = false,
+            bool exception = false,
+            bool runtimeReset = false,
+          }) {
+            terminationReason = reason;
+            terminalBoundary = boundary;
+            cancellationDetected = cancellationDetected || cancellation;
+            exceptionDetected = exceptionDetected || exception;
+            runtimeResetRequested = runtimeResetRequested || runtimeReset;
+          }
+
+          void finalizeFirstTokenAttempt() {
+            if (firstTokenAttemptClosed) {
+              return;
+            }
+            firstTokenAttemptClosed = true;
+            final endAttemptId = _currentFirstTokenAttemptId ?? attemptId;
+            final preFirstTokenActiveAtEnd = _preFirstTokenActive;
+            final runtimeResetRequestedAtEnd =
+                runtimeResetRequested || runtimeNeedsReset;
+            AndroidFfiRuntimeProvider._log(
+              '[FIRST_TOKEN_ATTEMPT_END] attemptId=$endAttemptId'
+              ' sessionId=$sessionId generated_tokens=$estimatedTokens'
+              ' termination_reason=$terminationReason'
+              ' terminal_boundary=$terminalBoundary'
+              ' first_token_received=${firstTokenAt != null}'
+              ' pre_first_token_active=$preFirstTokenActiveAtEnd'
+              ' runtime_reset_requested=$runtimeResetRequestedAtEnd'
+              ' cancellation_detected=$cancellationDetected'
+              ' exception_detected=$exceptionDetected'
+              ' runtime_needs_reset=$runtimeNeedsReset'
+              ' reset_reason=${runtimeResetReason ?? 'none'}',
+            );
+            _preFirstTokenActive = false;
+            _currentFirstTokenAttemptId = null;
+          }
+
+          AndroidFfiRuntimeProvider._log('[ACTION_VARS_INITIALIZED] sessionId=$sessionId modelId=${request.modelId} attemptId=$attemptId dartThreadId=$dartThreadId isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} nativeSessionId=${_nativeSessionId ?? 'null'} sessionCacheSize=${_nativeSessionsByModel.length} ts=${DateTime.now().microsecondsSinceEpoch}');
+          AndroidFfiRuntimeProvider._log(
+            '[FIRST_TOKEN_ATTEMPT_BEGIN] attemptId=$attemptId sessionId=$sessionId'
+            ' modelId=${request.modelId} is_verification=$isForensicSelfTest',
+          );
         // ─────────────────────────────────────────────────────────────────────
         AndroidFfiRuntimeProvider._log('[FFI_FLOW_ENTER] session=$sessionId thread_id=$dartThreadId');
         _setPhase(RuntimePhase.tokenizing);
@@ -188,8 +254,7 @@ Future<void> fatalEarlyExit(
           if (modelExists) {
             int modelSizeBytes = -1;
             bool modelReadable = false;
-            try {
-              modelSizeBytes = modelFile.lengthSync();
+                modelSizeBytes = modelFile.lengthSync();
               modelReadable = modelSizeBytes > 0;
             } catch (e) {
               modelReadable = false;
@@ -245,7 +310,6 @@ Future<void> fatalEarlyExit(
           // Model file validation runs synchronously on the current isolate.
           AndroidFfiRuntimeProvider._log('[MODEL_VALIDATION_BEGIN] session=$sessionId task=model_validation');
           String? modelValidationError;
-          try {
             modelValidationError = AndroidFfiRuntimeProvider._validateModelFileForRuntime(modelPath);
             AndroidFfiRuntimeProvider._log('[MODEL_VALIDATION_OK] session=$sessionId task=model_validation');
           } catch (error, stackTrace) {
@@ -289,8 +353,6 @@ Future<void> fatalEarlyExit(
           }
           AndroidFfiRuntimeProvider._log('[GGUF] validation=ok path=$modelPath');
 
-          final isForensicSelfTest =
-              request.sessionId.trim() == AndroidFfiRuntimeProvider._forensicSelfTestSessionId;
           if (!isForensicSelfTest) {
             AndroidFfiRuntimeProvider._log('[FORENSIC_BEFORE_WARMUP]');
             AndroidFfiRuntimeProvider._log(
@@ -346,7 +408,6 @@ Future<void> fatalEarlyExit(
               ' gpu_layers=${LlamaNativeDefaults.nGpuLayers}');
 
           int nativeSessionId;
-          try {
             _setPhase(RuntimePhase.tokenizing);
             AndroidFfiRuntimeProvider._log('[FIRST_FFI_CALL_BEGIN] stage=session_create phase=$_currentFfiPhase');
             AndroidFfiRuntimeProvider._log('[FFI_PRE_CREATE_SESSION] session=$sessionId path=$modelPath');
@@ -552,7 +613,6 @@ Future<void> fatalEarlyExit(
 
           int startResult;
           final startupWatch = Stopwatch()..start();
-          try {
             _setPhase(RuntimePhase.startingGeneration);
             final nativeHandleHex =
                 '0x${nativeSessionId.toUnsigned(64).toRadixString(16)}';
@@ -704,7 +764,7 @@ Future<void> fatalEarlyExit(
 
           cancellationToken.onCancel(() => _safeCancel(bindings, nativeSessionId));
 
-          await _runTokenPollingLoop(
+            await _runTokenPollingLoop(
             controller: controller,
             cancellationToken: cancellationToken,
             bindings: bindings,
@@ -718,7 +778,7 @@ Future<void> fatalEarlyExit(
             maxTokens: maxTokens,
             dartThreadId: dartThreadId,
             firstTokenDeadline: firstTokenDeadline,
-          );
+            );
       });
       AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1655 | Function: streamInference() | AFTER calling _runInferenceSerially()',
