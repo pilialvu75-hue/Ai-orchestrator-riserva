@@ -17,7 +17,7 @@ class _AndroidFfiLifecycleSubsystem {
     required String origin,
   }) {
     if (_owner._inVerificationScope) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true status=${status.name} reason=$reason origin=$origin',
       );
       return;
@@ -127,32 +127,32 @@ class _AndroidFfiLifecycleSubsystem {
     _owner._lastTransitionAt = now;
     _owner._lastTransitionReason = reason;
     _owner._lastTransitionOrigin = origin;
-    AndroidFfiRuntimeProvider._log(
+    _log(
       '[STATE_PATH] path=${from.name}->${to.name} reason=$reason origin=$origin transition_id=${_owner._activeTransitionId} transition_ts=${now.toIso8601String()} elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1} repeated=$repeated',
     );
-    AndroidFfiRuntimeProvider._log('[EXPECTED_NEXT] current=${to.name} next=${expectedNextFor(to)}');
+    _log('[EXPECTED_NEXT] current=${to.name} next=${expectedNextFor(to)}');
 
     if (from == LocalRuntimeStatus.runtimeUnavailable &&
         to == LocalRuntimeStatus.loading &&
         elapsedSinceLast != null &&
         elapsedSinceLast < AndroidFfiRuntimeProvider._reentryWarnThreshold) {
       _owner._reentryCount++;
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[REENTRY_DETECTED] from=${from.name} to=${to.name} elapsed_ms=${elapsedSinceLast.inMilliseconds} origin=$origin reentry_count=${_owner._reentryCount}',
       );
     }
 
     if (to == LocalRuntimeStatus.runtimeUnavailable &&
         !_owner._streamInferenceEntered) {
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[LIFECYCLE_INTERRUPTION] expected_next=PRE_STREAM_INFERENCE last_state=${to.name} last_transition_id=${_owner._activeTransitionId} reason=unexpected_reset_before_inference',
       );
-      AndroidFfiRuntimeProvider._log(
+      _log(
         '[FIRST_RESPONSE_BLOCKED] boundary=pre_stream_inference last_known_state=${to.name} last_transition_reason=${_owner._lastTransitionReason} last_transition_origin=${_owner._lastTransitionOrigin}',
       );
       if (_owner._reentryCount >=
           AndroidFfiRuntimeProvider._reentryLoopBlockThreshold) {
-        AndroidFfiRuntimeProvider._log(
+        _log(
           '[FIRST_RESPONSE_BLOCKED] boundary=runtime_verification_loop reentry_count=${_owner._reentryCount} elapsed_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
         );
       }
@@ -167,7 +167,7 @@ class _AndroidFfiLifecycleSubsystem {
     final elapsedSinceLast = _owner._lastTransitionAt == null
         ? null
         : now.difference(_owner._lastTransitionAt!);
-    AndroidFfiRuntimeProvider._log(
+    _log(
       '[STATE_RESET] reason=$reason origin=$origin elapsed_since_last_transition_ms=${elapsedSinceLast?.inMilliseconds ?? -1}',
     );
   }
