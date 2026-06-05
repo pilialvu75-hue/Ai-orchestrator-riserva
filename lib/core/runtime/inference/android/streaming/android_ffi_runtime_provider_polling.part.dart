@@ -503,7 +503,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             await Future<void>.delayed(Duration.zero);
           } else {
             _increaseIdleBackoff();
-            await Future<void>.delayed(Duration(milliseconds: AndroidFfiRuntimeProvider._idleBackoffMs));
+            await Future<void>.delayed(Duration(milliseconds: _idleBackoffMs));
           }
         }
       }
