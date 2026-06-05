@@ -278,9 +278,6 @@ struct RuntimeSession {
     }
 };
 
-// Trims prompt whitespace and guarantees a minimally usable prompt for the
-// first-token liveness path, falling back to kFallbackPrompt when input is
-// null, blank, or too short to reliably drive a decode step.
 std::string sanitize_prompt_for_generation(const char* prompt) {
     if (prompt == nullptr) {
         return std::string(kFallbackPrompt);
@@ -298,7 +295,6 @@ std::string sanitize_prompt_for_generation(const char* prompt) {
     return sanitized;
 }
 
-// Wakes any pollers waiting for the first token or an early terminal state.
 void notify_first_token_waiters(const std::shared_ptr<RuntimeSession>& session) {
     session->first_token_cv.notify_all();
 }
@@ -517,7 +513,7 @@ void run_generation(
             local_tokens.data(),
             static_cast<int32_t>(local_tokens.size()),
             true,
-            true // CORRETTO: Cambiato da false a true per forzare il parsing dei tag speciali nativi
+            true
         );
         if (token_count > 0) {
             local_tokens.resize(static_cast<size_t>(token_count));
@@ -526,9 +522,6 @@ void run_generation(
         return token_count;
     };
 
-    // =======================================================
-    // DETECTIVE LOGS - ISPEZIONE PROMPT (S24 FE DEBUG)
-    // =======================================================
     LOGI("[PROMPT_DEBUG] Caratteri totali ricevuti da Dart: %zu", prompt.size());
     LOGI("[PROMPT_DEBUG] --- INIZIO PROMPT REALE ---");
     LOGI("%s", prompt.c_str());
@@ -559,7 +552,6 @@ void run_generation(
     }
 
     LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
-    // =======================================================
 
     if (n_tokens <= 1) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
@@ -1120,7 +1112,7 @@ int32_t llb_session_start_gen(
             temperature,
             owner_epoch
         );
-        LOGI("[FORENSIC] [RUN_GENERATION_SPAWY_AFTER] after session=%" PRId64 " epoch=%" PRIu64,
+        LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] after session=%" PRId64 " epoch=%" PRIu64,
              session_id,
              owner_epoch);
     } catch (const std::exception& error) {
@@ -1268,21 +1260,10 @@ void llb_release_session(int64_t session_id) {
 
     LOGI("[SESSION_DESTROY] session=%" PRId64 " releasing=true", session_id);
 
-    // Signal cancellation so the gen thread exits its decode loop promptly.
     session->cancel_requested.store(true, std::memory_order_release);
     session->gen_state.store(kStateCancelled, std::memory_order_release);
-    // Wake any llb_session_poll_token caller waiting on the first-token CV.
-    // This is a no-op when cancelSession was already called (the common path),
-    // but is needed for correctness when releaseSession is called without a prior
-    // cancelSession (e.g. LRU eviction).  It is idempotent and harmless.
     notify_first_token_waiters(session);
 
-    // Synchronous cleanup: block the caller (Dart FFI isolate thread) until the
-    // gen_thread has fully exited and all native resources are freed.  This is the
-    // minimal change that eliminates the race between the old gen_thread still
-    // running llama_decode and a new llb_session_start_gen starting on a freshly
-    // created context — both would otherwise race through GGML's shared CPU thread
-    // pool, causing SIGSEGV at the start of the new generation.
     LOGI("[SESSION_RELEASE_WAIT_BEGIN] session=%" PRId64, session_id);
 
     {
