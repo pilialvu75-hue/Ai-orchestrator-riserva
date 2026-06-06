@@ -16,6 +16,9 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provide
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
 
+// Importazione necessaria per delegare l'esecuzione nativa su piattaforma Android
+import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
+
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
@@ -235,11 +238,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required CancellationToken cancellationToken,
   }) {
     if (Platform.isAndroid) {
-      debugPrint('[$_localProviderTag] Android detected: Processo CLI bloccato.');
-      final controller = StreamController<InferenceResponse>();
-      controller.add(InferenceResponse.error('Esecuzione locale tramite CLI non supportata su Android.'));
-      controller.close();
-      return controller.stream;
+      debugPrint('[$_localProviderTag] Android detected: Forwarding execution to AndroidFfiRuntimeProvider.');
+      
+      // Delegazione polimorfica all'infrastruttura nativa FFI per evitare il blocco CLI
+      final ffiProvider = AndroidFfiRuntimeProvider(
+        developerModeProvider: _developerModeProvider,
+      );
+      
+      return ffiProvider.streamInference(
+        request: request,
+        cancellationToken: cancellationToken,
+      );
     }
 
     final controller = StreamController<InferenceResponse>();
