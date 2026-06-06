@@ -8,13 +8,16 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: ORA UTILIZZATA CON SUCCESSO
+import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: UTILIZZATA CON SUCCESSO
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
+
+// Importazione polimorfica per gestire la deviazione nativa FFI su sistemi Android
+import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
@@ -234,14 +237,19 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // Se siamo su Android, interrompiamo l'esecuzione CLI isolando il controller 
-    // per non interferire con il ciclo nativo di AndroidFfiRuntimeProvider ed evitare Stack Overflow.
-    if (Platform.isAndroid) {
-      debugPrint('[$_localProviderTag] Android detected: Skipping desktop CLI process lifecycle.');
-      final controller = StreamController<InferenceResponse>();
-      // Completiamo lo stream immediatamente senza inviare pacchetti di errore testuali bloccanti.
-      controller.close();
-      return controller.stream;
+    // Se l'istanza corrente è già l'AndroidFfiRuntimeProvider specifico, evita il ciclo 
+    // e passa direttamente all'esecuzione nativa per via del polimorfismo.
+    if (Platform.isAndroid && this is! AndroidFfiRuntimeProvider) {
+      debugPrint('[$_localProviderTag] Android context detected. Delegating pipeline execution to AndroidFfiRuntimeProvider.');
+      
+      final ffiRuntimeElement = AndroidFfiRuntimeProvider(
+        developerModeProvider: _developerModeProvider,
+      );
+      
+      return ffiRuntimeElement.streamInference(
+        request: request,
+        cancellationToken: cancellationToken,
+      );
     }
 
     final controller = StreamController<InferenceResponse>();
