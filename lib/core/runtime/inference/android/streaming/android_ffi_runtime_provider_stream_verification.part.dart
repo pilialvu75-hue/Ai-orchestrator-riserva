@@ -10,7 +10,9 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1683 | Function: streamVerificationInference() | BEFORE entry',
       );
       final controller = StreamController<InferenceResponse>();
-      () async {
+      
+      // Utilizzo di runZonedGuarded speculare per bloccare i leak asincroni a livello di macro-task
+      runZonedGuarded(() async {
         AndroidFfiRuntimeProvider._log(
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1688 | Function: streamVerificationInference() | BEFORE calling _runInferenceSerially()',
         );
@@ -299,10 +301,29 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
           AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1926 | Function: streamVerificationInference() | AFTER calling _runInferenceSerially()',
           );
-        } catch (_) {
-          rethrow;
+        } catch (e, st) {
+          final trace = _dehydrateAndTraceError(e, st);
+          print('[VERIFICATION_QUEUE_FAULT_TERMINAL_SINK] Eccezione intercettata a livello di coda di verifica.\n$trace');
         }
-      }();
+      }, (error, stack) {
+        // TERMINAL SINK ESTERNO DI VERIFICA (ZONE BOUNDARY)
+        final trace = _dehydrateAndTraceError(error, stack);
+        print('[VERIFICATION_ZONE_FATAL_TERMINAL_SINK] Eccezione asincrona non gestita catturata nella zona di verifica.\n$trace');
+        
+        try {
+          if (!controller.isClosed) {
+            controller.addError('Verification zone execution critical failure.');
+            scheduleMicrotask(() {
+              if (!controller.isClosed) {
+                controller.close();
+              }
+            });
+          }
+        } catch (sinkError) {
+          print('[VERIFICATION_ZONE_SINK_FAIL] Fallimento nel sink della zona di verifica: $sinkError');
+        }
+      });
+
       AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1936 | Function: streamVerificationInference() | AFTER exit',
       );
