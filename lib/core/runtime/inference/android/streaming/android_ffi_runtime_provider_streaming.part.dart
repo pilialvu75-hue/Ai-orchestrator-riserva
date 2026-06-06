@@ -142,7 +142,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
             '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1659 | Function: streamInference() | BEFORE rethrow after async execution exception: $e \n $stackTrace',
           );
           rethrow;
-        } final {
+        } finally {
           _finalizeFirstTokenAttempt(firstTokenAttempt);
         }
       }, (error, stack) {
