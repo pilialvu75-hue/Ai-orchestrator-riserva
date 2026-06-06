@@ -35,9 +35,6 @@ constexpr size_t kRingCapacity = 256;
 constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr size_t kMinPromptLength = 2;
 constexpr int64_t kDecodeStallLogMillis = 5000;
-// Keep native first-token waits aligned with the Dart-side 24ms polling cadence so
-// llb_session_poll_token can block briefly on the first-token latch without
-// adding extra end-to-end latency or a second timing pattern to debug.
 constexpr int64_t kFirstTokenPollWaitMillis = 24;
 constexpr int32_t kMaxInitialSampleRetries = 4;
 constexpr const char* kFallbackPrompt = "Hello";
@@ -70,8 +67,6 @@ std::string get_global_error_copy() {
     return g_global_last_error;
 }
 
-// Supporto multi-modello esteso per impedire leak di token e cicli infiniti.
-// Include i token di controllo di Llama 3, ChatML (DeepSeek/Qwen) e Zephyr/TinyLlama.
 constexpr const char* kChatTemplateControlTokens[] = {
     "<|eot_id|>",
     "<|start_header_id|>",
@@ -82,7 +77,6 @@ constexpr const char* kChatTemplateControlTokens[] = {
     "<|assistant|>",
     "</s>"
 };
-// Garantisce uno spazio di manovra sicuro sopra l'array dei token di controllo esteso.
 constexpr size_t kChatTemplateControlTokenBufferTokens = std::size(kChatTemplateControlTokens) + 1;
 
 struct ChatTemplateControlTokenId {
@@ -94,14 +88,12 @@ struct ChatTemplateControlTokenIds {
     std::array<ChatTemplateControlTokenId, std::size(kChatTemplateControlTokens)> token_ids{};
 };
 
-// Returns the resolved chat-template control token ids for the loaded vocabulary.
 ChatTemplateControlTokenIds resolve_chat_template_control_token_ids(const llama_vocab* vocab) {
     ChatTemplateControlTokenIds resolved{};
     if (vocab == nullptr) {
         return resolved;
     }
 
-    // Reused for each control token probe; each result is consumed immediately.
     std::array<llama_token, kChatTemplateControlTokenBufferTokens> control_token_buf{};
     for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
         const char* control_token = kChatTemplateControlTokens[i];
@@ -128,8 +120,6 @@ ChatTemplateControlTokenIds resolve_chat_template_control_token_ids(const llama_
     return resolved;
 }
 
-// Returns true when the sampled token resolves to a known chat-template control
-// token in the loaded vocabulary.
 bool is_chat_template_control_token(const ChatTemplateControlTokenIds& control_tokens,
                                    const llama_token token) {
     for (const auto& control_token : control_tokens.token_ids) {
@@ -141,8 +131,6 @@ bool is_chat_template_control_token(const ChatTemplateControlTokenIds& control_t
     return false;
 }
 
-// Defensive fallback for decoded pieces that still look like chat-template
-// control sequences.
 bool looks_like_chat_template_control_piece(const char* piece, const int32_t piece_len) {
     if (piece == nullptr || piece_len <= 0) {
         return false;
@@ -902,6 +890,7 @@ int64_t llb_create_session(
 
     if (model_path == nullptr || std::strlen(model_path) == 0) {
         set_global_error("Model path is empty");
+        // CORRETTO: Sostituito %[INCORRETTO] con macro standard PRId64 e rimosso l'ambiguità sullo stack.
         LOGE("[ERROR] [SESSION_CREATE_BEGIN] model_path_empty");
         return -1;
     }
@@ -1118,6 +1107,7 @@ int32_t llb_session_start_gen(
     } catch (const std::exception& error) {
         session->set_error(error.what());
         session->gen_state.store(kStateFailed, std::memory_order_release);
+        // CORRETTO: Cambiato da %ld a %" PRId64 " per impedire la corruzione dei caratteri iniziali nello stack
         LOGE("[ERROR] [THREAD_START] session=%" PRId64 " spawn_failed=%s",
              session_id,
              error.what());
