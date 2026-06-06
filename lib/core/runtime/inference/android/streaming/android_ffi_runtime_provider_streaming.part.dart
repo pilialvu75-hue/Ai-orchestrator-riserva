@@ -59,6 +59,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
       AndroidFfiRuntimeProvider._log(
         '[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} inferenceTailHash=${(_inferenceTail ?? Future<void>.value()).hashCode}',
       );
+      
       runZonedGuarded(() async {
         AndroidFfiRuntimeProvider._log(
           '[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
@@ -141,14 +142,34 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
             '[AI_RUNTIME_MONITOR] FORENSIC_EXCEPTION - File: android_ffi_runtime_provider.dart | Line: 1659 | Function: streamInference() | BEFORE rethrow after async execution exception: $e \n $stackTrace',
           );
           rethrow;
-        } finally {
+        } final {
           _finalizeFirstTokenAttempt(firstTokenAttempt);
         }
       }, (error, stack) {
-        AndroidFfiRuntimeProvider._log(
-          '[ASYNC_CLOSURE_ZONE_UNCAUGHT] sessionId=${request.sessionId} modelId=${request.modelId} error=$error stack=$stack',
-        );
+        // TERMINAL SINK NON REATTIVO E MINIMALE PER L'ISOLAMENTO DELLA ZONA
+        // Estraiamo i dati dell'oggetto errore riducendoli a primitive pure (Zero Object Leak Rule)
+        final trace = _dehydrateAndTraceError(error, stack);
+        
+        // Stampa nativa per evitare l'intercettazione ricorsiva da parte del logging dell'applicazione
+        print('[ZONE_FATAL_TERMINAL_SINK] Isolate Boundary Breach Intercepted.\n$trace');
+
+        try {
+          if (!controller.isClosed) {
+            // Emettiamo sul confine dello stream una notifica di tipo stringa atomica immutabile
+            controller.addError('Inference runtime critical boundary suspension.');
+            
+            // Chiusura asincrona difensiva schedulata per non bloccare il loop corrente
+            scheduleMicrotask(() {
+              if (!controller.isClosed) {
+                controller.close();
+              }
+            });
+          }
+        } catch (sinkError) {
+          print('[ZONE_CRITICAL_CONTROLLER_FAIL] Fallimento definitivo nel terminal sink: ${sinkError.toString()}');
+        }
       });
+      
       AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1666 | Function: streamInference() | AFTER exit',
       );
