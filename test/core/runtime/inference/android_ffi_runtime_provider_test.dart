@@ -92,8 +92,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      final modelPath =
-          '${Directory.systemTemp.path}/runtime-model-ready.gguf';
+      final modelPath = 'test-fixtures/runtime-model-ready.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,
@@ -118,8 +117,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      final modelPath =
-          '${Directory.systemTemp.path}/runtime-model-reset.gguf';
+      final modelPath = 'test-fixtures/runtime-model-reset.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,
