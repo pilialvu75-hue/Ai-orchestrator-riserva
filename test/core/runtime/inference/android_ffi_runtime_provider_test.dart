@@ -96,6 +96,7 @@ void main() {
         modelPath: modelPath,
         source: 'test',
       );
+      expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
 
       provider.clearRuntimeVerification();
 
@@ -116,6 +117,7 @@ void main() {
         modelPath: modelPath,
         source: 'test',
       );
+      expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
       expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isTrue);
 
       provider.requestManualVerificationReset();
