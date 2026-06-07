@@ -128,6 +128,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 );
                 return;
               }
+              slotClaimed = false;
               cancellationToken.onCancel(() => _safeCancel(startup.bindings, startup.nativeSessionId));
               await _runTokenPollingLoop(
                 startup: startup,
@@ -140,7 +141,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               );
             });
           } finally {
-            if (slotClaimed && _activeInferenceSessions.contains(sessionId)) {
+            if (slotClaimed) {
               _releaseInferenceSlot(sessionId);
               _flushPendingRuntimeVerificationClear();
             }

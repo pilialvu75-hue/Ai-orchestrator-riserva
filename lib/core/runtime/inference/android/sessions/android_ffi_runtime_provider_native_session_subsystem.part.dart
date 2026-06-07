@@ -393,6 +393,7 @@ class _AndroidFfiNativeSessionSubsystem {
   }) async {
     final timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
     final stopwatch = Stopwatch()..start();
+    var backoffMs = 1;
     while (bindings.sessionIsActive(sessionId) == 1) {
       if (stopwatch.elapsed >= timeout) {
         _log(
@@ -401,7 +402,8 @@ class _AndroidFfiNativeSessionSubsystem {
         );
         return;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 16));
+      await Future<void>.delayed(Duration(milliseconds: backoffMs));
+      backoffMs = backoffMs < 16 ? backoffMs * 2 : 16;
     }
   }
 
