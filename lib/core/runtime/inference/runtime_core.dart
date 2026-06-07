@@ -783,13 +783,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         !_hasActiveInferenceLifecycle &&
         !_manualVerificationResetRequested) {
       _runtimeVerificationClearPending = false;
-      _log(
-        '[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready'
-        ' status=${monitor.state.status.name}'
-        ' active_sessions=${_activeInferenceSessions.length}'
-        ' native_session=${_nativeSessionId ?? 'null'}'
-        ' session_cache_size=${_nativeSessionsByModel.length}',
-      );
+      _log('[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready status=${monitor.state.status.name}');
       return;
     }
     if (_inVerificationScope) {

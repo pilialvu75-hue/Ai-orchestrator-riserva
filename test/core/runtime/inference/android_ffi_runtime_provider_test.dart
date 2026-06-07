@@ -103,5 +103,24 @@ void main() {
       expect(provider.monitor.state.status, LocalRuntimeStatus.ready);
       expect(stateMachine.state, RuntimeLifecycleState.verified);
     });
+
+    test('disables verification reuse after a manual reset request', () {
+      final stateMachine = RuntimeStateMachine();
+      final provider = AndroidFfiRuntimeProvider(
+        runtimeStateMachine: stateMachine,
+        developerModeProvider: () => false,
+      );
+      const modelPath = '/tmp/runtime-model-reset.gguf';
+
+      provider.recordVerificationSuccess(
+        modelPath: modelPath,
+        source: 'test',
+      );
+      expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isTrue);
+
+      provider.requestManualVerificationReset();
+
+      expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isFalse);
+    });
   });
 }
