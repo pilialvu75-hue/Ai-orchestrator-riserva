@@ -282,12 +282,10 @@ class _AndroidFfiNativeSessionSubsystem {
     }
     final effectiveModelPath = modelPath ?? 'unknown';
     // Native session IDs are opaque bridge handles surfaced as ints.
-    final pointerHex = '0x${sessionId.toUnsigned(64).toRadixString(16)}';
     final activeState = bindings.sessionIsActive(sessionId);
     _log(
       '[NATIVE_SESSION_SHUTDOWN_BEGIN] model_path=$effectiveModelPath reason=$reason'
-      ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
-      ' pointer_address=$sessionId session_active=$activeState'
+      ' nativeSessionId=$sessionId session_active=$activeState'
       ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
     );
     try {
@@ -309,7 +307,7 @@ class _AndroidFfiNativeSessionSubsystem {
       );
     } finally {
       final stillActive = bindings.sessionIsActive(sessionId);
-      if (cachedSessionId == sessionId && stillActive != 1) {
+      if (cachedSessionId == sessionId && stillActive != _kSessionActiveState) {
         _owner._nativeSessionsByModel.remove(effectiveModelPath);
       }
       if (_owner._nativeSessionId == sessionId) {
