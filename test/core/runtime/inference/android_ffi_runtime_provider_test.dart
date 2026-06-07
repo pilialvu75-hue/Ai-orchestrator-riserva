@@ -98,6 +98,10 @@ void main() {
         source: 'test',
       );
       expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
+      provider.monitor.update(
+        LocalRuntimeStatus.ready,
+        message: 'ready',
+      );
 
       provider.clearRuntimeVerification();
 
