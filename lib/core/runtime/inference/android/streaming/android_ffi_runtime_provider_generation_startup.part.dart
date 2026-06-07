@@ -367,7 +367,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
       clearRuntimeVerification();
       _setPhase(RuntimePhase.failed);
-      _safeResetRuntime(bindings, reason: 'start_generation_exception');
+      await _safeResetRuntime(bindings, reason: 'start_generation_exception');
       _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Native start_generation timed out.' : 'Native start_generation failed: $error', );
       if (error is TimeoutException) {
         AndroidFfiRuntimeProvider._log( '[FFI_TIMEOUT] session=$sessionId stage=start_generation' ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}', );
@@ -384,7 +384,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       _safeCancel(bindings, nativeSessionId);
       clearRuntimeVerification();
       _setPhase(RuntimePhase.stalled);
-      _safeResetRuntime(bindings, reason: 'start_generation_timeout');
+      await _safeResetRuntime(bindings, reason: 'start_generation_timeout');
       _updateRuntimeStatus( LocalRuntimeStatus.timedOut, message: 'Inference startup timed out after ${AndroidFfiRuntimeProvider._startGenerationTimeout.inSeconds}s.', );
       AndroidFfiRuntimeProvider._logAi('inference timeout');
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: 'Inference startup timed out after ${AndroidFfiRuntimeProvider._startGenerationTimeout.inSeconds}s.', );
@@ -397,7 +397,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       clearRuntimeVerification();
       _setPhase(RuntimePhase.failed);
       final err = AndroidFfiRuntimeProvider._safeLastError(bindings, nativeSessionId);
-      _safeResetRuntime(bindings, reason: 'start_generation_failed');
+      await _safeResetRuntime(bindings, reason: 'start_generation_failed');
       _updateRuntimeStatus(LocalRuntimeStatus.failed, message: err);
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: 'Failed to start generation.', details: err, );
       return null;

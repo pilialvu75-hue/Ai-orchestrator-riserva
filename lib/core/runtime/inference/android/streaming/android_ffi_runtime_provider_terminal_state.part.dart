@@ -62,7 +62,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
   ) async {
     final now = DateTime.now();
     if (context.runtimeNeedsReset) {
-      _safeResetRuntime(
+      await _safeResetRuntime(
         context.bindings,
         reason: context.runtimeResetReason ?? 'runtime_recovery',
       );
@@ -93,6 +93,7 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
     } catch (e, st) {
       AndroidFfiRuntimeProvider._log('Slot release failed but forced continuation: $e\n$st');
     }
+    _flushPendingRuntimeVerificationClear();
     final currentController = context.controller;
     try {
       if (!currentController.isClosed) {
