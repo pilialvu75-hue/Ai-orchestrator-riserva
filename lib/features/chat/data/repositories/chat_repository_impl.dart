@@ -131,7 +131,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final previousSubscription = _activeInferenceSubscriptions[sessionId];
             if (previousSubscription != null) {
               _log(
-                '[DUPLICATE_SUBSCRIPTION] session=$sessionId active_session=$sessionId action=cancel_previous',
+                '[DUPLICATE_SUBSCRIPTION] session=$sessionId action=cancel_previous',
               );
               await previousSubscription.cancel();
               _activeInferenceSubscriptions.remove(sessionId);
@@ -220,7 +220,7 @@ class ChatRepositoryImpl implements ChatRepository {
               }
             } finally {
               final activeSubscription = _activeInferenceSubscriptions[sessionId];
-              if (activeSubscription != null && identical(activeSubscription, subscription)) {
+              if (activeSubscription != null) {
                 await activeSubscription.cancel();
                 _activeInferenceSubscriptions.remove(sessionId);
               }
