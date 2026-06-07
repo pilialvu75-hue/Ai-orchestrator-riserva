@@ -782,8 +782,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     if (monitor.state.status == LocalRuntimeStatus.ready &&
         !_hasActiveInferenceLifecycle &&
         !_manualVerificationResetRequested) {
-      // Keep the deferred-clear flag inactive so a later terminal-state flush does not
-      // retroactively invalidate a runtime that is already ready.
+      // Keep _runtimeVerificationClearPending inactive so a later terminal-state
+      // flush does not retroactively invalidate a runtime that is already ready.
       _runtimeVerificationClearPending = false;
       _log('[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready status=${monitor.state.status.name}');
       return;
