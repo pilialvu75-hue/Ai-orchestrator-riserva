@@ -146,6 +146,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
+            // Ensure listener setup failures still release the abort signal.
             try {
               _log(
                 '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
@@ -220,10 +221,11 @@ class ChatRepositoryImpl implements ChatRepository {
                   return userMsg;
                 }
               } finally {
-                final activeSubscription = _activeInferenceSubscriptions[sessionId];
+                // Always cancel the active subscription before continuing.
+                final activeSubscription =
+                    _activeInferenceSubscriptions.remove(sessionId);
                 if (activeSubscription != null) {
                   await activeSubscription.cancel();
-                  _activeInferenceSubscriptions.remove(sessionId);
                 }
               }
             } finally {
