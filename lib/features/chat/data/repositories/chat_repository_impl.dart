@@ -35,8 +35,9 @@ class ChatRepositoryImpl implements ChatRepository {
   final Set<String> _activeSendSessions = <String>{};
   final Map<String, Completer<void>> _sessionAbortSignals =
       <String, Completer<void>>{};
-  StreamSubscription<InferenceResponse>? _activeInferenceSubscription;
-  String? _activeInferenceSubscriptionSessionId;
+  final Map<String, StreamSubscription<InferenceResponse>>
+      _activeInferenceSubscriptions =
+      <String, StreamSubscription<InferenceResponse>>{};
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
@@ -127,13 +128,13 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
             );
-            if (_activeInferenceSubscription != null) {
+            final previousSubscription = _activeInferenceSubscriptions[sessionId];
+            if (previousSubscription != null) {
               _log(
-                '[DUPLICATE_SUBSCRIPTION] session=$sessionId active_session=${_activeInferenceSubscriptionSessionId ?? "unknown"} action=cancel_previous',
+                '[DUPLICATE_SUBSCRIPTION] session=$sessionId action=cancel_previous',
               );
-              await _activeInferenceSubscription!.cancel();
-              _activeInferenceSubscription = null;
-              _activeInferenceSubscriptionSessionId = null;
+              await previousSubscription.cancel();
+              _activeInferenceSubscriptions.remove(sessionId);
             }
             final contextSnapshot = List<ChatTurn>.unmodifiable(context);
             final stream = orchestrator.handleStream(
@@ -145,82 +146,88 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
-            _log(
-              '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
-            );
-            _activeInferenceSubscription = stream.listen(
-              (chunk) {
-                try {
-                  if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
-                    _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
-                    onRuntimeNotice?.call(chunk.runtimeNotice!);
-                    return;
-                  }
-                  if (chunk.isError) {
-                    throw ServerFailure(
-                      _normalizeRuntimeErrorMessage(
-                        chunk.errorMessage ?? 'Inference failed.',
-                      ),
-                    );
-                  }
-                  if (chunk.isFinal) {
-                    if (chunk.text.isNotEmpty) {
-                      final merged = mergeStreamedText(
-                        currentText: streamedResponse.toString(),
-                        incomingText: chunk.text,
-                        isFinalChunk: true,
+            // Ensures listener setup failures still release the abort signal.
+            try {
+              _log(
+                '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
+              );
+              final subscription = stream.listen(
+                (chunk) {
+                  try {
+                    if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+                      _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
+                      onRuntimeNotice?.call(chunk.runtimeNotice!);
+                      return;
+                    }
+                    if (chunk.isError) {
+                      throw ServerFailure(
+                        _normalizeRuntimeErrorMessage(
+                          chunk.errorMessage ?? 'Inference failed.',
+                        ),
                       );
-                      streamedResponse.clear();
-                      streamedResponse.write(merged);
                     }
-                    if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
-                      responseProvider = chunk.model!;
+                    if (chunk.isFinal) {
+                      if (chunk.text.isNotEmpty) {
+                        final merged = mergeStreamedText(
+                          currentText: streamedResponse.toString(),
+                          incomingText: chunk.text,
+                          isFinalChunk: true,
+                        );
+                        streamedResponse.clear();
+                        streamedResponse.write(merged);
+                      }
+                      if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
+                        responseProvider = chunk.model!;
+                      }
+                      _log(
+                        '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
+                      );
+                    } else {
+                      streamedResponse.write(chunk.text);
+                      _log(
+                        '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
+                      );
+                      onPartialResponse?.call(streamedResponse.toString());
                     }
-                    _log(
-                      '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
-                    );
-                  } else {
-                    streamedResponse.write(chunk.text);
-                    _log(
-                      '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
-                    );
-                    onPartialResponse?.call(streamedResponse.toString());
+                  } catch (error, stackTrace) {
+                    if (!streamCompleter.isCompleted) {
+                      streamCompleter.completeError(error, stackTrace);
+                    }
                   }
-                } catch (error, stackTrace) {
+                },
+                onError: (Object error, StackTrace stackTrace) {
+                  _log(
+                    '[ASYNC_FATAL] scope=chat_repository.stream_listener session=$sessionId error=$error stack=$stackTrace',
+                  );
                   if (!streamCompleter.isCompleted) {
                     streamCompleter.completeError(error, stackTrace);
                   }
+                },
+                onDone: () {
+                  if (!streamCompleter.isCompleted) {
+                    streamCompleter.complete();
+                  }
+                },
+                cancelOnError: false,
+              );
+              _activeInferenceSubscriptions[sessionId] = subscription;
+              try {
+                final wasAborted = await Future.any<bool>([
+                  streamCompleter.future.then((_) => false),
+                  abortSignal.future.then((_) => true),
+                ]);
+                if (wasAborted) {
+                  _log('[CHAT_PIPELINE] action=stream_aborted session=$sessionId');
+                  return userMsg;
                 }
-              },
-              onError: (Object error, StackTrace stackTrace) {
-                _log(
-                  '[ASYNC_FATAL] scope=chat_repository.stream_listener session=$sessionId error=$error stack=$stackTrace',
-                );
-                if (!streamCompleter.isCompleted) {
-                  streamCompleter.completeError(error, stackTrace);
-                }
-              },
-              onDone: () {
-                if (!streamCompleter.isCompleted) {
-                  streamCompleter.complete();
-                }
-              },
-              cancelOnError: false,
-            );
-            _activeInferenceSubscriptionSessionId = sessionId;
-            try {
-              final wasAborted = await Future.any<bool>([
-                streamCompleter.future.then((_) => false),
-                abortSignal.future.then((_) => true),
-              ]);
-              if (wasAborted) {
-                _log('[CHAT_PIPELINE] action=stream_aborted session=$sessionId');
-                return userMsg;
+              } finally {
+                // Always cancel the active subscription before continuing.
+                await _cancelActiveSubscription(sessionId);
               }
             } finally {
-              await _activeInferenceSubscription?.cancel();
-              _activeInferenceSubscription = null;
-              _activeInferenceSubscriptionSessionId = null;
+              if (!abortSignal.isCompleted) {
+                abortSignal.complete();
+              }
               _sessionAbortSignals.remove(sessionId);
             }
 
@@ -294,11 +301,7 @@ class ChatRepositoryImpl implements ChatRepository {
       if (abortSignal != null && !abortSignal.isCompleted) {
         abortSignal.complete();
       }
-      if (_activeInferenceSubscriptionSessionId == sessionId) {
-        await _activeInferenceSubscription?.cancel();
-        _activeInferenceSubscription = null;
-        _activeInferenceSubscriptionSessionId = null;
-      }
+      await _cancelActiveSubscription(sessionId);
       _activeSendSessions.remove(sessionId);
       Object? error;
       StackTrace? stackTrace;
@@ -358,5 +361,12 @@ class ChatRepositoryImpl implements ChatRepository {
 
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
+  }
+
+  Future<void> _cancelActiveSubscription(String sessionId) async {
+    final activeSubscription = _activeInferenceSubscriptions.remove(sessionId);
+    if (activeSubscription != null) {
+      await activeSubscription.cancel();
+    }
   }
 }
