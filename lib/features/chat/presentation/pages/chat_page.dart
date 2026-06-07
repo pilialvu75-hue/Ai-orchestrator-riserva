@@ -31,6 +31,7 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
 const int _kAssistantTtsRecencyThresholdSeconds = 10;
+const Duration _kRuntimeStatePollInterval = Duration(seconds: 2);
 
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
@@ -42,7 +43,7 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
   static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
@@ -56,6 +57,7 @@ class _ChatPageState extends State<ChatPage> {
   late final VoiceModelDownloader _voiceModelDownloader;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
   Timer? _runtimeStateSyncTimer;
+  int? _runtimeStateSignature;
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
@@ -77,6 +79,8 @@ class _ChatPageState extends State<ChatPage> {
     _voiceLoopEngine = di.sl<SherpaOnnxVoiceEngine>();
     _voiceModelDownloader = di.sl<VoiceModelDownloader>();
     _runtimeState = _runtimeDiagnostics.monitor.state;
+    _runtimeStateSignature = _signatureForRuntimeState(_runtimeState);
+    WidgetsBinding.instance.addObserver(this);
     _startRuntimeStateSync();
     unawaited(_refreshRuntimeIndicators());
     final modelBloc = context.read<ModelDownloadBloc>();
@@ -85,20 +89,53 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startRuntimeStateSync();
+    } else {
+      _stopRuntimeStateSync();
+    }
+  }
+
   void _syncRuntimeStateFromMonitor() {
     if (!mounted) return;
     final state = _runtimeDiagnostics.monitor.state;
-    if (state == _runtimeState) return;
-    setState(() => _runtimeState = state);
+    final signature = _signatureForRuntimeState(state);
+    if (signature == _runtimeStateSignature) return;
+    setState(() {
+      _runtimeState = state;
+      _runtimeStateSignature = signature;
+    });
     unawaited(_refreshRuntimeIndicators());
   }
 
-  void _startRuntimeStateSync() {
-    _runtimeStateSyncTimer?.cancel();
-    _runtimeStateSyncTimer = Timer.periodic(
-      const Duration(milliseconds: 250),
-      (_) => _syncRuntimeStateFromMonitor(),
+  int _signatureForRuntimeState(LocalRuntimeState state) {
+    return Object.hash(
+      state.status,
+      state.message,
+      state.tokensGenerated,
+      state.elapsed,
+      state.startedAt,
     );
+  }
+
+  void _startRuntimeStateSync() {
+    if (!mounted) return;
+    if (_runtimeStateSyncTimer?.isActive == true) return;
+    _runtimeStateSyncTimer = Timer.periodic(
+      _kRuntimeStatePollInterval,
+      _handleRuntimeStateSyncTick,
+    );
+  }
+
+  void _handleRuntimeStateSyncTick(Timer timer) {
+    _syncRuntimeStateFromMonitor();
+  }
+
+  void _stopRuntimeStateSync() {
+    _runtimeStateSyncTimer?.cancel();
+    _runtimeStateSyncTimer = null;
   }
 
   Future<void> _refreshRuntimeIndicators() async {
@@ -136,8 +173,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    _runtimeStateSyncTimer?.cancel();
-    _runtimeStateSyncTimer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    _stopRuntimeStateSync();
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
