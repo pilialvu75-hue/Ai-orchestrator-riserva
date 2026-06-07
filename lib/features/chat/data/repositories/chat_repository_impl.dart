@@ -222,13 +222,12 @@ class ChatRepositoryImpl implements ChatRepository {
                 }
               } finally {
                 // Always cancel the active subscription before continuing.
-                final activeSubscription =
-                    _activeInferenceSubscriptions.remove(sessionId);
-                if (activeSubscription != null) {
-                  await activeSubscription.cancel();
-                }
+                await _cancelActiveSubscription(sessionId);
               }
             } finally {
+              if (!abortSignal.isCompleted) {
+                abortSignal.complete();
+              }
               _sessionAbortSignals.remove(sessionId);
             }
 
@@ -302,10 +301,7 @@ class ChatRepositoryImpl implements ChatRepository {
       if (abortSignal != null && !abortSignal.isCompleted) {
         abortSignal.complete();
       }
-      final activeSubscription = _activeInferenceSubscriptions.remove(sessionId);
-      if (activeSubscription != null) {
-        await activeSubscription.cancel();
-      }
+      await _cancelActiveSubscription(sessionId);
       _activeSendSessions.remove(sessionId);
       Object? error;
       StackTrace? stackTrace;
@@ -365,5 +361,12 @@ class ChatRepositoryImpl implements ChatRepository {
 
   static void _log(String message) {
     debugPrint('[$_logTag] $message');
+  }
+
+  Future<void> _cancelActiveSubscription(String sessionId) async {
+    final activeSubscription = _activeInferenceSubscriptions.remove(sessionId);
+    if (activeSubscription != null) {
+      await activeSubscription.cancel();
+    }
   }
 }
