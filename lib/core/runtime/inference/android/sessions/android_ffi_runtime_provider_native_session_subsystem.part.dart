@@ -280,8 +280,9 @@ class _AndroidFfiNativeSessionSubsystem {
       return;
     }
     final effectiveModelPath = modelPath ?? 'unknown';
+    // Native session IDs are opaque bridge handles surfaced as ints.
     final pointerHex = '0x${sessionId.toUnsigned(64).toRadixString(16)}';
-    final pointerAddress = Pointer<Void>.fromAddress(sessionId).address;
+    final pointerAddress = sessionId;
     final activeState = bindings.sessionIsActive(sessionId);
     _log(
       '[NATIVE_SESSION_SHUTDOWN_BEGIN] model_path=$effectiveModelPath reason=$reason'
