@@ -297,11 +297,8 @@ class _AndroidFfiNativeSessionSubsystem {
       );
     }
     await _awaitSessionTermination(bindings, sessionId, reason: reason);
+    final cachedSessionId = _owner._nativeSessionsByModel[effectiveModelPath];
     try {
-      final cachedSessionId = _owner._nativeSessionsByModel[effectiveModelPath];
-      if (cachedSessionId == sessionId) {
-        _owner._nativeSessionsByModel.remove(effectiveModelPath);
-      }
       _log('[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason');
       bindings.releaseSession(sessionId);
     } catch (error) {
@@ -309,6 +306,10 @@ class _AndroidFfiNativeSessionSubsystem {
         '[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason failed: $error',
       );
     } finally {
+      final stillActive = bindings.sessionIsActive(sessionId);
+      if (cachedSessionId == sessionId && stillActive != 1) {
+        _owner._nativeSessionsByModel.remove(effectiveModelPath);
+      }
       if (_owner._nativeSessionId == sessionId) {
         _owner._nativeSessionId = null;
       }
@@ -404,6 +405,9 @@ class _AndroidFfiNativeSessionSubsystem {
       }
       await Future<void>.delayed(Duration(milliseconds: backoffMs));
       backoffMs = backoffMs < 16 ? backoffMs * 2 : 16;
+      if (bindings.sessionIsActive(sessionId) != 1) {
+        return;
+      }
     }
   }
 

@@ -69,6 +69,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
         );
         try {
           var slotClaimed = false;
+          var pollingLoopEntered = false;
           final sessionId = request.sessionId.trim().isEmpty
               ? 'unknown'
               : request.sessionId.trim();
@@ -128,7 +129,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 );
                 return;
               }
-              slotClaimed = false;
+              pollingLoopEntered = true;
               cancellationToken.onCancel(() => _safeCancel(startup.bindings, startup.nativeSessionId));
               await _runTokenPollingLoop(
                 startup: startup,
@@ -141,7 +142,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               );
             });
           } finally {
-            if (slotClaimed) {
+            if (slotClaimed && !pollingLoopEntered) {
               _releaseInferenceSlot(sessionId);
               _flushPendingRuntimeVerificationClear();
             }
