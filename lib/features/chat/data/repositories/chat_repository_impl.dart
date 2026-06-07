@@ -35,8 +35,9 @@ class ChatRepositoryImpl implements ChatRepository {
   final Set<String> _activeSendSessions = <String>{};
   final Map<String, Completer<void>> _sessionAbortSignals =
       <String, Completer<void>>{};
-  StreamSubscription<InferenceResponse>? _activeInferenceSubscription;
-  String? _activeInferenceSubscriptionSessionId;
+  final Map<String, StreamSubscription<InferenceResponse>>
+      _activeInferenceSubscriptions =
+      <String, StreamSubscription<InferenceResponse>>{};
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
@@ -127,13 +128,13 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
             );
-            if (_activeInferenceSubscription != null) {
+            final previousSubscription = _activeInferenceSubscriptions[sessionId];
+            if (previousSubscription != null) {
               _log(
-                '[DUPLICATE_SUBSCRIPTION] session=$sessionId active_session=${_activeInferenceSubscriptionSessionId ?? "unknown"} action=cancel_previous',
+                '[DUPLICATE_SUBSCRIPTION] session=$sessionId active_session=$sessionId action=cancel_previous',
               );
-              await _activeInferenceSubscription!.cancel();
-              _activeInferenceSubscription = null;
-              _activeInferenceSubscriptionSessionId = null;
+              await previousSubscription.cancel();
+              _activeInferenceSubscriptions.remove(sessionId);
             }
             final contextSnapshot = List<ChatTurn>.unmodifiable(context);
             final stream = orchestrator.handleStream(
@@ -148,7 +149,7 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
             );
-            _activeInferenceSubscription = stream.listen(
+            final subscription = stream.listen(
               (chunk) {
                 try {
                   if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
@@ -207,7 +208,7 @@ class ChatRepositoryImpl implements ChatRepository {
               },
               cancelOnError: false,
             );
-            _activeInferenceSubscriptionSessionId = sessionId;
+            _activeInferenceSubscriptions[sessionId] = subscription;
             try {
               final wasAborted = await Future.any<bool>([
                 streamCompleter.future.then((_) => false),
@@ -218,9 +219,11 @@ class ChatRepositoryImpl implements ChatRepository {
                 return userMsg;
               }
             } finally {
-              await _activeInferenceSubscription?.cancel();
-              _activeInferenceSubscription = null;
-              _activeInferenceSubscriptionSessionId = null;
+              final activeSubscription = _activeInferenceSubscriptions[sessionId];
+              if (activeSubscription != null && identical(activeSubscription, subscription)) {
+                await activeSubscription.cancel();
+                _activeInferenceSubscriptions.remove(sessionId);
+              }
               _sessionAbortSignals.remove(sessionId);
             }
 
@@ -294,10 +297,9 @@ class ChatRepositoryImpl implements ChatRepository {
       if (abortSignal != null && !abortSignal.isCompleted) {
         abortSignal.complete();
       }
-      if (_activeInferenceSubscriptionSessionId == sessionId) {
-        await _activeInferenceSubscription?.cancel();
-        _activeInferenceSubscription = null;
-        _activeInferenceSubscriptionSessionId = null;
+      final activeSubscription = _activeInferenceSubscriptions.remove(sessionId);
+      if (activeSubscription != null) {
+        await activeSubscription.cancel();
       }
       _activeSendSessions.remove(sessionId);
       Object? error;
