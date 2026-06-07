@@ -55,6 +55,7 @@ class _ChatPageState extends State<ChatPage> {
   late final SherpaOnnxVoiceEngine _voiceLoopEngine;
   late final VoiceModelDownloader _voiceModelDownloader;
   LocalRuntimeState _runtimeState = const LocalRuntimeState();
+  Timer? _runtimeStateSyncTimer;
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
@@ -76,7 +77,7 @@ class _ChatPageState extends State<ChatPage> {
     _voiceLoopEngine = di.sl<SherpaOnnxVoiceEngine>();
     _voiceModelDownloader = di.sl<VoiceModelDownloader>();
     _runtimeState = _runtimeDiagnostics.monitor.state;
-    _runtimeDiagnostics.monitor.addListener(_handleRuntimeStateChanged);
+    _startRuntimeStateSync();
     unawaited(_refreshRuntimeIndicators());
     final modelBloc = context.read<ModelDownloadBloc>();
     if (modelBloc.state is ModelDownloadInitial) {
@@ -84,10 +85,20 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  void _handleRuntimeStateChanged(LocalRuntimeState state) {
+  void _syncRuntimeStateFromMonitor() {
     if (!mounted) return;
+    final state = _runtimeDiagnostics.monitor.state;
+    if (state == _runtimeState) return;
     setState(() => _runtimeState = state);
     unawaited(_refreshRuntimeIndicators());
+  }
+
+  void _startRuntimeStateSync() {
+    _runtimeStateSyncTimer?.cancel();
+    _runtimeStateSyncTimer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _syncRuntimeStateFromMonitor(),
+    );
   }
 
   Future<void> _refreshRuntimeIndicators() async {
@@ -125,8 +136,9 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _runtimeStateSyncTimer?.cancel();
+    _runtimeStateSyncTimer = null;
     _cancelUiDeadlockGuard();
-    _runtimeDiagnostics.monitor.removeListener(_handleRuntimeStateChanged);
     _scrollController.dispose();
     super.dispose();
   }
