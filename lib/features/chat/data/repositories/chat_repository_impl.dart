@@ -146,7 +146,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
-            // Ensure listener setup failures still release the abort signal.
+            // Ensures listener setup failures still release the abort signal.
             try {
               _log(
                 '[STREAM_LISTENER_ATTACH] session=$sessionId listener=chat_repository_stream_listener',
