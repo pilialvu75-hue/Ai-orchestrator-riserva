@@ -191,8 +191,12 @@ class _AndroidFfiWarmupSubsystem {
     } finally {
       freeWarmupPromptPtr();
       calloc.free(tokenBufRaw);
-      _log('[FFI_CANCEL] warmup session=$warmupSessionId');
-      bindings.cancelSession(warmupSessionId);
+      await _owner._shutdownNativeSessionGracefully(
+        bindings,
+        warmupSessionId,
+        reason: 'warmup_cleanup',
+        modelPath: modelPath,
+      );
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 2286 | Function: _runWarmup() | AFTER finally cleanup',
       );

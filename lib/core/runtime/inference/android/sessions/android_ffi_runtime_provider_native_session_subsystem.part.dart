@@ -269,6 +269,57 @@ class _AndroidFfiNativeSessionSubsystem {
     }
   }
 
+  Future<void> shutdownNativeSessionGracefully(
+    LlamaBridgeBindings bindings,
+    int sessionId, {
+    required String reason,
+    String? modelPath,
+  }) async {
+    if (sessionId <= 0) {
+      return;
+    }
+    final effectiveModelPath = modelPath ?? 'unknown';
+    final pointerHex = '0x${sessionId.toUnsigned(64).toRadixString(16)}';
+    final pointerAddress = Pointer<Void>.fromAddress(sessionId).address;
+    final activeState = bindings.sessionIsActive(sessionId);
+    _log(
+      '[NATIVE_SESSION_SHUTDOWN_BEGIN] model_path=$effectiveModelPath reason=$reason'
+      ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
+      ' pointer_address=$pointerAddress session_active=$activeState'
+      ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
+    );
+    try {
+      _log('[FFI_CANCEL] session=$sessionId path=$effectiveModelPath reason=$reason');
+      bindings.cancelSession(sessionId);
+    } catch (error) {
+      _log(
+        '[FFI_CANCEL] session=$sessionId path=$effectiveModelPath reason=$reason failed: $error',
+      );
+    }
+    await _awaitSessionTermination(bindings, sessionId, reason: reason);
+    try {
+      final cachedSessionId = _owner._nativeSessionsByModel[effectiveModelPath];
+      if (cachedSessionId == sessionId) {
+        _owner._nativeSessionsByModel.remove(effectiveModelPath);
+      }
+      _log('[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason');
+      bindings.releaseSession(sessionId);
+    } catch (error) {
+      _log(
+        '[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason failed: $error',
+      );
+    } finally {
+      if (_owner._nativeSessionId == sessionId) {
+        _owner._nativeSessionId = null;
+      }
+      _owner._flushPendingRuntimeVerificationClear();
+      _log(
+        '[NATIVE_SESSION_SHUTDOWN_END] model_path=$effectiveModelPath reason=$reason'
+        ' nativeSessionId=$sessionId isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
+      );
+    }
+  }
+
   void markSessionAsMostRecentlyUsed(String modelPath) {
     final lastModelPath = _owner._nativeSessionsByModel.isEmpty
         ? null
@@ -279,12 +330,25 @@ class _AndroidFfiNativeSessionSubsystem {
     _owner._nativeSessionsByModel[modelPath] = sessionId;
   }
 
-  void releaseAllNativeSessions(
+  Future<void> releaseAllNativeSessions(
     LlamaBridgeBindings bindings, {
     required String reason,
-  }) {
+  }) async {
     final entries = _owner._nativeSessionsByModel.entries.toList(growable: false);
     for (final entry in entries) {
+      try {
+        _log(
+          '[FFI_CANCEL] session=${entry.value} path=${entry.key} reason=$reason',
+        );
+        bindings.cancelSession(entry.value);
+      } catch (error) {
+        _log(
+          '[FFI_CANCEL] session=${entry.value} path=${entry.key} reason=$reason failed: $error',
+        );
+      }
+    }
+    for (final entry in entries) {
+      await _awaitSessionTermination(bindings, entry.value, reason: reason);
       try {
         _log(
           '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason',
@@ -309,21 +373,35 @@ class _AndroidFfiNativeSessionSubsystem {
     }
   }
 
-  void safeResetRuntime(
+  Future<void> safeResetRuntime(
     LlamaBridgeBindings bindings, {
     required String reason,
-  }) {
+  }) async {
     try {
       _log('[MODEL_EXECUTION] resetting native runtime: $reason');
-      final sessionId = _owner._nativeSessionId;
-      if (sessionId != null) {
-        _log(
-            '[MODEL_EXECUTION] llb_session_is_active before reset: ${bindings.sessionIsActive(sessionId)}');
-        safeCancel(bindings, sessionId);
-      }
-      releaseAllNativeSessions(bindings, reason: reason);
+      await releaseAllNativeSessions(bindings, reason: reason);
+      _owner._flushPendingRuntimeVerificationClear();
     } catch (error) {
       _log('[MODEL_EXECUTION] runtime reset failed: $error');
+    }
+  }
+
+  Future<void> _awaitSessionTermination(
+    LlamaBridgeBindings bindings,
+    int sessionId, {
+    required String reason,
+  }) async {
+    final timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
+    final stopwatch = Stopwatch()..start();
+    while (bindings.sessionIsActive(sessionId) == 1) {
+      if (stopwatch.elapsed >= timeout) {
+        _log(
+          '[NATIVE_SESSION_SHUTDOWN_TIMEOUT] session=$sessionId reason=$reason'
+          ' elapsed_ms=${stopwatch.elapsedMilliseconds}',
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 16));
     }
   }
 

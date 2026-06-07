@@ -68,72 +68,83 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
           '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 508 | Function: streamInference() | BEFORE calling _runInferenceSerially()',
         );
         try {
-          await _concurrencyManager.runInferenceSerially(() async {
-            AndroidFfiRuntimeProvider._log(
-              '[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}',
-            );
-            final sessionId = request.sessionId.trim().isEmpty
-                ? 'unknown'
-                : request.sessionId.trim();
-            final isForensicSelfTest =
-                request.sessionId.trim() == AndroidFfiRuntimeProvider._forensicSelfTestSessionId;
-            if (!isForensicSelfTest && !_claimInferenceSlot(sessionId)) {
-              _classifyFirstTokenTermination(
-                flowState: flowState,
-                attemptState: firstTokenAttempt,
-                reason: 'recursive_inference_guard',
-                boundary: 'recursive_inference_guard',
+          var slotClaimed = false;
+          final sessionId = request.sessionId.trim().isEmpty
+              ? 'unknown'
+              : request.sessionId.trim();
+          try {
+            await _concurrencyManager.runInferenceSerially(() async {
+              AndroidFfiRuntimeProvider._log(
+                '[ACTION_BODY_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} ts=${DateTime.now().microsecondsSinceEpoch}',
               );
-              AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
-              AndroidFfiRuntimeProvider._log('[SESSION] recursive_guard_triggered session=$sessionId');
-              await _fatalEarlyExit(
-                flowState: flowState,
+              final isForensicSelfTest =
+                  request.sessionId.trim() == AndroidFfiRuntimeProvider._forensicSelfTestSessionId;
+              if (!isForensicSelfTest && !_claimInferenceSlot(sessionId)) {
+                _classifyFirstTokenTermination(
+                  flowState: flowState,
+                  attemptState: firstTokenAttempt,
+                  reason: 'recursive_inference_guard',
+                  boundary: 'recursive_inference_guard',
+                );
+                AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=recursive_inference_guard');
+                AndroidFfiRuntimeProvider._log('[SESSION] recursive_guard_triggered session=$sessionId');
+                await _fatalEarlyExit(
+                  flowState: flowState,
+                  controller: controller,
+                  sessionId: sessionId,
+                  branch: 'recursive_inference_guard',
+                  reason: 'Recursive inference call blocked for session $sessionId.',
+                  stage: 'recursive_inference_guard',
+                );
+                AndroidFfiRuntimeProvider._log(
+                  '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
+                  ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
+                );
+                return;
+              }
+              if (!isForensicSelfTest) {
+                slotClaimed = true;
+              }
+              if (isForensicSelfTest) {
+                AndroidFfiRuntimeProvider._log(
+                  '[VERIFICATION_UI_IGNORED] verification_scope=true reason=skip_activeInferenceSessions_tracking session=$sessionId',
+                );
+              }
+              final startup = await _prepareGenerationStartup(
                 controller: controller,
+                request: request,
+                cancellationToken: cancellationToken,
+                flowState: flowState,
                 sessionId: sessionId,
-                branch: 'recursive_inference_guard',
-                reason: 'Recursive inference call blocked for session $sessionId.',
-                stage: 'recursive_inference_guard',
+                modelId: request.modelId,
+                modelPath: request.modelPath,
+                isForensicSelfTest: isForensicSelfTest,
+                dartThreadId: AndroidFfiRuntimeProvider._currentThreadId(),
+              );
+              if (startup == null) {
+                AndroidFfiRuntimeProvider._log(
+                  '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
+                  ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
+                );
+                return;
+              }
+              cancellationToken.onCancel(() => _safeCancel(startup.bindings, startup.nativeSessionId));
+              await _runTokenPollingLoop(
+                startup: startup,
+                attemptState: firstTokenAttempt,
+                flowState: flowState,
               );
               AndroidFfiRuntimeProvider._log(
                 '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
                 ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
               );
-              return;
+            });
+          } finally {
+            if (slotClaimed && _activeInferenceSessions.contains(sessionId)) {
+              _releaseInferenceSlot(sessionId);
+              _flushPendingRuntimeVerificationClear();
             }
-            if (isForensicSelfTest) {
-              AndroidFfiRuntimeProvider._log(
-                '[VERIFICATION_UI_IGNORED] verification_scope=true reason=skip_activeInferenceSessions_tracking session=$sessionId',
-              );
-            }
-            final startup = await _prepareGenerationStartup(
-              controller: controller,
-              request: request,
-              cancellationToken: cancellationToken,
-              flowState: flowState,
-              sessionId: sessionId,
-              modelId: request.modelId,
-              modelPath: request.modelPath,
-              isForensicSelfTest: isForensicSelfTest,
-              dartThreadId: AndroidFfiRuntimeProvider._currentThreadId(),
-            );
-            if (startup == null) {
-              AndroidFfiRuntimeProvider._log(
-                '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
-                ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
-              );
-              return;
-            }
-            cancellationToken.onCancel(() => _safeCancel(startup.bindings, startup.nativeSessionId));
-            await _runTokenPollingLoop(
-              startup: startup,
-              attemptState: firstTokenAttempt,
-              flowState: flowState,
-            );
-            AndroidFfiRuntimeProvider._log(
-              '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
-              ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
-            );
-          });
+          }
           AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1655 | Function: streamInference() | AFTER calling _runInferenceSerially()',
           );

@@ -260,14 +260,12 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                     freeVerificationPromptPtr();
                     _discardStructuralTemplateOutput();
                     calloc.free(tokenBufRaw);
-                    _safeCancel(bindings, verificationSessionId);
-                    try {
-                      bindings.releaseSession(verificationSessionId);
-                    } catch (error) {
-                      AndroidFfiRuntimeProvider._log(
-                        '[VERIFICATION_UI_IGNORED] verification_scope=true reason=verification_release_exception error=$error',
-                      );
-                    }
+                    await _shutdownNativeSessionGracefully(
+                      bindings,
+                      verificationSessionId,
+                      reason: 'verification_scope_cleanup',
+                      modelPath: modelPath,
+                    );
                   }
                 } catch (e, st) {
                   // TERMINAL SINK INTERNO DI VERIFICA: Cattura, deidratazione e rimozione del leak degli oggetti

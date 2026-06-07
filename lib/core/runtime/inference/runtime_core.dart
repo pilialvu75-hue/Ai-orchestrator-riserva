@@ -92,6 +92,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
   static const Duration _generationTimeout = Duration(seconds: 90);
+  static const Duration _sessionShutdownTimeout = Duration(seconds: 5);
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
@@ -196,6 +197,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   final Set<String> _activeInferenceSessions = <String>{};
   String? _verifiedRuntimeAbi;
   bool _manualVerificationResetRequested = false;
+  bool _runtimeVerificationClearPending = false;
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
@@ -411,7 +413,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   }) {
     final reusable = hasVerifiedRuntimeForModel(modelPath) &&
         _verifiedRuntimeAbi == LlamaFfiLoader.currentAbiName &&
-        !_manualVerificationResetRequested;
+        !_manualVerificationResetRequested &&
+        !_runtimeVerificationClearPending;
     if (reusable) {
       // Keep both markers for compatibility with existing log filters/forensics
       // that match one tag or the other.
@@ -741,13 +744,26 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   void _safeCancel(LlamaBridgeBindings bindings, int sessionId) =>
       _nativeSessionSubsystem.safeCancel(bindings, sessionId);
 
-  void _safeResetRuntime(
+  Future<void> _safeResetRuntime(
     LlamaBridgeBindings bindings, {
     required String reason,
   }) =>
       _nativeSessionSubsystem.safeResetRuntime(
         bindings,
         reason: reason,
+      );
+
+  Future<void> _shutdownNativeSessionGracefully(
+    LlamaBridgeBindings bindings,
+    int sessionId, {
+    required String reason,
+    String? modelPath,
+  }) =>
+      _nativeSessionSubsystem.shutdownNativeSessionGracefully(
+        bindings,
+        sessionId,
+        reason: reason,
+        modelPath: modelPath,
       );
 
   static void _log(String message) {
@@ -769,6 +785,23 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       );
       return;
     }
+    if (_hasActiveInferenceLifecycle) {
+      _runtimeVerificationClearPending = true;
+      _log(
+        '[STATE_RESET_DEFERRED] reason=verification_invalidated active_sessions=${_activeInferenceSessions.length} native_session=${_nativeSessionId ?? 'null'} session_cache_size=${_nativeSessionsByModel.length}',
+      );
+      return;
+    }
+    _applyRuntimeVerificationClear();
+  }
+
+  bool get _hasActiveInferenceLifecycle =>
+      _activeInferenceSessions.isNotEmpty ||
+      _nativeSessionId != null ||
+      _nativeSessionsByModel.isNotEmpty;
+
+  void _applyRuntimeVerificationClear() {
+    _runtimeVerificationClearPending = false;
     final caller = kDebugMode
         ? _inferCallerFromStack()
         : 'AndroidFfiRuntimeProvider.clearRuntimeVerification';
@@ -778,6 +811,14 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     );
     _verifiedRuntimeAbi = null;
     super.clearRuntimeVerification();
+  }
+
+  void _flushPendingRuntimeVerificationClear() {
+    if (!_runtimeVerificationClearPending || _hasActiveInferenceLifecycle) {
+      return;
+    }
+    _log('[STATE_RESET_APPLY] reason=verification_invalidated');
+    _applyRuntimeVerificationClear();
   }
 
   void _updateRuntimeStatus(
@@ -819,6 +860,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     super.recordVerificationSuccess(modelPath: modelPath, source: source);
     _verifiedRuntimeAbi = LlamaFfiLoader.currentAbiName;
     _manualVerificationResetRequested = false;
+    _runtimeVerificationClearPending = false;
     if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=record_verification_success_skip_ui_transition source=$source',
