@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
@@ -91,6 +93,22 @@ class LocalRuntimeState {
       );
 }
 
+void _dispatchListenerInRootZone<T>({
+  required String statusName,
+  required T state,
+  required List<void Function(T)> listeners,
+}) {
+  final listenerDispatchAt = DateTime.now().microsecondsSinceEpoch;
+  for (final listener in List.of(listeners)) {
+    debugPrint(
+      '[STATE_RESET_NOTIFY] ts_us=$listenerDispatchAt status=$statusName listener=${listener.hashCode.toRadixString(16)}',
+    );
+    Zone.root.runGuarded(() {
+      listener(state);
+    });
+  }
+}
+
 /// Observable monitor that tracks the live state of the local AI runtime.
 ///
 /// Providers call [update] as they transition through lifecycle stages.
@@ -129,6 +147,7 @@ class LocalRuntimeMonitor {
     DateTime? startedAt,
     bool resetProgress = false,
   }) {
+    final dispatchStartedAt = DateTime.now().microsecondsSinceEpoch;
     final previousState = resetProgress
         ? const LocalRuntimeState()
         : _state;
@@ -150,6 +169,9 @@ class LocalRuntimeMonitor {
       ' tokens=$nextTokens elapsed_ms=${nextElapsed.inMilliseconds}'
       ' message="${message ?? ''}"',
     );
+    debugPrint(
+      '[STATE_RESET_BEGIN] ts_us=$dispatchStartedAt status=${status.name} reset_progress=$resetProgress listener_count=${_listeners.length}',
+    );
     _state = LocalRuntimeState(
       status: status,
       message: message,
@@ -157,8 +179,17 @@ class LocalRuntimeMonitor {
       elapsed: nextElapsed,
       startedAt: resetProgress ? startedAt : (startedAt ?? previousState.startedAt),
     );
-    for (final listener in List.of(_listeners)) {
-      listener(_state);
+    try {
+      _dispatchListenerInRootZone<LocalRuntimeState>(
+        statusName: status.name,
+        state: _state,
+        listeners: _listeners,
+      );
+    } finally {
+      final dispatchEndedAt = DateTime.now().microsecondsSinceEpoch;
+      debugPrint(
+        '[STATE_RESET_END] ts_us=$dispatchEndedAt status=${status.name} elapsed_us=${dispatchEndedAt - dispatchStartedAt}',
+      );
     }
   }
 }
@@ -214,9 +245,22 @@ class RuntimeVerificationMonitor {
     RuntimeVerificationPhase phase, {
     String? message,
   }) {
+    final dispatchStartedAt = DateTime.now().microsecondsSinceEpoch;
+    debugPrint(
+      '[STATE_RESET_BEGIN] ts_us=$dispatchStartedAt status=${phase.name} reset_progress=false listener_count=${_listeners.length}',
+    );
     _state = RuntimeVerificationState(phase: phase, message: message);
-    for (final listener in List.of(_listeners)) {
-      listener(_state);
+    try {
+      _dispatchListenerInRootZone<RuntimeVerificationState>(
+        statusName: phase.name,
+        state: _state,
+        listeners: _listeners,
+      );
+    } finally {
+      final dispatchEndedAt = DateTime.now().microsecondsSinceEpoch;
+      debugPrint(
+        '[STATE_RESET_END] ts_us=$dispatchEndedAt status=${phase.name} elapsed_us=${dispatchEndedAt - dispatchStartedAt}',
+      );
     }
   }
 }
