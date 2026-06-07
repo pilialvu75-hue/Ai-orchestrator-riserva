@@ -83,5 +83,50 @@ void main() {
       expect(provider.monitor.state.status, LocalRuntimeStatus.loading);
       expect(stateMachine.state, RuntimeLifecycleState.verified);
     });
+
+    test('keeps verification when cleared while runtime is already ready', () {
+      final stateMachine = RuntimeStateMachine();
+      final provider = AndroidFfiRuntimeProvider(
+        runtimeStateMachine: stateMachine,
+        developerModeProvider: () => false,
+      );
+      final modelPath = 'test-fixtures/runtime-model-ready.gguf';
+
+      provider.recordVerificationSuccess(
+        modelPath: modelPath,
+        source: 'test',
+      );
+      expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
+      provider.monitor.update(
+        LocalRuntimeStatus.ready,
+        message: 'ready',
+      );
+
+      provider.clearRuntimeVerification();
+
+      expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
+      expect(provider.monitor.state.status, LocalRuntimeStatus.ready);
+      expect(stateMachine.state, RuntimeLifecycleState.verified);
+    });
+
+    test('disables verification reuse after a manual reset request', () {
+      final stateMachine = RuntimeStateMachine();
+      final provider = AndroidFfiRuntimeProvider(
+        runtimeStateMachine: stateMachine,
+        developerModeProvider: () => false,
+      );
+      final modelPath = 'test-fixtures/runtime-model-reset.gguf';
+
+      provider.recordVerificationSuccess(
+        modelPath: modelPath,
+        source: 'test',
+      );
+      expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
+      expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isTrue);
+
+      provider.requestManualVerificationReset();
+
+      expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isFalse);
+    });
   });
 }

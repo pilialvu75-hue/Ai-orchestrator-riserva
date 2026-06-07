@@ -77,7 +77,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=request_validation_missing_path_or_id');
       AndroidFfiRuntimeProvider._log('[MODEL_PATH] ABORT: path or modelId is null/empty');
       AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id');
-      clearRuntimeVerification();
       _updateRuntimeStatus(
         LocalRuntimeStatus.modelMissing,
         message: 'No validated local model is selected.',
@@ -129,7 +128,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
           boundary: 'model_guard',
         );
         AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
-        clearRuntimeVerification();
         const unsupportedAndroidModelMessage =
             'Selected model is not enabled for Android local runtime. '
             'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
@@ -220,7 +218,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=session_create error=$error');
       AndroidFfiRuntimeProvider._log('[SESSION_CREATE_FAIL] path=$resolvedModelPath exception=$error');
       AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=failed reason=session_create_exception');
-      clearRuntimeVerification();
       _setPhase(RuntimePhase.failed);
       _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Session create timed out.' : 'Session create failed: $error', );
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'session_create', message: 'Session create failed.', details: error.toString(), );
@@ -236,7 +233,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       final errMsg = AndroidFfiRuntimeProvider._safeLastError(bindings, nativeSessionId);
       AndroidFfiRuntimeProvider._log('[SESSION_CREATE_FAIL] code=$nativeSessionId error=$errMsg path=$resolvedModelPath');
       AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=failed reason=session_create_error code=$nativeSessionId');
-      clearRuntimeVerification();
       _updateRuntimeStatus(LocalRuntimeStatus.failed, message: errMsg);
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'session_create', message: 'Failed to create runtime session.', details: 'Create failed with code $nativeSessionId: $errMsg', );
       return null;
@@ -249,7 +245,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     if (promptWordEstimate <= 0) {
       _classifyFirstTokenTermination( flowState: flowState, reason: 'tokenizer_readiness_failed', boundary: 'tokenizer_readiness', );
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=tokenizer_readiness_failed');
-      clearRuntimeVerification();
       _updateRuntimeStatus( LocalRuntimeStatus.failed, message: 'Tokenizer readiness check failed: prompt has no tokens.', );
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'tokenizer_readiness', message: 'Tokenizer readiness check failed before inference.', );
       return null;
@@ -278,7 +273,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     if (loadedCheck != 1) {
       _classifyFirstTokenTermination( flowState: flowState, reason: 'session_inactive_before_start', boundary: 'start_generation_preflight', );
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=session_inactive_before_start');
-      clearRuntimeVerification();
       final nativeErr = AndroidFfiRuntimeProvider._safeLastError(bindings, nativeSessionId);
       _updateRuntimeStatus( LocalRuntimeStatus.failed, message: 'Session inactive (llb_session_is_active=$loadedCheck).', );
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: 'Session is not active in the native runtime (llb_session_is_active=$loadedCheck).', details: nativeErr.isNotEmpty ? nativeErr : null, );
@@ -365,7 +359,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       freePromptNativePtr();
       _classifyFirstTokenTermination( flowState: flowState, reason: error is TimeoutException ? 'start_generation_timeout' : 'start_generation_exception', boundary: 'start_generation', exception: true, runtimeReset: true, );
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
-      clearRuntimeVerification();
       _setPhase(RuntimePhase.failed);
       await _safeResetRuntime(bindings, reason: 'start_generation_exception');
       _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Native start_generation timed out.' : 'Native start_generation failed: $error', );
@@ -382,7 +375,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log( '[FFI_TIMEOUT] session=$sessionId stage=start_generation_postcheck' ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}', );
       freePromptNativePtr();
       _safeCancel(bindings, nativeSessionId);
-      clearRuntimeVerification();
       _setPhase(RuntimePhase.stalled);
       await _safeResetRuntime(bindings, reason: 'start_generation_timeout');
       _updateRuntimeStatus( LocalRuntimeStatus.timedOut, message: 'Inference startup timed out after ${AndroidFfiRuntimeProvider._startGenerationTimeout.inSeconds}s.', );
@@ -394,7 +386,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       _classifyFirstTokenTermination( flowState: flowState, reason: 'start_generation_failed_code', boundary: 'start_generation', runtimeReset: true, );
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=start_generation_failed_code');
       freePromptNativePtr();
-      clearRuntimeVerification();
       _setPhase(RuntimePhase.failed);
       final err = AndroidFfiRuntimeProvider._safeLastError(bindings, nativeSessionId);
       await _safeResetRuntime(bindings, reason: 'start_generation_failed');

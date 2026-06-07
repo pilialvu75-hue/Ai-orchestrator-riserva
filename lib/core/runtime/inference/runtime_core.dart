@@ -779,6 +779,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   @protected
   void clearRuntimeVerification() {
+    if (monitor.state.status == LocalRuntimeStatus.ready &&
+        !_hasActiveInferenceLifecycle &&
+        !_manualVerificationResetRequested) {
+      // Set _runtimeVerificationClearPending to false so the later
+      // _flushPendingRuntimeVerificationClear() terminal-state cleanup cannot
+      // retroactively invalidate a runtime that is already ready.
+      _runtimeVerificationClearPending = false;
+      _log('[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready status=${monitor.state.status.name}');
+      return;
+    }
     if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=clear_runtime_verification_ignored',
