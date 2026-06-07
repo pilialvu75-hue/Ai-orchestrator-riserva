@@ -779,6 +779,19 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   @protected
   void clearRuntimeVerification() {
+    if (monitor.state.status == LocalRuntimeStatus.ready &&
+        !_hasActiveInferenceLifecycle &&
+        !_manualVerificationResetRequested) {
+      _runtimeVerificationClearPending = false;
+      _log(
+        '[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready'
+        ' status=${monitor.state.status.name}'
+        ' active_sessions=${_activeInferenceSessions.length}'
+        ' native_session=${_nativeSessionId ?? 'null'}'
+        ' session_cache_size=${_nativeSessionsByModel.length}',
+      );
+      return;
+    }
     if (_inVerificationScope) {
       _log(
         '[VERIFICATION_UI_IGNORED] verification_scope=true reason=clear_runtime_verification_ignored',
