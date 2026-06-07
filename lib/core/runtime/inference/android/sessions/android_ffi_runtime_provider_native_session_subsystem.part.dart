@@ -5,6 +5,7 @@ class _AndroidFfiNativeSessionSubsystem {
   _AndroidFfiNativeSessionSubsystem(this._owner);
 
   final AndroidFfiRuntimeProvider _owner;
+  static const int _kMaxSessionTerminationBackoffMs = 16;
 
   int ensureNativeSession(
     LlamaBridgeBindings bindings,
@@ -404,10 +405,9 @@ class _AndroidFfiNativeSessionSubsystem {
         return;
       }
       await Future<void>.delayed(Duration(milliseconds: backoffMs));
-      backoffMs = backoffMs < 16 ? backoffMs * 2 : 16;
-      if (bindings.sessionIsActive(sessionId) != 1) {
-        return;
-      }
+      backoffMs = backoffMs < _kMaxSessionTerminationBackoffMs
+          ? backoffMs * 2
+          : _kMaxSessionTerminationBackoffMs;
     }
   }
 
