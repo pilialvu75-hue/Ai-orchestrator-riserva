@@ -90,6 +90,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
+      // Fixture path only; the test does not require the file to exist.
       const modelPath = '/tmp/runtime-model-ready.gguf';
 
       provider.recordVerificationSuccess(
@@ -111,6 +112,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
+      // Fixture path only; the test does not require the file to exist.
       const modelPath = '/tmp/runtime-model-reset.gguf';
 
       provider.recordVerificationSuccess(
