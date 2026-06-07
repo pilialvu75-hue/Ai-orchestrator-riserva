@@ -7,6 +7,7 @@ class _AndroidFfiNativeSessionSubsystem {
   final AndroidFfiRuntimeProvider _owner;
   static const int _kMaxSessionTerminationBackoffMs = 16;
   static const int _kSessionActiveState = 1;
+  static const int _kSessionInactiveState = 0;
 
   int ensureNativeSession(
     LlamaBridgeBindings bindings,
@@ -281,7 +282,6 @@ class _AndroidFfiNativeSessionSubsystem {
       return;
     }
     final effectiveModelPath = modelPath ?? 'unknown';
-    // Native session IDs are opaque bridge handles surfaced as ints.
     final activeState = bindings.sessionIsActive(sessionId);
     _log(
       '[NATIVE_SESSION_SHUTDOWN_BEGIN] model_path=$effectiveModelPath reason=$reason'
@@ -307,7 +307,7 @@ class _AndroidFfiNativeSessionSubsystem {
       );
     } finally {
       final stillActive = bindings.sessionIsActive(sessionId);
-      if (cachedSessionId == sessionId && stillActive != _kSessionActiveState) {
+      if (cachedSessionId == sessionId && stillActive == _kSessionInactiveState) {
         _owner._nativeSessionsByModel.remove(effectiveModelPath);
       }
       if (_owner._nativeSessionId == sessionId) {
