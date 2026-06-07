@@ -6,6 +6,7 @@ class _AndroidFfiNativeSessionSubsystem {
 
   final AndroidFfiRuntimeProvider _owner;
   static const int _kMaxSessionTerminationBackoffMs = 16;
+  static const int _kSessionActiveState = 1;
 
   int ensureNativeSession(
     LlamaBridgeBindings bindings,
@@ -282,12 +283,11 @@ class _AndroidFfiNativeSessionSubsystem {
     final effectiveModelPath = modelPath ?? 'unknown';
     // Native session IDs are opaque bridge handles surfaced as ints.
     final pointerHex = '0x${sessionId.toUnsigned(64).toRadixString(16)}';
-    final pointerAddress = sessionId;
     final activeState = bindings.sessionIsActive(sessionId);
     _log(
       '[NATIVE_SESSION_SHUTDOWN_BEGIN] model_path=$effectiveModelPath reason=$reason'
       ' nativeSessionId=$sessionId pointer_hex=$pointerHex'
-      ' pointer_address=$pointerAddress session_active=$activeState'
+      ' pointer_address=$sessionId session_active=$activeState'
       ' isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
     );
     try {
@@ -397,7 +397,7 @@ class _AndroidFfiNativeSessionSubsystem {
     final timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
     final stopwatch = Stopwatch()..start();
     var backoffMs = 1;
-    while (bindings.sessionIsActive(sessionId) == 1) {
+    while (bindings.sessionIsActive(sessionId) == _kSessionActiveState) {
       if (stopwatch.elapsed >= timeout) {
         _log(
           '[NATIVE_SESSION_SHUTDOWN_TIMEOUT] session=$sessionId reason=$reason'
