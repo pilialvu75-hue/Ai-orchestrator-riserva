@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
@@ -90,8 +92,8 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      // Fixture path only; the test does not require the file to exist.
-      const modelPath = '/tmp/runtime-model-ready.gguf';
+      final modelPath =
+          '${Directory.systemTemp.path}/runtime-model-ready.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,
@@ -116,8 +118,8 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      // Fixture path only; the test does not require the file to exist.
-      const modelPath = '/tmp/runtime-model-reset.gguf';
+      final modelPath =
+          '${Directory.systemTemp.path}/runtime-model-reset.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,
