@@ -5,9 +5,9 @@ class _AndroidFfiNativeSessionSubsystem {
   _AndroidFfiNativeSessionSubsystem(this._owner);
 
   final AndroidFfiRuntimeProvider _owner;
-  static const int _kMaxSessionTerminationBackoffMs = 16;
-  static const int _kSessionActiveState = 1;
-  static const int _kSessionInactiveState = 0;
+  static const int _maxSessionTerminationBackoffMs = 16;
+  static const int _sessionActiveState = 1;
+  static const int _sessionInactiveState = 0;
 
   int ensureNativeSession(
     LlamaBridgeBindings bindings,
@@ -307,7 +307,7 @@ class _AndroidFfiNativeSessionSubsystem {
       );
     } finally {
       final stillActive = bindings.sessionIsActive(sessionId);
-      if (cachedSessionId == sessionId && stillActive == _kSessionInactiveState) {
+      if (cachedSessionId == sessionId && _isSessionInactive(stillActive)) {
         _owner._nativeSessionsByModel.remove(effectiveModelPath);
       }
       if (_owner._nativeSessionId == sessionId) {
@@ -395,7 +395,7 @@ class _AndroidFfiNativeSessionSubsystem {
     final timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
     final stopwatch = Stopwatch()..start();
     var backoffMs = 1;
-    while (bindings.sessionIsActive(sessionId) == _kSessionActiveState) {
+    while (bindings.sessionIsActive(sessionId) == _sessionActiveState) {
       if (stopwatch.elapsed >= timeout) {
         _log(
           '[NATIVE_SESSION_SHUTDOWN_TIMEOUT] session=$sessionId reason=$reason'
@@ -404,11 +404,13 @@ class _AndroidFfiNativeSessionSubsystem {
         return;
       }
       await Future<void>.delayed(Duration(milliseconds: backoffMs));
-      backoffMs = backoffMs < _kMaxSessionTerminationBackoffMs
+      backoffMs = backoffMs < _maxSessionTerminationBackoffMs
           ? backoffMs * 2
-          : _kMaxSessionTerminationBackoffMs;
+          : _maxSessionTerminationBackoffMs;
     }
   }
+
+  bool _isSessionInactive(int state) => state == _sessionInactiveState;
 
   void _log(String message) {
     AndroidFfiRuntimeProvider._log(message);
