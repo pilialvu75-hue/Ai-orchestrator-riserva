@@ -1,5 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -128,5 +132,42 @@ void main() {
 
       expect(provider.shouldReuseRuntimeVerification(modelPath: modelPath), isFalse);
     });
+
+    test(
+      'dispatches streamInference through the Android override when typed as LocalRuntimeProvider',
+      () async {
+        final provider = AndroidFfiRuntimeProvider(
+          developerModeProvider: () => false,
+        );
+        final LocalRuntimeProvider providerAsBase = provider;
+        final logs = <String>[];
+        final originalDebugPrint = debugPrint;
+        debugPrint = (String? message, {int? wrapWidth}) {
+          if (message != null) {
+            logs.add(message);
+          }
+        };
+        addTearDown(() {
+          debugPrint = originalDebugPrint;
+        });
+
+        final chunks = await providerAsBase
+            .streamInference(
+              request: const InferenceRequest(
+                sessionId: 'dispatch-check',
+                prompt: 'hello',
+              ),
+              cancellationToken: CancellationToken(),
+            )
+            .toList();
+
+        expect(
+          logs.any((line) => line.contains('[FORENSIC_PROVIDER_ENTRY]')),
+          isTrue,
+        );
+        expect(chunks, isNotEmpty);
+        expect(chunks.last.isError, isTrue);
+      },
+    );
   });
 }
