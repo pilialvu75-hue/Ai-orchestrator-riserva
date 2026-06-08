@@ -226,6 +226,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   @override
   String get lifecycleRuntimeStateName => monitor.state.status.name;
 
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    return AndroidFfiRuntimeStreamingExtension(this).streamInference(
+      request: request,
+      cancellationToken: cancellationToken,
+    );
+  }
+
   // ── Library loading ──────────────────────────────────────────────────────────
 
   bool _ensureLibraryLoaded() {
