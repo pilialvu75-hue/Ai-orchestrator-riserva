@@ -1,11 +1,23 @@
-import 'package:flutter/foundation.dart';
+import 'dart:io';
+
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// Minimal GGUF header bytes used to create a valid local model fixture.
+const List<int> ggufMagicHeader = <int>[
+  0x47, // G
+  0x47, // G
+  0x55, // U
+  0x46, // F
+  0x00, // format version major
+  0x01, // format version minor
+];
 
 void main() {
   group('AndroidFfiRuntimeProvider.shouldReuseRuntimeVerification', () {
@@ -140,33 +152,39 @@ void main() {
           developerModeProvider: () => false,
         );
         final LocalRuntimeProvider providerAsBase = provider;
-        final logs = <String>[];
-        final originalDebugPrint = debugPrint;
-        debugPrint = (String? message, {int? wrapWidth}) {
-          if (message != null) {
-            logs.add(message);
-          }
-        };
-        addTearDown(() {
-          debugPrint = originalDebugPrint;
+        final tempDir = await Directory.systemTemp.createTemp('android-dispatch-');
+        final modelFile = File('${tempDir.path}/model.gguf');
+        await modelFile.writeAsBytes(ggufMagicHeader);
+        addTearDown(() async {
+          await tempDir.delete(recursive: true);
         });
+        RuntimeEventLog.instance.clear();
+        addTearDown(RuntimeEventLog.instance.clear);
 
         final chunks = await providerAsBase
             .streamInference(
-              request: const InferenceRequest(
+              request: InferenceRequest(
                 sessionId: 'dispatch-check',
                 prompt: 'hello',
+                modelId: 'unsupported_android_model',
+                modelPath: modelFile.path,
               ),
               cancellationToken: CancellationToken(),
             )
             .toList();
 
         expect(
-          logs.any((line) => line.contains('[FORENSIC_PROVIDER_ENTRY]')),
+          RuntimeEventLog.instance.entries.any(
+            (entry) => entry.message.contains('[FORENSIC_PROVIDER_ENTRY]'),
+          ),
           isTrue,
         );
         expect(chunks, isNotEmpty);
         expect(chunks.last.isError, isTrue);
+        expect(
+          chunks.last.errorMessage,
+          contains('Android local runtime'),
+        );
       },
     );
   });
