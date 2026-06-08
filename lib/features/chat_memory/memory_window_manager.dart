@@ -1,86 +1,79 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
 
 class MemoryWindowResult {
   const MemoryWindowResult({
     required this.contextTurns,
     required this.trimmedLines,
     required this.overflowDetected,
-    required this.totalChars,
+    required this.totalSize, // Rinominato da totalChars a totalSize
   });
 
   final List<ChatTurn> contextTurns;
   final int trimmedLines;
   final bool overflowDetected;
-  final int totalChars;
+  final int totalSize;
 }
 
 class MemoryWindowManager {
-  /// Il costruttore ora accetta parametri configurabili dinamicamente a runtime
-  /// a seconda della piattaforma (Android, MacOS, Windows, Linux) e del modello (1B, 7B, 8B, Cloud).
   const MemoryWindowManager({
-    this.maxContextLines = 60,       // Aumentato per accogliere dialoghi multi-turno complessi
-    this.maxTotalChars = 16000,      // Ampio margine adattativo di base (~4000 token), sovrascrivibile
-    this.minContextChars = 1024,     // Pavimento minimo protetto per evitare frammentazioni selvagge
-  });
+    required ITokenEstimator tokenEstimator,
+    this.maxContextLines = 60,
+    this.maxTotalSize = 4096,     // Se l'estimator è a token, 4096 indica il Context Window del LLM!
+    this.minContextSize = 512,
+  })  : _tokenEstimator = tokenEstimator;
 
+  final ITokenEstimator _tokenEstimator;
   final int maxContextLines;
-  final int maxTotalChars;
-  final int minContextChars;
+  final int maxTotalSize; // Rappresenta Token o Caratteri a seconda dell'estimator in uso
+  final int minContextSize;
 
   MemoryWindowResult trimToWindow({
     required String? systemPrompt,
     required String userPrompt,
     required List<ChatTurn> contextTurns,
   }) {
-    // 1. Limitazione iniziale basata sul numero massimo di linee ammesse
     final bounded = contextTurns.length <= maxContextLines
         ? List<ChatTurn>.from(contextTurns)
         : contextTurns.sublist(contextTurns.length - maxContextLines);
     var trimmedLines = contextTurns.length - bounded.length;
     var overflowDetected = false;
 
-    final systemChars = systemPrompt?.trim().length ?? 0;
-    final userChars = userPrompt.trim().length;
+    // Calcolo del peso dei prompt tramite l'estimator astratto
+    final systemSize = systemPrompt != null ? _tokenEstimator.estimateTextSize(systemPrompt) : 0;
+    final userSize = _tokenEstimator.estimateTextSize(userPrompt);
     
-    // Calcolo del budget dinamico per la cronologia volatile
     final dynamicBudget =
-        (maxTotalChars - systemChars - userChars).clamp(minContextChars, maxTotalChars);
+        (maxTotalSize - systemSize - userSize).clamp(minContextSize, maxTotalSize);
 
-    var runningChars = _estimateChars(bounded);
+    var runningSize = _estimateTurnsSize(bounded);
     
-    // 2. Strategia di Clipping Selettivo Anti-Frammentazione
-    // Se sforiamo il budget di caratteri, dobbiamo liberare spazio senza distruggere i tag critici.
-    while (bounded.isNotEmpty && runningChars > dynamicBudget) {
+    while (bounded.isNotEmpty && runningSize > dynamicBudget) {
       overflowDetected = true;
 
-      // Cerchiamo il primo indice sacrificabile (Messaggi cronologici della chat)
-      // L'indice 0 potrebbe contenere il blocco di sistema <ARCHIVIO_MEMORIA_RILEVANTE>
-      // inserito dal RollingContextBuilder. Dobbiamo proteggerlo se possibile.
       int indexToRemove = 0;
-      
       if (bounded.length > 1 && bounded.first.role == ChatRole.system) {
-        // Se il primo elemento è il blocco RAG di sistema, sacrifichiamo il messaggio successivo (la chat vecchia)
-        indexToRemove = 1;
+        indexToRemove = 1; // Protegge il blocco <ARCHIVIO_MEMORIA_RILEVANTE>
       }
 
       bounded.removeAt(indexToRemove);
       trimmedLines++;
-      runningChars = _estimateChars(bounded);
+      runningSize = _estimateTurnsSize(bounded);
     }
 
     return MemoryWindowResult(
       contextTurns: List<ChatTurn>.unmodifiable(bounded),
       trimmedLines: trimmedLines,
       overflowDetected: overflowDetected,
-      totalChars: runningChars + systemChars + userChars,
+      totalSize: runningSize + systemSize + userSize,
     );
   }
 
-  int _estimateChars(List<ChatTurn> turns) {
-    var chars = 0;
+  int _estimateTurnsSize(List<ChatTurn> turns) {
+    var total = 0;
     for (final turn in turns) {
-      chars += turn.content.trim().length + turn.role.name.length + 2;
+      total += _tokenEstimator.estimateSize(turn);
     }
-    return chars;
+    return total;
   }
 }
