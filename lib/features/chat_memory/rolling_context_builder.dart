@@ -32,18 +32,37 @@ class RollingContextBuilder {
     String? excludedMessageId,
     List<ChatTurn> recalledContext = const <ChatTurn>[],
   }) {
-    final seen = <String>{};
+    // Set isolato solo per evitare duplicati interni alla memoria semantica (RAG)
+    final semanticSeen = <String>{};
     final turns = <ChatTurn>[];
 
-    // 1. Inject recalled context FIRST (semantic memory)
+    // 1. Elaborazione e Isolamento della Memoria Semantica (RAG)
+    final bufferRAG = StringBuffer();
     for (final recalled in recalledContext) {
       final normalized = _normalizer.normalize(recalled);
       if (normalized.content.isEmpty) continue;
-      if (!seen.add(_turnKey(normalized))) continue;
-      turns.add(normalized);
+      
+      final key = _turnKey(normalized);
+      if (!semanticSeen.add(key)) continue;
+
+      // Costruiamo un blocco testuale strutturato e neutrale per l'archivio storico
+      final prefix = normalized.role == ChatRole.assistant ? 'AI' : 'UTENTE';
+      bufferRAG.writeln('[$prefix]: ${normalized.content}');
     }
 
-    // 2. Inject conversation history (chronological truth)
+    // Se ci sono ricordi semantici, li iniettiamo come un singolo blocco di sistema contestuale
+    // Questo evita l'anacronismo cronologico ed è compatibile con qualsiasi backend (Locale FFI o Cloud)
+    if (bufferRAG.isNotEmpty) {
+      turns.add(
+        ChatTurn(
+          role: ChatRole.system,
+          content: '<ARCHIVIO_MEMORIA_RILEVANTE>\n${bufferRAG.toString().trim()}\n</ARCHIVIO_MEMORIA_RILEVANTE>',
+        ),
+      );
+    }
+
+    // 2. Iniezione dell'Integrità Cronologica (La verità della Chat corrente)
+    // Rimosso il set 'seen' globale per impedire la cancellazione dei messaggi multi-turno identici
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) continue;
 
@@ -54,10 +73,11 @@ class RollingContextBuilder {
         ),
       );
       if (turn.content.isEmpty) continue;
-      if (!seen.add(_turnKey(turn))) continue;
+      
       turns.add(turn);
     }
 
+    // 3. Calcolo dinamico della finestra di contesto tramite il Manager
     final result = _windowManager.trimToWindow(
       systemPrompt: systemPrompt,
       userPrompt: userPrompt,
