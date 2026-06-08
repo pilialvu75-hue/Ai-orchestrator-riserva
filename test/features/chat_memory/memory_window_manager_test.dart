@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
 import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,7 +12,10 @@ void main() {
         const ChatTurn(role: ChatRole.assistant, content: 'gamma'),
       ];
 
-      final result = const MemoryWindowManager().trimToWindow(
+      // Risolto l'errore: raccordata l'istanza costante passando il CharacterLengthEstimator obbligatorio
+      final result = const MemoryWindowManager(
+        tokenEstimator: CharacterLengthEstimator(),
+      ).trimToWindow(
         systemPrompt: 'stay focused',
         userPrompt: 'question',
         contextTurns: source,
