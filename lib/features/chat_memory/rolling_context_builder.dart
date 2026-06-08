@@ -84,11 +84,12 @@ class RollingContextBuilder {
       contextTurns: turns,
     );
 
+    // Mappiamo result.totalSize su totalChars per sanare l'errore dell'analizzatore statico
     return RollingContextResult(
       contextTurns: result.contextTurns,
       trimmedLines: result.trimmedLines,
       overflowDetected: result.overflowDetected,
-      totalChars: result.totalChars,
+      totalChars: result.totalSize,
     );
   }
 
