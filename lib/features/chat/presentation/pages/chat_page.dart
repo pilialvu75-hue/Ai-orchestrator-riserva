@@ -1,3 +1,5 @@
+// chat_page.dart
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -1103,12 +1105,12 @@ class _HighPerformanceChatList extends StatelessWidget {
 
   // Funzione per generare il feedback aptico e mostrare il menu contestuale
   Future<void> _showContextMenu(BuildContext context, Offset position, String text) async {
-    // Feedback Aptico (Opzione A)
+    // Feedback Aptico
     HapticFeedback.lightImpact();
 
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     
-    // Configurazione Menu Contestuale (Opzione B)
+    // Configurazione Menu Contestuale
     final String? selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -1171,39 +1173,33 @@ class _HighPerformanceChatList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.custom(
+    return ListView.builder(
       controller: controller,
-      // ignore: deprecated_member_use
       cacheExtent: 1200.0,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
-      childrenDelegate: SliverChildBuilderDelegate(
-        (context, index) {
-          final message = messages[index];
-          return RepaintBoundary(
-            child: _AnimatedBubble(
-              key: ValueKey(message.id),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                // Tracciamento della posizione esatta del tocco sul Long Press
-                onLongPressStart: (details) => _showContextMenu(
-                  context, 
-                  details.globalPosition, 
-                  message.content,
-                ),
-                child: ChatBubble(
-                  message: message,
-                  assistantTextSize: assistantTextSize,
-                ),
+      itemCount: messages.length,
+      itemBuilder: (context, index) {
+        final message = messages[index];
+        return RepaintBoundary(
+          child: _AnimatedBubble(
+            key: ValueKey(message.id),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              // Tracciamento della posizione esatta del tocco sul Long Press
+              onLongPressStart: (details) => _showContextMenu(
+                context, 
+                details.globalPosition, 
+                message.content,
+              ),
+              child: ChatBubble(
+                message: message,
+                assistantTextSize: assistantTextSize,
               ),
             ),
-          );
-        },
-        childCount: messages.length,
-        addAutomaticKeepAlives: false,
-        addRepaintBoundaries: true,
-        addSemanticIndexes: false,
-      ),
+          ),
+        );
+      },
     );
   }
 }
