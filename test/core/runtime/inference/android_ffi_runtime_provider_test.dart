@@ -118,7 +118,7 @@ void main() {
         message: 'ready',
       );
 
-      provider.clearRuntimeVerification();
+      provider.clearRuntimeVerificationForTesting();
 
       expect(provider.isRuntimeVerified(modelPath: modelPath), isTrue);
       expect(provider.monitor.state.status, LocalRuntimeStatus.ready);
@@ -131,7 +131,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      final modelPath = 'test-fixtures/runtime-model-reset.gguf';
+      const modelPath = 'test-fixtures/runtime-model-reset.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,

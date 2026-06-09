@@ -464,6 +464,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     clearRuntimeVerification();
   }
 
+  void clearRuntimeVerificationForTesting() {
+    clearRuntimeVerification();
+  }
+
   Future<LocalRuntimeState> validateRuntimeInVerificationScope({
     AiModel? selectedModel,
   }) async {

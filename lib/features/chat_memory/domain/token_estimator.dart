@@ -1,14 +1,21 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
+const int _spaceCodeUnit = 32;
+const int _tabCodeUnit = 9;
+const int _newlineCodeUnit = 10;
+const int _carriageReturnCodeUnit = 13;
+
+bool _isTrimBoundary(int codeUnit) {
+  return codeUnit == _spaceCodeUnit ||
+      codeUnit == _tabCodeUnit ||
+      codeUnit == _newlineCodeUnit ||
+      codeUnit == _carriageReturnCodeUnit;
+}
+
 /// Interfaccia astratta per calcolare il peso di un turno di chat.
 /// Permette di passare da un calcolo a caratteri (approssimato) a un calcolo
 /// a token reali tramite FFI nativo o librerie specifiche del modello in uso.
 abstract class ITokenEstimator {
-  static const int _spaceCodeUnit = 32;
-  static const int _tabCodeUnit = 9;
-  static const int _newlineCodeUnit = 10;
-  static const int _carriageReturnCodeUnit = 13;
-
   int estimateSize(ChatTurn turn);
   int estimateTextSize(String text);
 
@@ -62,16 +69,10 @@ abstract class ITokenEstimator {
     return text.substring(start, end);
   }
 
-  bool _isTrimBoundary(int codeUnit) {
-    return codeUnit == _spaceCodeUnit ||
-        codeUnit == _tabCodeUnit ||
-        codeUnit == _newlineCodeUnit ||
-        codeUnit == _carriageReturnCodeUnit;
-  }
 }
 
 /// Implementazione di fallback predefinita basata sui caratteri (mantiene la retrocompatibilità)
-class CharacterLengthEstimator implements ITokenEstimator {
+class CharacterLengthEstimator extends ITokenEstimator {
   const CharacterLengthEstimator();
 
   @override
