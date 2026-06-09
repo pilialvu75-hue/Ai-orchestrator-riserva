@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -318,6 +319,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       MaterialPageRoute<void>(
                         builder: (_) => TokenConfiguratorPage(
                           settingsService: _aiRuntimeSettingsService,
+                          isWeb: kIsWeb,
                         ),
                       ),
                     );

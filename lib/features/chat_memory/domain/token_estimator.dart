@@ -4,10 +4,10 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 /// Permette di passare da un calcolo a caratteri (approssimato) a un calcolo
 /// a token reali tramite FFI nativo o librerie specifiche del modello in uso.
 abstract class ITokenEstimator {
-  static const int _spaceCode = 32;
-  static const int _tabCode = 9;
-  static const int _newlineCode = 10;
-  static const int _carriageReturnCode = 13;
+  static const int _space = 32;
+  static const int _tab = 9;
+  static const int _newline = 10;
+  static const int _carriageReturn = 13;
 
   int estimateSize(ChatTurn turn);
   int estimateTextSize(String text);
@@ -63,10 +63,10 @@ abstract class ITokenEstimator {
   }
 
   bool _isTrimBoundary(int codeUnit) {
-    return codeUnit == _spaceCode ||
-        codeUnit == _tabCode ||
-        codeUnit == _newlineCode ||
-        codeUnit == _carriageReturnCode;
+    return codeUnit == _space ||
+        codeUnit == _tab ||
+        codeUnit == _newline ||
+        codeUnit == _carriageReturn;
   }
 }
 
