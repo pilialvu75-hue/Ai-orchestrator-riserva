@@ -83,6 +83,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
         return MemoryWindowConfig.custom(
           maxContextLines: _customLineBudget,
           maxTotalSize: _customTokenBudget,
+          minContextSize: null,
           isWeb: widget.isWeb,
         );
     }
