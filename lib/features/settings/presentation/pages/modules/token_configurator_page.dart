@@ -137,10 +137,10 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ),
             style: const TextStyle(color: Colors.white),
-            items: const [
+            items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
-                child: Text('Automatico'),
+                child: Text(l10n.t('memory_window_automatic')),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
@@ -156,7 +156,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
-                child: Text('Personalizzato'),
+                child: Text(l10n.t('memory_window_custom')),
               ),
             ],
             onChanged: (value) {
