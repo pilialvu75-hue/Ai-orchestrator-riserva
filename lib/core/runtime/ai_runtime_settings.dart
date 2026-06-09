@@ -34,6 +34,7 @@ enum AiRuntimeMode {
   }
 }
 
+/// Persists runtime settings and notifies listeners when a setting changes.
 class AiRuntimeSettingsService extends ChangeNotifier {
   AiRuntimeSettingsService({required ConfigRepository configRepository})
       : _configRepository = configRepository;
