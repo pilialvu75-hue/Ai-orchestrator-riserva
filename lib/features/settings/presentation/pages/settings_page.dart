@@ -1,5 +1,4 @@
-// FILE COMPLETO AGGIORNATO — SETTINGS PAGE
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -16,6 +15,7 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/lan
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/personal_data_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/token_configurator_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/system_prompt_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/update_settings_page.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
@@ -301,6 +301,25 @@ class _SettingsPageState extends State<SettingsPage> {
                         builder: (_) => AiModePage(
                           settingsService:
                               _aiRuntimeSettingsService,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _ModuleCard(
+                  icon: Icons.route_outlined,
+                  title: 'Token Configurator',
+                  subtitle: 'Memory budget and line window presets',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => TokenConfiguratorPage(
+                          settingsService: _aiRuntimeSettingsService,
+                          isWeb: kIsWeb,
                         ),
                       ),
                     );

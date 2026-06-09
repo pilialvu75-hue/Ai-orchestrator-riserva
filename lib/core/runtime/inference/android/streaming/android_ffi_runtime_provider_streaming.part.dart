@@ -164,7 +164,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
         final trace = _dehydrateAndTraceError(error, stack);
         
         // Stampa nativa per evitare l'intercettazione ricorsiva da parte del logging dell'applicazione
-        print('[ZONE_FATAL_TERMINAL_SINK] Isolate Boundary Breach Intercepted.\n$trace');
+        stderr.writeln('[ZONE_FATAL_TERMINAL_SINK] Isolate Boundary Breach Intercepted.\n$trace');
 
         try {
           if (!controller.isClosed) {
@@ -179,7 +179,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
             });
           }
         } catch (sinkError) {
-          print('[ZONE_CRITICAL_CONTROLLER_FAIL] Fallimento definitivo nel terminal sink: ${sinkError.toString()}');
+          stderr.writeln('[ZONE_CRITICAL_CONTROLLER_FAIL] Fallimento definitivo nel terminal sink: ${sinkError.toString()}');
         }
       });
       

@@ -59,7 +59,7 @@ class ConversationMemoryService {
       '[CONTEXT_REBUILD] session=$sessionId context_turns=${result.contextTurns.length} recall_turns=${recalled.length}',
     );
 
-    return List<ChatTurn>.unmodifiable(result.contextTurns);
+    return result.contextTurns;
   }
 
   Future<void> storeMessageEmbedding({

@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
 
 class MemoryWindowResult {
@@ -6,7 +7,7 @@ class MemoryWindowResult {
     required this.contextTurns,
     required this.trimmedLines,
     required this.overflowDetected,
-    required this.totalSize, // Rinominato da totalChars a totalSize
+    required this.totalSize,
   });
 
   final List<ChatTurn> contextTurns;
@@ -18,62 +19,83 @@ class MemoryWindowResult {
 class MemoryWindowManager {
   const MemoryWindowManager({
     required ITokenEstimator tokenEstimator,
-    this.maxContextLines = 60,
-    this.maxTotalSize = 4096,     // Se l'estimator è a token, 4096 indica il Context Window del LLM!
-    this.minContextSize = 512,
-  })  : _tokenEstimator = tokenEstimator;
+    required MemoryWindowConfig Function() configProvider,
+  })  : _tokenEstimator = tokenEstimator,
+        _configProvider = configProvider;
 
   final ITokenEstimator _tokenEstimator;
-  final int maxContextLines;
-  final int maxTotalSize; // Rappresenta Token o Caratteri a seconda dell'estimator in uso
-  final int minContextSize;
+  final MemoryWindowConfig Function() _configProvider;
 
   MemoryWindowResult trimToWindow({
     required String? systemPrompt,
     required String userPrompt,
     required List<ChatTurn> contextTurns,
   }) {
-    final bounded = contextTurns.length <= maxContextLines
-        ? List<ChatTurn>.from(contextTurns)
-        : contextTurns.sublist(contextTurns.length - maxContextLines);
-    var trimmedLines = contextTurns.length - bounded.length;
-    var overflowDetected = false;
-
-    // Calcolo del peso dei prompt tramite l'estimator astratto
-    final systemSize = systemPrompt != null ? _tokenEstimator.estimateTextSize(systemPrompt) : 0;
+    final config = _configProvider();
+    final systemSize = systemPrompt == null
+        ? 0
+        : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    
-    final dynamicBudget =
-        (maxTotalSize - systemSize - userSize).clamp(minContextSize, maxTotalSize);
+    final dynamicBudget = _tokenEstimator.estimateAvailableContextSize(
+      maxTotalSize: config.maxTotalSize,
+      systemSize: systemSize,
+      userSize: userSize,
+      minContextSize: config.minContextSize,
+    );
 
-    var runningSize = _estimateTurnsSize(bounded);
-    
-    while (bounded.isNotEmpty && runningSize > dynamicBudget) {
-      overflowDetected = true;
+    final normalizedTurns = <ChatTurn>[];
+    final sizes = <int>[];
+    var trimmedLines = 0;
+    var runningSize = 0;
 
-      int indexToRemove = 0;
-      if (bounded.length > 1 && bounded.first.role == ChatRole.system) {
-        indexToRemove = 1; // Protegge il blocco <ARCHIVIO_MEMORIA_RILEVANTE>
+    for (final turn in contextTurns) {
+      if (turn.role == ChatRole.system) {
+        trimmedLines++;
+        continue;
       }
 
-      bounded.removeAt(indexToRemove);
-      trimmedLines++;
-      runningSize = _estimateTurnsSize(bounded);
+      final normalizedContent = _tokenEstimator.normalizeText(turn.content);
+      if (normalizedContent.isEmpty) {
+        trimmedLines++;
+        continue;
+      }
+
+      final normalizedTurn = normalizedContent == turn.content
+          ? turn
+          : turn.copyWith(content: normalizedContent);
+      final turnSize = _tokenEstimator.estimateSize(normalizedTurn);
+
+      normalizedTurns.add(normalizedTurn);
+      sizes.add(turnSize);
+      runningSize += turnSize;
     }
 
+    var startIndex = 0;
+    if (normalizedTurns.length > config.maxContextLines) {
+      startIndex = normalizedTurns.length - config.maxContextLines;
+      for (var index = 0; index < startIndex; index++) {
+        runningSize -= sizes[index];
+      }
+      trimmedLines += startIndex;
+    }
+
+    var overflowDetected = false;
+    while (startIndex < normalizedTurns.length && runningSize > dynamicBudget) {
+      overflowDetected = true;
+      runningSize -= sizes[startIndex];
+      startIndex++;
+      trimmedLines++;
+    }
+
+    final visibleTurns = startIndex == 0
+        ? normalizedTurns
+        : normalizedTurns.sublist(startIndex);
+
     return MemoryWindowResult(
-      contextTurns: List<ChatTurn>.unmodifiable(bounded),
+      contextTurns: List<ChatTurn>.unmodifiable(visibleTurns),
       trimmedLines: trimmedLines,
       overflowDetected: overflowDetected,
       totalSize: runningSize + systemSize + userSize,
     );
-  }
-
-  int _estimateTurnsSize(List<ChatTurn> turns) {
-    var total = 0;
-    for (final turn in turns) {
-      total += _tokenEstimator.estimateSize(turn);
-    }
-    return total;
   }
 }

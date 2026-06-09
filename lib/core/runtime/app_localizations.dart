@@ -99,6 +99,8 @@ class AppLocalizations {
       'local_ai_mode': 'Local',
       'cloud_ai_mode': 'Cloud',
       'hybrid_ai_mode': 'Hybrid',
+      'memory_window_automatic': 'Automatic',
+      'memory_window_custom': 'Custom',
       'preferred_cloud_provider': 'Preferred cloud provider',
       'preferred_cloud_provider_subtitle':
           'Used whenever cloud routing is available.',
@@ -233,6 +235,8 @@ class AppLocalizations {
       'local_ai_mode': 'Local',
       'cloud_ai_mode': 'Cloud',
       'hybrid_ai_mode': 'Hybride',
+      'memory_window_automatic': 'Automatique',
+      'memory_window_custom': 'Personnalisé',
       'preferred_cloud_provider': 'Fournisseur cloud pr\u00e9f\u00e9r\u00e9',
       'preferred_cloud_provider_subtitle':
           'Utilis\u00e9 lorsque le routage cloud est disponible.',
@@ -341,6 +345,8 @@ class AppLocalizations {
       'local_ai_mode': 'Locale',
       'cloud_ai_mode': 'Cloud',
       'hybrid_ai_mode': 'Ibrida',
+      'memory_window_automatic': 'Automatico',
+      'memory_window_custom': 'Personalizzato',
       'preferred_cloud_provider': 'Provider cloud preferito',
       'preferred_cloud_provider_subtitle':
           'Usato quando il routing cloud \u00e8 disponibile.',
@@ -472,6 +478,8 @@ class AppLocalizations {
       'local_ai_mode': 'Local',
       'cloud_ai_mode': 'Cloud',
       'hybrid_ai_mode': 'H\u00edbrido',
+      'memory_window_automatic': 'Automático',
+      'memory_window_custom': 'Personalizado',
       'preferred_cloud_provider': 'Proveedor cloud preferido',
       'preferred_cloud_provider_subtitle':
           'Se usa cuando el enrutamiento cloud est\u00e1 disponible.',
@@ -578,6 +586,8 @@ class AppLocalizations {
       'local_ai_mode': 'Lokal',
       'cloud_ai_mode': 'Cloud',
       'hybrid_ai_mode': 'Hybrid',
+      'memory_window_automatic': 'Automatisch',
+      'memory_window_custom': 'Benutzerdefiniert',
       'preferred_cloud_provider': 'Bevorzugter Cloud-Anbieter',
       'preferred_cloud_provider_subtitle':
           'Wird verwendet, wenn Cloud-Routing verf\u00fcgbar ist.',

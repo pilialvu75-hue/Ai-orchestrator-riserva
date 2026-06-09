@@ -135,7 +135,6 @@ class LocalSyncServer {
 
   void _onServerError(Object error, StackTrace stack) {
     // Log but do not crash – sync is optional, the app runs offline-first.
-    // ignore: avoid_print
-    print('[LocalSyncServer] error: $error');
+    stderr.writeln('[LocalSyncServer] error: $error');
   }
 }
