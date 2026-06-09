@@ -68,6 +68,11 @@ class AppConstants {
   static const String prefAiMode = 'ai_mode';
   static const String prefReleaseChannel = 'release_channel';
   static const String prefDeveloperMode = 'developer_mode';
+  static const String prefMemoryWindowProfile = 'memory_window.profile';
+  static const String prefMemoryWindowCustomTokenBudget =
+      'memory_window.custom_token_budget';
+  static const String prefMemoryWindowCustomLineBudget =
+      'memory_window.custom_line_budget';
   static const String prefAssistantTextSize = 'chat.assistant_text_size';
   static const String prefLlmRoleBindingPrefix = 'llm.role.binding.';
 

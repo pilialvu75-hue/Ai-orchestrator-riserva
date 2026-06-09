@@ -52,6 +52,7 @@ import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_dataso
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
 import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
@@ -205,20 +206,21 @@ Future<void> initDependencies({
   sl.registerLazySingleton<FileTreeService>(() => FileTreeService());
   sl.registerLazySingleton<AgentTaskRouter>(() => AgentTaskRouter());
   sl.registerLazySingleton<CodeChunker>(() => const CodeChunker());
-  
+
   // Registrazione dell'interfaccia astratta di stima volumetrica per disaccoppiare i Tokenizer
   sl.registerLazySingleton<ITokenEstimator>(
     () => const CharacterLengthEstimator(),
   );
-  
-  // Registrazione del manager di contenimento (Rimosso 'const' invalido, iniettato sl<ITokenEstimator>())
+
+  sl.registerFactory<MemoryWindowConfig>(
+   () => sl<AiRuntimeSettingsService>().memoryWindowConfig,
+  );
+
   sl.registerLazySingleton<MemoryWindowManager>(
-    () => MemoryWindowManager(
-      tokenEstimator: sl<ITokenEstimator>(),
-      maxContextLines: 60,
-      maxTotalSize: 16000,
-      minContextSize: 1024,
-    ),
+   () => MemoryWindowManager(
+     tokenEstimator: sl<ITokenEstimator>(),
+     configProvider: () => sl<MemoryWindowConfig>(),
+   ),
   );
   sl.registerLazySingleton<RollingContextBuilder>(
     () => RollingContextBuilder(

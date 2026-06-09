@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 
 enum AiRuntimeMode {
   local,
@@ -32,7 +34,7 @@ enum AiRuntimeMode {
   }
 }
 
-class AiRuntimeSettingsService {
+class AiRuntimeSettingsService extends ChangeNotifier {
   AiRuntimeSettingsService({required ConfigRepository configRepository})
       : _configRepository = configRepository;
 
@@ -54,6 +56,7 @@ class AiRuntimeSettingsService {
       AppConstants.prefAiMode,
       mode.storageValue,
     );
+    notifyListeners();
   }
 
   Future<void> setActiveProvider(String provider) async {
@@ -61,6 +64,7 @@ class AiRuntimeSettingsService {
       AppConstants.prefActiveProvider,
       normalizeProvider(provider),
     );
+    notifyListeners();
   }
 
   bool get developerMode =>
@@ -71,6 +75,7 @@ class AiRuntimeSettingsService {
       AppConstants.prefDeveloperMode,
       enabled,
     );
+    notifyListeners();
   }
 
   String normalizeProvider(String? provider) {
@@ -78,5 +83,101 @@ class AiRuntimeSettingsService {
       return provider;
     }
     return 'openAi';
+  }
+
+  String? get selectedModelId =>
+      _configRepository.getString(AppConstants.prefSelectedModel);
+
+  MemoryWindowProfile get memoryWindowProfile =>
+      MemoryWindowProfile.fromStoredValue(
+        _configRepository.getString(AppConstants.prefMemoryWindowProfile),
+      );
+
+  int get customMemoryTokenBudget => _readInt(
+        AppConstants.prefMemoryWindowCustomTokenBudget,
+        fallback: 8000,
+      );
+
+  int get customMemoryLineBudget => _readInt(
+        AppConstants.prefMemoryWindowCustomLineBudget,
+        fallback: 60,
+      );
+
+  Future<void> setMemoryWindowProfile(MemoryWindowProfile profile) async {
+    await _configRepository.setString(
+      AppConstants.prefMemoryWindowProfile,
+      profile.name,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setMemoryWindowCustomTokenBudget(int value) async {
+    await _configRepository.setString(
+      AppConstants.prefMemoryWindowCustomTokenBudget,
+      value.toString(),
+    );
+    notifyListeners();
+  }
+
+  Future<void> setMemoryWindowCustomLineBudget(int value) async {
+    await _configRepository.setString(
+      AppConstants.prefMemoryWindowCustomLineBudget,
+      value.toString(),
+    );
+    notifyListeners();
+  }
+
+  Future<void> setMemoryWindowCustomSettings({
+    required int tokenBudget,
+    required int lineBudget,
+  }) async {
+    await Future.wait<void>([
+      _configRepository.setString(
+        AppConstants.prefMemoryWindowCustomTokenBudget,
+        tokenBudget.toString(),
+      ),
+      _configRepository.setString(
+        AppConstants.prefMemoryWindowCustomLineBudget,
+        lineBudget.toString(),
+      ),
+    ]);
+    notifyListeners();
+  }
+
+  MemoryWindowConfig get memoryWindowConfig =>
+      resolveMemoryWindowConfig();
+
+  MemoryWindowConfig resolveMemoryWindowConfig({
+    String? modelId,
+    bool isWeb = kIsWeb,
+  }) {
+    switch (memoryWindowProfile) {
+      case MemoryWindowProfile.compact:
+        return MemoryWindowConfig.compact(isWeb: isWeb);
+      case MemoryWindowProfile.standard:
+        return MemoryWindowConfig.standard(isWeb: isWeb);
+      case MemoryWindowProfile.performance:
+        return MemoryWindowConfig.performance(isWeb: isWeb);
+      case MemoryWindowProfile.custom:
+        return MemoryWindowConfig.custom(
+          maxContextLines: customMemoryLineBudget,
+          maxTotalSize: customMemoryTokenBudget,
+          isWeb: isWeb,
+        );
+      case MemoryWindowProfile.automatic:
+        return MemoryWindowConfig.automatic(
+          modelId: modelId ?? selectedModelId,
+          isWeb: isWeb,
+        );
+    }
+  }
+
+  int _readInt(String key, {required int fallback}) {
+    final raw = _configRepository.getString(key);
+    final parsed = int.tryParse((raw ?? '').trim());
+    if (parsed == null) {
+      return fallback;
+    }
+    return parsed > 0 ? parsed : fallback;
   }
 }
