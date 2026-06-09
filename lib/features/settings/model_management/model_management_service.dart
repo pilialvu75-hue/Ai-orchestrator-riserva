@@ -447,8 +447,7 @@ class ModelManagementService {
     }
   }
 
-  // ignore: avoid_print
-  static void _log(String message) => print('[MODEL_MGMT] $message');
+  static void _log(String message) => stderr.writeln('[MODEL_MGMT] $message');
 }
 
 class _ExportCopyJob {

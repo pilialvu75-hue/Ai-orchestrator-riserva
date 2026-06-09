@@ -85,14 +85,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   // ── Forensic print helper ─────────────────────────────────────────────────
 
-  /// Synchronous forensic print emitted immediately before/after hardware-
-  /// adjacent native calls (mic stream open, ONNX binding).  Uses `print`
-  /// rather than `debugPrint` because `debugPrint` is async-buffered and
-  /// may be dropped when the hardware thread crashes before the Dart event
-  /// loop resumes.
+  /// Synchronous forensic log emitted immediately before/after hardware-
+  /// adjacent native calls (mic stream open, ONNX binding).
   static void _forensicPrint(String message) {
-    // ignore: avoid_print
-    print(message);
+    stdout.writeln(message);
   }
 
   static bool _isReadableAssetFileSync(String path) {

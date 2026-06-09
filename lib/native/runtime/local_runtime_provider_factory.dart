@@ -29,33 +29,35 @@ LocalRuntimeProvider createLocalRuntimeProvider({
   _providerCreateInProgress = true;
   try {
     _providerCreateCount++;
-  if (Platform.isAndroid) {
-    debugPrint('[RUNTIME_PATH] platform=android provider=AndroidFfiRuntimeProvider');
+    if (Platform.isAndroid) {
+      debugPrint(
+        '[RUNTIME_PATH] platform=android provider=AndroidFfiRuntimeProvider',
+      );
+      debugPrint(
+        '[RUNTIME_PROVIDER_BRANCH] provider=AndroidFfiRuntimeProvider '
+        'runtime_mode=local branch=session_api provider_path_selected=android',
+      );
+      final provider = AndroidFfiRuntimeProvider(
+        runtimeStateMachine: runtimeStateMachine,
+        developerModeProvider: developerModeProvider,
+      );
+      debugPrint(
+        '[PROVIDER_CREATE] type=AndroidFfiRuntimeProvider hash=${provider.hashCode.toRadixString(16)} create_count=$_providerCreateCount',
+      );
+      return provider;
+    }
+    debugPrint('[RUNTIME_PATH] platform=desktop provider=LocalRuntimeProvider');
     debugPrint(
-      '[RUNTIME_PROVIDER_BRANCH] provider=AndroidFfiRuntimeProvider '
-      'runtime_mode=local branch=session_api provider_path_selected=android',
+      '[RUNTIME_PROVIDER_BRANCH] provider=LocalRuntimeProvider '
+      'runtime_mode=desktop branch=cli_process provider_path_selected=desktop',
     );
-    final provider = AndroidFfiRuntimeProvider(
-      runtimeStateMachine: runtimeStateMachine,
+    final provider = LocalRuntimeProvider(
       developerModeProvider: developerModeProvider,
     );
     debugPrint(
-      '[PROVIDER_CREATE] type=AndroidFfiRuntimeProvider hash=${provider.hashCode.toRadixString(16)} create_count=$_providerCreateCount',
+      '[PROVIDER_CREATE] type=LocalRuntimeProvider hash=${provider.hashCode.toRadixString(16)} create_count=$_providerCreateCount',
     );
     return provider;
-  }
-  debugPrint('[RUNTIME_PATH] platform=desktop provider=LocalRuntimeProvider');
-  debugPrint(
-    '[RUNTIME_PROVIDER_BRANCH] provider=LocalRuntimeProvider '
-    'runtime_mode=desktop branch=cli_process provider_path_selected=desktop',
-  );
-  final provider = LocalRuntimeProvider(
-    developerModeProvider: developerModeProvider,
-  );
-  debugPrint(
-    '[PROVIDER_CREATE] type=LocalRuntimeProvider hash=${provider.hashCode.toRadixString(16)} create_count=$_providerCreateCount',
-  );
-  return provider;
   } finally {
     _providerCreateInProgress = false;
   }

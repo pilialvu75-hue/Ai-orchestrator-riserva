@@ -18,7 +18,7 @@ String _dehydrateAndTraceError(Object e, StackTrace? st) {
   }
   
   // Stampa nativa immediata per bypassare qualsiasi layer reattivo o asincrono dell'applicazione
-  print('[AI_ORCHESTRATOR_TELEMETRY] Eccezione intercettata nel modulo concorrenza. Tipo: $errorType, Hash: $errorHash');
+  stderr.writeln('[AI_ORCHESTRATOR_TELEMETRY] Eccezione intercettata nel modulo concorrenza. Tipo: $errorType, Hash: $errorHash');
   
   return buffer.toString();
 }

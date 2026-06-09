@@ -270,7 +270,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                 } catch (e, st) {
                   // TERMINAL SINK INTERNO DI VERIFICA: Cattura, deidratazione e rimozione del leak degli oggetti
                   final verificationTrace = _dehydrateAndTraceError(e, st);
-                  print('[VERIFICATION_SCOPE_FAULT_TERMINAL_SINK] Eccezione intercettata nel modulo di verifica.\n$verificationTrace');
+                  stderr.writeln('[VERIFICATION_SCOPE_FAULT_TERMINAL_SINK] Eccezione intercettata nel modulo di verifica.\n$verificationTrace');
                   
                   try {
                     if (!controller.isClosed) {
@@ -282,7 +282,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                       });
                     }
                   } catch (sinkError) {
-                    print('[VERIFICATION_SINK_FAIL] Fallimento definitivo nel controller di verifica: $sinkError');
+                    stderr.writeln('[VERIFICATION_SINK_FAIL] Fallimento definitivo nel controller di verifica: $sinkError');
                   }
                   
                   verificationMonitor.update(
@@ -301,12 +301,12 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
           );
         } catch (e, st) {
           final trace = _dehydrateAndTraceError(e, st);
-          print('[VERIFICATION_QUEUE_FAULT_TERMINAL_SINK] Eccezione intercettata a livello di coda di verifica.\n$trace');
+          stderr.writeln('[VERIFICATION_QUEUE_FAULT_TERMINAL_SINK] Eccezione intercettata a livello di coda di verifica.\n$trace');
         }
       }, (error, stack) {
         // TERMINAL SINK ESTERNO DI VERIFICA (ZONE BOUNDARY)
         final trace = _dehydrateAndTraceError(error, stack);
-        print('[VERIFICATION_ZONE_FATAL_TERMINAL_SINK] Eccezione asincrona non gestita catturata nella zona di verifica.\n$trace');
+        stderr.writeln('[VERIFICATION_ZONE_FATAL_TERMINAL_SINK] Eccezione asincrona non gestita catturata nella zona di verifica.\n$trace');
         
         try {
           if (!controller.isClosed) {
@@ -318,7 +318,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
             });
           }
         } catch (sinkError) {
-          print('[VERIFICATION_ZONE_SINK_FAIL] Fallimento nel sink della zona di verifica: $sinkError');
+          stderr.writeln('[VERIFICATION_ZONE_SINK_FAIL] Fallimento nel sink della zona di verifica: $sinkError');
         }
       });
 

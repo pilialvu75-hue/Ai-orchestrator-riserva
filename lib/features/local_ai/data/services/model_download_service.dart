@@ -185,8 +185,7 @@ class ModelDownloadService {
       // errors, network errors, or unexpected auth challenges).
       final statusCode = e.response?.statusCode;
       final responseBody = e.response?.data?.toString() ?? '<no body>';
-      // ignore: avoid_print
-      print(
+      stderr.writeln(
         '[ModelDownloadService] Download failed for ${model.id}: '
         'HTTP $statusCode – $responseBody',
       );
@@ -269,8 +268,7 @@ class ModelDownloadService {
       // Log the full server response to help diagnose failures.
       final statusCode = e.response?.statusCode;
       final responseBody = e.response?.data?.toString() ?? '<no body>';
-      // ignore: avoid_print
-      print(
+      stderr.writeln(
         '[ModelDownloadService] Custom download failed for $modelId: '
         'HTTP $statusCode – $responseBody',
       );

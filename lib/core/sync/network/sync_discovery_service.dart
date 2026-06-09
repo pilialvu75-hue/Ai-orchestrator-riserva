@@ -69,8 +69,7 @@ class SyncDiscoveryService {
     } catch (e) {
       // Discovery is optional; if binding fails the app continues without sync.
       // Log to aid troubleshooting (e.g. port in use, missing permissions).
-      // ignore: avoid_print
-      print('[SyncDiscoveryService] could not bind discovery socket: $e');
+      stderr.writeln('[SyncDiscoveryService] could not bind discovery socket: $e');
       _socket = null;
     }
   }
@@ -107,8 +106,7 @@ class SyncDiscoveryService {
       );
     } catch (e) {
       // Network not available or interface error; log for debugging.
-      // ignore: avoid_print
-      print('[SyncDiscoveryService] broadcast failed: $e');
+      stderr.writeln('[SyncDiscoveryService] broadcast failed: $e');
     }
   }
 
@@ -136,7 +134,6 @@ class SyncDiscoveryService {
 
   void _onError(Object error) {
     // Log but do not crash – discovery is best-effort.
-    // ignore: avoid_print
-    print('[SyncDiscoveryService] error: $error');
+    stderr.writeln('[SyncDiscoveryService] error: $error');
   }
 }
