@@ -97,7 +97,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
         widget.isWeb && _customTokenBudget > 8000 ? 8000 : _customTokenBudget;
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
-    final showWebWarning =
+    final isWebAndOversized =
         widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
         _customTokenBudget > 8000;
@@ -168,11 +168,10 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
           ),
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
-          if (showWebWarning) ...[
+          if (isWebAndOversized) ...[
             const SizedBox(height: 12),
             const _WarningBanner(
-              text:
-                  'Web safety clamp: custom budgets above 8000 are reduced automatically.',
+              text: 'Web safety clamp: budget exceeds standard limits',
             ),
           ],
           if (_profile == MemoryWindowProfile.custom) ...[

@@ -71,13 +71,16 @@ void main() {
         )),
       );
 
-      expect(find.textContaining('Web safety clamp'), findsOneWidget);
+      expect(find.text('Web safety clamp: budget exceeds standard limits'),
+          findsOneWidget);
     });
 
     testWidgets('maps dropdown options to persisted profiles', (tester) async {
       final service = await _createService(<String, Object>{
         AppConstants.prefMemoryWindowProfile: 'automatic',
       });
+      final defaultProfiles = MemoryWindowProfile.values;
+      expect(defaultProfiles, contains(MemoryWindowProfile.performance));
       await tester.pumpWidget(
         _wrap(TokenConfiguratorPage(
           settingsService: service,
