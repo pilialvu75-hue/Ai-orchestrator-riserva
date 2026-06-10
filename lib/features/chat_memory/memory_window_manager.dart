@@ -78,9 +78,14 @@ class MemoryWindowManager {
     }
 
     var overflowDetected = false;
-    while (startIndex < normalizedTurns.length &&
-        (runningSize > effectiveBudget ||
-            normalizedTurns.length - startIndex > config.maxContextLines)) {
+    while (startIndex < normalizedTurns.length) {
+      final remainingLines = normalizedTurns.length - startIndex;
+      final shouldTrimForBudget = runningSize > effectiveBudget;
+      final shouldTrimForLineLimit = remainingLines > config.maxContextLines;
+      if (!shouldTrimForBudget && !shouldTrimForLineLimit) {
+        break;
+      }
+
       if (runningSize > realContextBudget) {
         overflowDetected = true;
       }
