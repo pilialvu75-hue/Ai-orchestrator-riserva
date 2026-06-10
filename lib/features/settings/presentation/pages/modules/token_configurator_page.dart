@@ -99,7 +99,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
 
-    // FIX 1 — Banner Web basato sul valore locale (pronto al primo frame)
+    // Allineato ai test: usa il valore locale già inizializzato
     final showWebWarning = widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
         _customTokenBudget > 8000;
@@ -126,7 +126,6 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             style: TextStyle(color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 16),
-
           DropdownButtonFormField<MemoryWindowProfile>(
             initialValue: _profile,
             dropdownColor: const Color(0xFF151515),
@@ -141,13 +140,11 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ),
             style: const TextStyle(color: Colors.white),
-
-            // FIX 2 — Salvataggio sincrono per far passare il test
+            // Allineato ai test: salvataggio sincrono
             onChanged: (value) async {
               if (value == null) return;
               await _saveProfile(value);
             },
-
             items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
@@ -171,10 +168,8 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ],
           ),
-
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
-
           if (showWebWarning) ...[
             const SizedBox(height: 12),
             const _WarningBanner(
@@ -182,7 +177,6 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
                   'Web safety clamp: custom budgets above 8000 are reduced automatically.',
             ),
           ],
-
           if (_profile == MemoryWindowProfile.custom) ...[
             const SizedBox(height: 20),
             Text(
@@ -213,7 +207,6 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               },
             ),
           ],
-
           const SizedBox(height: 20),
           Align(
             alignment: Alignment.centerRight,
