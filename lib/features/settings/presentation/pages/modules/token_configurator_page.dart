@@ -34,8 +34,9 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     _customTokenBudget = _settingsService.customMemoryTokenBudget;
     _customLineBudget = _settingsService.customMemoryLineBudget;
 
-    // Garantisce che la UI sia completamente costruita al primo frame
+    // Ensures the dropdown shows the persisted profile on the first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Forces a rebuild so the dropdown reflects the initialized profile.
       if (mounted) setState(() {});
     });
   }
@@ -103,9 +104,8 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
         widget.isWeb && _customTokenBudget > 8000 ? 8000 : _customTokenBudget;
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
-
-    // Banner basato sul valore locale, pronto al primo frame
-    final showWebWarning = widget.isWeb &&
+    final isWebAndOversized =
+        widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
         _customTokenBudget > 8000;
 
@@ -133,7 +133,8 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
           const SizedBox(height: 16),
 
           DropdownButtonFormField<MemoryWindowProfile>(
-            value: _profile,
+            key: const Key('memory-window-profile-dropdown'),
+            initialValue: _profile,
             dropdownColor: const Color(0xFF151515),
             decoration: const InputDecoration(
               labelText: 'Memory profile',
@@ -150,38 +151,36 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               if (value == null) return;
               await _saveProfile(value);
             },
-            items: const [
+            items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
-                child: Text('Automatic'),
+                child: Text(l10n.t('memory_window_automatic')),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
                 child: Text('4K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
                 child: Text('8K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
                 child: Text('16K'),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
-                child: Text('Custom'),
+                child: Text(l10n.t('memory_window_custom')),
               ),
             ],
           ),
 
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
-
-          if (showWebWarning) ...[
+          if (isWebAndOversized) ...[
             const SizedBox(height: 12),
             const _WarningBanner(
-              text:
-                  'Web safety clamp: custom budgets above 8000 are reduced automatically.',
+              text: 'Web safety clamp: budget exceeds standard limits',
             ),
           ],
 

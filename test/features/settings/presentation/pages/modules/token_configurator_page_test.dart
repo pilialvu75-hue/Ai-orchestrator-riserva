@@ -70,8 +70,10 @@ void main() {
           isWeb: true,
         )),
       );
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('Web safety clamp'), findsOneWidget);
+      expect(find.text('Web safety clamp: budget exceeds standard limits'),
+          findsOneWidget);
     });
 
     testWidgets('maps dropdown options to persisted profiles', (tester) async {
@@ -84,9 +86,21 @@ void main() {
           isWeb: false,
         )),
       );
-
-      await tester.tap(find.byType(DropdownButtonFormField<MemoryWindowProfile>));
       await tester.pumpAndSettle();
+      final dropdownFinder =
+          find.byKey(const Key('memory-window-profile-dropdown'));
+      final fallbackDropdownFinder =
+          find.byType(DropdownButtonFormField<MemoryWindowProfile>);
+      await tester.tap(
+        dropdownFinder.evaluate().isNotEmpty
+            ? dropdownFinder
+            : fallbackDropdownFinder,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('4K'), findsOneWidget);
+      expect(find.text('8K'), findsOneWidget);
+      expect(find.text('16K'), findsAtLeastNWidgets(1));
+      expect(find.text('Custom'), findsOneWidget);
       await tester.tap(find.text('16K').last);
       await tester.pumpAndSettle();
 

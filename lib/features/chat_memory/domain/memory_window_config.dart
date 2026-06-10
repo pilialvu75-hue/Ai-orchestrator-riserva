@@ -110,9 +110,12 @@ class MemoryWindowConfig {
       min: 512,
       max: isWeb ? _webMaxTotalSize : _desktopMaxTotalSize,
     );
-    // Se il chiamante passa esplicitamente minContextSize, lo rispettiamo
-    // con un floor minimo di 32 (sufficiente per i test e per l'uso reale).
-    // Se non viene passato, usiamo il default con il floor di produzione (256).
+    // If the caller passes minContextSize explicitly, we respect it.
+    // We still apply the `_clamp(..., min: 32, ...)` floor so very small custom
+    // budgets remain usable in tests and in the UI. 32 matches the smallest
+    // explicit custom budget our settings UI accepts.
+    // If it is not passed, we use `_defaultMinContextSize(...)` with the
+    // production floor (`_minimumContextSizeFloor`).
     final normalizedMinContextSize = minContextSize != null
         ? _clamp(minContextSize, min: 32, max: normalizedMaxTotalSize)
         : _clamp(
