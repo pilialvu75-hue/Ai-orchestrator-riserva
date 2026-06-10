@@ -125,7 +125,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<MemoryWindowProfile>(
-            initialValue: _profile,
+            value: _profile,
             dropdownColor: const Color(0xFF151515),
             decoration: const InputDecoration(
               labelText: 'Memory profile',
@@ -140,22 +140,27 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             style: const TextStyle(color: Colors.white),
             items: [
               DropdownMenuItem(
+                key: const ValueKey('profile_automatic'),
                 value: MemoryWindowProfile.automatic,
                 child: Text(l10n.t('memory_window_automatic')),
               ),
               const DropdownMenuItem(
+                key: ValueKey('profile_compact'),
                 value: MemoryWindowProfile.compact,
                 child: Text('4K'),
               ),
               const DropdownMenuItem(
+                key: ValueKey('profile_standard'),
                 value: MemoryWindowProfile.standard,
                 child: Text('8K'),
               ),
               const DropdownMenuItem(
+                key: ValueKey('profile_performance'),
                 value: MemoryWindowProfile.performance,
                 child: Text('16K'),
               ),
               DropdownMenuItem(
+                key: const ValueKey('profile_custom'),
                 value: MemoryWindowProfile.custom,
                 child: Text(l10n.t('memory_window_custom')),
               ),
