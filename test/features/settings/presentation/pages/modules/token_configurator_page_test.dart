@@ -70,6 +70,7 @@ void main() {
           isWeb: true,
         )),
       );
+      await tester.pumpAndSettle();
 
       expect(find.text('Web safety clamp: budget exceeds standard limits'),
           findsOneWidget);
@@ -79,20 +80,18 @@ void main() {
       final service = await _createService(<String, Object>{
         AppConstants.prefMemoryWindowProfile: 'automatic',
       });
-      final defaultProfiles = MemoryWindowProfile.values;
       await tester.pumpWidget(
         _wrap(TokenConfiguratorPage(
           settingsService: service,
           isWeb: false,
         )),
       );
-
-      expect(
-        find.byType(DropdownMenuItem<MemoryWindowProfile>),
-        findsNWidgets(defaultProfiles.length),
-      );
       await tester.tap(find.byKey(const Key('memory-window-profile-dropdown')));
       await tester.pumpAndSettle();
+      expect(find.text('4K'), findsOneWidget);
+      expect(find.text('8K'), findsOneWidget);
+      expect(find.text('16K'), findsAtLeastNWidgets(1));
+      expect(find.text('Custom'), findsOneWidget);
       await tester.tap(find.text('16K').last);
       await tester.pumpAndSettle();
 

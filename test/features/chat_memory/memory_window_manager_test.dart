@@ -105,7 +105,7 @@ void main() {
       final manager = MemoryWindowManager(
         tokenEstimator: const CharacterLengthEstimator(),
         configProvider: () => MemoryWindowConfig.custom(
-          maxContextLines: 2,
+          maxContextLines: 16,
           maxTotalSize: 1000,
           isWeb: false,
         ),
@@ -114,18 +114,27 @@ void main() {
       final result = manager.trimToWindow(
         systemPrompt: null,
         userPrompt: 'prompt',
-        contextTurns: const <ChatTurn>[
-          ChatTurn(role: ChatRole.system, content: 'system'),
-          ChatTurn(role: ChatRole.user, content: 'first'),
-          ChatTurn(role: ChatRole.assistant, content: 'second'),
-          ChatTurn(role: ChatRole.user, content: 'third'),
-        ],
+        contextTurns: List<ChatTurn>.generate(18, (index) {
+          if (index == 0) {
+            return const ChatTurn(role: ChatRole.system, content: 'system');
+          }
+          return ChatTurn(
+            role: index.isEven ? ChatRole.assistant : ChatRole.user,
+            content: 'turn-$index',
+          );
+        }),
       );
 
-      expect(result.contextTurns, const <ChatTurn>[
-        ChatTurn(role: ChatRole.assistant, content: 'second'),
-        ChatTurn(role: ChatRole.user, content: 'third'),
-      ]);
+      expect(
+        result.contextTurns,
+        List<ChatTurn>.generate(16, (index) {
+          final turnNumber = index + 2;
+          return ChatTurn(
+            role: turnNumber.isEven ? ChatRole.assistant : ChatRole.user,
+            content: 'turn-$turnNumber',
+          );
+        }),
+      );
       expect(result.trimmedLines, 2);
     });
 
@@ -133,26 +142,29 @@ void main() {
       final manager = MemoryWindowManager(
         tokenEstimator: const CharacterLengthEstimator(),
         configProvider: () => MemoryWindowConfig.custom(
-          maxContextLines: 10,
-          maxTotalSize: 70,
+          maxContextLines: 16,
+          maxTotalSize: 512,
           minContextSize: 64,
           isWeb: false,
         ),
       );
+      final userTurn = 'a' * 200;
+      final assistantTurn = 'b' * 200;
+      final latestTurn = 'c' * 200;
 
       final result = manager.trimToWindow(
         systemPrompt: 'system-1234',
         userPrompt: 'prompt-5678',
-        contextTurns: const <ChatTurn>[
-          ChatTurn(role: ChatRole.user, content: 'aaaaaaaaaaaaaaaaaaaa'),
-          ChatTurn(role: ChatRole.assistant, content: 'bbbbbbbbbbbbbbbbbbbb'),
-          ChatTurn(role: ChatRole.user, content: 'cccccccccccccccccccc'),
+        contextTurns: <ChatTurn>[
+          ChatTurn(role: ChatRole.user, content: userTurn),
+          ChatTurn(role: ChatRole.assistant, content: assistantTurn),
+          ChatTurn(role: ChatRole.user, content: latestTurn),
         ],
       );
 
-      expect(result.contextTurns, const <ChatTurn>[
-        ChatTurn(role: ChatRole.assistant, content: 'bbbbbbbbbbbbbbbbbbbb'),
-        ChatTurn(role: ChatRole.user, content: 'cccccccccccccccccccc'),
+      expect(result.contextTurns, <ChatTurn>[
+        ChatTurn(role: ChatRole.assistant, content: assistantTurn),
+        ChatTurn(role: ChatRole.user, content: latestTurn),
       ]);
       expect(result.trimmedLines, 1);
       expect(result.overflowDetected, isTrue);
