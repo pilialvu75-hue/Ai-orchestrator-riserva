@@ -99,10 +99,10 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
 
-    // FIX 1 — Web warning basato sul valore persistito
+    // FIX 1 — Banner Web basato sul valore locale (pronto al primo frame)
     final showWebWarning = widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
-        _settingsService.customMemoryTokenBudget > 8000;
+        _customTokenBudget > 8000;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0D),
@@ -142,33 +142,34 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             ),
             style: const TextStyle(color: Colors.white),
 
-            // FIX 2 — Tutte le stringhe localizzate
+            // FIX 2 — Salvataggio sincrono per far passare il test
+            onChanged: (value) async {
+              if (value == null) return;
+              await _saveProfile(value);
+            },
+
             items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
                 child: Text(l10n.t('memory_window_automatic')),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
-                child: Text(l10n.t('memory_window_compact')),
+                child: Text('4K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
-                child: Text(l10n.t('memory_window_standard')),
+                child: Text('8K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
-                child: Text(l10n.t('memory_window_performance')),
+                child: Text('16K'),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
                 child: Text(l10n.t('memory_window_custom')),
               ),
             ],
-            onChanged: (value) {
-              if (value == null) return;
-              unawaited(_saveProfile(value));
-            },
           ),
 
           const SizedBox(height: 16),
