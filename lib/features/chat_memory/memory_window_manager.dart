@@ -36,12 +36,7 @@ class MemoryWindowManager {
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    final dynamicBudget = _tokenEstimator.estimateAvailableContextSize(
-      maxTotalSize: config.maxTotalSize,
-      systemSize: systemSize,
-      userSize: userSize,
-      minContextSize: config.minContextSize,
-    );
+    final realContextBudget = config.maxTotalSize - systemSize - userSize;
 
     final normalizedTurns = <ChatTurn>[];
     final sizes = <int>[];
@@ -80,8 +75,12 @@ class MemoryWindowManager {
     }
 
     var overflowDetected = false;
-    while (startIndex < normalizedTurns.length && runningSize > dynamicBudget) {
-      overflowDetected = true;
+    while (startIndex < normalizedTurns.length &&
+        (runningSize > realContextBudget ||
+            normalizedTurns.length - startIndex > config.maxContextLines)) {
+      if (runningSize > realContextBudget) {
+        overflowDetected = true;
+      }
       runningSize -= sizes[startIndex];
       startIndex++;
       trimmedLines++;

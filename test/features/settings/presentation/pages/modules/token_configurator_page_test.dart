@@ -85,7 +85,7 @@ void main() {
         )),
       );
 
-      await tester.tap(find.byType(DropdownButtonFormField<MemoryWindowProfile>));
+      await tester.tap(find.byKey(const Key('memory-window-profile-dropdown')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('16K').last);
       await tester.pumpAndSettle();
