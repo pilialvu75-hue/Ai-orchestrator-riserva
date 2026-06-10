@@ -87,7 +87,7 @@ class MemoryWindowManager {
         break;
       }
 
-      if (runningSize > availableContextBudget) {
+      if (shouldTrimForBudget) {
         overflowDetected = true;
       }
       runningSize -= sizes[startIndex];
