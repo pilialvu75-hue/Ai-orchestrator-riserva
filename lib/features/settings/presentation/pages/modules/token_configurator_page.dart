@@ -33,6 +33,11 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     _profile = _settingsService.memoryWindowProfile;
     _customTokenBudget = _settingsService.customMemoryTokenBudget;
     _customLineBudget = _settingsService.customMemoryLineBudget;
+
+    // Ensures the UI is fully built on the first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _saveProfile(MemoryWindowProfile profile) async {
@@ -93,6 +98,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final preview = _previewConfig();
+
     final displayBudget =
         widget.isWeb && _customTokenBudget > 8000 ? 8000 : _customTokenBudget;
     final displayLines =
@@ -108,9 +114,9 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
         backgroundColor: const Color(0xFF0D0D0D),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
+        title: const Text(
           'Token Configurator',
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
           ),
@@ -124,6 +130,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             style: TextStyle(color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 16),
+
           DropdownButtonFormField<MemoryWindowProfile>(
             key: const Key('memory-window-profile-dropdown'),
             initialValue: _profile,
@@ -139,33 +146,34 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ),
             style: const TextStyle(color: Colors.white),
-            items: [
+            onChanged: (value) async {
+              if (value == null) return;
+              await _saveProfile(value);
+            },
+            items: const [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
-                child: Text(l10n.t('memory_window_automatic')),
+                child: Text('Automatic'),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
                 child: Text('4K'),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
                 child: Text('8K'),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
                 child: Text('16K'),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
-                child: Text(l10n.t('memory_window_custom')),
+                child: Text('Custom'),
               ),
             ],
-            onChanged: (value) {
-              if (value == null) return;
-              unawaited(_saveProfile(value));
-            },
           ),
+
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
           if (isWebAndOversized) ...[
@@ -174,6 +182,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               text: 'Web safety clamp: budget exceeds standard limits',
             ),
           ],
+
           if (_profile == MemoryWindowProfile.custom) ...[
             const SizedBox(height: 20),
             Text(
@@ -204,6 +213,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               },
             ),
           ],
+
           const SizedBox(height: 20),
           Align(
             alignment: Alignment.centerRight,
