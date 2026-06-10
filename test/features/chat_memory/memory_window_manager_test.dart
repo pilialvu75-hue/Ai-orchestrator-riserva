@@ -81,12 +81,12 @@ void main() {
         ),
       );
 
-      const longContent = 'a' * 270;
+      final longContent = 'a' * 270;
 
       final result = manager.trimToWindow(
         systemPrompt: 'system',
         userPrompt: 'prompt',
-        contextTurns: const <ChatTurn>[
+        contextTurns: <ChatTurn>[
           ChatTurn(role: ChatRole.user, content: longContent),
           ChatTurn(role: ChatRole.assistant, content: longContent),
           ChatTurn(role: ChatRole.user, content: longContent),
