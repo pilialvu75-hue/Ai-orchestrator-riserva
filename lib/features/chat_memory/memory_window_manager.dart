@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
@@ -36,7 +38,7 @@ class MemoryWindowManager {
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    final realContextBudget = config.maxTotalSize - systemSize - userSize;
+    final realContextBudget = math.max(0, config.maxTotalSize - systemSize - userSize);
     final effectiveBudget = realContextBudget < config.minContextSize
         ? config.minContextSize
         : realContextBudget;
