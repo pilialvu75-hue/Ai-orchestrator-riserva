@@ -33,6 +33,11 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     _profile = _settingsService.memoryWindowProfile;
     _customTokenBudget = _settingsService.customMemoryTokenBudget;
     _customLineBudget = _settingsService.customMemoryLineBudget;
+
+    // Garantisce che la UI sia completamente costruita al primo frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _saveProfile(MemoryWindowProfile profile) async {
@@ -93,12 +98,14 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final preview = _previewConfig();
+
     final displayBudget =
         widget.isWeb && _customTokenBudget > 8000 ? 8000 : _customTokenBudget;
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
-    final showWebWarning =
-        widget.isWeb &&
+
+    // Banner basato sul valore locale, pronto al primo frame
+    final showWebWarning = widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
         _customTokenBudget > 8000;
 
@@ -108,9 +115,9 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
         backgroundColor: const Color(0xFF0D0D0D),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
+        title: const Text(
           'Token Configurator',
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
           ),
@@ -124,6 +131,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             style: TextStyle(color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 16),
+
           DropdownButtonFormField<MemoryWindowProfile>(
             value: _profile,
             dropdownColor: const Color(0xFF151515),
@@ -138,40 +146,37 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ),
             style: const TextStyle(color: Colors.white),
-            items: [
+            onChanged: (value) async {
+              if (value == null) return;
+              await _saveProfile(value);
+            },
+            items: const [
               DropdownMenuItem(
-                key: const ValueKey('profile_automatic'),
                 value: MemoryWindowProfile.automatic,
-                child: Text(l10n.t('memory_window_automatic')),
+                child: Text('Automatic'),
               ),
-              const DropdownMenuItem(
-                key: ValueKey('profile_compact'),
+              DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
                 child: Text('4K'),
               ),
-              const DropdownMenuItem(
-                key: ValueKey('profile_standard'),
+              DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
                 child: Text('8K'),
               ),
-              const DropdownMenuItem(
-                key: ValueKey('profile_performance'),
+              DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
                 child: Text('16K'),
               ),
               DropdownMenuItem(
-                key: const ValueKey('profile_custom'),
                 value: MemoryWindowProfile.custom,
-                child: Text(l10n.t('memory_window_custom')),
+                child: Text('Custom'),
               ),
             ],
-            onChanged: (value) {
-              if (value == null) return;
-              unawaited(_saveProfile(value));
-            },
           ),
+
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
+
           if (showWebWarning) ...[
             const SizedBox(height: 12),
             const _WarningBanner(
@@ -179,6 +184,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
                   'Web safety clamp: custom budgets above 8000 are reduced automatically.',
             ),
           ],
+
           if (_profile == MemoryWindowProfile.custom) ...[
             const SizedBox(height: 20),
             Text(
@@ -209,6 +215,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               },
             ),
           ],
+
           const SizedBox(height: 20),
           Align(
             alignment: Alignment.centerRight,
