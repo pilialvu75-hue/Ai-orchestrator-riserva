@@ -110,11 +110,16 @@ class MemoryWindowConfig {
       min: 512,
       max: isWeb ? _webMaxTotalSize : _desktopMaxTotalSize,
     );
-    final normalizedMinContextSize = _clamp(
-      minContextSize ?? _defaultMinContextSize(normalizedMaxTotalSize),
-      min: _minimumContextSizeFloor,
-      max: normalizedMaxTotalSize,
-    );
+    // Se il chiamante passa esplicitamente minContextSize, lo rispettiamo
+    // con un floor minimo di 32 (sufficiente per i test e per l'uso reale).
+    // Se non viene passato, usiamo il default con il floor di produzione (256).
+    final normalizedMinContextSize = minContextSize != null
+        ? _clamp(minContextSize, min: 32, max: normalizedMaxTotalSize)
+        : _clamp(
+            _defaultMinContextSize(normalizedMaxTotalSize),
+            min: _minimumContextSizeFloor,
+            max: normalizedMaxTotalSize,
+          );
 
     return MemoryWindowConfig._(
       profile: MemoryWindowProfile.custom,
