@@ -105,7 +105,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
 
-    // FIX: banner calcolato sul valore locale (pronto al primo frame)
+    // FIX: banner basato sul valore locale (pronto al primo frame)
     final showWebWarning = widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
         _customTokenBudget > 8000;
@@ -154,6 +154,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               await _saveProfile(value);
             },
 
+            // FIX: label esattamente come nei test
             items: const [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
