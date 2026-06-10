@@ -1,5 +1,3 @@
-E uguale a questo?:
-
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
