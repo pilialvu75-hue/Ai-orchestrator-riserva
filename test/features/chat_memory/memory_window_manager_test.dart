@@ -96,5 +96,34 @@ void main() {
           isTrue);
       expect(result.contextTurns.last.content, 'cccccccccccccccccccc');
     });
+
+    test('does not floor the available context budget before trimming', () {
+      final manager = MemoryWindowManager(
+        tokenEstimator: const CharacterLengthEstimator(),
+        configProvider: () => MemoryWindowConfig.custom(
+          maxContextLines: 10,
+          maxTotalSize: 70,
+          minContextSize: 64,
+          isWeb: false,
+        ),
+      );
+
+      final result = manager.trimToWindow(
+        systemPrompt: 'system-1234',
+        userPrompt: 'prompt-5678',
+        contextTurns: const <ChatTurn>[
+          ChatTurn(role: ChatRole.user, content: 'aaaaaaaaaaaaaaaaaaaa'),
+          ChatTurn(role: ChatRole.assistant, content: 'bbbbbbbbbbbbbbbbbbbb'),
+          ChatTurn(role: ChatRole.user, content: 'cccccccccccccccccccc'),
+        ],
+      );
+
+      expect(result.contextTurns, const <ChatTurn>[
+        ChatTurn(role: ChatRole.assistant, content: 'bbbbbbbbbbbbbbbbbbbb'),
+        ChatTurn(role: ChatRole.user, content: 'cccccccccccccccccccc'),
+      ]);
+      expect(result.trimmedLines, 1);
+      expect(result.overflowDetected, isTrue);
+    });
   });
 }

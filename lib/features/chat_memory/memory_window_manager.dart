@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
@@ -38,10 +36,7 @@ class MemoryWindowManager {
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    final availableContextBudget = math.max(
-      0,
-      config.maxTotalSize - systemSize - userSize,
-    );
+    final availableContextBudget = config.maxTotalSize - systemSize - userSize;
     final normalizedTurns = <ChatTurn>[];
     final sizes = <int>[];
     var trimmedLines = 0;
