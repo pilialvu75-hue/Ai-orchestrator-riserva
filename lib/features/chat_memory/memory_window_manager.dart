@@ -32,22 +32,28 @@ class MemoryWindowManager {
     required List<ChatTurn> contextTurns,
   }) {
     final config = _configProvider();
+    
+    // 1. Calcolo rigoroso dello spazio occupato dai prompt statici
     final systemSize = systemPrompt == null
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    final dynamicBudget = _tokenEstimator.estimateAvailableContextSize(
-      maxTotalSize: config.maxTotalSize,
-      systemSize: systemSize,
-      userSize: userSize,
-      minContextSize: config.minContextSize,
-    );
+
+    // 2. Determinazione del budget reale disponibile per la cronologia dei turni
+    final allowedContextSize = config.maxTotalSize - systemSize - userSize;
+    
+    // Se è configurato un minContextSize ed il budget reale è inferiore, 
+    // lo proteggiamo per garantire la soglia minima di operatività dell'AI.
+    final effectiveBudget = config.minContextSize != null && allowedContextSize < config.minContextSize!
+        ? config.minContextSize!
+        : allowedContextSize;
 
     final normalizedTurns = <ChatTurn>[];
     final sizes = <int>[];
     var trimmedLines = 0;
     var runningSize = 0;
 
+    // 3. Filtro e normalizzazione iniziale dei turni (esclusione Turni di Sistema interni)
     for (final turn in contextTurns) {
       if (turn.role == ChatRole.system) {
         trimmedLines++;
@@ -71,17 +77,23 @@ class MemoryWindowManager {
     }
 
     var startIndex = 0;
-    if (normalizedTurns.length > config.maxContextLines) {
-      startIndex = normalizedTurns.length - config.maxContextLines;
-      for (var index = 0; index < startIndex; index++) {
-        runningSize -= sizes[index];
-      }
-      trimmedLines += startIndex;
-    }
-
     var overflowDetected = false;
-    while (startIndex < normalizedTurns.length && runningSize > dynamicBudget) {
-      overflowDetected = true;
+
+    // 4. Unico ciclo di sbarramento: rimuove dal turno più vecchio (startIndex) 
+    // finché non vengono rispettati contemporaneamente sia il limite di linee che il budget di token.
+    while (startIndex < normalizedTurns.length) {
+      final remainingLines = normalizedTurns.length - startIndex;
+      final budgetViolated = runningSize > effectiveBudget;
+      final linesViolated = remainingLines > config.maxContextLines;
+
+      if (!budgetViolated && !linesViolated) {
+        break; // Entrambi i vincoli sono soddisfatti, usciamo.
+      }
+
+      if (budgetViolated) {
+        overflowDetected = true; // L'overflow viene tracciato solo se causato dal superamento dei token
+      }
+
       runningSize -= sizes[startIndex];
       startIndex++;
       trimmedLines++;
