@@ -93,14 +93,16 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final preview = _previewConfig();
+
     final displayBudget =
         widget.isWeb && _customTokenBudget > 8000 ? 8000 : _customTokenBudget;
     final displayLines =
         widget.isWeb && _customLineBudget > 80 ? 80 : _customLineBudget;
-    final showWebWarning =
-        widget.isWeb &&
+
+    // FIX 1 — Web warning basato sul valore persistito
+    final showWebWarning = widget.isWeb &&
         _profile == MemoryWindowProfile.custom &&
-        _customTokenBudget > 8000;
+        _settingsService.customMemoryTokenBudget > 8000;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0D),
@@ -124,6 +126,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
             style: TextStyle(color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 16),
+
           DropdownButtonFormField<MemoryWindowProfile>(
             initialValue: _profile,
             dropdownColor: const Color(0xFF151515),
@@ -138,22 +141,24 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               ),
             ),
             style: const TextStyle(color: Colors.white),
+
+            // FIX 2 — Tutte le stringhe localizzate
             items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
                 child: Text(l10n.t('memory_window_automatic')),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
-                child: Text('4K'),
+                child: Text(l10n.t('memory_window_compact')),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
-                child: Text('8K'),
+                child: Text(l10n.t('memory_window_standard')),
               ),
-              const DropdownMenuItem(
+              DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
-                child: Text('16K'),
+                child: Text(l10n.t('memory_window_performance')),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
@@ -165,8 +170,10 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               unawaited(_saveProfile(value));
             },
           ),
+
           const SizedBox(height: 16),
           _PreviewCard(preview: preview),
+
           if (showWebWarning) ...[
             const SizedBox(height: 12),
             const _WarningBanner(
@@ -174,6 +181,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
                   'Web safety clamp: custom budgets above 8000 are reduced automatically.',
             ),
           ],
+
           if (_profile == MemoryWindowProfile.custom) ...[
             const SizedBox(height: 20),
             Text(
@@ -204,6 +212,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               },
             ),
           ],
+
           const SizedBox(height: 20),
           Align(
             alignment: Alignment.centerRight,
