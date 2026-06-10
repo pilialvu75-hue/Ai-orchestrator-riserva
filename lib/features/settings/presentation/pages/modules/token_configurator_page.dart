@@ -34,8 +34,9 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
     _customTokenBudget = _settingsService.customMemoryTokenBudget;
     _customLineBudget = _settingsService.customMemoryLineBudget;
 
-    // Ensures the UI is fully built on the first frame.
+    // Ensures the dropdown shows the persisted profile on the first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Forces a rebuild so the dropdown reflects the initialized profile.
       if (mounted) setState(() {});
     });
   }
@@ -150,26 +151,26 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
               if (value == null) return;
               await _saveProfile(value);
             },
-            items: const [
+            items: [
               DropdownMenuItem(
                 value: MemoryWindowProfile.automatic,
-                child: Text('Automatic'),
+                child: Text(l10n.t('memory_window_automatic')),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.compact,
                 child: Text('4K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.standard,
                 child: Text('8K'),
               ),
-              DropdownMenuItem(
+              const DropdownMenuItem(
                 value: MemoryWindowProfile.performance,
                 child: Text('16K'),
               ),
               DropdownMenuItem(
                 value: MemoryWindowProfile.custom,
-                child: Text('Custom'),
+                child: Text(l10n.t('memory_window_custom')),
               ),
             ],
           ),
