@@ -64,6 +64,3 @@ flutter:
     - assets/models/
     - assets/debug_lab/
 
-dependency_overrides:
-  record_linux: any
-  record_platform_interface: ^1.6.0
