@@ -80,7 +80,6 @@ void main() {
         AppConstants.prefMemoryWindowProfile: 'automatic',
       });
       final defaultProfiles = MemoryWindowProfile.values;
-      expect(defaultProfiles, contains(MemoryWindowProfile.performance));
       await tester.pumpWidget(
         _wrap(TokenConfiguratorPage(
           settingsService: service,
@@ -88,6 +87,10 @@ void main() {
         )),
       );
 
+      expect(
+        find.byType(DropdownMenuItem<MemoryWindowProfile>),
+        findsNWidgets(defaultProfiles.length),
+      );
       await tester.tap(find.byKey(const Key('memory-window-profile-dropdown')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('16K').last);
