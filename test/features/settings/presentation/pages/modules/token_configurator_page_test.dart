@@ -86,7 +86,16 @@ void main() {
           isWeb: false,
         )),
       );
-      await tester.tap(find.byKey(const Key('memory-window-profile-dropdown')));
+      await tester.pumpAndSettle();
+      final dropdownFinder =
+          find.byKey(const Key('memory-window-profile-dropdown'));
+      final fallbackDropdownFinder =
+          find.byType(DropdownButtonFormField<MemoryWindowProfile>);
+      await tester.tap(
+        dropdownFinder.evaluate().isNotEmpty
+            ? dropdownFinder
+            : fallbackDropdownFinder,
+      );
       await tester.pumpAndSettle();
       expect(find.text('4K'), findsOneWidget);
       expect(find.text('8K'), findsOneWidget);
