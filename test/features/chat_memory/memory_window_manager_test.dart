@@ -30,8 +30,10 @@ void main() {
         ChatTurn(role: ChatRole.user, content: 'alpha'),
         ChatTurn(role: ChatRole.assistant, content: 'beta'),
       ]);
-      expect(result.contextTurns.every((turn) => turn.role != ChatRole.system),
-          isTrue);
+      expect(
+        result.contextTurns.every((turn) => turn.role != ChatRole.system),
+        isTrue,
+      );
       expect(
         () => result.contextTurns.add(
           const ChatTurn(role: ChatRole.user, content: 'delta'),
@@ -46,7 +48,6 @@ void main() {
         configProvider: () => MemoryWindowConfig.custom(
           maxContextLines: 2,
           maxTotalSize: 1000,
-          minContextSize: 64,
           isWeb: false,
         ),
       );
@@ -75,26 +76,57 @@ void main() {
         tokenEstimator: const CharacterLengthEstimator(),
         configProvider: () => MemoryWindowConfig.custom(
           maxContextLines: 10,
-          maxTotalSize: 60,
-          minContextSize: 32,
+          maxTotalSize: 512,
           isWeb: false,
         ),
       );
+
+      const longContent = 'a' * 270;
 
       final result = manager.trimToWindow(
         systemPrompt: 'system',
         userPrompt: 'prompt',
         contextTurns: const <ChatTurn>[
-          ChatTurn(role: ChatRole.user, content: 'aaaaaaaaaaaaaaaaaaaa'),
-          ChatTurn(role: ChatRole.assistant, content: 'bbbbbbbbbbbbbbbbbbbb'),
-          ChatTurn(role: ChatRole.user, content: 'cccccccccccccccccccc'),
+          ChatTurn(role: ChatRole.user, content: longContent),
+          ChatTurn(role: ChatRole.assistant, content: longContent),
+          ChatTurn(role: ChatRole.user, content: longContent),
         ],
       );
 
       expect(result.overflowDetected, isTrue);
-      expect(result.contextTurns.every((turn) => turn.role != ChatRole.system),
-          isTrue);
-      expect(result.contextTurns.last.content, 'cccccccccccccccccccc');
+      expect(
+        result.contextTurns.every((turn) => turn.role != ChatRole.system),
+        isTrue,
+      );
+      expect(result.contextTurns.last.content, longContent);
+    });
+
+    test('does not floor the available context budget before trimming', () {
+      final manager = MemoryWindowManager(
+        tokenEstimator: const CharacterLengthEstimator(),
+        configProvider: () => MemoryWindowConfig.custom(
+          maxContextLines: 2,
+          maxTotalSize: 1000,
+          isWeb: false,
+        ),
+      );
+
+      final result = manager.trimToWindow(
+        systemPrompt: null,
+        userPrompt: 'prompt',
+        contextTurns: const <ChatTurn>[
+          ChatTurn(role: ChatRole.system, content: 'system'),
+          ChatTurn(role: ChatRole.user, content: 'first'),
+          ChatTurn(role: ChatRole.assistant, content: 'second'),
+          ChatTurn(role: ChatRole.user, content: 'third'),
+        ],
+      );
+
+      expect(result.contextTurns, const <ChatTurn>[
+        ChatTurn(role: ChatRole.assistant, content: 'second'),
+        ChatTurn(role: ChatRole.user, content: 'third'),
+      ]);
+      expect(result.trimmedLines, 2);
     });
   });
 }
