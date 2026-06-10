@@ -40,7 +40,7 @@ class MemoryWindowManager {
       maxTotalSize: config.maxTotalSize,
       systemSize: systemSize,
       userSize: userSize,
-      minContextSize: config.minContextSize,
+      minContextSize: config.minContextSize ?? 0,
     );
 
     final normalizedTurns = <ChatTurn>[];
@@ -99,4 +99,3 @@ class MemoryWindowManager {
     );
   }
 }
-        
