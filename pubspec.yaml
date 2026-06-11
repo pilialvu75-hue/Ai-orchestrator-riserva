@@ -39,14 +39,10 @@ dependencies:
 
   android_intent_plus: ^6.0.0
 
-  # FFI utilities (Utf8, malloc/calloc, Arena) – required by AndroidFfiRuntimeProvider
   ffi: ^2.1.3
 
-  # Voice subsystem: offline STT/TTS via Sherpa-ONNX Dart SDK
   sherpa_onnx: ^1.10.2
-  # Low-level PCM microphone streaming required by SherpaOnnxVoiceEngine
-  record: ^5.2.0
-  # Phase 2: raw PCM audio output (live playback streaming to speaker)
+  record: ^5.2.1
   mp_audio_stream: any
 
   uuid: ^4.4.0
@@ -64,3 +60,6 @@ flutter:
     - assets/models/
     - assets/debug_lab/
 
+dependency_overrides:
+  record_linux: ^0.7.2
+  record_platform_interface: ^1.6.0
