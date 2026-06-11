@@ -218,8 +218,8 @@ jobs:
             echo "::warning::Release keystore validation failed"
           fi
 
-      - - name: Flutter pub get
-        run: flutter pub get
+      - name: Flutter pub get
+               run: flutter pub get
 
       - name: Debug dependency tree
         run: flutter pub deps --style=compact | grep -E "record|sherpa" || true
