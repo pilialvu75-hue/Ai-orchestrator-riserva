@@ -1,0 +1,20 @@
+name: Debug Dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Show record dependency tree
+        run: flutter pub deps --style=compact | grep -E "record|sherpa"
