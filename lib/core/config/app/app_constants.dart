@@ -103,11 +103,9 @@ class AppConstants {
   static const int chatHistoryMaxRows = 500;
 
   // ── Local AI model definitions ────────────────────────────────────────────
-  /// Version-manifest endpoint (replace with your actual hosting URL).
   static const String modelVersionManifestUrl =
       'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/models/manifest.json';
 
-  /// Platform target values used in model definitions.
   static const String platformAndroid = 'android';
   static const String platformWindows = 'windows';
   static const String platformAll = 'all';
@@ -135,31 +133,39 @@ class AppConstants {
   static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
-  // Primary locale for STT recognition output post-processing.
-  // Note: the selected streaming transducer (Zipformer EN-2023-06-26) is
-  // English-primary.  No public streaming Zipformer/transducer model covering
-  // Italian + French + English exists as of mid-2025.  Italian and French
-  // vocabulary embedded in English speech (code-switching) is handled via
-  // VoiceTextNormalizer and hotwords if needed.
   static const String sttDefaultLocaleId = 'en_US';
-  // ── Sherpa-ONNX STT runtime hints ──────────────────────────────────────────
-  // modelType must match the architecture tag expected by the sherpa-onnx
-  // OnlineModelConfig.  'zipformer2' selects the Zipformer2 transducer
-  // processing path in the ONNX runtime.
   static const String sttModelType = 'zipformer2';
   static const int sttNumThreads = 2;
-  // ── Sherpa-ONNX local model file names ─────────────────────────────────────
+
+  // ── Sherpa-ONNX STT file names ──────────────────────────────────────────────
   static const String sttEncoderFile = 'encoder.onnx';
   static const String sttDecoderFile = 'decoder.onnx';
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
+
+  // ── Sherpa-ONNX STT source repository ──────────────────────────────────────
   static const String sttZipformerEnRepository =
       'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
   static const String sttZipformerBaseUrl =
       'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
-  static const String ttsModelFile = 'vits-tts-it.onnx';
-  static const String ttsLexiconFile = 'vits-tts-lexicon.txt';
-  static const String ttsTokensFile = 'vits-tts-tokens.txt';
+
+  // ── Sherpa-ONNX TTS file names (vits-piper-it_IT-paola-medium) ─────────────
+  // Il modello TTS Piper italiano viene distribuito come archivio tar.bz2
+  // da GitHub Releases di sherpa-onnx. Il downloader scarica l'archivio
+  // e lo estrae nella directory privata dell'app.
+  static const String ttsModelFile = 'it_IT-paola-medium.onnx';
+  static const String ttsTokensFile = 'tts-tokens.txt';
+  // La cartella espeak-ng-data viene estratta dall'archivio tar.bz2.
+  // Il nome della sottocartella estratta è 'espeak-ng-data'.
+  static const String ttsEspeakDataDir = 'espeak-ng-data';
+
+  // URL archivio tar.bz2 ufficiale (GitHub Releases sherpa-onnx).
+  // Contiene: it_IT-paola-medium.onnx, tokens.txt, espeak-ng-data/
+  static const String ttsPaolaTarUrl =
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-it_IT-paola-medium.tar.bz2';
+  static const int ttsPaolaTarExpectedBytes = 63 * 1024 * 1024; // ~63 MB
+
+  // ── Canali Sherpa-ONNX ──────────────────────────────────────────────────────
   static const String sherpaVoiceMethodChannel =
       'com.aiorchestrator/sherpa_onnx_voice';
   static const String sherpaAsrEventChannel =
