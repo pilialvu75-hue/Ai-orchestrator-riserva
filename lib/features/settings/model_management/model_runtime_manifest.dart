@@ -3,9 +3,10 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 // Runtime-supported Voice Engine sections.
 // NOTE: Only the sections below reflect the ACTUAL current runtime architecture:
 //   - voiceStt: Sherpa-ONNX streaming Zipformer2 transducer (English, online)
-//   - voiceTtsItalian: VITS ONNX TTS for Italian (Paola), the active TTS voice
-// Additional TTS languages (FR, EN) are NOT currently loaded by the runtime
-// and are intentionally excluded to keep the manifest consistent with reality.
+//   - voiceTtsItalian: VITS Piper TTS for Italian (Paola), the active TTS voice
+// Il modello TTS Piper viene distribuito come archivio tar.bz2 e usa
+// espeak-ng-data invece di lexicon.txt. Non ci sono più file individuali
+// per il TTS nel manifest — il download avviene tramite VoiceModelDownloader.
 enum ModelManagementSection {
   voiceStt,
   voiceTtsItalian,
@@ -30,10 +31,6 @@ class RuntimeModelFileSpec {
   final int expectedBytes;
   final String estimatedSizeLabel;
 
-  // All voice model files are stored flat in the private models directory
-  // (appDir/models/<fileName>).  There is no subdirectory layering so that
-  // VoiceModelDownloader, ModelManagementService, and SherpaOnnxVoiceEngine
-  // all resolve to the same on-disk paths.
   String get relativeDirectory => '';
 }
 
@@ -51,15 +48,14 @@ class ModelRuntimeManifest {
     ModelManagementSection.voiceStt:
         'STT — Zipformer2 Transducer (EN streaming)',
     ModelManagementSection.voiceTtsItalian:
-        'TTS — VITS Italiano (Paola)',
+        'TTS — Piper Italiano (Paola Medium)',
   };
 
   static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
     // ── Zipformer2 streaming transducer — STT ──────────────────────────────
     // Source: csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
     // Architecture: Online Zipformer2 transducer (encoder + decoder + joiner)
-    // Language: English (EN-only; multilingual streaming Zipformer is not
-    //   available as of mid-2025).
+    // Language: English (EN-only)
     RuntimeModelFileSpec(
       id: 'stt_zipformer_encoder',
       section: ModelManagementSection.voiceStt,
@@ -99,39 +95,29 @@ class ModelRuntimeManifest {
       expectedBytes: 7 * 1024,
       estimatedSizeLabel: '~7 KB',
     ),
-    // ── VITS TTS — Italiano (Paola) ────────────────────────────────────────
-    // Source: csukuangfj/vits-models — vits-tts-it-paola
-    // Architecture: VITS ONNX offline TTS
-    // Language: Italian (lexicon-based; requires lexicon + tokens).
+    // ── Piper TTS — Italiano (Paola Medium) ───────────────────────────────
+    // Source: github.com/k2-fsa/sherpa-onnx releases/tts-models
+    // Archive: vits-piper-it_IT-paola-medium.tar.bz2 (~63 MB)
+    // Contiene: it_IT-paola-medium.onnx + tokens.txt + espeak-ng-data/
+    // Il download e l'estrazione avvengono tramite VoiceModelDownloader.
+    // Qui listiamo solo il file principale come riferimento UI.
     RuntimeModelFileSpec(
       id: 'it_tts_model',
       section: ModelManagementSection.voiceTtsItalian,
-      logicalName: 'VITS TTS Italiano — Modello',
+      logicalName: 'Piper TTS Italiano — Archivio Paola Medium',
       fileName: AppConstants.ttsModelFile,
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/vits-tts-it-paola.onnx',
-      expectedBytes: 120 * 1024 * 1024,
-      estimatedSizeLabel: '~120 MB',
-    ),
-    RuntimeModelFileSpec(
-      id: 'it_tts_lexicon',
-      section: ModelManagementSection.voiceTtsItalian,
-      logicalName: 'VITS TTS Italiano — Lessico',
-      fileName: AppConstants.ttsLexiconFile,
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/lexicon.txt',
-      expectedBytes: 1 * 1024 * 1024,
-      estimatedSizeLabel: '~1 MB',
+      downloadUrl: AppConstants.ttsPaolaTarUrl,
+      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
+      estimatedSizeLabel: '~63 MB',
     ),
     RuntimeModelFileSpec(
       id: 'it_tts_tokens',
       section: ModelManagementSection.voiceTtsItalian,
-      logicalName: 'VITS TTS Italiano — Tokens',
+      logicalName: 'Piper TTS Italiano — Tokens',
       fileName: AppConstants.ttsTokensFile,
-      downloadUrl:
-          'https://huggingface.co/csukuangfj/vits-models/resolve/main/vits-tts-it-paola/tokens.txt',
-      expectedBytes: 85 * 1024,
-      estimatedSizeLabel: '~85 KB',
+      downloadUrl: AppConstants.ttsPaolaTarUrl,
+      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
+      estimatedSizeLabel: 'incluso nell\'archivio',
     ),
   ];
 }
