@@ -221,9 +221,6 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-        name: Debug dependency tree
-        run: flutter pub deps --style=compact | grep -E "record|sherpa" || true
-
       - name: Ensure Android local.properties
         run: |
           set -euo pipefail
