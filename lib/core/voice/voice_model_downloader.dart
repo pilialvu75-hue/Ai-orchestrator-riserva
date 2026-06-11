@@ -27,11 +27,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
                 connectTimeout: const Duration(seconds: 30),
                 receiveTimeout: const Duration(hours: 1),
                 sendTimeout: const Duration(seconds: 30),
+                followRedirects: true,
+                maxRedirects: 10,
               ),
             ),
         _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
 
   static const String _tag = 'VOICE_DOWNLOAD';
+
+  // Soglia minima di validazione: 70% della dimensione attesa.
+  // Abbassata rispetto all'85% per gestire variazioni nei file piccoli
+  // (tokens.txt, decoder.onnx) dove le dimensioni stimate possono
+  // differire significativamente dalla dimensione reale sul server.
+  static const double _minValidationRatio = 0.70;
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
@@ -74,9 +82,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     // ── Fase 1: file STT individuali (4 file) ──────────────────────────────
     final sttSpecs = _sttModelSpecs;
-    final sttTotalBytes = sttSpecs.fold<int>(0, (s, e) => s + e.expectedBytes);
+    const sttTotalBytes = (170 + 18) * 1024 * 1024 + 400 * 1024 + 7 * 1024;
     final ttsTotalBytes = AppConstants.ttsPaolaTarExpectedBytes;
-    final grandTotal = sttTotalBytes + ttsTotalBytes;
+    const grandTotal = sttTotalBytes + ttsTotalBytes;
 
     var completedBytes = 0;
     onProgress(0.0);
@@ -88,7 +96,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       if (await _validateExistingFile(spec, destinationFile)) {
         logEvent(_tag, '[DOWNLOAD_SKIP] file=${spec.fileName}');
         completedBytes += spec.expectedBytes;
-        onProgress((completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
+        onProgress(
+            (completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
         continue;
       }
 
@@ -103,9 +112,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           spec.url,
           tempFile.path,
           deleteOnError: true,
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 10,
+          ),
           onReceiveProgress: (received, total) {
             final denominator = total > 0 ? total : spec.expectedBytes;
-            final fileProgress = (received / denominator).clamp(0.0, 1.0);
+            final fileProgress =
+                (received / denominator).clamp(0.0, 1.0);
             final aggregate =
                 (completedBytes + fileProgress * spec.expectedBytes) /
                     grandTotal;
@@ -127,7 +141,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         final message = statusCode == null
             ? 'Download STT fallito: ${spec.fileName}. ${error.message ?? "Errore di rete"}'
             : 'Download STT fallito: ${spec.fileName} (HTTP $statusCode).';
-        logEvent(_tag, '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=$message');
+        logEvent(
+            _tag, '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=$message');
         throw VoiceAssetException(message);
       } on VoiceAssetException {
         await _cleanupTempFiles(tempFile, destinationFile);
@@ -139,7 +154,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
 
       completedBytes += spec.expectedBytes;
-      onProgress((completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
+      onProgress(
+          (completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
     }
 
     // ── Fase 2: archivio TTS tar.bz2 (Paola Piper) ────────────────────────
@@ -151,25 +167,18 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         onProgress(aggregate.clamp(0.0, 1.0).toDouble());
       },
     );
-    completedBytes += ttsTotalBytes;
 
     await validateDownloadedAssets();
-    logEvent(_tag, '[DOWNLOAD_COMPLETE] voice assets ready in ${targetDir.path}');
+    logEvent(
+        _tag, '[DOWNLOAD_COMPLETE] voice assets ready in ${targetDir.path}');
     onProgress(1.0);
   }
 
   /// Scarica il tar.bz2 del modello TTS Piper Paola ed estrae i file.
-  ///
-  /// Struttura attesa nell'archivio:
-  ///   vits-piper-it_IT-paola-medium/
-  ///     it_IT-paola-medium.onnx
-  ///     tokens.txt
-  ///     espeak-ng-data/   (centinaia di file binari)
   Future<void> _downloadAndExtractTtsTar({
     required Directory targetDir,
     required Function(double) onProgress,
   }) async {
-    // Verifica se i file TTS sono già presenti e validi.
     final ttsModelFile =
         File(p.join(targetDir.path, AppConstants.ttsModelFile));
     final ttsTokensFile =
@@ -180,7 +189,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final alreadyExtracted = await ttsModelFile.exists() &&
         await ttsTokensFile.exists() &&
         await espeakDir.exists() &&
-        (await ttsModelFile.length()) > (50 * 1024 * 1024); // >50 MB
+        (await ttsModelFile.length()) > (50 * 1024 * 1024);
 
     if (alreadyExtracted) {
       logEvent(
@@ -191,13 +200,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    final tarPath = p.join(targetDir.path, 'vits-piper-it_IT-paola-medium.tar.bz2');
+    final tarPath =
+        p.join(targetDir.path, 'vits-piper-it_IT-paola-medium.tar.bz2');
     final tarFile = File(tarPath);
 
-    // Scarica il tar.bz2 se non è già presente.
     if (!await tarFile.exists() ||
         (await tarFile.length()) <
-            (AppConstants.ttsPaolaTarExpectedBytes * 0.85).toInt()) {
+            (AppConstants.ttsPaolaTarExpectedBytes * 0.70).toInt()) {
       if (await tarFile.exists()) await tarFile.delete();
 
       logEvent(
@@ -210,6 +219,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           AppConstants.ttsPaolaTarUrl,
           tarPath,
           deleteOnError: true,
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 10,
+          ),
           onReceiveProgress: (received, total) {
             final denominator =
                 total > 0 ? total : AppConstants.ttsPaolaTarExpectedBytes;
@@ -235,7 +248,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
 
     // Estrai il tar.bz2.
-    logEvent(_tag, '[TTS_TAR_EXTRACT_BEGIN] tar=$tarPath dest=${targetDir.path}');
+    logEvent(
+        _tag, '[TTS_TAR_EXTRACT_BEGIN] tar=$tarPath dest=${targetDir.path}');
     onProgress(0.85);
 
     try {
@@ -245,8 +259,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       final archive = TarDecoder().decodeBytes(tarBytes);
 
       for (final file in archive) {
-        // L'archivio ha una sottocartella 'vits-piper-it_IT-paola-medium/'.
-        // Rimuoviamo il prefisso per estrarre direttamente in targetDir.
         var outPath = file.name;
         const prefix = 'vits-piper-it_IT-paola-medium/';
         if (outPath.startsWith(prefix)) {
@@ -275,7 +287,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     } catch (error) {
       throw VoiceAssetException('Estrazione TTS tar fallita: $error');
     } finally {
-      // Elimina il tar dopo l'estrazione per liberare spazio.
       if (await tarFile.exists()) {
         await tarFile.delete();
         logEvent(_tag, '[TTS_TAR_CLEANUP] deleted $tarPath');
@@ -290,7 +301,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final targetDir = await _pathResolver.privateModelsDirectory();
     final missingOrInvalid = <String>[];
 
-    // Valida file STT.
     for (final spec in _sttModelSpecs) {
       final file = File(p.join(targetDir.path, spec.fileName));
       if (!await _validateExistingFile(spec, file)) {
@@ -299,7 +309,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
     }
 
-    // Valida file TTS.
     final ttsModelFile =
         File(p.join(targetDir.path, AppConstants.ttsModelFile));
     final ttsTokensFile =
@@ -309,7 +318,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     if (!await ttsModelFile.exists() ||
         (await ttsModelFile.length()) < (50 * 1024 * 1024)) {
-      logEvent(_tag, '[ASSET_MISSING] tts model=${AppConstants.ttsModelFile}');
+      logEvent(
+          _tag, '[ASSET_MISSING] tts model=${AppConstants.ttsModelFile}');
       missingOrInvalid.add(AppConstants.ttsModelFile);
     }
     if (!await ttsTokensFile.exists() ||
@@ -319,8 +329,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       missingOrInvalid.add(AppConstants.ttsTokensFile);
     }
     if (!await espeakDir.exists()) {
-      logEvent(_tag,
-          '[ASSET_MISSING] espeak-ng-data dir=${espeakDir.path}');
+      logEvent(
+          _tag, '[ASSET_MISSING] espeak-ng-data dir=${espeakDir.path}');
       missingOrInvalid.add(AppConstants.ttsEspeakDataDir);
     }
 
@@ -353,7 +363,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     try {
       if (!await file.exists()) return false;
       final length = await file.length();
-      final minBytes = (spec.expectedBytes * 0.85).toInt();
+      // Soglia 70% per gestire variazioni nei file piccoli.
+      final minBytes = (spec.expectedBytes * _minValidationRatio).toInt();
       return length >= minBytes;
     } catch (_) {
       return false;
@@ -375,28 +386,29 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         'File vocale vuoto dopo il download: ${spec.fileName}.',
       );
     }
-    final minBytes = (spec.expectedBytes * 0.85).toInt();
+    final minBytes = (spec.expectedBytes * _minValidationRatio).toInt();
     if (length < minBytes) {
       throw VoiceAssetException(
         'File vocale incompleto o corrotto: ${spec.fileName} '
-        '($length byte rilevati, attesi circa ${spec.expectedBytes}).',
+        '($length byte rilevati, attesi almeno $minBytes).',
       );
     }
   }
 
   Future<void> _cleanupTempFiles(File tempFile, File destinationFile) async {
     if (await tempFile.exists()) {
-      logEvent(_tag, '[CLEANUP_TEMP] deleting temp file: ${tempFile.path}');
+      logEvent(
+          _tag, '[CLEANUP_TEMP] deleting temp file: ${tempFile.path}');
       await tempFile.delete();
     }
     if (await destinationFile.exists()) {
       logEvent(
-          _tag, '[CLEANUP_DEST] deleting partial destination: ${destinationFile.path}');
+          _tag,
+          '[CLEANUP_DEST] deleting partial destination: ${destinationFile.path}');
       await destinationFile.delete();
     }
   }
 
-  /// File STT individuali scaricati da Hugging Face.
   List<_VoiceModelDownloadSpec> get _sttModelSpecs =>
       const <_VoiceModelDownloadSpec>[
         _VoiceModelDownloadSpec(
