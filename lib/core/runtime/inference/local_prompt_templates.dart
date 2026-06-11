@@ -44,6 +44,7 @@ class LocalPromptTemplates {
       );
     }
 
+    // Fallback generico: plain text
     final buffer = StringBuffer();
     if (cleanedSystemPrompt != null) {
       buffer.writeln('System: $cleanedSystemPrompt');
@@ -64,13 +65,6 @@ class LocalPromptTemplates {
   }
 
   /// Llama 3 Instruct chat template.
-  ///
-  /// Required by all Meta Llama 3.x Instruct models (including Llama 3.2 1B
-  /// Instruct).  The model is trained to stop at `<|eot_id|>` and expects
-  /// the conversation structured with `<|start_header_id|>` role markers.
-  /// Using the plain `User: …` fallback causes the model to misinterpret the
-  /// prompt format, skip the EOS stop-sequence, and run through the full
-  /// max-tokens budget without a meaningful answer.
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -92,7 +86,8 @@ class LocalPromptTemplates {
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('<|eot_id|>');
     for (final turn in turns) {
-      buffer.write('<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
+      buffer.write(
+          '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
@@ -105,36 +100,44 @@ class LocalPromptTemplates {
 
   /// ChatML / Qwen chat template.
   ///
-  /// [suppressThinking] prepends `/no_think` to the user message for Qwen3
-  /// models.  Qwen3 enters a chain-of-thought "thinking" mode by default,
-  /// emitting `<think>…</think>` tokens before the actual answer.  With the
-  /// 128-token Android budget these thinking tokens consume the entire
-  /// generation window, leaving nothing for the final response.  The `/no_think`
-  /// directive instructs the model to skip the reasoning phase and reply
-  /// directly — identical to setting `enable_thinking=False` in the Qwen3
-  /// chat template.
+  /// Ogni turno del contesto viene emesso come blocco ChatML separato
+  /// (<|im_start|>role ... <|im_end|>) invece di essere serializzato
+  /// come testo grezzo dentro il blocco user. Questo impedisce al modello
+  /// di vedere i tag ChatML come testo da ripetere nell'output.
+  ///
+  /// [suppressThinking] prepende /no_think al messaggio user per i modelli
+  /// Qwen3 con chain-of-thought, evitando di sprecare il budget token su
+  /// ragionamento interno prima della risposta finale.
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
     bool suppressThinking = false,
   }) {
-    final contextualUserPrompt = context.isEmpty
-        ? userPrompt
-        : '${_serializeTurns(context)}\n$userPrompt';
-    // Prepend /no_think for Qwen3 thinking models to avoid consuming all
-    // available tokens on internal reasoning before the actual answer.
-    final effectiveUserPrompt = suppressThinking
-        ? '/no_think\n$contextualUserPrompt'
-        : contextualUserPrompt;
     final buffer = StringBuffer();
-    buffer.writeln('<|im_start|>system');
-    buffer.writeln(systemPrompt ?? 'You are a helpful assistant.');
-    buffer.writeln('<|im_end|>');
-    buffer.writeln('<|im_start|>user');
-    buffer.writeln(effectiveUserPrompt);
-    buffer.writeln('<|im_end|>');
+
+    // System block
+    buffer.write('<|im_start|>system\n');
+    buffer.write(systemPrompt ?? 'You are a helpful assistant.');
+    buffer.write('\n<|im_end|>\n');
+
+    // Context turns — ognuno come blocco ChatML separato
+    for (final turn in context) {
+      buffer.write('<|im_start|>${_roleName(turn.role)}\n');
+      buffer.write(turn.content);
+      buffer.write('\n<|im_end|>\n');
+    }
+
+    // User turn corrente
+    final effectiveUserPrompt =
+        suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
+    buffer.write('<|im_start|>user\n');
+    buffer.write(effectiveUserPrompt);
+    buffer.write('\n<|im_end|>\n');
+
+    // Apertura blocco assistant — il modello continua da qui
     buffer.write('<|im_start|>assistant\n');
+
     return buffer.toString();
   }
 
@@ -155,12 +158,6 @@ class LocalPromptTemplates {
     buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
     buffer.write('<start_of_turn>model\n');
     return buffer.toString();
-  }
-
-  static String _serializeTurns(List<ChatTurn> turns) {
-    return turns
-        .map((turn) => '${_roleName(turn.role)}: ${turn.content}')
-        .join('\n');
   }
 
   static String _roleName(ChatRole role) {
