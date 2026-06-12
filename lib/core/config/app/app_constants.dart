@@ -133,39 +133,50 @@ class AppConstants {
   static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
+  // ── STT runtime hints ────────────────────────────────────────────────────────
   static const String sttDefaultLocaleId = 'en_US';
   static const String sttModelType = 'zipformer2';
   static const int sttNumThreads = 2;
 
-  // ── Sherpa-ONNX STT file names ──────────────────────────────────────────────
+  // ── Sherpa-ONNX STT file names ───────────────────────────────────────────────
   static const String sttEncoderFile = 'encoder.onnx';
   static const String sttDecoderFile = 'decoder.onnx';
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
 
-  // ── Sherpa-ONNX STT source repository ──────────────────────────────────────
+  // ── Sherpa-ONNX STT download (GitHub Releases tar.bz2) ───────────────────────
+  // Scaricato come archivio unico da GitHub Releases per evitare i redirect
+  // CDN di Hugging Face che causano download incompleti su Android.
+  // Struttura archivio:
+  //   sherpa-onnx-streaming-zipformer-en-2023-06-26/
+  //     encoder-epoch-99-avg-1-chunk-16-left-128.onnx  → encoder.onnx
+  //     decoder-epoch-99-avg-1-chunk-16-left-128.onnx  → decoder.onnx
+  //     joiner-epoch-99-avg-1-chunk-16-left-128.onnx   → joiner.onnx
+  //     tokens.txt                                      → tokens.txt
   static const String sttZipformerEnRepository =
       'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
   static const String sttZipformerBaseUrl =
       'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
+  static const String sttZipformerTarUrl =
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
+  static const int sttZipformerTarExpectedBytes = 200 * 1024 * 1024;
 
-  // ── Sherpa-ONNX TTS file names (vits-piper-it_IT-paola-medium) ─────────────
-  // Il modello TTS Piper italiano viene distribuito come archivio tar.bz2
-  // da GitHub Releases di sherpa-onnx. Il downloader scarica l'archivio
-  // e lo estrae nella directory privata dell'app.
+  // ── Sherpa-ONNX TTS file names (vits-piper-it_IT-paola-medium) ───────────────
+  // Modello Piper — usa espeak-ng-data invece di lexicon.txt.
+  // Scaricato come archivio tar.bz2 da GitHub Releases di sherpa-onnx.
+  // Struttura archivio:
+  //   vits-piper-it_IT-paola-medium/
+  //     it_IT-paola-medium.onnx
+  //     tokens.txt             → tts-tokens.txt
+  //     espeak-ng-data/
   static const String ttsModelFile = 'it_IT-paola-medium.onnx';
   static const String ttsTokensFile = 'tts-tokens.txt';
-  // La cartella espeak-ng-data viene estratta dall'archivio tar.bz2.
-  // Il nome della sottocartella estratta è 'espeak-ng-data'.
   static const String ttsEspeakDataDir = 'espeak-ng-data';
-
-  // URL archivio tar.bz2 ufficiale (GitHub Releases sherpa-onnx).
-  // Contiene: it_IT-paola-medium.onnx, tokens.txt, espeak-ng-data/
   static const String ttsPaolaTarUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-it_IT-paola-medium.tar.bz2';
-  static const int ttsPaolaTarExpectedBytes = 63 * 1024 * 1024; // ~63 MB
+  static const int ttsPaolaTarExpectedBytes = 63 * 1024 * 1024;
 
-  // ── Canali Sherpa-ONNX ──────────────────────────────────────────────────────
+  // ── Canali Sherpa-ONNX ───────────────────────────────────────────────────────
   static const String sherpaVoiceMethodChannel =
       'com.aiorchestrator/sherpa_onnx_voice';
   static const String sherpaAsrEventChannel =
