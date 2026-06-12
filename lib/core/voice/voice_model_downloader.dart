@@ -125,11 +125,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[STT_TAR_EXTRACT_BEGIN]');
 
     try {
-      final inputStream = InputFileStream(tarPath);
-      final tarBytes =
-          BZip2Decoder().decodeBytes(inputStream.readBytes());
-      final archive = TarDecoder().decodeBytes(tarBytes);
-      await inputStream.close();
+      final tarBytes = await File(tarPath).readAsBytes();
+      final decompressed = BZip2Decoder().decodeBytes(tarBytes);
+      final archive = TarDecoder().decodeBytes(decompressed);
 
       const prefix = 'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
       for (final file in archive) {
@@ -230,11 +228,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[TTS_TAR_EXTRACT_BEGIN]');
 
     try {
-      final inputStream = InputFileStream(tarPath);
-      final tarBytes =
-          BZip2Decoder().decodeBytes(inputStream.readBytes());
-      final archive = TarDecoder().decodeBytes(tarBytes);
-      await inputStream.close();
+      final tarBytes = await File(tarPath).readAsBytes();
+      final decompressed = BZip2Decoder().decodeBytes(tarBytes);
+      final archive = TarDecoder().decodeBytes(decompressed);
 
       const prefix = 'vits-piper-it_IT-paola-medium/';
       for (final file in archive) {
@@ -285,7 +281,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final destFile = File(destPath);
     if (await destFile.exists()) await destFile.delete();
 
-    logEvent(_tag, '[$tag\_DOWNLOAD_BEGIN] url=$url');
+    logEvent(_tag, '[${tag}_DOWNLOAD_BEGIN] url=$url');
 
     try {
       await _dio.download(
@@ -298,7 +294,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           onProgress((received / denom).clamp(0.0, 1.0).toDouble());
         },
       );
-      logEvent(_tag, '[$tag\_DOWNLOAD_COMPLETE]');
+      logEvent(_tag, '[${tag}_DOWNLOAD_COMPLETE]');
     } on DioException catch (e) {
       if (await destFile.exists()) await destFile.delete();
       final code = e.response?.statusCode;
