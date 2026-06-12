@@ -25,7 +25,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
             Dio(
               BaseOptions(
                 connectTimeout: const Duration(seconds: 30),
-                receiveTimeout: const Duration(hours: 1),
+                receiveTimeout: const Duration(hours: 2),
                 sendTimeout: const Duration(seconds: 30),
                 followRedirects: true,
                 maxRedirects: 10,
@@ -36,9 +36,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   static const String _tag = 'VOICE_DOWNLOAD';
 
   // Soglia minima di validazione: 70% della dimensione attesa.
-  // Abbassata rispetto all'85% per gestire variazioni nei file piccoli
-  // (tokens.txt, decoder.onnx) dove le dimensioni stimate possono
-  // differire significativamente dalla dimensione reale sul server.
   static const double _minValidationRatio = 0.70;
 
   final Dio _dio;
@@ -68,103 +65,32 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
   /// Scarica tutti i modelli vocali necessari.
   ///
-  /// STT: 4 file ONNX individuali da Hugging Face
-  /// (encoder, decoder, joiner, tokens).
+  /// STT: archivio tar.bz2 da GitHub Releases di sherpa-onnx
+  /// contenente encoder.onnx, decoder.onnx, joiner.onnx, tokens.txt.
   ///
   /// TTS: archivio tar.bz2 da GitHub Releases di sherpa-onnx
   /// contenente it_IT-paola-medium.onnx, tokens.txt e espeak-ng-data/.
-  /// L'archivio viene estratto nella directory privata dell'app.
   Future<void> downloadModels({
     required Function(double) onProgress,
   }) async {
     final targetDir = await _ensureTargetDirectory();
     logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
 
-    // ── Fase 1: file STT individuali (4 file) ──────────────────────────────
-    final sttSpecs = _sttModelSpecs;
-    final sttTotalBytes = (170 + 18) * 1024 * 1024 + 400 * 1024 + 7 * 1024;
-    final ttsTotalBytes = AppConstants.ttsPaolaTarExpectedBytes;
-    final grandTotal = sttTotalBytes + ttsTotalBytes;
-
-    var completedBytes = 0;
     onProgress(0.0);
 
-    for (final spec in sttSpecs) {
-      final destinationFile = File('${targetDir.path}/${spec.fileName}');
-      logEvent(_tag, '[URL_RESOLVE] file=${spec.fileName} url=${spec.url}');
-
-      if (await _validateExistingFile(spec, destinationFile)) {
-        logEvent(_tag, '[DOWNLOAD_SKIP] file=${spec.fileName}');
-        completedBytes += spec.expectedBytes;
-        onProgress(
-            (completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
-        continue;
-      }
-
-      final tempFile = File('${destinationFile.path}.part');
-      if (await tempFile.exists()) await tempFile.delete();
-      if (await destinationFile.exists()) await destinationFile.delete();
-
-      logEvent(_tag, '[DOWNLOAD_FILE_BEGIN] file=${spec.fileName}');
-
-      try {
-        await _dio.download(
-          spec.url,
-          tempFile.path,
-          deleteOnError: true,
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 10,
-          ),
-          onReceiveProgress: (received, total) {
-            final denominator = total > 0 ? total : spec.expectedBytes;
-            final fileProgress =
-                (received / denominator).clamp(0.0, 1.0);
-            final aggregate =
-                (completedBytes + fileProgress * spec.expectedBytes) /
-                    grandTotal;
-            onProgress(aggregate.clamp(0.0, 1.0).toDouble());
-          },
-        );
-
-        await _validateDownloadedFile(spec, tempFile);
-        await tempFile.rename(destinationFile.path);
-        await _validateDownloadedFile(spec, destinationFile);
-
-        logEvent(
-          _tag,
-          '[DOWNLOAD_FILE_COMPLETE] file=${spec.fileName} path=${destinationFile.path}',
-        );
-      } on DioException catch (error) {
-        await _cleanupTempFiles(tempFile, destinationFile);
-        final statusCode = error.response?.statusCode;
-        final message = statusCode == null
-            ? 'Download STT fallito: ${spec.fileName}. ${error.message ?? "Errore di rete"}'
-            : 'Download STT fallito: ${spec.fileName} (HTTP $statusCode).';
-        logEvent(
-            _tag, '[DOWNLOAD_FILE_FAIL] file=${spec.fileName} error=$message');
-        throw VoiceAssetException(message);
-      } on VoiceAssetException {
-        await _cleanupTempFiles(tempFile, destinationFile);
-        rethrow;
-      } catch (error) {
-        await _cleanupTempFiles(tempFile, destinationFile);
-        throw VoiceAssetException(
-            'Download STT fallito: ${spec.fileName}. $error');
-      }
-
-      completedBytes += spec.expectedBytes;
-      onProgress(
-          (completedBytes / grandTotal).clamp(0.0, 1.0).toDouble());
-    }
+    // ── Fase 1: archivio STT tar.bz2 ──────────────────────────────────────
+    await _downloadAndExtractSttTar(
+      targetDir: targetDir,
+      onProgress: (sttProgress) {
+        onProgress((sttProgress * 0.5).clamp(0.0, 0.5));
+      },
+    );
 
     // ── Fase 2: archivio TTS tar.bz2 (Paola Piper) ────────────────────────
     await _downloadAndExtractTtsTar(
       targetDir: targetDir,
       onProgress: (ttsProgress) {
-        final aggregate =
-            (completedBytes + ttsProgress * ttsTotalBytes) / grandTotal;
-        onProgress(aggregate.clamp(0.0, 1.0).toDouble());
+        onProgress((0.5 + ttsProgress * 0.5).clamp(0.0, 1.0));
       },
     );
 
@@ -174,7 +100,148 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     onProgress(1.0);
   }
 
+  /// Scarica il tar.bz2 del modello STT Zipformer EN ed estrae i file.
+  ///
+  /// Struttura attesa nell'archivio:
+  ///   sherpa-onnx-streaming-zipformer-en-2023-06-26/
+  ///     encoder-epoch-99-avg-1-chunk-16-left-128.onnx  → encoder.onnx
+  ///     decoder-epoch-99-avg-1-chunk-16-left-128.onnx  → decoder.onnx
+  ///     joiner-epoch-99-avg-1-chunk-16-left-128.onnx   → joiner.onnx
+  ///     tokens.txt                                      → tokens.txt
+  Future<void> _downloadAndExtractSttTar({
+    required Directory targetDir,
+    required Function(double) onProgress,
+  }) async {
+    final encoderFile =
+        File(p.join(targetDir.path, AppConstants.sttEncoderFile));
+    final decoderFile =
+        File(p.join(targetDir.path, AppConstants.sttDecoderFile));
+    final joinerFile =
+        File(p.join(targetDir.path, AppConstants.sttJoinerFile));
+    final tokensFile =
+        File(p.join(targetDir.path, AppConstants.sttTokensFile));
+
+    final alreadyExtracted = await encoderFile.exists() &&
+        await decoderFile.exists() &&
+        await joinerFile.exists() &&
+        await tokensFile.exists() &&
+        (await encoderFile.length()) > (100 * 1024 * 1024);
+
+    if (alreadyExtracted) {
+      logEvent(_tag, '[STT_TAR_SKIP] STT assets already extracted');
+      onProgress(1.0);
+      return;
+    }
+
+    final tarPath = p.join(
+        targetDir.path, 'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2');
+    final tarFile = File(tarPath);
+
+    if (!await tarFile.exists() ||
+        (await tarFile.length()) <
+            (AppConstants.sttZipformerTarExpectedBytes * 0.70).toInt()) {
+      if (await tarFile.exists()) await tarFile.delete();
+
+      logEvent(
+        _tag,
+        '[STT_TAR_DOWNLOAD_BEGIN] url=${AppConstants.sttZipformerTarUrl}',
+      );
+
+      try {
+        await _dio.download(
+          AppConstants.sttZipformerTarUrl,
+          tarPath,
+          deleteOnError: true,
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 10,
+          ),
+          onReceiveProgress: (received, total) {
+            final denominator =
+                total > 0 ? total : AppConstants.sttZipformerTarExpectedBytes;
+            onProgress((received / denominator).clamp(0.0, 0.8).toDouble());
+          },
+        );
+        logEvent(_tag, '[STT_TAR_DOWNLOAD_COMPLETE] path=$tarPath');
+      } on DioException catch (error) {
+        if (await tarFile.exists()) await tarFile.delete();
+        final statusCode = error.response?.statusCode;
+        final message = statusCode == null
+            ? 'Download STT tar fallito. ${error.message ?? "Errore di rete"}'
+            : 'Download STT tar fallito (HTTP $statusCode).';
+        logEvent(_tag, '[STT_TAR_DOWNLOAD_FAIL] error=$message');
+        throw VoiceAssetException(message);
+      } catch (error) {
+        if (await tarFile.exists()) await tarFile.delete();
+        throw VoiceAssetException('Download STT tar fallito. $error');
+      }
+    } else {
+      logEvent(_tag, '[STT_TAR_SKIP_DOWNLOAD] tar already present');
+      onProgress(0.8);
+    }
+
+    logEvent(
+        _tag, '[STT_TAR_EXTRACT_BEGIN] tar=$tarPath dest=${targetDir.path}');
+    onProgress(0.85);
+
+    try {
+      final bytes = await tarFile.readAsBytes();
+      final bz2Decoder = BZip2Decoder();
+      final tarBytes = bz2Decoder.decodeBytes(bytes);
+      final archive = TarDecoder().decodeBytes(tarBytes);
+
+      const prefix = 'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
+
+      for (final file in archive) {
+        var outPath = file.name;
+        if (outPath.startsWith(prefix)) {
+          outPath = outPath.substring(prefix.length);
+        }
+        if (outPath.isEmpty) continue;
+
+        // Rinomina i file con i nomi attesi dall'app.
+        if (outPath.contains('encoder')) {
+          outPath = AppConstants.sttEncoderFile;
+        } else if (outPath.contains('decoder')) {
+          outPath = AppConstants.sttDecoderFile;
+        } else if (outPath.contains('joiner')) {
+          outPath = AppConstants.sttJoinerFile;
+        } else if (outPath == 'tokens.txt') {
+          outPath = AppConstants.sttTokensFile;
+        } else {
+          // Salta file non necessari (test_wavs, README, script shell).
+          continue;
+        }
+
+        if (file.isFile) {
+          final destFile = File(p.join(targetDir.path, outPath));
+          await destFile.parent.create(recursive: true);
+          await destFile.writeAsBytes(file.content as List<int>);
+          logEvent(_tag, '[STT_TAR_FILE_EXTRACTED] $outPath');
+        }
+      }
+
+      logEvent(_tag, '[STT_TAR_EXTRACT_COMPLETE]');
+      onProgress(0.95);
+    } catch (error) {
+      throw VoiceAssetException('Estrazione STT tar fallita: $error');
+    } finally {
+      if (await tarFile.exists()) {
+        await tarFile.delete();
+        logEvent(_tag, '[STT_TAR_CLEANUP] deleted $tarPath');
+      }
+    }
+
+    onProgress(1.0);
+  }
+
   /// Scarica il tar.bz2 del modello TTS Piper Paola ed estrae i file.
+  ///
+  /// Struttura attesa nell'archivio:
+  ///   vits-piper-it_IT-paola-medium/
+  ///     it_IT-paola-medium.onnx
+  ///     tokens.txt
+  ///     espeak-ng-data/
   Future<void> _downloadAndExtractTtsTar({
     required Directory targetDir,
     required Function(double) onProgress,
@@ -192,10 +259,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         (await ttsModelFile.length()) > (50 * 1024 * 1024);
 
     if (alreadyExtracted) {
-      logEvent(
-        _tag,
-        '[TTS_TAR_SKIP] TTS assets already extracted to ${targetDir.path}',
-      );
+      logEvent(_tag, '[TTS_TAR_SKIP] TTS assets already extracted');
       onProgress(1.0);
       return;
     }
@@ -247,7 +311,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       onProgress(0.8);
     }
 
-    // Estrai il tar.bz2.
     logEvent(
         _tag, '[TTS_TAR_EXTRACT_BEGIN] tar=$tarPath dest=${targetDir.path}');
     onProgress(0.85);
@@ -258,15 +321,15 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       final tarBytes = bz2Decoder.decodeBytes(bytes);
       final archive = TarDecoder().decodeBytes(tarBytes);
 
+      const prefix = 'vits-piper-it_IT-paola-medium/';
+
       for (final file in archive) {
         var outPath = file.name;
-        const prefix = 'vits-piper-it_IT-paola-medium/';
         if (outPath.startsWith(prefix)) {
           outPath = outPath.substring(prefix.length);
         }
         if (outPath.isEmpty) continue;
 
-        // Rinomina tokens.txt del TTS per non confonderlo con quello STT.
         if (outPath == 'tokens.txt') {
           outPath = AppConstants.ttsTokensFile;
         }
@@ -301,14 +364,24 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final targetDir = await _pathResolver.privateModelsDirectory();
     final missingOrInvalid = <String>[];
 
-    for (final spec in _sttModelSpecs) {
-      final file = File(p.join(targetDir.path, spec.fileName));
-      if (!await _validateExistingFile(spec, file)) {
-        logEvent(_tag, '[ASSET_MISSING] stt file=${spec.fileName}');
-        missingOrInvalid.add(spec.fileName);
+    // Valida file STT.
+    final sttFiles = <String, int>{
+      AppConstants.sttEncoderFile: 100 * 1024 * 1024,
+      AppConstants.sttDecoderFile: 200 * 1024,
+      AppConstants.sttJoinerFile: 10 * 1024 * 1024,
+      AppConstants.sttTokensFile: 1024,
+    };
+
+    for (final entry in sttFiles.entries) {
+      final file = File(p.join(targetDir.path, entry.key));
+      final minBytes = entry.value;
+      if (!await file.exists() || (await file.length()) < minBytes) {
+        logEvent(_tag, '[ASSET_MISSING] stt file=${entry.key}');
+        missingOrInvalid.add(entry.key);
       }
     }
 
+    // Valida file TTS.
     final ttsModelFile =
         File(p.join(targetDir.path, AppConstants.ttsModelFile));
     final ttsTokensFile =
@@ -355,96 +428,4 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
     return targetDir;
   }
-
-  Future<bool> _validateExistingFile(
-    _VoiceModelDownloadSpec spec,
-    File file,
-  ) async {
-    try {
-      if (!await file.exists()) return false;
-      final length = await file.length();
-      // Soglia 70% per gestire variazioni nei file piccoli.
-      final minBytes = (spec.expectedBytes * _minValidationRatio).toInt();
-      return length >= minBytes;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> _validateDownloadedFile(
-    _VoiceModelDownloadSpec spec,
-    File file,
-  ) async {
-    if (!await file.exists()) {
-      throw VoiceAssetException(
-        'File vocale non trovato dopo il download: ${spec.fileName}.',
-      );
-    }
-    final length = await file.length();
-    if (length <= 0) {
-      throw VoiceAssetException(
-        'File vocale vuoto dopo il download: ${spec.fileName}.',
-      );
-    }
-    final minBytes = (spec.expectedBytes * _minValidationRatio).toInt();
-    if (length < minBytes) {
-      throw VoiceAssetException(
-        'File vocale incompleto o corrotto: ${spec.fileName} '
-        '($length byte rilevati, attesi almeno $minBytes).',
-      );
-    }
-  }
-
-  Future<void> _cleanupTempFiles(File tempFile, File destinationFile) async {
-    if (await tempFile.exists()) {
-      logEvent(
-          _tag, '[CLEANUP_TEMP] deleting temp file: ${tempFile.path}');
-      await tempFile.delete();
-    }
-    if (await destinationFile.exists()) {
-      logEvent(
-          _tag,
-          '[CLEANUP_DEST] deleting partial destination: ${destinationFile.path}');
-      await destinationFile.delete();
-    }
-  }
-
-  List<_VoiceModelDownloadSpec> get _sttModelSpecs =>
-      const <_VoiceModelDownloadSpec>[
-        _VoiceModelDownloadSpec(
-          fileName: AppConstants.sttEncoderFile,
-          url:
-              '${AppConstants.sttZipformerBaseUrl}/encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
-          expectedBytes: 170 * 1024 * 1024,
-        ),
-        _VoiceModelDownloadSpec(
-          fileName: AppConstants.sttDecoderFile,
-          url:
-              '${AppConstants.sttZipformerBaseUrl}/decoder-epoch-99-avg-1-chunk-16-left-128.onnx',
-          expectedBytes: 400 * 1024,
-        ),
-        _VoiceModelDownloadSpec(
-          fileName: AppConstants.sttJoinerFile,
-          url:
-              '${AppConstants.sttZipformerBaseUrl}/joiner-epoch-99-avg-1-chunk-16-left-128.onnx',
-          expectedBytes: 18 * 1024 * 1024,
-        ),
-        _VoiceModelDownloadSpec(
-          fileName: AppConstants.sttTokensFile,
-          url: '${AppConstants.sttZipformerBaseUrl}/tokens.txt',
-          expectedBytes: 7 * 1024,
-        ),
-      ];
-}
-
-class _VoiceModelDownloadSpec {
-  const _VoiceModelDownloadSpec({
-    required this.fileName,
-    required this.url,
-    required this.expectedBytes,
-  });
-
-  final String fileName;
-  final String url;
-  final int expectedBytes;
 }
