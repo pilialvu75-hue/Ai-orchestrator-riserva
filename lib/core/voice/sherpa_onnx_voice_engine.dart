@@ -12,14 +12,6 @@ import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
-/// Direct Dart-SDK voice engine using the `sherpa_onnx` package for offline
-/// STT and TTS, and `record` for low-level PCM microphone streaming.
-///
-/// Differenze rispetto alla versione precedente:
-/// - TTS usa `data_dir` (espeak-ng-data) invece di `lexicon` per i modelli Piper.
-/// - Il path della cartella espeak-ng-data viene risolto da [VoiceModelPaths.ttsDataDir]
-///   oppure calcolato automaticamente come sottocartella di [AppConstants.ttsEspeakDataDir]
-///   nella directory privata dei modelli.
 class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   SherpaOnnxVoiceEngine({
     VoiceModelPaths? modelPaths,
@@ -28,7 +20,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   static const String _tag = 'VOICE_ENGINE';
 
   final VoiceModelPaths _modelPaths;
-  final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
+  final RuntimeModelPathResolver _pathResolver =
+      const RuntimeModelPathResolver();
 
   sherpa_onnx.OnlineRecognizer? _recognizer;
   sherpa_onnx.OnlineStream? _asrStream;
@@ -134,15 +127,19 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     );
 
     final String sttEncoderPath =
-        _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
+        _modelPaths.sttEncoder ??
+        _preferredResolvedPath(sttEncoderResolution);
     final String sttDecoderPath =
-        _modelPaths.sttDecoder ?? _preferredResolvedPath(sttDecoderResolution);
+        _modelPaths.sttDecoder ??
+        _preferredResolvedPath(sttDecoderResolution);
     final String sttJoinerPath =
-        _modelPaths.sttJoiner ?? _preferredResolvedPath(sttJoinerResolution);
+        _modelPaths.sttJoiner ??
+        _preferredResolvedPath(sttJoinerResolution);
     final String sttTokensPath =
-        _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
+        _modelPaths.sttTokens ??
+        _preferredResolvedPath(sttTokensResolution);
 
-    // ── 3. Resolve TTS model paths (Piper: usa data_dir, non lexicon) ──────
+    // ── 3. Resolve TTS model paths (Piper: data_dir, no lexicon) ──────────
     final ttsModelResolution = await _pathResolver.resolveForRead(
       fileName: AppConstants.ttsModelFile,
       privateAbsolutePathHint: _modelPaths.ttsModel,
@@ -157,12 +154,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     final String ttsTokensPath =
         _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
 
-    // Risolvi espeak-ng-data: prima da VoiceModelPaths.ttsDataDir,
-    // poi calcolato come sottocartella nella directory privata dei modelli.
+    // espeak-ng-data: da VoiceModelPaths.ttsDataDir oppure
+    // calcolato come sottocartella nella directory privata dei modelli.
     final privateDir = await _pathResolver.privateModelsDirectory();
-    final String ttsDataDir = (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
-        ? _modelPaths.ttsDataDir!
-        : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
+    final String ttsDataDir =
+        (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
+            ? _modelPaths.ttsDataDir!
+            : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
 
     logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
 
@@ -195,13 +193,15 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     if (!assetsReady) {
       const msg =
-          'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.';
+          'Risorse vocali mancanti o non valide. '
+          'Scarica di nuovo i modelli vocali e riapri Live Mode.';
       logEvent(
         _tag,
         '[ASSET_CHECK_FAIL] $msg missing=${allMissing.join(", ")}',
       );
       _forensicPrint(
-        '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg missing=${allMissing.join(", ")}',
+        '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg '
+        'missing=${allMissing.join(", ")}',
       );
       _status = const VoiceEngineStatus(
         engineId: sherpaOnnxEngineId,
@@ -215,7 +215,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         offlineTtsAvailable: false,
         isVoiceDownloaded: false,
         details:
-            'Risorse vocali mancanti o non valide. Scarica di nuovo i modelli vocali e riapri Live Mode.',
+            'Risorse vocali mancanti o non valide. '
+            'Scarica di nuovo i modelli vocali e riapri Live Mode.',
       );
       return _status;
     }
@@ -227,7 +228,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         '[VOICE_ENGINE] [ONNX_BIND_BEGIN] Calling sherpa_onnx.initBindings()');
     try {
       sherpa_onnx.initBindings();
-      _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_OK] Native ONNX bindings loaded');
+      _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_OK]');
       logEvent(_tag, '[ONNX_BIND_OK] Native ONNX bindings loaded successfully');
     } catch (e, st) {
       final msg = 'Failed to load Sherpa-ONNX native libraries: $e';
@@ -265,12 +266,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         rule2MinTrailingSilence: 1.4,
         rule3MinUtteranceLength: 20.0,
       );
-      _forensicPrint(
-        '[VOICE_ENGINE] [STT_CONFIG_SHAPE] '
-        'modelType=${AppConstants.sttModelType} '
-        'provider=cpu numThreads=${AppConstants.sttNumThreads} '
-        'rule1=2.4 rule2=1.4 rule3=20.0',
-      );
       _recognizer = sherpa_onnx.OnlineRecognizer(config);
       sttReady = true;
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
@@ -292,9 +287,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
         vits: sherpa_onnx.OfflineTtsVitsModelConfig(
           model: ttsModelPath,
-          lexicon: '',       // Piper non usa lexicon.txt
+          lexicon: '',
           tokens: ttsTokensPath,
-          dataDir: ttsDataDir, // espeak-ng-data per Piper
+          dataDir: ttsDataDir,
         ),
         numThreads: 2,
         debug: false,
@@ -316,8 +311,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     // ── 7. Audio-channel allocation ────────────────────────────────────────
     bool micReady = false;
     logEvent(_tag, '[AUDIO_SESSION_CHECK_BEGIN] Verifying AudioRecorder');
-    _forensicPrint(
-        '[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN] AudioRecorder availability');
+    _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN]');
     try {
       final hasPerm = await _recorder.hasPermission();
       micReady = hasPerm;
@@ -357,15 +351,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     if (!initOk) {
       logEvent(
         _tag,
-        '[INIT_FAIL_LOUD] initialize() completed with no functional subsystem — '
-        'details: ${_status.details}',
+        '[INIT_FAIL_LOUD] initialize() completed with no functional subsystem '
+        '— details: ${_status.details}',
       );
     }
 
     return _status;
   }
-
-  // ── startListening ────────────────────────────────────────────────────────
 
   @override
   Future<void> startListening({
@@ -420,7 +412,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             final text = result.text.trim();
             logEvent(
               _tag,
-              '[VAD_ENDPOINT] isEndpoint=true text="${text.isEmpty ? "<empty>" : text}"',
+              '[VAD_ENDPOINT] isEndpoint=true '
+              'text="${text.isEmpty ? "<empty>" : text}"',
             );
             if (text.isNotEmpty) {
               onResult(text, true);
@@ -454,8 +447,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── stopListening ─────────────────────────────────────────────────────────
-
   @override
   Future<void> stopListening() async {
     logEvent(_tag, '[ASR_STOP_BEGIN]');
@@ -475,8 +466,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     logEvent(_tag, '[ASR_STOP_DONE]');
   }
 
-  // ── speak ─────────────────────────────────────────────────────────────────
-
   @override
   Future<void> speak(String text) async {
     final sanitized = text.trim();
@@ -484,13 +473,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     if (!_status.readyForOutput) {
       logEvent(
-          _tag, '[TTS_BLOCKED] engine not ready for output text="$sanitized"');
+          _tag, '[TTS_BLOCKED] engine not ready text="$sanitized"');
       return;
     }
 
     final tts = _tts;
     if (tts == null) {
-      logEvent(_tag, '[TTS_NULL] tts engine is null, cannot speak');
+      logEvent(_tag, '[TTS_NULL] tts engine is null');
       return;
     }
 
@@ -510,13 +499,15 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       logEvent(
         _tag,
-        '[TTS_GENERATE_OK] samples=${audio.samples.length} sampleRate=${audio.sampleRate}',
+        '[TTS_GENERATE_OK] samples=${audio.samples.length} '
+        'sampleRate=${audio.sampleRate}',
       );
 
       _audioPlayer.push(audio.samples, audio.sampleRate);
       logEvent(
         _tag,
-        '[TTS_PLAYBACK_ENQUEUED] queued ${audio.samples.length} samples at ${audio.sampleRate} Hz',
+        '[TTS_PLAYBACK_ENQUEUED] queued ${audio.samples.length} samples '
+        'at ${audio.sampleRate} Hz',
       );
     } catch (e, st) {
       final msg = 'TTS generation error: $e';
@@ -525,16 +516,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── stopSpeaking ──────────────────────────────────────────────────────────
-
   @override
   Future<void> stopSpeaking() async {
     logEvent(_tag, '[TTS_STOP]');
     _audioPlayer.stop();
     _pendingTtsSamples = null;
   }
-
-  // ── dispose ───────────────────────────────────────────────────────────────
 
   @override
   Future<void> dispose() async {
@@ -588,8 +575,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     _forensicPrint('[VOICE_ENGINE] [DISPOSE_DONE] all handles released');
     logEvent(_tag, '[DISPOSE_DONE]');
   }
-
-  // ── PCM conversion ────────────────────────────────────────────────────────
 
   static Float32List _pcm16BytesToFloat32(Uint8List bytes) {
     final numSamples = bytes.length ~/ 2;
