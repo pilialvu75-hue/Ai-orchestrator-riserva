@@ -82,9 +82,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     // ── Fase 1: file STT individuali (4 file) ──────────────────────────────
     final sttSpecs = _sttModelSpecs;
-    const sttTotalBytes = (170 + 18) * 1024 * 1024 + 400 * 1024 + 7 * 1024;
+    final sttTotalBytes = (170 + 18) * 1024 * 1024 + 400 * 1024 + 7 * 1024;
     final ttsTotalBytes = AppConstants.ttsPaolaTarExpectedBytes;
-    const grandTotal = sttTotalBytes + ttsTotalBytes;
+    final grandTotal = sttTotalBytes + ttsTotalBytes;
 
     var completedBytes = 0;
     onProgress(0.0);
