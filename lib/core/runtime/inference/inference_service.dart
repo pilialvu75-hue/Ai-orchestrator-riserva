@@ -253,22 +253,34 @@ class InferenceService {
   ) {
     if (selectedModel == null) {
       _log(
-        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_unavailable state=model_not_selected',
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId}'
+        ' reason=selected_model_unavailable state=model_not_selected',
       );
       return null;
     }
     if (selectedModel.localPath == null) {
       _log(
-        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId} reason=selected_model_missing_local_path modelId=${selectedModel.id}',
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId}'
+        ' reason=selected_model_missing_local_path modelId=${selectedModel.id}',
       );
       return null;
     }
+
+    final effectiveModelId = selectedModel.effectiveRuntimeModelId;
+
     _log(
-      '[PRE_STREAM_LOCAL_REQUEST_READY] session=${request.sessionId} modelId=${selectedModel.effectiveRuntimeModelId} modelPath=${selectedModel.localPath}',
+      '[PRE_STREAM_LOCAL_REQUEST_READY] session=${request.sessionId}'
+      ' modelId=$effectiveModelId modelPath=${selectedModel.localPath}',
     );
+
+    // Applica parametri adattivi basati sul modello effettivo.
+    // Sovrascrive i default dell'Orchestrator con valori calibrati
+    // sulla dimensione reale del modello.
     return request.copyWith(
-      modelId: selectedModel.effectiveRuntimeModelId,
+      modelId: effectiveModelId,
       modelPath: selectedModel.localPath,
+      maxTokens: InferenceRequest.maxTokensForModel(effectiveModelId),
+      temperature: InferenceRequest.temperatureForModel(effectiveModelId),
     );
   }
 
