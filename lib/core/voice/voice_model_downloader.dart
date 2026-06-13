@@ -147,8 +147,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    await _cleanupSttFiles(targetDir);
     logEvent(_tag, '[STT_TAR_CLEANUP_BEGIN]');
+    await _cleanupSttFiles(targetDir);
 
     final tarPath = p.join(targetDir.path, _sttTarFileName);
     await _downloadFile(
@@ -232,8 +232,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    await _cleanupTtsFiles(targetDir);
     logEvent(_tag, '[TTS_TAR_CLEANUP_BEGIN]');
+    await _cleanupTtsFiles(targetDir);
 
     final tarPath = p.join(targetDir.path, _ttsTarFileName);
     await _downloadFile(
