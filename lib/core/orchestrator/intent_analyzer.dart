@@ -11,28 +11,43 @@ class IntentAnalyzer {
   static const Set<String> _commandKeywords = {'apri', 'chiama', 'lancia'};
 
   /// Italian/English trigger words for multi-step planning (TaskWeaver-style).
-  ///
-  /// Chosen to be unambiguous technical terms unlikely to appear in everyday
-  /// conversation.  The list can be extended without touching the routing logic.
   static const Set<String> _planKeywords = {
-    'pianifica',   // IT: plan
-    'decomponi',   // IT: decompose
-    'orchestrate', // EN
-    'orchestrazione', // IT
-    'pianificazione', // IT: planning
+    'pianifica',
+    'decomponi',
+    'orchestrate',
+    'orchestrazione',
+    'pianificazione',
   };
 
   /// Italian/English trigger words for coding/debugging/refactoring tasks.
   static const Set<String> _codingKeywords = {
-    'implementa', // IT: implement
-    'implement',  // EN
-    'refactor',   // EN/IT
+    'implementa',
+    'implement',
+    'refactor',
     'refactoring',
     'debug',
     'bugfix',
-    'debugga',    // IT colloquial
+    'debugga',
     'script',
-    'codice',     // IT: code
+    'codice',
+  };
+
+  /// Italian/English trigger words for web search requests.
+  /// Intercettati PRIMA di arrivare al modello locale, che non ha rete.
+  static const Set<String> _webSearchKeywords = {
+    'cerca',          // IT: search
+    'search',         // EN
+    'cercami',        // IT: search for me
+    'googla',         // IT colloquial
+    'google',
+    'internet',
+    'online',
+    'web',
+    'trovami',        // IT: find me
+    'find',           // EN
+    'notizie',        // IT: news
+    'news',
+    'aggiornamenti',  // IT: updates
   };
 
   /// Returns the [TaskType] that best matches [input].
@@ -42,6 +57,7 @@ class IntentAnalyzer {
     if (tokens.any(_commandKeywords.contains)) return TaskType.command;
     if (tokens.any(_planKeywords.contains)) return TaskType.plan;
     if (tokens.any(_codingKeywords.contains)) return TaskType.coding;
+    if (tokens.any(_webSearchKeywords.contains)) return TaskType.webSearch;
 
     return TaskType.chat;
   }
