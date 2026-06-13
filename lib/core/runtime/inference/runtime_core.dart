@@ -88,7 +88,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions;
 
   static const _logTag = 'AI_RUNTIME';
-  static const int _safeMaxTokens = 128;
+  static const int _safeMaxTokens = 1024;
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
   static const Duration _generationTimeout = Duration(seconds: 90);
