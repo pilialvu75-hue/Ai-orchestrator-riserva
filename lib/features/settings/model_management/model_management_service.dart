@@ -165,7 +165,11 @@ class ModelManagementService {
         spec.downloadUrl,
         tempFile.path,
         deleteOnError: true,
-        options: Options(headers: const <String, dynamic>{}),
+        options: Options(
+          headers: const <String, dynamic>{},
+          followRedirects: true,
+          maxRedirects: 10,
+        ),
         onReceiveProgress: (received, total) {
           if (total > 0 && serverContentLength == null) {
             serverContentLength = total;
