@@ -198,7 +198,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       if (!await _sttAssetsComplete(targetDir)) {
         throw const VoiceAssetException(
-          'Verifica STT fallita: encoder.onnx, decoder.onnx, joiner.onnx o tokens.txt non sono validi.',
+          'Verifica STT fallita: ${AppConstants.sttEncoderFile}, ${AppConstants.sttDecoderFile}, '
+          '${AppConstants.sttJoinerFile} o ${AppConstants.sttTokensFile} non sono validi.',
         );
       }
 
@@ -273,17 +274,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         }
       }
 
-      final modelFile = File(p.join(targetDir.path, AppConstants.ttsModelFile));
-      if (!await modelFile.exists() ||
-          (await modelFile.length()) <= 50 * 1024 * 1024) {
-        throw const VoiceAssetException(
-          'Verifica TTS fallita: it_IT-paola-medium.onnx non supera la soglia minima richiesta.',
-        );
-      }
-
       if (!await _ttsAssetsComplete(targetDir)) {
-        throw const VoiceAssetException(
-          'Verifica TTS fallita: it_IT-paola-medium.onnx, tts-tokens.txt o espeak-ng-data non sono validi.',
+        throw VoiceAssetException(
+          'Verifica TTS fallita: ${AppConstants.ttsModelFile}, '
+          '${AppConstants.ttsTokensFile} o ${AppConstants.ttsEspeakDataDir} non sono validi.',
         );
       }
 
