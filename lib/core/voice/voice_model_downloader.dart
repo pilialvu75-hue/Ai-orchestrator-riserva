@@ -376,7 +376,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     if (missing.isNotEmpty) {
       final message =
-          'Risorse vocali mancanti o non valide: ${missing.join(", ")}. '
+          'Risorse vocali mancanti o non valide: ${missing.join("; ")}. '
           'Riprova il download dei modelli vocali.';
       logEvent(_tag, '[ASSET_VALIDATION_FAIL] $message');
       throw VoiceAssetException(message);
