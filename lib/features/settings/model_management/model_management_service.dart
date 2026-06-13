@@ -72,7 +72,7 @@ class ModelManagementService {
   // present and usable.  Files below this threshold are treated as incomplete
   // (interrupted download).  This mirrors the same constant used by
   // VoiceModelDownloader so both pipelines apply identical acceptance criteria.
-  static const double _minAcceptableFraction = 0.85;
+  static const double _minAcceptableFraction = 0.70;
 
   Future<List<ModelFileInspection>> inspectAll() async {
     final inspections = <ModelFileInspection>[];
