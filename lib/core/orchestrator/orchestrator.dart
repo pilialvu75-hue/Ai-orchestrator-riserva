@@ -13,15 +13,10 @@ import 'package:flutter/foundation.dart';
 
 /// Central routing layer for all AI calls.
 ///
-/// Step 3 – execution engine: classifica l'intent utente con [IntentAnalyzer],
-/// delega i comandi device a [ExecutionEngine] (platform-specific), instrada
-/// planning/coding attraverso [PlannerService] (TaskWeaver-inspired), e
-/// instrada le query AI chat attraverso [InferenceService].
-///
-/// I parametri [maxTokens] e [temperature] vengono ora calcolati
-/// automaticamente da [InferenceRequest] in base al modelId conosciuto
-/// a runtime in [InferenceService._buildLocalRequest]. Il valore passato
-/// qui è un default sicuro che vale solo se il modello non è ancora noto.
+/// Classifica l'intent utente con [IntentAnalyzer], delega i comandi
+/// device a [ExecutionEngine], instrada planning/coding a [PlannerService],
+/// le ricerche web a una risposta informativa (LOCAL) o al provider cloud
+/// (CLOUD/HYBRID), e le query chat a [InferenceService].
 class Orchestrator {
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
@@ -51,6 +46,15 @@ class Orchestrator {
       case TaskType.plan:
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
+      case TaskType.webSearch:
+        // In handle() sincrono restituiamo risposta informativa diretta.
+        return InferenceResponse.finalChunk(
+          text: 'Non ho accesso a internet in modalità locale. '
+              'Passa alla modalità Cloud o Hybrid nelle impostazioni '
+              'per cercare online.',
+          model: InferenceConstants.localModelName,
+          tokensGenerated: 0,
+        );
       case TaskType.chat:
       case TaskType.system:
         return _inferenceService.infer(
@@ -59,7 +63,6 @@ class Orchestrator {
             prompt: input,
             systemPrompt: systemPrompt,
             isOffline: isOffline,
-            // maxTokens e temperature usano i default adattivi di InferenceRequest
           ),
         );
     }
@@ -71,26 +74,30 @@ class Orchestrator {
     List<ChatTurn> context = const [],
     String? systemPrompt,
     bool isOffline = false,
-    // Parametri opzionali: se non passati, InferenceService li sovrascrive
-    // con valori adattivi basati sul modello selezionato a runtime.
-    // Manteniamo la firma per retrocompatibilità con i chiamanti esistenti.
     int? maxTokens,
     double? temperature,
   }) {
     _logForensic(
-      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream'
-      ' prompt_chars=${input.length} context_turns=${context.length}',
+      '[ORCHESTRATOR_SEND] session=$sessionId'
+      ' stage=orchestrator.handleStream'
+      ' prompt_chars=${input.length}'
+      ' context_turns=${context.length}',
     );
+
     final type = _analyzer.analyze(input);
+
     _logForensic(
-      '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name}'
-      ' will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
+      '[ORCHESTRATOR_ROUTE] session=$sessionId'
+      ' task_type=${type.name}'
+      ' will_stream_inference=${type == TaskType.chat || type == TaskType.system || type == TaskType.webSearch}',
     );
+
     final contextSnapshot = List<ChatTurn>.unmodifiable(context);
 
     if (type == TaskType.command) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
+        '[PRE_STREAM_BYPASS] session=$sessionId'
+        ' boundary=orchestrator.intent_route'
         ' reason=task_type_command target=_executeCommand',
       );
       return Stream.fromFuture(_executeCommand(input));
@@ -98,7 +105,8 @@ class Orchestrator {
 
     if (type == TaskType.plan || type == TaskType.coding) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
+        '[PRE_STREAM_BYPASS] session=$sessionId'
+        ' boundary=orchestrator.intent_route'
         ' reason=task_type_${type.name} target=_executePlan',
       );
       return Stream.fromFuture(
@@ -106,41 +114,44 @@ class Orchestrator {
       );
     }
 
-    // Ricerca web in modalità locale → risposta informativa immediata.
-    // In modalità cloud/hybrid, la request viene instradata normalmente
-    // e il provider cloud ha accesso a internet.
+    // Ricerca web in modalità locale → risposta informativa via LLM
+    // con system prompt dedicato e token ridotti.
+    // In modalità cloud/hybrid il provider ha già accesso a internet
+    // e gestisce la ricerca nativamente.
     if (type == TaskType.webSearch) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
-        ' reason=task_type_webSearch',
+        '[PRE_STREAM_BYPASS] session=$sessionId'
+        ' boundary=orchestrator.intent_route'
+        ' reason=task_type_webSearch isOffline=$isOffline',
       );
       return _inferenceService.stream(
         InferenceRequest(
           sessionId: sessionId,
           prompt: input,
           systemPrompt:
-              'You are AI Orchestrator. The user wants to search the web. '
-              'If you are running in LOCAL mode without internet access, '
-              'reply ONLY with this message in the user language: '
+              'You are AI Orchestrator running in LOCAL mode without internet. '
+              'The user is asking to search the web. '
+              'Reply ONLY with this sentence, translated to match the user language: '
               '"Non ho accesso a internet in modalità locale. '
               'Passa alla modalità Cloud o Hybrid nelle impostazioni per cercare online." '
               'Do not add anything else.',
           context: const [],
           isOffline: isOffline,
-          maxTokens: 128,
+          maxTokens: 64,
           temperature: 0.1,
         ),
       );
     }
 
+    // Chat / system → inference normale con parametri adattivi.
+    // InferenceService._buildLocalRequest sovrascriverà maxTokens e
+    // temperature con valori calibrati sul modello effettivo.
     _logForensic(
-      '[PRE_STREAM_FORWARD] session=$sessionId boundary=orchestrator.intent_route'
+      '[PRE_STREAM_FORWARD] session=$sessionId'
+      ' boundary=orchestrator.intent_route'
       ' target=inference_service.stream task_type=${type.name}',
     );
 
-    // Costruisce la request con i default adattivi.
-    // InferenceService._buildLocalRequest sovrascriverà maxTokens e temperature
-    // con valori calibrati sul modello effettivo una volta risolto.
     return _inferenceService.stream(
       InferenceRequest(
         sessionId: sessionId,
@@ -148,8 +159,6 @@ class Orchestrator {
         systemPrompt: systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
-        // Se il chiamante ha passato valori espliciti li rispettiamo,
-        // altrimenti usiamo i default adattivi di InferenceRequest.
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
@@ -172,8 +181,7 @@ class Orchestrator {
 
   /// Decompone [input] in un [Plan] ed esegue ogni step.
   ///
-  /// Fallback a una normale chiamata inference quando [PlannerService] non è
-  /// configurato (es. durante i test o cold startup prima del DI completo).
+  /// Fallback a inference normale quando [PlannerService] non è configurato.
   Future<InferenceResponse> _executePlan(
     String input, {
     bool isOffline = false,
