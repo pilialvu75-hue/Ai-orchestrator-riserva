@@ -144,31 +144,21 @@ class AppConstants {
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
 
-  // ── Sherpa-ONNX STT download (GitHub Releases tar.bz2) ───────────────────────
-  // Scaricato come archivio unico da GitHub Releases per evitare i redirect
-  // CDN di Hugging Face che causano download incompleti su Android.
-  // Struttura archivio:
-  //   sherpa-onnx-streaming-zipformer-en-2023-06-26/
-  //     encoder-epoch-99-avg-1-chunk-16-left-128.onnx  → encoder.onnx
-  //     decoder-epoch-99-avg-1-chunk-16-left-128.onnx  → decoder.onnx
-  //     joiner-epoch-99-avg-1-chunk-16-left-128.onnx   → joiner.onnx
-  //     tokens.txt                                      → tokens.txt
+  // ── Sherpa-ONNX STT download ─────────────────────────────────────────────────
   static const String sttZipformerEnRepository =
       'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
   static const String sttZipformerBaseUrl =
       'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
+
+  // STT scaricato come archivio tar.bz2 da GitHub Releases.
+  // Evita i redirect CDN di Hugging Face che causano download incompleti.
   static const String sttZipformerTarUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
   static const int sttZipformerTarExpectedBytes = 200 * 1024 * 1024;
 
-  // ── Sherpa-ONNX TTS file names (vits-piper-it_IT-paola-medium) ───────────────
-  // Modello Piper — usa espeak-ng-data invece di lexicon.txt.
-  // Scaricato come archivio tar.bz2 da GitHub Releases di sherpa-onnx.
-  // Struttura archivio:
-  //   vits-piper-it_IT-paola-medium/
-  //     it_IT-paola-medium.onnx
-  //     tokens.txt             → tts-tokens.txt
-  //     espeak-ng-data/
+  // ── Sherpa-ONNX TTS file names (Piper Paola) ─────────────────────────────────
+  // Modello Piper: usa espeak-ng-data invece di lexicon.txt.
+  // Scaricato come archivio tar.bz2 da GitHub Releases.
   static const String ttsModelFile = 'it_IT-paola-medium.onnx';
   static const String ttsTokensFile = 'tts-tokens.txt';
   static const String ttsEspeakDataDir = 'espeak-ng-data';
