@@ -1,4 +1,4 @@
-/// Classifies the kind of work a user input requires.
+/// Classifica il tipo di lavoro richiesto dall'input utente.
 enum TaskType {
   /// General conversational exchange handled by an AI provider.
   chat,
@@ -15,4 +15,10 @@ enum TaskType {
 
   /// A coding or code-analysis task (generation, debugging, refactoring).
   coding,
+
+  /// Una richiesta di ricerca web ("cerca", "search", "notizie", ecc.).
+  /// In modalità LOCAL viene gestita con un messaggio informativo.
+  /// In modalità CLOUD/HYBRID viene instradata al provider cloud che
+  /// ha accesso a internet (es. OpenAI con browsing, Gemini, ecc.).
+  webSearch,
 }
