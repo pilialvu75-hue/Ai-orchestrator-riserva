@@ -216,7 +216,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       final invalidAssets = await _sttInvalidAssets(targetDir);
       if (invalidAssets.isNotEmpty) {
         throw VoiceAssetException(
-          'Verifica STT fallita: ${invalidAssets.join(", ")} non sono validi.',
+          'Verifica STT fallita: ${invalidAssets.join("; ")} non sono validi.',
         );
       }
 
@@ -294,7 +294,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       final invalidAssets = await _ttsInvalidAssets(targetDir);
       if (invalidAssets.isNotEmpty) {
         throw VoiceAssetException(
-          'Verifica TTS fallita: ${invalidAssets.join(", ")} non sono validi.',
+          'Verifica TTS fallita: ${invalidAssets.join("; ")} non sono validi.',
         );
       }
 
