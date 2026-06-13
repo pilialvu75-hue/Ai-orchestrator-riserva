@@ -10,9 +10,7 @@ import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 
 class VoiceAssetException implements Exception {
   const VoiceAssetException(this.message);
-
   final String message;
-
   @override
   String toString() => message;
 }
@@ -22,31 +20,25 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     Dio? dio,
     RuntimeModelPathResolver? pathResolver,
   })  : _dio = dio ??
-            Dio(
-              BaseOptions(
-                followRedirects: true,
-                maxRedirects: 10,
-                connectTimeout: const Duration(seconds: 30),
-                receiveTimeout: const Duration(hours: 2),
-                sendTimeout: const Duration(seconds: 30),
-              ),
-            ),
+            Dio(BaseOptions(
+              connectTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(hours: 2),
+              sendTimeout: const Duration(seconds: 30),
+              followRedirects: true,
+              maxRedirects: 10,
+            )),
         _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
 
   static const String _tag = 'VOICE_DOWNLOAD';
-  static const String _sttTarFileName =
-      'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
-  static const String _ttsTarFileName = 'vits-piper-it_IT-paola-medium.tar.bz2';
-  static String get _sttArchivePrefix =>
-      _sttTarFileName.replaceFirst('.tar.bz2', '/');
-  static String get _ttsArchivePrefix =>
-      _ttsTarFileName.replaceFirst('.tar.bz2', '/');
-
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
 
   Future<bool> checkAndRequestPermissions() async {
     logEvent(_tag, '[PERMISSION_REQUEST_BEGIN]');
+    if (!Platform.isAndroid) {
+      logEvent(_tag, '[PERMISSION_REQUEST_RESULT] not android');
+      return true;
+    }
     logEvent(_tag, '[PERMISSION_REQUEST_RESULT] using app-private storage');
     return true;
   }
@@ -58,99 +50,53 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[DOWNLOAD_START] targetDir=${targetDir.path}');
     onProgress(0.0);
 
+    // Fase 1: STT (50% del progresso totale)
     await _downloadAndExtractSttTar(
       targetDir: targetDir,
-      onProgress: (value) => onProgress((value * 0.5).clamp(0.0, 0.5)),
+      onProgress: (v) => onProgress((v * 0.5).clamp(0.0, 0.5)),
     );
 
+    // Fase 2: TTS (50% del progresso totale)
     await _downloadAndExtractTtsTar(
       targetDir: targetDir,
-      onProgress: (value) => onProgress((0.5 + value * 0.5).clamp(0.0, 1.0)),
+      onProgress: (v) => onProgress((0.5 + v * 0.5).clamp(0.0, 1.0)),
     );
 
     await validateDownloadedAssets();
-    logEvent(_tag, '[DOWNLOAD_COMPLETE] voice assets ready');
+    logEvent(_tag, '[DOWNLOAD_COMPLETE] voice assets ready in ${targetDir.path}');
     onProgress(1.0);
   }
 
+  // ── STT ────────────────────────────────────────────────────────────────────
+
   Future<bool> _sttAssetsComplete(Directory targetDir) async {
-    return (await _sttInvalidAssets(targetDir)).isEmpty;
-  }
-
-  Future<List<String>> _sttInvalidAssets(Directory targetDir) async {
-    final invalid = <String>[];
-    final assets = <MapEntry<String, int>>[
-      MapEntry(AppConstants.sttEncoderFile, 100 * 1024 * 1024),
-      MapEntry(AppConstants.sttDecoderFile, 200 * 1024),
-      MapEntry(AppConstants.sttJoinerFile, 10 * 1024 * 1024),
-      MapEntry(AppConstants.sttTokensFile, 1024),
-    ];
-    for (final asset in assets) {
-      final file = File(p.join(targetDir.path, asset.key));
-      if (!await file.exists() || (await file.length()) < asset.value) {
-        invalid.add(asset.key);
-      }
+    final checks = <String, int>{
+      AppConstants.sttEncoderFile: 100 * 1024 * 1024,
+      AppConstants.sttDecoderFile: 200 * 1024,
+      AppConstants.sttJoinerFile: 10 * 1024 * 1024,
+      AppConstants.sttTokensFile: 1024,
+    };
+    for (final e in checks.entries) {
+      final f = File(p.join(targetDir.path, e.key));
+      if (!await f.exists() || await f.length() < e.value) return false;
     }
-    return invalid;
-  }
-
-  Future<bool> _ttsAssetsComplete(Directory targetDir) async {
-    return (await _ttsInvalidAssets(targetDir)).isEmpty;
-  }
-
-  Future<List<String>> _ttsInvalidAssets(Directory targetDir) async {
-    final invalid = <String>[];
-    final modelFile = File(p.join(targetDir.path, AppConstants.ttsModelFile));
-    final tokensFile = File(p.join(targetDir.path, AppConstants.ttsTokensFile));
-    final espeakDir =
-        Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
-
-    if (!await modelFile.exists() ||
-        (await modelFile.length()) <= 50 * 1024 * 1024) {
-      invalid.add(AppConstants.ttsModelFile);
-    }
-    if (!await tokensFile.exists() || (await tokensFile.length()) == 0) {
-      invalid.add(AppConstants.ttsTokensFile);
-    }
-    if (!await espeakDir.exists()) {
-      invalid.add(AppConstants.ttsEspeakDataDir);
-    }
-    return invalid;
+    return true;
   }
 
   Future<void> _cleanupSttFiles(Directory targetDir) async {
-    for (final name in <String>[
+    for (final name in [
       AppConstants.sttEncoderFile,
       AppConstants.sttDecoderFile,
       AppConstants.sttJoinerFile,
       AppConstants.sttTokensFile,
     ]) {
-      final file = File(p.join(targetDir.path, name));
-      if (await file.exists()) {
-        await file.delete();
+      final f = File(p.join(targetDir.path, name));
+      if (await f.exists()) {
+        await f.delete();
+        logEvent(_tag, '[CLEANUP] deleted $name');
       }
-      final partFile = File('${file.path}.part');
-      if (await partFile.exists()) {
-        await partFile.delete();
-      }
-    }
-  }
-
-  Future<void> _cleanupTtsFiles(Directory targetDir) async {
-    for (final name in <String>[
-      AppConstants.ttsModelFile,
-      AppConstants.ttsTokensFile,
-    ]) {
-      final file = File(p.join(targetDir.path, name));
-      if (await file.exists()) {
-        await file.delete();
-      }
-    }
-
-    final espeakDir =
-        Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
-    if (await espeakDir.exists()) {
-      await espeakDir.delete(recursive: true);
+      final part = File('${f.path}.part');
+      if (await part.exists()) await part.delete();
     }
   }
 
@@ -159,84 +105,147 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Function(double) onProgress,
   }) async {
     if (await _sttAssetsComplete(targetDir)) {
-      logEvent(_tag, '[STT_TAR_SKIP] all STT assets valid');
+      logEvent(_tag, '[STT_SKIP] all STT assets already valid');
       onProgress(1.0);
       return;
     }
 
-    logEvent(_tag, '[STT_TAR_CLEANUP_SCHEDULED]');
+    // Pulisce file parziali prima di ricominciare.
     await _cleanupSttFiles(targetDir);
 
-    final tarPath = p.join(targetDir.path, _sttTarFileName);
-    await _downloadFile(
-      url: AppConstants.sttZipformerTarUrl,
-      destPath: tarPath,
-      expectedBytes: AppConstants.sttZipformerTarExpectedBytes,
-      tag: 'STT_TAR',
-      onProgress: (value) => onProgress((value * 0.8).clamp(0.0, 0.8)),
+    final tarPath = p.join(
+      targetDir.path,
+      'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2',
     );
 
-    logEvent(_tag, '[STT_TAR_EXTRACT_BEGIN] path=$tarPath');
+    // Download
+    logEvent(_tag, '[STT_DOWNLOAD_BEGIN] url=${AppConstants.sttZipformerTarUrl}');
     try {
-      final tarBytes = await File(tarPath).readAsBytes();
-      final decompressed = BZip2Decoder().decodeBytes(tarBytes);
+      await _dio.download(
+        AppConstants.sttZipformerTarUrl,
+        tarPath,
+        deleteOnError: true,
+        options: Options(followRedirects: true, maxRedirects: 10),
+        onReceiveProgress: (received, total) {
+          final denom = total > 0
+              ? total
+              : AppConstants.sttZipformerTarExpectedBytes;
+          onProgress((received / denom * 0.8).clamp(0.0, 0.8));
+        },
+      );
+      logEvent(_tag, '[STT_DOWNLOAD_COMPLETE] path=$tarPath');
+    } on DioException catch (e) {
+      if (await File(tarPath).exists()) await File(tarPath).delete();
+      throw VoiceAssetException(
+        'Download STT fallito (HTTP ${e.response?.statusCode ?? "?"}): '
+        '${e.message ?? "errore di rete"}',
+      );
+    } catch (e) {
+      if (await File(tarPath).exists()) await File(tarPath).delete();
+      throw VoiceAssetException('Download STT fallito: $e');
+    }
+
+    // Estrazione
+    onProgress(0.85);
+    logEvent(_tag, '[STT_EXTRACT_BEGIN]');
+    try {
+      final bytes = await File(tarPath).readAsBytes();
+      final decompressed = BZip2Decoder().decodeBytes(bytes);
       final archive = TarDecoder().decodeBytes(decompressed);
 
+      const prefix = 'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
       for (final file in archive) {
-        if (!file.isFile) {
-          continue;
+        if (!file.isFile) continue;
+        var name = file.name;
+        if (name.startsWith(prefix)) name = name.substring(prefix.length);
+
+        String? destName;
+        if (name.contains('encoder')) {
+          destName = AppConstants.sttEncoderFile;
+        } else if (name.contains('decoder')) {
+          destName = AppConstants.sttDecoderFile;
+        } else if (name.contains('joiner')) {
+          destName = AppConstants.sttJoinerFile;
+        } else if (name == 'tokens.txt') {
+          destName = AppConstants.sttTokensFile;
+        } else {
+          continue; // salta test_wavs, README, script
         }
 
-        final normalizedPath = file.name.startsWith(_sttArchivePrefix)
-            ? file.name.substring(_sttArchivePrefix.length)
-            : file.name;
-
-        String? destinationName;
-        if (normalizedPath.contains('encoder')) {
-          destinationName = AppConstants.sttEncoderFile;
-        } else if (normalizedPath.contains('decoder')) {
-          destinationName = AppConstants.sttDecoderFile;
-        } else if (normalizedPath.contains('joiner')) {
-          destinationName = AppConstants.sttJoinerFile;
-        } else if (normalizedPath == 'tokens.txt') {
-          destinationName = AppConstants.sttTokensFile;
-        }
-
-        if (destinationName == null) {
-          logEvent(_tag, '[STT_TAR_SKIP_ENTRY] $normalizedPath');
-          continue;
-        }
-
-        final destination = File(p.join(targetDir.path, destinationName));
-        await destination.parent.create(recursive: true);
-        await destination.writeAsBytes(file.content as List<int>);
-        logEvent(_tag, '[STT_TAR_EXTRACTED] $destinationName');
-      }
-
-      final invalidAssets = await _sttInvalidAssets(targetDir);
-      if (invalidAssets.isNotEmpty) {
-        throw VoiceAssetException(
-          'Verifica STT fallita: ${invalidAssets.join("; ")} non sono validi.',
+        final dest = File(p.join(targetDir.path, destName));
+        await dest.writeAsBytes(file.content as List<int>);
+        logEvent(
+          _tag,
+          '[STT_EXTRACTED] $destName (${await dest.length()} bytes)',
         );
       }
-
-      logEvent(_tag, '[STT_TAR_EXTRACT_COMPLETE]');
       onProgress(0.95);
-    } catch (error) {
-      await _cleanupSttFiles(targetDir);
-      if (error is VoiceAssetException) {
-        rethrow;
-      }
-      throw VoiceAssetException('Estrazione STT tar fallita: $error');
+    } catch (e) {
+      throw VoiceAssetException('Estrazione STT fallita: $e');
     } finally {
-      final tarFile = File(tarPath);
-      if (await tarFile.exists()) {
-        await tarFile.delete();
+      final tar = File(tarPath);
+      if (await tar.exists()) {
+        await tar.delete();
         logEvent(_tag, '[STT_TAR_CLEANUP]');
       }
     }
 
+    // Verifica post-estrazione
+    final invalid = <String>[];
+    final postChecks = <String, int>{
+      AppConstants.sttEncoderFile: 100 * 1024 * 1024,
+      AppConstants.sttDecoderFile: 200 * 1024,
+      AppConstants.sttJoinerFile: 10 * 1024 * 1024,
+      AppConstants.sttTokensFile: 1024,
+    };
+    for (final e in postChecks.entries) {
+      final f = File(p.join(targetDir.path, e.key));
+      if (!await f.exists() || await f.length() < e.value) {
+        invalid.add('${e.key} (${await f.exists() ? await f.length() : 0} bytes)');
+      }
+    }
+    if (invalid.isNotEmpty) {
+      throw VoiceAssetException(
+        'Verifica STT fallita: ${invalid.join("; ")} non sono validi.',
+      );
+    }
+
+    logEvent(_tag, '[STT_EXTRACT_COMPLETE] all STT files valid');
     onProgress(1.0);
+  }
+
+  // ── TTS ────────────────────────────────────────────────────────────────────
+
+  Future<bool> _ttsAssetsComplete(Directory targetDir) async {
+    final model = File(p.join(targetDir.path, AppConstants.ttsModelFile));
+    final tokens = File(p.join(targetDir.path, AppConstants.ttsTokensFile));
+    final espeak =
+        Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
+    if (!await model.exists() || await model.length() < 50 * 1024 * 1024) {
+      return false;
+    }
+    if (!await tokens.exists() || await tokens.length() == 0) return false;
+    if (!await espeak.exists()) return false;
+    return true;
+  }
+
+  Future<void> _cleanupTtsFiles(Directory targetDir) async {
+    for (final name in [
+      AppConstants.ttsModelFile,
+      AppConstants.ttsTokensFile,
+    ]) {
+      final f = File(p.join(targetDir.path, name));
+      if (await f.exists()) {
+        await f.delete();
+        logEvent(_tag, '[CLEANUP] deleted $name');
+      }
+    }
+    final espeak =
+        Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
+    if (await espeak.exists()) {
+      await espeak.delete(recursive: true);
+      logEvent(_tag, '[CLEANUP] deleted espeak-ng-data/');
+    }
   }
 
   Future<void> _downloadAndExtractTtsTar({
@@ -244,145 +253,142 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Function(double) onProgress,
   }) async {
     if (await _ttsAssetsComplete(targetDir)) {
-      logEvent(_tag, '[TTS_TAR_SKIP] all TTS assets valid');
+      logEvent(_tag, '[TTS_SKIP] all TTS assets already valid');
       onProgress(1.0);
       return;
     }
 
-    logEvent(_tag, '[TTS_TAR_CLEANUP_SCHEDULED]');
     await _cleanupTtsFiles(targetDir);
 
-    final tarPath = p.join(targetDir.path, _ttsTarFileName);
-    await _downloadFile(
-      url: AppConstants.ttsPaolaTarUrl,
-      destPath: tarPath,
-      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
-      tag: 'TTS_TAR',
-      onProgress: (value) => onProgress((value * 0.8).clamp(0.0, 0.8)),
+    final tarPath = p.join(
+      targetDir.path,
+      'vits-piper-it_IT-paola-medium.tar.bz2',
     );
 
-    logEvent(_tag, '[TTS_TAR_EXTRACT_BEGIN] path=$tarPath');
+    // Download
+    logEvent(_tag, '[TTS_DOWNLOAD_BEGIN] url=${AppConstants.ttsPaolaTarUrl}');
     try {
-      final tarBytes = await File(tarPath).readAsBytes();
-      final decompressed = BZip2Decoder().decodeBytes(tarBytes);
+      await _dio.download(
+        AppConstants.ttsPaolaTarUrl,
+        tarPath,
+        deleteOnError: true,
+        options: Options(followRedirects: true, maxRedirects: 10),
+        onReceiveProgress: (received, total) {
+          final denom = total > 0
+              ? total
+              : AppConstants.ttsPaolaTarExpectedBytes;
+          onProgress((received / denom * 0.8).clamp(0.0, 0.8));
+        },
+      );
+      logEvent(_tag, '[TTS_DOWNLOAD_COMPLETE] path=$tarPath');
+    } on DioException catch (e) {
+      if (await File(tarPath).exists()) await File(tarPath).delete();
+      throw VoiceAssetException(
+        'Download TTS fallito (HTTP ${e.response?.statusCode ?? "?"}): '
+        '${e.message ?? "errore di rete"}',
+      );
+    } catch (e) {
+      if (await File(tarPath).exists()) await File(tarPath).delete();
+      throw VoiceAssetException('Download TTS fallito: $e');
+    }
+
+    // Estrazione
+    onProgress(0.85);
+    logEvent(_tag, '[TTS_EXTRACT_BEGIN]');
+    try {
+      final bytes = await File(tarPath).readAsBytes();
+      final decompressed = BZip2Decoder().decodeBytes(bytes);
       final archive = TarDecoder().decodeBytes(decompressed);
 
+      const prefix = 'vits-piper-it_IT-paola-medium/';
       for (final file in archive) {
-        final normalizedPath = file.name.startsWith(_ttsArchivePrefix)
-            ? file.name.substring(_ttsArchivePrefix.length)
-            : file.name;
+        var outPath = file.name;
+        if (outPath.startsWith(prefix)) {
+          outPath = outPath.substring(prefix.length);
+        }
+        if (outPath.isEmpty) continue;
 
-        if (normalizedPath.isEmpty) {
-          continue;
+        // Rinomina tokens.txt per non confonderlo con quello STT.
+        if (outPath == 'tokens.txt') {
+          outPath = AppConstants.ttsTokensFile;
         }
 
-        final destinationPath = normalizedPath == 'tokens.txt'
-            ? p.join(targetDir.path, AppConstants.ttsTokensFile)
-            : p.join(targetDir.path, normalizedPath);
-
+        final destPath = p.join(targetDir.path, outPath);
         if (file.isFile) {
-          final destination = File(destinationPath);
-          await destination.parent.create(recursive: true);
-          await destination.writeAsBytes(file.content as List<int>);
-          logEvent(_tag, '[TTS_TAR_EXTRACTED] $normalizedPath');
+          final dest = File(destPath);
+          await dest.parent.create(recursive: true);
+          await dest.writeAsBytes(file.content as List<int>);
         } else {
-          await Directory(destinationPath).create(recursive: true);
-          logEvent(_tag, '[TTS_TAR_DIR] $normalizedPath');
+          await Directory(destPath).create(recursive: true);
         }
       }
-
-      final invalidAssets = await _ttsInvalidAssets(targetDir);
-      if (invalidAssets.isNotEmpty) {
-        throw VoiceAssetException(
-          'Verifica TTS fallita: ${invalidAssets.join("; ")} non sono validi.',
-        );
-      }
-
-      logEvent(_tag, '[TTS_TAR_EXTRACT_COMPLETE]');
       onProgress(0.95);
-    } catch (error) {
-      await _cleanupTtsFiles(targetDir);
-      if (error is VoiceAssetException) {
-        rethrow;
-      }
-      throw VoiceAssetException('Estrazione TTS tar fallita: $error');
+    } catch (e) {
+      throw VoiceAssetException('Estrazione TTS fallita: $e');
     } finally {
-      final tarFile = File(tarPath);
-      if (await tarFile.exists()) {
-        await tarFile.delete();
+      final tar = File(tarPath);
+      if (await tar.exists()) {
+        await tar.delete();
         logEvent(_tag, '[TTS_TAR_CLEANUP]');
       }
     }
 
+    // Verifica post-estrazione
+    if (!await _ttsAssetsComplete(targetDir)) {
+      throw VoiceAssetException(
+        'Verifica TTS fallita: file mancanti dopo estrazione.',
+      );
+    }
+
+    logEvent(_tag, '[TTS_EXTRACT_COMPLETE] all TTS files valid');
     onProgress(1.0);
   }
 
-  Future<void> _downloadFile({
-    required String url,
-    required String destPath,
-    required int expectedBytes,
-    required String tag,
-    required Function(double) onProgress,
-  }) async {
-    final destination = File(destPath);
-    if (await destination.exists()) {
-      await destination.delete();
-    }
-
-    logEvent(_tag, '[${tag}_DOWNLOAD_BEGIN] url=$url');
-
-    try {
-      await _dio.download(
-        url,
-        destPath,
-        deleteOnError: true,
-        onReceiveProgress: (received, total) {
-          final denominator = total > 0 ? total : expectedBytes;
-          onProgress((received / denominator).clamp(0.0, 1.0).toDouble());
-        },
-      );
-      logEvent(_tag, '[${tag}_DOWNLOAD_COMPLETE]');
-    } on DioException catch (error) {
-      if (await destination.exists()) {
-        await destination.delete();
-      }
-      final statusCode = error.response?.statusCode;
-      throw VoiceAssetException(
-        statusCode == null
-            ? 'Download $tag fallito. ${error.message ?? "Errore di rete"}'
-            : 'Download $tag fallito (HTTP $statusCode).',
-      );
-    } catch (error) {
-      if (await destination.exists()) {
-        await destination.delete();
-      }
-      throw VoiceAssetException('Download $tag fallito. $error');
-    }
-  }
+  // ── Validazione pubblica ────────────────────────────────────────────────────
 
   Future<void> validateDownloadedAssets() async {
     logEvent(_tag, '[ASSET_VALIDATION_BEGIN]');
     final targetDir = await _pathResolver.privateModelsDirectory();
-
     final missing = <String>[];
-    final sttInvalidAssets = await _sttInvalidAssets(targetDir);
-    if (sttInvalidAssets.isNotEmpty) {
-      missing.addAll(sttInvalidAssets);
+
+    final sttChecks = <String, int>{
+      AppConstants.sttEncoderFile: 100 * 1024 * 1024,
+      AppConstants.sttDecoderFile: 200 * 1024,
+      AppConstants.sttJoinerFile: 10 * 1024 * 1024,
+      AppConstants.sttTokensFile: 1024,
+    };
+    for (final e in sttChecks.entries) {
+      final f = File(p.join(targetDir.path, e.key));
+      if (!await f.exists() || await f.length() < e.value) {
+        missing.add(e.key);
+      }
     }
-    final ttsInvalidAssets = await _ttsInvalidAssets(targetDir);
-    if (ttsInvalidAssets.isNotEmpty) {
-      missing.addAll(ttsInvalidAssets);
+
+    final ttsModel = File(p.join(targetDir.path, AppConstants.ttsModelFile));
+    final ttsTokens = File(p.join(targetDir.path, AppConstants.ttsTokensFile));
+    final espeak =
+        Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
+
+    if (!await ttsModel.exists() ||
+        await ttsModel.length() < 50 * 1024 * 1024) {
+      missing.add(AppConstants.ttsModelFile);
+    }
+    if (!await ttsTokens.exists() || await ttsTokens.length() == 0) {
+      missing.add(AppConstants.ttsTokensFile);
+    }
+    if (!await espeak.exists()) {
+      missing.add(AppConstants.ttsEspeakDataDir);
     }
 
     if (missing.isNotEmpty) {
-      final message =
-          'Risorse vocali mancanti o non valide: ${missing.join("; ")}. '
+      final msg =
+          'Risorse vocali mancanti o non valide: ${missing.join(", ")}. '
           'Riprova il download dei modelli vocali.';
-      logEvent(_tag, '[ASSET_VALIDATION_FAIL] $message');
-      throw VoiceAssetException(message);
+      logEvent(_tag, '[ASSET_VALIDATION_FAIL] $msg');
+      throw VoiceAssetException(msg);
     }
 
-    logEvent(_tag, '[ASSET_VALIDATION_COMPLETE]');
+    logEvent(_tag, '[ASSET_VALIDATION_COMPLETE] all voice assets ready');
   }
 
   Future<Directory> _ensureTargetDirectory() async {
