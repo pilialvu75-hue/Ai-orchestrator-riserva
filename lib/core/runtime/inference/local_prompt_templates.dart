@@ -8,7 +8,7 @@ class LocalPromptTemplates {
     required String modelId,
     required String prompt,
     String? systemPrompt,
-    List<ChatTurn> context = const <ChatTurn>[],
+    List<ChatTurn> context = const [],
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     final cleanedContext = context
@@ -20,42 +20,43 @@ class LocalPromptTemplates {
         .toList(growable: false);
     final userPrompt = prompt.trim();
 
-    if (LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId)) {
-      return _buildLlama3Prompt(
-        systemPrompt: cleanedSystemPrompt,
-        context: cleanedContext,
-        userPrompt: userPrompt,
-      );
-    }
-    if (LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId)) {
-      return _buildQwenChatPrompt(
-        systemPrompt: cleanedSystemPrompt,
-        context: cleanedContext,
-        userPrompt: userPrompt,
-        suppressThinking:
-            LocalInferenceModelIds.qwen3ThinkingModels.contains(modelId),
-      );
-    }
-    if (LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId)) {
-      return _buildGemmaPrompt(
-        systemPrompt: cleanedSystemPrompt,
-        context: cleanedContext,
-        userPrompt: userPrompt,
-      );
-    }
+    // Risolve il template per ID esatto O per pattern nome (modelli importati)
+    final template = LocalInferenceModelIds.resolveTemplate(modelId);
 
-    // Fallback generico: plain text
-    final buffer = StringBuffer();
-    if (cleanedSystemPrompt != null) {
-      buffer.writeln('System: $cleanedSystemPrompt');
-      buffer.writeln();
+    switch (template) {
+      case 'llama3':
+        return _buildLlama3Prompt(
+          systemPrompt: cleanedSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+        );
+      case 'qwen':
+        return _buildQwenChatPrompt(
+          systemPrompt: cleanedSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+          suppressThinking: LocalInferenceModelIds.isQwen3Thinking(modelId),
+        );
+      case 'gemma':
+        return _buildGemmaPrompt(
+          systemPrompt: cleanedSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+        );
+      default:
+        // Fallback generico: plain text
+        final buffer = StringBuffer();
+        if (cleanedSystemPrompt != null) {
+          buffer.writeln('System: $cleanedSystemPrompt');
+          buffer.writeln();
+        }
+        for (final turn in cleanedContext) {
+          buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
+        }
+        if (cleanedContext.isNotEmpty) buffer.writeln();
+        buffer.write('User: $userPrompt');
+        return buffer.toString();
     }
-    for (final turn in cleanedContext) {
-      buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
-    }
-    if (cleanedContext.isNotEmpty) buffer.writeln();
-    buffer.write('User: $userPrompt');
-    return buffer.toString();
   }
 
   static String? _clean(String? value) {
@@ -65,34 +66,30 @@ class LocalPromptTemplates {
   }
 
   /// Llama 3 Instruct chat template.
+  ///
+  /// Se l'ultimo turno del context ha role=user, viene tenuto separato
+  /// dal nuovo userPrompt invece di essere fuso, per evitare duplicazioni
+  /// quando il context window manager include già il messaggio corrente.
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
-    final turns = List<ChatTurn>.from(context);
-    ChatTurn? trailingUserTurn;
-    if (turns.isNotEmpty && turns.last.role == ChatRole.user) {
-      trailingUserTurn = turns.removeLast();
-    }
-    final effectiveUserTurn = trailingUserTurn == null
-        ? ChatTurn(role: ChatRole.user, content: userPrompt)
-        : trailingUserTurn.copyWith(
-            content: '${trailingUserTurn.content}\n$userPrompt'.trim(),
-          );
     final buffer = StringBuffer();
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('<|eot_id|>');
-    for (final turn in turns) {
+
+    for (final turn in context) {
       buffer.write(
           '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
+
     buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
-    buffer.write(effectiveUserTurn.content);
+    buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
     buffer.write('<|start_header_id|>assistant<|end_header_id|>\n\n');
     return buffer.toString();
