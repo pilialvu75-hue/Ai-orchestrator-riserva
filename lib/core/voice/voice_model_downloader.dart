@@ -28,6 +28,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
                 maxRedirects: 10,
                 connectTimeout: const Duration(seconds: 30),
                 receiveTimeout: const Duration(hours: 2),
+                sendTimeout: const Duration(seconds: 30),
               ),
             ),
         _pathResolver = pathResolver ?? const RuntimeModelPathResolver();
@@ -63,7 +64,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     await _downloadAndExtractTtsTar(
       targetDir: targetDir,
-      onProgress: (value) => onProgress((0.5 + value * 0.5).clamp(0.5, 1.0)),
+      onProgress: (value) => onProgress((0.5 + value * 0.5).clamp(0.0, 1.0)),
     );
 
     await validateDownloadedAssets();
@@ -146,8 +147,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    logEvent(_tag, '[STT_TAR_CLEANUP_BEGIN]');
     await _cleanupSttFiles(targetDir);
+    logEvent(_tag, '[STT_TAR_CLEANUP_BEGIN]');
 
     final tarPath = p.join(targetDir.path, _sttTarFileName);
     await _downloadFile(
@@ -230,8 +231,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    logEvent(_tag, '[TTS_TAR_CLEANUP_BEGIN]');
     await _cleanupTtsFiles(targetDir);
+    logEvent(_tag, '[TTS_TAR_CLEANUP_BEGIN]');
 
     final tarPath = p.join(targetDir.path, _ttsTarFileName);
     await _downloadFile(
@@ -371,7 +372,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     if (missing.isNotEmpty) {
       final message =
-          'Risorse vocali mancanti o non valide: ${missing.toSet().join(", ")}. '
+          'Risorse vocali mancanti o non valide: ${missing.join(", ")}. '
           'Riprova il download dei modelli vocali.';
       logEvent(_tag, '[ASSET_VALIDATION_FAIL] $message');
       throw VoiceAssetException(message);
