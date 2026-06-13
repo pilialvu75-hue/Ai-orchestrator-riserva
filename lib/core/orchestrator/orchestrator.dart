@@ -106,6 +106,33 @@ class Orchestrator {
       );
     }
 
+    // Ricerca web in modalità locale → risposta informativa immediata.
+    // In modalità cloud/hybrid, la request viene instradata normalmente
+    // e il provider cloud ha accesso a internet.
+    if (type == TaskType.webSearch) {
+      _logForensic(
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
+        ' reason=task_type_webSearch',
+      );
+      return _inferenceService.stream(
+        InferenceRequest(
+          sessionId: sessionId,
+          prompt: input,
+          systemPrompt:
+              'You are AI Orchestrator. The user wants to search the web. '
+              'If you are running in LOCAL mode without internet access, '
+              'reply ONLY with this message in the user language: '
+              '"Non ho accesso a internet in modalità locale. '
+              'Passa alla modalità Cloud o Hybrid nelle impostazioni per cercare online." '
+              'Do not add anything else.',
+          context: const [],
+          isOffline: isOffline,
+          maxTokens: 128,
+          temperature: 0.1,
+        ),
+      );
+    }
+
     _logForensic(
       '[PRE_STREAM_FORWARD] session=$sessionId boundary=orchestrator.intent_route'
       ' target=inference_service.stream task_type=${type.name}',
