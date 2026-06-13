@@ -1,16 +1,24 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 class InferenceRequest {
+  /// Default sicuro per Android con modelli 1B.
+  /// Sovrascritto da [maxTokensForModel] una volta noto il modelId.
+  static const int defaultMaxTokens = 512;
+
+  /// Temperature ottimale per modelli piccoli (1B).
+  /// Valori alti (0.7+) causano allucinazioni e ripetizioni sui modelli <3B.
+  static const double defaultTemperature = 0.45;
+
   const InferenceRequest({
     required this.sessionId,
     required this.prompt,
     this.systemPrompt,
     this.context = const [],
     this.isOffline = false,
-    this.maxTokens = 512,        // ← era 256, ora 512 default sicuro
-    this.temperature = 0.45,     // ← era 0.7, ora 0.45 per coerenza su 1B
-    this.topP = 0.9,             // ← nuovo: nucleus sampling
-    this.repeatPenalty = 1.1,    // ← nuovo: riduce ripetizioni
+    this.maxTokens = defaultMaxTokens,
+    this.temperature = defaultTemperature,
+    this.topP = 0.9,
+    this.repeatPenalty = 1.1,
     this.modelId,
     this.modelPath,
   });
@@ -28,7 +36,7 @@ class InferenceRequest {
   final String? modelPath;
 
   /// Calcola maxTokens ottimale in base alla dimensione del modello.
-  /// Chiamato dall'Orchestrator quando non si vuole hardcodare il valore.
+  /// Valori conservativi per Android: evitano OOM su S24 FE.
   static int maxTokensForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
     if (id.contains('14b') || id.contains('13b') || id.contains('12b')) {
@@ -40,17 +48,21 @@ class InferenceRequest {
     if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) {
       return 768;
     }
-    // 1B, 1.5B, tiny → 512 è sicuro su Android senza OOM
+    // 1B, 1.5B, tiny → 512 sicuro su Android
     return 512;
   }
 
   /// Temperature ottimale per dimensione modello.
+  /// Modelli piccoli richiedono temperature basse per risposte coerenti.
   static double temperatureForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
     if (id.contains('14b') || id.contains('7b') || id.contains('8b')) {
       return 0.6;
     }
-    // Modelli piccoli: temperatura bassa per coerenza
+    if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) {
+      return 0.5;
+    }
+    // 1B, 1.5B, tiny
     return 0.4;
   }
 
