@@ -36,10 +36,11 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   static const String _tag = 'VOICE_DOWNLOAD';
   static const String _sttTarFileName =
       'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
-  static const String _sttArchivePrefix =
-      'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
   static const String _ttsTarFileName = 'vits-piper-it_IT-paola-medium.tar.bz2';
-  static const String _ttsArchivePrefix = 'vits-piper-it_IT-paola-medium/';
+  static String get _sttArchivePrefix =>
+      _sttTarFileName.replaceFirst('.tar.bz2', '/');
+  static String get _ttsArchivePrefix =>
+      _ttsTarFileName.replaceFirst('.tar.bz2', '/');
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
@@ -73,6 +74,11 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   }
 
   Future<bool> _sttAssetsComplete(Directory targetDir) async {
+    return (await _sttInvalidAssets(targetDir)).isEmpty;
+  }
+
+  Future<List<String>> _sttInvalidAssets(Directory targetDir) async {
+    final invalid = <String>[];
     final assets = <MapEntry<String, int>>[
       MapEntry(AppConstants.sttEncoderFile, 100 * 1024 * 1024),
       MapEntry(AppConstants.sttDecoderFile, 200 * 1024),
@@ -82,23 +88,34 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     for (final asset in assets) {
       final file = File(p.join(targetDir.path, asset.key));
       if (!await file.exists() || (await file.length()) < asset.value) {
-        return false;
+        invalid.add(asset.key);
       }
     }
-    return true;
+    return invalid;
   }
 
   Future<bool> _ttsAssetsComplete(Directory targetDir) async {
+    return (await _ttsInvalidAssets(targetDir)).isEmpty;
+  }
+
+  Future<List<String>> _ttsInvalidAssets(Directory targetDir) async {
+    final invalid = <String>[];
     final modelFile = File(p.join(targetDir.path, AppConstants.ttsModelFile));
     final tokensFile = File(p.join(targetDir.path, AppConstants.ttsTokensFile));
     final espeakDir =
         Directory(p.join(targetDir.path, AppConstants.ttsEspeakDataDir));
 
-    return await modelFile.exists() &&
-        (await modelFile.length()) > 50 * 1024 * 1024 &&
-        await tokensFile.exists() &&
-        (await tokensFile.length()) > 0 &&
-        await espeakDir.exists();
+    if (!await modelFile.exists() ||
+        (await modelFile.length()) <= 50 * 1024 * 1024) {
+      invalid.add(AppConstants.ttsModelFile);
+    }
+    if (!await tokensFile.exists() || (await tokensFile.length()) == 0) {
+      invalid.add(AppConstants.ttsTokensFile);
+    }
+    if (!await espeakDir.exists()) {
+      invalid.add(AppConstants.ttsEspeakDataDir);
+    }
+    return invalid;
   }
 
   Future<void> _cleanupSttFiles(Directory targetDir) async {
@@ -147,7 +164,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    logEvent(_tag, '[STT_TAR_CLEANUP_BEGIN]');
+    logEvent(_tag, '[STT_TAR_CLEANUP_SCHEDULED]');
     await _cleanupSttFiles(targetDir);
 
     final tarPath = p.join(targetDir.path, _sttTarFileName);
@@ -196,10 +213,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         logEvent(_tag, '[STT_TAR_EXTRACTED] $destinationName');
       }
 
-      if (!await _sttAssetsComplete(targetDir)) {
+      final invalidAssets = await _sttInvalidAssets(targetDir);
+      if (invalidAssets.isNotEmpty) {
         throw VoiceAssetException(
-          'Verifica STT fallita: ${AppConstants.sttEncoderFile}, ${AppConstants.sttDecoderFile}, '
-          '${AppConstants.sttJoinerFile} o ${AppConstants.sttTokensFile} non sono validi.',
+          'Verifica STT fallita: ${invalidAssets.join(", ")} non sono validi.',
         );
       }
 
@@ -232,7 +249,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    logEvent(_tag, '[TTS_TAR_CLEANUP_BEGIN]');
+    logEvent(_tag, '[TTS_TAR_CLEANUP_SCHEDULED]');
     await _cleanupTtsFiles(targetDir);
 
     final tarPath = p.join(targetDir.path, _ttsTarFileName);
@@ -274,10 +291,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         }
       }
 
-      if (!await _ttsAssetsComplete(targetDir)) {
+      final invalidAssets = await _ttsInvalidAssets(targetDir);
+      if (invalidAssets.isNotEmpty) {
         throw VoiceAssetException(
-          'Verifica TTS fallita: ${AppConstants.ttsModelFile}, '
-          '${AppConstants.ttsTokensFile} o ${AppConstants.ttsEspeakDataDir} non sono validi.',
+          'Verifica TTS fallita: ${invalidAssets.join(", ")} non sono validi.',
         );
       }
 
@@ -348,20 +365,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     final targetDir = await _pathResolver.privateModelsDirectory();
 
     final missing = <String>[];
-    if (!await _sttAssetsComplete(targetDir)) {
-      missing.addAll(<String>[
-        AppConstants.sttEncoderFile,
-        AppConstants.sttDecoderFile,
-        AppConstants.sttJoinerFile,
-        AppConstants.sttTokensFile,
-      ]);
+    final sttInvalidAssets = await _sttInvalidAssets(targetDir);
+    if (sttInvalidAssets.isNotEmpty) {
+      missing.addAll(sttInvalidAssets);
     }
-    if (!await _ttsAssetsComplete(targetDir)) {
-      missing.addAll(<String>[
-        AppConstants.ttsModelFile,
-        AppConstants.ttsTokensFile,
-        AppConstants.ttsEspeakDataDir,
-      ]);
+    final ttsInvalidAssets = await _ttsInvalidAssets(targetDir);
+    if (ttsInvalidAssets.isNotEmpty) {
+      missing.addAll(ttsInvalidAssets);
     }
 
     if (missing.isNotEmpty) {
