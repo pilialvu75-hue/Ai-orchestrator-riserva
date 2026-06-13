@@ -197,7 +197,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
 
       if (!await _sttAssetsComplete(targetDir)) {
-        throw const VoiceAssetException(
+        throw VoiceAssetException(
           'Verifica STT fallita: ${AppConstants.sttEncoderFile}, ${AppConstants.sttDecoderFile}, '
           '${AppConstants.sttJoinerFile} o ${AppConstants.sttTokensFile} non sono validi.',
         );
