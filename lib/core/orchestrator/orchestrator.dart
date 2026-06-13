@@ -13,10 +13,15 @@ import 'package:flutter/foundation.dart';
 
 /// Central routing layer for all AI calls.
 ///
-/// Step 3 – execution engine: classifies the user intent with [IntentAnalyzer],
-/// delegates device commands to [ExecutionEngine] (platform-specific), routes
-/// planning/coding goals through [PlannerService] (TaskWeaver-inspired), and
-/// routes AI chat queries through [InferenceService].
+/// Step 3 – execution engine: classifica l'intent utente con [IntentAnalyzer],
+/// delega i comandi device a [ExecutionEngine] (platform-specific), instrada
+/// planning/coding attraverso [PlannerService] (TaskWeaver-inspired), e
+/// instrada le query AI chat attraverso [InferenceService].
+///
+/// I parametri [maxTokens] e [temperature] vengono ora calcolati
+/// automaticamente da [InferenceRequest] in base al modelId conosciuto
+/// a runtime in [InferenceService._buildLocalRequest]. Il valore passato
+/// qui è un default sicuro che vale solo se il modello non è ancora noto.
 class Orchestrator {
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
@@ -54,6 +59,7 @@ class Orchestrator {
             prompt: input,
             systemPrompt: systemPrompt,
             isOffline: isOffline,
+            // maxTokens e temperature usano i default adattivi di InferenceRequest
           ),
         );
     }
@@ -62,40 +68,52 @@ class Orchestrator {
   TokenStream handleStream(
     String input, {
     required String sessionId,
-    List<ChatTurn> context = const <ChatTurn>[],
+    List<ChatTurn> context = const [],
     String? systemPrompt,
     bool isOffline = false,
-    int maxTokens = 256,
-    double temperature = 0.7,
+    // Parametri opzionali: se non passati, InferenceService li sovrascrive
+    // con valori adattivi basati sul modello selezionato a runtime.
+    // Manteniamo la firma per retrocompatibilità con i chiamanti esistenti.
+    int? maxTokens,
+    double? temperature,
   }) {
     _logForensic(
-      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream prompt_chars=${input.length} context_turns=${context.length}',
+      '[ORCHESTRATOR_SEND] session=$sessionId stage=orchestrator.handleStream'
+      ' prompt_chars=${input.length} context_turns=${context.length}',
     );
     final type = _analyzer.analyze(input);
     _logForensic(
-      '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name} will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
+      '[ORCHESTRATOR_ROUTE] session=$sessionId task_type=${type.name}'
+      ' will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
     );
     final contextSnapshot = List<ChatTurn>.unmodifiable(context);
 
     if (type == TaskType.command) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_command target=_executeCommand',
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
+        ' reason=task_type_command target=_executeCommand',
       );
-      return Stream<InferenceResponse>.fromFuture(_executeCommand(input));
+      return Stream.fromFuture(_executeCommand(input));
     }
 
     if (type == TaskType.plan || type == TaskType.coding) {
       _logForensic(
-        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route reason=task_type_${type.name} target=_executePlan',
+        '[PRE_STREAM_BYPASS] session=$sessionId boundary=orchestrator.intent_route'
+        ' reason=task_type_${type.name} target=_executePlan',
       );
-      return Stream<InferenceResponse>.fromFuture(
+      return Stream.fromFuture(
         _executePlan(input, isOffline: isOffline),
       );
     }
 
     _logForensic(
-      '[PRE_STREAM_FORWARD] session=$sessionId boundary=orchestrator.intent_route target=inference_service.stream task_type=${type.name}',
+      '[PRE_STREAM_FORWARD] session=$sessionId boundary=orchestrator.intent_route'
+      ' target=inference_service.stream task_type=${type.name}',
     );
+
+    // Costruisce la request con i default adattivi.
+    // InferenceService._buildLocalRequest sovrascriverà maxTokens e temperature
+    // con valori calibrati sul modello effettivo una volta risolto.
     return _inferenceService.stream(
       InferenceRequest(
         sessionId: sessionId,
@@ -103,8 +121,10 @@ class Orchestrator {
         systemPrompt: systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
-        maxTokens: maxTokens,
-        temperature: temperature,
+        // Se il chiamante ha passato valori espliciti li rispettiamo,
+        // altrimenti usiamo i default adattivi di InferenceRequest.
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
     );
   }
@@ -123,17 +143,16 @@ class Orchestrator {
     );
   }
 
-  /// Decomposes [input] into a [Plan] and executes it step by step.
+  /// Decompone [input] in un [Plan] ed esegue ogni step.
   ///
-  /// Falls back to a normal inference call when [PlannerService] is not
-  /// configured (e.g. during tests or cold startup before full DI wiring).
+  /// Fallback a una normale chiamata inference quando [PlannerService] non è
+  /// configurato (es. durante i test o cold startup prima del DI completo).
   Future<InferenceResponse> _executePlan(
     String input, {
     bool isOffline = false,
   }) async {
     final planner = _plannerService;
     if (planner == null) {
-      // Graceful degradation: no planner wired — treat as a chat message.
       return _inferenceService.infer(
         InferenceRequest(
           sessionId: 'default',
