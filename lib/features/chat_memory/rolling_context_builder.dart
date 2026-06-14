@@ -47,6 +47,8 @@ class RollingContextBuilder {
         content: message.content,
       );
       if (turn == null) continue;
+      // Esclude turni marcati come non-contesto (webSearch, comandi, ecc.)
+      if (turn.excludeFromContext) continue;
       turns.add(turn);
     }
 
