@@ -109,7 +109,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log('[MODEL_SIZE] path=$resolvedModelPath size_bytes=N/A (file not found)');
       AndroidFfiRuntimeProvider._log('[MODEL_READABLE] path=$resolvedModelPath readable=false (file not found)');
     }
-    if (!_androidSafeModelIds.contains(modelId)) {
+    if (!_androidSafeModelIds.contains(modelId) && !_isImportedModelSafeForAndroid(modelId)) {
       if (_isDeveloperMode) {
         AndroidFfiRuntimeProvider._log(
           '[VALIDATION] developer_mode=true: modelId=$modelId is not in the '
