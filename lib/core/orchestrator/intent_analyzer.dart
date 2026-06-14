@@ -42,7 +42,7 @@ class IntentAnalyzer {
   static const Set<String> _chatContinuations = {
     'di', 'un', 'una', 'il', 'la', 'lo', 'gli', 'le', 'of',
     'a', 'an', 'the', 'to', 'for', 'modo', 'come', 'se',
-    'qualcosa', 'qualcuno', 'di', 'che',
+    'qualcosa', 'qualcuno', 'che',
   };
 
   TaskType analyze(String input) {
