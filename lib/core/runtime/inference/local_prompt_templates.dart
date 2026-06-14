@@ -12,15 +12,10 @@ class LocalPromptTemplates {
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     final cleanedContext = context
-        .map((turn) => ChatTurn(
-              role: turn.role,
-              content: turn.content.trim(),
-            ))
-        .where((turn) => turn.content.isNotEmpty)
+        .where((turn) => turn.content.trim().isNotEmpty)
+        .map((turn) => turn.copyWith(content: turn.content.trim()))
         .toList(growable: false);
     final userPrompt = prompt.trim();
-
-    // Risolve il template per ID esatto O per pattern nome (modelli importati)
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
 
     switch (template) {
@@ -44,7 +39,6 @@ class LocalPromptTemplates {
           userPrompt: userPrompt,
         );
       default:
-        // Fallback generico: plain text
         final buffer = StringBuffer();
         if (cleanedSystemPrompt != null) {
           buffer.writeln('System: $cleanedSystemPrompt');
@@ -65,11 +59,9 @@ class LocalPromptTemplates {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  /// Llama 3 Instruct chat template.
-  ///
-  /// Se l'ultimo turno del context ha role=user, viene tenuto separato
-  /// dal nuovo userPrompt invece di essere fuso, per evitare duplicazioni
-  /// quando il context window manager include già il messaggio corrente.
+  /// Llama 3 Instruct — ogni turno è un blocco separato.
+  /// NON fonde l'ultimo turno user con il prompt corrente:
+  /// quella logica causava duplicazioni e confusione nel modello.
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -80,14 +72,12 @@ class LocalPromptTemplates {
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('<|eot_id|>');
-
     for (final turn in context) {
       buffer.write(
           '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
-
     buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
@@ -95,16 +85,6 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// ChatML / Qwen chat template.
-  ///
-  /// Ogni turno del contesto viene emesso come blocco ChatML separato
-  /// (<|im_start|>role ... <|im_end|>) invece di essere serializzato
-  /// come testo grezzo dentro il blocco user. Questo impedisce al modello
-  /// di vedere i tag ChatML come testo da ripetere nell'output.
-  ///
-  /// [suppressThinking] prepende /no_think al messaggio user per i modelli
-  /// Qwen3 con chain-of-thought, evitando di sprecare il budget token su
-  /// ragionamento interno prima della risposta finale.
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -112,29 +92,20 @@ class LocalPromptTemplates {
     bool suppressThinking = false,
   }) {
     final buffer = StringBuffer();
-
-    // System block
     buffer.write('<|im_start|>system\n');
     buffer.write(systemPrompt ?? 'You are a helpful assistant.');
     buffer.write('\n<|im_end|>\n');
-
-    // Context turns — ognuno come blocco ChatML separato
     for (final turn in context) {
       buffer.write('<|im_start|>${_roleName(turn.role)}\n');
       buffer.write(turn.content);
       buffer.write('\n<|im_end|>\n');
     }
-
-    // User turn corrente
     final effectiveUserPrompt =
         suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
     buffer.write('<|im_start|>user\n');
     buffer.write(effectiveUserPrompt);
     buffer.write('\n<|im_end|>\n');
-
-    // Apertura blocco assistant — il modello continua da qui
     buffer.write('<|im_start|>assistant\n');
-
     return buffer.toString();
   }
 
