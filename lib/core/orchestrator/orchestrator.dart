@@ -47,7 +47,6 @@ class Orchestrator {
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
       case TaskType.webSearch:
-        // In handle() sincrono restituiamo risposta informativa diretta.
         return InferenceResponse.finalChunk(
           text: 'Non ho accesso a internet in modalità locale. '
               'Passa alla modalità Cloud o Hybrid nelle impostazioni '
@@ -89,7 +88,7 @@ class Orchestrator {
     _logForensic(
       '[ORCHESTRATOR_ROUTE] session=$sessionId'
       ' task_type=${type.name}'
-      ' will_stream_inference=${type == TaskType.chat || type == TaskType.system || type == TaskType.webSearch}',
+      ' will_stream_inference=${type == TaskType.chat || type == TaskType.system}',
     );
 
     final contextSnapshot = List<ChatTurn>.unmodifiable(context);
@@ -114,53 +113,23 @@ class Orchestrator {
       );
     }
 
-    // Ricerca web in modalità locale → risposta informativa via LLM
-    // con system prompt dedicato e token ridotti.
-    // In modalità cloud/hybrid il provider ha già accesso a internet
-    // e gestisce la ricerca nativamente.
     if (type == TaskType.webSearch) {
       _logForensic(
         '[PRE_STREAM_BYPASS] session=$sessionId'
         ' boundary=orchestrator.intent_route'
-        ' reason=task_type_webSearch isOffline=$isOffline',
+        ' reason=task_type_webSearch',
       );
-      // Risposta immediata senza passare per l'LLM.
-      // Così il modello non vede MAI il testo "non ho accesso a internet"
-      // nel suo contesto e non lo ripete nei turni successivi.
-      const webSearchReply =
-          'Non ho accesso a internet in modalità locale. '
-          'Passa alla modalità Cloud o Hybrid nelle impostazioni '
-          'per cercare online.';
       return Stream.value(
         InferenceResponse.finalChunk(
-          text: webSearchReply,
+          text: 'Non ho accesso a internet in modalità locale. '
+              'Passa alla modalità Cloud o Hybrid nelle impostazioni '
+              'per cercare online.',
           model: InferenceConstants.localModelName,
           tokensGenerated: 0,
         ),
       );
     }
-      return _inferenceService.stream(
-        InferenceRequest(
-          sessionId: sessionId,
-          prompt: input,
-          systemPrompt:
-              'You are AI Orchestrator running in LOCAL mode without internet. '
-              'The user is asking to search the web. '
-              'Reply ONLY with this sentence, translated to match the user language: '
-              '"Non ho accesso a internet in modalità locale. '
-              'Passa alla modalità Cloud o Hybrid nelle impostazioni per cercare online." '
-              'Do not add anything else.',
-          context: const [],
-          isOffline: isOffline,
-          maxTokens: 64,
-          temperature: 0.1,
-        ),
-      );
-    }
 
-    // Chat / system → inference normale con parametri adattivi.
-    // InferenceService._buildLocalRequest sovrascriverà maxTokens e
-    // temperature con valori calibrati sul modello effettivo.
     _logForensic(
       '[PRE_STREAM_FORWARD] session=$sessionId'
       ' boundary=orchestrator.intent_route'
