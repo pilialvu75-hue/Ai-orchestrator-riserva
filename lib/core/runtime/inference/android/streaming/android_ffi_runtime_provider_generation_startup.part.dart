@@ -130,8 +130,8 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
         AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=unsupported_model_guard');
         const unsupportedAndroidModelMessage =
             'Selected model is not enabled for Android local runtime. '
-            'Use DeepSeek-R1-Distill-Qwen-1.5B, Qwen3-1.7B, '
-            'gemma-2-2b-it, llama_1b, or gemma_2b.';
+            'Use a supported GGUF model (Llama, DeepSeek, Qwen, Gemma, Phi-3, Mistral) '
+            'or enable Developer Mode in Settings.';
         AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=failed reason=unsupported_model modelId=$modelId');
         _updateRuntimeStatus(
           LocalRuntimeStatus.failed,
