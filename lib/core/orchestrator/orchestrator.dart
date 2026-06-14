@@ -124,6 +124,21 @@ class Orchestrator {
         ' boundary=orchestrator.intent_route'
         ' reason=task_type_webSearch isOffline=$isOffline',
       );
+      // Risposta immediata senza passare per l'LLM.
+      // Così il modello non vede MAI il testo "non ho accesso a internet"
+      // nel suo contesto e non lo ripete nei turni successivi.
+      const webSearchReply =
+          'Non ho accesso a internet in modalità locale. '
+          'Passa alla modalità Cloud o Hybrid nelle impostazioni '
+          'per cercare online.';
+      return Stream.value(
+        InferenceResponse.finalChunk(
+          text: webSearchReply,
+          model: InferenceConstants.localModelName,
+          tokensGenerated: 0,
+        ),
+      );
+    }
       return _inferenceService.stream(
         InferenceRequest(
           sessionId: sessionId,
