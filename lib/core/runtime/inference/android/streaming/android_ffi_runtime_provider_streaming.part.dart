@@ -1,12 +1,43 @@
 part of '../../runtime_core.dart';
 
-const Set<String> _androidSafeModelIds = <String>{
+/// Set di modelId ufficialmente validati per il runtime Android FFI.
+///
+/// I modelli importati dall'utente (es. "Llama-3.2-1B-Instruct-Q4_K_M")
+/// vengono riconosciuti per pattern tramite [_isImportedModelSafeForAndroid].
+/// Non si aggiungono qui le costanti perché i nomi importati sono arbitrari.
+const Set<String> _androidSafeModelIds = {
   LocalInferenceModelIds.llama1b,
   LocalInferenceModelIds.gemma2b,
   LocalInferenceModelIds.gemma2_2bIt,
   LocalInferenceModelIds.deepSeekR1_1_5b,
   LocalInferenceModelIds.qwen3_1_7b,
 };
+
+/// Verifica se un modelId importato dall'utente è compatibile con
+/// il runtime Android FFI tramite pattern matching sul nome.
+///
+/// Architetture supportate da llama.cpp su Android arm64:
+/// - Llama (1B, 3B) — architettura transformer standard
+/// - Mistral / Mixtral — compatibile con llama.cpp
+/// - Qwen / Qwen2 / Qwen3 — supportato
+/// - DeepSeek distill (Qwen-based) — supportato
+/// - Gemma / Gemma2 — supportato
+/// - Phi-3 / Phi-3.5 — supportato
+///
+/// Architetture NON supportate: Falcon, MPT, RWKV, Mamba.
+bool _isImportedModelSafeForAndroid(String modelId) {
+  final id = modelId.trim().toLowerCase();
+  return id.contains('llama') ||
+      id.contains('mistral') ||
+      id.contains('mixtral') ||
+      id.contains('qwen') ||
+      id.contains('deepseek') ||
+      id.contains('gemma') ||
+      id.contains('phi-3') ||
+      id.contains('phi3') ||
+      id.contains('smollm') ||
+      id.contains('tinyllama');
+}
 
 extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
   Stream<InferenceResponse> streamInference({
@@ -59,7 +90,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
       AndroidFfiRuntimeProvider._log(
         '[ASYNC_CLOSURE_LAUNCH_BEGIN] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()} inferenceTailHash=${(_inferenceTail ?? Future<void>.value()).hashCode}',
       );
-      
+
       runZonedGuarded(() async {
         AndroidFfiRuntimeProvider._log(
           '[ASYNC_CLOSURE_ENTER] sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
@@ -159,19 +190,11 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
           _finalizeFirstTokenAttempt(firstTokenAttempt);
         }
       }, (error, stack) {
-        // TERMINAL SINK NON REATTIVO E MINIMALE PER L'ISOLAMENTO DELLA ZONA
-        // Estraiamo i dati dell'oggetto errore riducendoli a primitive pure (Zero Object Leak Rule)
         final trace = _dehydrateAndTraceError(error, stack);
-        
-        // Stampa nativa per evitare l'intercettazione ricorsiva da parte del logging dell'applicazione
         stderr.writeln('[ZONE_FATAL_TERMINAL_SINK] Isolate Boundary Breach Intercepted.\n$trace');
-
         try {
           if (!controller.isClosed) {
-            // Emettiamo sul confine dello stream una notifica di tipo stringa atomica immutabile
             controller.addError('Inference runtime critical boundary suspension.');
-            
-            // Chiusura asincrona difensiva schedulata per non bloccare il loop corrente
             scheduleMicrotask(() {
               if (!controller.isClosed) {
                 controller.close();
@@ -182,7 +205,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
           stderr.writeln('[ZONE_CRITICAL_CONTROLLER_FAIL] Fallimento definitivo nel terminal sink: ${sinkError.toString()}');
         }
       });
-      
+
       AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1666 | Function: streamInference() | AFTER exit',
       );
