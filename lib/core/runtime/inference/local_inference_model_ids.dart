@@ -11,6 +11,9 @@ class LocalInferenceModelIds {
   /// Desktop/PC-only model (non nella lista Android-safe).
   static const String deepSeekR1_7b = 'deepseek_r1_7b';
 
+  // ── Nuove costanti Phi-3.5-mini ────────────────────────────────────────────
+  static const String phi3_5_mini = 'phi3_5_mini';
+
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
   /// Modelli che usano il template Llama 3 Instruct
@@ -25,6 +28,7 @@ class LocalInferenceModelIds {
     deepSeekR1_1_5b,
     qwen3_1_7b,
     deepSeekR1_7b,
+    phi3_5_mini, // <- Aggiunto Phi-3.5-mini
   };
 
   /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
@@ -33,6 +37,7 @@ class LocalInferenceModelIds {
   /// accomodare i thinking token prima della risposta finale.
   static final Set<String> qwen3ThinkingModels = {
     qwen3_1_7b,
+    // Phi-3.5-mini NON supporta /no_think, quindi non lo aggiungo
   };
 
   static final Set<String> gemmaChatTemplateModels = {
@@ -69,13 +74,13 @@ class LocalInferenceModelIds {
 
   /// Restituisce true se il modello supporta la direttiva /no_think.
   /// Solo Qwen3 nativo supporta /no_think.
-  /// DeepSeek-R1-Distill non lo supporta e corrompe l'output.
+  /// DeepSeek-R1-Distill e Phi-3 non lo supportano e corrompono l'output.
   static bool isQwen3Thinking(String modelId) {
     if (qwen3ThinkingModels.contains(modelId)) return true;
     final id = modelId.trim().toLowerCase();
     // Solo Qwen3 nativo supporta /no_think.
-    // DeepSeek-R1-Distill non lo supporta e corrompe l'output.
-    return id.contains('qwen3');
+    // DeepSeek-R1-Distill e Phi-3 non lo supportano e corrompono l'output.
+    return id.contains('qwen3') &&!id.contains('phi');
   }
 
   // ── Pattern matching privato ──────────────────────────────────────────────
@@ -129,8 +134,4 @@ class LocalInferenceModelIds {
         break;
       default:
         // Template non riconosciuto: nessuna azione.
-        // resolveTemplate() userà il pattern matching o il fallback plain.
-        break;
-    }
-  }
-}
+        // resolve
