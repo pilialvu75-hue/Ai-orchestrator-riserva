@@ -13,29 +13,44 @@ class LocalInferenceModelIds {
 
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
-  static final Set<String> llama3ChatTemplateModels = {llama1b};
+  /// Modelli che usano il template Llama 3 Instruct
+  /// (<|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
+  static final Set<String> llama3ChatTemplateModels = {
+    llama1b,
+  };
 
+  /// Modelli che usano il template ChatML / Qwen
+  /// (<|im_start|> / <|im_end|>).
   static final Set<String> qwenChatTemplateModels = {
     deepSeekR1_1_5b,
     qwen3_1_7b,
     deepSeekR1_7b,
   };
 
-  static final Set<String> qwen3ThinkingModels = {qwen3_1_7b};
+  /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
+  /// Qwen3 `/no_think` per sopprimere il chain-of-thought.
+  /// Necessario su Android dove il budget token è troppo stretto per
+  /// accomodare i thinking token prima della risposta finale.
+  static final Set<String> qwen3ThinkingModels = {
+    qwen3_1_7b,
+  };
 
-  static final Set<String> gemmaChatTemplateModels = {gemma2_2bIt};
+  static final Set<String> gemmaChatTemplateModels = {
+    gemma2_2bIt,
+  };
 
   // ── Risoluzione template ──────────────────────────────────────────────────
 
   /// Risolve il template corretto per un modelId arbitrario.
   ///
   /// Priorità:
-  ///   1. Match esatto nei set registrati
-  ///   2. Pattern matching sul nome (modelli importati dall'utente)
-  ///   3. Fallback 'plain'
+  /// 1. Match esatto nei set registrati (costanti + registerModel)
+  /// 2. Pattern matching sul nome (modelli importati dall'utente)
+  /// 3. Fallback 'plain'
   ///
-  /// TinyLlama viene controllato PRIMA di Llama3 perché il suo nome
-  /// contiene "llama" ma usa il template Zephyr, non Llama3 Instruct.
+  /// Questo permette a modelli importati con nomi liberi come
+  /// "Llama-3.2-1B-Instruct-Q4_K_M" o "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M"
+  /// di ricevere il template corretto senza registrazione manuale.
   static String resolveTemplate(String modelId) {
     // 1. Match esatto nei set
     if (llama3ChatTemplateModels.contains(modelId)) return 'llama3';
@@ -44,7 +59,6 @@ class LocalInferenceModelIds {
 
     // 2. Pattern matching (case-insensitive) per modelli importati
     final id = modelId.trim().toLowerCase();
-    if (_matchesTinyLlama(id)) return 'zephyr';
     if (_matchesLlama3(id)) return 'llama3';
     if (_matchesQwen(id)) return 'qwen';
     if (_matchesGemma(id)) return 'gemma';
@@ -53,18 +67,18 @@ class LocalInferenceModelIds {
     return 'plain';
   }
 
+  /// Restituisce true se il modello supporta la direttiva /no_think.
+  /// Solo Qwen3 nativo supporta /no_think.
+  /// DeepSeek-R1-Distill non lo supporta e corrompe l'output.
   static bool isQwen3Thinking(String modelId) {
     if (qwen3ThinkingModels.contains(modelId)) return true;
     final id = modelId.trim().toLowerCase();
-    return id.contains('qwen3') ||
-        (id.contains('deepseek') && id.contains('r1'));
+    // Solo Qwen3 nativo supporta /no_think.
+    // DeepSeek-R1-Distill non lo supporta e corrompe l'output.
+    return id.contains('qwen3');
   }
 
   // ── Pattern matching privato ──────────────────────────────────────────────
-
-  /// TinyLlama-1.1B-Chat usa il template Zephyr, non Llama3 Instruct.
-  /// Deve essere verificato prima di [_matchesLlama3].
-  static bool _matchesTinyLlama(String id) => id.contains('tinyllama');
 
   static bool _matchesLlama3(String id) {
     return id.contains('llama-3') ||
@@ -81,10 +95,22 @@ class LocalInferenceModelIds {
         id.contains('phi3');
   }
 
-  static bool _matchesGemma(String id) => id.contains('gemma');
+  static bool _matchesGemma(String id) {
+    return id.contains('gemma');
+  }
 
   // ── Registrazione dinamica ────────────────────────────────────────────────
 
+  /// Registra un modello importato associandolo a un template specifico.
+  ///
+  /// Utile per modelli con nomi non riconoscibili dai pattern automatici.
+  /// Esempio:
+  /// ```dart
+  /// LocalInferenceModelIds.registerModel(
+  /// 'mio_modello_custom',
+  /// template: 'llama3',
+  /// );
+  /// ```
   static void registerModel(
     String modelId, {
     required String template,
@@ -93,12 +119,17 @@ class LocalInferenceModelIds {
     switch (template.toLowerCase()) {
       case 'llama3':
         llama3ChatTemplateModels.add(modelId);
+        break;
       case 'qwen':
         qwenChatTemplateModels.add(modelId);
         if (supportsNoThink) qwen3ThinkingModels.add(modelId);
+        break;
       case 'gemma':
         gemmaChatTemplateModels.add(modelId);
+        break;
       default:
+        // Template non riconosciuto: nessuna azione.
+        // resolveTemplate() userà il pattern matching o il fallback plain.
         break;
     }
   }
