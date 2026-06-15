@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/task_type.dart';
@@ -15,8 +17,8 @@ import 'package:flutter/foundation.dart';
 ///
 /// Classifica l'intent utente con [IntentAnalyzer], delega i comandi
 /// device a [ExecutionEngine], instrada planning/coding a [PlannerService],
-/// le ricerche web a una risposta informativa (LOCAL) o al provider cloud
-/// (CLOUD/HYBRID), e le query chat a [InferenceService].
+/// le ricerche web a [_handleWebSearchStream] (controlla connettività reale),
+/// e le query chat a [InferenceService].
 class Orchestrator {
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
@@ -47,10 +49,11 @@ class Orchestrator {
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
       case TaskType.webSearch:
+        // handle() sincrono — risposta informativa diretta.
+        // La connettività viene verificata solo in handleStream.
         return InferenceResponse.finalChunk(
-          text: 'Non ho accesso a internet in modalità locale. '
-              'Passa alla modalità Cloud o Hybrid nelle impostazioni '
-              'per cercare online.',
+          text: 'Verifica la connessione e usa la modalità Cloud '
+              'o Hybrid nelle impostazioni per cercare online.',
           model: InferenceConstants.localModelName,
           tokensGenerated: 0,
         );
@@ -119,14 +122,14 @@ class Orchestrator {
         ' boundary=orchestrator.intent_route'
         ' reason=task_type_webSearch',
       );
-      return Stream.value(
-        InferenceResponse.finalChunk(
-          text: 'Non ho accesso a internet in modalità locale. '
-              'Passa alla modalità Cloud o Hybrid nelle impostazioni '
-              'per cercare online.',
-          model: InferenceConstants.localModelName,
-          tokensGenerated: 0,
-        ),
+      return _handleWebSearchStream(
+        input: input,
+        sessionId: sessionId,
+        context: contextSnapshot,
+        systemPrompt: systemPrompt,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
       );
     }
 
@@ -143,6 +146,65 @@ class Orchestrator {
         systemPrompt: systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      ),
+    );
+  }
+
+  /// Gestisce le richieste di ricerca web.
+  ///
+  /// Controlla la connettività reale con [InternetAddress.lookup] senza
+  /// dipendenze esterne. Se c'è rete, passa la richiesta al modello locale
+  /// che risponde con le sue conoscenze. Se non c'è rete, emette un
+  /// messaggio informativo immediato senza coinvolgere l'LLM.
+  TokenStream _handleWebSearchStream({
+    required String input,
+    required String sessionId,
+    required List<ChatTurn> context,
+    required String? systemPrompt,
+    required bool isOffline,
+    required int? maxTokens,
+    required double? temperature,
+  }) async* {
+    bool hasInternet = false;
+    if (!isOffline) {
+      try {
+        final result = await InternetAddress.lookup('google.com')
+            .timeout(const Duration(seconds: 3));
+        hasInternet =
+            result.isNotEmpty && result.first.rawAddress.isNotEmpty;
+      } catch (_) {
+        hasInternet = false;
+      }
+    }
+
+    _logForensic(
+      '[WEB_SEARCH] session=$sessionId'
+      ' hasInternet=$hasInternet isOffline=$isOffline',
+    );
+
+    if (!hasInternet) {
+      yield InferenceResponse.finalChunk(
+        text: 'Non ho accesso a internet in questo momento. '
+            'Verifica la connessione o passa alla modalità Cloud '
+            'nelle impostazioni per cercare online.',
+        model: InferenceConstants.localModelName,
+        tokensGenerated: 0,
+      );
+      return;
+    }
+
+    // Connessione disponibile: il modello risponde con le sue conoscenze.
+    // L'accesso diretto a internet in LOCAL mode è pianificato per una
+    // versione futura con integrazione API di ricerca (es. DuckDuckGo).
+    yield* _inferenceService.stream(
+      InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: systemPrompt,
+        context: context,
+        isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
