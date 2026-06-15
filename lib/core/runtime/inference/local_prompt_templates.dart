@@ -38,6 +38,12 @@ class LocalPromptTemplates {
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+      case 'zephyr':
+        return _buildZephyrPrompt(
+          systemPrompt: cleanedSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+        );
       default:
         final buffer = StringBuffer();
         if (cleanedSystemPrompt != null) {
@@ -60,8 +66,6 @@ class LocalPromptTemplates {
   }
 
   /// Llama 3 Instruct — ogni turno è un blocco separato.
-  /// NON fonde l'ultimo turno user con il prompt corrente:
-  /// quella logica causava duplicazioni e confusione nel modello.
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -85,6 +89,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
+  /// ChatML / Qwen — ogni turno come blocco separato.
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -109,6 +114,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
+  /// Gemma chat template.
   static String _buildGemmaPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -125,6 +131,30 @@ class LocalPromptTemplates {
     }
     buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
     buffer.write('<start_of_turn>model\n');
+    return buffer.toString();
+  }
+
+  /// Zephyr / TinyLlama-1.1B-Chat template.
+  ///
+  /// TinyLlama usa il formato Zephyr con tag <|system|>, <|user|>,
+  /// <|assistant|> e separatore </s>. Diverso da Llama3 Instruct.
+  static String _buildZephyrPrompt({
+    required String? systemPrompt,
+    required List<ChatTurn> context,
+    required String userPrompt,
+  }) {
+    final buffer = StringBuffer();
+    if (systemPrompt != null) {
+      buffer.write('<|system|>\n$systemPrompt\n</s>\n');
+    }
+    for (final turn in context) {
+      final tag = turn.role == ChatRole.assistant
+          ? '<|assistant|>'
+          : '<|user|>';
+      buffer.write('$tag\n${turn.content}\n</s>\n');
+    }
+    buffer.write('<|user|>\n$userPrompt\n</s>\n');
+    buffer.write('<|assistant|>\n');
     return buffer.toString();
   }
 
