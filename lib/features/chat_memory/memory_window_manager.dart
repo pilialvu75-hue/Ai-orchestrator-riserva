@@ -36,7 +36,8 @@ class MemoryWindowManager {
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
     final userSize = _tokenEstimator.estimateTextSize(userPrompt);
-    final availableContextBudget = config.maxTotalSize - systemSize - userSize;
+    final availableContextBudget = (config.maxTotalSize - systemSize - userSize)
+    .clamp(config.minContextBudget, config.maxTotalSize);
     final normalizedTurns = <ChatTurn>[];
     final sizes = <int>[];
     var trimmedLines = 0;
