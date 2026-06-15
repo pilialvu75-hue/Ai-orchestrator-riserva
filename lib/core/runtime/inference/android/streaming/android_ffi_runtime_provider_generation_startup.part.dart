@@ -257,7 +257,11 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log( '[CONTEXT_SIZE] session=$sessionId context_lines=${request.context.length} system_chars=${(request.systemPrompt ?? '').length} prompt_chars=${request.prompt.length} composed_prompt_chars=${prompt.length}', );
     AndroidFfiRuntimeProvider._log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate', );
-    final requestedMaxTokens = isForensicSelfTest ? 4 : request.maxTokens;
+    final requestedMaxTokens = isForensicSelfTest
+    ? 4
+    : (request.maxTokens > 0
+        ? request.maxTokens
+        : AndroidFfiRuntimeProvider._defaultMaxTokens);
     final maxTokens = requestedMaxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens);
     final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
     final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
