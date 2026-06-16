@@ -16,7 +16,7 @@ bool _isTrimBoundary(int codeUnit) {
 /// Permette di passare da un calcolo a caratteri (approssimato) a un calcolo
 /// a token reali tramite FFI nativo o librerie specifiche del modello in uso.
 abstract class ITokenEstimator {
-  /// Costruttore costante necessario per sbloccare l'istanziazione const 
+  /// Costruttore costante necessario per sbloccare l'istanziazione const
   /// delle classi derivate (es. CharacterLengthEstimator nel container DI).
   const ITokenEstimator();
 
