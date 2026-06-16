@@ -12,7 +12,7 @@ class LocalPromptTemplates {
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     final cleanedContext = context
-        .where((turn) => turn.content.trim().isNotEmpty)
+        .where((turn) => !turn.excludeFromContext && turn.content.trim().isNotEmpty)
         .map((turn) => turn.copyWith(content: turn.content.trim()))
         .toList(growable: false);
     final userPrompt = prompt.trim();
@@ -135,9 +135,6 @@ class LocalPromptTemplates {
   }
 
   /// Zephyr / TinyLlama-1.1B-Chat template.
-  ///
-  /// TinyLlama usa il formato Zephyr con tag <|system|>, <|user|>,
-  /// <|assistant|> e separatore </s>. Diverso da Llama3 Instruct.
   static String _buildZephyrPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -148,9 +145,7 @@ class LocalPromptTemplates {
       buffer.write('<|system|>\n$systemPrompt\n</s>\n');
     }
     for (final turn in context) {
-      final tag = turn.role == ChatRole.assistant
-          ? '<|assistant|>'
-          : '<|user|>';
+      final tag = _zephyrRoleName(turn.role);
       buffer.write('$tag\n${turn.content}\n</s>\n');
     }
     buffer.write('<|user|>\n$userPrompt\n</s>\n');
@@ -177,6 +172,17 @@ class LocalPromptTemplates {
         return 'user';
       case ChatRole.user:
         return 'user';
+    }
+  }
+
+  static String _zephyrRoleName(ChatRole role) {
+    switch (role) {
+      case ChatRole.assistant:
+        return '<|assistant|>';
+      case ChatRole.system:
+        return '<|system|>';
+      case ChatRole.user:
+        return '<|user|>';
     }
   }
 }
