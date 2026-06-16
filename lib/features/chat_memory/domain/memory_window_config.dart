@@ -156,7 +156,7 @@ class MemoryWindowConfig {
       case MemoryWindowProfile.compact:
         return (
           isWeb ? 32 : 40,
-          1600,
+          4096,
           256,
         );
       case MemoryWindowProfile.standard:
@@ -190,8 +190,6 @@ class MemoryWindowConfig {
         '1_5b',
         '1.5b',
         '2b',
-        '3b',
-        '4b',
         'tiny',
         'small',
       ],
