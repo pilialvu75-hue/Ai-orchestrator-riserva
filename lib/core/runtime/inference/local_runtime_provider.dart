@@ -23,18 +23,22 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
-            developerModeProvider ?? (() => kDebugMode);
+            developerModeProvider?? (() => kDebugMode);
 
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  static const Set<String> _mobileValidatedModelIds =
-      AndroidFfiRuntimeModelIds.validatedModelIds;
+  // ── FIX: Set Mobile con Phi-3.5-mini aggiunto ─────────────────────────────
+  static const Set<String> _mobileValidatedModelIds = {
+   ...AndroidFfiRuntimeModelIds.validatedModelIds,
+    LocalInferenceModelIds.phi3_5_mini, // <- Aggiunto Phi mobile
+  };
 
   static const Set<String> _desktopValidatedModelIds =
       AndroidFfiRuntimeModelIds.validatedModelIds;
+  // ──────────────────────────────────────────
 
   final bool Function() _developerModeProvider;
 
@@ -67,12 +71,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   @protected
   bool hasVerifiedRuntimeForModel(String modelPath) =>
-      _verifiedModelPath != null &&
+      _verifiedModelPath!= null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
   bool isRuntimeVerified({String? modelPath}) {
     if (modelPath == null || modelPath.trim().isEmpty) {
-      return _verifiedModelPath != null;
+      return _verifiedModelPath!= null;
     }
     return hasVerifiedRuntimeForModel(modelPath);
   }
@@ -116,7 +120,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           '$msg modelId=$modelId',
         );
 
-        return model.localPath != null &&
+        return model.localPath!= null &&
             model.localPath!.isNotEmpty &&
             model.isDownloaded;
       }
@@ -142,7 +146,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     if (!selectedModel.isDownloaded) {
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
-        message: 'Model is not downloaded.',
+        message: 'Model file not downloaded.',
       );
     }
 
@@ -213,7 +217,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         ' | hasVerifiedRuntimeForModel: $gateVerified'
         ' | ModelID: $gateModelId'
         ' | ModelPath: $modelPath'
-        ' | _verifiedModelPath: ${_verifiedModelPath ?? 'null'}';
+        ' | _verifiedModelPath: ${_verifiedModelPath?? 'null'}';
     debugPrint(gateMsg);
     RuntimeEventLog.instance.emit(gateMsg);
 
@@ -237,15 +241,15 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // Se l'istanza corrente è già l'AndroidFfiRuntimeProvider specifico, evita il ciclo 
+    // Se l'istanza corrente è già l'AndroidFfiRuntimeProvider specifico, evita il ciclo
     // e passa direttamente all'esecuzione nativa per via del polimorfismo.
     if (Platform.isAndroid && this is! AndroidFfiRuntimeProvider) {
       debugPrint('[$_localProviderTag] Android context detected. Delegating pipeline execution to AndroidFfiRuntimeProvider.');
-      
+
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
       );
-      
+
       return ffiRuntimeElement.streamInference(
         request: request,
         cancellationToken: cancellationToken,
@@ -355,8 +359,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         });
 
         stdoutSub = process.stdout
-            .transform(utf8.decoder)
-            .listen(
+           .transform(utf8.decoder)
+           .listen(
           (chunk) {
             if (chunk.isEmpty) return;
 
@@ -381,8 +385,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         );
 
         stderrSub = process.stderr
-            .transform(utf8.decoder)
-            .listen(
+           .transform(utf8.decoder)
+           .listen(
           (chunk) {
             stderrBuffer.write(chunk);
 
@@ -422,7 +426,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
-        if (exitCode != 0 &&
+        if (exitCode!= 0 &&
             fullText.isEmpty) {
           clearRuntimeVerification();
 
@@ -432,7 +436,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           controller.add(
             InferenceResponse.error(
               stderr.isEmpty
-                  ? 'llama.cpp failed with exit code $exitCode'
+                 ? 'llama.cpp failed with exit code $exitCode'
                   : stderr,
             ),
           );
@@ -481,7 +485,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     // 1. Controlla prima i set statici di base delle piattaforme
     final baseAllowed =
         _isDesktopPlatform()
-            ? _desktopValidatedModelIds
+           ? _desktopValidatedModelIds
             : _mobileValidatedModelIds;
 
     if (baseAllowed.contains(modelId)) {
@@ -499,7 +503,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
 
-    if (envPath != null &&
+    if (envPath!= null &&
         envPath.trim().isNotEmpty) {
       return envPath.trim();
     }
@@ -530,7 +534,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     InferenceRequest request,
   ) {
     return LocalPromptTemplates.compose(
-      modelId: request.modelId ?? '',
+      modelId: request.modelId?? '',
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
       context: request.context,
@@ -579,8 +583,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     return cleaned
-        .split(RegExp(r'\s+'))
-        .length;
+       .split(RegExp(r'\s+'))
+       .length;
   }
 
   static bool _isDesktopPlatform() {
