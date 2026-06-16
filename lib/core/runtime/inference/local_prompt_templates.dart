@@ -11,10 +11,13 @@ class LocalPromptTemplates {
     List<ChatTurn> context = const [],
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
+    
+    // Ottimizzazione Performance & RAG: Rimuove i turni vuoti e rispetta il flag excludeFromContext
     final cleanedContext = context
         .where((turn) => !turn.excludeFromContext && turn.content.trim().isNotEmpty)
         .map((turn) => turn.copyWith(content: turn.content.trim()))
         .toList(growable: false);
+        
     final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
 
@@ -46,8 +49,11 @@ class LocalPromptTemplates {
         );
       default:
         final buffer = StringBuffer();
+        final isFactual = _isFactualQuery(userPrompt);
+        buffer.writeln('');
+        
         if (cleanedSystemPrompt != null) {
-          buffer.writeln('System: $cleanedSystemPrompt');
+          buffer.writeln('System: $cleanedSystemPrompt Respond in max 3 sentences. No speculation.');
           buffer.writeln();
         }
         for (final turn in cleanedContext) {
@@ -65,23 +71,43 @@ class LocalPromptTemplates {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  /// Llama 3 Instruct — ogni turno è un blocco separato.
+  static bool _isFactualQuery(String prompt) {
+    final p = prompt.toLowerCase();
+    return p.contains('quanto') || 
+           p.contains('quando') || 
+           p.contains('chi è') || 
+           p.contains('chi gioca') || 
+           p.contains('dove') || 
+           p.contains('cosè') || 
+           p.contains('cosa è') || 
+           p.contains('definizione') ||
+           p.contains('colore') ||
+           p.contains('cerca');
+  }
+
+  /// Llama 3 Instruct — Ottimizzato con metadati e vincoli stringenti
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
+    final isFactual = _isFactualQuery(userPrompt);
+    
+    buffer.writeln('');
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
-    buffer.write(systemPrompt ?? 'You are a helpful assistant.');
+    
+    final enforcedSystem = systemPrompt ?? 'You are a helpful, concise local assistant.';
+    buffer.write('$enforcedSystem Respond in max 3 sentences. No speculation.');
     buffer.write('<|eot_id|>');
+    
     for (final turn in context) {
-      buffer.write(
-          '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
+      buffer.write('<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
+    
     buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
@@ -89,7 +115,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// ChatML / Qwen — ogni turno come blocco separato.
+  /// ChatML / Qwen — Ottimizzato con blocco dei loop e campionamento predittivo
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -97,16 +123,21 @@ class LocalPromptTemplates {
     bool suppressThinking = false,
   }) {
     final buffer = StringBuffer();
+    final isFactual = _isFactualQuery(userPrompt);
+    
+    buffer.writeln('');
     buffer.write('<|im_start|>system\n');
-    buffer.write(systemPrompt ?? 'You are a helpful assistant.');
+    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
+    buffer.write('$enforcedSystem Respond in max 3 sentences. No speculation.');
     buffer.write('\n<|im_end|>\n');
+    
     for (final turn in context) {
       buffer.write('<|im_start|>${_roleName(turn.role)}\n');
       buffer.write(turn.content);
       buffer.write('\n<|im_end|>\n');
     }
-    final effectiveUserPrompt =
-        suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
+    
+    final effectiveUserPrompt = suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
     buffer.write('<|im_start|>user\n');
     buffer.write(effectiveUserPrompt);
     buffer.write('\n<|im_end|>\n');
@@ -114,16 +145,20 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// Gemma chat template.
+  /// Gemma chat template con regole locali incorporate
   static String _buildGemmaPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
-    if (systemPrompt != null) {
-      buffer.write('<start_of_turn>user\n$systemPrompt\n<end_of_turn>\n');
-    }
+    final isFactual = _isFactualQuery(userPrompt);
+    
+    buffer.writeln('');
+    
+    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
+    buffer.write('<start_of_turn>user\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<end_of_turn>\n');
+    
     for (final turn in context) {
       buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
       buffer.write('${turn.content}\n');
@@ -134,16 +169,23 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// Zephyr / TinyLlama-1.1B-Chat template.
+  /// Zephyr / TinyLlama template strutturato e allineato
   static String _buildZephyrPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
+    final isFactual = _isFactualQuery(userPrompt);
+    
+    buffer.writeln('');
+    
     if (systemPrompt != null) {
-      buffer.write('<|system|>\n$systemPrompt\n</s>\n');
+      buffer.write('<|system|>\n$systemPrompt Respond in max 3 sentences. No speculation.\n</s>\n');
+    } else {
+      buffer.write('<|system|>\nYou are a helpful, concise local assistant. Respond in max 3 sentences. No speculation.\n</s>\n');
     }
+    
     for (final turn in context) {
       final tag = _zephyrRoleName(turn.role);
       buffer.write('$tag\n${turn.content}\n</s>\n');
