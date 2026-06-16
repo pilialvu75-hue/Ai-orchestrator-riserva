@@ -73,5 +73,3 @@ class InferenceRequest {
     );
   }
 }
-
-Ecco i file, rendimento completi senza tagare o rompere niente
