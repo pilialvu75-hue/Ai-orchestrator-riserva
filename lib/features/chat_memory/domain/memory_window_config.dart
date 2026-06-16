@@ -155,7 +155,7 @@ class MemoryWindowConfig {
     switch (profile) {
       case MemoryWindowProfile.compact:
         return (
-          isWeb ? 6 : 6,
+          isWeb ? 32 : 40,
           1600,
           256,
         );
