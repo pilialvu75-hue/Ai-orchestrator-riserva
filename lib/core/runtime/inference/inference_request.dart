@@ -30,12 +30,13 @@ class InferenceRequest {
   final String? modelId;
   final String? modelPath;
 
+  // FIX: 512→300 per 1B models. Margine per ~1200 token di tag Llama3
   static int maxTokensForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
     if (id.contains('14b') || id.contains('13b') || id.contains('12b')) return 2048;
     if (id.contains('7b') || id.contains('8b')) return 1024;
     if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) return 768;
-    return 512;
+    return 300; // era 512
   }
 
   static double temperatureForModel(String? modelId) {
