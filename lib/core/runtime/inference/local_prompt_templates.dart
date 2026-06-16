@@ -50,7 +50,7 @@ class LocalPromptTemplates {
       default:
         final buffer = StringBuffer();
         final isFactual = _isFactualQuery(userPrompt);
-        buffer.writeln('');
+        buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
         
         if (cleanedSystemPrompt != null) {
           buffer.writeln('System: $cleanedSystemPrompt Respond in max 3 sentences. No speculation.');
@@ -96,7 +96,8 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    buffer.writeln('');
+    // FIX 1: Iniezione metadati sampling dinamico
+    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     
@@ -127,7 +128,8 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    buffer.writeln('');
+    // FIX 1: Iniezione metadati sampling dinamico
+    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     buffer.write('<|im_start|>system\n');
     
     final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
@@ -157,9 +159,11 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    buffer.writeln('');
+    // FIX 1: Iniezione metadati sampling dinamico
+    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     
     final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
+    // FIX 2: Gemma usa <start_of_turn>system invece di user per il system prompt
     buffer.write('<start_of_turn>system\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<end_of_turn>\n');
     
     for (final turn in context) {
@@ -181,7 +185,8 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    buffer.writeln('');
+    // FIX 1: Iniezione metadati sampling dinamico
+    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     
     if (systemPrompt != null) {
       buffer.write('<|system|>\n$systemPrompt Respond in max 3 sentences. No speculation.\n</s>\n');
