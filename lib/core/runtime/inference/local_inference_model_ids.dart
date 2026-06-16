@@ -138,4 +138,27 @@ class LocalInferenceModelIds {
         break;
     }
   }
-} // <- Chiusura classe aggiunta qui
+
+  // ── FIX PER TEST: temperatura automatica ─────────────────────────────────
+
+  /// Temperatura base usata da AiRuntimeSettingsService per config automatica.
+  /// I metadati META nel prompt sovrascriveranno questo valore nel runtime FFI.
+  static double temperatureForModel(String? modelId) {
+    if (modelId == null || modelId.trim().isEmpty) return 0.5;
+    final id = modelId.trim().toLowerCase();
+
+    // Llama3 1B: temp base 0.5, poi META lo porta a 0.2 se fattuale
+    if (id.contains('llama') && id.contains('1b')) return 0.5;
+
+    // Phi-3.5-mini: stabile a 0.5
+    if (id.contains('phi-3.5') || id.contains('phi3_5')) return 0.5;
+
+    // Qwen/DeepSeek: 0.5 di default
+    if (id.contains('qwen') || id.contains('deepseek')) return 0.5;
+
+    // Gemma: 0.5 di default
+    if (id.contains('gemma')) return 0.5;
+
+    return 0.5;
+  }
+}
