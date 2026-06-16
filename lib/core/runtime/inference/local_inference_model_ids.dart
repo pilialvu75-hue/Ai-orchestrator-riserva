@@ -17,7 +17,7 @@ class LocalInferenceModelIds {
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
   /// Modelli che usano il template Llama 3 Instruct
-  /// (<|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
+  /// ( <|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
   static final Set<String> llama3ChatTemplateModels = {
     llama1b,
   };
@@ -37,7 +37,7 @@ class LocalInferenceModelIds {
   /// accomodare i thinking token prima della risposta finale.
   static final Set<String> qwen3ThinkingModels = {
     qwen3_1_7b,
-    // Phi-3.5-mini NON supporta /no_think, quindi non lo aggiungo
+    // Phi-3.5-mini NON supporta /no_think
   };
 
   static final Set<String> gemmaChatTemplateModels = {
@@ -134,4 +134,8 @@ class LocalInferenceModelIds {
         break;
       default:
         // Template non riconosciuto: nessuna azione.
-        // resolve
+        // resolveTemplate() userà il pattern matching o il fallback plain.
+        break;
+    }
+  }
+} // <- Chiusura classe aggiunta qui
