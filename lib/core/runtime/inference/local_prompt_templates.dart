@@ -12,7 +12,7 @@ class LocalPromptTemplates {
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     
-    // Ottimizzazione Performance & RAG: Rimuove i turni vuoti e rispetta il flag excludeFromContext
+    // Filtro contestuale centralizzato per il RAG locale e la memoria
     final cleanedContext = context
         .where((turn) => !turn.excludeFromContext && turn.content.trim().isNotEmpty)
         .map((turn) => turn.copyWith(content: turn.content.trim()))
@@ -82,10 +82,12 @@ class LocalPromptTemplates {
            p.contains('cosa è') || 
            p.contains('definizione') ||
            p.contains('colore') ||
-           p.contains('cerca');
+           p.contains('cerca') ||
+           p.contains('data') ||
+           p.contains('anno');
   }
 
-  /// Llama 3 Instruct — Ottimizzato con metadati e vincoli stringenti
+  /// Llama 3 Instruct — Configurato con metadati dinamici e blocchi eot
   static String _buildLlama3Prompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -115,7 +117,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// ChatML / Qwen — Ottimizzato con blocco dei loop e campionamento predittivo
+  /// ChatML / Qwen — Controllo cicli e campionamento predittivo
   static String _buildQwenChatPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -127,6 +129,7 @@ class LocalPromptTemplates {
     
     buffer.writeln('');
     buffer.write('<|im_start|>system\n');
+    
     final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
     buffer.write('$enforcedSystem Respond in max 3 sentences. No speculation.');
     buffer.write('\n<|im_end|>\n');
@@ -145,7 +148,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// Gemma chat template con regole locali incorporate
+  /// Gemma chat template — Allineato con start_of_turn system nativo
   static String _buildGemmaPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -157,7 +160,7 @@ class LocalPromptTemplates {
     buffer.writeln('');
     
     final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
-    buffer.write('<start_of_turn>user\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<end_of_turn>\n');
+    buffer.write('<start_of_turn>system\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<end_of_turn>\n');
     
     for (final turn in context) {
       buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
@@ -169,7 +172,7 @@ class LocalPromptTemplates {
     return buffer.toString();
   }
 
-  /// Zephyr / TinyLlama template strutturato e allineato
+  /// Zephyr / TinyLlama template
   static String _buildZephyrPrompt({
     required String? systemPrompt,
     required List<ChatTurn> context,
@@ -211,7 +214,7 @@ class LocalPromptTemplates {
       case ChatRole.assistant:
         return 'model';
       case ChatRole.system:
-        return 'user';
+        return 'system';
       case ChatRole.user:
         return 'user';
     }
