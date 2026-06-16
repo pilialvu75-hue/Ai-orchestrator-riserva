@@ -1,44 +1,5 @@
 part of '../../runtime_core.dart';
 
-/// Set di modelId ufficialmente validati per il runtime Android FFI.
-///
-/// I modelli importati dall'utente (es. "Llama-3.2-1B-Instruct-Q4_K_M")
-/// vengono riconosciuti per pattern tramite [_isImportedModelSafeForAndroid].
-/// Non si aggiungono qui le costanti perché i nomi importati sono arbitrari.
-const Set<String> _androidSafeModelIds = {
-  LocalInferenceModelIds.llama1b,
-  LocalInferenceModelIds.gemma2b,
-  LocalInferenceModelIds.gemma2_2bIt,
-  LocalInferenceModelIds.deepSeekR1_1_5b,
-  LocalInferenceModelIds.qwen3_1_7b,
-};
-
-/// Verifica se un modelId importato dall'utente è compatibile con
-/// il runtime Android FFI tramite pattern matching sul nome.
-///
-/// Architetture supportate da llama.cpp su Android arm64:
-/// - Llama (1B, 3B) — architettura transformer standard
-/// - Mistral / Mixtral — compatibile con llama.cpp
-/// - Qwen / Qwen2 / Qwen3 — supportato
-/// - DeepSeek distill (Qwen-based) — supportato
-/// - Gemma / Gemma2 — supportato
-/// - Phi-3 / Phi-3.5 — supportato
-///
-/// Architetture NON supportate: Falcon, MPT, RWKV, Mamba.
-bool _isImportedModelSafeForAndroid(String modelId) {
-  final id = modelId.trim().toLowerCase();
-  return id.contains('llama') ||
-      id.contains('mistral') ||
-      id.contains('mixtral') ||
-      id.contains('qwen') ||
-      id.contains('deepseek') ||
-      id.contains('gemma') ||
-      id.contains('phi-3') ||
-      id.contains('phi3') ||
-      id.contains('smollm') ||
-      id.contains('tinyllama');
-}
-
 extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
   Stream<InferenceResponse> streamInference({
     required InferenceRequest request,
@@ -160,13 +121,27 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 );
                 return;
               }
+
+              // ── FIX: Estrazione metadati META dal prompt ──
+              final sampling = _SamplingParams.fromPrompt(startup.prompt);
+              final cleanPrompt = startup.prompt.replaceAll(RegExp(r'<!--META.*?-->\n?'), '');
+              AndroidFfiRuntimeProvider._log(
+                '[SAMPLING_PARAMS_EXTRACTED] session=$sessionId temp=${sampling.temperature} top_p=${sampling.topP} repeat_penalty=${sampling.repeatPenalty}',
+              );
+              // ─────────────────────────────────────────────
+
               pollingLoopEntered = true;
               cancellationToken.onCancel(() => _safeCancel(startup.bindings, startup.nativeSessionId));
-              await _runTokenPollingLoop(
+              
+              // Passa cleanPrompt e sampling al loop di polling
+              await _runTokenPollingLoopWithSampling(
                 startup: startup,
                 attemptState: firstTokenAttempt,
                 flowState: flowState,
+                cleanPrompt: cleanPrompt,
+                sampling: sampling,
               );
+              
               AndroidFfiRuntimeProvider._log(
                 '[FFI_FLOW_EXIT] session=$sessionId first_ffi_attempted=${flowState.firstFfiInvocationAttempted}'
                 ' first_ffi_completed=${flowState.firstFfiInvocationCompleted} controller_closed=${controller.isClosed}',
@@ -215,6 +190,78 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
         '[FORENSIC_UNHANDLED_EXCEPTION] error=$e stackTrace=$stackTrace',
       );
       rethrow;
+    }
+  }
+
+  // ── Nuovo metodo con sampling dinamico ──────────────────────────────────
+  Future<void> _runTokenPollingLoopWithSampling({
+    required _GenerationStartup startup,
+    required _FirstTokenAttemptState attemptState,
+    required _StreamFlowControlState flowState,
+    required String cleanPrompt,
+    required _SamplingParams sampling,
+  }) async {
+    final bindings = startup.bindings;
+    final nativeSessionId = startup.nativeSessionId;
+    final modelId = startup.modelId;
+    final modelPath = startup.modelPath;
+    final sessionId = startup.sessionId;
+
+    try {
+      _setPhase(RuntimePhase.startingGeneration);
+      
+      // Usa cleanPrompt senza <!--META--> e passa temperature dinamica
+      final promptPtr = cleanPrompt.toNativeUtf8().cast<Utf8>();
+      final startOk = await _runNativeCallWithTimeout(
+        stage: 'start_generation',
+        timeout: _startGenerationTimeout,
+        call: () => bindings.sessionStartGen(
+          nativeSessionId,
+          promptPtr,
+          startup.maxTokens,
+          sampling.temperature, // FIX: temp dinamica da META
+          sampling.topP,        // FIX: top_p dinamico
+          sampling.repeatPenalty, // FIX: repeat_penalty dinamico
+          0, // min_p
+          40, // top_k
+          512, // mirostat_tau
+          1.7, // mirostat_eta
+          0, // mirostat
+          0, // grammar_token
+          Pointer<Void>.fromAddress(0),
+        ),
+      );
+      malloc.free(promptPtr);
+
+      if (startOk != 0) {
+        final err = _safeLastError(bindings, nativeSessionId);
+        await _fatalEarlyExit(
+          flowState: flowState,
+          controller: startup.controller,
+          sessionId: sessionId,
+          branch: 'start_generation_failed',
+          reason: 'Native start_gen failed: $err',
+          stage: 'start_generation',
+        );
+        return;
+      }
+
+      _setPhase(RuntimePhase.waitingFirstToken);
+      await _runTokenPollingLoop(
+        startup: startup,
+        attemptState: attemptState,
+        flowState: flowState,
+      );
+    } catch (e, st) {
+      AndroidFfiRuntimeProvider._log('[TOKEN_LOOP_EXCEPTION] $e\n$st');
+      await _fatalEarlyExit(
+        flowState: flowState,
+        controller: startup.controller,
+        sessionId: sessionId,
+        branch: 'token_loop_exception',
+        reason: e.toString(),
+        stage: 'token_polling',
+      );
     }
   }
 }
