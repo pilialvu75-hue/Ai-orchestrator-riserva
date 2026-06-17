@@ -20,11 +20,13 @@ enum AiRuntimeMode {
       case 'ai_runtime_mode_local':
       case 'fast':
         return AiRuntimeMode.local;
+
       case 'cloud':
       case 'remote':
       case 'ai_runtime_mode_cloud':
       case 'deep':
         return AiRuntimeMode.cloud;
+
       case 'hybrid':
       case 'ai_runtime_mode_hybrid':
       case 'balanced':
@@ -32,6 +34,11 @@ enum AiRuntimeMode {
         return AiRuntimeMode.hybrid;
     }
   }
+}
+
+/// 🔥 NEW: internet is ALWAYS available, mode does NOT control connectivity
+enum InternetPolicy {
+  always,
 }
 
 /// Persists runtime settings and notifies listeners when a setting changes.
@@ -88,6 +95,10 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   String? get selectedModelId =>
       _configRepository.getString(AppConstants.prefSelectedModel);
+
+  // ================================
+  // MEMORY WINDOW CONFIG
+  // ================================
 
   MemoryWindowProfile get memoryWindowProfile =>
       MemoryWindowProfile.fromStoredValue(
@@ -155,16 +166,20 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     switch (memoryWindowProfile) {
       case MemoryWindowProfile.compact:
         return MemoryWindowConfig.compact(isWeb: isWeb);
+
       case MemoryWindowProfile.standard:
         return MemoryWindowConfig.standard(isWeb: isWeb);
+
       case MemoryWindowProfile.performance:
         return MemoryWindowConfig.performance(isWeb: isWeb);
+
       case MemoryWindowProfile.custom:
         return MemoryWindowConfig.custom(
           maxContextLines: customMemoryLineBudget,
           maxTotalSize: customMemoryTokenBudget,
           isWeb: isWeb,
         );
+
       case MemoryWindowProfile.automatic:
         return MemoryWindowConfig.automatic(
           modelId: modelId ?? selectedModelId,
@@ -173,12 +188,15 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     }
   }
 
+  /// ================================
+  /// 🔥 NEW: INTERNET IS ALWAYS AVAILABLE
+  /// ================================
+  InternetPolicy get internetPolicy => InternetPolicy.always;
+
   int _readInt(String key, {required int fallback}) {
     final raw = _configRepository.getString(key);
     final parsed = int.tryParse((raw ?? '').trim());
-    if (parsed == null) {
-      return fallback;
-    }
+    if (parsed == null) return fallback;
     return parsed > 0 ? parsed : fallback;
   }
 }
