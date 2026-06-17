@@ -685,8 +685,9 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
+    // Checked separately because the catalog exposes a single Phi-3.5 bucket.
     final phi35Pattern = RegExp(
-      r'(^|[^a-z0-9])phi(?:[-_]?3\.5|3_5)([^a-z0-9]|$)',
+      r'(^|[^a-z0-9])phi[-_]?(?:3\.5|3_5)([^a-z0-9]|$)',
       caseSensitive: false,
     );
     if (phi35Pattern.hasMatch(normalized)) {
