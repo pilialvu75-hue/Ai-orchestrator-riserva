@@ -10,7 +10,7 @@ void main() {
 
       expect(compact.profile, MemoryWindowProfile.compact);
       expect(compact.activeProfile, MemoryWindowProfile.compact);
-      expect(compact.maxContextLines, 40);
+      expect(compact.maxContextLines, 6);
       expect(compact.maxTotalSize, 4096);
       expect(compact.minContextSize, 256);
 
