@@ -685,7 +685,11 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
-    if (normalized.contains('phi-3.5') || normalized.contains('phi3_5')) {
+    final phi35Pattern = RegExp(
+      r'(^|[^a-z0-9])phi(?:-?3\.5|3_5)([^a-z0-9]|$)',
+      caseSensitive: false,
+    );
+    if (phi35Pattern.hasMatch(normalized)) {
       return 'phi35';
     }
     return null;
