@@ -32,23 +32,6 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-part 'android/lifecycle/android_ffi_runtime_provider_lifecycle_subsystem.part.dart';
-part 'android/sessions/android_ffi_runtime_provider_native_session_subsystem.part.dart';
-part 'android/warmup/android_ffi_runtime_provider_warmup_subsystem.part.dart';
-part 'android/helpers/android_ffi_runtime_provider_concurrency_manager.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_token_stream_processor.part.dart';
-part 'android/helpers/android_ffi_runtime_provider_session_state_isolator.part.dart';
-part 'android/logging/android_ffi_runtime_provider_logging.part.dart';
-part 'android/logging/android_ffi_runtime_provider_ffi_bridge_handler.part.dart';
-part 'android/polling/android_ffi_runtime_provider_polling_controller.part.dart';
-part 'android/diagnostics/android_ffi_runtime_provider_diagnostics.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_streaming.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_generation_startup.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_first_token.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_polling.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_terminal_state.part.dart';
-part 'android/streaming/android_ffi_runtime_provider_stream_verification.part.dart';
-
 // ── Helper per estrarre sampling dai metadati META ───────────────────────
 class _SamplingParams {
   const _SamplingParams({
@@ -102,9 +85,10 @@ class _SamplingParams {
   }
 }
 
+
 // ── Classe usata dal loop di polling ─────────────────────────────────────
-class _GenerationStartupData {
-  const _GenerationStartupData({
+class _GenerationStartup {
+  const _GenerationStartup({
     required this.bindings,
     required this.nativeSessionId,
     required this.prompt,
@@ -148,6 +132,25 @@ bool _isImportedModelSafeForAndroid(String modelId) {
       id.contains('smollm') ||
       id.contains('tinyllama');
 }
+
+part 'android/lifecycle/android_ffi_runtime_provider_lifecycle_subsystem.part.dart';
+part 'android/sessions/android_ffi_runtime_provider_native_session_subsystem.part.dart';
+part 'android/warmup/android_ffi_runtime_provider_warmup_subsystem.part.dart';
+part 'android/helpers/android_ffi_runtime_provider_concurrency_manager.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_token_stream_processor.part.dart';
+part 'android/helpers/android_ffi_runtime_provider_session_state_isolator.part.dart';
+part 'android/logging/android_ffi_runtime_provider_logging.part.dart';
+part 'android/logging/android_ffi_runtime_provider_ffi_bridge_handler.part.dart';
+part 'android/polling/android_ffi_runtime_provider_polling_controller.part.dart';
+part 'android/diagnostics/android_ffi_runtime_provider_diagnostics.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_streaming.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_generation_startup.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_first_token.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_polling.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_terminal_state.part.dart';
+part 'android/streaming/android_ffi_runtime_provider_stream_verification.part.dart';
+
+
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
