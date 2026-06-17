@@ -103,8 +103,8 @@ class _SamplingParams {
 }
 
 // ── Classe usata dal loop di polling ─────────────────────────────────────
-class _GenerationStartup {
-  const _GenerationStartup({
+class _GenerationStartupData {
+  const _GenerationStartupData({
     required this.bindings,
     required this.nativeSessionId,
     required this.prompt,
