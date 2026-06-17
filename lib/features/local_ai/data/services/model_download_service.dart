@@ -685,6 +685,14 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
+    // Checked separately because the catalog exposes a single Phi-3.5 bucket.
+    final phi35Pattern = RegExp(
+      r'(^|[^a-z0-9])phi[-_]?(?:3\.5|3_5)([^a-z0-9]|$)',
+      caseSensitive: false,
+    );
+    if (phi35Pattern.hasMatch(normalized)) {
+      return 'phi35';
+    }
     return null;
   }
 
@@ -706,6 +714,9 @@ class ModelDownloadService {
         return normalized.contains('it') || normalized.contains('instruct')
             ? 'gemma_2_2b_it'
             : 'gemma_2b';
+      case 'phi35':
+        // Internal family bucket for Phi-3.5 GGUF imports.
+        return 'phi3_5_mini';
       default:
         return null;
     }
@@ -713,6 +724,7 @@ class ModelDownloadService {
 
   String? _inferPlatformTarget(String? runtimeModelId) {
     if (runtimeModelId == 'deepseek_r1_1_5b') return 'android';
+    if (runtimeModelId == 'phi3_5_mini') return 'android';
     if (runtimeModelId == 'deepseek_r1_7b') return 'windows';
     return 'all';
   }
@@ -720,14 +732,21 @@ class ModelDownloadService {
   String _buildImportedDisplayName(String fileName, String? family) {
     final baseName = p.basenameWithoutExtension(fileName).replaceAll('_', ' ');
     if (baseName.trim().isNotEmpty) return baseName;
-    return family == null ? 'Imported GGUF' : 'Imported ${family.toUpperCase()}';
+    return family == null
+        ? 'Imported GGUF'
+        : 'Imported ${_familyDisplayLabel(family)}';
   }
 
   String _buildImportedDescription(String fileName, String? family) {
     final prefix = family == null
         ? 'Imported GGUF from device storage'
-        : 'Imported ${family.toUpperCase()} GGUF from device storage';
+        : 'Imported ${_familyDisplayLabel(family)} GGUF from device storage';
     return '$prefix · ${p.basename(fileName)}';
+  }
+
+  String _familyDisplayLabel(String family) {
+    if (family == 'phi35') return 'Phi-3.5';
+    return family.toUpperCase();
   }
 
   Future<String?> _persistAndroidDocumentUri(String? uri) async {
