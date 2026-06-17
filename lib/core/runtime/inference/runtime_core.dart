@@ -32,107 +32,6 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-// ── Helper per estrarre sampling dai metadati META ───────────────────────
-class _SamplingParams {
-  const _SamplingParams({
-    required this.temperature,
-    required this.topP,
-    required this.repeatPenalty,
-  });
-
-  final double temperature;
-  final double topP;
-  final double repeatPenalty;
-
-  static const _default = _SamplingParams(
-    temperature: 0.5,
-    topP: 0.9,
-    repeatPenalty: 1.1,
-  );
-
-  static _SamplingParams fromPrompt(String prompt) {
-    final metaRegex = RegExp(r'<!--META\s+(.*?)-->', dotAll: true);
-    final match = metaRegex.firstMatch(prompt);
-    if (match == null) return _default;
-
-    final metaStr = match.group(1)!;
-    double temp = _default.temperature;
-    double topP = _default.topP;
-    double repeatPenalty = _default.repeatPenalty;
-
-    final tempMatch = RegExp(r'temp=([0-9.]+)').firstMatch(metaStr);
-    if (tempMatch != null) {
-      temp = double.tryParse(tempMatch.group(1)!) ?? temp;
-    }
-
-    final topPMatch = RegExp(r'top_p=([0-9.]+)').firstMatch(metaStr);
-    if (topPMatch != null) {
-      topP = double.tryParse(topPMatch.group(1)!) ?? topP;
-    }
-
-    final repeatMatch =
-        RegExp(r'repeat_penalty=([0-9.]+)').firstMatch(metaStr);
-    if (repeatMatch != null) {
-      repeatPenalty =
-          double.tryParse(repeatMatch.group(1)!) ?? repeatPenalty;
-    }
-
-    return _SamplingParams(
-      temperature: temp,
-      topP: topP,
-      repeatPenalty: repeatPenalty,
-    );
-  }
-}
-
-
-// ── Classe usata dal loop di polling ─────────────────────────────────────
-class _GenerationStartup {
-  const _GenerationStartup({
-    required this.bindings,
-    required this.nativeSessionId,
-    required this.prompt,
-    required this.maxTokens,
-    required this.controller,
-    required this.modelId,
-    required this.modelPath,
-    required this.sessionId,
-  });
-
-  final LlamaBridgeBindings bindings;
-  final int nativeSessionId;
-  final String prompt;
-  final int maxTokens;
-  final StreamController<InferenceResponse> controller;
-  final String modelId;
-  final String modelPath;
-  final String sessionId;
-}
-
-/// Set di modelId ufficialmente validati per il runtime Android FFI.
-const Set<String> _androidSafeModelIds = {
-  LocalInferenceModelIds.llama1b,
-  LocalInferenceModelIds.gemma2b,
-  LocalInferenceModelIds.gemma2_2bIt,
-  LocalInferenceModelIds.deepSeekR1_1_5b,
-  LocalInferenceModelIds.qwen3_1_7b,
-};
-
-/// Verifica se un modelId importato dall'utente è compatibile con il runtime Android FFI.
-bool _isImportedModelSafeForAndroid(String modelId) {
-  final id = modelId.trim().toLowerCase();
-  return id.contains('llama') ||
-      id.contains('mistral') ||
-      id.contains('mixtral') ||
-      id.contains('qwen') ||
-      id.contains('deepseek') ||
-      id.contains('gemma') ||
-      id.contains('phi-3') ||
-      id.contains('phi3') ||
-      id.contains('smollm') ||
-      id.contains('tinyllama');
-}
-
 part 'android/lifecycle/android_ffi_runtime_provider_lifecycle_subsystem.part.dart';
 part 'android/sessions/android_ffi_runtime_provider_native_session_subsystem.part.dart';
 part 'android/warmup/android_ffi_runtime_provider_warmup_subsystem.part.dart';
@@ -149,8 +48,6 @@ part 'android/streaming/android_ffi_runtime_provider_first_token.part.dart';
 part 'android/streaming/android_ffi_runtime_provider_polling.part.dart';
 part 'android/streaming/android_ffi_runtime_provider_terminal_state.part.dart';
 part 'android/streaming/android_ffi_runtime_provider_stream_verification.part.dart';
-
-
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -191,7 +88,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions;
 
   static const _logTag = 'AI_RUNTIME';
-  static const int _safeMaxTokens = 2048; // tetto assoluto di sicurezza nativa
+  static const int _safeMaxTokens = 2048;  // tetto assoluto di sicurezza nativa
   static const int _defaultMaxTokens = 1024; // default operativo per modelli 1B
   // Keep local mobile generations bounded so stalled native loops surface
   // quickly and the UI can return partial text instead of hanging indefinitely.
@@ -200,16 +97,11 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
   // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
-  static const Duration _stalledInferenceTimeoutRelease =
-      Duration(seconds: 45);
-  static const Duration _stalledInferenceTimeoutDebug =
-      Duration(seconds: 120);
-  static const Duration _verificationFirstTokenTimeout =
-      Duration(seconds: 5);
-  static const Duration _noTokenProgressTimeout =
-      Duration(seconds: 35);
-  static const Duration _startGenerationTimeout =
-      Duration(seconds: 60);
+  static const Duration _stalledInferenceTimeoutRelease = Duration(seconds: 45);
+  static const Duration _stalledInferenceTimeoutDebug = Duration(seconds: 120);
+  static const Duration _verificationFirstTokenTimeout = Duration(seconds: 5);
+  static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
+  static const Duration _startGenerationTimeout = Duration(seconds: 60);
   static const Duration _modelLoadTimeout = Duration(seconds: 60);
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
@@ -218,12 +110,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const double _warmupTemperature = 0.1;
   // Soft suppression only: 600ms was chosen to collapse same-frame startup/UI
   // revalidation bursts while still allowing user-driven retries immediately.
-  static const Duration _runtimeCheckDebounce =
-      Duration(milliseconds: 600);
+  static const Duration _runtimeCheckDebounce = Duration(milliseconds: 600);
   // 1200ms captures tight runtimeUnavailable->loading churn seen in failing
   // traces without flagging normal user pacing as a loop.
-  static const Duration _reentryWarnThreshold =
-      Duration(milliseconds: 1200);
+  static const Duration _reentryWarnThreshold = Duration(milliseconds: 1200);
   // Emit loop-boundary blocked marker after the third rapid re-entry.
   static const int _reentryLoopBlockThreshold = 3;
   static const String _autoTransitionReason = 'status_update';
@@ -285,7 +175,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   String _lastTransitionOrigin = 'AndroidFfiRuntimeProvider';
   int _reentryCount = 0;
   bool _streamInferenceEntered = false;
-
+  
   // FSM Interna per il monitoraggio nativo delle fasi
   FfiPhase _currentFfiPhase = FfiPhase.idle;
   RuntimePhase _runtimePhase = RuntimePhase.tokenizing;
@@ -312,8 +202,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   int _lastLoopLogAtMs = 0;
   static const int _loopLogThrottleMs = 250;
   int _idleBackoffMs = 24;
-  final RuntimeModelPathResolver _pathResolver =
-      const RuntimeModelPathResolver();
+  final RuntimeModelPathResolver _pathResolver = const RuntimeModelPathResolver();
   late final _AndroidFfiLifecycleSubsystem _lifecycleSubsystem =
       _AndroidFfiLifecycleSubsystem(this);
   late final _AndroidFfiNativeSessionSubsystem _nativeSessionSubsystem =
@@ -408,9 +297,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       final now = DateTime.now();
       if (_runtimeCheckInProgress) {
-        _log(
-          '[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored',
-        );
+        _log('[RUNTIME_CHECK_SKIPPED] reason=check_already_running origin=AndroidFfiRuntimeProvider.validateRuntime transition_action=ignored');
         return _lastRuntimeValidationSnapshot ?? monitor.state;
       }
       final sinceLastCheck = _lastRuntimeCheckAt == null
@@ -426,9 +313,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
       _runtimeCheckInProgress = true;
       _lastRuntimeCheckAt = now;
-      _log(
-        '[RUNTIME_CHECK_BEGIN] origin=AndroidFfiRuntimeProvider.validateRuntime',
-      );
+      _log('[RUNTIME_CHECK_BEGIN] origin=AndroidFfiRuntimeProvider.validateRuntime');
       if (!LlamaFfiLoader.isCurrentPlatformSupported) {
         final snapshot = LocalRuntimeState(
           status: LocalRuntimeStatus.failed,
@@ -486,8 +371,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       }
 
       // ── FORENSIC: gate-condition snapshot ────────────────────────────────────
-      final forensicModelId =
-          selectedModel?.effectiveRuntimeModelId ?? 'null';
+      final forensicModelId = selectedModel?.effectiveRuntimeModelId ?? 'null';
       final forensicModelPath = selectedModelPath ?? 'null';
       final forensicVerified = selectedModelPath != null &&
           selectedModelPath.trim().isNotEmpty &&
@@ -563,8 +447,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
             status == LocalRuntimeStatus.completed) {
           _updateRuntimeStatus(
             LocalRuntimeStatus.ready,
-            message:
-                'Runtime verification reused and ready for inference.',
+            message: 'Runtime verification reused and ready for inference.',
             reason: 'verification_reused',
             origin: 'shouldReuseRuntimeVerification',
           );
@@ -608,8 +491,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         if (!LlamaFfiLoader.isCurrentPlatformSupported) {
           verificationMonitor.update(
             RuntimeVerificationPhase.failed,
-            message:
-                'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).',
+            message: 'Unsupported Android ABI (${LlamaFfiLoader.currentAbiName}).',
           );
           return LocalRuntimeState(
             status: LocalRuntimeStatus.failed,
@@ -689,6 +571,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
+
   // ── Private helpers ───────────────────────────────────────────────────────────
 
   int _ensureNativeSession(
@@ -736,8 +619,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _tokenStreamProcessor.sanitizeStructuralTemplateOutput(input);
 
   String _flushStructuralTemplateOutput(StringBuffer fullText) =>
-      fullText.toString() +
-      _tokenStreamProcessor.flushStructuralTemplateOutput();
+      fullText.toString() + _tokenStreamProcessor.flushStructuralTemplateOutput();
 
   void _discardStructuralTemplateOutput() =>
       _tokenStreamProcessor.discardStructuralTemplateOutput();
@@ -783,6 +665,8 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         modelPath: modelPath,
       );
 
+  
+
   static void _finishWithRuntimeError(
     StreamController<InferenceResponse> ctrl, {
     required String stage,
@@ -806,8 +690,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     required String fullText,
     required int tokensGenerated,
     String? notice,
-    InferenceTerminalState partialTerminalState =
-        InferenceTerminalState.failed,
+    InferenceTerminalState partialTerminalState = InferenceTerminalState.failed,
   }) =>
       _AndroidFfiRuntimeExecutionBoundary.finishWithPartialOrRuntimeError(
         ctrl,
@@ -862,10 +745,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
-  static String _safeLastError(
-    LlamaBridgeBindings bindings,
-    int sessionId,
-  ) {
+  static String _safeLastError(LlamaBridgeBindings bindings, int sessionId) {
     try {
       final value = bindings.sessionLastError(sessionId);
       if (value.trim().isEmpty) return 'Unknown native runtime error.';
@@ -922,9 +802,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       // _flushPendingRuntimeVerificationClear() terminal-state cleanup cannot
       // retroactively invalidate a runtime that is already ready.
       _runtimeVerificationClearPending = false;
-      _log(
-        '[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready status=${monitor.state.status.name}',
-      );
+      _log('[VERIFICATION_CLEAR_SKIPPED] reason=runtime_ready status=${monitor.state.status.name}');
       return;
     }
     if (_inVerificationScope) {
@@ -978,8 +856,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     bool resetProgress = false,
     String reason = _autoTransitionReason,
     String origin = 'AndroidFfiRuntimeProvider',
-  }) =>
-      _lifecycleSubsystem.updateRuntimeStatus(
+  }) => _lifecycleSubsystem.updateRuntimeStatus(
         status,
         message: message,
         tokensGenerated: tokensGenerated,
