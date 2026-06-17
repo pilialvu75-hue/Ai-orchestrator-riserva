@@ -685,11 +685,7 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
-    final phiPattern = RegExp(
-      r'(^|[^a-z0-9])phi[-_ ]?3(\.5|_5)([^a-z0-9]|$)',
-      caseSensitive: false,
-    );
-    if (phiPattern.hasMatch(normalized)) {
+    if (normalized.contains('phi-3.5') || normalized.contains('phi3_5')) {
       return 'phi35';
     }
     return null;
@@ -731,12 +727,12 @@ class ModelDownloadService {
   String _buildImportedDisplayName(String fileName, String? family) {
     final baseName = p.basenameWithoutExtension(fileName).replaceAll('_', ' ');
     if (baseName.trim().isNotEmpty) return baseName;
-    if (family == 'phi35') return 'Imported PHI 3.5';
+    if (family == 'phi35') return 'Imported Phi-3.5';
     return family == null ? 'Imported GGUF' : 'Imported ${family.toUpperCase()}';
   }
 
   String _buildImportedDescription(String fileName, String? family) {
-    final familyLabel = family == 'phi35' ? 'PHI 3.5' : family?.toUpperCase();
+    final familyLabel = family == 'phi35' ? 'Phi-3.5' : family?.toUpperCase();
     final prefix = family == null
         ? 'Imported GGUF from device storage'
         : 'Imported $familyLabel GGUF from device storage';
