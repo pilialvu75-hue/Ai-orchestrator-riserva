@@ -685,10 +685,12 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
-    if (normalized.contains('phi-3.5') ||
-        normalized.contains('phi3_5') ||
-        normalized.contains('phi-3') ||
-        normalized.contains('phi3')) {
+    if (normalized.contains('phi-3.5') || normalized.contains('phi3_5')) {
+      return 'phi';
+    }
+    // Phi-3 and Phi-3.5 share the same runtime bucket in this app, so any
+    // Phi-family GGUF imports map to the same local runtime model id.
+    if (normalized.contains('phi-3') || normalized.contains('phi3')) {
       return 'phi';
     }
     return null;
