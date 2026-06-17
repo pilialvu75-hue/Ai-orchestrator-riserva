@@ -686,7 +686,7 @@ class ModelDownloadService {
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
     final phi35Pattern = RegExp(
-      r'(^|[^a-z0-9])phi(?:-?3\.5|3_5)([^a-z0-9]|$)',
+      r'(^|[^a-z0-9])phi(?:[-_]?3\.5|3_5)([^a-z0-9]|$)',
       caseSensitive: false,
     );
     if (phi35Pattern.hasMatch(normalized)) {
@@ -731,16 +731,21 @@ class ModelDownloadService {
   String _buildImportedDisplayName(String fileName, String? family) {
     final baseName = p.basenameWithoutExtension(fileName).replaceAll('_', ' ');
     if (baseName.trim().isNotEmpty) return baseName;
-    if (family == 'phi35') return 'Imported Phi-3.5';
-    return family == null ? 'Imported GGUF' : 'Imported ${family.toUpperCase()}';
+    return family == null
+        ? 'Imported GGUF'
+        : 'Imported ${_familyDisplayLabel(family)}';
   }
 
   String _buildImportedDescription(String fileName, String? family) {
-    final familyLabel = family == 'phi35' ? 'Phi-3.5' : family?.toUpperCase();
     final prefix = family == null
         ? 'Imported GGUF from device storage'
-        : 'Imported $familyLabel GGUF from device storage';
+        : 'Imported ${_familyDisplayLabel(family)} GGUF from device storage';
     return '$prefix · ${p.basename(fileName)}';
+  }
+
+  String _familyDisplayLabel(String family) {
+    if (family == 'phi35') return 'Phi-3.5';
+    return family.toUpperCase();
   }
 
   Future<String?> _persistAndroidDocumentUri(String? uri) async {
