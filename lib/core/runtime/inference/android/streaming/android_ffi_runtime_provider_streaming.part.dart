@@ -228,7 +228,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
           1.7, // mirostat_eta
           0, // mirostat
           0, // grammar_token
-          Pointer<Void>.fromAddress(0),
+          nullptr, // FIX: usa nullptr invece di Pointer<Void>.fromAddress(0)
         ),
       );
       malloc.free(promptPtr);
