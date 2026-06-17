@@ -123,6 +123,18 @@ class AppConstants {
           'TinyLlama 1.1B Chat (Q4_K_M) – minimal verification model for Android local-runtime proof-of-life.',
       'platformTarget': 'android',
     },
+    {
+      'id': 'phi3_5_mini',
+      'displayName': 'Phi-3.5 Mini Instruct',
+      'fileName': 'Phi-3.5-mini-instruct-Q4_K_M.gguf',
+      'downloadUrl':
+          'https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf',
+      'version': '1.0.0',
+      'sizeBytes': 2390000000,
+      'description':
+          'Phi-3.5 Mini Instruct (Q4_K_M) – local GGUF option compatible with the Android FFI runtime.',
+      'platformTarget': 'android',
+    },
   ];
 
   static const int contextWindowMaxMessages = 20;

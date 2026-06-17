@@ -685,6 +685,12 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
+    if (normalized.contains('phi-3.5') ||
+        normalized.contains('phi3_5') ||
+        normalized.contains('phi-3') ||
+        normalized.contains('phi3')) {
+      return 'phi';
+    }
     return null;
   }
 
@@ -706,6 +712,8 @@ class ModelDownloadService {
         return normalized.contains('it') || normalized.contains('instruct')
             ? 'gemma_2_2b_it'
             : 'gemma_2b';
+      case 'phi':
+        return 'phi3_5_mini';
       default:
         return null;
     }
@@ -713,6 +721,7 @@ class ModelDownloadService {
 
   String? _inferPlatformTarget(String? runtimeModelId) {
     if (runtimeModelId == 'deepseek_r1_1_5b') return 'android';
+    if (runtimeModelId == 'phi3_5_mini') return 'android';
     if (runtimeModelId == 'deepseek_r1_7b') return 'windows';
     return 'all';
   }
