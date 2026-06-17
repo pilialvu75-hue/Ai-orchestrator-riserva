@@ -78,7 +78,7 @@ void main() {
       expect(config.profile, MemoryWindowProfile.automatic);
       expect(config.activeProfile, MemoryWindowProfile.compact);
       expect(config.maxTotalSize, 4096);
-      expect(config.maxContextLines, 40);
+      expect(config.maxContextLines, 6);
     });
   });
 }
