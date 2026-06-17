@@ -195,7 +195,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 
   // ── Nuovo metodo con sampling dinamico ──────────────────────────────────
   Future<void> _runTokenPollingLoopWithSampling({
-    required _GenerationStartup startup,
+    required _GenerationStartupData startup,
     required _FirstTokenAttemptState attemptState,
     required _StreamFlowControlState flowState,
     required String cleanPrompt,
