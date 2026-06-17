@@ -685,9 +685,11 @@ class ModelDownloadService {
     if (normalized.contains('qwen')) return 'qwen';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
-    // Phi-3.x GGUF imports map to the same local runtime model id here.
-    if (normalized.contains('phi-3') || normalized.contains('phi3')) {
-      return 'phi';
+    final phiPattern = RegExp(
+      r'(^|[^a-z0-9])phi[-_ ]?3(\.5|_5)?([^a-z0-9]|$)',
+    );
+    if (phiPattern.hasMatch(normalized)) {
+      return 'phi3';
     }
     return null;
   }
@@ -710,7 +712,7 @@ class ModelDownloadService {
         return normalized.contains('it') || normalized.contains('instruct')
             ? 'gemma_2_2b_it'
             : 'gemma_2b';
-      case 'phi':
+      case 'phi3':
         return 'phi3_5_mini';
       default:
         return null;
