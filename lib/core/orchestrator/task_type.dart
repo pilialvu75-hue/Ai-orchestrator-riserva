@@ -17,8 +17,8 @@ enum TaskType {
   coding,
 
   /// Una richiesta di ricerca web ("cerca", "search", "notizie", ecc.).
-  /// In modalità LOCAL viene gestita con un messaggio informativo.
-  /// In modalità CLOUD/HYBRID viene instradata al provider cloud che
-  /// ha accesso a internet (es. OpenAI con browsing, Gemini, ecc.).
+  /// In modalità LOCAL utilizza il tool di ricerca web e poi passa i risultati
+  /// al modello locale; in modalità CLOUD/HYBRID può ancora essere inoltrata
+  /// ai provider cloud se necessario.
   webSearch,
 }

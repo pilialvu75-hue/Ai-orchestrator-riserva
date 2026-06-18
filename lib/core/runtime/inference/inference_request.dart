@@ -34,6 +34,9 @@ class InferenceRequest {
     final id = (modelId ?? '').toLowerCase();
     if (id.contains('14b') || id.contains('13b') || id.contains('12b')) return 2048;
     if (id.contains('7b') || id.contains('8b')) return 1024;
+    if (id.contains('phi3_5') || id.contains('phi-3.5') || id.contains('phi3.5')) {
+      return 768;
+    }
     if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) return 768;
     return 512;
   }
@@ -41,6 +44,9 @@ class InferenceRequest {
   static double temperatureForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
     if (id.contains('14b') || id.contains('7b') || id.contains('8b')) return 0.6;
+    if (id.contains('phi3_5') || id.contains('phi-3.5') || id.contains('phi3.5')) {
+      return 0.5;
+    }
     if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) return 0.5;
     return 0.4;
   }

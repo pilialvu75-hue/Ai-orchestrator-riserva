@@ -1,6 +1,7 @@
 package com.aiorchestrator
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.content.Intent
@@ -216,6 +217,21 @@ class MainActivity : FlutterActivity() {
                             "installedVersionName" to installedPackageInfo.versionName,
                             "installedVersionCode" to getVersionCode(installedPackageInfo),
                             "installedSignatureSha256" to extractSignatureSha256(installedPackageInfo),
+                        )
+                    )
+                }
+
+                "getDeviceMemoryInfo" -> {
+                    val activityManager = getSystemService(ACTIVITY_SERVICE) as? ActivityManager
+                    val memoryInfo = ActivityManager.MemoryInfo()
+                    activityManager?.getMemoryInfo(memoryInfo)
+                    result.success(
+                        mapOf(
+                            "availableBytes" to memoryInfo.availMem,
+                            "totalBytes" to memoryInfo.totalMem,
+                            "lowRamDevice" to memoryInfo.lowMemory,
+                            "memoryClassMb" to activityManager?.memoryClass,
+                            "largeMemoryClassMb" to activityManager?.largeMemoryClass,
                         )
                     )
                 }

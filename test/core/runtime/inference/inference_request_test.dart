@@ -55,4 +55,11 @@ void main() {
       );
     });
   });
+
+  group('InferenceRequest model defaults', () {
+    test('recognises Phi 3.5 model family', () {
+      expect(InferenceRequest.maxTokensForModel('phi3_5_mini'), 768);
+      expect(InferenceRequest.temperatureForModel('phi3_5_mini'), 0.5);
+    });
+  });
 }

@@ -11,6 +11,7 @@ const Set<String> _androidSafeModelIds = {
   LocalInferenceModelIds.gemma2_2bIt,
   LocalInferenceModelIds.deepSeekR1_1_5b,
   LocalInferenceModelIds.qwen3_1_7b,
+  LocalInferenceModelIds.phi3_5_mini,
 };
 
 /// Verifica se un modelId importato dall'utente è compatibile con

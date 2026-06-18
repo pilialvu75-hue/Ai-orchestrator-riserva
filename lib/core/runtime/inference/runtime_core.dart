@@ -26,6 +26,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_models.dart';
+import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ffi/ffi.dart';

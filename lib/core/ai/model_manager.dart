@@ -11,6 +11,8 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 class ModelManager {
   const ModelManager();
 
+  static const int _desktopFallbackThresholdBytes = 2300000000;
+
   // ── Platform detection ────────────────────────────────────────────────────
 
   /// Returns the platform tag for the current OS.
@@ -28,12 +30,12 @@ class ModelManager {
   /// Human-readable label that describes the recommended model tier for the UI.
   ///
   /// Examples:
-  /// - Android → `"Mobile Coder (1.5B)"`
-  /// - Windows → `"Senior Architect (7B)"`
+  /// - Android → `"Mobile Coder (1B-4B)"`
+  /// - Windows → `"Senior Architect (7B+)"`
   /// - other   → `"Standard"`
   String get platformModelLabel {
-    if (Platform.isAndroid) return 'Mobile Coder (1.5B)';
-    if (Platform.isWindows) return 'Senior Architect (7B)';
+    if (Platform.isAndroid) return 'Mobile Coder (1B-4B)';
+    if (Platform.isWindows) return 'Senior Architect (7B+)';
     return 'Standard';
   }
 
@@ -73,4 +75,36 @@ class ModelManager {
   /// platform.
   bool isRecommended(AiModel model, List<AiModel> allModels) =>
       getRecommendedModelId(allModels) == model.id;
+
+  /// Returns `true` when [model] is considered desktop-class for filtering.
+  ///
+  /// The decision prefers an explicit platform target, then the declared size
+  /// category, and only falls back to raw file size when the catalog metadata
+  /// is missing.
+  bool isDesktopModel(AiModel model) {
+    final target = (model.platformTarget ?? 'all').toLowerCase();
+    if (target == 'windows' ||
+        target == 'linux' ||
+        target == 'macos' ||
+        target == 'desktop' ||
+        target == 'pc') {
+      return true;
+    }
+
+    final category = parseModelSizeCategory(model.sizeCategory);
+    if (category != null) {
+      return category >= 7;
+    }
+
+    return model.sizeBytes >= _desktopFallbackThresholdBytes;
+  }
+
+  /// Parses a category label like `4B` or `3.8B` into a numeric tier.
+  static int? parseModelSizeCategory(String? value) {
+    final normalized = value?.trim().toUpperCase() ?? '';
+    if (normalized.isEmpty) return null;
+    final match = RegExp(r'(\d+(?:\.\d+)?)\s*B').firstMatch(normalized);
+    if (match == null) return null;
+    return double.tryParse(match.group(1)!)?.round();
+  }
 }

@@ -8,11 +8,13 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: UTILIZZATA CON SUCCESSO
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
 
@@ -515,16 +517,27 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     InferenceRequest request,
   ) {
     final prompt = _composePrompt(request);
+    final metadata = SamplingMetadata.fromPrompt(prompt);
+    final cleanedPrompt = metadata.stripFrom(prompt);
+    final effectiveTemperature = metadata.temperature ?? request.temperature;
+    final effectiveTopP = metadata.topP ?? request.topP;
+    final effectiveRepeatPenalty = metadata.repeatPenalty ?? request.repeatPenalty;
 
     return <String>[
       '-m',
       request.modelPath!,
       '-p',
-      prompt,
+      cleanedPrompt,
       '-n',
       request.maxTokens.toString(),
       '--temp',
-      request.temperature.toString(),
+      effectiveTemperature.toString(),
+      '--top-p',
+      effectiveTopP.toString(),
+      '--top-k',
+      LlamaNativeDefaults.topK.toString(),
+      '--repeat-penalty',
+      effectiveRepeatPenalty.toString(),
       '--no-display-prompt',
       '--log-disable',
     ];

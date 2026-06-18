@@ -16,8 +16,6 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
-  // Approx. 2.3GB threshold used to route high-memory models to desktop section.
-  static const int _desktopModelSizeThresholdBytes = 2300000000;
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
@@ -80,15 +78,7 @@ class _ModelsPageState extends State<ModelsPage> {
   }
 
   bool _isDesktopModel(AiModel model) {
-    final target = (model.platformTarget ?? 'all').toLowerCase();
-    if (target == 'windows' ||
-        target == 'linux' ||
-        target == 'macos' ||
-        target == 'desktop' ||
-        target == 'pc') {
-      return true;
-    }
-    return model.sizeBytes >= _desktopModelSizeThresholdBytes;
+    return _modelManager.isDesktopModel(model);
   }
 
   bool _isMobileModel(AiModel model) {

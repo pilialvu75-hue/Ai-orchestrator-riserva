@@ -24,6 +24,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
 import 'package:ai_orchestrator/core/runtime/llm_role_assignment_service.dart';
+import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
@@ -482,12 +483,14 @@ Future<void> initDependencies({
       sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
+  sl.registerLazySingleton<WebSearchTool>(() => WebSearchTool());
   sl.registerLazySingleton<Orchestrator>(
     () => Orchestrator(
       intentAnalyzer: sl<IntentAnalyzer>(),
       executor: sl<ExecutionEngine>(),
       inferenceService: sl<InferenceService>(),
       plannerService: sl<PlannerService>(),
+      webSearchTool: sl<WebSearchTool>(),
     ),
   );
   sl.registerLazySingleton<ChatRepository>(
