@@ -28,12 +28,12 @@ class ModelManager {
   /// Human-readable label that describes the recommended model tier for the UI.
   ///
   /// Examples:
-  /// - Android → `"Mobile Coder (1.5B)"`
-  /// - Windows → `"Senior Architect (7B)"`
+  /// - Android → `"Mobile Coder (1B-8B)"`
+  /// - Windows → `"Senior Architect (9B+)"`
   /// - other   → `"Standard"`
   String get platformModelLabel {
-    if (Platform.isAndroid) return 'Mobile Coder (1.5B)';
-    if (Platform.isWindows) return 'Senior Architect (7B)';
+    if (Platform.isAndroid) return 'Mobile Coder (1B-8B)';
+    if (Platform.isWindows) return 'Senior Architect (9B+)';
     return 'Standard';
   }
 
