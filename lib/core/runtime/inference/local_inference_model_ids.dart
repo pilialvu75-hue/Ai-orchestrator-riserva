@@ -143,6 +143,7 @@ class LocalInferenceModelIds {
         break;
       case 'phi3':
       case 'zephyr':
+        // Zephyr is the same prompt/token shape used by our Phi-3.5 routing.
         phi3ChatTemplateModels.add(modelId);
         break;
       default:
