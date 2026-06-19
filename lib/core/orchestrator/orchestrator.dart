@@ -209,15 +209,16 @@ class Orchestrator {
     required int? maxTokens,
     required double? temperature,
   }) async {
-    if (isOffline || _webSearchTool == null) {
+    final webSearchTool = _webSearchTool;
+    if (isOffline || webSearchTool == null) {
       _logForensic(
         '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
-        ' hasTool=${_webSearchTool != null}',
+        ' hasTool=${webSearchTool != null}',
       );
       return null;
     }
 
-    final search = await _webSearchTool.execute(<String, dynamic>{
+    final search = await webSearchTool.execute(<String, dynamic>{
       'query': input,
       'limit': 5,
     });

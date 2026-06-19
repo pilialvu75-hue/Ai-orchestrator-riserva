@@ -28,7 +28,6 @@ class LocalInferenceModelIds {
     deepSeekR1_1_5b,
     qwen3_1_7b,
     deepSeekR1_7b,
-    phi3_5_mini, // <- Aggiunto Phi-3.5-mini
   };
 
   /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
@@ -42,6 +41,11 @@ class LocalInferenceModelIds {
 
   static final Set<String> gemmaChatTemplateModels = {
     gemma2_2bIt,
+  };
+
+  /// Modelli che usano il template Phi-3 / Phi-3.5.
+  static final Set<String> phiChatTemplateModels = {
+    phi3_5_mini,
   };
 
   // ── Risoluzione template ──────────────────────────────────────────────────
@@ -61,9 +65,11 @@ class LocalInferenceModelIds {
     if (llama3ChatTemplateModels.contains(modelId)) return 'llama3';
     if (qwenChatTemplateModels.contains(modelId)) return 'qwen';
     if (gemmaChatTemplateModels.contains(modelId)) return 'gemma';
+    if (phiChatTemplateModels.contains(modelId)) return 'phi3';
 
     // 2. Pattern matching (case-insensitive) per modelli importati
     final id = modelId.trim().toLowerCase();
+    if (_matchesPhi(id)) return 'phi3';
     if (_matchesLlama3(id)) return 'llama3';
     if (_matchesQwen(id)) return 'qwen';
     if (_matchesGemma(id)) return 'gemma';
@@ -95,13 +101,16 @@ class LocalInferenceModelIds {
   static bool _matchesQwen(String id) {
     return id.contains('deepseek') ||
         id.contains('qwen') ||
-        id.contains('mistral') ||
-        id.contains('phi-3') ||
-        id.contains('phi3');
+        id.contains('mistral');
   }
 
   static bool _matchesGemma(String id) {
     return id.contains('gemma');
+  }
+
+  static bool _matchesPhi(String id) {
+    return id.contains('phi-3') ||
+        id.contains('phi3');
   }
 
   // ── Registrazione dinamica ────────────────────────────────────────────────
@@ -131,6 +140,9 @@ class LocalInferenceModelIds {
         break;
       case 'gemma':
         gemmaChatTemplateModels.add(modelId);
+        break;
+      case 'phi3':
+        phiChatTemplateModels.add(modelId);
         break;
       default:
         // Template non riconosciuto: nessuna azione.
