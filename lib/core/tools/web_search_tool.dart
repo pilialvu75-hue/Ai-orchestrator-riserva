@@ -31,7 +31,7 @@ class WebSearchTool implements Tool {
   Future<ToolResult> execute(Map<String, dynamic> params) async {
     final query = (params['query'] as String?)?.trim() ?? '';
     final requestedLimit = (params['limit'] as num?)?.toInt() ?? maxResults;
-    final limit = requestedLimit.clamp(1, 8).toInt();
+    final limit = requestedLimit.clamp(1, 8);
 
     if (query.isEmpty) {
       return const ToolResult(
@@ -88,9 +88,13 @@ class WebSearchTool implements Tool {
       if ((heading ?? '').isNotEmpty || (abstract ?? '').isNotEmpty) {
         results.add(
           _WebSearchEntry(
-            title: heading?.isNotEmpty == true ? heading! : query,
-            url: abstractUrl?.isNotEmpty == true ? abstractUrl! : uri.toString(),
-            snippet: abstract?.isNotEmpty == true ? abstract! : 'No abstract available.',
+            title: heading?.isNotEmpty ?? false ? heading! : query,
+            url: abstractUrl?.isNotEmpty ?? false
+                ? abstractUrl!
+                : uri.toString(),
+            snippet: abstract?.isNotEmpty ?? false
+                ? abstract!
+                : 'No abstract available.',
           ),
         );
       }

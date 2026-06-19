@@ -255,6 +255,7 @@ class Orchestrator {
     return 'Web search results:\n$trimmed';
   }
 
+  /// Guides the model to treat retrieved web results as the primary source.
   String _buildWebSearchSystemPrompt() {
     return 'You are AI Orchestrator. Answer the user using the web search '
         'results in the conversation context as primary evidence. Cite the '

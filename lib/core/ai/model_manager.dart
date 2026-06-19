@@ -105,6 +105,7 @@ class ModelManager {
     if (normalized.isEmpty) return null;
     final match = RegExp(r'(\d+(?:\.\d+)?)\s*B').firstMatch(normalized);
     if (match == null) return null;
-    return double.tryParse(match.group(1)!)?.round();
+    final matchValue = match.group(1);
+    return matchValue != null ? double.tryParse(matchValue)?.round() : null;
   }
 }
