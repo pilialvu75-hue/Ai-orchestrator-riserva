@@ -16,8 +16,8 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
-  // Approx. 2.3GB threshold used to route high-memory models to desktop section.
-  static const int _desktopModelSizeThresholdBytes = 2300000000;
+  // Alzata la soglia a 3.5GB per includere i modelli compatti ad alto contesto (come Phi-3.5 / DeepSeek 1.5B/3B)
+  static const int _desktopModelSizeThresholdBytes = 3500000000;
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
@@ -88,6 +88,14 @@ class _ModelsPageState extends State<ModelsPage> {
         target == 'pc') {
       return true;
     }
+    
+    // Forza Phi sul mobile indipendentemente dalla dimensione del file generato
+    final idLower = model.id.toLowerCase();
+    final fileLower = model.fileName.toLowerCase();
+    if (idLower.contains('phi3') || fileLower.contains('phi3')) {
+      return false;
+    }
+
     return model.sizeBytes >= _desktopModelSizeThresholdBytes;
   }
 
@@ -600,13 +608,17 @@ class _ModelConfigTile extends StatelessWidget {
       _ => null,
     };
 
+    // Forza l'attivazione per Phi anche quando importato localmente senza ID runtime di catalogo
+    final isPhiImport = model.isImportedModel && 
+        (model.id.toLowerCase().contains('phi3') || model.fileName.toLowerCase().contains('phi3'));
+
     // A model can only be set active when it is on disk AND passed validation.
     final canSetActive = model.isDownloaded &&
         !isSelected &&
         status != 'invalid' &&
         status != 'missing' &&
         status != 'error' &&
-        (!model.isImportedModel || model.runtimeModelId != null);
+        (!model.isImportedModel || model.runtimeModelId != null || isPhiImport);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
