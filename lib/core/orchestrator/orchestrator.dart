@@ -264,8 +264,8 @@ class Orchestrator {
 
   InferenceResponse _noWebSearchResults() {
     return InferenceResponse.finalChunk(
-      text: 'Non riesco a recuperare risultati di ricerca online in questo '
-          'momento. Riprova più tardi o verifica la connessione.',
+      text: 'I cannot retrieve online search results right now. Try again '
+          'later or check your connection.',
       model: InferenceConstants.localModelName,
       tokensGenerated: 0,
     );

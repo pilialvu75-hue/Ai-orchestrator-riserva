@@ -776,7 +776,11 @@ class ModelDownloadService {
     final id = (runtimeModelId ?? '').toLowerCase();
     final familyName = (family ?? _inferModelFamily(fileName) ?? '').toLowerCase();
 
-    if (id.contains('phi3_5') || normalized.contains('phi-3.5')) return '4B';
+    if (id.contains('phi3_5') ||
+        normalized.contains('phi-3.5') ||
+        normalized.contains('phi3.5')) {
+      return '4B';
+    }
     if (familyName == 'phi') return '4B';
     if (id.contains('deepseek_r1_7b')) return '7B';
     if (sizeBytes >= 7000000000) return '7B';
