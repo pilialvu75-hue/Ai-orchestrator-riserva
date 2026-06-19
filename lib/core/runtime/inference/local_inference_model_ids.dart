@@ -46,7 +46,7 @@ class LocalInferenceModelIds {
   };
 
   static final Set<String> gemmaChatTemplateModels = {
-    gemma2_2bIt;
+    gemma2_2bIt,
   };
 
   // ── Risoluzione template ──────────────────────────────────────────────────
