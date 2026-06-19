@@ -23,7 +23,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
-            developerModeProvider?? (() => kDebugMode);
+            developerModeProvider ?? (() => kDebugMode);
 
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
@@ -32,7 +32,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   // ── FIX: Set Mobile con Phi-3.5-mini aggiunto ─────────────────────────────
   static const Set<String> _mobileValidatedModelIds = {
-   ...AndroidFfiRuntimeModelIds.validatedModelIds,
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
     LocalInferenceModelIds.phi3_5_mini, // <- Aggiunto Phi mobile
   };
 
@@ -71,12 +71,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   @protected
   bool hasVerifiedRuntimeForModel(String modelPath) =>
-      _verifiedModelPath!= null &&
+      _verifiedModelPath != null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
   bool isRuntimeVerified({String? modelPath}) {
     if (modelPath == null || modelPath.trim().isEmpty) {
-      return _verifiedModelPath!= null;
+      return _verifiedModelPath != null;
     }
     return hasVerifiedRuntimeForModel(modelPath);
   }
@@ -120,7 +120,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           '$msg modelId=$modelId',
         );
 
-        return model.localPath!= null &&
+        return model.localPath != null &&
             model.localPath!.isNotEmpty &&
             model.isDownloaded;
       }
@@ -217,7 +217,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         ' | hasVerifiedRuntimeForModel: $gateVerified'
         ' | ModelID: $gateModelId'
         ' | ModelPath: $modelPath'
-        ' | _verifiedModelPath: ${_verifiedModelPath?? 'null'}';
+        ' | _verifiedModelPath: ${_verifiedModelPath ?? 'null'}';
     debugPrint(gateMsg);
     RuntimeEventLog.instance.emit(gateMsg);
 
@@ -426,7 +426,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
-        if (exitCode!= 0 &&
+        if (exitCode != 0 &&
             fullText.isEmpty) {
           clearRuntimeVerification();
 
@@ -495,7 +495,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     // 2. Integrazione dinamica: Controlla se il modelId è presente in uno dei set di template dinamici
     return LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
         LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId);
+        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.phi3ChatTemplateModels.contains(modelId); // <- Sblocca l'ammissione dinamica di Phi-3.5
   }
 
   String _resolveLlamaExecutable() {
@@ -503,7 +504,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
 
-    if (envPath!= null &&
+    if (envPath != null &&
         envPath.trim().isNotEmpty) {
       return envPath.trim();
     }
@@ -534,7 +535,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     InferenceRequest request,
   ) {
     return LocalPromptTemplates.compose(
-      modelId: request.modelId?? '',
+      modelId: request.modelId ?? '',
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
       context: request.context,
