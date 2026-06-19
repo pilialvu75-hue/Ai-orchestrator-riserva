@@ -32,15 +32,16 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  // ── FIX: Set Mobile con Phi-3.5-mini aggiunto ─────────────────────────────
-  static const Set<String> _mobileValidatedModelIds = {
-    ...AndroidFfiRuntimeModelIds.validatedModelIds,
-    LocalInferenceModelIds.phi3_5_mini, // <- Aggiunto Phi mobile
-  };
+  // ——— FIX: Set Mobile con Phi-3.5-mini aggiunto ———
+static final Set<String> _mobileValidatedModelIds = {
+  ...AndroidFfiRuntimeModelIds.validatedModelIds,
+  LocalInferenceModelIds.phi3_5_mini, 
+};
 
-  static const Set<String> _desktopValidatedModelIds =
-      AndroidFfiRuntimeModelIds.validatedModelIds;
-  // ──────────────────────────────────────────
+static final Set<String> _desktopValidatedModelIds = {
+  ...AndroidFfiRuntimeModelIds.validatedModelIds,
+};
+// —————————————————————————————————————————————————
 
   final bool Function() _developerModeProvider;
 
