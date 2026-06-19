@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -53,7 +54,14 @@ class WebSearchTool implements Tool {
           'no_redirect': '1',
         },
       );
-      final response = await _client.get(uri).timeout(timeout);
+      final response = await _client.get(uri).timeout(
+        timeout,
+        onTimeout: () {
+          throw TimeoutException(
+            'DuckDuckGo request timed out after ${timeout.inSeconds}s.',
+          );
+        },
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return ToolResult(
           toolId: id,
@@ -115,6 +123,13 @@ class WebSearchTool implements Tool {
         toolId: id,
         output: buffer.toString().trimRight(),
         success: true,
+      );
+    } on TimeoutException catch (error) {
+      return ToolResult(
+        toolId: id,
+        output: '',
+        success: false,
+        error: 'Web search timed out: $error',
       );
     } catch (error) {
       return ToolResult(
