@@ -41,6 +41,12 @@ class LocalPromptTemplates {
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+      case 'phi3':
+        return _buildPhi3Prompt(
+          systemPrompt: cleanedSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+        );
       case 'zephyr':
         return _buildZephyrPrompt(
           systemPrompt: cleanedSystemPrompt,
@@ -173,6 +179,31 @@ class LocalPromptTemplates {
     }
     buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
     buffer.write('<start_of_turn>model\n');
+    return buffer.toString();
+  }
+
+  /// Phi-3 / Phi-3.5 chat template.
+  static String _buildPhi3Prompt({
+    required String? systemPrompt,
+    required List<ChatTurn> context,
+    required String userPrompt,
+  }) {
+    final buffer = StringBuffer();
+    final isFactual = _isFactualQuery(userPrompt);
+
+    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+
+    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
+    buffer.write('<|system|>\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<|end|>\n');
+
+    for (final turn in context) {
+      buffer.write('<|${_roleName(turn.role)}|>\n');
+      buffer.write('${turn.content}\n');
+      buffer.write('<|end|>\n');
+    }
+
+    buffer.write('<|user|>\n$userPrompt\n<|end|>\n');
+    buffer.write('<|assistant|>\n');
     return buffer.toString();
   }
 

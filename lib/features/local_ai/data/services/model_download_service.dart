@@ -106,6 +106,12 @@ class ModelDownloadService {
           downloadUrl: m['downloadUrl'] as String,
           version: m['version'] as String,
           sizeBytes: m['sizeBytes'] as int,
+          sizeCategory: m['sizeCategory'] as String? ??
+              _inferSizeCategory(
+                fileName: m['fileName'] as String,
+                sizeBytes: m['sizeBytes'] as int,
+                runtimeModelId: m['id'] as String,
+              ),
           description: m['description'] as String,
           isDownloaded: downloaded,
           localPath: downloaded ? effectiveFile.path : null,
@@ -176,6 +182,11 @@ class ModelDownloadService {
         isDownloaded: true,
         localPath: filePath,
         validationStatus: status,
+        sizeCategory: _inferSizeCategory(
+          fileName: model.fileName,
+          sizeBytes: file.lengthSync(),
+          runtimeModelId: model.runtimeModelId ?? model.id,
+        ),
       );
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
@@ -256,6 +267,11 @@ class ModelDownloadService {
         localPath: filePath,
         platformTarget: 'all',
         validationStatus: status,
+        sizeCategory: _inferSizeCategory(
+          fileName: fileName,
+          sizeBytes: fileSize,
+          runtimeModelId: modelId,
+        ),
         source: 'custom_url',
       );
       // Persist the custom model entry so it reappears after app restarts.
@@ -350,6 +366,12 @@ class ModelDownloadService {
       externalUri: identifier,
       runtimeModelId: runtimeModelId,
       detectedFamily: family,
+      sizeCategory: _inferSizeCategory(
+        fileName: fileName,
+        sizeBytes: sizeBytes,
+        runtimeModelId: runtimeModelId,
+        family: family,
+      ),
     );
     await saveImportedModelEntry(model);
     return model;
@@ -487,6 +509,7 @@ class ModelDownloadService {
         'downloadUrl': m.downloadUrl,
         'version': m.version,
         'sizeBytes': m.sizeBytes,
+        'sizeCategory': m.sizeCategory,
         'description': m.description,
         'localPath': m.localPath,
         'platformTarget': m.platformTarget,
@@ -506,6 +529,7 @@ class ModelDownloadService {
         downloadUrl: j['downloadUrl'] as String,
         version: j['version'] as String,
         sizeBytes: (j['sizeBytes'] as num).toInt(),
+        sizeCategory: j['sizeCategory'] as String?,
         description: j['description'] as String,
         isDownloaded: true,
         localPath: j['localPath'] as String?,
@@ -611,6 +635,13 @@ class ModelDownloadService {
         validationStatus: model.isImportedModel
             ? ModelValidationStatus.missingFile
             : ModelValidationStatus.notDownloaded,
+        sizeCategory: model.sizeCategory ??
+            _inferSizeCategory(
+              fileName: model.fileName,
+              sizeBytes: model.sizeBytes,
+              runtimeModelId: model.runtimeModelId ?? model.id,
+              family: model.detectedFamily,
+            ),
         );
     }
     final resolution = await _pathResolver.resolveForRead(
@@ -624,6 +655,13 @@ class ModelDownloadService {
         isDownloaded: false,
         validationStatus: ModelValidationStatus.notDownloaded,
         localPath: path,
+        sizeCategory: model.sizeCategory ??
+            _inferSizeCategory(
+              fileName: model.fileName,
+              sizeBytes: model.sizeBytes,
+              runtimeModelId: model.runtimeModelId ?? model.id,
+              family: model.detectedFamily,
+            ),
       );
     }
     final validation = await _validateModelPath(
@@ -636,6 +674,13 @@ class ModelDownloadService {
       validationStatus: validation.status,
       localPath: exists ? resolvedPath : path,
       sizeBytes: await _safeFileLength(resolvedPath, fallback: model.sizeBytes),
+      sizeCategory: model.sizeCategory ??
+          _inferSizeCategory(
+            fileName: model.fileName,
+            sizeBytes: model.sizeBytes,
+            runtimeModelId: model.runtimeModelId ?? model.id,
+            family: model.detectedFamily,
+          ),
     );
   }
 
@@ -683,6 +728,7 @@ class ModelDownloadService {
     final normalized = fileName.toLowerCase();
     if (normalized.contains('deepseek')) return 'deepseek';
     if (normalized.contains('qwen')) return 'qwen';
+    if (normalized.contains('phi')) return 'phi';
     if (normalized.contains('llama')) return 'llama';
     if (normalized.contains('gemma')) return 'gemma';
     return null;
@@ -700,6 +746,8 @@ class ModelDownloadService {
         return has7b ? 'deepseek_r1_7b' : 'deepseek_r1_1_5b';
       case 'qwen':
         return has7b ? 'deepseek_r1_7b' : 'qwen3_1_7b';
+      case 'phi':
+        return 'phi3_5_mini';
       case 'llama':
         return 'llama_1b';
       case 'gemma':
@@ -714,7 +762,36 @@ class ModelDownloadService {
   String? _inferPlatformTarget(String? runtimeModelId) {
     if (runtimeModelId == 'deepseek_r1_1_5b') return 'android';
     if (runtimeModelId == 'deepseek_r1_7b') return 'windows';
+    if (runtimeModelId == 'phi3_5_mini') return 'android';
     return 'all';
+  }
+
+  String? _inferSizeCategory({
+    required String fileName,
+    required int sizeBytes,
+    String? runtimeModelId,
+    String? family,
+  }) {
+    final normalized = fileName.toLowerCase();
+    final id = (runtimeModelId ?? '').toLowerCase();
+    final familyName = (family ?? _inferModelFamily(fileName) ?? '').toLowerCase();
+
+    if (id.contains('phi3_5') ||
+        normalized.contains('phi-3.5') ||
+        normalized.contains('phi3.5')) {
+      return '4B';
+    }
+    if (familyName == 'phi') return '4B';
+    if (id.contains('deepseek_r1_7b')) return '7B';
+    if (sizeBytes >= 7000000000) return '7B';
+    if (sizeBytes >= 3500000000) return '4B';
+    if (id.contains('qwen3_1_7b')) return '2B';
+    if (familyName == 'deepseek') return '2B';
+    if (familyName == 'qwen') return '2B';
+    if (familyName == 'gemma') return '2B';
+    if (familyName == 'llama' || normalized.contains('1b')) return '1B';
+    if (sizeBytes >= 2000000000) return '2B';
+    return '1B';
   }
 
   String _buildImportedDisplayName(String fileName, String? family) {

@@ -16,8 +16,6 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
-  // Alzata la soglia a 3.5GB per includere i modelli compatti ad alto contesto (come Phi-3.5 / DeepSeek 1.5B/3B)
-  static const int _desktopModelSizeThresholdBytes = 3500000000;
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
@@ -80,23 +78,7 @@ class _ModelsPageState extends State<ModelsPage> {
   }
 
   bool _isDesktopModel(AiModel model) {
-    final target = (model.platformTarget ?? 'all').toLowerCase();
-    if (target == 'windows' ||
-        target == 'linux' ||
-        target == 'macos' ||
-        target == 'desktop' ||
-        target == 'pc') {
-      return true;
-    }
-    
-    // Forza Phi sul mobile indipendentemente dalla dimensione del file generato
-    final idLower = model.id.toLowerCase();
-    final fileLower = model.fileName.toLowerCase();
-    if (idLower.contains('phi3') || fileLower.contains('phi3')) {
-      return false;
-    }
-
-    return model.sizeBytes >= _desktopModelSizeThresholdBytes;
+    return _modelManager.isDesktopModel(model);
   }
 
   bool _isMobileModel(AiModel model) {
@@ -608,17 +590,13 @@ class _ModelConfigTile extends StatelessWidget {
       _ => null,
     };
 
-    // Forza l'attivazione per Phi anche quando importato localmente senza ID runtime di catalogo
-    final isPhiImport = model.isImportedModel && 
-        (model.id.toLowerCase().contains('phi3') || model.fileName.toLowerCase().contains('phi3'));
-
     // A model can only be set active when it is on disk AND passed validation.
     final canSetActive = model.isDownloaded &&
         !isSelected &&
         status != 'invalid' &&
         status != 'missing' &&
         status != 'error' &&
-        (!model.isImportedModel || model.runtimeModelId != null || isPhiImport);
+        (!model.isImportedModel || model.runtimeModelId != null);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),

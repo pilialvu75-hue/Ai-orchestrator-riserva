@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/task_type.dart';
@@ -11,29 +9,33 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:flutter/foundation.dart';
 
 /// Central routing layer for all AI calls.
 ///
 /// Classifica l'intent utente con [IntentAnalyzer], delega i comandi
 /// device a [ExecutionEngine], instrada planning/coding a [PlannerService],
-/// le ricerche web a [_handleWebSearchStream] (controlla connettività reale),
-/// e le query chat a [InferenceService].
+/// esegue ricerche web tramite [WebSearchTool] e passa i risultati al
+/// modello locale, e invia le query chat a [InferenceService].
 class Orchestrator {
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
     required ExecutionEngine executor,
     required InferenceService inferenceService,
     PlannerService? plannerService,
+    WebSearchTool? webSearchTool,
   })  : _analyzer = intentAnalyzer,
         _executor = executor,
         _inferenceService = inferenceService,
-        _plannerService = plannerService;
+        _plannerService = plannerService,
+        _webSearchTool = webSearchTool;
 
   final IntentAnalyzer _analyzer;
   final ExecutionEngine _executor;
   final InferenceService _inferenceService;
   final PlannerService? _plannerService;
+  final WebSearchTool? _webSearchTool;
 
   Future<InferenceResponse> handle(
     String input, {
@@ -49,13 +51,10 @@ class Orchestrator {
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
       case TaskType.webSearch:
-        // handle() sincrono — risposta informativa diretta.
-        // La connettività viene verificata solo in handleStream.
-        return InferenceResponse.finalChunk(
-          text: 'Verifica la connessione e usa la modalità Cloud '
-              'o Hybrid nelle impostazioni per cercare online.',
-          model: InferenceConstants.localModelName,
-          tokensGenerated: 0,
+        return _handleWebSearch(
+          input,
+          systemPrompt: systemPrompt,
+          isOffline: isOffline,
         );
       case TaskType.chat:
       case TaskType.system:
@@ -152,12 +151,28 @@ class Orchestrator {
     );
   }
 
-  /// Gestisce le richieste di ricerca web.
-  ///
-  /// Controlla la connettività reale con [InternetAddress.lookup] senza
-  /// dipendenze esterne. Se c'è rete, passa la richiesta al modello locale
-  /// che risponde con le sue conoscenze. Se non c'è rete, emette un
-  /// messaggio informativo immediato senza coinvolgere l'LLM.
+  Future<InferenceResponse> _handleWebSearch(
+    String input, {
+    required String? systemPrompt,
+    required bool isOffline,
+  }) async {
+    final request = await _buildWebSearchRequest(
+      input: input,
+      sessionId: 'default',
+      context: const [],
+      systemPrompt: systemPrompt,
+      isOffline: isOffline,
+      maxTokens: InferenceRequest.defaultMaxTokens,
+      temperature: InferenceRequest.defaultTemperature,
+    );
+
+    if (request == null) {
+      return _noWebSearchResults();
+    }
+
+    return _inferenceService.infer(request);
+  }
+
   TokenStream _handleWebSearchStream({
     required String input,
     required String sessionId,
@@ -167,47 +182,92 @@ class Orchestrator {
     required int? maxTokens,
     required double? temperature,
   }) async* {
-    bool hasInternet = false;
-    if (!isOffline) {
-      try {
-        final result = await InternetAddress.lookup('google.com')
-            .timeout(const Duration(seconds: 3));
-        hasInternet =
-            result.isNotEmpty && result.first.rawAddress.isNotEmpty;
-      } catch (_) {
-        hasInternet = false;
-      }
-    }
-
-    _logForensic(
-      '[WEB_SEARCH] session=$sessionId'
-      ' hasInternet=$hasInternet isOffline=$isOffline',
+    final request = await _buildWebSearchRequest(
+      input: input,
+      sessionId: sessionId,
+      context: context,
+      systemPrompt: systemPrompt,
+      isOffline: isOffline,
+      maxTokens: maxTokens,
+      temperature: temperature,
     );
 
-    if (!hasInternet) {
-      yield InferenceResponse.finalChunk(
-        text: 'Non ho accesso a internet in questo momento. '
-            'Verifica la connessione o passa alla modalità Cloud '
-            'nelle impostazioni per cercare online.',
-        model: InferenceConstants.localModelName,
-        tokensGenerated: 0,
-      );
+    if (request == null) {
+      yield _noWebSearchResults();
       return;
     }
 
-    // Connessione disponibile: il modello risponde con le sue conoscenze.
-    // L'accesso diretto a internet in LOCAL mode è pianificato per una
-    // versione futura con integrazione API di ricerca (es. DuckDuckGo).
-    yield* _inferenceService.stream(
-      InferenceRequest(
-        sessionId: sessionId,
-        prompt: input,
-        systemPrompt: systemPrompt,
-        context: context,
-        isOffline: false,
-        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
-        temperature: temperature ?? InferenceRequest.defaultTemperature,
-      ),
+    yield* _inferenceService.stream(request);
+  }
+
+  Future<InferenceRequest?> _buildWebSearchRequest({
+    required String input,
+    required String sessionId,
+    required List<ChatTurn> context,
+    required String? systemPrompt,
+    required bool isOffline,
+    required int? maxTokens,
+    required double? temperature,
+  }) async {
+    final webSearchTool = _webSearchTool;
+    if (isOffline || webSearchTool == null) {
+      _logForensic(
+        '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
+        ' hasTool=${webSearchTool != null}',
+      );
+      return null;
+    }
+
+    final search = await webSearchTool.execute(<String, dynamic>{
+      'query': input,
+      'limit': 5,
+    });
+    _logForensic(
+      '[WEB_SEARCH] session=$sessionId success=${search.success}'
+      ' output_chars=${search.output.length}',
+    );
+
+    if (!search.success || search.output.trim().isEmpty) {
+      return null;
+    }
+
+    final searchContext = _buildSearchContext(search.output);
+    final searchPrompt = _buildWebSearchSystemPrompt();
+    final effectiveSystemPrompt = [
+      if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
+      searchPrompt,
+      searchContext,
+    ].join('\n\n');
+
+    return InferenceRequest(
+      sessionId: sessionId,
+      prompt: input,
+      systemPrompt: effectiveSystemPrompt,
+      context: context,
+      isOffline: false,
+      maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+      temperature: temperature ?? InferenceRequest.defaultTemperature,
+    );
+  }
+
+  String _buildSearchContext(String searchOutput) {
+    final trimmed = searchOutput.trim();
+    return 'Web search results:\n$trimmed';
+  }
+
+  /// Guides the model to treat retrieved web results as the primary source.
+  String _buildWebSearchSystemPrompt() {
+    return 'You are AI Orchestrator. Answer the user using the web search '
+        'results in the conversation context as primary evidence. Cite the '
+        'most relevant source URLs when possible. If the search results do '
+        'not contain enough evidence, say so explicitly.';
+  }
+
+  InferenceResponse _noWebSearchResults() {
+    return InferenceResponse.finalChunk(
+      text: 'Web search is currently unavailable. Try again later.',
+      model: InferenceConstants.localModelName,
+      tokensGenerated: 0,
     );
   }
 

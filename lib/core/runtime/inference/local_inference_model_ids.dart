@@ -28,12 +28,6 @@ class LocalInferenceModelIds {
     deepSeekR1_1_5b,
     qwen3_1_7b,
     deepSeekR1_7b,
-    // Rimossa l'incongruenza: phi3_5_mini non viene più classificato come Qwen
-  };
-
-  /// Nuova famiglia Phi-3 / Phi-3.5 (Mappata su template Zephyr in LocalPromptTemplates)
-  static final Set<String> phi3ChatTemplateModels = {
-    phi3_5_mini,
   };
 
   /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
@@ -47,6 +41,11 @@ class LocalInferenceModelIds {
 
   static final Set<String> gemmaChatTemplateModels = {
     gemma2_2bIt,
+  };
+
+  /// Modelli che usano il template Phi-3 / Phi-3.5.
+  static final Set<String> phi3ChatTemplateModels = {
+    phi3_5_mini,
   };
 
   // ── Risoluzione template ──────────────────────────────────────────────────
@@ -63,14 +62,14 @@ class LocalInferenceModelIds {
   /// di ricevere il template corretto senza registrazione manuale.
   static String resolveTemplate(String modelId) {
     // 1. Match esatto nei set
-    if (phi3ChatTemplateModels.contains(modelId)) return 'zephyr'; // Phi-3.5 usa nativamente i token definiti in 'zephyr'
     if (llama3ChatTemplateModels.contains(modelId)) return 'llama3';
     if (qwenChatTemplateModels.contains(modelId)) return 'qwen';
     if (gemmaChatTemplateModels.contains(modelId)) return 'gemma';
+    if (phi3ChatTemplateModels.contains(modelId)) return 'phi3';
 
     // 2. Pattern matching (case-insensitive) per modelli importati
     final id = modelId.trim().toLowerCase();
-    if (_matchesPhi3(id)) return 'zephyr'; // Pattern matching automatico per file locali Phi
+    if (_matchesPhi(id)) return 'phi3';
     if (_matchesLlama3(id)) return 'llama3';
     if (_matchesQwen(id)) return 'qwen';
     if (_matchesGemma(id)) return 'gemma';
@@ -92,12 +91,6 @@ class LocalInferenceModelIds {
 
   // ── Pattern matching privato ──────────────────────────────────────────────
 
-  static bool _matchesPhi3(String id) {
-    return id.contains('phi-3') ||
-        id.contains('phi3') ||
-        id.contains('phi_3');
-  }
-
   static bool _matchesLlama3(String id) {
     return id.contains('llama-3') ||
         id.contains('llama3') ||
@@ -106,7 +99,6 @@ class LocalInferenceModelIds {
   }
 
   static bool _matchesQwen(String id) {
-    // Rimosse le occorrenze di phi-3 e phi3 per isolamento ottimale
     return id.contains('deepseek') ||
         id.contains('qwen') ||
         id.contains('mistral');
@@ -114,6 +106,11 @@ class LocalInferenceModelIds {
 
   static bool _matchesGemma(String id) {
     return id.contains('gemma');
+  }
+
+  static bool _matchesPhi(String id) {
+    return id.contains('phi-3') ||
+        id.contains('phi3');
   }
 
   // ── Registrazione dinamica ────────────────────────────────────────────────
@@ -134,10 +131,6 @@ class LocalInferenceModelIds {
     bool supportsNoThink = false,
   }) {
     switch (template.toLowerCase()) {
-      case 'phi3':
-      case 'zephyr':
-        phi3ChatTemplateModels.add(modelId);
-        break;
       case 'llama3':
         llama3ChatTemplateModels.add(modelId);
         break;
@@ -147,6 +140,11 @@ class LocalInferenceModelIds {
         break;
       case 'gemma':
         gemmaChatTemplateModels.add(modelId);
+        break;
+      case 'phi3':
+      case 'zephyr':
+        // Zephyr is the same prompt/token shape used by our Phi-3.5 routing.
+        phi3ChatTemplateModels.add(modelId);
         break;
       default:
         // Template non riconosciuto: nessuna azione.
@@ -160,11 +158,11 @@ class LocalInferenceModelIds {
   /// Temperatura base usata da AiRuntimeSettingsService per config automatica.
   /// I metadati META nel prompt sovrascriveranno questo valore nel runtime FFI.
   static double temperatureForModel(String? modelId) {
-    if (modelId == null || modelId.trim().isEmpty) return 0.3;
+    if (modelId == null || modelId.trim().isEmpty) return 0.5;
     final id = modelId.trim().toLowerCase();
 
     // Llama3 1B: temp base 0.5, poi META lo porta a 0.2 se fattuale
-    if (id.contains('llama') && id.contains('1b')) return 0.3;
+    if (id.contains('llama') && id.contains('1b')) return 0.5;
 
     // Phi-3.5-mini: stabile a 0.5
     if (id.contains('phi-3.5') || id.contains('phi3_5')) return 0.5;
