@@ -44,7 +44,7 @@ class LocalInferenceModelIds {
   };
 
   /// Modelli che usano il template Phi-3 / Phi-3.5.
-  static final Set<String> phiChatTemplateModels = {
+  static final Set<String> phi3ChatTemplateModels = {
     phi3_5_mini,
   };
 
@@ -65,7 +65,7 @@ class LocalInferenceModelIds {
     if (llama3ChatTemplateModels.contains(modelId)) return 'llama3';
     if (qwenChatTemplateModels.contains(modelId)) return 'qwen';
     if (gemmaChatTemplateModels.contains(modelId)) return 'gemma';
-    if (phiChatTemplateModels.contains(modelId)) return 'phi3';
+    if (phi3ChatTemplateModels.contains(modelId)) return 'phi3';
 
     // 2. Pattern matching (case-insensitive) per modelli importati
     final id = modelId.trim().toLowerCase();
@@ -142,7 +142,8 @@ class LocalInferenceModelIds {
         gemmaChatTemplateModels.add(modelId);
         break;
       case 'phi3':
-        phiChatTemplateModels.add(modelId);
+      case 'zephyr':
+        phi3ChatTemplateModels.add(modelId);
         break;
       default:
         // Template non riconosciuto: nessuna azione.

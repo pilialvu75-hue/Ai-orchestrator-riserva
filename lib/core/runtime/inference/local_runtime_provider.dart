@@ -497,7 +497,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     // 2. Integrazione dinamica: Controlla se il modelId è presente in uno dei set di template dinamici
     return LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
         LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId);
+        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.phi3ChatTemplateModels.contains(modelId); // <- Sblocca l'ammissione dinamica di Phi-3.5
   }
 
   String _resolveLlamaExecutable() {
