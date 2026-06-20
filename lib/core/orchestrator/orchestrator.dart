@@ -153,30 +153,6 @@ class Orchestrator {
     );
   }
 
-  Future<InferenceResponse> _executePlan(
-    String input, {
-    bool isOffline = false,
-  }) async {
-    final planner = _plannerService;
-    if (planner == null) {
-      return _inferenceService.infer(
-        InferenceRequest(
-          sessionId: 'default',
-          prompt: input,
-          isOffline: isOffline,
-        ),
-      );
-    }
-
-    final plan = await planner.decompose(input, isOffline: isOffline);
-
-    return InferenceResponse.finalChunk(
-      text: plan.toDisplayString(),
-      model: InferenceConstants.localModelName,
-      tokensGenerated: plan.steps.length,
-    );
-  }
-
   Future<InferenceResponse> _handleWebSearch(
     String input, {
     required String? systemPrompt,
@@ -217,7 +193,6 @@ class Orchestrator {
     yield* _inferenceService.stream(request);
   }
 
-  // --- MODIFICA 1: Estrazione e pulizia della query web ---
   String _extractSearchQuery(String input) {
     var query = input.trim();
 
@@ -256,8 +231,6 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
-    
-    // --- MODIFICA 6: Se offline o senza tool, restituisce il systemPrompt originale pulito ---
     if (isOffline || webSearchTool == null) {
       _logForensic(
         '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
@@ -275,7 +248,6 @@ class Orchestrator {
     }
 
     try {
-      // --- MODIFICA 5: Pulizia della query prima di invocare il tool ed emissione log ---
       final query = _extractSearchQuery(input);
       _logForensic(
         '[WEB_SEARCH_QUERY]'
@@ -287,29 +259,22 @@ class Orchestrator {
         'query': query,
         'limit': _maxWebSearchResults,
       });
-      
       _logForensic(
         '[WEB_SEARCH] session=$sessionId success=${search.success}'
         ' output_chars=${search.output.length}',
       );
 
-      // --- MODIFICA 3: Non viene costruito il blocco failure se la ricerca non ha esito positivo ---
       final hasSearchResults = search.success && search.output.trim().isNotEmpty;
-
-      final searchContext = hasSearchResults
-          ? _buildSearchContext(search.output)
-          : '';
-
-      // --- MODIFICA 4: Passaggio a metodo condizionale rigoroso per evitare istruzioni web vuote ---
-      final effectiveSystemPrompt = _buildWebSearchEffectiveSystemPrompt(
-        baseSystemPrompt: systemPrompt,
-        searchContext: searchContext,
-      );
+      final searchContext = hasSearchResults ? _buildSearchContext(search.output) : '';
 
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: effectiveSystemPrompt,
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: searchContext,
+          hasResults: hasSearchResults,
+        ),
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -322,7 +287,7 @@ class Orchestrator {
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: systemPrompt, // Fallback sicuro al prompt base in caso di eccezione
+        systemPrompt: systemPrompt,
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -336,10 +301,10 @@ class Orchestrator {
     return 'Web search results:\n$trimmed';
   }
 
-  // --- MODIFICA 4 (Dettaglio): Esclude le istruzioni web se non ci sono risultati reali ---
   String _buildWebSearchEffectiveSystemPrompt({
     required String? baseSystemPrompt,
     required String searchContext,
+    required bool hasResults,
   }) {
     final sections = <String>[];
     final base = baseSystemPrompt?.trim();
@@ -348,30 +313,12 @@ class Orchestrator {
       sections.add(base);
     }
 
-    if (searchContext.trim().isNotEmpty) {
+    if (hasResults && searchContext.trim().isNotEmpty) {
       sections.add(_buildWebSearchSystemPrompt());
       sections.add(searchContext);
     }
 
     return sections.join('\n\n');
-  }
-
-  // --- MODIFICA 2: Svuotamento radicale del failure context per eliminare l'iniezione tossica ---
-  String _buildWebSearchFailureContext(String reason) {
-    return '';
-  }
-
-  String _buildWebSearchUnavailableReason({
-    required bool isOffline,
-    required bool hasTool,
-  }) {
-    if (isOffline) {
-      return 'the device is offline';
-    }
-    if (!hasTool) {
-      return 'the web search tool is unavailable';
-    }
-    return 'the web search tool returned no usable results';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
@@ -393,6 +340,30 @@ class Orchestrator {
       text: commandOutput,
       model: InferenceConstants.localModelName,
       tokensGenerated: 0,
+    );
+  }
+
+  Future<InferenceResponse> _executePlan(
+    String input, {
+    bool isOffline = false,
+  }) async {
+    final planner = _plannerService;
+    if (planner == null) {
+      return _inferenceService.infer(
+        InferenceRequest(
+          sessionId: 'default',
+          prompt: input,
+          isOffline: isOffline,
+        ),
+      );
+    }
+
+    final plan = await planner.decompose(input, isOffline: isOffline);
+
+    return InferenceResponse.finalChunk(
+      text: plan.toDisplayString(),
+      model: InferenceConstants.localModelName,
+      tokensGenerated: plan.steps.length,
     );
   }
 }
