@@ -166,10 +166,6 @@ class Orchestrator {
       temperature: InferenceRequest.defaultTemperature,
     );
 
-    if (request == null) {
-      return _noWebSearchResults();
-    }
-
     return _inferenceService.infer(request);
   }
 
@@ -192,15 +188,10 @@ class Orchestrator {
       temperature: temperature,
     );
 
-    if (request == null) {
-      yield _noWebSearchResults();
-      return;
-    }
-
     yield* _inferenceService.stream(request);
   }
 
-  Future<InferenceRequest?> _buildWebSearchRequest({
+  Future<InferenceRequest> _buildWebSearchRequest({
     required String input,
     required String sessionId,
     required List<ChatTurn> context,
@@ -215,44 +206,100 @@ class Orchestrator {
         '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
         ' hasTool=${webSearchTool != null}',
       );
-      return null;
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: [
+          if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
+          _buildWebSearchSystemPrompt(),
+          _buildWebSearchUnavailableContext(
+            isOffline: isOffline,
+            hasTool: webSearchTool != null,
+          ),
+        ].join('\n\n'),
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
     }
 
-    final search = await webSearchTool.execute(<String, dynamic>{
-      'query': input,
-      'limit': 5,
-    });
-    _logForensic(
-      '[WEB_SEARCH] session=$sessionId success=${search.success}'
-      ' output_chars=${search.output.length}',
-    );
+    try {
+      final search = await webSearchTool.execute(<String, dynamic>{
+        'query': input,
+        'limit': 5,
+      });
+      _logForensic(
+        '[WEB_SEARCH] session=$sessionId success=${search.success}'
+        ' output_chars=${search.output.length}',
+      );
 
-    if (!search.success || search.output.trim().isEmpty) {
-      return null;
+      final searchContext = search.success && search.output.trim().isNotEmpty
+          ? _buildSearchContext(search.output)
+          : _buildWebSearchUnavailableContext(
+              isOffline: false,
+              hasTool: true,
+              failureReason: search.error ?? 'No search results found.',
+            );
+
+      final searchPrompt = _buildWebSearchSystemPrompt();
+      final effectiveSystemPrompt = [
+        if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
+        searchPrompt,
+        searchContext,
+      ].join('\n\n');
+
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: effectiveSystemPrompt,
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
+    } catch (error) {
+      _logForensic(
+        '[WEB_SEARCH] session=$sessionId success=false error=$error',
+      );
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: [
+          if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
+          _buildWebSearchSystemPrompt(),
+          _buildWebSearchUnavailableContext(
+            isOffline: false,
+            hasTool: true,
+            failureReason: error.toString(),
+          ),
+        ].join('\n\n'),
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
     }
-
-    final searchContext = _buildSearchContext(search.output);
-    final searchPrompt = _buildWebSearchSystemPrompt();
-    final effectiveSystemPrompt = [
-      if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
-      searchPrompt,
-      searchContext,
-    ].join('\n\n');
-
-    return InferenceRequest(
-      sessionId: sessionId,
-      prompt: input,
-      systemPrompt: effectiveSystemPrompt,
-      context: context,
-      isOffline: false,
-      maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
-      temperature: temperature ?? InferenceRequest.defaultTemperature,
-    );
   }
 
   String _buildSearchContext(String searchOutput) {
     final trimmed = searchOutput.trim();
     return 'Web search results:\n$trimmed';
+  }
+
+  String _buildWebSearchUnavailableContext({
+    required bool isOffline,
+    required bool hasTool,
+    String? failureReason,
+  }) {
+    final details = <String>[
+      'Web search evidence could not be gathered.',
+      'offline=$isOffline',
+      'tool_available=$hasTool',
+      if (failureReason != null && failureReason.trim().isNotEmpty)
+        'reason=${failureReason.trim()}',
+    ];
+    return details.join('\n');
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
@@ -261,14 +308,6 @@ class Orchestrator {
         'results in the conversation context as primary evidence. Cite the '
         'most relevant source URLs when possible. If the search results do '
         'not contain enough evidence, say so explicitly.';
-  }
-
-  InferenceResponse _noWebSearchResults() {
-    return InferenceResponse.finalChunk(
-      text: 'Web search is currently unavailable. Try again later.',
-      model: InferenceConstants.localModelName,
-      tokensGenerated: 0,
-    );
   }
 
   static void _logForensic(String message) {

@@ -28,6 +28,7 @@ void main() {
       expect(prompt, contains('<|user|>'));
       expect(prompt, contains('<|assistant|>'));
       expect(prompt, contains('<|end|>'));
+      expect(prompt, isNot(contains('<!--META')));
       expect(prompt, isNot(contains('<|im_start|>')));
     });
   });

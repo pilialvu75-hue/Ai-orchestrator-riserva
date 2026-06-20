@@ -189,9 +189,6 @@ class LocalPromptTemplates {
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
-    final isFactual = _isFactualQuery(userPrompt);
-
-    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
 
     final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
     buffer.write('<|system|>\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<|end|>\n');
