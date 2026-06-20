@@ -209,14 +209,13 @@ class Orchestrator {
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: [
-          if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
-          _buildWebSearchSystemPrompt(),
-          _buildWebSearchUnavailableContext(
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: _buildWebSearchUnavailableContext(
             isOffline: isOffline,
             hasTool: webSearchTool != null,
           ),
-        ].join('\n\n'),
+        ),
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -242,17 +241,13 @@ class Orchestrator {
               failureReason: search.error ?? 'No search results found.',
             );
 
-      final searchPrompt = _buildWebSearchSystemPrompt();
-      final effectiveSystemPrompt = [
-        if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
-        searchPrompt,
-        searchContext,
-      ].join('\n\n');
-
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: effectiveSystemPrompt,
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: searchContext,
+        ),
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -265,15 +260,14 @@ class Orchestrator {
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: [
-          if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
-          _buildWebSearchSystemPrompt(),
-          _buildWebSearchUnavailableContext(
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: _buildWebSearchUnavailableContext(
             isOffline: false,
             hasTool: true,
             failureReason: error.toString(),
           ),
-        ].join('\n\n'),
+        ),
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -285,6 +279,18 @@ class Orchestrator {
   String _buildSearchContext(String searchOutput) {
     final trimmed = searchOutput.trim();
     return 'Web search results:\n$trimmed';
+  }
+
+  String _buildWebSearchEffectiveSystemPrompt({
+    required String? baseSystemPrompt,
+    required String searchContext,
+  }) {
+    return [
+      if (baseSystemPrompt != null && baseSystemPrompt.trim().isNotEmpty)
+        baseSystemPrompt.trim(),
+      _buildWebSearchSystemPrompt(),
+      searchContext,
+    ].join('\n\n');
   }
 
   String _buildWebSearchUnavailableContext({

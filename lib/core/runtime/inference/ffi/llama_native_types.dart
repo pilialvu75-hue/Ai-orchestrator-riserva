@@ -32,13 +32,16 @@ abstract final class LlamaNativeDefaults {
   static const int nCtx = 2048;
   // Keep Android runtime thread usage bounded for thermals/stability while
   // still scaling up on higher-core devices.
-  static int get nThreads {
+  static final int _nThreads = _calculateThreadCount();
+
+  static int _calculateThreadCount() {
     final cores = Platform.numberOfProcessors;
     if (cores >= 8) return 6;
     if (cores >= 6) return 4;
     return 2;
   }
-  static int get nThreadsBatch => nThreads;
+  static int get nThreads => _nThreads;
+  static int get nThreadsBatch => _nThreads;
   // Native prefill now sizes the batch to the active context instead of using
   // a fixed clamp, so the surfaced batch diagnostic mirrors n_ctx.
   static int get nBatch => LlamaNativeDefaults.nCtx;
