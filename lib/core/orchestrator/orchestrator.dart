@@ -256,9 +256,9 @@ class Orchestrator {
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
-    } catch (error, stackTrace) {
+    } catch (error) {
       _logForensic(
-        '[WEB_SEARCH] session=$sessionId success=false error=$error stack=$stackTrace',
+        '[WEB_SEARCH] session=$sessionId success=false error=$error',
       );
       return InferenceRequest(
         sessionId: sessionId,

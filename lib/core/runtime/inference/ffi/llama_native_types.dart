@@ -35,7 +35,10 @@ abstract final class LlamaNativeDefaults {
   static final int _nThreads = _calculateThreadCount();
 
   static int _calculateThreadCount() {
-    final cores = Platform.numberOfProcessors;
+    return threadCountForCores(Platform.numberOfProcessors);
+  }
+
+  static int threadCountForCores(int cores) {
     // Use 6 threads on octa-core devices to keep the decode loop responsive
     // without fully saturating the big.LITTLE cluster.
     if (cores >= 8) return 6;
