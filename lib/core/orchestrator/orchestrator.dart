@@ -240,10 +240,7 @@ class Orchestrator {
       final searchContext = search.success && search.output.trim().isNotEmpty
           ? _buildSearchContext(search.output)
           : _buildWebSearchFailureContext(
-              _buildWebSearchUnavailableReason(
-                isOffline: false,
-                hasTool: true,
-              ),
+              'the web search tool returned no usable results',
             );
 
       return InferenceRequest(
