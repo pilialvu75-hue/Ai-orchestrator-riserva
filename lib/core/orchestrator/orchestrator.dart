@@ -238,7 +238,7 @@ class Orchestrator {
           : _buildWebSearchUnavailableContext(
               isOffline: false,
               hasTool: true,
-              failureReason: search.error ?? 'No search results found.',
+              failureReason: 'the web search tool returned no usable results',
             );
 
       return InferenceRequest(
@@ -265,7 +265,7 @@ class Orchestrator {
           searchContext: _buildWebSearchUnavailableContext(
             isOffline: isOffline,
             hasTool: true,
-            failureReason: error.toString(),
+            failureReason: 'the web search request failed',
           ),
         ),
         context: context,
@@ -298,15 +298,17 @@ class Orchestrator {
     required bool hasTool,
     String? failureReason,
   }) {
-    final reason = [
-      if (isOffline) 'the device is offline',
-      if (!hasTool) 'the web search tool is unavailable',
-      if (failureReason != null && failureReason.trim().isNotEmpty)
-        failureReason.trim(),
-    ].join('; ');
-    return reason.isEmpty
-        ? 'Web search evidence could not be gathered.'
-        : 'Web search evidence could not be gathered because $reason.';
+    final reason = failureReason?.trim();
+    if (reason != null && reason.isNotEmpty) {
+      return 'Web search evidence could not be gathered because $reason.';
+    }
+    if (isOffline) {
+      return 'Web search evidence could not be gathered because the device is offline.';
+    }
+    if (!hasTool) {
+      return 'Web search evidence could not be gathered because the web search tool is unavailable.';
+    }
+    return 'Web search evidence could not be gathered.';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
