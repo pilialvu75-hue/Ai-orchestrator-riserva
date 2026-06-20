@@ -212,8 +212,10 @@ class Orchestrator {
         systemPrompt: _buildWebSearchEffectiveSystemPrompt(
           baseSystemPrompt: systemPrompt,
           searchContext: _buildWebSearchUnavailableContext(
-            isOffline: isOffline,
-            hasTool: webSearchTool != null,
+            _buildWebSearchUnavailableReason(
+              isOffline: isOffline,
+              hasTool: webSearchTool != null,
+            ),
           ),
         ),
         context: context,
@@ -236,9 +238,10 @@ class Orchestrator {
       final searchContext = search.success && search.output.trim().isNotEmpty
           ? _buildSearchContext(search.output)
           : _buildWebSearchUnavailableContext(
-              isOffline: false,
-              hasTool: true,
-              failureReason: 'the web search tool returned no usable results',
+              _buildWebSearchUnavailableReason(
+                isOffline: false,
+                hasTool: true,
+              ),
             );
 
       return InferenceRequest(
@@ -253,9 +256,9 @@ class Orchestrator {
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
       _logForensic(
-        '[WEB_SEARCH] session=$sessionId success=false error=$error',
+        '[WEB_SEARCH] session=$sessionId success=false error=$error stack=$stackTrace',
       );
       return InferenceRequest(
         sessionId: sessionId,
@@ -263,9 +266,7 @@ class Orchestrator {
         systemPrompt: _buildWebSearchEffectiveSystemPrompt(
           baseSystemPrompt: systemPrompt,
           searchContext: _buildWebSearchUnavailableContext(
-            isOffline: isOffline,
-            hasTool: true,
-            failureReason: 'the web search request failed',
+            'the web search request failed',
           ),
         ),
         context: context,
@@ -293,22 +294,21 @@ class Orchestrator {
     ].join('\n\n');
   }
 
-  String _buildWebSearchUnavailableContext({
+  String _buildWebSearchUnavailableReason({
     required bool isOffline,
     required bool hasTool,
-    String? failureReason,
   }) {
-    final reason = failureReason?.trim();
-    if (reason != null && reason.isNotEmpty) {
-      return 'Web search evidence could not be gathered because $reason.';
-    }
     if (isOffline) {
-      return 'Web search evidence could not be gathered because the device is offline.';
+      return 'the device is offline';
     }
     if (!hasTool) {
-      return 'Web search evidence could not be gathered because the web search tool is unavailable.';
+      return 'the web search tool is unavailable';
     }
-    return 'Web search evidence could not be gathered.';
+    return 'the web search tool returned no usable results';
+  }
+
+  String _buildWebSearchUnavailableContext(String reason) {
+    return 'Web search evidence could not be gathered because $reason.';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
