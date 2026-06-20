@@ -19,6 +19,8 @@ import 'package:flutter/foundation.dart';
 /// esegue ricerche web tramite [WebSearchTool] e passa i risultati al
 /// modello locale, e invia le query chat a [InferenceService].
 class Orchestrator {
+  static const int _maxWebSearchResults = 5;
+
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
     required ExecutionEngine executor,
@@ -166,10 +168,6 @@ class Orchestrator {
       temperature: InferenceRequest.defaultTemperature,
     );
 
-    if (request == null) {
-      return _noWebSearchResults();
-    }
-
     return _inferenceService.infer(request);
   }
 
@@ -192,15 +190,10 @@ class Orchestrator {
       temperature: temperature,
     );
 
-    if (request == null) {
-      yield _noWebSearchResults();
-      return;
-    }
-
     yield* _inferenceService.stream(request);
   }
 
-  Future<InferenceRequest?> _buildWebSearchRequest({
+  Future<InferenceRequest> _buildWebSearchRequest({
     required String input,
     required String sessionId,
     required List<ChatTurn> context,
@@ -215,44 +208,108 @@ class Orchestrator {
         '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
         ' hasTool=${webSearchTool != null}',
       );
-      return null;
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: _buildWebSearchFailureContext(
+            _buildWebSearchUnavailableReason(
+              isOffline: isOffline,
+              hasTool: webSearchTool != null,
+            ),
+          ),
+        ),
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
     }
 
-    final search = await webSearchTool.execute(<String, dynamic>{
-      'query': input,
-      'limit': 5,
-    });
-    _logForensic(
-      '[WEB_SEARCH] session=$sessionId success=${search.success}'
-      ' output_chars=${search.output.length}',
-    );
+    try {
+      final search = await webSearchTool.execute(<String, dynamic>{
+        'query': input,
+        'limit': _maxWebSearchResults,
+      });
+      _logForensic(
+        '[WEB_SEARCH] session=$sessionId success=${search.success}'
+        ' output_chars=${search.output.length}',
+      );
 
-    if (!search.success || search.output.trim().isEmpty) {
-      return null;
+      final searchContext = search.success && search.output.trim().isNotEmpty
+          ? _buildSearchContext(search.output)
+          : _buildWebSearchFailureContext(
+              'the web search tool returned no usable results',
+            );
+
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: searchContext,
+        ),
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
+    } catch (error) {
+      _logForensic(
+        '[WEB_SEARCH] session=$sessionId success=false error=$error',
+      );
+      return InferenceRequest(
+        sessionId: sessionId,
+        prompt: input,
+        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
+          baseSystemPrompt: systemPrompt,
+          searchContext: _buildWebSearchFailureContext(
+            'the web search request failed',
+          ),
+        ),
+        context: context,
+        isOffline: false,
+        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        temperature: temperature ?? InferenceRequest.defaultTemperature,
+      );
     }
-
-    final searchContext = _buildSearchContext(search.output);
-    final searchPrompt = _buildWebSearchSystemPrompt();
-    final effectiveSystemPrompt = [
-      if (systemPrompt != null && systemPrompt.trim().isNotEmpty) systemPrompt.trim(),
-      searchPrompt,
-      searchContext,
-    ].join('\n\n');
-
-    return InferenceRequest(
-      sessionId: sessionId,
-      prompt: input,
-      systemPrompt: effectiveSystemPrompt,
-      context: context,
-      isOffline: false,
-      maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
-      temperature: temperature ?? InferenceRequest.defaultTemperature,
-    );
   }
 
   String _buildSearchContext(String searchOutput) {
     final trimmed = searchOutput.trim();
     return 'Web search results:\n$trimmed';
+  }
+
+  String _buildWebSearchEffectiveSystemPrompt({
+    required String? baseSystemPrompt,
+    required String searchContext,
+  }) {
+    final trimmedBaseSystemPrompt =
+        baseSystemPrompt == null ? null : baseSystemPrompt.trim();
+    return [
+      if (trimmedBaseSystemPrompt != null && trimmedBaseSystemPrompt.isNotEmpty)
+        trimmedBaseSystemPrompt,
+      _buildWebSearchSystemPrompt(),
+      searchContext,
+    ].join('\n\n');
+  }
+
+  String _buildWebSearchUnavailableReason({
+    required bool isOffline,
+    required bool hasTool,
+  }) {
+    if (isOffline) {
+      return 'the device is offline';
+    }
+    if (!hasTool) {
+      return 'the web search tool is unavailable';
+    }
+    return 'the web search tool returned no usable results';
+  }
+
+  String _buildWebSearchFailureContext(String reason) {
+    return 'Web search evidence could not be gathered because $reason.';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
@@ -261,14 +318,6 @@ class Orchestrator {
         'results in the conversation context as primary evidence. Cite the '
         'most relevant source URLs when possible. If the search results do '
         'not contain enough evidence, say so explicitly.';
-  }
-
-  InferenceResponse _noWebSearchResults() {
-    return InferenceResponse.finalChunk(
-      text: 'Web search is currently unavailable. Try again later.',
-      model: InferenceConstants.localModelName,
-      tokensGenerated: 0,
-    );
   }
 
   static void _logForensic(String message) {

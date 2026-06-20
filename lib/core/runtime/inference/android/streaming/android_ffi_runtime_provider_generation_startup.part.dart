@@ -311,6 +311,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
       ' max_tokens=$maxTokens temperature=$effectiveTemperature'
       ' n_threads=${LlamaNativeDefaults.nThreads}'
+      ' n_threads_batch=${LlamaNativeDefaults.nThreadsBatch}'
       ' n_batch=${LlamaNativeDefaults.nBatch}'
       ' n_ctx=${LlamaNativeDefaults.nCtx}'
       ' top_k=$effectiveTopK'

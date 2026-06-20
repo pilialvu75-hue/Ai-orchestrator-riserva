@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -29,9 +30,26 @@ typedef LlbSessionLastErrorDart = Pointer<Utf8> Function(int);
 abstract final class LlamaNativeDefaults {
   // Conservative mobile runtime context for stable local generation.
   static const int nCtx = 2048;
-  // Keep Android runtime thread usage bounded for thermals/stability.
-  // This mirrors the native-side safe defaults used by llama_bridge.cpp.
-  static const int nThreads = 2;
+  // Keep Android runtime thread usage bounded for thermals/stability while
+  // still scaling up on higher-core devices.
+  static final int _nThreads = _calculateThreadCount();
+
+  static int _calculateThreadCount() {
+    return threadCountForCores(Platform.numberOfProcessors);
+  }
+
+  static int threadCountForCores(int cores) {
+    // Use 6 threads on octa-core devices to keep the decode loop responsive
+    // without fully saturating the big.LITTLE cluster.
+    if (cores >= 8) return 6;
+    // Use 4 threads on mid-range devices so generation scales above the
+    // previous hardcoded baseline while still leaving headroom for UI work.
+    if (cores >= 6) return 4;
+    // Fall back to 2 threads on smaller devices to avoid thermal spikes.
+    return 2;
+  }
+  static int get nThreads => _nThreads;
+  static int get nThreadsBatch => _nThreads;
   // Native prefill now sizes the batch to the active context instead of using
   // a fixed clamp, so the surfaced batch diagnostic mirrors n_ctx.
   static int get nBatch => LlamaNativeDefaults.nCtx;
