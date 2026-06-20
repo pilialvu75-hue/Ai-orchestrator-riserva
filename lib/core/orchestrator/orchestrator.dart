@@ -263,7 +263,7 @@ class Orchestrator {
         systemPrompt: _buildWebSearchEffectiveSystemPrompt(
           baseSystemPrompt: systemPrompt,
           searchContext: _buildWebSearchUnavailableContext(
-            isOffline: false,
+            isOffline: isOffline,
             hasTool: true,
             failureReason: error.toString(),
           ),
@@ -298,14 +298,15 @@ class Orchestrator {
     required bool hasTool,
     String? failureReason,
   }) {
-    final details = <String>[
-      'Web search evidence could not be gathered.',
-      'offline=$isOffline',
-      'tool_available=$hasTool',
+    final reason = [
+      if (isOffline) 'the device is offline',
+      if (!hasTool) 'the web search tool is unavailable',
       if (failureReason != null && failureReason.trim().isNotEmpty)
-        'reason=${failureReason.trim()}',
-    ];
-    return details.join('\n');
+        failureReason.trim(),
+    ].join('; ');
+    return reason.isEmpty
+        ? 'Web search evidence could not be gathered.'
+        : 'Web search evidence could not be gathered because $reason.';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
