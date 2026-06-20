@@ -213,7 +213,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: _buildWebSearchEffectiveSystemPrompt(
           baseSystemPrompt: systemPrompt,
-          searchContext: _buildWebSearchUnavailableContext(
+          searchContext: _buildWebSearchFailureContext(
             _buildWebSearchUnavailableReason(
               isOffline: isOffline,
               hasTool: webSearchTool != null,
@@ -239,7 +239,7 @@ class Orchestrator {
 
       final searchContext = search.success && search.output.trim().isNotEmpty
           ? _buildSearchContext(search.output)
-          : _buildWebSearchUnavailableContext(
+          : _buildWebSearchFailureContext(
               _buildWebSearchUnavailableReason(
                 isOffline: false,
                 hasTool: true,
@@ -267,7 +267,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: _buildWebSearchEffectiveSystemPrompt(
           baseSystemPrompt: systemPrompt,
-          searchContext: _buildWebSearchUnavailableContext(
+          searchContext: _buildWebSearchFailureContext(
             'the web search request failed',
           ),
         ),
@@ -288,9 +288,11 @@ class Orchestrator {
     required String? baseSystemPrompt,
     required String searchContext,
   }) {
+    final trimmedBaseSystemPrompt =
+        baseSystemPrompt == null ? null : baseSystemPrompt.trim();
     return [
-      if (baseSystemPrompt != null && baseSystemPrompt.trim().isNotEmpty)
-        baseSystemPrompt.trim(),
+      if (trimmedBaseSystemPrompt != null && trimmedBaseSystemPrompt.isNotEmpty)
+        trimmedBaseSystemPrompt,
       _buildWebSearchSystemPrompt(),
       searchContext,
     ].join('\n\n');
@@ -309,7 +311,7 @@ class Orchestrator {
     return 'the web search tool returned no usable results';
   }
 
-  String _buildWebSearchUnavailableContext(String reason) {
+  String _buildWebSearchFailureContext(String reason) {
     return 'Web search evidence could not be gathered because $reason.';
   }
 
