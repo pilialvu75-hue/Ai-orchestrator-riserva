@@ -153,6 +153,30 @@ class Orchestrator {
     );
   }
 
+  Future<InferenceResponse> _executePlan(
+    String input, {
+    bool isOffline = false,
+  }) async {
+    final planner = _plannerService;
+    if (planner == null) {
+      return _inferenceService.infer(
+        InferenceRequest(
+          sessionId: 'default',
+          prompt: input,
+          isOffline: isOffline,
+        ),
+      );
+    }
+
+    final plan = await planner.decompose(input, isOffline: isOffline);
+
+    return InferenceResponse.finalChunk(
+      text: plan.toDisplayString(),
+      model: InferenceConstants.localModelName,
+      tokensGenerated: plan.steps.length,
+    );
+  }
+
   Future<InferenceResponse> _handleWebSearch(
     String input, {
     required String? systemPrompt,
@@ -193,6 +217,35 @@ class Orchestrator {
     yield* _inferenceService.stream(request);
   }
 
+  // --- MODIFICA 1: Estrazione e pulizia della query web ---
+  String _extractSearchQuery(String input) {
+    var query = input.trim();
+
+    const prefixes = [
+      'cerca ',
+      'cerca su internet ',
+      'cerca online ',
+      'search ',
+      'search for ',
+      'find ',
+      'trovami ',
+      'notizie su ',
+      'news su ',
+      'aggiornamenti su ',
+    ];
+
+    final lower = query.toLowerCase();
+
+    for (final prefix in prefixes) {
+      if (lower.startsWith(prefix)) {
+        query = query.substring(prefix.length).trim();
+        break;
+      }
+    }
+
+    return query.isEmpty ? input : query;
+  }
+
   Future<InferenceRequest> _buildWebSearchRequest({
     required String input,
     required String sessionId,
@@ -203,6 +256,8 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
+    
+    // --- MODIFICA 6: Se offline o senza tool, restituisce il systemPrompt originale pulito ---
     if (isOffline || webSearchTool == null) {
       _logForensic(
         '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
@@ -211,15 +266,7 @@ class Orchestrator {
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
-          baseSystemPrompt: systemPrompt,
-          searchContext: _buildWebSearchFailureContext(
-            _buildWebSearchUnavailableReason(
-              isOffline: isOffline,
-              hasTool: webSearchTool != null,
-            ),
-          ),
-        ),
+        systemPrompt: systemPrompt,
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -228,28 +275,41 @@ class Orchestrator {
     }
 
     try {
+      // --- MODIFICA 5: Pulizia della query prima di invocare il tool ed emissione log ---
+      final query = _extractSearchQuery(input);
+      _logForensic(
+        '[WEB_SEARCH_QUERY]'
+        ' original="$input"'
+        ' extracted="$query"',
+      );
+
       final search = await webSearchTool.execute(<String, dynamic>{
-        'query': input,
+        'query': query,
         'limit': _maxWebSearchResults,
       });
+      
       _logForensic(
         '[WEB_SEARCH] session=$sessionId success=${search.success}'
         ' output_chars=${search.output.length}',
       );
 
-      final searchContext = search.success && search.output.trim().isNotEmpty
+      // --- MODIFICA 3: Non viene costruito il blocco failure se la ricerca non ha esito positivo ---
+      final hasSearchResults = search.success && search.output.trim().isNotEmpty;
+
+      final searchContext = hasSearchResults
           ? _buildSearchContext(search.output)
-          : _buildWebSearchFailureContext(
-              'the web search tool returned no usable results',
-            );
+          : '';
+
+      // --- MODIFICA 4: Passaggio a metodo condizionale rigoroso per evitare istruzioni web vuote ---
+      final effectiveSystemPrompt = _buildWebSearchEffectiveSystemPrompt(
+        baseSystemPrompt: systemPrompt,
+        searchContext: searchContext,
+      );
 
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
-          baseSystemPrompt: systemPrompt,
-          searchContext: searchContext,
-        ),
+        systemPrompt: effectiveSystemPrompt,
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -262,12 +322,7 @@ class Orchestrator {
       return InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: _buildWebSearchEffectiveSystemPrompt(
-          baseSystemPrompt: systemPrompt,
-          searchContext: _buildWebSearchFailureContext(
-            'the web search request failed',
-          ),
-        ),
+        systemPrompt: systemPrompt, // Fallback sicuro al prompt base in caso di eccezione
         context: context,
         isOffline: false,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
@@ -281,18 +336,29 @@ class Orchestrator {
     return 'Web search results:\n$trimmed';
   }
 
+  // --- MODIFICA 4 (Dettaglio): Esclude le istruzioni web se non ci sono risultati reali ---
   String _buildWebSearchEffectiveSystemPrompt({
     required String? baseSystemPrompt,
     required String searchContext,
   }) {
-    final trimmedBaseSystemPrompt =
-        baseSystemPrompt == null ? null : baseSystemPrompt.trim();
-    return [
-      if (trimmedBaseSystemPrompt != null && trimmedBaseSystemPrompt.isNotEmpty)
-        trimmedBaseSystemPrompt,
-      _buildWebSearchSystemPrompt(),
-      searchContext,
-    ].join('\n\n');
+    final sections = <String>[];
+    final base = baseSystemPrompt?.trim();
+
+    if (base != null && base.isNotEmpty) {
+      sections.add(base);
+    }
+
+    if (searchContext.trim().isNotEmpty) {
+      sections.add(_buildWebSearchSystemPrompt());
+      sections.add(searchContext);
+    }
+
+    return sections.join('\n\n');
+  }
+
+  // --- MODIFICA 2: Svuotamento radicale del failure context per eliminare l'iniezione tossica ---
+  String _buildWebSearchFailureContext(String reason) {
+    return '';
   }
 
   String _buildWebSearchUnavailableReason({
@@ -306,10 +372,6 @@ class Orchestrator {
       return 'the web search tool is unavailable';
     }
     return 'the web search tool returned no usable results';
-  }
-
-  String _buildWebSearchFailureContext(String reason) {
-    return 'Web search evidence could not be gathered because $reason.';
   }
 
   /// Guides the model to treat retrieved web results as the primary source.
@@ -331,33 +393,6 @@ class Orchestrator {
       text: commandOutput,
       model: InferenceConstants.localModelName,
       tokensGenerated: 0,
-    );
-  }
-
-  /// Decompone [input] in un [Plan] ed esegue ogni step.
-  ///
-  /// Fallback a inference normale quando [PlannerService] non è configurato.
-  Future<InferenceResponse> _executePlan(
-    String input, {
-    bool isOffline = false,
-  }) async {
-    final planner = _plannerService;
-    if (planner == null) {
-      return _inferenceService.infer(
-        InferenceRequest(
-          sessionId: 'default',
-          prompt: input,
-          isOffline: isOffline,
-        ),
-      );
-    }
-
-    final plan = await planner.decompose(input, isOffline: isOffline);
-
-    return InferenceResponse.finalChunk(
-      text: plan.toDisplayString(),
-      model: InferenceConstants.localModelName,
-      tokensGenerated: plan.steps.length,
     );
   }
 }
