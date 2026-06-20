@@ -19,6 +19,8 @@ import 'package:flutter/foundation.dart';
 /// esegue ricerche web tramite [WebSearchTool] e passa i risultati al
 /// modello locale, e invia le query chat a [InferenceService].
 class Orchestrator {
+  static const int _maxWebSearchResults = 5;
+
   Orchestrator({
     required IntentAnalyzer intentAnalyzer,
     required ExecutionEngine executor,
@@ -228,7 +230,7 @@ class Orchestrator {
     try {
       final search = await webSearchTool.execute(<String, dynamic>{
         'query': input,
-        'limit': 5,
+        'limit': _maxWebSearchResults,
       });
       _logForensic(
         '[WEB_SEARCH] session=$sessionId success=${search.success}'
