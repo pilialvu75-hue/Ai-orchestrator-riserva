@@ -13,10 +13,12 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iomanip>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <sstream>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -69,6 +71,7 @@ std::string get_global_error_copy() {
 
 constexpr const char* kChatTemplateControlTokens[] = {
     "<|eot_id|>",
+    "<|end|>",
     "<|start_header_id|>",
     "<|end_header_id|>",
     "<|im_start|>",
@@ -144,6 +147,45 @@ bool looks_like_chat_template_control_piece(const char* piece, const int32_t pie
     }
 
     return false;
+}
+
+std::string format_hex_window(const char* data, const size_t size) {
+    if (data == nullptr || size == 0) {
+        return "";
+    }
+
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (size_t i = 0; i < size; ++i) {
+        out << std::setw(2) << static_cast<unsigned int>(
+            static_cast<unsigned char>(data[i]));
+        if (i + 1 < size) {
+            out << ' ';
+        }
+    }
+    return out.str();
+}
+
+void log_prompt_forensics(const char* prompt) {
+    if (prompt == nullptr) {
+        LOGI("[FORENSIC_PROMPT_NATIVE] raw=(null)");
+        LOGI("[FORENSIC_PROMPT_NATIVE] chars=0 bytes=0");
+        LOGI("[FORENSIC_PROMPT_NATIVE] first_512_hex=");
+        LOGI("[FORENSIC_PROMPT_NATIVE] last_512_hex=");
+        return;
+    }
+
+    const size_t prompt_len = std::strlen(prompt);
+    const size_t head_len = std::min(prompt_len, static_cast<size_t>(512));
+    const size_t tail_len = std::min(prompt_len, static_cast<size_t>(512));
+    const size_t tail_offset = prompt_len > tail_len ? prompt_len - tail_len : 0;
+
+    LOGI("[FORENSIC_PROMPT_NATIVE] raw=%s", prompt);
+    LOGI("[FORENSIC_PROMPT_NATIVE] chars=%zu bytes=%zu", prompt_len, prompt_len);
+    LOGI("[FORENSIC_PROMPT_NATIVE] first_512_hex=%s",
+         format_hex_window(prompt, head_len).c_str());
+    LOGI("[FORENSIC_PROMPT_NATIVE] last_512_hex=%s",
+         format_hex_window(prompt + tail_offset, tail_len).c_str());
 }
 
 int32_t decode_token_piece(
@@ -577,8 +619,6 @@ void run_generation(
          session->id,
          owner_epoch,
          n_tokens);
-
-    llama_memory_clear(llama_get_memory(ctx), true);
 
     BatchGuard prefill_batch(static_cast<int32_t>(tokens.size()), 0, 1);
     if (!prefill_batch.initialized) {
@@ -1058,6 +1098,18 @@ int32_t llb_session_start_gen(
         return -4;
     }
 
+    log_prompt_forensics(prompt);
+    {
+        std::ostringstream stop_tokens;
+        for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
+            if (i > 0) {
+                stop_tokens << ",";
+            }
+            stop_tokens << kChatTemplateControlTokens[i];
+        }
+        LOGI("[FORENSIC_STOP_SEQUENCES] tokens=%s", stop_tokens.str().c_str());
+    }
+
     std::lock_guard<std::mutex> lock(session->generation_mutex);
 
     LOGI("[CANCEL_REQUEST] session=%" PRId64 " reason=restart_generation", session_id);
@@ -1071,6 +1123,7 @@ int32_t llb_session_start_gen(
     session->cancel_requested.store(false, std::memory_order_release);
     session->first_token_emitted.store(false, std::memory_order_release);
     session->clear_error();
+    llama_memory_clear(llama_get_memory(session->ctx), true);
 
     const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     session->gen_state.store(kStateGenerating, std::memory_order_release);

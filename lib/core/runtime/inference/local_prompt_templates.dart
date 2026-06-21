@@ -190,8 +190,8 @@ class LocalPromptTemplates {
   }) {
     final buffer = StringBuffer();
 
-    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
-    buffer.write('<|system|>\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<|end|>\n');
+    final enforcedSystem = (systemPrompt ?? 'You are a helpful assistant.').trim();
+    buffer.write('<|system|>\n$enforcedSystem\n<|end|>\n');
 
     for (final turn in context) {
       buffer.write('<|${_roleName(turn.role)}|>\n');
