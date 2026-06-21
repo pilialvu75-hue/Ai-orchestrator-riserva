@@ -168,6 +168,17 @@ std::string format_hex_window(const char* data, const size_t size) {
     return out.str();
 }
 
+std::string format_stop_token_list() {
+    std::ostringstream stop_tokens;
+    for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
+        if (i > 0) {
+            stop_tokens << ",";
+        }
+        stop_tokens << kChatTemplateControlTokens[i];
+    }
+    return stop_tokens.str();
+}
+
 void log_prompt_forensics(const char* prompt) {
     if (prompt == nullptr) {
         LOGI("[FORENSIC_PROMPT_NATIVE] raw=(null)");
@@ -1104,16 +1115,7 @@ int32_t llb_session_start_gen(
     log_prompt_forensics(prompt);
 #endif
 #ifndef NDEBUG
-    {
-        std::ostringstream stop_tokens;
-        for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
-            if (i > 0) {
-                stop_tokens << ",";
-            }
-            stop_tokens << kChatTemplateControlTokens[i];
-        }
-        LOGI("[FORENSIC_STOP_SEQUENCES] tokens=%s", stop_tokens.str().c_str());
-    }
+    LOGI("[FORENSIC_STOP_SEQUENCES] tokens=%s", format_stop_token_list().c_str());
 #endif
 
     std::lock_guard<std::mutex> lock(session->generation_mutex);

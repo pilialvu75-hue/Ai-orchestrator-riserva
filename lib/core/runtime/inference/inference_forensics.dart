@@ -50,13 +50,13 @@ String describeUtf8PayloadForensics({
   final tail = bytes.skip(tailStart).toList(growable: false);
 
   // Converts a byte window into a space-separated hexadecimal string.
-  String hexDump(List<int> input) =>
+  String _formatAsHex(List<int> input) =>
       input.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join(' ');
 
   return [
     '[$label] raw=$payload',
     '[$label] chars=${payload.length} bytes=${bytes.length}',
-    '[$label] first_512_hex=${hexDump(head)}',
-    '[$label] last_512_hex=${hexDump(tail)}',
+    '[$label] first_512_hex=${_formatAsHex(head)}',
+    '[$label] last_512_hex=${_formatAsHex(tail)}',
   ].join('\n');
 }
