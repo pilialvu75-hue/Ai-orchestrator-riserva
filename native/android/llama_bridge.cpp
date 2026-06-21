@@ -158,8 +158,9 @@ std::string format_hex_window(const char* data, const size_t size) {
     std::ostringstream out;
     out << std::hex << std::setfill('0');
     for (size_t i = 0; i < size; ++i) {
-        out << std::setw(2) << static_cast<unsigned int>(
+        const auto byte_value = static_cast<unsigned int>(
             static_cast<unsigned char>(data[i]));
+        out << std::setw(2) << byte_value;
         if (i + 1 < size) {
             out << ' ';
         }

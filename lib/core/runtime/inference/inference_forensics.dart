@@ -49,6 +49,7 @@ String describeUtf8PayloadForensics({
   final head = bytes.take(headLength).toList(growable: false);
   final tail = bytes.skip(tailStart).toList(growable: false);
 
+  // Converts a byte window into a space-separated hexadecimal string.
   String hexDump(List<int> input) =>
       input.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join(' ');
 
