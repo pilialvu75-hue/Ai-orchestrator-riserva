@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 
 typedef ForensicLogFn = void Function(String message);
+
+const int kForensicWindowSize = 512;
 
 Future<T> runInferenceGuarded<T>({
   required String scope,
@@ -33,4 +37,26 @@ Future<T> runInferenceGuarded<T>({
     },
   );
   return completer.future;
+}
+
+String describeUtf8PayloadForensics({
+  required String label,
+  required String payload,
+}) {
+  final bytes = utf8.encode(payload);
+  final headLength = math.min(bytes.length, kForensicWindowSize);
+  final tailStart = math.max(0, bytes.length - kForensicWindowSize);
+  final head = bytes.take(headLength).toList(growable: false);
+  final tail = bytes.skip(tailStart).toList(growable: false);
+
+  // Converts a byte window into a space-separated hexadecimal string.
+  String _formatAsHex(List<int> input) =>
+      input.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join(' ');
+
+  return [
+    '[$label] raw=$payload',
+    '[$label] chars=${payload.length} bytes=${bytes.length}',
+    '[$label] first_512_hex=${_formatAsHex(head)}',
+    '[$label] last_512_hex=${_formatAsHex(tail)}',
+  ].join('\n');
 }

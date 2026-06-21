@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -125,10 +126,28 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const Set<String> _systemSanityTags = <String>{
     '<|im_start|>',
     '<|im_end|>',
+    '<|user|>',
+    '<|assistant|>',
+    '<|system|>',
+    '<|end|>',
+    '</s>',
+    '<|eot_id|>',
     '&lt;|im_start|&gt;',
     '&lt;|im_end|&gt;',
+    '&lt;|user|&gt;',
+    '&lt;|assistant|&gt;',
+    '&lt;|system|&gt;',
+    '&lt;|end|&gt;',
+    '&lt;/s&gt;',
+    '&lt;|eot_id|&gt;',
     '&amp;lt;|im_start|&gt;',
     '&amp;lt;|im_end|&gt;',
+    '&amp;lt;|user|&gt;',
+    '&amp;lt;|assistant|&gt;',
+    '&amp;lt;|system|&gt;',
+    '&amp;lt;|end|&gt;',
+    '&amp;lt;/s&gt;',
+    '&amp;lt;|eot_id|&gt;',
     '<|endoftext|>',
     '<think>',
     '</think>',

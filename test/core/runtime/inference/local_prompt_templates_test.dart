@@ -30,6 +30,7 @@ void main() {
       expect(prompt, contains('<|end|>'));
       expect(prompt, isNot(contains('<!--META')));
       expect(prompt, isNot(contains('<|im_start|>')));
+      expect(prompt, isNot(contains('Respond in max 3 sentences')));
     });
   });
 }
