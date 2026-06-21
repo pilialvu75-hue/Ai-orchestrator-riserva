@@ -3,6 +3,8 @@ import 'dart:convert';
 
 typedef ForensicLogFn = void Function(String message);
 
+const int kForensicWindowSize = 512;
+
 Future<T> runInferenceGuarded<T>({
   required String scope,
   required Future<T> Function() action,
@@ -41,8 +43,8 @@ String describeUtf8PayloadForensics({
   required String payload,
 }) {
   final bytes = utf8.encode(payload);
-  final headLength = bytes.length < 512 ? bytes.length : 512;
-  final tailStart = bytes.length > 512 ? bytes.length - 512 : 0;
+  final headLength = bytes.length < kForensicWindowSize ? bytes.length : kForensicWindowSize;
+  final tailStart = bytes.length > kForensicWindowSize ? bytes.length - kForensicWindowSize : 0;
   final head = bytes.take(headLength).toList(growable: false);
   final tail = bytes.skip(tailStart).toList(growable: false);
 

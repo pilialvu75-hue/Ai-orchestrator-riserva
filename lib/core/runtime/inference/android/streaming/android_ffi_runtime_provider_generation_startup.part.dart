@@ -247,12 +247,14 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     );
     final samplingMetadata = SamplingMetadata.fromPrompt(composedPrompt);
     final prompt = samplingMetadata.stripFrom(composedPrompt);
-    AndroidFfiRuntimeProvider._log(
-      describeUtf8PayloadForensics(
-        label: 'FORENSIC_DART_PROMPT',
-        payload: prompt,
-      ),
-    );
+    if (kDebugMode) {
+      AndroidFfiRuntimeProvider._log(
+        describeUtf8PayloadForensics(
+          label: 'FORENSIC_DART_PROMPT',
+          payload: prompt,
+        ),
+      );
+    }
     AndroidFfiRuntimeProvider._log(
       '[SAMPLING_META] session=$sessionId'
       ' temp=${samplingMetadata.temperature ?? request.temperature}'

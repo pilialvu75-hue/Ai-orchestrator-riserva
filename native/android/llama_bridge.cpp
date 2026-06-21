@@ -36,6 +36,7 @@ namespace {
 constexpr size_t kRingCapacity = 256;
 constexpr int32_t kMaxGeneratedTokens = 256;
 constexpr size_t kMinPromptLength = 2;
+constexpr size_t kForensicWindowSize = 512;
 constexpr int64_t kDecodeStallLogMillis = 5000;
 constexpr int64_t kFirstTokenPollWaitMillis = 24;
 constexpr int32_t kMaxInitialSampleRetries = 4;
@@ -176,8 +177,8 @@ void log_prompt_forensics(const char* prompt) {
     }
 
     const size_t prompt_len = std::strlen(prompt);
-    const size_t head_len = std::min(prompt_len, static_cast<size_t>(512));
-    const size_t tail_len = std::min(prompt_len, static_cast<size_t>(512));
+    const size_t head_len = std::min(prompt_len, kForensicWindowSize);
+    const size_t tail_len = std::min(prompt_len, kForensicWindowSize);
     const size_t tail_offset = prompt_len > tail_len ? prompt_len - tail_len : 0;
 
     LOGI("[FORENSIC_PROMPT_NATIVE] raw=%s", prompt);
@@ -1098,7 +1099,9 @@ int32_t llb_session_start_gen(
         return -4;
     }
 
+#ifndef NDEBUG
     log_prompt_forensics(prompt);
+#endif
     {
         std::ostringstream stop_tokens;
         for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
