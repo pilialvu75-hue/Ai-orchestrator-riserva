@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 typedef ForensicLogFn = void Function(String message);
 
@@ -43,8 +44,8 @@ String describeUtf8PayloadForensics({
   required String payload,
 }) {
   final bytes = utf8.encode(payload);
-  final headLength = bytes.length < kForensicWindowSize ? bytes.length : kForensicWindowSize;
-  final tailStart = bytes.length > kForensicWindowSize ? bytes.length - kForensicWindowSize : 0;
+  final headLength = math.min(bytes.length, kForensicWindowSize);
+  final tailStart = math.max(0, bytes.length - kForensicWindowSize);
   final head = bytes.take(headLength).toList(growable: false);
   final tail = bytes.skip(tailStart).toList(growable: false);
 

@@ -1102,6 +1102,7 @@ int32_t llb_session_start_gen(
 #ifndef NDEBUG
     log_prompt_forensics(prompt);
 #endif
+#ifndef NDEBUG
     {
         std::ostringstream stop_tokens;
         for (size_t i = 0; i < std::size(kChatTemplateControlTokens); ++i) {
@@ -1112,6 +1113,7 @@ int32_t llb_session_start_gen(
         }
         LOGI("[FORENSIC_STOP_SEQUENCES] tokens=%s", stop_tokens.str().c_str());
     }
+#endif
 
     std::lock_guard<std::mutex> lock(session->generation_mutex);
 
