@@ -8,8 +8,8 @@ abstract class RoleContract {
 }
 
 final class OrchestratorRole extends RoleContract {
-  const OrchestratorRole({this.label = 'Orchestrator'})
-      : super(OrchestratorRoleKind.orchestrator, enabled: true);
+  const OrchestratorRole({this.label = 'Orchestrator', bool enabled = true})
+      : super(OrchestratorRoleKind.orchestrator, enabled: enabled);
 
   final String label;
 }
@@ -29,13 +29,13 @@ final class ArchitectRole extends RoleContract {
 }
 
 final class CloudRole extends RoleContract {
-  const CloudRole({this.label = 'Cloud'})
-      : super(OrchestratorRoleKind.cloud, enabled: false);
+  const CloudRole({this.label = 'Cloud', bool enabled = false})
+      : super(OrchestratorRoleKind.cloud, enabled: enabled);
 
   final String label;
 }
 
-class RoleFallbackRegistry {
+final class RoleFallbackRegistry {
   const RoleFallbackRegistry({
     required this.orchestrator,
     this.engineer,
@@ -48,16 +48,32 @@ class RoleFallbackRegistry {
   final ArchitectRole? architect;
   final CloudRole? cloud;
 
-  RoleContract? resolve(OrchestratorRoleKind kind) {
+  /// Resolves the requested role.
+  ///
+  /// Engineer and Architect fall back to the active orchestrator binding when
+  /// they are missing or disabled.
+  ///
+  /// [OrchestratorRoleKind.orchestrator] always returns the primary
+  /// orchestrator binding. [OrchestratorRoleKind.cloud] always throws
+  /// [UnsupportedError] because CloudRole remains disabled under the current
+  /// runtime policy.
+  RoleContract resolve(OrchestratorRoleKind kind) {
     switch (kind) {
       case OrchestratorRoleKind.orchestrator:
         return orchestrator;
       case OrchestratorRoleKind.engineer:
-        return engineer?.enabled == true ? engineer : orchestrator;
+        return _resolveFallback(engineer, orchestrator);
       case OrchestratorRoleKind.architect:
-        return architect?.enabled == true ? architect : orchestrator;
+        return _resolveFallback(architect, orchestrator);
       case OrchestratorRoleKind.cloud:
-        return cloud?.enabled == true ? cloud : null;
+        throw UnsupportedError(
+          'CloudRole cannot be resolved because it is disabled by policy. '
+          'Use orchestrator, engineer, or architect instead.',
+        );
     }
+  }
+
+  RoleContract _resolveFallback(RoleContract? role, RoleContract fallback) {
+    return (role?.enabled ?? false) ? role! : fallback;
   }
 }
