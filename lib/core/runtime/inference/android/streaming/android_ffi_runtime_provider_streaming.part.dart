@@ -62,6 +62,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
       AndroidFfiRuntimeProvider._log(
         '[FORENSIC_STREAM_INFERENCE_ACTIVE] streamInferenceEntered=true sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
       );
+      _pollingController.resetIdleBackoff();
       final controller = StreamController<InferenceResponse>();
       AndroidFfiRuntimeProvider._log(
         '[STREAM_CONTROLLER_CREATED] sessionId=${request.sessionId} modelId=${request.modelId}',
