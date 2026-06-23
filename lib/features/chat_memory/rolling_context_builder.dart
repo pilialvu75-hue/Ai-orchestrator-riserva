@@ -43,15 +43,16 @@ class RollingContextBuilder {
         role: ChatTurnNormalizer.roleFromText(message.role),
         content: message.content,
       );
-      if (turn == null || !_hasVisibleContent(turn)) continue;
+      if (turn == null) continue;
       seen.add(_turnFingerprint(turn));
       turns.add(turn);
     }
 
-    final recalledTurns = recalledContext.where((turn) {
-      if (!_hasVisibleContent(turn)) return false;
-      return seen.add(_turnFingerprint(turn));
-    }).toList(growable: false);
+    final recalledTurns = recalledContext
+        .map(_normalizeContextTurn)
+        .whereType<ChatTurn>()
+        .where((turn) => seen.add(_turnFingerprint(turn)))
+        .toList(growable: false);
     turns.addAll(recalledTurns);
 
     final result = _windowManager.trimToWindow(
@@ -82,10 +83,14 @@ class RollingContextBuilder {
   }
 
   int _turnFingerprint(ChatTurn turn) {
-    return Object.hash(turn.role, turn.content.trim());
+    return Object.hash(turn.role, turn.content);
   }
 
-  bool _hasVisibleContent(ChatTurn turn) {
-    return turn.content.trim().isNotEmpty;
+  ChatTurn? _normalizeContextTurn(ChatTurn turn) {
+    final normalizedContent = turn.content.trim();
+    if (normalizedContent.isEmpty) return null;
+    return normalizedContent == turn.content
+        ? turn
+        : turn.copyWith(content: normalizedContent);
   }
 }
