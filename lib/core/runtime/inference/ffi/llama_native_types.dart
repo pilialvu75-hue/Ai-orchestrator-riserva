@@ -50,9 +50,9 @@ abstract final class LlamaNativeDefaults {
   }
   static int get nThreads => _nThreads;
   static int get nThreadsBatch => _nThreads;
-  // Native prefill now sizes the batch to the active context instead of using
-  // a fixed clamp, so the surfaced batch diagnostic mirrors n_ctx.
-  static int get nBatch => LlamaNativeDefaults.nCtx;
+  // Native prefill uses a fixed chunked batch to avoid CPU saturation during
+  // prompt prefill on large contexts.
+  static const int nBatch = 512;
   static const double temperature = 0.7;
   static const int topK = 40;
   static const double topP = 0.9;

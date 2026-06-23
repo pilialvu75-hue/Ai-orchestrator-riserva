@@ -1016,11 +1016,12 @@ int64_t llb_create_session(
     llama_context_params cparams = llama_context_default_params();
     const uint32_t effective_n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
     const int32_t effective_n_threads = n_threads > 0 ? n_threads : 2;
+    constexpr uint32_t kPrefillBatchSize = 512;
     cparams.n_ctx = effective_n_ctx;
     cparams.n_threads = effective_n_threads;
     cparams.n_threads_batch = effective_n_threads;
-    cparams.n_batch = effective_n_ctx;
-    cparams.n_ubatch = effective_n_ctx;
+    cparams.n_batch = kPrefillBatchSize;
+    cparams.n_ubatch = kPrefillBatchSize;
     cparams.embeddings = false;
     cparams.offload_kqv = true;
     LOGI("[FORENSIC_CTX_PARAMS] session=%" PRId64
