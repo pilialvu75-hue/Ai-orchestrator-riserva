@@ -33,7 +33,7 @@ class RollingContextBuilder {
     List<ChatTurn> recalledContext = const [],
   }) {
     final turns = <ChatTurn>[];
-    final seen = <String>{};
+    final seen = <int>{};
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -43,17 +43,16 @@ class RollingContextBuilder {
         role: ChatTurnNormalizer.roleFromText(message.role),
         content: message.content,
       );
-      if (turn == null) continue;
-      seen.add('${turn.role.name}:${turn.content.toLowerCase()}');
+      if (turn == null || !_hasVisibleContent(turn)) continue;
+      seen.add(_turnFingerprint(turn));
       turns.add(turn);
     }
 
-    for (final recalledTurn in recalledContext) {
-      final key =
-          '${recalledTurn.role.name}:${recalledTurn.content.toLowerCase()}';
-      if (recalledTurn.content.trim().isEmpty || !seen.add(key)) continue;
-      turns.add(recalledTurn);
-    }
+    final recalledTurns = recalledContext.where((turn) {
+      if (!_hasVisibleContent(turn)) return false;
+      return seen.add(_turnFingerprint(turn));
+    }).toList(growable: false);
+    turns.addAll(recalledTurns);
 
     final result = _windowManager.trimToWindow(
       systemPrompt: systemPrompt,
@@ -80,5 +79,13 @@ class RollingContextBuilder {
       return null;
     }
     return normalized;
+  }
+
+  int _turnFingerprint(ChatTurn turn) {
+    return Object.hash(turn.role, turn.content.trim());
+  }
+
+  bool _hasVisibleContent(ChatTurn turn) {
+    return turn.content.trim().isNotEmpty;
   }
 }
