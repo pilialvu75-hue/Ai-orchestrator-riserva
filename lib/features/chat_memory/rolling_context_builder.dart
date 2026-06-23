@@ -32,9 +32,8 @@ class RollingContextBuilder {
     String? excludedMessageId,
     List<ChatTurn> recalledContext = const [],
   }) {
-    // Solo storia cronologica — nessun recall semantico prepended.
-    // Il recall fuori ordine causa risposte incoerenti su modelli 1B.
     final turns = <ChatTurn>[];
+    final seen = <String>{};
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -45,7 +44,15 @@ class RollingContextBuilder {
         content: message.content,
       );
       if (turn == null) continue;
+      seen.add('${turn.role.name}:${turn.content.toLowerCase()}');
       turns.add(turn);
+    }
+
+    for (final recalledTurn in recalledContext) {
+      final key =
+          '${recalledTurn.role.name}:${recalledTurn.content.toLowerCase()}';
+      if (recalledTurn.content.trim().isEmpty || !seen.add(key)) continue;
+      turns.add(recalledTurn);
     }
 
     final result = _windowManager.trimToWindow(
