@@ -33,7 +33,7 @@ class RollingContextBuilder {
     List<ChatTurn> recalledContext = const [],
   }) {
     final turns = <ChatTurn>[];
-    final seen = <int>{};
+    final historyFingerprints = <int>{};
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -44,15 +44,19 @@ class RollingContextBuilder {
         content: message.content,
       );
       if (turn == null) continue;
-      seen.add(_turnFingerprint(turn));
+      historyFingerprints.add(_turnContentHash(turn));
       turns.add(turn);
     }
 
+    final recalledFingerprints = <int>{};
     final recalledTurns = recalledContext
         .map(_normalizeContextTurn)
         .whereType<ChatTurn>()
-        .where((turn) => seen.add(_turnFingerprint(turn)))
-        .toList(growable: false);
+        .where((turn) {
+      final fingerprint = _turnContentHash(turn);
+      if (historyFingerprints.contains(fingerprint)) return false;
+      return recalledFingerprints.add(fingerprint);
+    }).toList(growable: false);
     turns.addAll(recalledTurns);
 
     final result = _windowManager.trimToWindow(
@@ -82,7 +86,7 @@ class RollingContextBuilder {
     return normalized;
   }
 
-  int _turnFingerprint(ChatTurn turn) {
+  int _turnContentHash(ChatTurn turn) {
     return Object.hash(turn.role, turn.content);
   }
 
