@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
@@ -82,28 +80,27 @@ class RollingContextBuilder {
     required ChatRole role,
     required String content,
   }) {
-    final normalized = _normalizer.normalize(
-      ChatTurn(role: role, content: content),
-    );
-    if (normalized.content.isEmpty || normalized.role == ChatRole.system) {
+    final normalizedContent = _normalizeContent(content);
+    if (normalizedContent == null || role == ChatRole.system) {
       return null;
     }
-    return normalized;
+    return ChatTurn(role: role, content: normalizedContent);
   }
 
   ChatTurn? _normalizeContextTurn(ChatTurn turn) {
-    final normalizedContent = turn.content.trim();
-    if (normalizedContent.isEmpty) return null;
+    final normalizedContent = _normalizeContent(turn.content);
+    if (normalizedContent == null) return null;
     return normalizedContent == turn.content
         ? turn
         : turn.copyWith(content: normalizedContent);
   }
 
   String _turnSignature(ChatTurn turn) {
-    return jsonEncode([
-      turn.role.index,
-      turn.excludeFromContext,
-      turn.content,
-    ]);
+    return '${turn.role.index}\u0000${turn.excludeFromContext ? 1 : 0}\u0000${turn.content}';
+  }
+
+  String? _normalizeContent(String content) {
+    final normalized = content.trim();
+    return normalized.isEmpty ? null : normalized;
   }
 }
