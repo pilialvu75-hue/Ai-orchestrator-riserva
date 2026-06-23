@@ -35,6 +35,17 @@ void main() {
       expect(config.maxTotalSize, 4096);
     });
 
+    test('Phi-3.5 automatic profile stays compact', () {
+      final config = MemoryWindowConfig.automatic(
+        modelId: 'phi3_5_mini',
+        isWeb: false,
+      );
+
+      expect(config.activeProfile, MemoryWindowProfile.compact);
+      expect(config.maxContextLines, 6);
+      expect(config.maxTotalSize, 4096);
+    });
+
     test('custom web values clamp to conservative thresholds', () {
       final config = MemoryWindowConfig.custom(
         maxContextLines: 120,
