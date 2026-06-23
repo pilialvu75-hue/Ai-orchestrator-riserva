@@ -24,7 +24,6 @@ class RollingContextBuilder {
 
   final MemoryWindowManager _windowManager;
   static const ChatTurnNormalizer _normalizer = ChatTurnNormalizer();
-  static const String _signatureDelimiter = '\u0000';
 
   RollingContextResult build({
     required List<ChatMessage> messages,
@@ -97,7 +96,15 @@ class RollingContextBuilder {
   }
 
   String _turnSignature(ChatTurn turn) {
-    return '${turn.role.index}${_signatureDelimiter}${turn.excludeFromContext ? 1 : 0}${_signatureDelimiter}${turn.content}';
+    final buffer = StringBuffer()
+      ..write(turn.role.index)
+      ..write(':')
+      ..write(turn.excludeFromContext ? 1 : 0)
+      ..write(':')
+      ..write(turn.content.length)
+      ..write(':')
+      ..write(turn.content);
+    return buffer.toString();
   }
 
   String? _normalizeContent(String content) {
