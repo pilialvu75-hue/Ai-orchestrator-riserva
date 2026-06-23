@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
@@ -33,7 +35,7 @@ class RollingContextBuilder {
     List<ChatTurn> recalledContext = const [],
   }) {
     final turns = <ChatTurn>[];
-    final historyTurns = <ChatTurn>[];
+    final historySignatures = <String>{};
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -44,14 +46,20 @@ class RollingContextBuilder {
         content: message.content,
       );
       if (turn == null) continue;
-      historyTurns.add(turn);
       turns.add(turn);
+      historySignatures.add(_turnSignature(turn));
     }
 
+    final normalizedRecalledTurns = recalledContext
+        .map(_normalizeContextTurn)
+        .whereType<ChatTurn>()
+        .toList(growable: false);
+    final recalledSignatures = <String>{};
     final filteredRecalledTurns = <ChatTurn>[];
-    for (final turn in recalledContext.map(_normalizeContextTurn).whereType<ChatTurn>()) {
-      if (_containsEquivalentTurn(historyTurns, turn)) continue;
-      if (_containsEquivalentTurn(filteredRecalledTurns, turn)) continue;
+    for (final turn in normalizedRecalledTurns) {
+      final signature = _turnSignature(turn);
+      if (historySignatures.contains(signature)) continue;
+      if (!recalledSignatures.add(signature)) continue;
       filteredRecalledTurns.add(turn);
     }
     turns.addAll(filteredRecalledTurns);
@@ -91,14 +99,11 @@ class RollingContextBuilder {
         : turn.copyWith(content: normalizedContent);
   }
 
-  bool _containsEquivalentTurn(List<ChatTurn> turns, ChatTurn candidate) {
-    for (final turn in turns) {
-      if (turn.role == candidate.role &&
-          turn.content == candidate.content &&
-          turn.excludeFromContext == candidate.excludeFromContext) {
-        return true;
-      }
-    }
-    return false;
+  String _turnSignature(ChatTurn turn) {
+    return jsonEncode([
+      turn.role.index,
+      turn.excludeFromContext,
+      turn.content,
+    ]);
   }
 }
