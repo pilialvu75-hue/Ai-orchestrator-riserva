@@ -33,7 +33,7 @@ class RollingContextBuilder {
     List<ChatTurn> recalledContext = const [],
   }) {
     final turns = <ChatTurn>[];
-    final historyFingerprints = <int>{};
+    final historyTurns = <ChatTurn>[];
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -44,20 +44,17 @@ class RollingContextBuilder {
         content: message.content,
       );
       if (turn == null) continue;
-      historyFingerprints.add(_turnContentHash(turn));
+      historyTurns.add(turn);
       turns.add(turn);
     }
 
-    final recalledFingerprints = <int>{};
-    final recalledTurns = recalledContext
-        .map(_normalizeContextTurn)
-        .whereType<ChatTurn>()
-        .where((turn) {
-      final fingerprint = _turnContentHash(turn);
-      if (historyFingerprints.contains(fingerprint)) return false;
-      return recalledFingerprints.add(fingerprint);
-    }).toList(growable: false);
-    turns.addAll(recalledTurns);
+    final filteredRecalledTurns = <ChatTurn>[];
+    for (final turn in recalledContext.map(_normalizeContextTurn).whereType<ChatTurn>()) {
+      if (_containsEquivalentTurn(historyTurns, turn)) continue;
+      if (_containsEquivalentTurn(filteredRecalledTurns, turn)) continue;
+      filteredRecalledTurns.add(turn);
+    }
+    turns.addAll(filteredRecalledTurns);
 
     final result = _windowManager.trimToWindow(
       systemPrompt: systemPrompt,
@@ -86,15 +83,22 @@ class RollingContextBuilder {
     return normalized;
   }
 
-  int _turnContentHash(ChatTurn turn) {
-    return Object.hash(turn.role, turn.content);
-  }
-
   ChatTurn? _normalizeContextTurn(ChatTurn turn) {
     final normalizedContent = turn.content.trim();
     if (normalizedContent.isEmpty) return null;
     return normalizedContent == turn.content
         ? turn
         : turn.copyWith(content: normalizedContent);
+  }
+
+  bool _containsEquivalentTurn(List<ChatTurn> turns, ChatTurn candidate) {
+    for (final turn in turns) {
+      if (turn.role == candidate.role &&
+          turn.content == candidate.content &&
+          turn.excludeFromContext == candidate.excludeFromContext) {
+        return true;
+      }
+    }
+    return false;
   }
 }
