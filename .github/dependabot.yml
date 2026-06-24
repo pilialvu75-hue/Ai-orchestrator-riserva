@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # 1. Monitoraggio automatico delle dipendenze Flutter / Dart (pubspec.yaml)
+  - package-ecosystem: "pub"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    timezone: "Europe/Rome"
+    open-pull-requests-limit: 3
+
+  # 2. Monitoraggio degli aggiornamenti delle GitHub Actions (.github/workflows)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    timezone: "Europe/Rome"
+    open-pull-requests-limit: 2
