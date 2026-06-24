@@ -1,6 +1,6 @@
-import '../../workspace/models/file_diff.dart';
-import '../interfaces/validator.dart';
-import '../models/validation_result.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/file_diff.dart';
+import 'package:ai_orchestrator/features/ai_code/validation/interfaces/validator.dart';
+import 'package:ai_orchestrator/features/ai_code/validation/models/validation_result.dart';
 
 /// Validatore euristico veloce anti-rumore operante su stringhe grezze.
 /// Ripulito dai controlli sulle parentesi graffe per azzerare i falsi positivi.
