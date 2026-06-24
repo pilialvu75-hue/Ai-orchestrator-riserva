@@ -1,9 +1,9 @@
-import '../../workspace/models/code_patch.dart';
-import '../../workspace/models/file_diff.dart';
-import '../../workspace/services/virtual_workspace.dart';
-import '../../workspace/services/workspace_diff_builder.dart';
-import '../../validation/interfaces/validator.dart';
-import '../../validation/models/validation_result.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/code_patch.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/file_diff.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/services/virtual_workspace.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/services/workspace_diff_builder.dart';
+import 'package:ai_orchestrator/features/ai_code/validation/interfaces/validator.dart';
+import 'package:ai_orchestrator/features/ai_code/validation/models/validation_result.dart';
 
 /// Oggetto di ritorno transitorio per isolare l'esito dell'orchestrazione nella Fase 1.
 class OrchestrationResultPhase1 {
@@ -63,7 +63,7 @@ class CodeOrchestratorImpl {
         return const OrchestrationResultPhase1(
           success: false,
           diffs: [],
-          errorMessage: 'Nessuna variazione di codice rilevata rispetto allo stato attuale.',
+          errorMessage: 'Nessuna variazione di codice rilevata rispetto sullo stato attuale.',
         );
       }
 
