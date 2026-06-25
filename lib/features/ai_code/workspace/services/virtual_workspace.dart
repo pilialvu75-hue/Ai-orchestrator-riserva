@@ -1,5 +1,5 @@
-import '../models/code_patch.dart';
-import '../models/workspace_apply_result.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/code_patch.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/workspace_apply_result.dart';
 
 /// Sandbox in memoria (VFS) che isola il codice reale dell'applicazione 
 /// dalle manipolazioni transitorie indotte dall'AI.
