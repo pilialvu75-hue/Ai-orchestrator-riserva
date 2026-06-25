@@ -12,7 +12,7 @@ class LocalInferenceModelIds {
   static const String deepSeekR1_7b = 'deepseek_r1_7b';
 
   // ── Nuove costanti Phi-3.5-mini ────────────────────────────────────────────
-  static const String phi3_5_mini = 'phi3_5_mini';
+  static const String phi35Mini = 'phi3_5_mini';
 
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
@@ -45,7 +45,7 @@ class LocalInferenceModelIds {
 
   /// Modelli che usano il template Phi-3 / Phi-3.5.
   static final Set<String> phi3ChatTemplateModels = {
-    phi3_5_mini,
+    phi35Mini,
   };
 
   // ── Risoluzione template ──────────────────────────────────────────────────
@@ -86,7 +86,7 @@ class LocalInferenceModelIds {
     final id = modelId.trim().toLowerCase();
     // Solo Qwen3 nativo supporta /no_think.
     // DeepSeek-R1-Distill e Phi-3 non lo supportano e corrompono l'output.
-    return id.contains('qwen3') &&!id.contains('phi');
+    return id.contains('qwen3') && !id.contains('phi');
   }
 
   // ── Pattern matching privato ──────────────────────────────────────────────
@@ -165,7 +165,7 @@ class LocalInferenceModelIds {
     if (id.contains('llama') && id.contains('1b')) return 0.5;
 
     // Phi-3.5-mini: stabile a 0.5
-    if (id.contains('phi-3.5') || id.contains('phi3_5')) return 0.5;
+    if (id.contains('phi-3.5') || id.contains('phi3_5') || id.contains('phi35mini')) return 0.5;
 
     // Qwen/DeepSeek: 0.5 di default
     if (id.contains('qwen') || id.contains('deepseek')) return 0.5;
