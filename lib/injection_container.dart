@@ -91,7 +91,6 @@ import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_serv
 import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
 import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
-import 'package:ai_orchestrator/features/voice/sherpa_onnx_adapter.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
