@@ -1,4 +1,4 @@
-import '../models/file_diff.dart';
+import 'package:ai_orchestrator/features/ai_code/workspace/models/file_diff.dart';
 
 /// Calcola i delta strutturali staccando la generazione del diff logico 
 /// dallo stato mutabile del workspace.
