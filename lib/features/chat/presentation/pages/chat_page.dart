@@ -916,6 +916,11 @@ class _ChatBodyState extends State<_ChatBody> {
                   )
                 ],
               ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined, color: Color(0xE6FFFFFF)),
+                onPressed: widget.onSettings,
+              ),
+              const SizedBox(width: 4),
             ],
           ),
           
@@ -1103,14 +1108,11 @@ class _HighPerformanceChatList extends StatelessWidget {
   final List<ChatMessage> messages;
   final AssistantMessageTextSize assistantTextSize;
 
-  // Funzione per generare il feedback aptico e mostrare il menu contestuale
   Future<void> _showContextMenu(BuildContext context, Offset position, String text) async {
-    // Feedback Aptico
     HapticFeedback.lightImpact();
 
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     
-    // Configurazione Menu Contestuale
     final String? selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -1186,7 +1188,6 @@ class _HighPerformanceChatList extends StatelessWidget {
             key: ValueKey(message.id),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              // Tracciamento della posizione esatta del tocco sul Long Press
               onLongPressStart: (details) => _showContextMenu(
                 context, 
                 details.globalPosition, 
