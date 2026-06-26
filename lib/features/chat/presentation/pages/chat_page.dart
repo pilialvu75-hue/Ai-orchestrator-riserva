@@ -902,6 +902,7 @@ class _ChatBodyState extends State<_ChatBody> {
                           const Divider(color: Colors.white12),
                           Text("Local Runtime: ${widget.runtimeState.status != LocalRuntimeStatus.ffiMissing ? 'ON' : 'OFF'}", 
                               style: TextStyle(color: widget.runtimeState.status != LocalRuntimeStatus.ffiMissing ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80), fontSize: 11, fontWeight: FontWeight.w600)),
+                          Text("Mode: ${widget.runtimeModeName.toUpperCase()}", style: const TextStyle(color: Colors.white70, fontSize: 11)),
                           Text("Voice Engine: ${widget.voiceEngineActive ? 'ON' : 'OFF'}", 
                               style: TextStyle(color: widget.voiceEngineActive ? const Color(0xFF4ADE80) : const Color(0xFFFF8A80), fontSize: 11, fontWeight: FontWeight.w600)),
                           Text("GPU Backend: ${widget.gpuBackend.toUpperCase()}", 
@@ -1130,7 +1131,6 @@ class _HighPerformanceChatList extends StatelessWidget {
           child: Row(
             children: [
               Icon(Icons.copy_rounded, size: 20, color: Colors.white70),
-              SSIBLE_SizedBox,
               SizedBox(width: 10),
               Text('Copia', style: TextStyle(color: Colors.white)),
             ],
