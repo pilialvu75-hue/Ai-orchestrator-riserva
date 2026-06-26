@@ -14,6 +14,9 @@ class LocalInferenceModelIds {
   // ── Nuove costanti Phi-3.5-mini ────────────────────────────────────────────
   static const String phi35Mini = 'phi3_5_mini';
 
+  @Deprecated('Usa phi35Mini per rispettare lo stile lowerCamelCase')
+  static const String phi3_5_mini = phi35Mini;
+
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
   /// Modelli che usano il template Llama 3 Instruct
