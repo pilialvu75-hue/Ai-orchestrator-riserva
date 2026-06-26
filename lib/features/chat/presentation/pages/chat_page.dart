@@ -855,15 +855,15 @@ class _ChatBodyState extends State<_ChatBody> {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.white12),
                 ),
-                child: Row(
+                child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      widget.runtimeModeName.toUpperCase(),
-                      style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                      "Phi-3.5 Mini Instruct",
+                      style: TextStyle(color: Color(0xE6FFFFFF), fontSize: 14, fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.arrow_drop_down, color: Colors.white38, size: 16),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_drop_down, color: Colors.white38, size: 16),
                   ],
                 ),
               ),
@@ -1130,6 +1130,7 @@ class _HighPerformanceChatList extends StatelessWidget {
           child: Row(
             children: [
               Icon(Icons.copy_rounded, size: 20, color: Colors.white70),
+              SSIBLE_SizedBox,
               SizedBox(width: 10),
               Text('Copia', style: TextStyle(color: Colors.white)),
             ],
