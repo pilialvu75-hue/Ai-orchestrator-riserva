@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 
-// Importazione pulita dei componenti satelliti (senza chat_app_bar che ora è interna)
+// Importazione dei componenti satelliti
 import 'package:ai_orchestrator/presentation/chat/components/chat_conversation.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
@@ -56,6 +56,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   double _textScale = 1.0;
   double _assistantTextSize = 14.0;
   int _secretClickCount = 0;
+
+  // SCUDO CRITICO: Memorizza la cronologia per non far svuotare lo schermo nei cambi di stato intermedi
+  List<dynamic> _cachedMessages = const [];
 
   @override
   void initState() {
@@ -203,7 +206,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         children: [
           BlocBuilder<OrchestratorStateEngine, ChatState>(
             builder: (context, chatState) {
-              final List<dynamic> currentMessages = (chatState as dynamic).messages ?? const [];
+              // Estrazione difensiva avanzata per evitare NoSuchMethodError
+              List<dynamic> currentMessages = _cachedMessages;
+              try {
+                final stateMessages = (chatState as dynamic).messages;
+                if (stateMessages != null) {
+                  currentMessages = stateMessages;
+                  _cachedMessages = stateMessages; // Allinea la cache
+                }
+              } catch (_) {
+                // Se lo stato non espone 'messages', manteniamo i dati dell'ultimo stato valido
+              }
               
               return ChatConversation(
                 textScale: _textScale,
