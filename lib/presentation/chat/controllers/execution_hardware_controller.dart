@@ -41,9 +41,10 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
       gpuBackend = 'unavailable';
     }
 
+    // CORRETTO: Cambiati '=' in ':' per l'inizializzazione dei parametri nominali
     value = HardwareSnapshot(
-      gpuAccelerationActive = gpuActive,
-      gpuBackend = gpuBackend,
+      gpuAccelerationActive: gpuActive,
+      gpuBackend: gpuBackend,
     );
   }
 }
