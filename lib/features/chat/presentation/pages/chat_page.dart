@@ -9,9 +9,10 @@ import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_wid
 import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
 import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
-// Importazione dei controllori di Fase 2
+// Importazione dei controllori atomici di Fase 2
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
 
 // Servizi infrastrutturali core
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -40,17 +41,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   
-  // Controllori atomici isolati
+  // Trittico di controllori atomici isolati
   late final RuntimeStateController _runtimeStateController;
   late final ExecutionHardwareController _hardwareController;
+  late final SystemIndicatorsController _indicatorsController;
   
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
   
-  bool _voiceEngineActive = false;
-  String _runtimeModeName = 'hybrid';
-
   bool _showMetrics = false;
   bool _debugLabOpen = false;
   double _textScale = 1.0;
@@ -70,6 +69,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     
     _runtimeStateController = RuntimeStateController(diagnostics: _runtimeDiagnostics);
     _hardwareController = ExecutionHardwareController();
+    _indicatorsController = SystemIndicatorsController(
+      runtimeSettings: _runtimeSettings,
+      voiceEngine: _voiceEngine,
+    );
     
     WidgetsBinding.instance.addObserver(this);
     _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
@@ -86,17 +89,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshRuntimeIndicators() async {
-    final runtimeMode = await _runtimeSettings.loadRuntimeMode();
-    final voiceStatus = await _voiceEngine.inspect();
-    
-    // Delega il controllo canali nativi al controllore dedicato
+    // Aggiornamento parallelo dei controllori senza forzare rebuild della pagina
     await _hardwareController.updateHardwareStatus();
-
-    if (!mounted) return;
-    setState(() {
-      _runtimeModeName = runtimeMode.name;
-      _voiceEngineActive = voiceStatus.offlineAsrAvailable && voiceStatus.readyForInput;
-    });
+    await _indicatorsController.refreshIndicators();
   }
 
   void _onSend(String text) {
@@ -203,13 +198,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 return ValueListenableBuilder<HardwareSnapshot>(
                   valueListenable: _hardwareController,
                   builder: (context, hardwareSnapshot, _) {
-                    return RuntimeMetricsWidget(
-                      monitorState: runtimeSnapshot.state,
-                      voiceEngineActive: _voiceEngineActive,
-                      gpuAccelerationActive: hardwareSnapshot.gpuAccelerationActive,
-                      gpuBackend: hardwareSnapshot.gpuBackend,
-                      runtimeModeName: _runtimeModeName,
-                      onClose: () => setState(() => _showMetrics = false),
+                    return ValueListenableBuilder<SystemIndicatorsSnapshot>(
+                      valueListenable: _indicatorsController,
+                      builder: (context, indicatorsSnapshot, _) {
+                        return RuntimeMetricsWidget(
+                          monitorState: runtimeSnapshot.state,
+                          voiceEngineActive: indicatorsSnapshot.voiceEngineActive,
+                          gpuAccelerationActive: hardwareSnapshot.gpuAccelerationActive,
+                          gpuBackend: hardwareSnapshot.gpuBackend,
+                          runtimeModeName: indicatorsSnapshot.runtimeModeName,
+                          onClose: () => setState(() => _showMetrics = false),
+                        );
+                      },
                     );
                   },
                 );
@@ -237,6 +237,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _runtimeStateController.dispose();
     _hardwareController.dispose();
+    _indicatorsController.dispose();
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
