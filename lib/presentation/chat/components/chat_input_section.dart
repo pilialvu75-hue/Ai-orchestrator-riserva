@@ -43,14 +43,13 @@ class _ChatInputSectionState extends State<ChatInputSection> {
           BoxShadow(
             offset: const Offset(0, -1),
             blurRadius: 4.0,
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
           ),
         ],
       ),
       child: SafeArea(
         child: Row(
           children: [
-            // Bottone per l'attivazione della sessione vocale (STT/ASR)
             IconButton(
               icon: const Icon(Icons.mic_none_outlined),
               onPressed: widget.isSending ? null : widget.onVoicePressed,
@@ -69,7 +68,6 @@ class _ChatInputSectionState extends State<ChatInputSection> {
                 enabled: !widget.isSending,
               ),
             ),
-            // Bottone di invio reattivo allo stato computazionale dell'interfaccia
             IconButton(
               icon: widget.isSending
                   ? const SizedBox(
