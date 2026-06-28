@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter/services.dart';
 
 // Importazione dei componenti satelliti
 import 'package:ai_orchestrator/presentation/chat/components/chat_conversation.dart';
@@ -10,8 +9,9 @@ import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_wid
 import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
 import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
-// Importazione del nuovo controllore di Fase 2
+// Importazione dei controllori di Fase 2
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
 
 // Servizi infrastrutturali core
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -33,7 +33,6 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  static const _mlcNativeChannel = MethodChannel('com.aiorchestrator/mlc_native');
   static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
   
@@ -41,16 +40,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   
-  // Gestore dello stato atomico ad alta frequenza
+  // Controllori atomici isolati
   late final RuntimeStateController _runtimeStateController;
+  late final ExecutionHardwareController _hardwareController;
   
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
   
   bool _voiceEngineActive = false;
-  bool _gpuAccelerationActive = false;
-  String _gpuBackend = 'cpu';
   String _runtimeModeName = 'hybrid';
 
   bool _showMetrics = false;
@@ -59,7 +57,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   double _assistantTextSize = 14.0;
   int _secretClickCount = 0;
 
-  // SCUDO CRITICO: Memorizza la cronologia per non far svuotare lo schermo nei cambi di stato intermedi
   List<dynamic> _cachedMessages = const [];
 
   @override
@@ -71,8 +68,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeSettings = di.sl<AiRuntimeSettingsService>();
     _voiceEngine = di.sl<VoiceEngine>();
     
-    // Inizializzazione del controllore dedicato
     _runtimeStateController = RuntimeStateController(diagnostics: _runtimeDiagnostics);
+    _hardwareController = ExecutionHardwareController();
     
     WidgetsBinding.instance.addObserver(this);
     _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
@@ -91,30 +88,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _refreshRuntimeIndicators() async {
     final runtimeMode = await _runtimeSettings.loadRuntimeMode();
     final voiceStatus = await _voiceEngine.inspect();
-    var gpuActive = false;
-    var gpuBackend = 'cpu';
-    try {
-      final nativeAvailable = await _mlcNativeChannel.invokeMethod<bool>('isMlcNativeAvailable');
-      final backend = await _mlcNativeChannel.invokeMethod<String>('getMlcBackend');
-      gpuBackend = (backend ?? 'cpu').trim();
-      final normalizedBackend = gpuBackend.toLowerCase();
-      gpuActive = nativeAvailable == true &&
-          normalizedBackend.isNotEmpty &&
-          normalizedBackend != 'cpu' &&
-          normalizedBackend != 'fallback-llama';
-    } on PlatformException {
-      gpuActive = false;
-      gpuBackend = 'unavailable';
-    } on MissingPluginException {
-      gpuActive = false;
-      gpuBackend = 'unavailable';
-    }
+    
+    // Delega il controllo canali nativi al controllore dedicato
+    await _hardwareController.updateHardwareStatus();
+
     if (!mounted) return;
     setState(() {
       _runtimeModeName = runtimeMode.name;
       _voiceEngineActive = voiceStatus.offlineAsrAvailable && voiceStatus.readyForInput;
-      _gpuAccelerationActive = gpuActive;
-      _gpuBackend = gpuBackend;
     });
   }
 
@@ -218,14 +199,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           if (_showMetrics)
             ValueListenableBuilder<ChatRuntimeSnapshot>(
               valueListenable: _runtimeStateController,
-              builder: (context, snapshot, _) {
-                return RuntimeMetricsWidget(
-                  monitorState: snapshot.state,
-                  voiceEngineActive: _voiceEngineActive,
-                  gpuAccelerationActive: _gpuAccelerationActive,
-                  gpuBackend: _gpuBackend,
-                  runtimeModeName: _runtimeModeName,
-                  onClose: () => setState(() => _showMetrics = false),
+              builder: (context, runtimeSnapshot, _) {
+                return ValueListenableBuilder<HardwareSnapshot>(
+                  valueListenable: _hardwareController,
+                  builder: (context, hardwareSnapshot, _) {
+                    return RuntimeMetricsWidget(
+                      monitorState: runtimeSnapshot.state,
+                      voiceEngineActive: _voiceEngineActive,
+                      gpuAccelerationActive: hardwareSnapshot.gpuAccelerationActive,
+                      gpuBackend: hardwareSnapshot.gpuBackend,
+                      runtimeModeName: _runtimeModeName,
+                      onClose: () => setState(() => _showMetrics = false),
+                    );
+                  },
                 );
               },
             ),
@@ -250,6 +236,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _runtimeStateController.dispose();
+    _hardwareController.dispose();
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
