@@ -28,7 +28,6 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   int? _lastSignature;
 
   RuntimeStateController({required this.diagnostics}) : super(const ChatRuntimeSnapshot()) {
-    // Sincronizzazione immediata al caricamento
     _syncState();
   }
 
@@ -54,7 +53,6 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
       currentState.startedAt,
     );
 
-    // Esegue l'aggiornamento SOLO se i dati infrastrutturali sono realmente cambiati
     if (currentSignature != _lastSignature) {
       _lastSignature = currentSignature;
       value = ChatRuntimeSnapshot(state: currentState);
