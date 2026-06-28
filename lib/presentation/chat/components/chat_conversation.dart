@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'chat_app_bar.dart';
 
 class ChatConversation extends StatelessWidget {
   final double textScale;
@@ -14,16 +15,23 @@ class ChatConversation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Applica il fattore di scala del testo ereditato dal pannello preferenze/debug
     return MediaQuery(
+      // Applica il fattore di scala del testo proveniente dal Debug Lab
       data: MediaQuery.of(context).copyWith(
-        textScaler: TextScaler.linear(textScale),
+        // ignore: deprecated_member_use
+        textScaleFactor: textScale,
       ),
       child: Column(
         children: [
+          // 1. La vera ed unica ChatAppBar nativa integrata in cima
+          const ChatAppBar(),
+          
+          // 2. Il motore della lista messaggi che occupa tutto lo spazio centrale scaricando la memoria
           Expanded(
             child: chatList,
           ),
+          
+          // 3. La barra inferiore per tastiera, allegati e microfono
           inputSection,
         ],
       ),
