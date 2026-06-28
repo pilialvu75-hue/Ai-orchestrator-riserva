@@ -1,50 +1,27 @@
-// =========================================================================
-// AI-Orchestrator - Presentation Layer
-// file: lib/features/chat/presentation/pages/chat_page.dart
-//
-// 🗺️ MAPPA DEI COMPONENTI COLLEGATI (FASE 1)
-// -------------------------------------------------------------------------
-// 📍 AppBar e Barra di Stato   -> lib/presentation/chat/components/chat_app_bar.dart
-// 📍 Layout Principale Chat    -> lib/presentation/chat/components/chat_conversation.dart
-// 📍 Lista Messaggi Virtualiz. -> lib/presentation/chat/components/high_performance_chat_list.dart
-// 📍 Monitor Metriche Hardware  -> lib/presentation/chat/components/runtime_metrics_widget.dart
-// 📍 Barra Input e Mic Vocale   -> lib/presentation/chat/components/chat_input_section.dart
-// 📍 Scompartimento Debug Lab  -> lib/presentation/chat/components/debug_lab_overlay.dart
-// =========================================================================
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 
-// Importazione dei 6 componenti satelliti con percorsi relativi corretti rispetto alla struttura del repo
-import '../../../../presentation/chat/components/chat_app_bar.dart';
-import '../../../../presentation/chat/components/chat_conversation.dart';
-import '../../../../presentation/chat/components/high_performance_chat_list.dart';
-import '../../../../presentation/chat/components/runtime_metrics_widget.dart';
-import '../../../../presentation/chat/components/chat_input_section.dart';
-import '../../../../presentation/chat/components/debug_lab_overlay.dart';
+// Importazione dei componenti con percorsi package assoluti e puliti
+import 'package:ai_orchestrator/presentation/chat/components/chat_app_bar.dart';
+import 'package:ai_orchestrator/presentation/chat/components/chat_conversation.dart';
+import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
+import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
+import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
+import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
-// Servizi di Core e Infrastruttura occupati dall'orchestrazione legacy
-import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
-import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
-import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
-import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
-import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+// Servizi infrastrutturali core
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
-import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
-import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
-import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
-const int _kAssistantTtsRecencyThresholdSeconds = 10;
 const Duration _kRuntimeStatePollInterval = Duration(seconds: 2);
 
 class ChatPage extends StatefulWidget {
@@ -75,7 +52,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   String _gpuBackend = 'cpu';
   String _runtimeModeName = 'hybrid';
 
-  // Configurazioni grafiche temporanee per la Fase 1
   bool _showMetrics = false;
   bool _debugLabOpen = false;
   double _textScale = 1.0;
@@ -166,7 +142,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _onSend(String text) {
-    _uiLog('[FORENSIC_BEFORE_ONSEND] chars=${text.length}');
+    debugPrint('[CHAT_UI] [FORENSIC_BEFORE_ONSEND] chars=${text.length}');
     _uiSendBeganAt = DateTime.now();
     _uiStreamStarted = false;
     _startUiDeadlockGuard();
@@ -233,10 +209,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         children: [
           BlocBuilder<OrchestratorStateEngine, ChatState>(
             builder: (context, chatState) {
+              final List<dynamic> currentMessages = (chatState as dynamic).messages ?? const [];
+              
               return ChatConversation(
                 textScale: _textScale,
                 chatList: HighPerformanceChatList(
-                  messages: chatState.messages,
+                  messages: currentMessages,
                   textSize: _assistantTextSize,
                 ),
                 inputSection: ChatInputSection(
@@ -259,6 +237,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           if (_showMetrics)
             RuntimeMetricsWidget(
               monitorState: _runtimeState,
+              voiceEngineActive: _voiceEngineActive,
+              gpuAccelerationActive: _gpuAccelerationActive,
+              gpuBackend: _gpuBackend,
+              runtimeModeName: _runtimeModeName,
               onClose: () => setState(() => _showMetrics = false),
             ),
           if (_debugLabOpen)
@@ -285,9 +267,5 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
-  }
-
-  static void _uiLog(String message) {
-    debugPrint('[CHAT_UI] $message');
   }
 }
