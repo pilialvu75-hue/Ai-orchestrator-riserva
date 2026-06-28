@@ -9,10 +9,11 @@ import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_wid
 import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
 import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
-// Importazione dei controllori atomici di Fase 2
+// Importazione dei controllori e view model di Fase 2
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
+import 'package:ai_orchestrator/presentation/chat/view_models/chat_appearance_view_model.dart';
 
 // Servizi infrastrutturali core
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -41,20 +42,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   
-  // Trittico di controllori atomici isolati
+  // Ecosistema dei controllori atomici di Fase 2
   late final RuntimeStateController _runtimeStateController;
   late final ExecutionHardwareController _hardwareController;
   late final SystemIndicatorsController _indicatorsController;
+  late final ChatAppearanceViewModel _appearanceViewModel;
   
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
-  
-  bool _showMetrics = false;
-  bool _debugLabOpen = false;
-  double _textScale = 1.0;
-  double _assistantTextSize = 14.0;
-  int _secretClickCount = 0;
 
   List<dynamic> _cachedMessages = const [];
 
@@ -73,6 +69,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       runtimeSettings: _runtimeSettings,
       voiceEngine: _voiceEngine,
     );
+    _appearanceViewModel = ChatAppearanceViewModel();
     
     WidgetsBinding.instance.addObserver(this);
     _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
@@ -89,7 +86,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshRuntimeIndicators() async {
-    // Aggiornamento parallelo dei controllori senza forzare rebuild della pagina
     await _hardwareController.updateHardwareStatus();
     await _indicatorsController.refreshIndicators();
   }
@@ -134,100 +130,88 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _uiStreamStarted = false;
   }
 
-  void _handleSecretPatternClick() {
-    setState(() {
-      _secretClickCount++;
-      if (_secretClickCount >= 7) {
-        _secretClickCount = 0;
-        _debugLabOpen = !_debugLabOpen;
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF131314),
-      body: Stack(
-        children: [
-          BlocBuilder<OrchestratorStateEngine, ChatState>(
-            builder: (context, chatState) {
-              List<dynamic> currentMessages = _cachedMessages;
-              try {
-                final stateMessages = (chatState as dynamic).messages;
-                if (stateMessages != null) {
-                  currentMessages = stateMessages;
-                  _cachedMessages = stateMessages;
-                }
-              } catch (_) {}
-              
-              return ChatConversation(
-                textScale: _textScale,
-                title: 'Phi-3.5-mini',
-                onTitlePressed: _handleSecretPatternClick,
-                onSettingsPressed: () {
-                  setState(() {
-                    _showMetrics = !_showMetrics;
-                  });
+      body: ListenableBuilder(
+        listenable: _appearanceViewModel,
+        builder: (context, _) {
+          return Stack(
+            children: [
+              BlocBuilder<OrchestratorStateEngine, ChatState>(
+                builder: (context, chatState) {
+                  List<dynamic> currentMessages = _cachedMessages;
+                  try {
+                    final stateMessages = (chatState as dynamic).messages;
+                    if (stateMessages != null) {
+                      currentMessages = stateMessages;
+                      _cachedMessages = stateMessages;
+                    }
+                  } catch (_) {}
+                  
+                  return ChatConversation(
+                    textScale: _appearanceViewModel.textScale,
+                    title: 'Phi-3.5-mini',
+                    onTitlePressed: _appearanceViewModel.handleSecretPatternClick,
+                    onSettingsPressed: _appearanceViewModel.toggleMetrics,
+                    chatList: HighPerformanceChatList(
+                      messages: currentMessages,
+                      textSize: _appearanceViewModel.assistantTextSize,
+                    ),
+                    inputSection: ChatInputSection(
+                      onSend: _onSend,
+                      onVoicePressed: () {
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          builder: (context) => const SizedBox(
+                            height: 350,
+                            child: Center(child: Text('Voice Session Activating...')),
+                          ),
+                        );
+                      },
+                      isSending: chatState is ChatSending,
+                    ),
+                  );
                 },
-                chatList: HighPerformanceChatList(
-                  messages: currentMessages,
-                  textSize: _assistantTextSize,
-                ),
-                inputSection: ChatInputSection(
-                  onSend: _onSend,
-                  onVoicePressed: () {
-                    showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      builder: (context) => const SizedBox(
-                        height: 350,
-                        child: Center(child: Text('Voice Session Activating...')),
-                      ),
-                    );
-                  },
-                  isSending: chatState is ChatSending,
-                ),
-              );
-            },
-          ),
-          if (_showMetrics)
-            ValueListenableBuilder<ChatRuntimeSnapshot>(
-              valueListenable: _runtimeStateController,
-              builder: (context, runtimeSnapshot, _) {
-                return ValueListenableBuilder<HardwareSnapshot>(
-                  valueListenable: _hardwareController,
-                  builder: (context, hardwareSnapshot, _) {
-                    return ValueListenableBuilder<SystemIndicatorsSnapshot>(
-                      valueListenable: _indicatorsController,
-                      builder: (context, indicatorsSnapshot, _) {
-                        return RuntimeMetricsWidget(
-                          monitorState: runtimeSnapshot.state,
-                          voiceEngineActive: indicatorsSnapshot.voiceEngineActive,
-                          gpuAccelerationActive: hardwareSnapshot.gpuAccelerationActive,
-                          gpuBackend: hardwareSnapshot.gpuBackend,
-                          runtimeModeName: indicatorsSnapshot.runtimeModeName,
-                          onClose: () => setState(() => _showMetrics = false),
+              ),
+              if (_appearanceViewModel.showMetrics)
+                ValueListenableBuilder<ChatRuntimeSnapshot>(
+                  valueListenable: _runtimeStateController,
+                  builder: (context, runtimeSnapshot, _) {
+                    return ValueListenableBuilder<HardwareSnapshot>(
+                      valueListenable: _hardwareController,
+                      builder: (context, hardwareSnapshot, _) {
+                        return ValueListenableBuilder<SystemIndicatorsSnapshot>(
+                          valueListenable: _indicatorsController,
+                          builder: (context, indicatorsSnapshot, _) {
+                            return RuntimeMetricsWidget(
+                              monitorState: runtimeSnapshot.state,
+                              voiceEngineActive: indicatorsSnapshot.voiceEngineActive,
+                              gpuAccelerationActive: hardwareSnapshot.gpuAccelerationActive,
+                              gpuBackend: hardwareSnapshot.gpuBackend,
+                              runtimeModeName: indicatorsSnapshot.runtimeModeName,
+                              onClose: () => _appearanceViewModel.setMetricsVisibility(false),
+                            );
+                          },
                         );
                       },
                     );
                   },
-                );
-              },
-            ),
-          if (_debugLabOpen)
-            DebugLabOverlay(
-              onToggleMetrics: () => setState(() {
-                _showMetrics = !_showMetrics;
-                _debugLabOpen = false;
-              }),
-              onTextScaleChanged: (scale) => setState(() => _textScale = scale),
-              onFontSizeChanged: (size) => setState(() => _assistantTextSize = size),
-              currentTextScale: _textScale,
-              currentFontSize: _assistantTextSize,
-              onClose: () => setState(() => _debugLabOpen = false),
-            ),
-        ],
+                ),
+              if (_appearanceViewModel.debugLabOpen)
+                DebugLabOverlay(
+                  onToggleMetrics: _appearanceViewModel.toggleMetricsFromLab,
+                  onTextScaleChanged: _appearanceViewModel.updateTextScale,
+                  onFontSizeChanged: _appearanceViewModel.updateFontSize,
+                  currentTextScale: _appearanceViewModel.textScale,
+                  currentFontSize: _appearanceViewModel.assistantTextSize,
+                  onClose: _appearanceViewModel.closeDebugLab,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -238,6 +222,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeStateController.dispose();
     _hardwareController.dispose();
     _indicatorsController.dispose();
+    _appearanceViewModel.dispose();
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
