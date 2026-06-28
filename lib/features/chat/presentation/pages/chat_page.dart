@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 
-// Importazione dei componenti con percorsi package assoluti e puliti
-import 'package:ai_orchestrator/presentation/chat/components/chat_app_bar.dart';
+// Importazione pulita dei componenti satelliti (senza chat_app_bar che ora è interna)
 import 'package:ai_orchestrator/presentation/chat/components/chat_conversation.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
@@ -200,7 +199,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF131314),
-      // L'appBar duplicata è stata rimossa da qui perché è già integrata dentro ChatConversation
       body: Stack(
         children: [
           BlocBuilder<OrchestratorStateEngine, ChatState>(
@@ -209,6 +207,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               
               return ChatConversation(
                 textScale: _textScale,
+                title: 'Phi-3.5-mini',
+                onTitlePressed: _handleSecretPatternClick,
+                onSettingsPressed: () {
+                  setState(() {
+                    _showMetrics = !_showMetrics;
+                  });
+                },
                 chatList: HighPerformanceChatList(
                   messages: currentMessages,
                   textSize: _assistantTextSize,
