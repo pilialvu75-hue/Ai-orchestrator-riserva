@@ -16,7 +16,8 @@ class HighPerformanceChatList extends StatelessWidget {
       key: const PageStorageKey('high_perf_chat_list'),
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
       itemCount: messages.length,
-      scrollCacheExtent: 600.0, 
+      // ignore: deprecated_member_use
+      cacheExtent: 600.0, 
       itemBuilder: (context, index) {
         final message = messages[index];
         
