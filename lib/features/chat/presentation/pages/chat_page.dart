@@ -200,11 +200,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF131314),
-      appBar: ChatAppBar(
-        title: 'Phi-3.5 Mini Instruct',
-        onSettingsPressed: () => Navigator.of(context).pushNamed('/settings'),
-        onTitlePressed: _handleSecretPatternClick,
-      ),
+      // L'appBar duplicata è stata rimossa da qui perché è già integrata dentro ChatConversation
       body: Stack(
         children: [
           BlocBuilder<OrchestratorStateEngine, ChatState>(
