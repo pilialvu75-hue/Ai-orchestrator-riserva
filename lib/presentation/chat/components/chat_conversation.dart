@@ -1,37 +1,44 @@
 import 'package:flutter/material.dart';
-import 'chat_app_bar.dart';
+import 'package:ai_orchestrator/presentation/chat/components/chat_app_bar.dart';
 
 class ChatConversation extends StatelessWidget {
   final double textScale;
   final Widget chatList;
   final Widget inputSection;
+  final String title;
+  final VoidCallback onTitlePressed;
+  final VoidCallback onSettingsPressed;
 
   const ChatConversation({
     super.key,
     required this.textScale,
     required this.chatList,
     required this.inputSection,
+    required this.title,
+    required this.onTitlePressed,
+    required this.onSettingsPressed,
   });
 
   @override
   Widget build(BuildContext context) {
     return MediaQuery(
-      // Applica il fattore di scala del testo proveniente dal Debug Lab
       data: MediaQuery.of(context).copyWith(
         // ignore: deprecated_member_use
         textScaleFactor: textScale,
       ),
       child: Column(
         children: [
-          // 1. La vera ed unica ChatAppBar nativa integrata in cima
-          const ChatAppBar(),
+          // Passaggio corretto dei parametri richiesti dall'AppBar nativa
+          ChatAppBar(
+            title: title,
+            onTitlePressed: onTitlePressed,
+            onSettingsPressed: onSettingsPressed,
+          ),
           
-          // 2. Il motore della lista messaggi che occupa tutto lo spazio centrale scaricando la memoria
           Expanded(
             child: chatList,
           ),
           
-          // 3. La barra inferiore per tastiera, allegati e microfono
           inputSection,
         ],
       ),
