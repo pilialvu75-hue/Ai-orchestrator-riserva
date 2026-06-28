@@ -10,10 +10,12 @@ import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_wid
 import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
 import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
+// Importazione del nuovo controllore di Fase 2
+import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
+
 // Servizi infrastrutturali core
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
@@ -39,9 +41,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   
-  LocalRuntimeState _runtimeState = const LocalRuntimeState();
-  Timer? _runtimeStateSyncTimer;
-  int? _runtimeStateSignature;
+  // Gestore dello stato atomico ad alta frequenza
+  late final RuntimeStateController _runtimeStateController;
+  
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
@@ -69,48 +71,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeSettings = di.sl<AiRuntimeSettingsService>();
     _voiceEngine = di.sl<VoiceEngine>();
     
-    _runtimeState = _runtimeDiagnostics.monitor.state;
-    _runtimeStateSignature = _signatureForRuntimeState(_runtimeState);
+    // Inizializzazione del controllore dedicato
+    _runtimeStateController = RuntimeStateController(diagnostics: _runtimeDiagnostics);
     
     WidgetsBinding.instance.addObserver(this);
-    _startRuntimeStateSync();
+    _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
     unawaited(_refreshRuntimeIndicators());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startRuntimeStateSync();
+      _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
     } else {
-      _stopRuntimeStateSync();
+      _runtimeStateController.stopMonitoring();
     }
-  }
-
-  void _syncRuntimeStateFromMonitor() {
-    if (!mounted) return;
-    final state = _runtimeDiagnostics.monitor.state;
-    final signature = _signatureForRuntimeState(state);
-    if (signature == _runtimeStateSignature) return;
-    setState(() {
-      _runtimeState = state;
-      _runtimeStateSignature = signature;
-    });
-    unawaited(_refreshRuntimeIndicators());
-  }
-
-  int _signatureForRuntimeState(LocalRuntimeState state) {
-    return Object.hash(state.status, state.message, state.tokensGenerated, state.elapsed, state.startedAt);
-  }
-
-  void _startRuntimeStateSync() {
-    if (!mounted) return;
-    if (_runtimeStateSyncTimer?.isActive == true) return;
-    _runtimeStateSyncTimer = Timer.periodic(_kRuntimeStatePollInterval, (timer) => _syncRuntimeStateFromMonitor());
-  }
-
-  void _stopRuntimeStateSync() {
-    _runtimeStateSyncTimer?.cancel();
-    _runtimeStateSyncTimer = null;
   }
 
   Future<void> _refreshRuntimeIndicators() async {
@@ -156,11 +131,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ));
   }
 
-  bool _isRuntimeInferencing() {
-    return _runtimeState.status == LocalRuntimeStatus.inferencing ||
-        _runtimeState.status == LocalRuntimeStatus.streaming;
-  }
-
   void _startUiDeadlockGuard() {
     _cancelUiDeadlockGuard();
     _uiDeadlockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -169,7 +139,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       final chatState = context.read<OrchestratorStateEngine>().state;
       final waiting = chatState is ChatSending;
       final elapsed = DateTime.now().difference(startedAt);
-      if (waiting && !_isRuntimeInferencing() && elapsed > _uiDeadlockTimeout) {
+      if (waiting && !_runtimeStateController.isInferencing() && elapsed > _uiDeadlockTimeout) {
         context.read<OrchestratorStateEngine>().add(
               const RecoverFromStuckUiEvent(
                 sessionId: _kDefaultSessionId,
@@ -206,17 +176,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         children: [
           BlocBuilder<OrchestratorStateEngine, ChatState>(
             builder: (context, chatState) {
-              // Estrazione difensiva avanzata per evitare NoSuchMethodError
               List<dynamic> currentMessages = _cachedMessages;
               try {
                 final stateMessages = (chatState as dynamic).messages;
                 if (stateMessages != null) {
                   currentMessages = stateMessages;
-                  _cachedMessages = stateMessages; // Allinea la cache
+                  _cachedMessages = stateMessages;
                 }
-              } catch (_) {
-                // Se lo stato non espone 'messages', manteniamo i dati dell'ultimo stato valido
-              }
+              } catch (_) {}
               
               return ChatConversation(
                 textScale: _textScale,
@@ -249,13 +216,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             },
           ),
           if (_showMetrics)
-            RuntimeMetricsWidget(
-              monitorState: _runtimeState,
-              voiceEngineActive: _voiceEngineActive,
-              gpuAccelerationActive: _gpuAccelerationActive,
-              gpuBackend: _gpuBackend,
-              runtimeModeName: _runtimeModeName,
-              onClose: () => setState(() => _showMetrics = false),
+            ValueListenableBuilder<ChatRuntimeSnapshot>(
+              valueListenable: _runtimeStateController,
+              builder: (context, snapshot, _) {
+                return RuntimeMetricsWidget(
+                  monitorState: snapshot.state,
+                  voiceEngineActive: _voiceEngineActive,
+                  gpuAccelerationActive: _gpuAccelerationActive,
+                  gpuBackend: _gpuBackend,
+                  runtimeModeName: _runtimeModeName,
+                  onClose: () => setState(() => _showMetrics = false),
+                );
+              },
             ),
           if (_debugLabOpen)
             DebugLabOverlay(
@@ -277,7 +249,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _stopRuntimeStateSync();
+    _runtimeStateController.dispose();
     _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
