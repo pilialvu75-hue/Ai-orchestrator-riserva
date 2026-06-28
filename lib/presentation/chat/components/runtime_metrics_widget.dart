@@ -1,26 +1,34 @@
 import 'package:flutter/material.dart';
 
 class RuntimeMetricsWidget extends StatelessWidget {
-  final dynamic monitorState; // Mantenuto dynamic in Fase 1 per riflettere l'oggetto del monitor legacy
+  final dynamic monitorState;
+  final bool voiceEngineActive;
+  final bool gpuAccelerationActive;
+  final String gpuBackend;
+  final String runtimeModeName;
   final VoidCallback onClose;
 
   const RuntimeMetricsWidget({
     super.key,
     required this.monitorState,
+    required this.voiceEngineActive,
+    required this.gpuAccelerationActive,
+    required this.gpuBackend,
+    required this.runtimeModeName,
     required this.onClose,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Positioned(
       top: 16.0,
       left: 16.0,
       right: 16.0,
       child: Card(
         elevation: 6.0,
-        color: Theme.of(context).alignment == null 
-            ? Colors.black87 
-            : Theme.of(context).cardColor.withOpacity(0.95),
+        color: isDark ? Colors.black87 : Theme.of(context).cardColor.withValues(alpha: 0.95),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12.0),
         ),
@@ -39,10 +47,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
                       SizedBox(width: 8),
                       Text(
                         'Metrics Lab',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                       ),
                     ],
                   ),
@@ -56,7 +61,6 @@ class RuntimeMetricsWidget extends StatelessWidget {
                 ],
               ),
               const Divider(height: 16, thickness: 0.5),
-              // Consuma le proprietà native del monitor ereditate direttamente dal file monolitico
               Text(
                 'Stato Core: ${monitorState?.status?.toString().split('.').last ?? 'Inattivo'}',
                 style: const TextStyle(fontSize: 13),
@@ -71,6 +75,10 @@ class RuntimeMetricsWidget extends StatelessWidget {
                 'Tempo di Esecuzione: ${monitorState?.elapsed?.toString() ?? '0s'}',
                 style: const TextStyle(fontSize: 13),
               ),
+              const Divider(height: 16, thickness: 0.5),
+              Text('Modalità Runtime: $runtimeModeName', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text('Accelerazione GPU: ${gpuAccelerationActive ? "Attiva ($gpuBackend)" : "Inattiva (CPU)"}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text('Motore Vocale ASR: ${voiceEngineActive ? "Pronto" : "Non Inizializzato"}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
             ],
           ),
         ),
