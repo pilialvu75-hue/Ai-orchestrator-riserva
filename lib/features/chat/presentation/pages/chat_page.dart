@@ -9,10 +9,11 @@ import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_wid
 import 'package:ai_orchestrator/presentation/chat/components/chat_input_section.dart';
 import 'package:ai_orchestrator/presentation/chat/components/debug_lab_overlay.dart';
 
-// Importazione dei controllori e view model di Fase 2
+// Importazione dei controllori e dei view model di Fase 2
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/chat_deadlock_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/view_models/chat_appearance_view_model.dart';
 
 // Servizi infrastrutturali core
@@ -35,22 +36,18 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  static const Duration _uiDeadlockTimeout = Duration(seconds: 15);
   final _scrollController = ScrollController();
   
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   
-  // Ecosistema dei controllori atomici di Fase 2
+  // Architettura di controllo di Fase 2 completata
   late final RuntimeStateController _runtimeStateController;
   late final ExecutionHardwareController _hardwareController;
   late final SystemIndicatorsController _indicatorsController;
+  late final ChatDeadlockController _deadlockController;
   late final ChatAppearanceViewModel _appearanceViewModel;
-  
-  Timer? _uiDeadlockTimer;
-  DateTime? _uiSendBeganAt;
-  bool _uiStreamStarted = false;
 
   List<dynamic> _cachedMessages = const [];
 
@@ -69,6 +66,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       runtimeSettings: _runtimeSettings,
       voiceEngine: _voiceEngine,
     );
+    _deadlockController = ChatDeadlockController();
     _appearanceViewModel = ChatAppearanceViewModel();
     
     WidgetsBinding.instance.addObserver(this);
@@ -92,42 +90,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   void _onSend(String text) {
     debugPrint('[CHAT_UI] [FORENSIC_BEFORE_ONSEND] chars=${text.length}');
-    _uiSendBeganAt = DateTime.now();
-    _uiStreamStarted = false;
-    _startUiDeadlockGuard();
+    _deadlockController.handleSendBegan();
     
-    context.read<OrchestratorStateEngine>().add(SendMessageEvent(
-          sessionId: _kDefaultSessionId,
-          userPrompt: text,
-          attachments: const [],
-        ));
-  }
-
-  void _startUiDeadlockGuard() {
-    _cancelUiDeadlockGuard();
-    _uiDeadlockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final startedAt = _uiSendBeganAt;
-      if (startedAt == null || !mounted || _uiStreamStarted) return;
-      final chatState = context.read<OrchestratorStateEngine>().state;
-      final waiting = chatState is ChatSending;
-      final elapsed = DateTime.now().difference(startedAt);
-      if (waiting && !_runtimeStateController.isInferencing() && elapsed > _uiDeadlockTimeout) {
+    _deadlockController.startGuard(
+      isSending: true,
+      isInferencing: _runtimeStateController.isInferencing(),
+      onDeadlockTriggered: () {
         context.read<OrchestratorStateEngine>().add(
               const RecoverFromStuckUiEvent(
                 sessionId: _kDefaultSessionId,
                 runtimeMessage: 'Local runtime stalled before first token. Request cancelled and UI recovered.',
               ),
             );
-        _cancelUiDeadlockGuard();
-      }
-    });
-  }
-
-  void _cancelUiDeadlockGuard() {
-    _uiDeadlockTimer?.cancel();
-    _uiDeadlockTimer = null;
-    _uiSendBeganAt = null;
-    _uiStreamStarted = false;
+      },
+    );
+    
+    context.read<OrchestratorStateEngine>().add(SendMessageEvent(
+          sessionId: _kDefaultSessionId,
+          userPrompt: text,
+          attachments: const [],
+        ));
   }
 
   @override
@@ -150,6 +132,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     }
                   } catch (_) {}
                   
+                  // Se lo streaming è iniziato, aggiorna il controllore di deadlock
+                  if (chatState is! ChatSending && chatState is! ChatInitial) {
+                    _deadlockController.cancelGuard();
+                  }
+                  
                   return ChatConversation(
                     textScale: _appearanceViewModel.textScale,
                     title: 'Phi-3.5-mini',
@@ -158,6 +145,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     chatList: HighPerformanceChatList(
                       messages: currentMessages,
                       textSize: _appearanceViewModel.assistantTextSize,
+                      controller: _scrollController, // CONNESSO: Ora la lista segue lo scorrimento
                     ),
                     inputSection: ChatInputSection(
                       onSend: _onSend,
@@ -222,8 +210,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeStateController.dispose();
     _hardwareController.dispose();
     _indicatorsController.dispose();
+    _deadlockController.dispose();
     _appearanceViewModel.dispose();
-    _cancelUiDeadlockGuard();
     _scrollController.dispose();
     super.dispose();
   }
