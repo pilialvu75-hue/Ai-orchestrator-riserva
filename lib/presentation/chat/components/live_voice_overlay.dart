@@ -220,7 +220,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     }
   }
 
-  List<Widget> _buildErrorWidgets(String errorText) {
+  List<Widget> _buildErrorWidgetsIfPresent(String errorText) {
     if (errorText.isEmpty) return const <Widget>[];
     return [
       const SizedBox(height: 12),
@@ -306,7 +306,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                             ),
                           ),
                         ),
-                        ..._buildErrorWidgets(errorText),
+                        ..._buildErrorWidgetsIfPresent(errorText),
                         const Spacer(),
                         SizedBox(
                           width: double.infinity,
@@ -381,7 +381,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      ..._buildErrorWidgets(errorText),
+                      ..._buildErrorWidgetsIfPresent(errorText),
                       const Spacer(),
                       SizedBox(
                         width: double.infinity,

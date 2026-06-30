@@ -68,11 +68,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final ChatDeadlockController _deadlockController;
   bool _isSending = false;
 
-  LocalRuntimeState get _runtimeState => _runtimeStateController.value.state;
-  HardwareSnapshot get _hardwareSnapshot => _hardwareController.value;
-  SystemIndicatorsSnapshot get _systemIndicatorsSnapshot =>
-      _systemIndicatorsController.value;
-
   @override
   void initState() {
     super.initState();
@@ -170,7 +165,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       isSending: () => _isSending,
       isInferencing: _runtimeStateController.isInferencing,
       onDeadlockTriggered: () {
-        _uiLog('[UI_WAITING_STUCK] session=$_kDefaultSessionId runtime=${_runtimeState.status.name}');
+        _uiLog('[UI_WAITING_STUCK] session=$_kDefaultSessionId runtime=${_runtimeStateController.value.state.status.name}');
         _uiLog('[inference_loop_detected] session=$_kDefaultSessionId waiting=true no_token=true runtime_inferencing=false');
         _uiLog('[UI_SEND_CANCEL] session=$_kDefaultSessionId reason=deadlock_breaker');
         context.read<OrchestratorStateEngine>().add(
@@ -306,8 +301,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onSend: _onSend,
                     onSettings: _openSettings,
                     scrollToBottom: _scrollToBottom,
-                    runtimeState: _runtimeState,
-                    runtimeModeName: _systemIndicatorsSnapshot.runtimeModeName,
+                    runtimeState: _runtimeStateController.value.state,
+                    runtimeModeName: _systemIndicatorsController.value.runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
                     debugLabMessages: _debugLabMessages,
@@ -319,8 +314,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onSend: _onSend,
                     onSettings: _openSettings,
                     scrollToBottom: _scrollToBottom,
-                    runtimeState: _runtimeState,
-                    runtimeModeName: _systemIndicatorsSnapshot.runtimeModeName,
+                    runtimeState: _runtimeStateController.value.state,
+                    runtimeModeName: _systemIndicatorsController.value.runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
                     debugLabMessages: _debugLabMessages,
@@ -792,8 +787,8 @@ class _ChatBodyState extends State<_ChatBody> {
                     enabled: false,
                     child: RuntimeMetricsWidget(
                       runtimeState: widget.runtimeState,
-                      hardwareSnapshot: _hardwareSnapshot,
-                      systemIndicators: _systemIndicatorsSnapshot,
+                      hardwareSnapshot: _hardwareController.value,
+                      systemIndicators: _systemIndicatorsController.value,
                     ),
                   )
                 ],
