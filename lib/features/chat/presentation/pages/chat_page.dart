@@ -308,6 +308,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     debugLabMessages: _debugLabMessages,
                     onAppendDebugLabConversation: _appendDebugLabConversation,
                     onClearDebugLabMessages: _clearDebugLabMessages,
+                    hardwareController: _hardwareController,
+                    systemIndicatorsController: _systemIndicatorsController,
                   )
                 : _NarrowLayout(
                     scrollController: _scrollController,
@@ -321,6 +323,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     debugLabMessages: _debugLabMessages,
                     onAppendDebugLabConversation: _appendDebugLabConversation,
                     onClearDebugLabMessages: _clearDebugLabMessages,
+                    hardwareController: _hardwareController,
+                    systemIndicatorsController: _systemIndicatorsController,
                   );
           }),
     );
@@ -344,6 +348,8 @@ class _NarrowLayout extends StatelessWidget {
     required this.debugLabMessages,
     required this.onAppendDebugLabConversation,
     required this.onClearDebugLabMessages,
+    required this.hardwareController,
+    required this.systemIndicatorsController,
   });
 
   final ScrollController scrollController;
@@ -358,6 +364,8 @@ class _NarrowLayout extends StatelessWidget {
   final void Function({required String prompt, required String response})
       onAppendDebugLabConversation;
   final VoidCallback onClearDebugLabMessages;
+  final ExecutionHardwareController hardwareController;
+  final SystemIndicatorsController systemIndicatorsController;
 
   @override
   Widget build(BuildContext context) {
@@ -374,6 +382,8 @@ class _NarrowLayout extends StatelessWidget {
       debugLabMessages: debugLabMessages,
       onAppendDebugLabConversation: onAppendDebugLabConversation,
       onClearDebugLabMessages: onClearDebugLabMessages,
+      hardwareController: hardwareController,
+      systemIndicatorsController: systemIndicatorsController,
     );
   }
 }
@@ -391,6 +401,8 @@ class _WideLayout extends StatelessWidget {
     required this.debugLabMessages,
     required this.onAppendDebugLabConversation,
     required this.onClearDebugLabMessages,
+    required this.hardwareController,
+    required this.systemIndicatorsController,
   });
 
   final ScrollController scrollController;
@@ -405,6 +417,8 @@ class _WideLayout extends StatelessWidget {
   final void Function({required String prompt, required String response})
       onAppendDebugLabConversation;
   final VoidCallback onClearDebugLabMessages;
+  final ExecutionHardwareController hardwareController;
+  final SystemIndicatorsController systemIndicatorsController;
 
   @override
   Widget build(BuildContext context) {
@@ -462,6 +476,8 @@ class _WideLayout extends StatelessWidget {
            debugLabMessages: debugLabMessages,
            onAppendDebugLabConversation: onAppendDebugLabConversation,
            onClearDebugLabMessages: onClearDebugLabMessages,
+           hardwareController: hardwareController,
+           systemIndicatorsController: systemIndicatorsController,
           ),
         ),
       ],
@@ -483,6 +499,8 @@ class _ChatBody extends StatefulWidget {
     required this.debugLabMessages,
     required this.onAppendDebugLabConversation,
     required this.onClearDebugLabMessages,
+    required this.hardwareController,
+    required this.systemIndicatorsController,
   });
 
   final bool isWide;
@@ -498,6 +516,8 @@ class _ChatBody extends StatefulWidget {
   final void Function({required String prompt, required String response})
       onAppendDebugLabConversation;
   final VoidCallback onClearDebugLabMessages;
+  final ExecutionHardwareController hardwareController;
+  final SystemIndicatorsController systemIndicatorsController;
 
   @override
   State<_ChatBody> createState() => _ChatBodyState();
@@ -787,8 +807,8 @@ class _ChatBodyState extends State<_ChatBody> {
                     enabled: false,
                     child: RuntimeMetricsWidget(
                       runtimeState: widget.runtimeState,
-                      hardwareSnapshot: _hardwareController.value,
-                      systemIndicators: _systemIndicatorsController.value,
+                      hardwareSnapshot: widget.hardwareController.value,
+                      systemIndicators: widget.systemIndicatorsController.value,
                     ),
                   )
                 ],
