@@ -10,6 +10,17 @@ class HardwareSnapshot {
     this.gpuAccelerationActive = false,
     this.gpuBackend = 'cpu',
   });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HardwareSnapshot &&
+          runtimeType == other.runtimeType &&
+          gpuAccelerationActive == other.gpuAccelerationActive &&
+          gpuBackend == other.gpuBackend;
+
+  @override
+  int get hashCode => Object.hash(gpuAccelerationActive, gpuBackend);
 }
 
 class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
@@ -18,7 +29,7 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
   ExecutionHardwareController() : super(const HardwareSnapshot());
 
   /// Interroga l'infrastruttura nativa (Android NDK / Desktop) per verificare lo stato della GPU
-  Future<void> updateHardwareStatus() async {
+  Future<void> refreshHardwareStatus() async {
     var gpuActive = false;
     var gpuBackend = 'cpu';
 
@@ -47,4 +58,6 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
       gpuBackend: gpuBackend,
     );
   }
+
+  Future<void> updateHardwareStatus() => refreshHardwareStatus();
 }

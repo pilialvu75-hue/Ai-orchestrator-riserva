@@ -9,6 +9,9 @@ class ChatDeadlockController {
 
   ChatDeadlockController({this.timeout = const Duration(seconds: 15)});
 
+  bool get hasPendingSend => _uiSendBeganAt != null;
+  bool get isStreamStarted => _uiStreamStarted;
+
   /// Registra il momento esatto in cui l'utente preme invio
   void handleSendBegan() {
     _uiSendBeganAt = DateTime.now();
@@ -22,17 +25,17 @@ class ChatDeadlockController {
 
   /// Avvia il monitoraggio in background per verificare se il runtime si è incastrato prima del primo token
   void startGuard({
-    required bool isSending,
-    required bool isInferencing,
+    required bool Function() isSending,
+    required bool Function() isInferencing,
     required VoidCallback onDeadlockTriggered,
   }) {
     cancelGuard();
     _uiDeadlockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final startedAt = _uiSendBeganAt;
       if (startedAt == null || _uiStreamStarted) return;
-      
+
       final elapsed = DateTime.now().difference(startedAt);
-      if (isSending && !isInferencing && elapsed > timeout) {
+      if (isSending() && !isInferencing() && elapsed > timeout) {
         onDeadlockTriggered();
         cancelGuard();
       }
