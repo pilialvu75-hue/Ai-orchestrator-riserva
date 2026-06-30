@@ -23,7 +23,11 @@ class ChatDeadlockController {
     _uiStreamStarted = true;
   }
 
-  /// Avvia il monitoraggio in background per verificare se il runtime si è incastrato prima del primo token
+  /// Avvia il monitoraggio in background per verificare se il runtime si è
+  /// incastrato prima del primo token.
+  ///
+  /// The state checks are provided as callbacks so each timer tick sees the
+  /// latest UI/runtime state instead of a stale snapshot captured at start.
   void startGuard({
     required bool Function() isSending,
     required bool Function() isInferencing,

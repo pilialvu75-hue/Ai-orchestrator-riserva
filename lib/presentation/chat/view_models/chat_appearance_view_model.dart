@@ -20,6 +20,7 @@ class ChatAppearanceViewModel extends ChangeNotifier {
   }
 
   void setMetricsVisibility(bool visible) {
+    if (_showMetrics == visible) return;
     _showMetrics = visible;
     notifyListeners();
   }

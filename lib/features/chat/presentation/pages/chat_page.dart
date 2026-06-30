@@ -67,6 +67,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final SystemIndicatorsController _systemIndicatorsController;
   late final ChatDeadlockController _deadlockController;
   late final ChatAppearanceViewModel _appearanceViewModel;
+  bool _isSending = false;
 
   LocalRuntimeState get _runtimeState => _runtimeStateController.value.state;
   HardwareSnapshot get _hardwareSnapshot => _hardwareController.value;
@@ -170,7 +171,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _uiLog('[FORENSIC_BEFORE_ONSEND] chars=${text.length} attachments=${attachments.length}');
     _deadlockController.handleSendBegan();
     _deadlockController.startGuard(
-      isSending: () => context.read<OrchestratorStateEngine>().state is ChatSending,
+      isSending: () => _isSending,
       isInferencing: _runtimeStateController.isInferencing,
       onDeadlockTriggered: () {
         _uiLog('[UI_WAITING_STUCK] session=$_kDefaultSessionId runtime=${_runtimeState.status.name}');
@@ -200,6 +201,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _handleOrchestratorState(ChatState state) {
+    _isSending = state is ChatSending;
     if (state is ChatSending) {
       final hasAssistantToken = state.messages.any(
         (message) => message.role == 'assistant' && message.content.trim().isNotEmpty,
@@ -633,13 +635,6 @@ class _ChatBodyState extends State<_ChatBody> {
     }
   }
 
-  AssistantMessageTextSize get _assistantTextSize =>
-      _appearanceViewModel.assistantTextSize;
-
-  double get _textScaleFactor => _appearanceViewModel.textScale;
-
-  bool get _localDebugOverlayVisible => _appearanceViewModel.debugLabOpen;
-
   String? _runtimeMessageForState(ChatState state) {
     if (state is ChatLoaded) return state.runtimeMessage;
     if (state is ChatSending) return state.runtimeMessage;
@@ -740,17 +735,18 @@ class _ChatBodyState extends State<_ChatBody> {
                         ? _buildEmptyState(context)
                         : MediaQuery(
                             data: MediaQuery.of(context).copyWith(
-                              textScaler: TextScaler.linear(_textScaleFactor),
+                              textScaler:
+                                  TextScaler.linear(_appearanceViewModel.textScale),
                             ),
                             child: HighPerformanceChatList(
                               controller: widget.scrollController,
                               messages: combinedMessages,
-                              assistantTextSize: _assistantTextSize,
+                              assistantTextSize: _appearanceViewModel.assistantTextSize,
                             ),
                           ),
                   ),
-                  
-                  if (_debugLabController.isVisible || _localDebugOverlayVisible)
+
+                  if (_debugLabController.isVisible || _appearanceViewModel.debugLabOpen)
                     Positioned(
                       top: 10,
                       left: 10,
@@ -766,7 +762,7 @@ class _ChatBodyState extends State<_ChatBody> {
                           );
                         },
                         onClearChat: _clearChatDebug,
-                        assistantTextSize: _assistantTextSize,
+                        assistantTextSize: _appearanceViewModel.assistantTextSize,
                         onAssistantTextSizeChanged: (size) {
                           unawaited(_setAssistantTextSize(size));
                         },
@@ -898,11 +894,11 @@ class _ChatBodyState extends State<_ChatBody> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text("Scala caratteri chat", style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
-                            Text("${(_textScaleFactor * 100).toInt()}%", style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text("${(_appearanceViewModel.textScale * 100).toInt()}%", style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 12, fontWeight: FontWeight.bold)),
                           ],
                         ),
                         Slider(
-                          value: _textScaleFactor,
+                          value: _appearanceViewModel.textScale,
                           min: 0.7,
                           max: 1.7,
                           divisions: 10,

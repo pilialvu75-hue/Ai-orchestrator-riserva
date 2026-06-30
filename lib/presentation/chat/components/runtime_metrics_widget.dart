@@ -110,10 +110,6 @@ class RuntimeMetricsWidget extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Status: ${runtimeState.status.name}',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
-            Text(
               'Tokens: ${runtimeState.tokensGenerated}',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
