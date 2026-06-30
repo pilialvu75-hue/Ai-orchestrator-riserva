@@ -1,23 +1,21 @@
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
 import 'package:flutter/material.dart';
 
 class RuntimeMetricsWidget extends StatelessWidget {
   const RuntimeMetricsWidget({
     super.key,
     required this.runtimeState,
-    required this.voiceEngineActive,
-    required this.gpuAccelerationActive,
-    required this.gpuBackend,
-    required this.runtimeModeName,
+    required this.hardwareSnapshot,
+    required this.systemIndicators,
     this.additionalMetrics = const <Widget>[],
     this.onClose,
   });
 
   final LocalRuntimeState runtimeState;
-  final bool voiceEngineActive;
-  final bool gpuAccelerationActive;
-  final String gpuBackend;
-  final String runtimeModeName;
+  final HardwareSnapshot hardwareSnapshot;
+  final SystemIndicatorsSnapshot systemIndicators;
   final List<Widget> additionalMetrics;
   final VoidCallback? onClose;
 
@@ -100,7 +98,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                '${runtimeState.status.name.toUpperCase()} • $runtimeModeName',
+                '${runtimeState.status.name.toUpperCase()} • ${systemIndicators.runtimeModeName}',
                 style: TextStyle(
                   color: statusColor,
                   fontSize: 10,
@@ -129,9 +127,9 @@ class RuntimeMetricsWidget extends StatelessWidget {
               ),
             ),
             Text(
-              'Voice Engine: ${voiceEngineActive ? 'ON' : 'OFF'}',
+              'Voice Engine: ${systemIndicators.voiceEngineActive ? 'ON' : 'OFF'}',
               style: TextStyle(
-                color: voiceEngineActive
+                color: systemIndicators.voiceEngineActive
                     ? const Color(0xFF4ADE80)
                     : const Color(0xFFFF8A80),
                 fontSize: 11,
@@ -139,9 +137,11 @@ class RuntimeMetricsWidget extends StatelessWidget {
               ),
             ),
             Text(
-              'GPU Backend: ${gpuBackend.toUpperCase()}',
+              'GPU Backend: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
               style: TextStyle(
-                color: gpuAccelerationActive ? const Color(0xFF4ADE80) : Colors.white38,
+                color: hardwareSnapshot.gpuAccelerationActive
+                    ? const Color(0xFF4ADE80)
+                    : Colors.white38,
                 fontSize: 11,
               ),
             ),

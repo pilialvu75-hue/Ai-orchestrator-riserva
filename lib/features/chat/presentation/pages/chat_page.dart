@@ -60,7 +60,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final AiRuntimeSettingsService _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   late final VoiceLoopManager _voiceLoopManager;
-  late final SherpaOnnxVoiceEngine _voiceLoopEngine;
+  late final SherpaOnnxVoiceEngine _sherpaVoiceEngine;
   late final VoiceModelDownloader _voiceModelDownloader;
   late final RuntimeStateController _runtimeStateController;
   late final ExecutionHardwareController _hardwareController;
@@ -84,7 +84,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeSettings = di.sl<AiRuntimeSettingsService>();
     _voiceEngine = di.sl<VoiceEngine>();
     _voiceLoopManager = di.sl<VoiceLoopManager>();
-    _voiceLoopEngine = di.sl<SherpaOnnxVoiceEngine>();
+    _sherpaVoiceEngine = di.sl<SherpaOnnxVoiceEngine>();
     _voiceModelDownloader = di.sl<VoiceModelDownloader>();
     _runtimeStateController = RuntimeStateController(
       diagnostics: _runtimeDiagnostics,
@@ -269,7 +269,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       enableDrag: false,
       builder: (_) => LiveVoiceOverlay(
         voiceLoopManager: _voiceLoopManager,
-        voiceEngine: _voiceLoopEngine,
+        voiceEngine: _sherpaVoiceEngine,
         voiceModelDownloader: _voiceModelDownloader,
       ),
     );
@@ -311,9 +311,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onSettings: _openSettings,
                     scrollToBottom: _scrollToBottom,
                     runtimeState: _runtimeState,
-                    voiceEngineActive: _systemIndicatorsSnapshot.voiceEngineActive,
-                    gpuAccelerationActive: _hardwareSnapshot.gpuAccelerationActive,
-                    gpuBackend: _hardwareSnapshot.gpuBackend,
                     runtimeModeName: _systemIndicatorsSnapshot.runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
@@ -327,9 +324,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onSettings: _openSettings,
                     scrollToBottom: _scrollToBottom,
                     runtimeState: _runtimeState,
-                    voiceEngineActive: _systemIndicatorsSnapshot.voiceEngineActive,
-                    gpuAccelerationActive: _hardwareSnapshot.gpuAccelerationActive,
-                    gpuBackend: _hardwareSnapshot.gpuBackend,
                     runtimeModeName: _systemIndicatorsSnapshot.runtimeModeName,
                     onStartLiveSession: _openLiveVoiceSession,
                     liveSessionEnabled: !_voiceLoopManager.isSessionActive,
@@ -353,9 +347,6 @@ class _NarrowLayout extends StatelessWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
-    required this.voiceEngineActive,
-    required this.gpuAccelerationActive,
-    required this.gpuBackend,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -369,9 +360,6 @@ class _NarrowLayout extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
-  final bool voiceEngineActive;
-  final bool gpuAccelerationActive;
-  final String gpuBackend;
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
@@ -389,9 +377,6 @@ class _NarrowLayout extends StatelessWidget {
       onSettings: onSettings,
       scrollToBottom: scrollToBottom,
       runtimeState: runtimeState,
-      voiceEngineActive: voiceEngineActive,
-      gpuAccelerationActive: gpuAccelerationActive,
-      gpuBackend: gpuBackend,
       runtimeModeName: runtimeModeName,
       onStartLiveSession: onStartLiveSession,
       liveSessionEnabled: liveSessionEnabled,
@@ -409,9 +394,6 @@ class _WideLayout extends StatelessWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
-    required this.voiceEngineActive,
-    required this.gpuAccelerationActive,
-    required this.gpuBackend,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -425,9 +407,6 @@ class _WideLayout extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
-  final bool voiceEngineActive;
-  final bool gpuAccelerationActive;
-  final String gpuBackend;
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
@@ -480,22 +459,19 @@ class _WideLayout extends StatelessWidget {
         ),
         Expanded(
           child: _ChatBody(
-            isWide: true,
-            scrollController: scrollController,
-            onSend: onSend,
-             onSettings: onSettings,
-             scrollToBottom: scrollToBottom,
-             runtimeState: runtimeState,
-             voiceEngineActive: voiceEngineActive,
-             gpuAccelerationActive: gpuAccelerationActive,
-             gpuBackend: gpuBackend,
-             runtimeModeName: runtimeModeName,
-             onStartLiveSession: onStartLiveSession,
-             liveSessionEnabled: liveSessionEnabled,
-             debugLabMessages: debugLabMessages,
-             onAppendDebugLabConversation: onAppendDebugLabConversation,
-             onClearDebugLabMessages: onClearDebugLabMessages,
-           ),
+           isWide: true,
+           scrollController: scrollController,
+           onSend: onSend,
+           onSettings: onSettings,
+           scrollToBottom: scrollToBottom,
+           runtimeState: runtimeState,
+           runtimeModeName: runtimeModeName,
+           onStartLiveSession: onStartLiveSession,
+           liveSessionEnabled: liveSessionEnabled,
+           debugLabMessages: debugLabMessages,
+           onAppendDebugLabConversation: onAppendDebugLabConversation,
+           onClearDebugLabMessages: onClearDebugLabMessages,
+          ),
         ),
       ],
     );
@@ -510,9 +486,6 @@ class _ChatBody extends StatefulWidget {
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
-    required this.voiceEngineActive,
-    required this.gpuAccelerationActive,
-    required this.gpuBackend,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -527,9 +500,6 @@ class _ChatBody extends StatefulWidget {
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
   final LocalRuntimeState runtimeState;
-  final bool voiceEngineActive;
-  final bool gpuAccelerationActive;
-  final String gpuBackend;
   final String runtimeModeName;
   final VoidCallback onStartLiveSession;
   final bool liveSessionEnabled;
@@ -826,10 +796,8 @@ class _ChatBodyState extends State<_ChatBody> {
                     enabled: false,
                     child: RuntimeMetricsWidget(
                       runtimeState: widget.runtimeState,
-                      voiceEngineActive: widget.voiceEngineActive,
-                      gpuAccelerationActive: widget.gpuAccelerationActive,
-                      gpuBackend: widget.gpuBackend,
-                      runtimeModeName: widget.runtimeModeName,
+                      hardwareSnapshot: _hardwareSnapshot,
+                      systemIndicators: _systemIndicatorsSnapshot,
                     ),
                   )
                 ],

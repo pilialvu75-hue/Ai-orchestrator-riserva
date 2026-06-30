@@ -28,6 +28,9 @@ class ChatDeadlockController {
   ///
   /// The state checks are provided as callbacks so each timer tick sees the
   /// latest UI/runtime state instead of a stale snapshot captured at start.
+  /// `isSending` should return whether the chat pipeline is still waiting for a
+  /// response, and `isInferencing` should return whether the runtime is already
+  /// producing tokens.
   void startGuard({
     required bool Function() isSending,
     required bool Function() isInferencing,

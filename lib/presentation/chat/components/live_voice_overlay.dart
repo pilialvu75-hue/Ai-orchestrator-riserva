@@ -6,7 +6,7 @@ import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 import 'package:flutter/material.dart';
 
-enum LiveVoiceUiState { listening, thinking, speaking, idle }
+enum _LiveVoiceUiState { listening, thinking, speaking, idle }
 
 class LiveVoiceOverlay extends StatefulWidget {
   const LiveVoiceOverlay({
@@ -25,8 +25,8 @@ class LiveVoiceOverlay extends StatefulWidget {
 }
 
 class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
-  final ValueNotifier<LiveVoiceUiState> _uiState =
-      ValueNotifier<LiveVoiceUiState>(LiveVoiceUiState.thinking);
+  final ValueNotifier<_LiveVoiceUiState> _uiState =
+      ValueNotifier<_LiveVoiceUiState>(_LiveVoiceUiState.thinking);
   Timer? _stateTicker;
   bool _closing = false;
   bool _isDownloadingModels = false;
@@ -84,7 +84,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
         _error = '$error';
         _isDownloadingModels = false;
       });
-      _uiState.value = LiveVoiceUiState.idle;
+      _uiState.value = _LiveVoiceUiState.idle;
     }
   }
 
@@ -163,17 +163,17 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     });
   }
 
-  LiveVoiceUiState _deriveUiState() {
+  _LiveVoiceUiState _deriveUiState() {
     if (widget.voiceEngine.isListening) {
-      return LiveVoiceUiState.listening;
+      return _LiveVoiceUiState.listening;
     }
     if (widget.voiceEngine.isSpeaking) {
-      return LiveVoiceUiState.speaking;
+      return _LiveVoiceUiState.speaking;
     }
     if (widget.voiceLoopManager.isSessionActive) {
-      return LiveVoiceUiState.thinking;
+      return _LiveVoiceUiState.thinking;
     }
-    return LiveVoiceUiState.idle;
+    return _LiveVoiceUiState.idle;
   }
 
   void _syncUiStateFromEngine() {
@@ -194,28 +194,28 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     Navigator.of(context).pop();
   }
 
-  String _statusLabel(LiveVoiceUiState state) {
+  String _statusLabel(_LiveVoiceUiState state) {
     switch (state) {
-      case LiveVoiceUiState.listening:
+      case _LiveVoiceUiState.listening:
         return 'Ti ascolto...';
-      case LiveVoiceUiState.thinking:
+      case _LiveVoiceUiState.thinking:
         return 'Sto pensando...';
-      case LiveVoiceUiState.speaking:
+      case _LiveVoiceUiState.speaking:
         return "L'assistente parla...";
-      case LiveVoiceUiState.idle:
+      case _LiveVoiceUiState.idle:
         return 'Sessione in attesa...';
     }
   }
 
-  Color _statusColor(LiveVoiceUiState state) {
+  Color _statusColor(_LiveVoiceUiState state) {
     switch (state) {
-      case LiveVoiceUiState.listening:
+      case _LiveVoiceUiState.listening:
         return const Color(0xFF4ADE80);
-      case LiveVoiceUiState.thinking:
+      case _LiveVoiceUiState.thinking:
         return const Color(0xFFF9A826);
-      case LiveVoiceUiState.speaking:
+      case _LiveVoiceUiState.speaking:
         return const Color(0xFF8AB4F8);
-      case LiveVoiceUiState.idle:
+      case _LiveVoiceUiState.idle:
         return const Color(0xFF9CA3AF);
     }
   }
@@ -241,7 +241,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
             ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
-              child: ValueListenableBuilder<LiveVoiceUiState>(
+              child: ValueListenableBuilder<_LiveVoiceUiState>(
                 valueListenable: _uiState,
                 builder: (context, state, _) {
                   final errorText = _error?.trim() ?? '';
@@ -327,7 +327,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                   }
 
                   final statusColor = _statusColor(state);
-                  final isActive = state != LiveVoiceUiState.idle;
+                  final isActive = state != _LiveVoiceUiState.idle;
                   return Column(
                     children: [
                       Container(
@@ -359,7 +359,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                           ],
                         ),
                         child: Icon(
-                          state == LiveVoiceUiState.speaking
+                          state == _LiveVoiceUiState.speaking
                               ? Icons.volume_up_rounded
                               : Icons.graphic_eq_rounded,
                           size: 46,

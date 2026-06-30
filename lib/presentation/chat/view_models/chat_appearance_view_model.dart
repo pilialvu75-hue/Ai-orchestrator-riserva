@@ -41,6 +41,15 @@ class ChatAppearanceViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  @Deprecated('Use updateAssistantTextSize instead.')
+  void updateFontSize(double size) {
+    final selected = AssistantMessageTextSize.values.firstWhere(
+      (candidate) => candidate.fontSize == size,
+      orElse: () => AssistantMessageTextSize.medium,
+    );
+    updateAssistantTextSize(selected);
+  }
+
   /// Gestisce il pattern di sblocco a 7 click per il Developer Lab
   void handleSecretPatternClick() {
     _secretClickCount++;
