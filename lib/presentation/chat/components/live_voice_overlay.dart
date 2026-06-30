@@ -244,6 +244,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
               child: ValueListenableBuilder<LiveVoiceUiState>(
                 valueListenable: _uiState,
                 builder: (context, state, _) {
+                  final errorText = _error?.trim() ?? '';
                   if (_isDownloadingModels) {
                     return Column(
                       children: [
@@ -290,10 +291,10 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                             ),
                           ),
                         ),
-                        if ((_error ?? '').trim().isNotEmpty) ...[
+                        if (errorText.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           Text(
-                            _error!,
+                            errorText,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Color(0xFFFF8A80),
@@ -375,10 +376,10 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if ((_error ?? '').trim().isNotEmpty) ...[
+                      if (errorText.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(
-                          _error!,
+                          errorText,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             color: Color(0xFFFF8A80),
