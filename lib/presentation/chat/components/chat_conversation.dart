@@ -23,12 +23,10 @@ class ChatConversation extends StatelessWidget {
   Widget build(BuildContext context) {
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
-        // ignore: deprecated_member_use
-        textScaleFactor: textScale,
+        textScaler: TextScaler.linear(textScale),
       ),
       child: Column(
         children: [
-          // Passaggio corretto dei parametri richiesti dall'AppBar nativa
           ChatAppBar(
             title: title,
             onTitlePressed: onTitlePressed,

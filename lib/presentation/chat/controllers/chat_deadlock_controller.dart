@@ -9,6 +9,9 @@ class ChatDeadlockController {
 
   ChatDeadlockController({this.timeout = const Duration(seconds: 15)});
 
+  bool get hasPendingSend => _uiSendBeganAt != null;
+  bool get isStreamStarted => _uiStreamStarted;
+
   /// Registra il momento esatto in cui l'utente preme invio
   void handleSendBegan() {
     _uiSendBeganAt = DateTime.now();
@@ -20,19 +23,26 @@ class ChatDeadlockController {
     _uiStreamStarted = true;
   }
 
-  /// Avvia il monitoraggio in background per verificare se il runtime si è incastrato prima del primo token
+  /// Avvia il monitoraggio in background per verificare se il runtime si è
+  /// incastrato prima del primo token.
+  ///
+  /// I controlli di stato sono forniti come callback così ogni tick del timer
+  /// legge lo stato UI/runtime più recente invece di un'istantanea obsoleta.
+  /// `isSending` deve restituire se la pipeline chat è ancora in attesa di una
+  /// risposta, mentre `isInferencing` deve indicare se il runtime sta già
+  /// producendo token.
   void startGuard({
-    required bool isSending,
-    required bool isInferencing,
+    required bool Function() isSending,
+    required bool Function() isInferencing,
     required VoidCallback onDeadlockTriggered,
   }) {
     cancelGuard();
     _uiDeadlockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final startedAt = _uiSendBeganAt;
       if (startedAt == null || _uiStreamStarted) return;
-      
+
       final elapsed = DateTime.now().difference(startedAt);
-      if (isSending && !isInferencing && elapsed > timeout) {
+      if (isSending() && !isInferencing() && elapsed > timeout) {
         onDeadlockTriggered();
         cancelGuard();
       }

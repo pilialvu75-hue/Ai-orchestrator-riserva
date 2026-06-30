@@ -15,11 +15,19 @@ class ChatRuntimeSnapshot {
       other is ChatRuntimeSnapshot &&
           runtimeType == other.runtimeType &&
           state.status == other.state.status &&
+          state.message == other.state.message &&
           state.tokensGenerated == other.state.tokensGenerated &&
-          state.elapsed == other.state.elapsed;
+          state.elapsed == other.state.elapsed &&
+          state.startedAt == other.state.startedAt;
 
   @override
-  int get hashCode => Object.hash(state.status, state.tokensGenerated, state.elapsed);
+  int get hashCode => Object.hash(
+        state.status,
+        state.message,
+        state.tokensGenerated,
+        state.elapsed,
+        state.startedAt,
+      );
 }
 
 class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
@@ -35,6 +43,8 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   void startMonitoring(Duration interval) {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(interval, (_) => _syncState());
+    // Populate the UI immediately instead of waiting for the first timer tick.
+    _syncState();
   }
 
   /// Interrompe il ciclo quando la pagina è in background o distrutta

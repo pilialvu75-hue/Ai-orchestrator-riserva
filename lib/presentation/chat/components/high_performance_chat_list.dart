@@ -1,16 +1,95 @@
+import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class HighPerformanceChatList extends StatelessWidget {
-  final List<dynamic> messages;
-  final double textSize;
-  final ScrollController? controller; // RISOLTO: Ora il parametro nominativo esiste
-
   const HighPerformanceChatList({
     super.key,
+    required this.controller,
     required this.messages,
-    required this.textSize,
-    this.controller,
+    required this.assistantTextSize,
   });
+
+  final ScrollController controller;
+  final List<ChatMessage> messages;
+  final AssistantMessageTextSize assistantTextSize;
+
+  Future<void> _showContextMenu(
+    BuildContext context,
+    Offset position,
+    String text,
+  ) async {
+    HapticFeedback.lightImpact();
+
+    final RenderBox overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 30, 30),
+        Offset.zero & overlay.size,
+      ),
+      color: const Color(0xFF1E1F20),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Colors.white12, width: 1),
+      ),
+      items: const [
+        PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy_rounded, size: 20, color: Colors.white70),
+              SizedBox(width: 10),
+              Text('Copia', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (!context.mounted || selected != 'copy') return;
+    _copyToClipboard(context, text);
+  }
+
+  void _copyToClipboard(BuildContext context, String text) {
+    if (text.trim().isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text)).then((_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(
+                Icons.assignment_turned_in_rounded,
+                color: Color(0xFF4ADE80),
+                size: 18,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Risposta copiata negli appunti!',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF1E1F20),
+          behavior: SnackBarBehavior.floating,
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: const BorderSide(color: Colors.white12, width: 1),
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,56 +103,76 @@ class HighPerformanceChatList extends StatelessWidget {
     }
 
     return ListView.builder(
-      controller: controller, // RISOLTO: Il controller controlla lo scorrimento reale della lista
-      cacheExtent: 600.0,
+      controller: controller,
+      cacheExtent: 1200.0,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.symmetric(vertical: 12),
       itemCount: messages.length,
-      padding: const EdgeInsets.only(top: 16.0, bottom: 80.0), // Spazio inferiore per non coprire l'input
       itemBuilder: (context, index) {
         final message = messages[index];
-        
-        // ESTRATTORE DIFENSIVO: Smette di fare il toString() generico del modello
-        String text = '';
-        bool isUser = false;
-        
-        try {
-          // Tenta l'estrazione dinamica dei campi dal modello dati del BLoC
-          text = (message as dynamic).text ?? (message as dynamic).content ?? message.toString();
-          final role = (message as dynamic).role?.toString().toLowerCase() ?? '';
-          isUser = role == 'user' || ((message as dynamic).isUser == true);
-        } catch (_) {
-          text = message.toString();
-        }
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
-          child: Align(
-            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
+        return RepaintBoundary(
+          child: _AnimatedBubble(
+            key: ValueKey(message.id),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onLongPressStart: (details) => _showContextMenu(
+                context,
+                details.globalPosition,
+                message.content,
               ),
-              decoration: BoxDecoration(
-                color: isUser ? const Color(0xFF2A85FF) : const Color(0xFF2E2F30),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16.0),
-                  topRight: const Radius.circular(16.0),
-                  bottomLeft: Radius.circular(isUser ? 16.0 : 4.0),
-                  bottomRight: Radius.circular(isUser ? 4.0 : 16.0),
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 14.0),
-              child: Text(
-                text,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: textSize,
-                  height: 1.4,
-                ),
+              child: ChatBubble(
+                message: message,
+                assistantTextSize: assistantTextSize,
               ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _AnimatedBubble extends StatefulWidget {
+  const _AnimatedBubble({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AnimatedBubble> createState() => _AnimatedBubbleState();
+}
+
+class _AnimatedBubbleState extends State<_AnimatedBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(position: _slide, child: widget.child),
     );
   }
 }

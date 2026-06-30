@@ -11,6 +11,17 @@ class SystemIndicatorsSnapshot {
     this.voiceEngineActive = false,
     this.runtimeModeName = 'hybrid',
   });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SystemIndicatorsSnapshot &&
+          runtimeType == other.runtimeType &&
+          voiceEngineActive == other.voiceEngineActive &&
+          runtimeModeName == other.runtimeModeName;
+
+  @override
+  int get hashCode => Object.hash(voiceEngineActive, runtimeModeName);
 }
 
 class SystemIndicatorsController extends ValueNotifier<SystemIndicatorsSnapshot> {
