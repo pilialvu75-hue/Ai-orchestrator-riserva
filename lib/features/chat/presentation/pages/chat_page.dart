@@ -66,7 +66,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late final ExecutionHardwareController _hardwareController;
   late final SystemIndicatorsController _systemIndicatorsController;
   late final ChatDeadlockController _deadlockController;
-  late final ChatAppearanceViewModel _appearanceViewModel;
   bool _isSending = false;
 
   LocalRuntimeState get _runtimeState => _runtimeStateController.value.state;
@@ -97,11 +96,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _deadlockController = ChatDeadlockController(
       timeout: _uiDeadlockTimeout,
     );
-    _appearanceViewModel = ChatAppearanceViewModel();
     _runtimeStateController.addListener(_handleRuntimeStateChanged);
     _hardwareController.addListener(_handlePresentationStateChanged);
     _systemIndicatorsController.addListener(_handlePresentationStateChanged);
-    _appearanceViewModel.addListener(_handlePresentationStateChanged);
     WidgetsBinding.instance.addObserver(this);
     _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
     unawaited(_refreshPresentationIndicators());
@@ -145,12 +142,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _runtimeStateController.removeListener(_handleRuntimeStateChanged);
     _hardwareController.removeListener(_handlePresentationStateChanged);
     _systemIndicatorsController.removeListener(_handlePresentationStateChanged);
-    _appearanceViewModel.removeListener(_handlePresentationStateChanged);
     _runtimeStateController.dispose();
     _hardwareController.dispose();
     _systemIndicatorsController.dispose();
     _deadlockController.dispose();
-    _appearanceViewModel.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -169,6 +164,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   void _onSend(String text, List<ChatAttachment> attachments) {
     _uiLog('[FORENSIC_BEFORE_ONSEND] chars=${text.length} attachments=${attachments.length}');
+    _isSending = true;
     _deadlockController.handleSendBegan();
     _deadlockController.startGuard(
       isSending: () => _isSending,

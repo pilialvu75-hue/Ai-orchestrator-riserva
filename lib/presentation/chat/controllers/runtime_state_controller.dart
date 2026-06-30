@@ -43,6 +43,7 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   void startMonitoring(Duration interval) {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(interval, (_) => _syncState());
+    // Populate the UI immediately instead of waiting for the first timer tick.
     _syncState();
   }
 

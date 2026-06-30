@@ -220,6 +220,21 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     }
   }
 
+  List<Widget> _buildErrorWidgets(String errorText) {
+    if (errorText.isEmpty) return const <Widget>[];
+    return [
+      const SizedBox(height: 12),
+      Text(
+        errorText,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFFFF8A80),
+          fontSize: 13,
+        ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -291,17 +306,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                             ),
                           ),
                         ),
-                        if (errorText.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            errorText,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Color(0xFFFF8A80),
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
+                        ..._buildErrorWidgets(errorText),
                         const Spacer(),
                         SizedBox(
                           width: double.infinity,
@@ -376,17 +381,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (errorText.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          errorText,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Color(0xFFFF8A80),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
+                      ..._buildErrorWidgets(errorText),
                       const Spacer(),
                       SizedBox(
                         width: double.infinity,

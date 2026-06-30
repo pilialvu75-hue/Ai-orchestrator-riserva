@@ -59,5 +59,6 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
     );
   }
 
+  @Deprecated('Use refreshHardwareStatus instead.')
   Future<void> updateHardwareStatus() => refreshHardwareStatus();
 }

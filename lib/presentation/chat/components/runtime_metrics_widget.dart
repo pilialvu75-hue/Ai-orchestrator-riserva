@@ -10,14 +10,12 @@ class RuntimeMetricsWidget extends StatelessWidget {
     required this.hardwareSnapshot,
     required this.systemIndicators,
     this.additionalMetrics = const <Widget>[],
-    this.onClose,
   });
 
   final LocalRuntimeState runtimeState;
   final HardwareSnapshot hardwareSnapshot;
   final SystemIndicatorsSnapshot systemIndicators;
   final List<Widget> additionalMetrics;
-  final VoidCallback? onClose;
 
   Color _statusColor() {
     switch (runtimeState.status) {
@@ -82,13 +80,6 @@ class RuntimeMetricsWidget extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (onClose != null)
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    splashRadius: 16,
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close, color: Colors.white70, size: 16),
-                  ),
               ],
             ),
             Container(

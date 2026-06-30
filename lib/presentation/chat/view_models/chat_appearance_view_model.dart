@@ -25,6 +25,12 @@ class ChatAppearanceViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void closeDebugLab() {
+    if (!_debugLabOpen) return;
+    _debugLabOpen = false;
+    notifyListeners();
+  }
+
   void toggleMetricsFromLab() {
     _showMetrics = !_showMetrics;
     _debugLabOpen = false;
@@ -57,12 +63,6 @@ class ChatAppearanceViewModel extends ChangeNotifier {
       _secretClickCount = 0;
       _debugLabOpen = !_debugLabOpen;
     }
-    notifyListeners();
-  }
-
-  void closeDebugLab() {
-    if (!_debugLabOpen) return;
-    _debugLabOpen = false;
     notifyListeners();
   }
 }
