@@ -122,10 +122,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshPresentationIndicators() async {
-    await Future.wait<void>([
-      _hardwareController.refreshHardwareStatus(),
-      _systemIndicatorsController.refreshIndicators(),
-    ]);
+    _hardwareController.refreshHardwareStatus();
+    await _systemIndicatorsController.refreshIndicators();
   }
 
   @override

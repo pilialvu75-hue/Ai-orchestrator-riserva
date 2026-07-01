@@ -24,6 +24,27 @@ void main() {
         ),
         'cpu',
       );
+
+      expect(
+        ExecutionHardwareController.backendFromRuntimeLog(
+          '[GPU_DETECT] vulkan=enabled requested_gpu_layers=99',
+        ),
+        'vulkan',
+      );
+
+      expect(
+        ExecutionHardwareController.backendFromRuntimeLog(
+          '[GPU_DETECT] vulkan=disabled requested_gpu_layers=99 effective_gpu_layers=0',
+        ),
+        'cpu',
+      );
+    });
+
+    test('normalizes backend labels consistently', () {
+      expect(ExecutionHardwareController.normalizeBackendName(null), 'unknown');
+      expect(ExecutionHardwareController.normalizeBackendName(''), 'unknown');
+      expect(ExecutionHardwareController.normalizeBackendName('vulkan'), 'vulkan');
+      expect(ExecutionHardwareController.normalizeBackendName('fallback-llama'), 'cpu');
     });
   });
 }

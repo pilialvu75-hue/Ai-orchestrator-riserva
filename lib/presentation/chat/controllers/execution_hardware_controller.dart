@@ -1,4 +1,4 @@
-import 'dart:async' show StreamSubscription, unawaited;
+import 'dart:async' show StreamSubscription;
 
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -36,13 +36,13 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
   ExecutionHardwareController() : super(const HardwareSnapshot()) {
     _runtimeEventSubscription = RuntimeEventLog.instance.stream.listen((entry) {
       if (_entryContainsBackendInfo(entry.message)) {
-        unawaited(refreshHardwareStatus());
+        refreshHardwareStatus();
       }
     });
   }
 
   /// Interroga l'infrastruttura nativa e i log runtime per verificare il backend effettivo di llama.cpp.
-  Future<void> refreshHardwareStatus() {
+  void refreshHardwareStatus() {
     var gpuActive = false;
     var gpuBackend = _resolveBackendFromRuntimeLogs() ?? 'unknown';
     gpuActive = _isAcceleratedBackend(gpuBackend);
@@ -51,11 +51,12 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
       gpuAccelerationActive: gpuActive,
       gpuBackend: gpuBackend,
     );
-    return Future<void>.value();
   }
 
   @Deprecated('Use refreshHardwareStatus instead.')
-  Future<void> updateHardwareStatus() => refreshHardwareStatus();
+  Future<void> updateHardwareStatus() async {
+    refreshHardwareStatus();
+  }
 
   @override
   void dispose() {
@@ -85,12 +86,12 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
   static String? backendFromRuntimeLog(String message) {
     final backendMatch = _backendRegExp.firstMatch(message);
     if (backendMatch != null) {
-      return _normalizeBackendName(backendMatch.group(1));
+      return normalizeBackendName(backendMatch.group(1));
     }
 
     final fallbackMatch = _fallbackBackendRegExp.firstMatch(message);
     if (fallbackMatch != null) {
-      return _normalizeBackendName(fallbackMatch.group(1));
+      return normalizeBackendName(fallbackMatch.group(1));
     }
 
     final vulkanMatch = _vulkanRegExp.firstMatch(message);
@@ -101,7 +102,7 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
     return null;
   }
 
-  static String _normalizeBackendName(String? backend) {
+  static String normalizeBackendName(String? backend) {
     final normalized = (backend ?? '').trim().toLowerCase();
     if (normalized.isEmpty) {
       return 'unknown';

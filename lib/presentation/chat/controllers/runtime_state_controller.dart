@@ -31,13 +31,11 @@ class ChatRuntimeSnapshot {
 
 class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   final LocalRuntimeDiagnosticsService diagnostics;
-  late final void Function(LocalRuntimeState) _diagnosticListener;
   bool _isMonitoring = false;
   int? _lastSignature;
 
   RuntimeStateController({required this.diagnostics}) : super(const ChatRuntimeSnapshot()) {
-    _diagnosticListener = _onDiagnosticsStateChanged;
-    diagnostics.monitor.addListener(_diagnosticListener);
+    diagnostics.monitor.addListener(_onDiagnosticsStateChanged);
     _syncState(diagnostics.monitor.state);
   }
 
@@ -80,7 +78,7 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
 
   @override
   void dispose() {
-    diagnostics.monitor.removeListener(_diagnosticListener);
+    diagnostics.monitor.removeListener(_onDiagnosticsStateChanged);
     stopMonitoring();
     super.dispose();
   }
