@@ -26,6 +26,8 @@ class HardwareSnapshot {
 }
 
 class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
+  static const String _fallbackBackendLabel = 'fallback-llama';
+  static const int _kLogScanWindowSize = 32;
   static final RegExp _backendRegExp = RegExp(r'\bbackend=([a-z0-9._-]+)', caseSensitive: false);
   static final RegExp _fallbackBackendRegExp =
       RegExp(r'\bfallback=([a-z0-9._-]+)', caseSensitive: false);
@@ -78,13 +80,15 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
     super.dispose();
   }
 
-  static String? _resolveBackendFromRuntimeLogs() {
+  String? _resolveBackendFromRuntimeLogs() {
     final entries = RuntimeEventLog.instance.entries;
     if (_cachedBackendFromLogs != null && entries.length == _cachedLogCount) {
       return _cachedBackendFromLogs;
     }
 
-    final startIndex = entries.length > 32 ? entries.length - 32 : 0;
+    final startIndex = entries.length > _kLogScanWindowSize
+        ? entries.length - _kLogScanWindowSize
+        : 0;
     for (var index = entries.length - 1; index >= startIndex; index--) {
       final entry = entries[index];
       final backend = backendFromRuntimeLog(entry.message);
@@ -133,7 +137,7 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
     if (normalized.isEmpty) {
       return 'unknown';
     }
-    if (normalized == 'fallback-llama') {
+    if (normalized == _fallbackBackendLabel) {
       return 'cpu';
     }
     return normalized;

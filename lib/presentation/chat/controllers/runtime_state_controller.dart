@@ -57,6 +57,8 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   }
 
   void _syncState(LocalRuntimeState currentState) {
+    // Mirror the fields that participate in LocalRuntimeState equality so the
+    // chat overlay only rebuilds when the observable runtime snapshot changes.
     final currentSignature = Object.hash(
       currentState.status,
       currentState.message,
