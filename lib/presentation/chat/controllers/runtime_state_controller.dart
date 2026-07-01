@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -32,29 +31,34 @@ class ChatRuntimeSnapshot {
 
 class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   final LocalRuntimeDiagnosticsService diagnostics;
-  Timer? _pollingTimer;
+  bool _isMonitoring = false;
   int? _lastSignature;
 
   RuntimeStateController({required this.diagnostics}) : super(const ChatRuntimeSnapshot()) {
-    _syncState();
+    diagnostics.monitor.addListener(_onDiagnosticsStateChanged);
+    _syncState(diagnostics.monitor.state);
   }
 
-  /// Avvia il ciclo di monitoraggio isolato ad alta frequenza senza toccare la UI generale
-  void startMonitoring(Duration interval) {
-    _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(interval, (_) => _syncState());
-    // Populate the UI immediately instead of waiting for the first timer tick.
-    _syncState();
+  /// Keep the snapshot in sync with the authoritative diagnostics monitor.
+  /// Listener-driven monitoring keeps the UI hot-path responsive without polling.
+  void startMonitoring() {
+    _isMonitoring = true;
+    _syncState(diagnostics.monitor.state);
   }
 
-  /// Interrompe il ciclo quando la pagina è in background o distrutta
+  /// Pause UI propagation while the page is backgrounded.
   void stopMonitoring() {
-    _pollingTimer?.cancel();
-    _pollingTimer = null;
+    _isMonitoring = false;
   }
 
-  void _syncState() {
-    final currentState = diagnostics.monitor.state;
+  void _onDiagnosticsStateChanged(LocalRuntimeState state) {
+    if (!_isMonitoring) return;
+    _syncState(state);
+  }
+
+  void _syncState(LocalRuntimeState currentState) {
+    // Mirror the fields that participate in LocalRuntimeState equality so the
+    // chat overlay only rebuilds when the observable runtime snapshot changes.
     final currentSignature = Object.hash(
       currentState.status,
       currentState.message,
@@ -76,6 +80,7 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
 
   @override
   void dispose() {
+    diagnostics.monitor.removeListener(_onDiagnosticsStateChanged);
     stopMonitoring();
     super.dispose();
   }

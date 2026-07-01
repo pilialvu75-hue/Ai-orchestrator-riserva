@@ -99,7 +99,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Tokens: ${runtimeState.tokensGenerated}',
+              'Tokens generated: ${runtimeState.tokensGenerated}',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
             Text(
@@ -128,7 +128,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
               ),
             ),
             Text(
-              'GPU Backend: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
+              'llama.cpp backend: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
               style: TextStyle(
                 color: hardwareSnapshot.gpuAccelerationActive
                     ? const Color(0xFF4ADE80)

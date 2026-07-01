@@ -39,8 +39,6 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
 const int _kAssistantTtsRecencyThresholdSeconds = 10;
-const Duration _kRuntimeStatePollInterval = Duration(seconds: 2);
-
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
 
@@ -95,7 +93,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _hardwareController.addListener(_handlePresentationStateChanged);
     _systemIndicatorsController.addListener(_handlePresentationStateChanged);
     WidgetsBinding.instance.addObserver(this);
-    _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
+    _runtimeStateController.startMonitoring();
     unawaited(_refreshPresentationIndicators());
     final modelBloc = context.read<ModelDownloadBloc>();
     if (modelBloc.state is ModelDownloadInitial) {
@@ -106,7 +104,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _runtimeStateController.startMonitoring(_kRuntimeStatePollInterval);
+      _runtimeStateController.startMonitoring();
       unawaited(_refreshPresentationIndicators());
     } else {
       _runtimeStateController.stopMonitoring();
@@ -121,14 +119,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _handleRuntimeStateChanged() {
     if (!mounted) return;
     setState(() {});
-    unawaited(_refreshPresentationIndicators());
   }
 
   Future<void> _refreshPresentationIndicators() async {
-    await Future.wait<void>([
-      _hardwareController.refreshHardwareStatus(),
-      _systemIndicatorsController.refreshIndicators(),
-    ]);
+    // Hardware refresh is synchronous because it only snapshots cached runtime logs.
+    _hardwareController.refreshHardwareStatus();
+    await _systemIndicatorsController.refreshIndicators();
   }
 
   @override
