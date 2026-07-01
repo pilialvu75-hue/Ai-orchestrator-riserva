@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:async' show StreamSubscription, unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';

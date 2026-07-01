@@ -1,6 +1,9 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 
+const String _completeSystemPrompt =
+    'You are a helpful assistant. Give complete answers when appropriate.';
+
 class LocalPromptTemplates {
   LocalPromptTemplates._();
 
@@ -107,7 +110,7 @@ class LocalPromptTemplates {
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful local assistant. Give complete answers when appropriate.';
+    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
     buffer.write(enforcedSystem);
     buffer.write('<|eot_id|>');
     
@@ -138,7 +141,7 @@ class LocalPromptTemplates {
     buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     buffer.write('<|im_start|>system\n');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.';
+    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
     buffer.write(enforcedSystem);
     buffer.write('\n<|im_end|>\n');
     
@@ -168,7 +171,7 @@ class LocalPromptTemplates {
     // FIX 1: Iniezione metadati sampling dinamico
     buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.';
+    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
     // FIX 2: Gemma usa <start_of_turn>system invece di user per il system prompt
     buffer.write('<start_of_turn>system\n$enforcedSystem\n<end_of_turn>\n');
     
@@ -190,7 +193,7 @@ class LocalPromptTemplates {
   }) {
     final buffer = StringBuffer();
 
-    final enforcedSystem = (systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.').trim();
+    final enforcedSystem = (systemPrompt ?? _completeSystemPrompt).trim();
     buffer.write('<|system|>\n$enforcedSystem\n<|end|>\n');
 
     for (final turn in context) {
@@ -219,7 +222,7 @@ class LocalPromptTemplates {
     if (systemPrompt != null) {
       buffer.write('<|system|>\n$systemPrompt\n</s>\n');
     } else {
-      buffer.write('<|system|>\nYou are a helpful, concise local assistant. Give complete answers when appropriate.\n</s>\n');
+      buffer.write('<|system|>\n$_completeSystemPrompt\n</s>\n');
     }
     
     for (final turn in context) {
