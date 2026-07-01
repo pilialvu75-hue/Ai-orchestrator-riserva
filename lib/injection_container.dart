@@ -482,27 +482,7 @@ Future<void> initDependencies({
       sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
-
-  // ── Web Search Module (Decoupled Infrastructure) ───────────────────────────
-  sl.registerLazySingleton<SearchCache>(
-    () => InMemorySearchCache(ttl: const Duration(minutes: 10)),
-  );
-  sl.registerLazySingleton<DuckDuckGoHtmlParser>(
-    () => DuckDuckGoHtmlParser(),
-  );
-  sl.registerLazySingleton<SearchProvider>(
-    () => DuckDuckGoProvider(
-      client: sl<http.Client>(),
-      parser: sl<DuckDuckGoHtmlParser>(),
-    ),
-  );
-  sl.registerLazySingleton<WebSearchTool>(
-    () => WebSearchTool(
-      provider: sl<SearchProvider>(),
-      cache: sl<SearchCache>(),
-    ),
-  );
-
+  sl.registerLazySingleton<WebSearchTool>(() => WebSearchTool());
   sl.registerLazySingleton<Orchestrator>(
     () => Orchestrator(
       intentAnalyzer: sl<IntentAnalyzer>(),
@@ -588,6 +568,6 @@ String _resolveNodeId(SharedPreferences prefs) {
 /// collision risk when multiple installations are created simultaneously.
 String _generateNodeId() {
   final t = DateTime.now();
-  final entropy = (t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003)).abs();
+  final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
   return entropy.toRadixString(16).padLeft(16, '0');
 }
