@@ -42,8 +42,11 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   }
 
   /// Keep the snapshot in sync with the authoritative diagnostics monitor.
+  /// The interval is retained for call-site compatibility with the old timer API.
   void startMonitoring(Duration interval) {
-    assert(interval >= Duration.zero);
+    if (interval < Duration.zero) {
+      throw ArgumentError.value(interval, 'interval', 'must be non-negative');
+    }
     _isMonitoring = true;
     _syncState(diagnostics.monitor.state);
   }

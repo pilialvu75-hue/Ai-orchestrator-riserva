@@ -59,10 +59,9 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
 
   @override
   void dispose() {
-    if (_runtimeEventSubscription != null) {
-      unawaited(_runtimeEventSubscription!.cancel());
-    }
+    final subscription = _runtimeEventSubscription;
     _runtimeEventSubscription = null;
+    unawaited(subscription?.cancel());
     super.dispose();
   }
 
