@@ -59,7 +59,7 @@ class LocalPromptTemplates {
         buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
         
         if (cleanedSystemPrompt != null) {
-          buffer.writeln('System: $cleanedSystemPrompt Respond in max 3 sentences. No speculation.');
+          buffer.writeln('System: $cleanedSystemPrompt');
           buffer.writeln();
         }
         for (final turn in cleanedContext) {
@@ -107,8 +107,8 @@ class LocalPromptTemplates {
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful, concise local assistant.';
-    buffer.write('$enforcedSystem Respond in max 3 sentences. No speculation.');
+    final enforcedSystem = systemPrompt ?? 'You are a helpful local assistant. Give complete answers when appropriate.';
+    buffer.write(enforcedSystem);
     buffer.write('<|eot_id|>');
     
     for (final turn in context) {
@@ -138,8 +138,8 @@ class LocalPromptTemplates {
     buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     buffer.write('<|im_start|>system\n');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
-    buffer.write('$enforcedSystem Respond in max 3 sentences. No speculation.');
+    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.';
+    buffer.write(enforcedSystem);
     buffer.write('\n<|im_end|>\n');
     
     for (final turn in context) {
@@ -168,9 +168,9 @@ class LocalPromptTemplates {
     // FIX 1: Iniezione metadati sampling dinamico
     buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     
-    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant.';
+    final enforcedSystem = systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.';
     // FIX 2: Gemma usa <start_of_turn>system invece di user per il system prompt
-    buffer.write('<start_of_turn>system\n$enforcedSystem Respond in max 3 sentences. No speculation.\n<end_of_turn>\n');
+    buffer.write('<start_of_turn>system\n$enforcedSystem\n<end_of_turn>\n');
     
     for (final turn in context) {
       buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
@@ -190,7 +190,7 @@ class LocalPromptTemplates {
   }) {
     final buffer = StringBuffer();
 
-    final enforcedSystem = (systemPrompt ?? 'You are a helpful assistant.').trim();
+    final enforcedSystem = (systemPrompt ?? 'You are a helpful assistant. Give complete answers when appropriate.').trim();
     buffer.write('<|system|>\n$enforcedSystem\n<|end|>\n');
 
     for (final turn in context) {
@@ -217,9 +217,9 @@ class LocalPromptTemplates {
     buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
     
     if (systemPrompt != null) {
-      buffer.write('<|system|>\n$systemPrompt Respond in max 3 sentences. No speculation.\n</s>\n');
+      buffer.write('<|system|>\n$systemPrompt\n</s>\n');
     } else {
-      buffer.write('<|system|>\nYou are a helpful, concise local assistant. Respond in max 3 sentences. No speculation.\n</s>\n');
+      buffer.write('<|system|>\nYou are a helpful, concise local assistant. Give complete answers when appropriate.\n</s>\n');
     }
     
     for (final turn in context) {

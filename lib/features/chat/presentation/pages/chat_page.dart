@@ -121,7 +121,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _handleRuntimeStateChanged() {
     if (!mounted) return;
     setState(() {});
-    unawaited(_refreshPresentationIndicators());
   }
 
   Future<void> _refreshPresentationIndicators() async {
