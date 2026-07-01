@@ -482,7 +482,27 @@ Future<void> initDependencies({
       sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
-  sl.registerLazySingleton<WebSearchTool>(() => WebSearchTool());
+
+  // ── Web Search Module (Decoupled Infrastructure) ───────────────────────────
+  sl.registerLazySingleton<SearchCache>(
+    () => InMemorySearchCache(ttl: const Duration(minutes: 10)),
+  );
+  sl.registerLazySingleton<DuckDuckGoHtmlParser>(
+    () => DuckDuckGoHtmlParser(),
+  );
+  sl.registerLazySingleton<SearchProvider>(
+    () => DuckDuckGoProvider(
+      client: sl<http.Client>(),
+      parser: sl<DuckDuckGoHtmlParser>(),
+    ),
+  );
+  sl.registerLazySingleton<WebSearchTool>(
+    () => WebSearchTool(
+      provider: sl<SearchProvider>(),
+      cache: sl<SearchCache>(),
+    ),
+  );
+
   sl.registerLazySingleton<Orchestrator>(
     () => Orchestrator(
       intentAnalyzer: sl<IntentAnalyzer>(),
