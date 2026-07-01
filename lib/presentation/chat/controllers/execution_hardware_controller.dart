@@ -32,20 +32,29 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
   static final RegExp _vulkanRegExp = RegExp(r'\bvulkan=(enabled|disabled)\b', caseSensitive: false);
 
   StreamSubscription<RuntimeEventEntry>? _runtimeEventSubscription;
+  StreamSubscription<void>? _runtimeLogClearSubscription;
+  String? _cachedBackendFromLogs;
+  int _cachedLogCount = 0;
 
   ExecutionHardwareController() : super(const HardwareSnapshot()) {
     _runtimeEventSubscription = RuntimeEventLog.instance.stream.listen((entry) {
       if (_entryContainsBackendInfo(entry.message)) {
         refreshHardwareStatus();
       }
+    }, onError: (Object error, StackTrace stackTrace) {
+      debugPrint('[RuntimeHardware] log stream error: $error\n$stackTrace');
+    });
+    _runtimeLogClearSubscription = RuntimeEventLog.instance.onClear.listen((_) {
+      _cachedBackendFromLogs = null;
+      _cachedLogCount = 0;
+      refreshHardwareStatus();
     });
   }
 
   /// Interroga l'infrastruttura nativa e i log runtime per verificare il backend effettivo di llama.cpp.
   void refreshHardwareStatus() {
-    var gpuActive = false;
     var gpuBackend = _resolveBackendFromRuntimeLogs() ?? 'unknown';
-    gpuActive = _isAcceleratedBackend(gpuBackend);
+    final gpuActive = _isAcceleratedBackend(gpuBackend);
 
     value = HardwareSnapshot(
       gpuAccelerationActive: gpuActive,
@@ -61,20 +70,37 @@ class ExecutionHardwareController extends ValueNotifier<HardwareSnapshot> {
   @override
   void dispose() {
     final subscription = _runtimeEventSubscription;
+    final clearSubscription = _runtimeLogClearSubscription;
     _runtimeEventSubscription = null;
+    _runtimeLogClearSubscription = null;
     subscription?.cancel();
+    clearSubscription?.cancel();
     super.dispose();
   }
 
   static String? _resolveBackendFromRuntimeLogs() {
     final entries = RuntimeEventLog.instance.entries;
-    for (var index = entries.length - 1; index >= 0; index--) {
+    if (_cachedBackendFromLogs != null && entries.length == _cachedLogCount) {
+      return _cachedBackendFromLogs;
+    }
+
+    final startIndex = entries.length > 32 ? entries.length - 32 : 0;
+    for (var index = entries.length - 1; index >= startIndex; index--) {
       final entry = entries[index];
       final backend = backendFromRuntimeLog(entry.message);
       if (backend != null) {
+        _cachedBackendFromLogs = backend;
+        _cachedLogCount = entries.length;
         return backend;
       }
     }
+
+    if (_cachedBackendFromLogs != null) {
+      _cachedLogCount = entries.length;
+      return _cachedBackendFromLogs;
+    }
+
+    _cachedLogCount = entries.length;
     return null;
   }
 

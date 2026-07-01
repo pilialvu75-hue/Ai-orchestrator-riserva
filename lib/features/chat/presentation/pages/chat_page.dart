@@ -122,6 +122,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshPresentationIndicators() async {
+    // Hardware refresh is synchronous because it only snapshots cached runtime logs.
     _hardwareController.refreshHardwareStatus();
     await _systemIndicatorsController.refreshIndicators();
   }
