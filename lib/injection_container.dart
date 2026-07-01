@@ -568,6 +568,6 @@ String _resolveNodeId(SharedPreferences prefs) {
 /// collision risk when multiple installations are created simultaneously.
 String _generateNodeId() {
   final t = DateTime.now();
-  final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
+  final entropy = (t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003)).abs();
   return entropy.toRadixString(16).padLeft(16, '0');
 }
