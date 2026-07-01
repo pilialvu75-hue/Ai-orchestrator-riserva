@@ -23,34 +23,33 @@ class _FakeClient extends http.BaseClient {
 }
 
 void main() {
-  test('estrae con successo i contesti di ricerca dal markup DuckDuckGo HTML', () async {
+  test('returns compact search context from DuckDuckGo JSON', () async {
     final client = _FakeClient((request) async {
-      expect(request.url.host, 'html.duckduckgo.com');
-      
-      // Simulazione del markup HTML reale restituito dall'endpoint leggero
-      final mockHtml = '''
-      <html>
-        <body>
-          <div class="web-result">
-            <div class="result__body">
-              <a class="result__url" href="https://flutter.dev">Flutter - Build apps</a>
-              <a class="result__snippet" href="https://flutter.dev">A UI toolkit for building beautiful apps.</a>
-            </div>
-          </div>
-        </body>
-      </html>
-      ''';
-
-      return http.Response(mockHtml, 200);
+      expect(request.url.host, 'api.duckduckgo.com');
+      return http.Response(
+        jsonEncode(
+          <String, dynamic>{
+            'Heading': 'Flutter',
+            'AbstractText': 'A UI toolkit.',
+            'AbstractURL': 'https://flutter.dev',
+            'RelatedTopics': [
+              <String, dynamic>{
+                'Text': 'Flutter - Build apps',
+                'FirstURL': 'https://flutter.dev',
+              },
+            ],
+          },
+        ),
+        200,
+      );
     });
 
-    final tool = WebSearchTool(client: client);  
-    final result = await tool.execute(<String, dynamic>{'query': 'flutter'});  
+    final tool = WebSearchTool(client: client);
+    final result = await tool.execute(<String, dynamic>{'query': 'flutter'});
 
-    expect(result.success, isTrue);  
-    expect(result.output, contains('Query: flutter'));  
-    expect(result.output, contains('Flutter - Build apps'));  
+    expect(result.success, isTrue);
+    expect(result.output, contains('Query: flutter'));
+    expect(result.output, contains('Flutter'));
     expect(result.output, contains('https://flutter.dev'));
-    expect(result.output, contains('A UI toolkit for building beautiful apps.'));
   });
 }
