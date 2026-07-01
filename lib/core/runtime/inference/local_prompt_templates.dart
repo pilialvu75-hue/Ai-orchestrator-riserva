@@ -1,8 +1,7 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 
-const String _completeSystemPrompt =
-    'You are a helpful assistant. Give complete answers when appropriate.';
+const String _completeSystemPrompt = 'You are a helpful assistant. Give complete answers when appropriate.';
 
 class LocalPromptTemplates {
   LocalPromptTemplates._();

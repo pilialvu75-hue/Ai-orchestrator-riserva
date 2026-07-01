@@ -42,11 +42,8 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
   }
 
   /// Keep the snapshot in sync with the authoritative diagnostics monitor.
-  /// Listener-driven monitoring ignores the interval and keeps the old API stable.
-  void startMonitoring([Duration interval = Duration.zero]) {
-    if (interval != Duration.zero) {
-      // Ignored: monitoring is now driven by diagnostics listeners.
-    }
+  /// Listener-driven monitoring keeps the UI hot-path responsive without polling.
+  void startMonitoring() {
     _isMonitoring = true;
     _syncState(diagnostics.monitor.state);
   }
