@@ -12,6 +12,7 @@ class DuckDuckGoProvider implements SearchProvider {
   }) : _client = client ?? http.Client();
 
   final http.Client _client;
+  /// Maximum duration allowed for a DuckDuckGo API request.
   final Duration timeout;
 
   @override
@@ -19,7 +20,7 @@ class DuckDuckGoProvider implements SearchProvider {
     String query, {
     int limit = 5,
   }) async {
-    final clampedLimit = limit.clamp(1, maxSearchResultsLimit);
+    final clampedLimit = limit.clamp(1, searchResultsLimit);
     final uri = Uri.https(
       'api.duckduckgo.com',
       '/',

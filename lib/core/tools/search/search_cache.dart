@@ -11,6 +11,7 @@ abstract class SearchCache {
 class InMemorySearchCache implements SearchCache {
   final Map<String, List<SearchResult>> _cache = <String, List<SearchResult>>{};
 
+  /// Normalizes queries so cache keys stay stable across whitespace/case.
   String _normalize(String query) => query.trim().toLowerCase();
 
   @override
