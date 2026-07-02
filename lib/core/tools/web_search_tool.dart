@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/core/tools/tool.dart';
@@ -56,6 +58,13 @@ class WebSearchTool implements Tool {
           await _searchProvider.search(
             query,
             limit: 8,
+          ).timeout(
+            timeout,
+            onTimeout: () {
+              throw TimeoutException(
+                'Web search timed out after ${timeout.inSeconds}s.',
+              );
+            },
           );
       if (_searchCache != null && cached == null) {
         _searchCache.put(query, results);
