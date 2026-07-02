@@ -16,6 +16,8 @@ class SearchResult {
 }
 
 abstract class SearchProvider {
+  Duration get timeout;
+
   Future<List<SearchResult>> search(
     String query, {
     int limit = 5,

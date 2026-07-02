@@ -19,7 +19,7 @@ class DuckDuckGoProvider implements SearchProvider {
     String query, {
     int limit = 5,
   }) async {
-    final normalizedLimit = limit.clamp(1, maxSearchResultsLimit);
+    final clampedLimit = limit.clamp(1, maxSearchResultsLimit);
     final uri = Uri.https(
       'api.duckduckgo.com',
       '/',
@@ -69,7 +69,7 @@ class DuckDuckGoProvider implements SearchProvider {
     }
 
     _collectRelatedTopics(decoded['RelatedTopics'], results);
-    return results.take(normalizedLimit).toList(growable: false);
+    return results.take(clampedLimit).toList(growable: false);
   }
 
   void _collectRelatedTopics(

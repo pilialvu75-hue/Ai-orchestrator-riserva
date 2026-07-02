@@ -13,7 +13,7 @@ class WebSearchTool implements Tool {
     SearchProvider? searchProvider,
     SearchCache? searchCache,
     this.maxResults = 5,
-    this.timeout = const Duration(seconds: 5),
+    Duration timeout = const Duration(seconds: 5),
   })  : _searchProvider = searchProvider ??
             DuckDuckGoProvider(
               client: client ?? http.Client(),
@@ -24,7 +24,6 @@ class WebSearchTool implements Tool {
   final SearchProvider _searchProvider;
   final SearchCache? _searchCache;
   final int maxResults;
-  final Duration timeout;
 
   @override
   String get id => 'web_search';
@@ -59,10 +58,10 @@ class WebSearchTool implements Tool {
             query,
             limit: maxSearchResultsLimit,
           ).timeout(
-            timeout,
+            _searchProvider.timeout,
             onTimeout: () {
               throw TimeoutException(
-                'Web search timed out after ${timeout.inSeconds}s.',
+                'Web search timed out after ${_searchProvider.timeout.inSeconds}s.',
               );
             },
           );

@@ -30,6 +30,9 @@ class _FakeSearchProvider implements SearchProvider {
   var calls = 0;
 
   @override
+  Duration get timeout => const Duration(seconds: 5);
+
+  @override
   Future<List<SearchResult>> search(String _query, {int limit = 5}) async {
     calls++;
     return _results.take(limit).toList(growable: false);
