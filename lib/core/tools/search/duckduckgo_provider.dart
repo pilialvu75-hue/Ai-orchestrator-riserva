@@ -13,6 +13,7 @@ class DuckDuckGoProvider implements SearchProvider {
 
   final http.Client _client;
   /// Maximum duration allowed for a DuckDuckGo API request.
+  @override
   final Duration timeout;
 
   @override

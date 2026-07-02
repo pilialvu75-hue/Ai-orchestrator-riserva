@@ -97,9 +97,16 @@ class WebSearchTool implements Tool {
         output: buffer.toString().trimRight(),
         success: true,
       );
+    } on TimeoutException catch (error) {
+      return ToolResult(
+      toolId: id,
+      output: '',
+      success: false,
+      error: 'Web search timed out: $error',
+      );
     } catch (error) {
       return ToolResult(
-        toolId: id,
+      toolId: id,
         output: '',
         success: false,
         error: 'Web search failed: $error',
