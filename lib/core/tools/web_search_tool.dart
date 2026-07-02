@@ -41,7 +41,7 @@ class WebSearchTool implements Tool {
   Future<ToolResult> execute(Map<String, dynamic> params) async {
     final query = (params['query'] as String?)?.trim() ?? '';
     final requestedLimit = (params['limit'] as num?)?.toInt() ?? maxResults;
-    final limit = requestedLimit.clamp(1, 8).toInt();
+    final limit = requestedLimit.clamp(1, maxSearchResultsLimit);
 
     if (query.isEmpty) {
       return const ToolResult(
@@ -57,7 +57,7 @@ class WebSearchTool implements Tool {
       final results = cached ??
           await _searchProvider.search(
             query,
-            limit: 8,
+            limit: maxSearchResultsLimit,
           ).timeout(
             timeout,
             onTimeout: () {

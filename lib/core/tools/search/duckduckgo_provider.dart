@@ -19,7 +19,7 @@ class DuckDuckGoProvider implements SearchProvider {
     String query, {
     int limit = 5,
   }) async {
-    final normalizedLimit = limit.clamp(1, 8).toInt();
+    final normalizedLimit = limit.clamp(1, maxSearchResultsLimit);
     final uri = Uri.https(
       'api.duckduckgo.com',
       '/',

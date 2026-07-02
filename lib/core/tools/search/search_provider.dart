@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+const int maxSearchResultsLimit = 8;
+
 @immutable
 class SearchResult {
   const SearchResult({

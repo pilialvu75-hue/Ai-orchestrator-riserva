@@ -485,11 +485,8 @@ Future<void> initDependencies({
       sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
-  sl.registerLazySingleton<DuckDuckGoProvider>(
-    () => DuckDuckGoProvider(client: sl<http.Client>()),
-  );
   sl.registerLazySingleton<SearchProvider>(
-    () => sl<DuckDuckGoProvider>(),
+    () => DuckDuckGoProvider(client: sl<http.Client>()),
   );
   sl.registerLazySingleton<SearchCache>(() => InMemorySearchCache());
   sl.registerLazySingleton<WebSearchTool>(
