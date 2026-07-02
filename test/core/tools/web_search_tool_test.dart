@@ -1,7 +1,8 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
+import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
+import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
@@ -19,6 +20,22 @@ class _FakeClient extends http.BaseClient {
       headers: response.headers,
       request: request,
     );
+  }
+}
+
+class _FakeSearchProvider implements SearchProvider {
+  _FakeSearchProvider(this._results);
+
+  final List<SearchResult> _results;
+  var calls = 0;
+
+  @override
+  Duration get timeout => const Duration(seconds: 5);
+
+  @override
+  Future<List<SearchResult>> search(String _query, {int limit = 5}) async {
+    calls++;
+    return _results.take(limit).toList(growable: false);
   }
 }
 
@@ -51,5 +68,29 @@ void main() {
     expect(result.output, contains('Query: flutter'));
     expect(result.output, contains('Flutter'));
     expect(result.output, contains('https://flutter.dev'));
+  });
+
+  test('reuses cached search results', () async {
+    final provider = _FakeSearchProvider(
+      const [
+        SearchResult(
+          title: 'Cached result',
+          url: 'https://example.com',
+          snippet: 'Cached snippet',
+        ),
+      ],
+    );
+    final cache = InMemorySearchCache();
+    final tool = WebSearchTool(
+      searchProvider: provider,
+      searchCache: cache,
+    );
+
+    final first = await tool.execute(<String, dynamic>{'query': 'flutter'});
+    final second = await tool.execute(<String, dynamic>{'query': 'flutter'});
+
+    expect(first.success, isTrue);
+    expect(second.success, isTrue);
+    expect(provider.calls, 1);
   });
 }
