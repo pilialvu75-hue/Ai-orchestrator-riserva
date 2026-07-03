@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(SUPPORTED_ANDROID_ABIS arm64-v8a)
 option(AI_ANDROID_ENABLE_MLC "Enable MLC-LLM JNI bridge integration" OFF)
+option(AI_ANDROID_ENABLE_VULKAN "Enable ggml Vulkan backend when Vulkan-Hpp is available" OFF)
 
 if(ANDROID AND DEFINED ANDROID_ABI AND NOT ANDROID_ABI IN_LIST SUPPORTED_ANDROID_ABIS)
     message(FATAL_ERROR
@@ -44,13 +45,19 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
-# ggml-vulkan requires vulkan/vulkan.hpp (Vulkan-Hpp C++ header), which is NOT
-# provided by the Android NDK. The NDK ships vulkan/vulkan.h (the C API) and
-# libvulkan.so (the runtime loader), but vulkan.hpp is only available through
-# the LunarG Vulkan SDK or the Khronos vulkan-hpp project. Forcing this OFF
-# prevents ggml-vulkan.cpp from being compiled and avoids the fatal header
-# error even if a future CMake argument accidentally sets it to ON.
-set(GGML_VULKAN           OFF CACHE BOOL "" FORCE)
+find_path(VULKAN_HPP_INCLUDE_DIR vulkan/vulkan.hpp)
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_HPP_INCLUDE_DIR)
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+    include_directories("${VULKAN_HPP_INCLUDE_DIR}")
+    message(STATUS "ggml Vulkan backend enabled with Vulkan-Hpp headers at ${VULKAN_HPP_INCLUDE_DIR}")
+else()
+    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+    if(AI_ANDROID_ENABLE_VULKAN)
+        message(WARNING
+            "AI_ANDROID_ENABLE_VULKAN is ON but vulkan/vulkan.hpp was not found. "
+            "Falling back to CPU-only llama.cpp.")
+    endif()
+endif()
 
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

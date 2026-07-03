@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+
 import 'search_provider.dart';
 
 class DuckDuckGoProvider implements SearchProvider {
@@ -41,6 +43,12 @@ class DuckDuckGoProvider implements SearchProvider {
     debugPrint('[DDG] Query: $query');
     debugPrint('[DDG] URL: $uri');
     debugPrint('[DDG] Timeout: ${timeout.inSeconds}s');
+    RuntimeEventLog.instance.emit(
+      '[WEBSEARCH_PROVIDER_SELECTED] provider=duckduckgo limit=$clampedLimit',
+    );
+    RuntimeEventLog.instance.emit(
+      '[WEBSEARCH_HTTP_BEGIN] host=${uri.host} path=${uri.path}',
+    );
 
     final stopwatch = Stopwatch()..start();
 
@@ -59,6 +67,11 @@ class DuckDuckGoProvider implements SearchProvider {
       stopwatch.stop();
 
       debugPrint('[DDG] HTTP ${response.statusCode}');
+      RuntimeEventLog.instance.emit(
+        response.statusCode >= 200 && response.statusCode < 300
+            ? '[WEBSEARCH_HTTP_SUCCESS] status=${response.statusCode} elapsed_ms=${stopwatch.elapsedMilliseconds}'
+            : '[WEBSEARCH_HTTP_FAILURE] status=${response.statusCode} elapsed_ms=${stopwatch.elapsedMilliseconds}',
+      );
       debugPrint('[DDG] Elapsed ${stopwatch.elapsedMilliseconds} ms');
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -136,6 +149,11 @@ class DuckDuckGoProvider implements SearchProvider {
       debugPrint('[DDG] EXCEPTION');
       debugPrint(e.toString());
       debugPrint(s.toString());
+      RuntimeEventLog.instance.emit(
+        e is TimeoutException
+            ? '[WEBSEARCH_HTTP_TIMEOUT] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e'
+            : '[WEBSEARCH_HTTP_FAILURE] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e',
+      );
       debugPrint('[DDG] ============================================');
 
       rethrow;

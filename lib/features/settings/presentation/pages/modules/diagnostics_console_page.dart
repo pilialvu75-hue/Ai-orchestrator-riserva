@@ -252,6 +252,10 @@ class _CategoryFilterBar extends StatelessWidget {
         return 'STREAM';
       case RuntimeEventCategory.validation:
         return 'VALIDATION';
+      case RuntimeEventCategory.websearch:
+        return 'WEBSEARCH';
+      case RuntimeEventCategory.hardware:
+        return 'HARDWARE';
       case RuntimeEventCategory.other:
         return 'OTHER';
     }
@@ -273,6 +277,10 @@ class _CategoryFilterBar extends StatelessWidget {
         return const Color(0xFF22D3EE); // cyan
       case RuntimeEventCategory.validation:
         return const Color(0xFFA78BFA); // purple
+      case RuntimeEventCategory.websearch:
+        return const Color(0xFFF59E0B); // amber
+      case RuntimeEventCategory.hardware:
+        return const Color(0xFF38BDF8); // sky
       case RuntimeEventCategory.other:
         return const Color(0xFF9CA3AF); // grey
     }
@@ -418,6 +426,10 @@ class _EntryRow extends StatelessWidget {
         return const Color(0xFF22D3EE);
       case RuntimeEventCategory.validation:
         return const Color(0xFFA78BFA);
+      case RuntimeEventCategory.websearch:
+        return const Color(0xFFF59E0B);
+      case RuntimeEventCategory.hardware:
+        return const Color(0xFF38BDF8);
       case RuntimeEventCategory.other:
         return const Color(0xFF9CA3AF);
     }

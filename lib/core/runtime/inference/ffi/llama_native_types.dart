@@ -6,6 +6,12 @@ import 'package:ffi/ffi.dart';
 typedef LlbInitBackendNative = Void Function();
 typedef LlbInitBackendDart = void Function();
 
+typedef LlbGpuBackendNameNative = Pointer<Utf8> Function();
+typedef LlbGpuBackendNameDart = Pointer<Utf8> Function();
+
+typedef LlbGpuBackendReasonNative = Pointer<Utf8> Function();
+typedef LlbGpuBackendReasonDart = Pointer<Utf8> Function();
+
 typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32, Int32);
 typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
 

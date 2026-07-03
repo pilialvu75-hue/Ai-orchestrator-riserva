@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
+
 typedef ForensicLogFn = void Function(String message);
 
 const int kForensicWindowSize = 512;
@@ -60,3 +62,6 @@ String describeUtf8PayloadForensics({
     '[$label] last_512_hex=${_formatAsHex(tail)}',
   ].join('\n');
 }
+
+String secureForensicHash(String payload) =>
+    sha256.convert(utf8.encode(payload)).toString();

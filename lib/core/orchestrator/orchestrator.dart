@@ -45,6 +45,9 @@ class Orchestrator {
     bool isOffline = false,
   }) async {
     final type = _analyzer.analyze(input);
+    _logForensic(
+      '[WEBSEARCH_INTENT_DETECTED] input_chars=${input.length} task_type=${type.name}',
+    );
 
     switch (type) {
       case TaskType.command:
@@ -53,6 +56,9 @@ class Orchestrator {
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
       case TaskType.webSearch:
+        _logForensic(
+          '[WEBSEARCH_TASK_SELECTED] session=default',
+        );
         return _handleWebSearch(
           input,
           systemPrompt: systemPrompt,
@@ -123,6 +129,9 @@ class Orchestrator {
         ' boundary=orchestrator.intent_route'
         ' reason=task_type_webSearch',
       );
+      _logForensic(
+        '[WEBSEARCH_TASK_SELECTED] session=$sessionId',
+      );
       return _handleWebSearchStream(
         input: input,
         sessionId: sessionId,
@@ -168,7 +177,14 @@ class Orchestrator {
       temperature: InferenceRequest.defaultTemperature,
     );
 
-    return _inferenceService.infer(request);
+    final response = await _inferenceService.infer(request);
+    _logForensic(
+      '[WEBSEARCH_MODEL_RESPONSE] session=default isError=${response.isError} text_chars=${response.text.length}',
+    );
+    _logForensic(
+      '[WEBSEARCH_EXIT] session=default success=${!response.isError}',
+    );
+    return response;
   }
 
   TokenStream _handleWebSearchStream({
@@ -191,6 +207,12 @@ class Orchestrator {
     );
 
     yield* _inferenceService.stream(request);
+    _logForensic(
+      '[WEBSEARCH_MODEL_RESPONSE] session=$sessionId stream_complete=true',
+    );
+    _logForensic(
+      '[WEBSEARCH_EXIT] session=$sessionId stream_complete=true',
+    );
   }
 
   String _extractSearchQuery(String input) {
@@ -231,10 +253,9 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
-    if (isOffline || webSearchTool == null) {
+    if (webSearchTool == null) {
       _logForensic(
-        '[WEB_SEARCH] session=$sessionId enabled=false isOffline=$isOffline'
-        ' hasTool=${webSearchTool != null}',
+        '[WEBSEARCH_EXIT] session=$sessionId success=false reason=tool_missing',
       );
       return InferenceRequest(
         sessionId: sessionId,
@@ -250,9 +271,10 @@ class Orchestrator {
     try {
       final query = _extractSearchQuery(input);
       _logForensic(
-        '[WEB_SEARCH_QUERY]'
-        ' original="$input"'
-        ' extracted="$query"',
+        '[WEBSEARCH_TOOL_FOUND] session=$sessionId tool=${webSearchTool.id}',
+      );
+      _logForensic(
+        '[WEBSEARCH_PROVIDER_SELECTED] session=$sessionId provider=${webSearchTool.runtimeType}',
       );
 
       final search = await webSearchTool.execute(<String, dynamic>{
@@ -260,12 +282,14 @@ class Orchestrator {
         'limit': _maxWebSearchResults,
       });
       _logForensic(
-        '[WEB_SEARCH] session=$sessionId success=${search.success}'
-        ' output_chars=${search.output.length}',
+        '[WEBSEARCH_REQUEST_SENT] session=$sessionId query_chars=${query.length}',
       );
 
       final hasSearchResults = search.success && search.output.trim().isNotEmpty;
       final searchContext = hasSearchResults ? _buildSearchContext(search.output) : '';
+      _logForensic(
+        '[WEBSEARCH_CONTEXT_CREATED] session=$sessionId chars=${searchContext.length} empty=${searchContext.isEmpty}',
+      );
 
       return InferenceRequest(
         sessionId: sessionId,
@@ -282,7 +306,7 @@ class Orchestrator {
       );
     } catch (error) {
       _logForensic(
-        '[WEB_SEARCH] session=$sessionId success=false error=$error',
+        '[WEBSEARCH_EXIT] session=$sessionId success=false error=$error',
       );
       return InferenceRequest(
         sessionId: sessionId,
@@ -316,6 +340,9 @@ class Orchestrator {
     if (hasResults && searchContext.trim().isNotEmpty) {
       sections.add(_buildWebSearchSystemPrompt());
       sections.add(searchContext);
+      _logForensic(
+        '[WEBSEARCH_CONTEXT_INJECTED] chars=${searchContext.length}',
+      );
     }
 
     return sections.join('\n\n');
@@ -323,10 +350,12 @@ class Orchestrator {
 
   /// Guides the model to treat retrieved web results as the primary source.
   String _buildWebSearchSystemPrompt() {
-    return 'You are AI Orchestrator. Answer the user using the web search '
+    final prompt = 'You are AI Orchestrator. Answer the user using the web search '
         'results in the conversation context as primary evidence. Cite the '
         'most relevant source URLs when possible. If the search results do '
         'not contain enough evidence, say so explicitly.';
+    _logForensic('[WEBSEARCH_PROMPT_FINALIZED] chars=${prompt.length}');
+    return prompt;
   }
 
   static void _logForensic(String message) {

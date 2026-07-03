@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
 import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
@@ -41,6 +42,7 @@ class _FakeSearchProvider implements SearchProvider {
 
 void main() {
   test('returns compact search context from DuckDuckGo JSON', () async {
+    RuntimeEventLog.instance.clear();
     final client = _FakeClient((request) async {
       expect(request.url.host, 'api.duckduckgo.com');
       return http.Response(
@@ -68,9 +70,16 @@ void main() {
     expect(result.output, contains('Query: flutter'));
     expect(result.output, contains('Flutter'));
     expect(result.output, contains('https://flutter.dev'));
+    expect(
+      RuntimeEventLog.instance.entries.any(
+        (entry) => entry.message.contains('[WEBSEARCH_CACHE_MISS]'),
+      ),
+      isTrue,
+    );
   });
 
   test('reuses cached search results', () async {
+    RuntimeEventLog.instance.clear();
     final provider = _FakeSearchProvider(
       const [
         SearchResult(
@@ -92,5 +101,11 @@ void main() {
     expect(first.success, isTrue);
     expect(second.success, isTrue);
     expect(provider.calls, 1);
+    expect(
+      RuntimeEventLog.instance.entries.any(
+        (entry) => entry.message.contains('[WEBSEARCH_CACHE_HIT]'),
+      ),
+      isTrue,
+    );
   });
 }
