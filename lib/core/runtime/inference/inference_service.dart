@@ -328,7 +328,7 @@ class InferenceService {
       final searchPattern = RegExp(r'<search>(.*?)</search>');
       final match = searchPattern.firstMatch(textAccumulator.toString());
 
-      if (match != null && detectedQuery == null) {
+            if (match != null && detectedQuery == null) {
         detectedQuery = match.group(1)?.trim();
         _log('[INTERCEPTOR] Rilevato tag di ricerca internet. Query: "$detectedQuery"');
         
@@ -338,8 +338,8 @@ class InferenceService {
           model: localRequest.modelId ?? 'local',
         );
         
-        // Interrompe l'esecutore nativo corrente per poter iniettare il contesto
-        _runtimeProvider.cancel(localRequest.sessionId); 
+        // Interrompe l'esecutore nativo corrente usando il token di cancellazione
+        cancellationToken.cancel(); 
         break;
       }
 
