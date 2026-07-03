@@ -253,14 +253,11 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
-    // Offline is recorded for diagnostics only; web search availability is
-    // intentionally decoupled from runtime mode so LOCAL still supports tools.
-    // `isOffline` is diagnostic metadata only in this method; if it is true and
-    // a tool exists, the HTTP layer still runs and surfaces timeout/failure
-    // diagnostics instead of short-circuiting here.
+    
     _logForensic(
       '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
     );
+    
     if (webSearchTool == null) {
       _logForensic(
         '[WEBSEARCH_EXIT] session=$sessionId success=false reason=tool_missing',
@@ -270,7 +267,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: systemPrompt,
         context: context,
-        isOffline: false,
+        isOffline: isOffline, // CORRETTO: Passa il flag reale invece di false hardcoded
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
@@ -308,7 +305,7 @@ class Orchestrator {
           hasResults: hasSearchResults,
         ),
         context: context,
-        isOffline: false,
+        isOffline: isOffline, // CORRETTO: Garantisce che il local RAG mantenga il runtime FFI attivo
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
@@ -321,7 +318,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: systemPrompt,
         context: context,
-        isOffline: false,
+        isOffline: isOffline, // CORRETTO: Gestione dell'errore coerente con lo stato offline richiesto
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
