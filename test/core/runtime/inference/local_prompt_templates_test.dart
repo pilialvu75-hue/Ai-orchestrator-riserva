@@ -1,11 +1,13 @@
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LocalPromptTemplates', () {
     test('uses the Phi-3 template for Phi-3.5 Mini', () {
+      RuntimeEventLog.instance.clear();
       expect(
         LocalInferenceModelIds.resolveTemplate('phi3_5_mini'),
         'phi3',
@@ -31,6 +33,18 @@ void main() {
       expect(prompt, isNot(contains('<!--META')));
       expect(prompt, isNot(contains('<|im_start|>')));
       expect(prompt, isNot(contains('Respond in max 3 sentences')));
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains('[PROMPT_BEGIN]'),
+        ),
+        isTrue,
+      );
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains('[PROMPT_SENT]'),
+        ),
+        isTrue,
+      );
     });
   });
 }

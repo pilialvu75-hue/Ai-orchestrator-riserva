@@ -9,6 +9,10 @@ extern "C" {
 
 void llb_init_backend(void);
 
+const char* llb_gpu_backend_name(void);
+
+const char* llb_gpu_backend_reason(void);
+
 int64_t llb_create_session(
     const char* model_path,
     int32_t n_ctx,

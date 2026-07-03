@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:flutter/foundation.dart';
 
@@ -47,6 +48,7 @@ class InferenceService {
 
   TokenStream stream(InferenceRequest request) async* {
     final isolatedRequest = request.copyWith();
+    _log('[INFERENCE_BEGIN] session=${isolatedRequest.sessionId}');
     _log('[FORENSIC_INFERENCE_SERVICE_ENTRY] session=${isolatedRequest.sessionId} prompt_chars=${isolatedRequest.prompt.length} provider=${_runtimeProvider.runtimeType}');
     _log('[ORCHESTRATOR_BEGIN] session=${isolatedRequest.sessionId}');
     _log(
@@ -63,8 +65,10 @@ class InferenceService {
     }
     _runtimeLookupInProgress = true;
     final session = _sessionManager.startSession(isolatedRequest.sessionId);
+    _log('[INFERENCE_SESSION_CREATED] session=${isolatedRequest.sessionId}');
     try {
       final runtimeMode = await _loadRuntimeMode();
+      _log('[INFERENCE_RUNTIME_SELECTED] session=${isolatedRequest.sessionId} runtime=${runtimeMode.name}');
       _log(
        '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
       );
@@ -74,6 +78,7 @@ class InferenceService {
       );
 
       final selectedModel = await _resolveSelectedModelForLocalRuntime();
+      _log('[INFERENCE_MODEL] session=${isolatedRequest.sessionId} model=${selectedModel?.effectiveRuntimeModelId ?? 'none'}');
       final localRequest = _buildLocalRequest(isolatedRequest, selectedModel);
       _log(
        '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
@@ -85,6 +90,9 @@ class InferenceService {
       _log(
        '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=request_construction local_request=${localRequest != null}',
       );
+      _log(
+       '[INFERENCE_STREAM_BEGIN] session=${isolatedRequest.sessionId} mode=${runtimeMode.name}',
+      );
 
       yield* _streamWithRetryAndGuards(
        runtimeMode: runtimeMode,
@@ -93,6 +101,7 @@ class InferenceService {
        cancellationToken: session.cancellationToken,
       );
     } catch (error, stackTrace) {
+      _log('[INFERENCE_ERROR] session=${isolatedRequest.sessionId} error=$error');
       _log('[ASYNC_FATAL] scope=inference_service.stream session=${isolatedRequest.sessionId} error=$error stack=$stackTrace');
       yield InferenceResponse.error(
        'Inference service failed before runtime stream start: $error',
@@ -100,6 +109,7 @@ class InferenceService {
     } finally {
       _runtimeLookupInProgress = false;
       _sessionManager.complete(session);
+      _log('[INFERENCE_FINISHED] session=${isolatedRequest.sessionId}');
       _log('async listener cleanup session=${isolatedRequest.sessionId}');
       _log('stream end session=${isolatedRequest.sessionId}');
       _log('[ORCHESTRATOR_END] session=${isolatedRequest.sessionId}');
@@ -315,6 +325,7 @@ class InferenceService {
       if (chunk.isError &&
           _isStalledPreInferenceError(chunk.errorMessage)) {
         cancellationToken.cancel();
+        _log('[INFERENCE_ERROR] session=${localRequest.sessionId} reason=stalled_pre_inference');
         _log(
           '[TERMINAL_STATE] state=stalled_pre_inference session=${localRequest.sessionId}'
           ' stage=local_stream_guard',
@@ -358,6 +369,8 @@ class InferenceService {
       var emittedContent = false;
       var shouldRetry = false;
       var retryReason = '';
+      var firstTokenLogged = false;
+      var streamedTokenCount = 0;
       final routedStream = _routeInference(
         runtimeMode: runtimeMode,
         cloudRequest: cloudRequest,
@@ -379,6 +392,11 @@ class InferenceService {
         }
         if (chunk.text.trim().isNotEmpty) {
           emittedContent = true;
+          streamedTokenCount++;
+          if (!firstTokenLogged) {
+            firstTokenLogged = true;
+            _log('[INFERENCE_FIRST_TOKEN] session=${cloudRequest.sessionId} attempt=$attempt');
+          }
         }
         if (chunk.isError &&
             attempt <= _maxRetryCount &&
@@ -390,6 +408,10 @@ class InferenceService {
             '[RUNTIME_PATH] retry session=${cloudRequest.sessionId} attempt=$attempt reason="$retryReason"',
           );
           continue;
+        }
+        if (chunk.isFinal && !chunk.isError) {
+          _log('[INFERENCE_LAST_TOKEN] session=${cloudRequest.sessionId} attempt=$attempt');
+          _log('[STREAM_TOKEN_COUNT] session=${cloudRequest.sessionId} attempt=$attempt tokens=$streamedTokenCount');
         }
         _log(
           '[FINAL_RESPONSE] session=${cloudRequest.sessionId} attempt=$attempt isFinal=${chunk.isFinal} '
@@ -540,14 +562,16 @@ class InferenceService {
   }
 
   String _promptHash(InferenceRequest request) {
-    return Object.hash(
-      request.sessionId,
-      request.prompt.trim(),
-      request.systemPrompt?.trim() ?? '',
-      request.context
-          .map((turn) => '${turn.role.name}:${turn.content}')
-          .join('\n'),
-    ).toRadixString(16);
+    return secureForensicHash(
+      [
+        request.sessionId,
+        request.prompt.trim(),
+        request.systemPrompt?.trim() ?? '',
+        request.context
+            .map((turn) => '${turn.role.name}:${turn.content}')
+            .join('\n'),
+      ].join('\u0000'),
+    );
   }
 
   TokenStream _streamAutomaticOrchestration({
@@ -576,7 +600,7 @@ class InferenceService {
         '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=inference_service._streamLocalInference_not_invoked',
       );
       yield InferenceResponse.error(
-        'Device is offline and no validated local model is selected.',
+        'Network is unavailable and no local model is ready for use.',
       );
       return;
     }

@@ -1,5 +1,7 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 const String _completeSystemPrompt = 'You are a helpful assistant. Give complete answers when appropriate.';
 
@@ -22,6 +24,26 @@ class LocalPromptTemplates {
         
     final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
+    final contextChars = cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
+    final webSystemPromptChars = cleanedSystemPrompt != null &&
+            cleanedSystemPrompt.contains('Web search results:')
+        ? cleanedSystemPrompt.length
+        : 0;
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_BEGIN] model=$modelId prompt_chars=${userPrompt.length}',
+    );
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_SYSTEM_SIZE] chars=${cleanedSystemPrompt?.length ?? 0}',
+    );
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=$contextChars',
+    );
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_MEMORY_SIZE] chars=$contextChars',
+    );
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_WEB_RESULTS_SIZE] chars=$webSystemPromptChars',
+    );
 
     switch (template) {
       case 'llama3':
@@ -69,7 +91,9 @@ class LocalPromptTemplates {
         }
         if (cleanedContext.isNotEmpty) buffer.writeln();
         buffer.write('User: $userPrompt');
-        return buffer.toString();
+        final composed = buffer.toString();
+        _logFinalPromptMetrics(composed, userPrompt.length);
+        return composed;
     }
   }
 
@@ -123,7 +147,9 @@ class LocalPromptTemplates {
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
     buffer.write('<|start_header_id|>assistant<|end_header_id|>\n\n');
-    return buffer.toString();
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
   }
 
   /// ChatML / Qwen — Controllo cicli e campionamento predittivo
@@ -155,7 +181,9 @@ class LocalPromptTemplates {
     buffer.write(effectiveUserPrompt);
     buffer.write('\n<|im_end|>\n');
     buffer.write('<|im_start|>assistant\n');
-    return buffer.toString();
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
   }
 
   /// Gemma chat template — Allineato con start_of_turn system nativo
@@ -181,7 +209,9 @@ class LocalPromptTemplates {
     }
     buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
     buffer.write('<start_of_turn>model\n');
-    return buffer.toString();
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
   }
 
   /// Phi-3 / Phi-3.5 chat template.
@@ -203,7 +233,9 @@ class LocalPromptTemplates {
 
     buffer.write('<|user|>\n$userPrompt\n<|end|>\n');
     buffer.write('<|assistant|>\n');
-    return buffer.toString();
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
   }
 
   /// Zephyr / TinyLlama template
@@ -230,7 +262,23 @@ class LocalPromptTemplates {
     }
     buffer.write('<|user|>\n$userPrompt\n</s>\n');
     buffer.write('<|assistant|>\n');
-    return buffer.toString();
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
+  }
+
+  static void _logFinalPromptMetrics(String composed, int userPromptChars) {
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_FINAL_SIZE] chars=${composed.length}',
+    );
+    RuntimeEventLog.instance.emit(
+      // Rough English-style BPE estimate for diagnostics only; real tokenization
+      // varies by model, language, and vocabulary.
+      '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
+    );
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_SENT] hash=${secureForensicHash(composed)} prompt_chars=$userPromptChars',
+    );
   }
 
   static String _roleName(ChatRole role) {

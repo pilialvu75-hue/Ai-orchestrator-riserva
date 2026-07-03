@@ -195,6 +195,31 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       return null;
     }
     final bindings = _bindings!;
+    final gpuBackendName = bindings.gpuBackendName();
+    final gpuBackendReason = bindings.gpuBackendReason();
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_BEGIN] session=$sessionId requested_layers=${LlamaNativeDefaults.nGpuLayers} modelId=$modelId',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_DEVICE_FOUND] backend=$gpuBackendName',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_BACKEND] type=$gpuBackendName $gpuBackendReason',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_SELECTED] backend=$gpuBackendName requested_layers=${LlamaNativeDefaults.nGpuLayers}',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_MEMORY] backend=$gpuBackendName model_path=$resolvedModelPath',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_THREADS] backend=$gpuBackendName n_threads=${LlamaNativeDefaults.nThreads}',
+    );
+    if (gpuBackendName == 'CPU_FALLBACK') {
+      AndroidFfiRuntimeProvider._log(
+        '[GPU_CPU_FALLBACK] backend=$gpuBackendName ${gpuBackendReason.trim()}',
+      );
+    }
     _updateRuntimeStatus( LocalRuntimeStatus.loading, message: 'Loading model: $modelId', resetProgress: true, );
     await Future<void>.delayed(Duration.zero);
     AndroidFfiRuntimeProvider._logAi('creating native session...');
@@ -428,6 +453,9 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     }
     AndroidFfiRuntimeProvider._log('[WARMUP] inference_startup_ok session=$sessionId' ' startup_ms=${startupWatch.elapsed.inMilliseconds}');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=ready startup_ms=${startupWatch.elapsed.inMilliseconds}', );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_EXIT] backend=$gpuBackendName status=ready elapsed_ms=${startupWatch.elapsed.inMilliseconds}',
+    );
     return _GenerationStartupState( controller: controller, cancellationToken: cancellationToken, bindings: bindings, sessionId: sessionId, modelId: modelId, modelPath: resolvedModelPath, isForensicSelfTest: isForensicSelfTest, dartThreadId: dartThreadId, firstTokenDeadline: firstTokenDeadline, maxTokens: maxTokens, nativeSessionId: nativeSessionId, prompt: prompt, promptNativePtr: promptNativePtr, freePromptNativePtr: freePromptNativePtr, );
   }
 }

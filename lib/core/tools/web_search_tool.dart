@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
 import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 class WebSearchTool implements Tool {
   WebSearchTool({
@@ -41,8 +42,14 @@ class WebSearchTool implements Tool {
     final query = (params['query'] as String?)?.trim() ?? '';
     final requestedLimit = (params['limit'] as num?)?.toInt() ?? maxResults;
     final limit = requestedLimit.clamp(1, searchResultsLimit);
+    RuntimeEventLog.instance.emit(
+      '[WEBSEARCH_ENTER] query_chars=${query.length} limit=$limit',
+    );
 
     if (query.isEmpty) {
+      RuntimeEventLog.instance.emit(
+        '[WEBSEARCH_EXIT] success=false reason=empty_query',
+      );
       return const ToolResult(
         toolId: 'web_search',
         output: '',
@@ -53,6 +60,11 @@ class WebSearchTool implements Tool {
 
     try {
       final cached = _searchCache?.get(query);
+      RuntimeEventLog.instance.emit(
+        cached != null
+            ? '[WEBSEARCH_CACHE_HIT] query_chars=${query.length}'
+            : '[WEBSEARCH_CACHE_MISS] query_chars=${query.length}',
+      );
       final results = cached ??
           await _searchProvider.search(
             query,
@@ -70,6 +82,12 @@ class WebSearchTool implements Tool {
       }
 
       if (results.isEmpty) {
+        RuntimeEventLog.instance.emit(
+          '[WEBSEARCH_RESULTS_RECEIVED] count=0 empty=true',
+        );
+        RuntimeEventLog.instance.emit(
+          '[WEBSEARCH_EXIT] success=false reason=no_results',
+        );
         return ToolResult(
           toolId: id,
           output: 'No search results found for "$query".',
@@ -79,6 +97,9 @@ class WebSearchTool implements Tool {
       }
 
       final limited = results.take(limit);
+      RuntimeEventLog.instance.emit(
+        '[WEBSEARCH_RESULTS_RECEIVED] count=${results.length} empty=false',
+      );
       final buffer = StringBuffer()
         ..writeln('Query: $query')
         ..writeln('Top results:');
@@ -92,21 +113,30 @@ class WebSearchTool implements Tool {
         index++;
       }
 
+      RuntimeEventLog.instance.emit(
+        '[WEBSEARCH_EXIT] success=true results=${results.length}',
+      );
       return ToolResult(
         toolId: id,
         output: buffer.toString().trimRight(),
         success: true,
       );
     } on TimeoutException catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WEBSEARCH_EXIT] success=false reason=timeout error=$error',
+      );
       return ToolResult(
-      toolId: id,
-      output: '',
-      success: false,
-      error: 'Web search timed out: $error',
+        toolId: id,
+        output: '',
+        success: false,
+        error: 'Web search timed out: $error',
       );
     } catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WEBSEARCH_EXIT] success=false reason=failure error=$error',
+      );
       return ToolResult(
-      toolId: id,
+        toolId: id,
         output: '',
         success: false,
         error: 'Web search failed: $error',

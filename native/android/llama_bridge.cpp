@@ -932,6 +932,26 @@ void llb_init_backend(void) {
     });
 }
 
+const char* llb_gpu_backend_name(void) {
+#if defined(GGML_USE_VULKAN)
+    return "VULKAN";
+#elif defined(GGML_USE_OPENCL)
+    return "OPENCL";
+#else
+    return "CPU_FALLBACK";
+#endif
+}
+
+const char* llb_gpu_backend_reason(void) {
+#if defined(GGML_USE_VULKAN)
+    return "reason=backend_vulkan_enabled";
+#elif defined(GGML_USE_OPENCL)
+    return "reason=backend_opencl_enabled";
+#else
+    return "reason=compile_without_vulkan";
+#endif
+}
+
 int64_t llb_create_session(
     const char* model_path,
     int32_t n_ctx,
@@ -960,6 +980,7 @@ int64_t llb_create_session(
          n_ctx,
          n_threads,
          effective_gpu_layers);
+    LOGI("[GPU_BEGIN] model_path=%s requested_gpu_layers=%d", model_path, effective_gpu_layers);
     LOGI("[SESSION_LOAD] model_exists=%s model_readable=%s model_size=%" PRId64,
          model_exists ? "true" : "false",
          model_readable ? "true" : "false",
@@ -1034,6 +1055,11 @@ int64_t llb_create_session(
          effective_n_threads,
          cparams.n_batch,
          cparams.n_ubatch);
+    LOGI("[GPU_DEVICE_FOUND] backend=%s", llb_gpu_backend_name());
+    LOGI("[GPU_BACKEND] type=%s %s", llb_gpu_backend_name(), llb_gpu_backend_reason());
+    LOGI("[GPU_SELECTED] backend=%s requested_gpu_layers=%d", llb_gpu_backend_name(), effective_gpu_layers);
+    LOGI("[GPU_MEMORY] backend=%s model_size=%" PRId64, llb_gpu_backend_name(), model_size);
+    LOGI("[GPU_THREADS] backend=%s n_threads=%d", llb_gpu_backend_name(), effective_n_threads);
 
     {
         std::lock_guard<std::mutex> lock(session->native_mutex);
@@ -1078,6 +1104,7 @@ int64_t llb_create_session(
     }
 
     LOGI("[SESSION_CREATE_OK] session=%" PRId64 " created=true", session_id);
+    LOGI("[GPU_EXIT] backend=%s", llb_gpu_backend_name());
     return session_id;
 }
 

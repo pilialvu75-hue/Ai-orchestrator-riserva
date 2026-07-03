@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: UTILIZZATA CON SUCCESSO
@@ -140,6 +141,8 @@ static final Set<String> _desktopValidatedModelIds = {
     AiModel? selectedModel,
   }) async {
     if (selectedModel == null) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=no_local_model_selected');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'No local model selected.',
@@ -147,6 +150,8 @@ static final Set<String> _desktopValidatedModelIds = {
     }
 
     if (!selectedModel.isDownloaded) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=not_downloaded modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_not_downloaded modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model file not downloaded.',
@@ -156,6 +161,8 @@ static final Set<String> _desktopValidatedModelIds = {
     final modelPath = selectedModel.localPath;
 
     if (modelPath == null || modelPath.trim().isEmpty) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing_path modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_path_empty modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model path is empty.',
@@ -167,6 +174,8 @@ static final Set<String> _desktopValidatedModelIds = {
     );
 
     if (!exists) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing_file modelId=${selectedModel.id} path=$modelPath');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_file_missing modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model file missing from storage.',
@@ -179,6 +188,8 @@ static final Set<String> _desktopValidatedModelIds = {
 
     if (fileSize <= 0 ||
         fileSize > _maxModelFileSizeBytes) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=invalid_size modelId=${selectedModel.id} size_bytes=$fileSize');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_model_size modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message: 'Invalid model file size.',
@@ -191,6 +202,7 @@ static final Set<String> _desktopValidatedModelIds = {
     );
 
     if (!hasValidGgufHeader) {
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_gguf_header modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message: 'Invalid GGUF model header.',
@@ -199,6 +211,7 @@ static final Set<String> _desktopValidatedModelIds = {
 
     if (!supportsModel(selectedModel)) {
       if (_isDeveloperMode) {
+        RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=false developer_mode=true');
         return const LocalRuntimeState(
           status: LocalRuntimeStatus.runtimeUnavailable,
           message:
@@ -206,6 +219,8 @@ static final Set<String> _desktopValidatedModelIds = {
         );
       }
 
+      RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=false developer_mode=false');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=unsupported_model modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message:
@@ -223,8 +238,14 @@ static final Set<String> _desktopValidatedModelIds = {
         ' | _verifiedModelPath: ${_verifiedModelPath ?? 'null'}';
     debugPrint(gateMsg);
     RuntimeEventLog.instance.emit(gateMsg);
+    RuntimeEventLog.instance.emit('[MODEL_FOUND] status=present modelId=${selectedModel.id} path=$modelPath');
+    RuntimeEventLog.instance.emit('[MODEL_HASH] modelId=${selectedModel.id} hash=${secureForensicHash('${selectedModel.id}:$modelPath:$fileSize')}');
+    RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=${selectedModel.id} runtime=${Platform.isAndroid ? 'android_ffi' : 'process_cli'}');
 
     if (gateVerified) {
+      RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=true');
+      RuntimeEventLog.instance.emit('[MODEL_READY] modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_SUCCESS] modelId=${selectedModel.id}');
       return LocalRuntimeState(
         status: LocalRuntimeStatus.ready,
         message:
@@ -274,6 +295,8 @@ static final Set<String> _desktopValidatedModelIds = {
             modelPath.isEmpty ||
             modelId == null) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=${modelId ?? 'none'} runtime=unavailable');
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=missing_model_path_or_id');
 
           controller.add(
             InferenceResponse.error(
@@ -291,6 +314,7 @@ static final Set<String> _desktopValidatedModelIds = {
 
         if (!modelExists) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_file_missing modelId=$modelId');
 
           controller.add(
             InferenceResponse.error(
@@ -309,6 +333,7 @@ static final Set<String> _desktopValidatedModelIds = {
 
         if (!isValidModelFile) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_gguf_header modelId=$modelId');
 
           controller.add(
             InferenceResponse.error(
@@ -322,6 +347,8 @@ static final Set<String> _desktopValidatedModelIds = {
 
         final executable =
             _resolveLlamaExecutable();
+        RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=$modelId runtime=${Platform.isAndroid ? 'android_ffi' : 'process_cli'}');
+        RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=$modelId compatible=true');
 
         final args = _buildArgs(request);
 
@@ -346,6 +373,7 @@ static final Set<String> _desktopValidatedModelIds = {
           );
         } on ProcessException catch (e) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=ffi_binding_failed detail=${e.message}');
 
           controller.add(
             InferenceResponse.error(
@@ -416,6 +444,7 @@ static final Set<String> _desktopValidatedModelIds = {
 
         if (cancellationToken.isCancelled) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=cancelled');
 
           controller.add(
             InferenceResponse.error(
@@ -432,6 +461,7 @@ static final Set<String> _desktopValidatedModelIds = {
         if (exitCode != 0 &&
             fullText.isEmpty) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=process_exit_code exitCode=$exitCode');
 
           final stderr =
               stderrBuffer.toString().trim();
@@ -449,6 +479,8 @@ static final Set<String> _desktopValidatedModelIds = {
         }
 
         markRuntimeVerified(modelPath);
+        RuntimeEventLog.instance.emit('[MODEL_READY] modelId=$modelId');
+        RuntimeEventLog.instance.emit('[VALIDATION_SUCCESS] modelId=$modelId');
 
         controller.add(
           InferenceResponse.finalChunk(
