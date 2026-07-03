@@ -117,7 +117,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             cancellation: true,
           );
           _safeCancel(bindings, nativeSessionId);
-          clearRuntimeVerification();
+          // CORRETTO: Rimosso clearRuntimeVerification() distruttivo su cancellazione utente
           AndroidFfiRuntimeProvider._log(
             '[TERMINAL_STATE] state=cancelled generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${DateTime.now().difference(state.startedAt).inMilliseconds}',
@@ -130,12 +130,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
               state: InferenceTerminalState.cancelled,
             );
           }
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            message: 'Cancelled',
-            tokensGenerated: attemptState.estimatedTokens,
-            elapsed: DateTime.now().difference(state.startedAt),
-          );
+          // CORRETTO: Lo stato rimane ready/pronto per la prossima inferenza invece di diventare unavailable
           AndroidFfiRuntimeProvider._log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=pre_poll_cancellation');
           break;
         }
@@ -465,6 +460,17 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           final tokenObservedAt = DateTime.now();
           state.lastNativeActivityAt = tokenObservedAt;
           
+          // --- CORREZIONE CRITICA HOT-PATH ---
+          // Il motore nativo ha appena risposto con successo (status == 1).
+          // Dobbiamo resettare SUBITO i contatori di stallo e inattività PRIMA
+          // di qualsiasi filtraggio o sanitizzazione! Altrimenti, se il token viene
+          // ignorato dai continue sottostanti, il watchdog accuserà falsamente
+          // un blocco e ucciderà la risposta a metà!
+          state.lastTokenProgressAt = tokenObservedAt;
+          state.consecutiveIdlePolls = 0;
+          state.consecutiveInvalidTokens = 0;
+          // -----------------------------------
+
           if (_shouldIgnoreToken(trimmedPiece)) {
             continue;
           }
@@ -493,9 +499,6 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
           
           final firstTokenReceived = firstTokenTimestamp != null;
-          state.consecutiveInvalidTokens = 0;
-          state.consecutiveIdlePolls = 0;
-          state.lastTokenProgressAt = tokenObservedAt;
           state.fullText.write(sanitizedPiece);
           attemptState.estimatedTokens++;
           recordVerificationSuccess(modelPath: modelPath, source: 'first_token');
@@ -554,7 +557,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
                 runtimeReset: true,
               );
               _safeCancel(bindings, nativeSessionId);
-              clearRuntimeVerification();
+              // CORRETTO: Un'allucinazione ripetitiva dell'LLM non significa che il file GGUF sia corrotto!
               attemptState.runtimeNeedsReset = true;
               attemptState.runtimeResetReason = 'repeated_token_loop';
               _setPhase(RuntimePhase.failed);
@@ -687,7 +690,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             '[TERMINAL_STATE] state=cancelled generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${DateTime.now().difference(state.startedAt).inMilliseconds}',
           );
-          clearRuntimeVerification();
+          // CORRETTO: Rimosso clearRuntimeVerification() e transizione a runtimeUnavailable
           if (!controller.isClosed) {
             AndroidFfiRuntimeProvider._finishWithRuntimeError(
               controller,
@@ -697,11 +700,6 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             );
           }
           AndroidFfiRuntimeProvider._log('[FFI_RUNTIME_UNAVAILABLE_REASON] session=$sessionId reason=native_cancelled');
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.runtimeUnavailable,
-            tokensGenerated: attemptState.estimatedTokens,
-            elapsed: DateTime.now().difference(state.startedAt),
-          );
           break;
           
         // STATUS -1: Errore d'esecuzione del Core Nativo C++
