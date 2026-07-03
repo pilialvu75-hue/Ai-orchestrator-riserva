@@ -261,24 +261,83 @@ static final Set<String> _desktopValidatedModelIds = {
   }
 
   @override
+  T  @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // Se l'istanza corrente è già l'AndroidFfiRuntimeProvider specifico, evita il ciclo
-    // e passa direttamente all'esecuzione nativa per via del polimorfismo.
+    // Mantieni il blocco FFI per Android che avevi già
     if (Platform.isAndroid && this is! AndroidFfiRuntimeProvider) {
-      debugPrint('[$_localProviderTag] Android context detected. Delegating pipeline execution to AndroidFfiRuntimeProvider.');
-
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
       );
-
       return ffiRuntimeElement.streamInference(
         request: request,
         cancellationToken: cancellationToken,
       );
     }
+
+    final controller = StreamController<InferenceResponse>();
+
+    () async {
+      try {
+        final modelPath = request.modelPath;
+        final modelId = request.modelId;
+
+        if (modelPath == null || modelPath.isEmpty || modelId == null) {
+           controller.add(InferenceResponse.error('Missing model path.'));
+           await controller.close();
+           return;
+        }
+
+        final executable = _resolveLlamaExecutable();
+        final args = _buildArgs(request);
+        Process? process;
+
+        process = await Process.start(executable, args);
+
+        cancellationToken.onCancel(() { process?.kill(ProcessSignal.sigterm); });
+
+        final fullText = StringBuffer();
+
+        process.stdout.transform(utf8.decoder).listen(
+          (chunk) {
+            fullText.write(chunk);
+            
+            // --- LOGICA INTERCETTAZIONE "STO CERCANDO" ---
+            // Cerchiamo il tag <search> nel buffer in tempo reale
+            final searchMatch = RegExp(r'<search>(.*?)</search>').firstMatch(fullText.toString());
+            
+            if (searchMatch != null) {
+              final query = searchMatch.group(1);
+              // Invia alla UI il messaggio di ricerca (l'utente vedrà "Sto cercando...")
+              controller.add(InferenceResponse.token(
+                text: "\n\n🔍 Sto cercando su Internet: '$query'...",
+                model: modelId,
+              ));
+              // IMPORTANTE: Qui potresti voler interrompere lo stream per gestire il tool
+              return; 
+            }
+            // ---------------------------------------------
+
+            controller.add(InferenceResponse.token(text: chunk, model: modelId));
+          },
+          onError: (Object error) => debugPrint('[$_localProviderTag] error: $error'),
+        );
+
+        final exitCode = await process.exitCode;
+        await controller.close();
+
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.add(InferenceResponse.error('Runtime error: $error'));
+          await controller.close();
+        }
+      }
+    }();
+    return controller.stream;
+  }
+
 
     final controller = StreamController<InferenceResponse>();
 
