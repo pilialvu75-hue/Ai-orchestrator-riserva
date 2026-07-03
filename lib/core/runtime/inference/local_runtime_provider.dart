@@ -34,15 +34,15 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
   // ——— FIX: Set Mobile con Phi-3.5-mini aggiunto ———
-static final Set<String> _mobileValidatedModelIds = {
-  ...AndroidFfiRuntimeModelIds.validatedModelIds,
-  LocalInferenceModelIds.phi3_5_mini, 
-};
+  static final Set<String> _mobileValidatedModelIds = {
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
+    LocalInferenceModelIds.phi3_5_mini, 
+  };
 
-static final Set<String> _desktopValidatedModelIds = {
-  ...AndroidFfiRuntimeModelIds.validatedModelIds,
-};
-// —————————————————————————————————————————————————
+  static final Set<String> _desktopValidatedModelIds = {
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
+  };
+  // —————————————————————————————————————————————————
 
   final bool Function() _developerModeProvider;
 
@@ -260,7 +260,7 @@ static final Set<String> _desktopValidatedModelIds = {
     );
   }
 
-    @override
+  @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
@@ -274,67 +274,6 @@ static final Set<String> _desktopValidatedModelIds = {
         cancellationToken: cancellationToken,
       );
     }
-
-    final controller = StreamController<InferenceResponse>();
-
-    () async {
-      try {
-        final modelPath = request.modelPath;
-        final modelId = request.modelId;
-
-        if (modelPath == null || modelPath.isEmpty || modelId == null) {
-          controller.add(InferenceResponse.error('Missing model path.'));
-          await controller.close();
-          return;
-        }
-
-        final executable = _resolveLlamaExecutable();
-        final args = _buildArgs(request);
-        Process? process;
-
-        process = await Process.start(executable, args);
-
-        cancellationToken.onCancel(() { 
-          process?.kill(ProcessSignal.sigterm); 
-        });
-
-        final fullText = StringBuffer();
-
-        process.stdout.transform(utf8.decoder).listen(
-          (chunk) {
-            fullText.write(chunk);
-            
-            final searchMatch = RegExp(r'<search>(.*?)</search>').firstMatch(fullText.toString());
-            
-            if (searchMatch != null) {
-              final query = searchMatch.group(1);
-              controller.add(InferenceResponse.token(
-                text: "\n\n🔍 Sto cercando su Internet: '$query'...",
-                model: modelId,
-              ));
-              return; 
-            }
-
-            controller.add(InferenceResponse.token(text: chunk, model: modelId));
-          },
-          onError: (Object error) => debugPrint('[$_localProviderTag] error: $error'),
-        );
-
-        final exitCode = await process.exitCode;
-        await controller.close();
-
-      } catch (error) {
-        if (!controller.isClosed) {
-          controller.add(InferenceResponse.error('Runtime error: $error'));
-          await controller.close();
-        }
-      }
-    }();
-    
-    return controller.stream;
-  }
-
-
 
     final controller = StreamController<InferenceResponse>();
 
@@ -455,6 +394,24 @@ static final Set<String> _desktopValidatedModelIds = {
 
             estimatedTokenCount +=
                 _estimateTokenCount(chunk);
+
+            // —————————————————————————————————————————————————
+            // FIX: Intercettazione del tag di ricerca Internet nativo
+            final searchMatch = RegExp(r'<search>(.*?)</search>')
+                .firstMatch(fullText.toString());
+            
+            if (searchMatch != null) {
+              final query = searchMatch.group(1)?.trim();
+              controller.add(
+                InferenceResponse.token(
+                  text: "\n\n🔍 Sto cercando su Internet: '$query'...",
+                  model: modelId,
+                ),
+              );
+              process?.kill(ProcessSignal.sigterm);
+              return; 
+            }
+            // —————————————————————————————————————————————————
 
             controller.add(
               InferenceResponse.token(
