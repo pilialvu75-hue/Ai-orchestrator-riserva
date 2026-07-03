@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.d
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/tools/search/web_search_tool.dart'; // IMPORTATO CORRETTAMENTE
 import 'package:flutter/foundation.dart';
 
 class InferenceService {
@@ -97,9 +98,6 @@ class InferenceService {
        '[INFERENCE_STREAM_BEGIN] session=${isolatedRequest.sessionId} mode=${runtimeMode.name}',
       );
 
-      // OTTIMIZZAZIONE: La fase di lookup e allocazione dei parametri è terminata.
-      // Rilasciamo il flag prima del yield* per evitare blocchi o falsi allarmi di 
-      // ricorsione causati da chiamate parallele o asincrone durante lo streaming nativo.
       _runtimeLookupInProgress = false;
 
       yield* _streamWithRetryAndGuards(
@@ -315,11 +313,36 @@ class InferenceService {
     _log(
       '[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType} modelId=${localRequest.modelId} modelPath=${localRequest.modelPath}',
     );
+
+    final textAccumulator = StringBuffer();
+    String? detectedQuery;
+
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: cancellationToken,
     )) {
       localChunkCount++;
+      textAccumulator.write(chunk.text);
+
+      // --- RILEVAMENTO RECURSIVO DEL TAG DI RICERCA ---
+      final searchPattern = RegExp(r'<search>(.*?)</search>');
+      final match = searchPattern.firstMatch(textAccumulator.toString());
+
+      if (match != null && detectedQuery == null) {
+        detectedQuery = match.group(1)?.trim();
+        _log('[INTERCEPTOR] Rilevato tag di ricerca internet. Query: "$detectedQuery"');
+        
+        // Emette l'avviso visivo immediato per l'utente sulla UI
+        yield InferenceResponse.token(
+          text: '\n\n🔍 *Sto cercando su Internet: "$detectedQuery"...*\n\n',
+          model: localRequest.modelId ?? 'local',
+        );
+        
+        // Interrompe l'esecutore nativo corrente per poter iniettare il contesto
+        _runtimeProvider.cancel(localRequest.sessionId); 
+        break;
+      }
+
       _log(
         '[TOKEN_STREAM] local chunk session=${localRequest.sessionId} chunk=$localChunkCount '
         'isFinal=${chunk.isFinal} isError=${chunk.isError} text_len=${chunk.text.length} '
@@ -357,6 +380,32 @@ class InferenceService {
 
       yield chunk;
     }
+
+    // Se è stata rilevata una query, esegue il recupero asincrono e rilancia l'inferenza
+    if (detectedQuery != null && detectedQuery.isNotEmpty) {
+      try {
+        final searchTool = WebSearchTool();
+        final searchResult = await searchTool.execute({'query': detectedQuery});
+        
+        _log('[INTERCEPTOR] Ricerca completata con successo. Riavvio inferenza locale con i risultati.');
+
+        final enrichedPrompt = '${localRequest.prompt}\n\n'
+            '[RISULTATI RICERCA INTERNET]\n${searchResult.output}\n\n'
+            'Utilizza le informazioni sopra per completare in modo accurato la richiesta iniziale dell\'utente.';
+
+        final updatedLocalRequest = localRequest.copyWith(prompt: enrichedPrompt);
+
+        yield* _runtimeProvider.streamInference(
+          request: updatedLocalRequest,
+          cancellationToken: cancellationToken,
+        );
+        return;
+      } catch (e) {
+        _log('[INTERCEPTOR_ERROR] Errore durante l\'esecuzione del tool o il riavvio: $e');
+        yield InferenceResponse.error('Errore durante il recupero dei dati web: $e');
+      }
+    }
+
     _log(
       '[FINAL_RESPONSE] local stream end session=${localRequest.sessionId} emittedLocalToken=$emittedLocalToken chunks=$localChunkCount',
     );
@@ -443,7 +492,7 @@ class InferenceService {
     switch (runtimeMode) {
       case AiRuntimeMode.local:
         _log(
-          '[RUNTIME_PATH] mode=local session=${cloudRequest.sessionId} local_request=${localRequest != null}',
+          'A[RUNTIME_PATH] mode=local session=${cloudRequest.sessionId} local_request=${localRequest != null}',
         );
         _log(
           '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType} '
