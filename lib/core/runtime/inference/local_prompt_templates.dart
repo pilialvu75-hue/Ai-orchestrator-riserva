@@ -24,8 +24,8 @@ class LocalPromptTemplates {
         
     final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
-    final memorySize = cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
-    final webResultsSize = cleanedSystemPrompt != null &&
+    final contextChars = cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
+    final webSystemPromptChars = cleanedSystemPrompt != null &&
             cleanedSystemPrompt.contains('Web search results:')
         ? cleanedSystemPrompt.length
         : 0;
@@ -39,10 +39,10 @@ class LocalPromptTemplates {
       '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=${cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length)}',
     );
     RuntimeEventLog.instance.emit(
-      '[PROMPT_MEMORY_SIZE] chars=$memorySize',
+      '[PROMPT_MEMORY_SIZE] chars=$contextChars',
     );
     RuntimeEventLog.instance.emit(
-      '[PROMPT_WEB_RESULTS_SIZE] chars=$webResultsSize',
+      '[PROMPT_WEB_RESULTS_SIZE] chars=$webSystemPromptChars',
     );
 
     switch (template) {
@@ -272,7 +272,7 @@ class LocalPromptTemplates {
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
     RuntimeEventLog.instance.emit(
-      '[PROMPT_FINAL_TOKENS] estimate=${composed.trim().split(RegExp(r'\s+')).where((token) => token.isNotEmpty).length}',
+      '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
     );
     RuntimeEventLog.instance.emit(
       '[PROMPT_SENT] hash=${secureForensicHash(composed)} prompt_chars=$userPromptChars',

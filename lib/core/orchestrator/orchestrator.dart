@@ -253,6 +253,9 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
+    _logForensic(
+      '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
+    );
     if (webSearchTool == null) {
       _logForensic(
         '[WEBSEARCH_EXIT] session=$sessionId success=false reason=tool_missing',
