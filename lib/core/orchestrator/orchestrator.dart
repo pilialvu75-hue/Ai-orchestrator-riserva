@@ -255,8 +255,9 @@ class Orchestrator {
     final webSearchTool = _webSearchTool;
     // Offline is recorded for diagnostics only; web search availability is
     // intentionally decoupled from runtime mode so LOCAL still supports tools.
-    // If `isOffline` is true and a tool exists, the HTTP layer still runs and
-    // surfaces timeout/failure diagnostics instead of short-circuiting here.
+    // `isOffline` is diagnostic metadata only in this method; if it is true and
+    // a tool exists, the HTTP layer still runs and surfaces timeout/failure
+    // diagnostics instead of short-circuiting here.
     _logForensic(
       '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
     );

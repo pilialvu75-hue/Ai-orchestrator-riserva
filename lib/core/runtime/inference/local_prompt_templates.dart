@@ -272,7 +272,8 @@ class LocalPromptTemplates {
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
     RuntimeEventLog.instance.emit(
-      // Rough estimate only; actual tokens vary by model, language, and vocab.
+      // Rough English-style BPE estimate for diagnostics only; real tokenization
+      // varies by model, language, and vocabulary.
       '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
     );
     RuntimeEventLog.instance.emit(
