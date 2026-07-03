@@ -13,7 +13,7 @@ import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.d
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
-import 'package:ai_orchestrator/core/tools/search/web_search_tool.dart'; // IMPORTATO CORRETTAMENTE
+import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:flutter/foundation.dart';
 
 class InferenceService {
