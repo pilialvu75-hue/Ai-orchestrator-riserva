@@ -253,6 +253,8 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
+    // Offline is recorded for diagnostics only; web search availability is
+    // intentionally decoupled from runtime mode so LOCAL still supports tools.
     _logForensic(
       '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
     );

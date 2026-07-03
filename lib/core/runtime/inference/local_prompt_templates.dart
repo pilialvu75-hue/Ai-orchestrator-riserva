@@ -36,7 +36,7 @@ class LocalPromptTemplates {
       '[PROMPT_SYSTEM_SIZE] chars=${cleanedSystemPrompt?.length ?? 0}',
     );
     RuntimeEventLog.instance.emit(
-      '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=${cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length)}',
+      '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=$contextChars',
     );
     RuntimeEventLog.instance.emit(
       '[PROMPT_MEMORY_SIZE] chars=$contextChars',
