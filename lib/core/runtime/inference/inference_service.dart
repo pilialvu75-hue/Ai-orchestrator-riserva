@@ -60,12 +60,15 @@ class InferenceService {
       'context_turns=${isolatedRequest.context.length} offline=${isolatedRequest.isOffline}',
     );
     _log('[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=runtime_mode_load');
+    
     if (_runtimeLookupInProgress) {
       _log('[RUNTIME_INIT_RECURSION] session=${isolatedRequest.sessionId} scope=inference_service.runtime_lookup');
     }
+    
     _runtimeLookupInProgress = true;
     final session = _sessionManager.startSession(isolatedRequest.sessionId);
     _log('[INFERENCE_SESSION_CREATED] session=${isolatedRequest.sessionId}');
+    
     try {
       final runtimeMode = await _loadRuntimeMode();
       _log('[INFERENCE_RUNTIME_SELECTED] session=${isolatedRequest.sessionId} runtime=${runtimeMode.name}');
@@ -93,6 +96,11 @@ class InferenceService {
       _log(
        '[INFERENCE_STREAM_BEGIN] session=${isolatedRequest.sessionId} mode=${runtimeMode.name}',
       );
+
+      // OTTIMIZZAZIONE: La fase di lookup e allocazione dei parametri è terminata.
+      // Rilasciamo il flag prima del yield* per evitare blocchi o falsi allarmi di 
+      // ricorsione causati da chiamate parallele o asincrone durante lo streaming nativo.
+      _runtimeLookupInProgress = false;
 
       yield* _streamWithRetryAndGuards(
        runtimeMode: runtimeMode,
@@ -225,8 +233,6 @@ class InferenceService {
     }
 
     if (!_runtimeProvider.supportsModel(selected)) {
-      // Infer the precise reason for the runtime rejection so the log is
-      // actionable rather than a generic "unavailable" message.
       final effectiveId = selected.effectiveRuntimeModelId;
       final vs = selected.validationStatus;
       String rejectionReason;
@@ -283,9 +289,6 @@ class InferenceService {
       ' modelId=$effectiveModelId modelPath=${selectedModel.localPath}',
     );
 
-    // Applica parametri adattivi basati sul modello effettivo.
-    // Sovrascrive i default dell'Orchestrator con valori calibrati
-    // sulla dimensione reale del modello.
     return request.copyWith(
       modelId: effectiveModelId,
       modelPath: selectedModel.localPath,
