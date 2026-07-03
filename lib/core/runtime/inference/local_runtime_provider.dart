@@ -260,12 +260,11 @@ static final Set<String> _desktopValidatedModelIds = {
     );
   }
 
-  @override
+    @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // Mantieni il blocco FFI per Android che avevi già
     if (Platform.isAndroid && this is! AndroidFfiRuntimeProvider) {
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
@@ -284,9 +283,9 @@ static final Set<String> _desktopValidatedModelIds = {
         final modelId = request.modelId;
 
         if (modelPath == null || modelPath.isEmpty || modelId == null) {
-           controller.add(InferenceResponse.error('Missing model path.'));
-           await controller.close();
-           return;
+          controller.add(InferenceResponse.error('Missing model path.'));
+          await controller.close();
+          return;
         }
 
         final executable = _resolveLlamaExecutable();
@@ -295,7 +294,9 @@ static final Set<String> _desktopValidatedModelIds = {
 
         process = await Process.start(executable, args);
 
-        cancellationToken.onCancel(() { process?.kill(ProcessSignal.sigterm); });
+        cancellationToken.onCancel(() { 
+          process?.kill(ProcessSignal.sigterm); 
+        });
 
         final fullText = StringBuffer();
 
@@ -303,21 +304,16 @@ static final Set<String> _desktopValidatedModelIds = {
           (chunk) {
             fullText.write(chunk);
             
-            // --- LOGICA INTERCETTAZIONE "STO CERCANDO" ---
-            // Cerchiamo il tag <search> nel buffer in tempo reale
             final searchMatch = RegExp(r'<search>(.*?)</search>').firstMatch(fullText.toString());
             
             if (searchMatch != null) {
               final query = searchMatch.group(1);
-              // Invia alla UI il messaggio di ricerca (l'utente vedrà "Sto cercando...")
               controller.add(InferenceResponse.token(
                 text: "\n\n🔍 Sto cercando su Internet: '$query'...",
                 model: modelId,
               ));
-              // IMPORTANTE: Qui potresti voler interrompere lo stream per gestire il tool
               return; 
             }
-            // ---------------------------------------------
 
             controller.add(InferenceResponse.token(text: chunk, model: modelId));
           },
@@ -334,8 +330,10 @@ static final Set<String> _desktopValidatedModelIds = {
         }
       }
     }();
+    
     return controller.stream;
   }
+
 
 
     final controller = StreamController<InferenceResponse>();
