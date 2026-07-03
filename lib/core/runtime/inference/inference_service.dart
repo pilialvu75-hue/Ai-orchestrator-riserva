@@ -600,7 +600,7 @@ class InferenceService {
         '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=inference_service._streamLocalInference_not_invoked',
       );
       yield InferenceResponse.error(
-        'Network is unavailable and no validated local model is selected.',
+        'Network is unavailable and no local model is ready for use.',
       );
       return;
     }

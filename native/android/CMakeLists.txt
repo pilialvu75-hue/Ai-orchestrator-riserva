@@ -55,7 +55,7 @@ else()
     if(AI_ANDROID_ENABLE_VULKAN)
         message(WARNING
             "AI_ANDROID_ENABLE_VULKAN is ON but vulkan/vulkan.hpp was not found. "
-            "Falling back to CPU-only llama.cpp.")
+            "Continuing without GPU acceleration.")
     endif()
 endif()
 

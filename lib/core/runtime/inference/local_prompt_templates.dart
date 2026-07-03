@@ -272,6 +272,7 @@ class LocalPromptTemplates {
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
     RuntimeEventLog.instance.emit(
+      // Approximate token count using a conservative character-to-token ratio.
       '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
     );
     RuntimeEventLog.instance.emit(
