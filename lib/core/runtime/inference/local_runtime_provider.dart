@@ -261,7 +261,6 @@ static final Set<String> _desktopValidatedModelIds = {
   }
 
   @override
-  T  @override
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
