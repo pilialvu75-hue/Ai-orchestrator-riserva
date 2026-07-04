@@ -5,6 +5,13 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 const String _completeSystemPrompt = 'You are a helpful assistant. Give complete answers when appropriate.';
 
+// Istruzione globale per l'abilitazione della ricerca web
+const String _webSearchInstruction = 
+    "IMPORTANTE: Hai accesso a Internet tramite il tag <search>query</search>. "
+    "Se l'utente chiede notizie, meteo, fatti recenti, dati in tempo reale o informazioni che cambiano nel tempo, "
+    "NON rispondere d'istinto. DEVI invocare una ricerca scrivendo ESCLUSIVAMENTE il tag <search>query di ricerca</search>. "
+    "Non aggiungere altro prima o dopo il tag.";
+
 class LocalPromptTemplates {
   LocalPromptTemplates._();
 
@@ -16,6 +23,9 @@ class LocalPromptTemplates {
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
     
+    // Iniezione forzata dell'istruzione di ricerca web nel system prompt
+    final finalSystemPrompt = "${cleanedSystemPrompt ?? _completeSystemPrompt}\n\n$_webSearchInstruction";
+
     // Filtro contestuale centralizzato per il RAG locale e la memoria
     final cleanedContext = context
         .where((turn) => !turn.excludeFromContext && turn.content.trim().isNotEmpty)
@@ -25,21 +35,18 @@ class LocalPromptTemplates {
     final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
     final contextChars = cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
-    final webSystemPromptChars = cleanedSystemPrompt != null &&
-            cleanedSystemPrompt.contains('Web search results:')
-        ? cleanedSystemPrompt.length
+    final webSystemPromptChars = finalSystemPrompt.contains('Web search results:')
+        ? finalSystemPrompt.length
         : 0;
+
     RuntimeEventLog.instance.emit(
       '[PROMPT_BEGIN] model=$modelId prompt_chars=${userPrompt.length}',
     );
     RuntimeEventLog.instance.emit(
-      '[PROMPT_SYSTEM_SIZE] chars=${cleanedSystemPrompt?.length ?? 0}',
+      '[PROMPT_SYSTEM_SIZE] chars=${finalSystemPrompt.length}',
     );
     RuntimeEventLog.instance.emit(
       '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=$contextChars',
-    );
-    RuntimeEventLog.instance.emit(
-      '[PROMPT_MEMORY_SIZE] chars=$contextChars',
     );
     RuntimeEventLog.instance.emit(
       '[PROMPT_WEB_RESULTS_SIZE] chars=$webSystemPromptChars',
@@ -48,44 +55,43 @@ class LocalPromptTemplates {
     switch (template) {
       case 'llama3':
         return _buildLlama3Prompt(
-          systemPrompt: cleanedSystemPrompt,
+          systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
       case 'qwen':
         return _buildQwenChatPrompt(
-          systemPrompt: cleanedSystemPrompt,
+          systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
           suppressThinking: LocalInferenceModelIds.isQwen3Thinking(modelId),
         );
       case 'gemma':
         return _buildGemmaPrompt(
-          systemPrompt: cleanedSystemPrompt,
+          systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
       case 'phi3':
         return _buildPhi3Prompt(
-          systemPrompt: cleanedSystemPrompt,
+          systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
       case 'zephyr':
         return _buildZephyrPrompt(
-          systemPrompt: cleanedSystemPrompt,
+          systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
       default:
         final buffer = StringBuffer();
         final isFactual = _isFactualQuery(userPrompt);
-        buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+        buffer.writeln('');
         
-        if (cleanedSystemPrompt != null) {
-          buffer.writeln('System: $cleanedSystemPrompt');
-          buffer.writeln();
-        }
+        buffer.writeln('System: $finalSystemPrompt');
+        buffer.writeln();
+        
         for (final turn in cleanedContext) {
           buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
         }
@@ -116,25 +122,24 @@ class LocalPromptTemplates {
            p.contains('colore') ||
            p.contains('cerca') ||
            p.contains('data') ||
-           p.contains('anno');
+           p.contains('anno') ||
+           p.contains('meteo') ||
+           p.contains('notizie');
   }
 
-  /// Llama 3 Instruct — Configurato con metadati dinamici e blocchi eot
   static String _buildLlama3Prompt({
-    required String? systemPrompt,
+    required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    // FIX 1: Iniezione metadati sampling dinamico
-    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+    buffer.writeln('');
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
     
-    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
-    buffer.write(enforcedSystem);
+    buffer.write(systemPrompt);
     buffer.write('<|eot_id|>');
     
     for (final turn in context) {
@@ -152,9 +157,8 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// ChatML / Qwen — Controllo cicli e campionamento predittivo
   static String _buildQwenChatPrompt({
-    required String? systemPrompt,
+    required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
     bool suppressThinking = false,
@@ -162,12 +166,10 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    // FIX 1: Iniezione metadati sampling dinamico
-    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+    buffer.writeln('');
     buffer.write('<|im_start|>system\n');
     
-    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
-    buffer.write(enforcedSystem);
+    buffer.write(systemPrompt);
     buffer.write('\n<|im_end|>\n');
     
     for (final turn in context) {
@@ -186,21 +188,17 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// Gemma chat template — Allineato con start_of_turn system nativo
   static String _buildGemmaPrompt({
-    required String? systemPrompt,
+    required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    // FIX 1: Iniezione metadati sampling dinamico
-    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+    buffer.writeln('');
     
-    final enforcedSystem = systemPrompt ?? _completeSystemPrompt;
-    // FIX 2: Gemma usa <start_of_turn>system invece di user per il system prompt
-    buffer.write('<start_of_turn>system\n$enforcedSystem\n<end_of_turn>\n');
+    buffer.write('<start_of_turn>system\n$systemPrompt\n<end_of_turn>\n');
     
     for (final turn in context) {
       buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
@@ -214,16 +212,14 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// Phi-3 / Phi-3.5 chat template.
   static String _buildPhi3Prompt({
-    required String? systemPrompt,
+    required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
 
-    final enforcedSystem = (systemPrompt ?? _completeSystemPrompt).trim();
-    buffer.write('<|system|>\n$enforcedSystem\n<|end|>\n');
+    buffer.write('<|system|>\n${systemPrompt.trim()}\n<|end|>\n');
 
     for (final turn in context) {
       buffer.write('<|${_roleName(turn.role)}|>\n');
@@ -238,23 +234,17 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// Zephyr / TinyLlama template
   static String _buildZephyrPrompt({
-    required String? systemPrompt,
+    required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
     final isFactual = _isFactualQuery(userPrompt);
     
-    // FIX 1: Iniezione metadati sampling dinamico
-    buffer.writeln('<!--META temp=${isFactual ? 0.2 : 0.5} top_p=0.9 repeat_penalty=1.1 -->');
+    buffer.writeln('');
     
-    if (systemPrompt != null) {
-      buffer.write('<|system|>\n$systemPrompt\n</s>\n');
-    } else {
-      buffer.write('<|system|>\n$_completeSystemPrompt\n</s>\n');
-    }
+    buffer.write('<|system|>\n$systemPrompt\n</s>\n');
     
     for (final turn in context) {
       final tag = _zephyrRoleName(turn.role);
@@ -272,8 +262,6 @@ class LocalPromptTemplates {
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
     RuntimeEventLog.instance.emit(
-      // Rough English-style BPE estimate for diagnostics only; real tokenization
-      // varies by model, language, and vocabulary.
       '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
     );
     RuntimeEventLog.instance.emit(
