@@ -77,10 +77,14 @@ class DebugLabOverlay extends StatelessWidget {
                   icon: const Icon(Icons.play_arrow, size: 20),
                   onPressed: () async {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Test in corso...')));
+                    // Sostituisci la logica di rete precedente con questa:
                     try {
                       final client = HttpClient();
                       final request = await client.getUrl(Uri.parse('https://www.google.com'));
-                      final response = await request.timeout(const Duration(seconds: 5)).close();
+  
+                      // CORREZIONE: Chiudi la richiesta PRIMA di applicare il timeout al Future risultante
+                      final response = await request.close().timeout(const Duration(seconds: 5));
+  
                       client.close();
 
                       if (!context.mounted) return;
