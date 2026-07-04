@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:ai_orchestrator/core/runtime/inference/tool_interceptor_transformer.dart';
+
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
