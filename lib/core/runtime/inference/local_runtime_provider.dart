@@ -271,10 +271,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
       );
+      // AGGANCIO TRONCO 1: Il flusso FFI nativo passa per il trasformatore
       return ffiRuntimeElement.streamInference(
         request: request,
         cancellationToken: cancellationToken,
-      );
+      ).transform(ToolInterceptorTransformer());
     }
 
     final controller = StreamController<InferenceResponse>();
@@ -397,24 +398,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
             estimatedTokenCount +=
                 _estimateTokenCount(chunk);
 
-            // —————————————————————————————————————————————————
-            // FIX: Intercettazione del tag di ricerca Internet nativo
-            final searchMatch = RegExp(r'<search>(.*?)</search>')
-                .firstMatch(fullText.toString());
-            
-            if (searchMatch != null) {
-              final query = searchMatch.group(1)?.trim();
-              controller.add(
-                InferenceResponse.token(
-                  text: "\n\n🔍 Sto cercando su Internet: '$query'...",
-                  model: modelId,
-                ),
-              );
-              process?.kill(ProcessSignal.sigterm);
-              return; 
-            }
-            // —————————————————————————————————————————————————
-
             controller.add(
               InferenceResponse.token(
                 text: chunk,
@@ -526,7 +509,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       }
     }();
 
-    return controller.stream;
+    // AGGANCIO TRONCO 2: Anche il flusso CLI passa per il trasformatore
+    return controller.stream.transform(ToolInterceptorTransformer());
   }
 
   bool _isModelAllowedOnPlatform(
