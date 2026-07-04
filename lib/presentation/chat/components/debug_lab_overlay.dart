@@ -1,3 +1,4 @@
+import 'dart:io'; // Necessario per il test di rete
 import 'package:flutter/material.dart';
 
 class DebugLabOverlay extends StatelessWidget {
@@ -21,7 +22,7 @@ class DebugLabOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      bottom: 80.0, // Posizionato sopra la barra di input
+      bottom: 80.0,
       left: 16.0,
       right: 16.0,
       child: Card(
@@ -35,7 +36,7 @@ class DebugLabOverlay extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header del Debug Lab
+              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -64,13 +65,37 @@ class DebugLabOverlay extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.av_timer_outlined),
                 title: const Text('Overlay Metriche Hardware', style: TextStyle(fontSize: 13)),
-                trailing: TextButton(
-                  onPressed: onToggleMetrics,
-                  child: const Text('Toggle'),
+                trailing: TextButton(onPressed: onToggleMetrics, child: const Text('Toggle')),
+              ),
+
+              // Nuova Voce: Test Connettività Search
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.network_check_outlined),
+                title: const Text('Test Connettività Search', style: TextStyle(fontSize: 13)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.play_arrow, size: 20),
+                  onPressed: () async {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Test in corso...')));
+                    try {
+                      final client = HttpClient();
+                      final request = await client.getUrl(Uri.parse('https://www.google.com'));
+                      final response = await request.timeout(const Duration(seconds: 5)).close();
+                      client.close();
+
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(response.statusCode == 200 ? '✅ Connessione OK' : '❌ Errore HTTP: ${response.statusCode}')),
+                      );
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Errore: ${e.toString()}')));
+                    }
+                  },
                 ),
               ),
 
-              // Controllo 2: Text Scale dell'intera Viewport (Slider)
+              // Controllo 2: Text Scale
               const Text('Fattore di scala testo generale:', style: TextStyle(fontSize: 12, color: Colors.grey)),
               Row(
                 children: [
@@ -89,7 +114,7 @@ class DebugLabOverlay extends StatelessWidget {
                 ],
               ),
 
-              // Controllo 3: Dimensione Font Assistente (Slider)
+              // Controllo 3: Dimensione Font Assistente
               const Text('Dimensione carattere Assistente:', style: TextStyle(fontSize: 12, color: Colors.grey)),
               Row(
                 children: [
