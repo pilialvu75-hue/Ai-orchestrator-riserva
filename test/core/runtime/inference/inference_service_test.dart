@@ -320,7 +320,7 @@ Top results:
             }
 
             expect(cancellationToken.isCancelled, isFalse);
-            expect(request.prompt, contains('[RISULTATI RICERCA INTERNET]'));
+            expect(request.prompt, contains('[INTERNET SEARCH RESULTS]'));
             yield InferenceResponse.finalChunk(
               text: 'Rome weather is sunny.',
               tokensGenerated: 5,

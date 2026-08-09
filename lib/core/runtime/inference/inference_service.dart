@@ -45,7 +45,6 @@ class InferenceService {
   final CloudRuntimeProvider _cloudRuntimeProvider;
   final RuntimeSessionManager _sessionManager;
   final Tool? _webSearchTool;
-  late final Tool _defaultWebSearchTool = WebSearchTool();
 
   void cancel(String sessionId) {
     _log('cancel requested session=$sessionId');
@@ -331,21 +330,21 @@ class InferenceService {
       localChunkCount++;
       textAccumulator.write(chunk.text);
 
-      // --- RILEVAMENTO RECURSIVO DEL TAG DI RICERCA ---
+      // --- Recursive search-tag detection ---
       final searchPattern = RegExp(r'<search>(.*?)</search>');
       final match = searchPattern.firstMatch(textAccumulator.toString());
 
       if (match != null && detectedQuery == null) {
         detectedQuery = match.group(1)?.trim();
-        _log('[INTERCEPTOR] Rilevato tag di ricerca internet. Query: "$detectedQuery"');
+        _log('[INTERCEPTOR] Detected internet search tag. Query: "$detectedQuery"');
         
-        // Emette l'avviso visivo immediato per l'utente sulla UI
+        // Emit an immediate visual notice for the user in the UI.
         yield InferenceResponse.token(
-          text: '\n\n🔍 *Sto cercando su Internet: "$detectedQuery"...*\n\n',
+          text: '\n\n🔍 *Searching the web for: "$detectedQuery"...*\n\n',
           model: localRequest.modelId ?? 'local',
         );
         
-        // Interrompe la prima generazione locale senza annullare il token esterno.
+        // Stop the first local generation without canceling the outer token.
         firstGenerationToken.cancel();
         break;
       }
@@ -388,17 +387,17 @@ class InferenceService {
       yield chunk;
     }
 
-    // Se è stata rilevata una query, esegue il recupero asincrono e rilancia l'inferenza
+    // If a query was detected, fetch results asynchronously and rerun inference.
     if (detectedQuery != null && detectedQuery.isNotEmpty) {
       try {
-        final searchTool = _webSearchTool ?? _defaultWebSearchTool;
+        final searchTool = _webSearchTool ?? WebSearchTool();
         final searchResult = await searchTool.execute({'query': detectedQuery});
         
-        _log('[INTERCEPTOR] Ricerca completata con successo. Riavvio inferenza locale con i risultati.');
+        _log('[INTERCEPTOR] Search completed successfully. Restarting local inference with the results.');
 
         final enrichedPrompt = '${localRequest.prompt}\n\n'
-            '[RISULTATI RICERCA INTERNET]\n${searchResult.output}\n\n'
-            'Utilizza le informazioni sopra per completare in modo accurato la richiesta iniziale dell\'utente.';
+            '[INTERNET SEARCH RESULTS]\n${searchResult.output}\n\n'
+            'Use the information above to accurately complete the user\'s original request.';
 
         final updatedLocalRequest = localRequest.copyWith(prompt: enrichedPrompt);
         final continuationToken = CancellationToken();
@@ -410,8 +409,10 @@ class InferenceService {
         );
         return;
       } catch (e) {
-        _log('[INTERCEPTOR_ERROR] Errore durante l\'esecuzione del tool o il riavvio: $e');
-        yield InferenceResponse.error('Errore durante il recupero dei dati web: $e');
+        _log('[INTERCEPTOR_ERROR] code=WEB_SEARCH_RECOVERY_FAILED error=$e');
+        yield InferenceResponse.error(
+          'Unable to retrieve web data. See logs for details.',
+        );
       }
     }
 
