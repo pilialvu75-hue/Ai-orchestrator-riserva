@@ -339,9 +339,8 @@ class InferenceService {
         _log('[INTERCEPTOR] Detected internet search tag. Query: "$detectedQuery"');
         
         // Emit an immediate visual notice for the user in the UI.
-        yield InferenceResponse.token(
-          text: '\n\n🔍 *Searching the web for: "$detectedQuery"...*\n\n',
-          model: localRequest.modelId ?? 'local',
+        yield InferenceResponse.notice(
+          '\n\n🔍 *Searching the web for: "$detectedQuery"...*\n\n',
         );
         
         // Stop the first local generation without canceling the outer token.
