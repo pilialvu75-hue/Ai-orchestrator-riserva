@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.d
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:flutter/foundation.dart';
 
@@ -30,17 +31,21 @@ class InferenceService {
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
     required RuntimeSessionManager sessionManager,
+    Tool? webSearchTool,
   })  : _loadSelectedModel = loadSelectedModel,
         _loadRuntimeMode = loadRuntimeMode,
         _runtimeProvider = runtimeProvider,
         _cloudRuntimeProvider = cloudRuntimeProvider,
-        _sessionManager = sessionManager;
+        _sessionManager = sessionManager,
+        _webSearchTool = webSearchTool;
 
   final Future<AiModel?> Function() _loadSelectedModel;
   final Future<AiRuntimeMode> Function() _loadRuntimeMode;
   final LocalRuntimeProvider _runtimeProvider;
   final CloudRuntimeProvider _cloudRuntimeProvider;
   final RuntimeSessionManager _sessionManager;
+  final Tool? _webSearchTool;
+  late final Tool _defaultWebSearchTool = WebSearchTool();
 
   void cancel(String sessionId) {
     _log('cancel requested session=$sessionId');
@@ -316,10 +321,12 @@ class InferenceService {
 
     final textAccumulator = StringBuffer();
     String? detectedQuery;
+    final firstGenerationToken = CancellationToken();
+    cancellationToken.onCancel(firstGenerationToken.cancel);
 
     await for (final chunk in _runtimeProvider.streamInference(
       request: localRequest,
-      cancellationToken: cancellationToken,
+      cancellationToken: firstGenerationToken,
     )) {
       localChunkCount++;
       textAccumulator.write(chunk.text);
@@ -328,7 +335,7 @@ class InferenceService {
       final searchPattern = RegExp(r'<search>(.*?)</search>');
       final match = searchPattern.firstMatch(textAccumulator.toString());
 
-            if (match != null && detectedQuery == null) {
+      if (match != null && detectedQuery == null) {
         detectedQuery = match.group(1)?.trim();
         _log('[INTERCEPTOR] Rilevato tag di ricerca internet. Query: "$detectedQuery"');
         
@@ -338,8 +345,8 @@ class InferenceService {
           model: localRequest.modelId ?? 'local',
         );
         
-        // Interrompe l'esecutore nativo corrente usando il token di cancellazione
-        cancellationToken.cancel(); 
+        // Interrompe la prima generazione locale senza annullare il token esterno.
+        firstGenerationToken.cancel();
         break;
       }
 
@@ -384,7 +391,7 @@ class InferenceService {
     // Se è stata rilevata una query, esegue il recupero asincrono e rilancia l'inferenza
     if (detectedQuery != null && detectedQuery.isNotEmpty) {
       try {
-        final searchTool = WebSearchTool();
+        final searchTool = _webSearchTool ?? _defaultWebSearchTool;
         final searchResult = await searchTool.execute({'query': detectedQuery});
         
         _log('[INTERCEPTOR] Ricerca completata con successo. Riavvio inferenza locale con i risultati.');
@@ -394,10 +401,12 @@ class InferenceService {
             'Utilizza le informazioni sopra per completare in modo accurato la richiesta iniziale dell\'utente.';
 
         final updatedLocalRequest = localRequest.copyWith(prompt: enrichedPrompt);
+        final continuationToken = CancellationToken();
+        cancellationToken.onCancel(continuationToken.cancel);
 
         yield* _runtimeProvider.streamInference(
           request: updatedLocalRequest,
-          cancellationToken: cancellationToken,
+          cancellationToken: continuationToken,
         );
         return;
       } catch (e) {
