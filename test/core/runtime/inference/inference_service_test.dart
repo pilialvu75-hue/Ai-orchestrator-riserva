@@ -293,6 +293,7 @@ Top results:
         ),
       );
       var streamInvocations = 0;
+      final seenSessionIds = <String>[];
       final service = buildService(
         mode: AiRuntimeMode.local,
         selectedModel: const AiModel(
@@ -310,6 +311,7 @@ Top results:
         localRuntimeProvider: FakeLocalRuntimeProvider(
           streamBuilder: (request, cancellationToken) async* {
             streamInvocations += 1;
+            seenSessionIds.add(request.sessionId);
             if (streamInvocations == 1) {
               expect(cancellationToken.isCancelled, isFalse);
               yield InferenceResponse.token(
@@ -343,6 +345,7 @@ Top results:
       expect(response.text, 'Rome weather is sunny.');
       expect(searchTool.calls, 1);
       expect(streamInvocations, 2);
+      expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
   });
 }
