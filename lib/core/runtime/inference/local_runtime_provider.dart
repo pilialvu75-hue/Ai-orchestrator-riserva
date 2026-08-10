@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:ai_orchestrator/core/runtime/inference/tool_interceptor_transformer.dart';
-
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
@@ -271,11 +269,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
       );
-      // AGGANCIO TRONCO 1: Il flusso FFI nativo passa per il trasformatore
       return ffiRuntimeElement.streamInference(
         request: request,
         cancellationToken: cancellationToken,
-      ).transform(ToolInterceptorTransformer());
+      );
     }
 
     final controller = StreamController<InferenceResponse>();
@@ -509,8 +506,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       }
     }();
 
-    // AGGANCIO TRONCO 2: Anche il flusso CLI passa per il trasformatore
-    return controller.stream.transform(ToolInterceptorTransformer());
+    return controller.stream;
   }
 
   bool _isModelAllowedOnPlatform(

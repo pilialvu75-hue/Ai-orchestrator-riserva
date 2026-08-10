@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/tools/tool.dart';
 
 void main() {
   const validModel = AiModel(
@@ -32,6 +33,7 @@ void main() {
     AiModel? selectedModel,
     required FakeLocalRuntimeProvider localRuntimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
+    Tool? webSearchTool,
   }) {
     return InferenceService(
       loadSelectedModel: () async => selectedModel,
@@ -39,6 +41,7 @@ void main() {
       runtimeProvider: localRuntimeProvider,
       cloudRuntimeProvider: cloudRuntimeProvider,
       sessionManager: RuntimeSessionManager(),
+      webSearchTool: webSearchTool,
     );
   }
 
@@ -274,6 +277,73 @@ void main() {
       expect(response.text, 'Cloud response');
       expect(response.model, 'gpt-4o');
     });
+
+    test('local search continuation uses a fresh cancellation token', () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: '''
+Query: weather in rome
+Top results:
+1. Rome forecast
+   URL: https://example.com/rome
+   Snippet: Sunny.
+''',
+          success: true,
+        ),
+      );
+      var streamInvocations = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: const AiModel(
+          id: 'phi3_5_mini',
+          displayName: 'Phi-3.5 Mini Instruct',
+          fileName: 'phi3.gguf',
+          downloadUrl: 'https://example.com/model.gguf',
+          version: '1.0.0',
+          sizeBytes: 123,
+          description: 'Test model',
+          isDownloaded: true,
+          localPath: '/tmp/phi3.gguf',
+          validationStatus: ModelValidationStatus.validatedOk,
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, cancellationToken) async* {
+            streamInvocations += 1;
+            if (streamInvocations == 1) {
+              expect(cancellationToken.isCancelled, isFalse);
+              yield InferenceResponse.token(
+                text: '<search>weather in rome</search>',
+                model: 'phi3_5_mini',
+              );
+              return;
+            }
+
+            expect(cancellationToken.isCancelled, isFalse);
+            expect(request.prompt, contains('[INTERNET SEARCH RESULTS]'));
+            yield InferenceResponse.finalChunk(
+              text: 'Rome weather is sunny.',
+              tokensGenerated: 5,
+              model: 'phi3_5_mini',
+            );
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+        webSearchTool: searchTool,
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(
+          sessionId: 'search-s1',
+          prompt: 'What is the weather in Rome?',
+        ),
+      );
+
+      expect(response.isError, false);
+      expect(response.text, 'Rome weather is sunny.');
+      expect(searchTool.calls, 1);
+      expect(streamInvocations, 2);
+    });
   });
 }
 
@@ -306,5 +376,28 @@ class FakeLocalRuntimeProvider extends LocalRuntimeProvider {
     for (final response in responses) {
       yield response;
     }
+  }
+}
+
+class _FakeWebSearchTool implements Tool {
+  _FakeWebSearchTool(this._result);
+
+  final ToolResult _result;
+  var calls = 0;
+
+  @override
+  String get id => 'web_search';
+
+  @override
+  String get name => 'Web Search';
+
+  @override
+  String get description => 'Fake web search tool for tests.';
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> params) async {
+    calls += 1;
+    expect(params['query'], isNotEmpty);
+    return _result;
   }
 }
