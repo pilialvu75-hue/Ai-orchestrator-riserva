@@ -84,10 +84,13 @@ class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse
           onError: controller.addError,
           onDone: () {
             // Scarico finale di sicurezza se lo stream si chiude con testo residuo non-tag
-            if (buffer.isNotEmpty && !controller.isClosed) {
+            final pendingText = buffer.toString();
+            final shouldDiscardPending =
+                pendingText.contains(_searchTagStart) || _hasPartialSearchTag(pendingText);
+            if (buffer.isNotEmpty && !controller.isClosed && !shouldDiscardPending) {
               controller.add(
                 InferenceResponse.token(
-                  text: buffer.toString(),
+                  text: pendingText,
                   model: 'unknown',
                 ),
               );

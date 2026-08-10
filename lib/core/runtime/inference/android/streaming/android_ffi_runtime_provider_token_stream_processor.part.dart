@@ -103,9 +103,8 @@ class _AndroidFfiTokenStreamProcessor {
       return '';
     }
 
-    final pending = _pendingStructuralTemplateOutput;
     _pendingStructuralTemplateOutput = '';
-    return pending;
+    return '';
   }
 
   void discardStructuralTemplateOutput() {

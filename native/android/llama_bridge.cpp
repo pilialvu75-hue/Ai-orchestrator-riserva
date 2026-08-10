@@ -933,9 +933,9 @@ void llb_init_backend(void) {
 }
 
 const char* llb_gpu_backend_name(void) {
-#if defined(GGML_USE_VULKAN)
+#if defined(GGML_USE_VULKAN) || defined(GGML_VULKAN)
     return "VULKAN";
-#elif defined(GGML_USE_OPENCL)
+#elif defined(GGML_USE_OPENCL) || defined(GGML_OPENCL)
     return "OPENCL";
 #else
     return "CPU_FALLBACK";
@@ -943,9 +943,9 @@ const char* llb_gpu_backend_name(void) {
 }
 
 const char* llb_gpu_backend_reason(void) {
-#if defined(GGML_USE_VULKAN)
+#if defined(GGML_USE_VULKAN) || defined(GGML_VULKAN)
     return "reason=backend_vulkan_enabled";
-#elif defined(GGML_USE_OPENCL)
+#elif defined(GGML_USE_OPENCL) || defined(GGML_OPENCL)
     return "reason=backend_opencl_enabled";
 #else
     return "reason=compile_without_vulkan";
