@@ -16,23 +16,31 @@ void main() {
     test('drops incomplete search fragments at stream completion', () async {
       final chunks = await transform(
         <InferenceResponse>[
-          InferenceResponse.token(text: '<'),
+          InferenceResponse.token(
+            text: '<',
+            model: 'test-model',
+          ),
         ],
       ).toList();
 
       expect(chunks, isEmpty);
     });
 
-    test('drops an incomplete search opening tag at stream completion', () async {
+    test('drops an incomplete search opening tag at stream completion',
+        () async {
       final chunks = await transform(
         <InferenceResponse>[
-          InferenceResponse.token(text: 'Hello <sea'),
+          InferenceResponse.token(
+            text: 'Hello <sea',
+            model: 'test-model',
+          ),
         ],
       ).toList();
 
       expect(chunks, hasLength(1));
       expect(chunks.single.text, 'Hello ');
       expect(chunks.single.runtimeNotice, isNull);
+      expect(chunks.single.model, 'test-model');
     });
 
     test('emits a search notice for a complete search tag', () async {
@@ -46,7 +54,10 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(1));
+      expect(chunks.single.text, isEmpty);
       expect(chunks.single.runtimeNotice, 'search:weather in rome');
+      expect(chunks.single.isFinal, isFalse);
+      expect(chunks.single.terminalState, isNull);
     });
 
     test('emits normal text before the search notice', () async {
@@ -64,8 +75,12 @@ void main() {
 
       expect(chunks[0].text, 'I will search for you. ');
       expect(chunks[0].runtimeNotice, isNull);
+      expect(chunks[0].model, 'test-model');
 
+      expect(chunks[1].text, isEmpty);
       expect(chunks[1].runtimeNotice, 'search:weather in rome');
+      expect(chunks[1].isFinal, isFalse);
+      expect(chunks[1].terminalState, isNull);
     });
 
     test('detects a search tag split across multiple chunks', () async {
@@ -90,11 +105,16 @@ void main() {
 
       expect(chunks[0].text, 'Searching ');
       expect(chunks[0].runtimeNotice, isNull);
+      expect(chunks[0].model, 'test-model');
 
+      expect(chunks[1].text, isEmpty);
       expect(chunks[1].runtimeNotice, 'search:weather in rome');
+      expect(chunks[1].isFinal, isFalse);
+      expect(chunks[1].terminalState, isNull);
     });
 
-    test('preserves normal text split around a partial search prefix', () async {
+    test('preserves normal text split around a partial search prefix',
+        () async {
       final chunks = await transform(
         <InferenceResponse>[
           InferenceResponse.token(
@@ -109,9 +129,15 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(2));
+
       expect(chunks[0].text, 'Hello ');
       expect(chunks[0].runtimeNotice, isNull);
+      expect(chunks[0].model, 'test-model');
+
+      expect(chunks[1].text, isEmpty);
       expect(chunks[1].runtimeNotice, 'search:Paris weather');
+      expect(chunks[1].isFinal, isFalse);
+      expect(chunks[1].terminalState, isNull);
     });
 
     test('does not emit text after the closing search tag', () async {
@@ -129,6 +155,7 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(1));
+      expect(chunks.single.text, isEmpty);
       expect(chunks.single.runtimeNotice, 'search:weather in rome');
     });
 
@@ -158,8 +185,14 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(1));
-      expect(chunks.single.isError, isTrue);
       expect(chunks.single, same(errorResponse));
+      expect(chunks.single.isError, isTrue);
+      expect(chunks.single.isFinal, isTrue);
+      expect(
+        chunks.single.terminalState,
+        InferenceTerminalState.failed,
+      );
+      expect(chunks.single.errorMessage, 'test error');
     });
 
     test('forwards empty responses unchanged', () async {
@@ -191,6 +224,7 @@ void main() {
       expect(chunks, hasLength(1));
       expect(chunks.single.text, 'Hello world');
       expect(chunks.single.runtimeNotice, isNull);
+      expect(chunks.single.model, 'test-model');
     });
 
     test('preserves text before an incomplete search tag at completion',
@@ -207,6 +241,7 @@ void main() {
       expect(chunks, hasLength(1));
       expect(chunks.single.text, 'Hello ');
       expect(chunks.single.runtimeNotice, isNull);
+      expect(chunks.single.model, 'test-model');
     });
 
     test('does not create a search notice without a closing tag', () async {
@@ -225,7 +260,8 @@ void main() {
       );
     });
 
-    test('preserves the latest model for emitted tokens', () async {
+    test('preserves the model for separately emitted normal tokens',
+        () async {
       final chunks = await transform(
         <InferenceResponse>[
           InferenceResponse.token(
@@ -239,9 +275,13 @@ void main() {
         ],
       ).toList();
 
-      expect(chunks, hasLength(1));
-      expect(chunks.single.text, 'Hello world');
-      expect(chunks.single.model, 'model-a');
+      expect(chunks, hasLength(2));
+
+      expect(chunks[0].text, 'Hello ');
+      expect(chunks[0].model, 'model-a');
+
+      expect(chunks[1].text, 'world');
+      expect(chunks[1].model, 'model-a');
     });
 
     test('uses the latest non-empty model for buffered output', () async {
@@ -259,8 +299,12 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(2));
+
       expect(chunks[0].text, 'Hello ');
+      expect(chunks[0].runtimeNotice, isNull);
       expect(chunks[0].model, 'model-b');
+
+      expect(chunks[1].text, isEmpty);
       expect(chunks[1].runtimeNotice, 'search:weather');
     });
 
@@ -275,33 +319,8 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(1));
+      expect(chunks.single.text, isEmpty);
       expect(chunks.single.runtimeNotice, 'search:');
-    });
-
-    test('handles multiple normal chunks without duplicating tokens', () async {
-      final chunks = await transform(
-        <InferenceResponse>[
-          InferenceResponse.token(
-            text: 'Hello ',
-            model: 'test-model',
-          ),
-          InferenceResponse.token(
-            text: 'beautiful ',
-            model: 'test-model',
-          ),
-          InferenceResponse.token(
-            text: 'world',
-            model: 'test-model',
-          ),
-        ],
-      ).toList();
-
-      final text = chunks
-          .where((response) => response.runtimeNotice == null)
-          .map((response) => response.text ?? '')
-          .join();
-
-      expect(text, 'Hello beautiful world');
     });
 
     test('does not emit the opening search tag as normal text', () async {
@@ -320,12 +339,14 @@ void main() {
 
       final normalText = chunks
           .where((response) => response.runtimeNotice == null)
-          .map((response) => response.text ?? '')
+          .map((response) => response.text)
           .join();
 
       expect(normalText, 'Before ');
       expect(
-        chunks.where((response) => response.runtimeNotice == 'search:query'),
+        chunks.where(
+          (response) => response.runtimeNotice == 'search:query',
+        ),
         hasLength(1),
       );
     });
@@ -363,6 +384,7 @@ void main() {
       final chunks = await transform(responses).toList();
 
       expect(chunks, hasLength(1));
+      expect(chunks.single.text, isEmpty);
       expect(chunks.single.runtimeNotice, 'search:weather');
     });
 
@@ -390,13 +412,15 @@ void main() {
 
       final normalText = chunks
           .where((response) => response.runtimeNotice == null)
-          .map((response) => response.text ?? '')
+          .map((response) => response.text)
           .join();
 
       expect(normalText, 'One two three ');
 
       expect(
-        chunks.where((response) => response.runtimeNotice == 'search:query'),
+        chunks.where(
+          (response) => response.runtimeNotice == 'search:query',
+        ),
         hasLength(1),
       );
     });
@@ -417,14 +441,121 @@ void main() {
 
       final normalText = chunks
           .where((response) => response.runtimeNotice == null)
-          .map((response) => response.text ?? '')
+          .map((response) => response.text)
           .join();
 
       expect(normalText, 'Before ');
       expect(
-        chunks.where((response) => response.runtimeNotice == 'search:query'),
+        chunks.where(
+          (response) => response.runtimeNotice == 'search:query',
+        ),
         hasLength(1),
       );
+    });
+
+    test('detects a closing search tag split across chunks', () async {
+      final chunks = await transform(
+        <InferenceResponse>[
+          InferenceResponse.token(
+            text: '<search>weather</sea',
+            model: 'test-model',
+          ),
+          InferenceResponse.token(
+            text: 'rch>',
+            model: 'test-model',
+          ),
+        ],
+      ).toList();
+
+      expect(chunks, hasLength(1));
+      expect(chunks.single.text, isEmpty);
+      expect(chunks.single.runtimeNotice, 'search:weather');
+    });
+
+    test('forwards normal text without duplication', () async {
+      final chunks = await transform(
+        <InferenceResponse>[
+          InferenceResponse.token(
+            text: 'Hello ',
+            model: 'test-model',
+          ),
+          InferenceResponse.token(
+            text: 'beautiful ',
+            model: 'test-model',
+          ),
+          InferenceResponse.token(
+            text: 'world',
+            model: 'test-model',
+          ),
+        ],
+      ).toList();
+
+      expect(chunks, hasLength(3));
+
+      final text = chunks
+          .where((response) => response.runtimeNotice == null)
+          .map((response) => response.text)
+          .join();
+
+      expect(text, 'Hello beautiful world');
+    });
+
+    test('forwards empty responses unchanged between normal chunks',
+        () async {
+      final first = InferenceResponse.token(
+        text: 'Hello ',
+        model: 'test-model',
+      );
+
+      final empty = InferenceResponse.token(
+        text: '',
+        model: 'test-model',
+      );
+
+      final last = InferenceResponse.token(
+        text: 'world',
+        model: 'test-model',
+      );
+
+      final chunks = await transform(
+        <InferenceResponse>[
+          first,
+          empty,
+          last,
+        ],
+      ).toList();
+
+      expect(chunks, hasLength(3));
+      expect(chunks[0], same(first));
+      expect(chunks[1], same(empty));
+      expect(chunks[2], same(last));
+    });
+
+    test('does not emit an error after a terminal search notice', () async {
+      final controller = StreamController<InferenceResponse>();
+
+      final future = controller.stream
+          .transform(ToolInterceptorTransformer())
+          .toList();
+
+      controller.add(
+        InferenceResponse.token(
+          text: '<search>weather</search>',
+          model: 'test-model',
+        ),
+      );
+
+      controller.add(
+        InferenceResponse.error('must not be forwarded'),
+      );
+
+      await controller.close();
+
+      final chunks = await future;
+
+      expect(chunks, hasLength(1));
+      expect(chunks.single.runtimeNotice, 'search:weather');
+      expect(chunks.single.isError, isFalse);
     });
   });
 }
