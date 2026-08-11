@@ -122,6 +122,7 @@ class AppConstants {
       'description':
           'TinyLlama 1.1B Chat (Q4_K_M) – minimal verification model for Android local-runtime proof-of-life.',
       'platformTarget': 'android',
+      'sizeCategory': '1B',
     },
     {
       'id': 'phi3_5_mini',
@@ -132,8 +133,9 @@ class AppConstants {
       'version': '1.0.0',
       'sizeBytes': 2390000000,
       'description':
-          'Phi-3.5 Mini Instruct (Q4_K_M) – local GGUF option compatible with the Android FFI runtime.',
+          'Phi-3.5 Mini Instruct (Q4_K_M) mobile-friendly local model for concise reasoning and tool use.',
       'platformTarget': 'android',
+      'sizeCategory': '4B',
     },
   ];
 

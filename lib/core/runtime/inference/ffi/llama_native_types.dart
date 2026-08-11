@@ -1,9 +1,16 @@
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
 typedef LlbInitBackendNative = Void Function();
 typedef LlbInitBackendDart = void Function();
+
+typedef LlbGpuBackendNameNative = Pointer<Utf8> Function();
+typedef LlbGpuBackendNameDart = Pointer<Utf8> Function();
+
+typedef LlbGpuBackendReasonNative = Pointer<Utf8> Function();
+typedef LlbGpuBackendReasonDart = Pointer<Utf8> Function();
 
 typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32, Int32);
 typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
@@ -29,12 +36,29 @@ typedef LlbSessionLastErrorDart = Pointer<Utf8> Function(int);
 abstract final class LlamaNativeDefaults {
   // Conservative mobile runtime context for stable local generation.
   static const int nCtx = 2048;
-  // Keep Android runtime thread usage bounded for thermals/stability.
-  // This mirrors the native-side safe defaults used by llama_bridge.cpp.
-  static const int nThreads = 2;
-  // Native prefill now sizes the batch to the active context instead of using
-  // a fixed clamp, so the surfaced batch diagnostic mirrors n_ctx.
-  static int get nBatch => LlamaNativeDefaults.nCtx;
+  // Keep Android runtime thread usage bounded for thermals/stability while
+  // still scaling up on higher-core devices.
+  static final int _nThreads = _calculateThreadCount();
+
+  static int _calculateThreadCount() {
+    return threadCountForCores(Platform.numberOfProcessors);
+  }
+
+  static int threadCountForCores(int cores) {
+    // Use 6 threads on octa-core devices to keep the decode loop responsive
+    // without fully saturating the big.LITTLE cluster.
+    if (cores >= 8) return 6;
+    // Use 4 threads on mid-range devices so generation scales above the
+    // previous hardcoded baseline while still leaving headroom for UI work.
+    if (cores >= 6) return 4;
+    // Fall back to 2 threads on smaller devices to avoid thermal spikes.
+    return 2;
+  }
+  static int get nThreads => _nThreads;
+  static int get nThreadsBatch => _nThreads;
+  // Native prefill uses a fixed chunked batch to avoid CPU saturation during
+  // prompt prefill on large contexts.
+  static const int nBatch = 512;
   static const double temperature = 0.7;
   static const int topK = 40;
   static const double topP = 0.9;

@@ -1,3 +1,4 @@
+// schermata iniziale di Ai-Orchestrator-Riserva 
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/app/app_shell.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';

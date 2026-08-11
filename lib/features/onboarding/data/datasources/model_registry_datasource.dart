@@ -18,10 +18,12 @@ class ModelRegistryDataSource {
         downloadUrl: 'https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf',
       ),
       ModelUpdateInfo(
-        modelId: 'phi-3-mini',
+        modelId: 'phi3_5_mini',
         currentVersion: '3.8.0',
         latestVersion: '3.8.0',
         updateAvailable: false,
+        downloadUrl:
+            'https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF',
       ),
       ModelUpdateInfo(
         modelId: 'llama-3-8b',

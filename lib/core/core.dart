@@ -38,6 +38,7 @@ export 'memory/memory_provider.dart';
 export 'orchestrator/execution_engine.dart';
 export 'orchestrator/intent_analyzer.dart';
 export 'orchestrator/multi_agent_orchestrator.dart';
+export 'orchestrator/role_contracts.dart';
 export 'orchestrator/orchestration_strategy.dart';
 export 'orchestrator/orchestrator.dart';
 export 'orchestrator/state_engine/chat_event.dart';

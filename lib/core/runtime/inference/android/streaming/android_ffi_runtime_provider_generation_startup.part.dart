@@ -195,6 +195,31 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       return null;
     }
     final bindings = _bindings!;
+    final gpuBackendName = bindings.gpuBackendName();
+    final gpuBackendReason = bindings.gpuBackendReason();
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_BEGIN] session=$sessionId requested_layers=${LlamaNativeDefaults.nGpuLayers} modelId=$modelId',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_DEVICE_FOUND] backend=$gpuBackendName',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_BACKEND] type=$gpuBackendName $gpuBackendReason',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_SELECTED] backend=$gpuBackendName requested_layers=${LlamaNativeDefaults.nGpuLayers}',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_MEMORY] backend=$gpuBackendName model_path=$resolvedModelPath',
+    );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_THREADS] backend=$gpuBackendName n_threads=${LlamaNativeDefaults.nThreads}',
+    );
+    if (gpuBackendName == 'CPU_FALLBACK') {
+      AndroidFfiRuntimeProvider._log(
+        '[GPU_CPU_FALLBACK] backend=$gpuBackendName ${gpuBackendReason.trim()}',
+      );
+    }
     _updateRuntimeStatus( LocalRuntimeStatus.loading, message: 'Loading model: $modelId', resetProgress: true, );
     await Future<void>.delayed(Duration.zero);
     AndroidFfiRuntimeProvider._logAi('creating native session...');
@@ -240,8 +265,32 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log('[NATIVE_MODEL_LOAD_SUCCESS] path=$resolvedModelPath modelId=$modelId' ' session=$nativeSessionId');
     AndroidFfiRuntimeProvider._log('[NATIVE_CONTEXT_CREATE] path=$resolvedModelPath status=ok');
     AndroidFfiRuntimeProvider._logAi('native session ready');
-    final prompt = _composePrompt( request, modelId: modelId, bypassNonessentialLayers: isForensicSelfTest, );
-    final promptWordEstimate = prompt .trim() .split(RegExp(r'\s+')) .where((token) => token.isNotEmpty) .length;
+    final composedPrompt = _composePrompt(
+      request,
+      modelId: modelId,
+      bypassNonessentialLayers: isForensicSelfTest,
+    );
+    final samplingMetadata = SamplingMetadata.fromPrompt(composedPrompt);
+    final prompt = samplingMetadata.stripFrom(composedPrompt);
+    if (kDebugMode) {
+      AndroidFfiRuntimeProvider._log(
+        describeUtf8PayloadForensics(
+          label: 'FORENSIC_DART_PROMPT',
+          payload: prompt,
+        ),
+      );
+    }
+    AndroidFfiRuntimeProvider._log(
+      '[SAMPLING_META] session=$sessionId'
+      ' temp=${samplingMetadata.temperature ?? request.temperature}'
+      ' top_p=${samplingMetadata.topP ?? LlamaNativeDefaults.topP}'
+      ' repeat_penalty=${samplingMetadata.repeatPenalty ?? request.repeatPenalty}',
+    );
+    final promptWordEstimate = prompt
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((token) => token.isNotEmpty)
+        .length;
     if (promptWordEstimate <= 0) {
       _classifyFirstTokenTermination( flowState: flowState, reason: 'tokenizer_readiness_failed', boundary: 'tokenizer_readiness', );
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=tokenizer_readiness_failed');
@@ -263,9 +312,13 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
         ? request.maxTokens
         : AndroidFfiRuntimeProvider._defaultMaxTokens);
     final maxTokens = requestedMaxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens);
-    final effectiveTemperature = isForensicSelfTest ? 0.1 : request.temperature;
+    final effectiveTemperature = isForensicSelfTest
+        ? 0.1
+        : (samplingMetadata.temperature ?? request.temperature);
     final effectiveTopK = isForensicSelfTest ? 1 : LlamaNativeDefaults.topK;
-    final effectiveTopP = isForensicSelfTest ? 0.1 : LlamaNativeDefaults.topP;
+    final effectiveTopP = isForensicSelfTest
+        ? 0.1
+        : (samplingMetadata.topP ?? LlamaNativeDefaults.topP);
     final firstTokenDeadline = isForensicSelfTest ? AndroidFfiRuntimeProvider._verificationFirstTokenTimeout : AndroidFfiRuntimeProvider._firstTokenTimeout;
     if (request.maxTokens > AndroidFfiRuntimeProvider._safeMaxTokens) {
       AndroidFfiRuntimeProvider._log(
@@ -291,6 +344,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       '[GENERATION_START] session=$sessionId prompt_chars=${prompt.length}'
       ' max_tokens=$maxTokens temperature=$effectiveTemperature'
       ' n_threads=${LlamaNativeDefaults.nThreads}'
+      ' n_threads_batch=${LlamaNativeDefaults.nThreadsBatch}'
       ' n_batch=${LlamaNativeDefaults.nBatch}'
       ' n_ctx=${LlamaNativeDefaults.nCtx}'
       ' top_k=$effectiveTopK'
@@ -399,6 +453,9 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     }
     AndroidFfiRuntimeProvider._log('[WARMUP] inference_startup_ok session=$sessionId' ' startup_ms=${startupWatch.elapsed.inMilliseconds}');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=ready startup_ms=${startupWatch.elapsed.inMilliseconds}', );
+    AndroidFfiRuntimeProvider._log(
+      '[GPU_EXIT] backend=$gpuBackendName status=ready elapsed_ms=${startupWatch.elapsed.inMilliseconds}',
+    );
     return _GenerationStartupState( controller: controller, cancellationToken: cancellationToken, bindings: bindings, sessionId: sessionId, modelId: modelId, modelPath: resolvedModelPath, isForensicSelfTest: isForensicSelfTest, dartThreadId: dartThreadId, firstTokenDeadline: firstTokenDeadline, maxTokens: maxTokens, nativeSessionId: nativeSessionId, prompt: prompt, promptNativePtr: promptNativePtr, freePromptNativePtr: freePromptNativePtr, );
   }
 }

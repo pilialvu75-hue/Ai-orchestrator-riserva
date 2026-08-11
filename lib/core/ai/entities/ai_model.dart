@@ -30,6 +30,7 @@ class AiModel extends Equatable {
     required this.version,
     required this.sizeBytes,
     required this.description,
+    this.sizeCategory,
     this.isDownloaded = false,
     this.localPath,
     this.platformTarget,
@@ -58,6 +59,9 @@ class AiModel extends Equatable {
 
   /// Expected download size in bytes.
   final int sizeBytes;
+
+  /// Categorical model size label (e.g. `1B`, `2B`, `4B`, `7B`).
+  final String? sizeCategory;
 
   /// Short description shown in the UI.
   final String description;
@@ -106,6 +110,7 @@ class AiModel extends Equatable {
     String? downloadUrl,
     String? version,
     int? sizeBytes,
+    String? sizeCategory,
     String? description,
     bool? isDownloaded,
     String? localPath,
@@ -125,6 +130,7 @@ class AiModel extends Equatable {
       downloadUrl: downloadUrl ?? this.downloadUrl,
       version: version ?? this.version,
       sizeBytes: sizeBytes ?? this.sizeBytes,
+      sizeCategory: sizeCategory ?? this.sizeCategory,
       description: description ?? this.description,
       isDownloaded: isDownloaded ?? this.isDownloaded,
       localPath: localPath ?? this.localPath,
@@ -148,6 +154,7 @@ class AiModel extends Equatable {
         downloadUrl,
         version,
         sizeBytes,
+        sizeCategory,
         description,
         isDownloaded,
         localPath,
@@ -163,5 +170,6 @@ class AiModel extends Equatable {
   @override
   String toString() =>
       'AiModel(id: $id, version: $version, isDownloaded: $isDownloaded, '
-      'platform: $platformTarget, source: $source, validation: $validationStatus)';
+      'platform: $platformTarget, size: $sizeCategory, source: $source, '
+      'validation: $validationStatus)';
 }

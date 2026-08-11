@@ -9,6 +9,12 @@ class LlamaBridgeBindings {
             lib.lookupFunction<LlbInitBackendNative, LlbInitBackendDart>(
           'llb_init_backend',
         ),
+        _gpuBackendName = lib.lookupFunction<
+            LlbGpuBackendNameNative,
+            LlbGpuBackendNameDart>('llb_gpu_backend_name'),
+        _gpuBackendReason = lib.lookupFunction<
+            LlbGpuBackendReasonNative,
+            LlbGpuBackendReasonDart>('llb_gpu_backend_reason'),
         _createSession =
             lib.lookupFunction<LlbCreateSessionNative, LlbCreateSessionDart>(
           'llb_create_session',
@@ -38,6 +44,8 @@ class LlamaBridgeBindings {
             LlbSessionLastErrorDart>('llb_session_last_error');
 
   final LlbInitBackendDart _initBackend;
+  final LlbGpuBackendNameDart _gpuBackendName;
+  final LlbGpuBackendReasonDart _gpuBackendReason;
   final LlbCreateSessionDart _createSession;
   final LlbSessionStartGenDart _sessionStartGen;
   final LlbSessionPollTokenDart _sessionPollToken;
@@ -47,6 +55,10 @@ class LlamaBridgeBindings {
   final LlbSessionLastErrorDart _sessionLastError;
 
   void initBackend() => _initBackend();
+
+  String gpuBackendName() => _gpuBackendName().toDartString();
+
+  String gpuBackendReason() => _gpuBackendReason().toDartString();
 
   int createSession(String modelPath, {int nGpuLayers = LlamaNativeDefaults.nGpuLayers}) {
     final pathPtr = modelPath.toNativeUtf8(allocator: calloc);

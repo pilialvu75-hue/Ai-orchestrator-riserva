@@ -9,8 +9,11 @@ on:
       - main
   workflow_dispatch:
 
+# MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
   contents: write
+  security-events: write
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -78,6 +81,14 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
+      # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
+      - name: Initialize CodeQL (C++ & Android Native)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: 'cpp, java-kotlin'
+          queries: security-and-quality
 
       - name: Reset Android debug keystore
         run: |
@@ -341,6 +352,13 @@ jobs:
             --build-name="${{ steps.version.outputs.version_name }}" \
             --build-number="${{ steps.version.outputs.version_code }}" \
             2>&1 | tee release_aab_build.log
+
+      # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
+      # A questo punto CodeQL ha catturato la compilazione di llama.cpp e dei servizi Java.
+      - name: Perform CodeQL Final Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:multi"
 
       - name: Discover release outputs
         run: |

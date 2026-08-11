@@ -36,6 +36,21 @@ class _AndroidFfiTokenStreamProcessor {
     '<|im_end|>',
     '&lt;|im_end|&gt;',
     '&amp;lt;|im_end|&gt;',
+    '<|user|>',
+    '&lt;|user|&gt;',
+    '&amp;lt;|user|&gt;',
+    '<|assistant|>',
+    '&lt;|assistant|&gt;',
+    '&amp;lt;|assistant|&gt;',
+    '<|system|>',
+    '&lt;|system|&gt;',
+    '&amp;lt;|system|&gt;',
+    '<|end|>',
+    '&lt;|end|&gt;',
+    '&amp;lt;|end|&gt;',
+    '</s>',
+    '&lt;/s&gt;',
+    '&amp;lt;/s&gt;',
     '<think>',
     '</think>',
     '&lt;think&gt;',
@@ -90,6 +105,9 @@ class _AndroidFfiTokenStreamProcessor {
 
     final pending = _pendingStructuralTemplateOutput;
     _pendingStructuralTemplateOutput = '';
+    if (_structuralTemplateTokens.any((token) => token.startsWith(pending))) {
+      return '';
+    }
     return pending;
   }
 

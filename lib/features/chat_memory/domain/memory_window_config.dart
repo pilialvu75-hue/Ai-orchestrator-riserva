@@ -207,7 +207,7 @@ class MemoryWindowConfig {
         'performance',
       ],
     )) {
-      return MemoryWindowProfile.performance;
+      return MemoryWindowProfile.compact;
     }
 
     return MemoryWindowProfile.standard;

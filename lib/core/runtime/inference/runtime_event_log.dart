@@ -11,6 +11,8 @@ enum RuntimeEventCategory {
   token,
   stream,
   validation,
+  websearch,
+  hardware,
   other,
 }
 
@@ -143,6 +145,12 @@ class RuntimeEventLog {
         tag.startsWith('FALLBACK') ||
         tag == 'RUNTIME_PATH') {
       return RuntimeEventCategory.fallback;
+    }
+    if (tag.startsWith('WEBSEARCH')) {
+      return RuntimeEventCategory.websearch;
+    }
+    if (tag.startsWith('GPU') || tag.startsWith('HARDWARE')) {
+      return RuntimeEventCategory.hardware;
     }
     if (_tokenTags.contains(tag) ||
         tag.startsWith('TOKEN_STREAM') ||

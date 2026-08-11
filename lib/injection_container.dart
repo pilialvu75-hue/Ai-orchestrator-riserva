@@ -24,6 +24,10 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
 import 'package:ai_orchestrator/core/runtime/language_service.dart';
 import 'package:ai_orchestrator/core/runtime/llm_role_assignment_service.dart';
+import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
+import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
@@ -90,7 +94,6 @@ import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_serv
 import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
 import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
-import 'package:ai_orchestrator/features/voice/sherpa_onnx_adapter.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
@@ -482,12 +485,23 @@ Future<void> initDependencies({
       sessionManager: sl<RuntimeSessionManager>(),
     ),
   );
+  sl.registerLazySingleton<SearchProvider>(
+    () => DuckDuckGoProvider(client: sl<http.Client>()),
+  );
+  sl.registerLazySingleton<SearchCache>(() => InMemorySearchCache());
+  sl.registerLazySingleton<WebSearchTool>(
+    () => WebSearchTool(
+      searchProvider: sl<SearchProvider>(),
+      searchCache: sl<SearchCache>(),
+    ),
+  );
   sl.registerLazySingleton<Orchestrator>(
     () => Orchestrator(
       intentAnalyzer: sl<IntentAnalyzer>(),
       executor: sl<ExecutionEngine>(),
       inferenceService: sl<InferenceService>(),
       plannerService: sl<PlannerService>(),
+      webSearchTool: sl<WebSearchTool>(),
     ),
   );
   sl.registerLazySingleton<ChatRepository>(

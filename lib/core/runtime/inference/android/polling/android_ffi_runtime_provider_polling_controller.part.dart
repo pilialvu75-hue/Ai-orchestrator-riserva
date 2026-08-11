@@ -1,16 +1,17 @@
-/// Polling control for the Android FFI runtime token loop.
-///
-/// Owns idle backoff and loop telemetry helpers while preserving the original
-/// polling limits and timing behavior.
 part of '../../runtime_core.dart';
 
-
+/// Controllo ottimizzato del ciclo di polling per il runtime nativo FFI.
+///
+/// Abbassa la latenza iniziale a zero per massimizzare il throughput dei modelli
+/// locali leggeri (Phi-3.5) e riallinea le iterazioni massime al watchdog di Dart.
 class _AndroidFfiRuntimePollingController {
   _AndroidFfiRuntimePollingController(this._owner);
 
   final AndroidFfiRuntimeProvider _owner;
 
-  static const int _maxIdlePollIterations = 2400;
+  // Ricalcolato sul watchdog di Dart: 35 secondi di timeout / 25ms medi = ~1400 iterazioni.
+  // Evita che il ciclo nativo ignori il timeout imposto dal provider superiore.
+  static const int _maxIdlePollIterations = 1400;
 
   int get maxIdlePollIterations => _maxIdlePollIterations;
 
@@ -33,12 +34,22 @@ class _AndroidFfiRuntimePollingController {
     }
   }
 
+  /// Incrementa il backoff in modo controllato.
+  /// Parte da 0ms (yield immediato dell'event loop) e sale fino a un tetto
+  /// compatibile con la reattività dell'interfaccia utente (32ms).
   void increaseIdleBackoff() {
-    _owner._idleBackoffMs = (_owner._idleBackoffMs * 2).clamp(24, 200);
+    if (_owner._idleBackoffMs == 0) {
+      _owner._idleBackoffMs = 4; // Primo gradino dopo lo yield a zero
+    } else {
+      _owner._idleBackoffMs = (_owner._idleBackoffMs * 2).clamp(4, 32);
+    }
   }
 
+  /// Reset del backoff a zero per l'hot-path di ricezione token.
+  /// Garantisce che non appena viene emesso un token, il campionamento successivo
+  /// avvenga senza alcun ritardo artificiale.
   void resetIdleBackoff() {
-    _owner._idleBackoffMs = 24;
+    _owner._idleBackoffMs = 0; // 0ms indica un Duration.zero (microtask yield)
   }
 
   void _log(String message) {

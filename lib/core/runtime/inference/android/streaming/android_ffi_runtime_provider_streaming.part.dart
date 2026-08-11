@@ -11,6 +11,7 @@ const Set<String> _androidSafeModelIds = {
   LocalInferenceModelIds.gemma2_2bIt,
   LocalInferenceModelIds.deepSeekR1_1_5b,
   LocalInferenceModelIds.qwen3_1_7b,
+  LocalInferenceModelIds.phi3_5_mini,
 };
 
 /// Verifica se un modelId importato dall'utente è compatibile con
@@ -61,6 +62,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
       AndroidFfiRuntimeProvider._log(
         '[FORENSIC_STREAM_INFERENCE_ACTIVE] streamInferenceEntered=true sessionId=${request.sessionId} modelId=${request.modelId} isolateHash=${AndroidFfiRuntimeProvider._currentThreadId()}',
       );
+      _pollingController.resetIdleBackoff();
       final controller = StreamController<InferenceResponse>();
       AndroidFfiRuntimeProvider._log(
         '[STREAM_CONTROLLER_CREATED] sessionId=${request.sessionId} modelId=${request.modelId}',

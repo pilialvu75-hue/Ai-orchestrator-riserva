@@ -7,12 +7,15 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: UTILIZZATA CON SUCCESSO
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
 
@@ -23,22 +26,23 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
-            developerModeProvider?? (() => kDebugMode);
+            developerModeProvider ?? (() => kDebugMode);
 
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  // ── FIX: Set Mobile con Phi-3.5-mini aggiunto ─────────────────────────────
-  static const Set<String> _mobileValidatedModelIds = {
-   ...AndroidFfiRuntimeModelIds.validatedModelIds,
-    LocalInferenceModelIds.phi3_5_mini, // <- Aggiunto Phi mobile
+  // ——— FIX: Set Mobile con Phi-3.5-mini aggiunto ———
+  static final Set<String> _mobileValidatedModelIds = {
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
+    LocalInferenceModelIds.phi3_5_mini, 
   };
 
-  static const Set<String> _desktopValidatedModelIds =
-      AndroidFfiRuntimeModelIds.validatedModelIds;
-  // ──────────────────────────────────────────
+  static final Set<String> _desktopValidatedModelIds = {
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
+  };
+  // —————————————————————————————————————————————————
 
   final bool Function() _developerModeProvider;
 
@@ -71,12 +75,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
   @protected
   bool hasVerifiedRuntimeForModel(String modelPath) =>
-      _verifiedModelPath!= null &&
+      _verifiedModelPath != null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
   bool isRuntimeVerified({String? modelPath}) {
     if (modelPath == null || modelPath.trim().isEmpty) {
-      return _verifiedModelPath!= null;
+      return _verifiedModelPath != null;
     }
     return hasVerifiedRuntimeForModel(modelPath);
   }
@@ -120,7 +124,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           '$msg modelId=$modelId',
         );
 
-        return model.localPath!= null &&
+        return model.localPath != null &&
             model.localPath!.isNotEmpty &&
             model.isDownloaded;
       }
@@ -137,6 +141,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     AiModel? selectedModel,
   }) async {
     if (selectedModel == null) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=no_local_model_selected');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'No local model selected.',
@@ -144,6 +150,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     if (!selectedModel.isDownloaded) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=not_downloaded modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_not_downloaded modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model file not downloaded.',
@@ -153,6 +161,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     final modelPath = selectedModel.localPath;
 
     if (modelPath == null || modelPath.trim().isEmpty) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing_path modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_path_empty modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model path is empty.',
@@ -164,6 +174,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
 
     if (!exists) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing_file modelId=${selectedModel.id} path=$modelPath');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_file_missing modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.modelMissing,
         message: 'Model file missing from storage.',
@@ -176,6 +188,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (fileSize <= 0 ||
         fileSize > _maxModelFileSizeBytes) {
+      RuntimeEventLog.instance.emit('[MODEL_FOUND] status=invalid_size modelId=${selectedModel.id} size_bytes=$fileSize');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_model_size modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message: 'Invalid model file size.',
@@ -188,6 +202,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
 
     if (!hasValidGgufHeader) {
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_gguf_header modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message: 'Invalid GGUF model header.',
@@ -196,6 +211,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     if (!supportsModel(selectedModel)) {
       if (_isDeveloperMode) {
+        RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=false developer_mode=true');
         return const LocalRuntimeState(
           status: LocalRuntimeStatus.runtimeUnavailable,
           message:
@@ -203,6 +219,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         );
       }
 
+      RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=false developer_mode=false');
+      RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=unsupported_model modelId=${selectedModel.id}');
       return const LocalRuntimeState(
         status: LocalRuntimeStatus.failed,
         message:
@@ -217,11 +235,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         ' | hasVerifiedRuntimeForModel: $gateVerified'
         ' | ModelID: $gateModelId'
         ' | ModelPath: $modelPath'
-        ' | _verifiedModelPath: ${_verifiedModelPath?? 'null'}';
+        ' | _verifiedModelPath: ${_verifiedModelPath ?? 'null'}';
     debugPrint(gateMsg);
     RuntimeEventLog.instance.emit(gateMsg);
+    RuntimeEventLog.instance.emit('[MODEL_FOUND] status=present modelId=${selectedModel.id} path=$modelPath');
+    RuntimeEventLog.instance.emit('[MODEL_HASH] modelId=${selectedModel.id} hash=${secureForensicHash('${selectedModel.id}:$modelPath:$fileSize')}');
+    RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=${selectedModel.id} runtime=${Platform.isAndroid ? 'android_ffi' : 'process_cli'}');
 
     if (gateVerified) {
+      RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=${selectedModel.id} compatible=true');
+      RuntimeEventLog.instance.emit('[MODEL_READY] modelId=${selectedModel.id}');
+      RuntimeEventLog.instance.emit('[VALIDATION_SUCCESS] modelId=${selectedModel.id}');
       return LocalRuntimeState(
         status: LocalRuntimeStatus.ready,
         message:
@@ -241,15 +265,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    // Se l'istanza corrente è già l'AndroidFfiRuntimeProvider specifico, evita il ciclo
-    // e passa direttamente all'esecuzione nativa per via del polimorfismo.
     if (Platform.isAndroid && this is! AndroidFfiRuntimeProvider) {
-      debugPrint('[$_localProviderTag] Android context detected. Delegating pipeline execution to AndroidFfiRuntimeProvider.');
-
       final ffiRuntimeElement = AndroidFfiRuntimeProvider(
         developerModeProvider: _developerModeProvider,
       );
-
       return ffiRuntimeElement.streamInference(
         request: request,
         cancellationToken: cancellationToken,
@@ -271,6 +290,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
             modelPath.isEmpty ||
             modelId == null) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=${modelId ?? 'none'} runtime=unavailable');
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=missing_model_path_or_id');
 
           controller.add(
             InferenceResponse.error(
@@ -288,6 +309,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         if (!modelExists) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=model_file_missing modelId=$modelId');
 
           controller.add(
             InferenceResponse.error(
@@ -306,6 +328,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         if (!isValidModelFile) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_gguf_header modelId=$modelId');
 
           controller.add(
             InferenceResponse.error(
@@ -319,6 +342,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         final executable =
             _resolveLlamaExecutable();
+        RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=$modelId runtime=${Platform.isAndroid ? 'android_ffi' : 'process_cli'}');
+        RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=$modelId compatible=true');
 
         final args = _buildArgs(request);
 
@@ -343,6 +368,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           );
         } on ProcessException catch (e) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=ffi_binding_failed detail=${e.message}');
 
           controller.add(
             InferenceResponse.error(
@@ -413,6 +439,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         if (cancellationToken.isCancelled) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=cancelled');
 
           controller.add(
             InferenceResponse.error(
@@ -426,9 +453,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
-        if (exitCode!= 0 &&
+        if (exitCode != 0 &&
             fullText.isEmpty) {
           clearRuntimeVerification();
+          RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=process_exit_code exitCode=$exitCode');
 
           final stderr =
               stderrBuffer.toString().trim();
@@ -446,6 +474,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         markRuntimeVerified(modelPath);
+        RuntimeEventLog.instance.emit('[MODEL_READY] modelId=$modelId');
+        RuntimeEventLog.instance.emit('[VALIDATION_SUCCESS] modelId=$modelId');
 
         controller.add(
           InferenceResponse.finalChunk(
@@ -495,7 +525,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     // 2. Integrazione dinamica: Controlla se il modelId è presente in uno dei set di template dinamici
     return LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
         LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId);
+        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.phi3ChatTemplateModels.contains(modelId); // <- Sblocca l'ammissione dinamica di Phi-3.5
   }
 
   String _resolveLlamaExecutable() {
@@ -503,7 +534,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
 
-    if (envPath!= null &&
+    if (envPath != null &&
         envPath.trim().isNotEmpty) {
       return envPath.trim();
     }
@@ -515,16 +546,27 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     InferenceRequest request,
   ) {
     final prompt = _composePrompt(request);
+    final metadata = SamplingMetadata.fromPrompt(prompt);
+    final cleanedPrompt = metadata.stripFrom(prompt);
+    final effectiveTemperature = metadata.temperature ?? request.temperature;
+    final effectiveTopP = metadata.topP ?? request.topP;
+    final effectiveRepeatPenalty = metadata.repeatPenalty ?? request.repeatPenalty;
 
     return <String>[
       '-m',
       request.modelPath!,
       '-p',
-      prompt,
+      cleanedPrompt,
       '-n',
       request.maxTokens.toString(),
       '--temp',
-      request.temperature.toString(),
+      effectiveTemperature.toString(),
+      '--top-p',
+      effectiveTopP.toString(),
+      '--top-k',
+      LlamaNativeDefaults.topK.toString(),
+      '--repeat-penalty',
+      effectiveRepeatPenalty.toString(),
       '--no-display-prompt',
       '--log-disable',
     ];
@@ -534,7 +576,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     InferenceRequest request,
   ) {
     return LocalPromptTemplates.compose(
-      modelId: request.modelId?? '',
+      modelId: request.modelId ?? '',
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
       context: request.context,
