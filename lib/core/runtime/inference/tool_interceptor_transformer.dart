@@ -44,11 +44,10 @@ class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse
                 '[TOOL_INTERCEPTOR] target=search status=extracted query="$query"',
               );
               
-              // Emettiamo il messaggio come token user-facing e chiudiamo la sottoscrizione
+              // Emettiamo il messaggio come runtime notice e chiudiamo la sottoscrizione
               controller.add(
-                InferenceResponse.token(
-                  text: "Sto cercando su Internet: '$query'",
-                  model: response.model,
+                InferenceResponse.notice(
+                  'search:$query',
                 ),
               );
               
