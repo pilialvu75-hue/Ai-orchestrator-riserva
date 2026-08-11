@@ -173,7 +173,7 @@ class ToolInterceptorTransformer
               return;
             }
 
-            final textChunk = response.text ?? '';
+            final textChunk = response.text;
 
             if (response.model != null && response.model!.isNotEmpty) {
               lastModel = response.model;
@@ -207,8 +207,13 @@ class ToolInterceptorTransformer
               final searchStartIndex = pendingText.indexOf(_searchTagStart);
 
               if (searchStartIndex == -1) {
-                // No search tag was ever started. Everything is safe to emit.
-                emitToken(pendingText);
+                // If the pending text ends with a partial `<search>` opening
+                // tag, that fragment is deliberately discarded.
+                //
+                // Otherwise all remaining text is safe to emit.
+                if (!_hasPartialSearchTag(pendingText)) {
+                  emitToken(pendingText);
+                }
               } else if (searchStartIndex > 0) {
                 // Preserve normal text before an incomplete search tag.
                 emitToken(
