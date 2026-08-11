@@ -14,7 +14,7 @@ void main() {
       expect(chunks, isEmpty);
     });
 
-    test('emits a notice for a complete search tag', () async {
+    test('emits a user-facing token for a complete search tag', () async {
       final chunks = await Stream<InferenceResponse>.fromIterable(
         <InferenceResponse>[
           InferenceResponse.token(text: '<search>weather in rome</search>'),
@@ -22,8 +22,11 @@ void main() {
       ).transform(ToolInterceptorTransformer()).toList();
 
       expect(chunks, hasLength(1));
-      expect(chunks.single.runtimeNotice, isNotNull);
-      expect(chunks.single.text, isEmpty);
+      expect(chunks.single.runtimeNotice, isNull);
+      expect(
+        chunks.single.text,
+        contains("Sto cercando su Internet: 'weather in rome'"),
+      );
     });
   });
 }

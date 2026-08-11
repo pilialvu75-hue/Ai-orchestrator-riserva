@@ -79,10 +79,13 @@ target_include_directories(llama_bridge PRIVATE
 target_link_libraries(llama_bridge PRIVATE
     llama
     ggml
-    ${VULKAN_LIB}
     log       # Android NDK logging
     android   # Android NDK utils
 )
+
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
+    target_link_libraries(llama_bridge PRIVATE ${VULKAN_LIB})
+endif()
 
 target_compile_options(llama_bridge PRIVATE
     -O3
