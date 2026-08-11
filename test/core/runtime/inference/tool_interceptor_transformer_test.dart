@@ -284,7 +284,7 @@ void main() {
       expect(chunks[1].model, 'model-a');
     });
 
-    test('uses the latest non-empty model for buffered output', () async {
+    test('uses the model active when buffered text is emitted', () async {
       final chunks = await transform(
         <InferenceResponse>[
           InferenceResponse.token(
@@ -300,12 +300,16 @@ void main() {
 
       expect(chunks, hasLength(2));
 
+      // "Hello " is flushed immediately from the first chunk.
+      // Only "<" remains buffered because it may start "<search>".
       expect(chunks[0].text, 'Hello ');
       expect(chunks[0].runtimeNotice, isNull);
-      expect(chunks[0].model, 'model-b');
+      expect(chunks[0].model, 'model-a');
 
       expect(chunks[1].text, isEmpty);
       expect(chunks[1].runtimeNotice, 'search:weather');
+      expect(chunks[1].isFinal, isFalse);
+      expect(chunks[1].terminalState, isNull);
     });
 
     test('handles a search tag with an empty query', () async {
@@ -526,9 +530,18 @@ void main() {
       ).toList();
 
       expect(chunks, hasLength(3));
-      expect(chunks[0], same(first));
+
+      // Normal tokens are reconstructed by the transformer.
+      expect(chunks[0].text, 'Hello ');
+      expect(chunks[0].runtimeNotice, isNull);
+      expect(chunks[0].model, 'test-model');
+
+      // Empty responses are forwarded exactly as received.
       expect(chunks[1], same(empty));
-      expect(chunks[2], same(last));
+
+      expect(chunks[2].text, 'world');
+      expect(chunks[2].runtimeNotice, isNull);
+      expect(chunks[2].model, 'test-model');
     });
 
     test('does not emit an error after a terminal search notice', () async {
