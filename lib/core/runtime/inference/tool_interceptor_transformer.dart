@@ -15,6 +15,7 @@ class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse
     controller = StreamController<InferenceResponse>(
       onListen: () {
         final buffer = StringBuffer();
+        var searchMode = false;
 
         subscription = stream.listen(
           (response) {
@@ -44,10 +45,17 @@ class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse
                 InferenceResponse.notice("Sto cercando su Internet: '$query'"),
               );
               buffer.clear();
+              searchMode = false;
               return;
             }
 
-            if (currentText.contains(_searchTagStart) || _hasPartialSearchTag(currentText)) {
+            if (currentText.contains(_searchTagStart)) {
+              searchMode = true;
+              return;
+            }
+
+            if (searchMode || _hasPartialSearchTag(currentText)) {
+              searchMode = true;
               return;
             }
 
