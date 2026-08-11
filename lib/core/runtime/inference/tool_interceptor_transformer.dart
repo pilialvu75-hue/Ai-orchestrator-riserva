@@ -3,7 +3,29 @@ import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
-class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse, InferenceResponse> {
+/// Intercepts streaming inference responses looking for a `<search>...</search>`
+/// tool-call.
+///
+/// The transformer preserves normal inference streaming while withholding only
+/// the minimum amount of text necessary to determine whether a search tool-call
+/// is being produced.
+///
+/// When a complete search tag is detected, a runtime notice containing the
+/// extracted query is emitted and the upstream subscription is cancelled.
+///
+/// Important:
+/// - Normal tokens are forwarded exactly once.
+/// - Partial `<search>` prefixes are retained across chunks.
+/// - Text preceding a search tag is emitted before the tool notice.
+/// - Text following `</search>` is intentionally not emitted because the
+///   search tool-call terminates the current inference stream.
+/// - Error responses are forwarded immediately.
+/// - Empty responses are forwarded immediately.
+/// - Terminal stream completion flushes any safe residual text.
+/// - No unbounded regular-expression scan is performed on every token.
+///
+class ToolInterceptorTransformer
+    extends StreamTransformerBase<InferenceResponse, InferenceResponse> {
   static const String _searchTagStart = '<search>';
   static const String _searchTagEnd = '</search>';
 
@@ -13,110 +35,266 @@ class ToolInterceptorTransformer extends StreamTransformerBase<InferenceResponse
     StreamSubscription<InferenceResponse>? subscription;
 
     controller = StreamController<InferenceResponse>(
+      sync: true,
       onListen: () {
         final buffer = StringBuffer();
+        var searchDetected = false;
+        var streamTerminated = false;
+        String? lastModel;
+
+        void emitToken(String text) {
+          if (text.isEmpty || controller.isClosed) {
+            return;
+          }
+
+          controller.add(
+            InferenceResponse.token(
+              text: text,
+              model: lastModel ?? 'unknown',
+            ),
+          );
+        }
+
+        void emitSearchNotice(String query) {
+          if (controller.isClosed) {
+            return;
+          }
+
+          RuntimeEventLog.instance.emit(
+            '[TOOL_INTERCEPTOR] '
+            'target=search '
+            'status=extracted '
+            'query="$query"',
+          );
+
+          controller.add(
+            InferenceResponse.notice(
+              'search:$query',
+            ),
+          );
+        }
+
+        Future<void> terminateAfterSearch() async {
+          if (streamTerminated) {
+            return;
+          }
+
+          streamTerminated = true;
+          searchDetected = true;
+
+          await subscription?.cancel();
+
+          if (!controller.isClosed) {
+            await controller.close();
+          }
+        }
+
+        void processBuffer() {
+          if (streamTerminated || controller.isClosed) {
+            return;
+          }
+
+          final text = buffer.toString();
+
+          if (text.isEmpty) {
+            return;
+          }
+
+          final searchStartIndex = text.indexOf(_searchTagStart);
+
+          // No complete opening tag yet.
+          if (searchStartIndex == -1) {
+            final safeLength = _safeFlushLength(text);
+
+            if (safeLength > 0) {
+              emitToken(text.substring(0, safeLength));
+
+              final remainder = text.substring(safeLength);
+              buffer
+                ..clear()
+                ..write(remainder);
+            }
+
+            return;
+          }
+
+          // We have found the opening tag.
+          //
+          // Everything before it is ordinary model output and can safely be
+          // forwarded before we start withholding the tool-call.
+          if (searchStartIndex > 0) {
+            emitToken(text.substring(0, searchStartIndex));
+
+            final remainder = text.substring(searchStartIndex);
+            buffer
+              ..clear()
+              ..write(remainder);
+          }
+
+          final bufferedText = buffer.toString();
+
+          final endIndex = bufferedText.indexOf(
+            _searchTagEnd,
+            _searchTagStart.length,
+          );
+
+          // Opening tag exists, but the closing tag has not arrived yet.
+          // Keep everything buffered.
+          if (endIndex == -1) {
+            return;
+          }
+
+          final query = bufferedText
+              .substring(
+                _searchTagStart.length,
+                endIndex,
+              )
+              .trim();
+
+          // Consume the complete search expression.
+          buffer.clear();
+
+          emitSearchNotice(query);
+
+          // A search tool-call represents a terminal event for this inference
+          // stream. The orchestrator is responsible for starting the next
+          // phase after executing the tool.
+          unawaited(terminateAfterSearch());
+        }
 
         subscription = stream.listen(
           (response) {
-            // Le risposte di errore o gli stati terminali non necessitano di ispezione
+            if (streamTerminated || controller.isClosed) {
+              return;
+            }
+
             if (response.isError) {
               controller.add(response);
               return;
             }
 
             final textChunk = response.text ?? '';
+
+            if (response.model != null && response.model!.isNotEmpty) {
+              lastModel = response.model;
+            }
+
+            // Empty responses can contain useful metadata/state, so preserve
+            // them exactly as received.
             if (textChunk.isEmpty) {
               controller.add(response);
               return;
             }
 
             buffer.write(textChunk);
-            final currentText = buffer.toString();
-
-            // 1. Verifica di cattura completa: Il tag è stato aperto, scritto e chiuso?
-            final RegExp completeMatchRegex = RegExp(r'<search>(.*?)</search>', dotAll: true);
-            final match = completeMatchRegex.firstMatch(currentText);
-            
-            if (match != null) {
-              final query = match.group(1)?.trim() ?? '';
-              
-              RuntimeEventLog.instance.emit(
-                '[TOOL_INTERCEPTOR] target=search status=extracted query="$query"',
-              );
-              
-              // Emettiamo il messaggio come runtime notice e chiudiamo la sottoscrizione
-              controller.add(
-                InferenceResponse.notice(
-                  'search:$query',
-                ),
-              );
-              
-              subscription?.cancel();
-              controller.close();
-              return;
-            }
-
-            // 2. Verifica di ritenzione sicura: Siamo nel mezzo di un tag aperto?
-            if (currentText.contains(_searchTagStart)) {
-              // Tratteniamo i token nel buffer finché non arriva la chiusura </search>
-              return;
-            }
-
-            // 3. Verifica di ritenzione parziale: I token stanno formando l'apertura del tag?
-            if (_hasPartialSearchTag(currentText)) {
-              // Il frammento potrebbe completarsi in <search> al prossimo ciclo
-              return;
-            }
-
-            // 4. Scarico sicuro: Nessun tag in vista. Emettiamo il contenuto del buffer.
-            if (currentText.isNotEmpty) {
-              // Re-impacchettiamo il testo (che potrebbe includere token trattenuti per un falso allarme)
-              controller.add(
-                InferenceResponse.token(
-                  text: currentText,
-                  model: response.model,
-                ),
-              );
-              buffer.clear();
-            }
+            processBuffer();
           },
-          onError: controller.addError,
-          onDone: () {
-            // Scarico finale di sicurezza se lo stream si chiude con testo residuo non-tag
-            final pendingText = buffer.toString();
-            final shouldDiscardPending =
-                pendingText.contains(_searchTagStart) || _hasPartialSearchTag(pendingText);
-            if (buffer.isNotEmpty && !controller.isClosed && !shouldDiscardPending) {
-              controller.add(
-                InferenceResponse.token(
-                  text: pendingText,
-                  model: 'unknown',
-                ),
-              );
+          onError: (Object error, StackTrace stackTrace) {
+            if (controller.isClosed) {
+              return;
             }
+
+            controller.addError(error, stackTrace);
+          },
+          onDone: () {
+            if (streamTerminated || controller.isClosed) {
+              return;
+            }
+
+            final pendingText = buffer.toString();
+
+            if (pendingText.isNotEmpty) {
+              final searchStartIndex = pendingText.indexOf(_searchTagStart);
+
+              if (searchStartIndex == -1) {
+                // No search tag was ever started. Everything is safe to emit.
+                emitToken(pendingText);
+              } else if (searchStartIndex > 0) {
+                // Preserve normal text before an incomplete search tag.
+                emitToken(
+                  pendingText.substring(0, searchStartIndex),
+                );
+              }
+
+              // Any incomplete `<search>...` fragment is deliberately
+              // discarded. It is not a valid tool-call.
+            }
+
+            buffer.clear();
+
             if (!controller.isClosed) {
-              controller.close();
+              unawaited(controller.close());
             }
           },
           cancelOnError: false,
         );
       },
-      onPause: () => subscription?.pause(),
-      onResume: () => subscription?.resume(),
-      onCancel: () => subscription?.cancel(),
+      onPause: () {
+        subscription?.pause();
+      },
+      onResume: () {
+        subscription?.resume();
+      },
+      onCancel: () async {
+        await subscription?.cancel();
+      },
     );
 
     return controller.stream;
   }
 
-  /// Controlla se la fine del testo corrente corrisponde a un prefisso del tag di apertura.
-  /// Previene la stampa accidentale a schermo di frammenti come "<sear"
+  /// Returns the amount of text that is safe to emit while preserving enough
+  /// trailing characters to detect a `<search>` opening tag split across
+  /// multiple inference chunks.
+  ///
+  /// Example:
+  ///
+  ///   "Hello <sea"
+  ///
+  /// The `"Hello "` portion is safe, while `"<sea"` must remain buffered.
+  int _safeFlushLength(String text) {
+    if (text.isEmpty) {
+      return 0;
+    }
+
+    final maxPrefixLength = _searchTagStart.length - 1;
+
+    final maximumCheckLength = text.length < maxPrefixLength
+        ? text.length
+        : maxPrefixLength;
+
+    for (int length = maximumCheckLength; length > 0; length--) {
+      final suffix = text.substring(text.length - length);
+
+      if (_searchTagStart.startsWith(suffix)) {
+        return text.length - length;
+      }
+    }
+
+    return text.length;
+  }
+
+  /// Kept as a dedicated helper because partial-tag detection is part of the
+  /// transformer's parsing contract.
+  ///
+  /// This method intentionally checks only the end of the supplied text.
   bool _hasPartialSearchTag(String text) {
-    for (int i = 1; i <= _searchTagStart.length; i++) {
-      if (text.endsWith(_searchTagStart.substring(0, i))) {
+    if (text.isEmpty) {
+      return false;
+    }
+
+    final maxLength = text.length < _searchTagStart.length
+        ? text.length
+        : _searchTagStart.length - 1;
+
+    for (int length = 1; length <= maxLength; length++) {
+      if (text.endsWith(
+        _searchTagStart.substring(0, length),
+      )) {
         return true;
       }
     }
+
     return false;
   }
 }
