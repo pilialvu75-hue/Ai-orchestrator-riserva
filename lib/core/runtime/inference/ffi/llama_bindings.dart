@@ -60,7 +60,10 @@ class LlamaBridgeBindings {
 
   String gpuBackendReason() => _gpuBackendReason().toDartString();
 
-  int createSession(String modelPath, {int nGpuLayers = LlamaNativeDefaults.nGpuLayers}) {
+  int createSession(
+    String modelPath, {
+    int nGpuLayers = LlamaNativeDefaults.nGpuLayers,
+  }) {
     final pathPtr = modelPath.toNativeUtf8(allocator: calloc);
     try {
       return _createSession(
@@ -77,21 +80,53 @@ class LlamaBridgeBindings {
   /// Starts generation for [sessionId] using the caller-owned [promptPtr].
   ///
   /// The caller is responsible for keeping [promptPtr] valid until the first
-  /// token has been polled from the native side (i.e. until the first
-  /// successful [pollToken] call returns a non-empty piece). Freeing the
-  /// pointer before that point is undefined behaviour because the native
-  /// tokenisation stage may read from it on a background thread.
+  /// token has been polled from the native side. The native generation worker
+  /// may still access the prompt while tokenisation is in progress.
+  ///
+  /// The session-active check immediately before the FFI call is intentional:
+  /// the first command must never enter native generation with an already
+  /// inactive/released session. A failed check is converted into a controlled
+  /// Dart error instead of invoking the native function with an invalid
+  /// lifecycle state.
   int startGeneration(
     int sessionId,
     Pointer<Utf8> promptPtr,
     int maxTokens,
     double temperature,
   ) {
-    return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
+    if (sessionId <= 0) {
+      throw StateError(
+        'Cannot start native generation with invalid sessionId=$sessionId.',
+      );
+    }
+
+    final activeState = _sessionIsActive(sessionId);
+
+    if (activeState != 1) {
+      final lastError = _sessionLastError(sessionId).toDartString().trim();
+      final suffix =
+          lastError.isEmpty ? '' : ' Native error: $lastError';
+
+      throw StateError(
+        'Native session is inactive before startGeneration '
+        '(sessionId=$sessionId, activeState=$activeState).$suffix',
+      );
+    }
+
+    return _sessionStartGen(
+      sessionId,
+      promptPtr,
+      maxTokens,
+      temperature,
+    );
   }
 
   int pollToken(int sessionId, Pointer<Utf8> buf) =>
-      _sessionPollToken(sessionId, buf, LlamaNativeDefaults.tokenBufferSize);
+      _sessionPollToken(
+        sessionId,
+        buf,
+        LlamaNativeDefaults.tokenBufferSize,
+      );
 
   void cancelSession(int sessionId) => _sessionCancel(sessionId);
 
@@ -99,5 +134,6 @@ class LlamaBridgeBindings {
 
   int sessionIsActive(int sessionId) => _sessionIsActive(sessionId);
 
-  String sessionLastError(int sessionId) => _sessionLastError(sessionId).toDartString();
+  String sessionLastError(int sessionId) =>
+      _sessionLastError(sessionId).toDartString();
 }
