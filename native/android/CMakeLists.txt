@@ -45,16 +45,17 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
-find_path(VULKAN_HPP_INCLUDE_DIR vulkan/vulkan.hpp)
-if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_HPP_INCLUDE_DIR)
+find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.h)
+find_library(VULKAN_LIB vulkan)
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    include_directories("${VULKAN_HPP_INCLUDE_DIR}")
-    message(STATUS "ggml Vulkan backend enabled with Vulkan-Hpp headers at ${VULKAN_HPP_INCLUDE_DIR}")
+    include_directories("${VULKAN_INCLUDE_DIR}")
+    message(STATUS "ggml Vulkan backend enabled with Vulkan headers at ${VULKAN_INCLUDE_DIR}")
 else()
     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
     if(AI_ANDROID_ENABLE_VULKAN)
         message(WARNING
-            "AI_ANDROID_ENABLE_VULKAN is ON but vulkan/vulkan.hpp was not found. "
+            "AI_ANDROID_ENABLE_VULKAN is ON but Vulkan headers or library were not found. "
             "Vulkan GPU backend unavailable, using CPU fallback.")
     endif()
 endif()
@@ -81,6 +82,10 @@ target_link_libraries(llama_bridge PRIVATE
     log       # Android NDK logging
     android   # Android NDK utils
 )
+
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
+    target_link_libraries(llama_bridge PRIVATE ${VULKAN_LIB})
+endif()
 
 target_compile_options(llama_bridge PRIVATE
     -O3

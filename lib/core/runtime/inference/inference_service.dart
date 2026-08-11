@@ -398,7 +398,10 @@ class InferenceService {
             '[INTERNET SEARCH RESULTS]\n${searchResult.output}\n\n'
             'Use the information above to accurately complete the user\'s original request.';
 
-        final updatedLocalRequest = localRequest.copyWith(prompt: enrichedPrompt);
+        final updatedLocalRequest = localRequest.copyWith(
+          sessionId: '${localRequest.sessionId}::search',
+          prompt: enrichedPrompt,
+        );
         final continuationToken = CancellationToken();
         cancellationToken.onCancel(continuationToken.cancel);
 

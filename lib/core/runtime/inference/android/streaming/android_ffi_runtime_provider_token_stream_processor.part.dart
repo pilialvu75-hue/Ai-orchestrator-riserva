@@ -105,6 +105,9 @@ class _AndroidFfiTokenStreamProcessor {
 
     final pending = _pendingStructuralTemplateOutput;
     _pendingStructuralTemplateOutput = '';
+    if (_structuralTemplateTokens.any((token) => token.startsWith(pending))) {
+      return '';
+    }
     return pending;
   }
 
