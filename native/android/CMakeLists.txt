@@ -45,7 +45,7 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
-find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.h)
+find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.hpp)
 find_library(VULKAN_LIB vulkan)
 if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
