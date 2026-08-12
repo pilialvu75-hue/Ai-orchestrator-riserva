@@ -4,7 +4,7 @@ class LocalInferenceModelIds {
   // ── Costanti originali (invariate per retrocompatibilità) ─────────────────
   static const String llama1b = 'llama_1b';
   static const String gemma2b = 'gemma_2b';
-  static const String gemma2_2bIt = 'gemma_2_2b_it';
+  static const String gemma2_2bIt = 'gemma_2b_it';
   static const String deepSeekR1_1_5b = 'deepseek_r1_1_5b';
   static const String qwen3_1_7b = 'qwen3_1_7b';
 
@@ -20,8 +20,22 @@ class LocalInferenceModelIds {
   // ── Set di appartenenza per match esatto ─────────────────────────────────
 
   /// Modelli che usano il template Llama 3 Instruct
-  /// ( <|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
-  static final Set<String> llama3ChatTemplateModels = {
+  /// (<|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
+  ///
+  /// ATTENZIONE:
+  /// TinyLlama 1.1B Chat NON appartiene a questo gruppo.
+  static final Set<String> llama3ChatTemplateModels = <String>{};
+
+  /// TinyLlama 1.1B Chat usa il formato chat stile Zephyr:
+  ///
+  /// <|system|>
+  /// <|user|>
+  /// <|assistant|>
+  /// </s>
+  ///
+  /// Il modelId storico `llama_1b` identifica proprio TinyLlama
+  /// nel manifest Android.
+  static final Set<String> zephyrChatTemplateModels = {
     llama1b,
   };
 
@@ -56,43 +70,82 @@ class LocalInferenceModelIds {
   /// Risolve il template corretto per un modelId arbitrario.
   ///
   /// Priorità:
-  /// 1. Match esatto nei set registrati (costanti + registerModel)
-  /// 2. Pattern matching sul nome (modelli importati dall'utente)
+  /// 1. Match esatto nei set registrati
+  /// 2. Pattern matching sul nome
   /// 3. Fallback 'plain'
-  ///
-  /// Questo permette a modelli importati con nomi liberi come
-  /// "Llama-3.2-1B-Instruct-Q4_K_M" o "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M"
-  /// di ricevere il template corretto senza registrazione manuale.
   static String resolveTemplate(String modelId) {
     // 1. Match esatto nei set
-    if (llama3ChatTemplateModels.contains(modelId)) return 'llama3';
-    if (qwenChatTemplateModels.contains(modelId)) return 'qwen';
-    if (gemmaChatTemplateModels.contains(modelId)) return 'gemma';
-    if (phi3ChatTemplateModels.contains(modelId)) return 'phi3';
 
-    // 2. Pattern matching (case-insensitive) per modelli importati
+    // IMPORTANTISSIMO:
+    // TinyLlama 1.1B Chat -> Zephyr-style template.
+    if (zephyrChatTemplateModels.contains(modelId)) {
+      return 'zephyr';
+    }
+
+    if (llama3ChatTemplateModels.contains(modelId)) {
+      return 'llama3';
+    }
+
+    if (qwenChatTemplateModels.contains(modelId)) {
+      return 'qwen';
+    }
+
+    if (gemmaChatTemplateModels.contains(modelId)) {
+      return 'gemma';
+    }
+
+    if (phi3ChatTemplateModels.contains(modelId)) {
+      return 'phi3';
+    }
+
+    // 2. Pattern matching (case-insensitive)
     final id = modelId.trim().toLowerCase();
-    if (_matchesPhi(id)) return 'phi3';
-    if (_matchesLlama3(id)) return 'llama3';
-    if (_matchesQwen(id)) return 'qwen';
-    if (_matchesGemma(id)) return 'gemma';
+
+    // TinyLlama deve essere intercettato PRIMA di llama3.
+    if (_matchesTinyLlama(id)) {
+      return 'zephyr';
+    }
+
+    if (_matchesPhi(id)) {
+      return 'phi3';
+    }
+
+    if (_matchesLlama3(id)) {
+      return 'llama3';
+    }
+
+    if (_matchesQwen(id)) {
+      return 'qwen';
+    }
+
+    if (_matchesGemma(id)) {
+      return 'gemma';
+    }
 
     // 3. Fallback plain text
     return 'plain';
   }
 
   /// Restituisce true se il modello supporta la direttiva /no_think.
+  ///
   /// Solo Qwen3 nativo supporta /no_think.
-  /// DeepSeek-R1-Distill e Phi-3 non lo supportano e corrompono l'output.
+  /// DeepSeek-R1-Distill e Phi-3 non lo supportano.
   static bool isQwen3Thinking(String modelId) {
-    if (qwen3ThinkingModels.contains(modelId)) return true;
+    if (qwen3ThinkingModels.contains(modelId)) {
+      return true;
+    }
+
     final id = modelId.trim().toLowerCase();
-    // Solo Qwen3 nativo supporta /no_think.
-    // DeepSeek-R1-Distill e Phi-3 non lo supportano e corrompono l'output.
+
     return id.contains('qwen3') && !id.contains('phi');
   }
 
   // ── Pattern matching privato ──────────────────────────────────────────────
+
+  static bool _matchesTinyLlama(String id) {
+    return id.contains('tinyllama') ||
+        id.contains('tiny-llama');
+  }
 
   static bool _matchesLlama3(String id) {
     return id.contains('llama-3') ||
@@ -121,13 +174,6 @@ class LocalInferenceModelIds {
   /// Registra un modello importato associandolo a un template specifico.
   ///
   /// Utile per modelli con nomi non riconoscibili dai pattern automatici.
-  /// Esempio:
-  /// ```dart
-  /// LocalInferenceModelIds.registerModel(
-  /// 'mio_modello_custom',
-  /// template: 'llama3',
-  /// );
-  /// ```
   static void registerModel(
     String modelId, {
     required String template,
@@ -137,44 +183,67 @@ class LocalInferenceModelIds {
       case 'llama3':
         llama3ChatTemplateModels.add(modelId);
         break;
+
       case 'qwen':
         qwenChatTemplateModels.add(modelId);
-        if (supportsNoThink) qwen3ThinkingModels.add(modelId);
+        if (supportsNoThink) {
+          qwen3ThinkingModels.add(modelId);
+        }
         break;
+
       case 'gemma':
         gemmaChatTemplateModels.add(modelId);
         break;
+
       case 'phi3':
       case 'zephyr':
-        // Zephyr is the same prompt/token shape used by our Phi-3.5 routing.
+        // Zephyr usa la stessa forma di prompt del template
+        // precedentemente utilizzato per il routing Phi.
         phi3ChatTemplateModels.add(modelId);
         break;
+
       default:
-        // Template non riconosciuto: nessuna azione.
-        // resolveTemplate() userà il pattern matching o il fallback plain.
+        // Template non riconosciuto:
+        // resolveTemplate() userà il pattern matching
+        // o il fallback plain.
         break;
     }
   }
 
-  // ── FIX PER TEST: temperatura automatica ─────────────────────────────────
+  // ── Temperatura automatica ────────────────────────────────────────────────
 
   /// Temperatura base usata da AiRuntimeSettingsService per config automatica.
-  /// I metadati META nel prompt sovrascriveranno questo valore nel runtime FFI.
+  /// I metadati META nel prompt possono sovrascrivere questo valore
+  /// nel runtime FFI.
   static double temperatureForModel(String? modelId) {
-    if (modelId == null || modelId.trim().isEmpty) return 0.5;
+    if (modelId == null || modelId.trim().isEmpty) {
+      return 0.5;
+    }
+
     final id = modelId.trim().toLowerCase();
 
-    // Llama3 1B: temp base 0.5, poi META lo porta a 0.2 se fattuale
-    if (id.contains('llama') && id.contains('1b')) return 0.5;
+    // TinyLlama / Llama 1B
+    if (id.contains('llama') && id.contains('1b')) {
+      return 0.5;
+    }
 
-    // Phi-3.5-mini: stabile a 0.5
-    if (id.contains('phi-3.5') || id.contains('phi3_5') || id.contains('phi35mini')) return 0.5;
+    // Phi-3.5-mini
+    if (id.contains('phi-3.5') ||
+        id.contains('phi3_5') ||
+        id.contains('phi35mini')) {
+      return 0.5;
+    }
 
-    // Qwen/DeepSeek: 0.5 di default
-    if (id.contains('qwen') || id.contains('deepseek')) return 0.5;
+    // Qwen / DeepSeek
+    if (id.contains('qwen') ||
+        id.contains('deepseek')) {
+      return 0.5;
+    }
 
-    // Gemma: 0.5 di default
-    if (id.contains('gemma')) return 0.5;
+    // Gemma
+    if (id.contains('gemma')) {
+      return 0.5;
+    }
 
     return 0.5;
   }
