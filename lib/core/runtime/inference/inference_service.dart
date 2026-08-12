@@ -463,6 +463,7 @@ class InferenceService {
           }
         }
         if (chunk.isError &&
+            runtimeMode != AiRuntimeMode.local &&
             attempt <= _maxRetryCount &&
             !emittedContent &&
             _isRetryableError(chunk.errorMessage)) {
