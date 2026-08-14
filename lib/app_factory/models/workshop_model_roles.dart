@@ -74,7 +74,7 @@ class WorkshopModelDescriptor {
   final String id;
   final String displayName;
 
-  /// Hugging Face repository identifier, e.g. `Qwen/...`.
+  /// Hugging Face repository identifier.
   final String repository;
 
   /// Concrete GGUF file selected for the initial configuration.
@@ -82,10 +82,10 @@ class WorkshopModelDescriptor {
 
   final String quantization;
 
-  /// Approximate model-file size.
+  /// Approximate model-file size in bytes.
   ///
-  /// This is metadata used by the model manager/UI. The existing model
-  /// verification system remains authoritative for the actual downloaded file.
+  /// The existing model verification system remains authoritative for the
+  /// actual downloaded file.
   final int sizeBytes;
 
   final AiModelSource source;
@@ -94,8 +94,8 @@ class WorkshopModelDescriptor {
 
   /// Direct HTTPS URL to the selected model file.
   ///
-  /// The application should pass this to the existing model downloader rather
-  /// than implementing another download mechanism here.
+  /// The application must pass this to the existing model downloader rather
+  /// than implementing a second download mechanism.
   final String downloadUrl;
 
   /// Optional models are visible in the catalogue but are not required for
@@ -112,9 +112,10 @@ class WorkshopModelDescriptor {
 /// - Do not duplicate the existing ModelManagementService here.
 /// - The existing model-management system remains responsible for download,
 ///   verification, persistence, import/export and runtime loading.
-/// - The UI will eventually allow the user to assign any compatible model to
-///   any role.
+/// - The UI will eventually allow the user to assign compatible models to
+///   each role.
 abstract final class WorkshopModelCatalogue {
+  /// Existing Assistant/Hannibal model.
   static const WorkshopModelDescriptor assistantPhi35 =
       WorkshopModelDescriptor(
     id: 'phi3_5_mini',
@@ -131,6 +132,7 @@ abstract final class WorkshopModelCatalogue {
         'https://huggingface.co/tensorblock/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf',
   );
 
+  /// Lightweight local orchestrator for the Workshop.
   static const WorkshopModelDescriptor workshopOrchestrator =
       WorkshopModelDescriptor(
     id: 'qwen2_5_3b_instruct',
@@ -147,23 +149,10 @@ abstract final class WorkshopModelCatalogue {
         'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
   );
 
+  /// Strong coding model dedicated to architectural work.
+  ///
+  /// Architect is intentionally not assigned a 1.5B model anymore.
   static const WorkshopModelDescriptor architect =
-      WorkshopModelDescriptor(
-    id: 'qwen2_5_coder_1_5b_instruct',
-    displayName: 'Qwen2.5-Coder 1.5B Instruct',
-    repository: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF',
-    filename: 'qwen2.5-coder-1.5b-instruct-q5_k_m.gguf',
-    quantization: 'Q5_K_M',
-    sizeBytes: 1290000000,
-    source: AiModelSource.local,
-    roles: <AppAiRole>{
-      AppAiRole.architect,
-    },
-    downloadUrl:
-        'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q5_k_m.gguf',
-  );
-
-  static const WorkshopModelDescriptor engineer =
       WorkshopModelDescriptor(
     id: 'qwen2_5_coder_7b_instruct',
     displayName: 'Qwen2.5-Coder 7B Instruct',
@@ -173,10 +162,34 @@ abstract final class WorkshopModelCatalogue {
     sizeBytes: 4680000000,
     source: AiModelSource.local,
     roles: <AppAiRole>{
-      AppAiRole.engineer,
+      AppAiRole.architect,
     },
+    downloadUrl:
+        'https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf',
   );
 
+  /// Independent coding model dedicated to implementation work.
+  ///
+  /// DeepSeek Coder 6.7B gives the Engineer a different model family from
+  /// the Architect, allowing the two roles to provide independent reasoning
+  /// and implementation perspectives.
+  static const WorkshopModelDescriptor engineer =
+      WorkshopModelDescriptor(
+    id: 'deepseek_coder_6_7b_instruct',
+    displayName: 'DeepSeek Coder 6.7B Instruct',
+    repository: 'tensorblock/deepseek-coder-6.7b-instruct-GGUF',
+    filename: 'deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
+    quantization: 'Q4_K_M',
+    sizeBytes: 3802000000,
+    source: AiModelSource.local,
+    roles: <AppAiRole>{
+      AppAiRole.engineer,
+    },
+    downloadUrl:
+        'https://huggingface.co/tensorblock/deepseek-coder-6.7b-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
+  );
+
+  /// Independent coding/review model.
   static const WorkshopModelDescriptor reviewer =
       WorkshopModelDescriptor(
     id: 'starcoder2_3b',
@@ -195,9 +208,9 @@ abstract final class WorkshopModelCatalogue {
 
   /// Optional stronger Engineer model.
   ///
-  /// It is intentionally not the default because the Q4_K_M file is about
-  /// 9.65 GB and is therefore a substantial local workload on a phone.
-  static const WorkshopModelDescriptor deepSeekEngineer =
+  /// This remains available as an alternative, but is NOT the default
+  /// Engineer model because of its substantially larger footprint.
+  static const WorkshopModelDescriptor deepSeekV2Engineer =
       WorkshopModelDescriptor(
     id: 'deepseek_coder_v2_lite_instruct',
     displayName: 'DeepSeek Coder V2 Lite Instruct',
@@ -221,7 +234,7 @@ abstract final class WorkshopModelCatalogue {
     architect,
     engineer,
     reviewer,
-    deepSeekEngineer,
+    deepSeekV2Engineer,
   ];
 
   static WorkshopModelDescriptor? findById(String id) {
@@ -230,6 +243,7 @@ abstract final class WorkshopModelCatalogue {
         return model;
       }
     }
+
     return null;
   }
 
