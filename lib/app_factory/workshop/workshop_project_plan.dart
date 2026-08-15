@@ -83,16 +83,9 @@ final class WorkshopProjectPhase {
   WorkshopProjectPhaseStatus status;
   WorkshopProjectPriority priority;
 
-  /// IDs of tasks belonging to this phase.
   final List<String> taskIds;
-
-  /// IDs of phases that should be completed first.
   final List<String> dependencies;
-
-  /// Known repository/project paths involved in this phase.
   final List<String> affectedPaths;
-
-  /// Conditions that must be satisfied before the phase is considered done.
   final List<String> validationCriteria;
 
   bool get isComplete =>
@@ -161,23 +154,16 @@ final class WorkshopProjectTask {
 
   bool completed;
 
-  /// IDs of tasks that must be completed before this task can start.
   final List<String> dependencies;
-
   final List<String> affectedPaths;
   final List<String> validationCriteria;
 
-  /// A task is blocked only when at least one dependency is still incomplete.
+  /// Indicates that this task has dependencies.
   ///
-  /// A task with no dependencies is immediately available.
-  bool get isBlocked {
-    // Dependency resolution is performed by [WorkshopProjectPlan].
-    //
-    // This local getter therefore only identifies the presence of
-    // dependencies. The plan-level [isTaskBlocked] method performs the
-    // authoritative dependency check.
-    return dependencies.isNotEmpty;
-  }
+  /// The authoritative dependency state is calculated by
+  /// [WorkshopProjectPlan.isTaskBlocked], because only the complete
+  /// project graph can determine whether those dependencies are complete.
+  bool get hasDependencies => dependencies.isNotEmpty;
 
   WorkshopProjectTask copyWith({
     String? id,
@@ -219,13 +205,6 @@ final class WorkshopProjectTask {
 /// The plan is deliberately independent from the repository implementation.
 ///
 /// A project can therefore exist before any code is written.
-///
-/// This is especially important for multidisciplinary projects such as:
-///
-///   "Costruiamo un drone"
-///
-/// where the first stages may concern requirements, mechanical design,
-/// electronics and component selection before any firmware is created.
 final class WorkshopProjectPlan {
   WorkshopProjectPlan({
     required this.id,
@@ -233,8 +212,8 @@ final class WorkshopProjectPlan {
     required this.goal,
     this.domain = WorkshopProjectDomain.software,
     this.status = WorkshopProjectStatus.draft,
-    this.createdAt,
-    this.updatedAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     List<String> requirements = const <String>[],
     List<String> constraints = const <String>[],
     List<String> assumptions = const <String>[],
@@ -265,7 +244,6 @@ final class WorkshopProjectPlan {
   final String goal;
 
   final WorkshopProjectDomain domain;
-
   WorkshopProjectStatus status;
 
   final DateTime createdAt;
@@ -274,13 +252,8 @@ final class WorkshopProjectPlan {
   final List<String> requirements;
   final List<String> constraints;
   final List<String> assumptions;
-
-  /// Software technologies, frameworks, languages or protocols.
   final List<String> technologies;
-
-  /// Physical components relevant to the project.
   final List<String> hardware;
-
   final List<String> deliverables;
   final List<String> validationCriteria;
   final List<String> risks;
@@ -338,7 +311,6 @@ final class WorkshopProjectPlan {
     );
   }
 
-  /// Returns true when all dependencies of [phase] are completed.
   bool arePhaseDependenciesComplete(
     WorkshopProjectPhase phase,
   ) {
@@ -348,7 +320,6 @@ final class WorkshopProjectPlan {
     );
   }
 
-  /// Returns true when all dependencies of [task] are completed.
   bool areTaskDependenciesComplete(
     WorkshopProjectTask task,
   ) {
@@ -358,10 +329,6 @@ final class WorkshopProjectPlan {
     );
   }
 
-  /// Authoritative project-level blocked state for a task.
-  ///
-  /// This is preferable to [WorkshopProjectTask.isBlocked] when the
-  /// complete project graph is available.
   bool isTaskBlocked(
     WorkshopProjectTask task,
   ) {
@@ -372,7 +339,6 @@ final class WorkshopProjectPlan {
     return !areTaskDependenciesComplete(task);
   }
 
-  /// Returns the first phase that can currently be worked on.
   WorkshopProjectPhase? get nextAvailablePhase {
     for (final phase in phases) {
       if (phase.status != WorkshopProjectPhaseStatus.pending) {
@@ -387,7 +353,6 @@ final class WorkshopProjectPlan {
     return null;
   }
 
-  /// Returns the first incomplete task whose dependencies are completed.
   WorkshopProjectTask? get nextAvailableTask {
     for (final task in tasks) {
       if (task.completed) {
