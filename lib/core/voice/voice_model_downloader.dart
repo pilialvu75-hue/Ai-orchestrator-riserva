@@ -43,7 +43,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     logEvent(_tag, '[PERMISSION_REQUEST_BEGIN]');
 
     if (!Platform.isAndroid) {
-      logEvent(_tag, '[PERMISSION_REQUEST_RESULT] not android');
+      logEvent(
+        _tag,
+        '[PERMISSION_REQUEST_RESULT] not android',
+      );
       return true;
     }
 
@@ -67,7 +70,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     onProgress(0.0);
 
-    // STT = 50% del progresso complessivo.
     await _downloadAndExtractSttTar(
       targetDir: targetDir,
       onProgress: (value) {
@@ -77,7 +79,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       },
     );
 
-    // TTS = 50% del progresso complessivo.
     await _downloadAndExtractTtsTar(
       targetDir: targetDir,
       onProgress: (value) {
@@ -91,7 +92,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[DOWNLOAD_COMPLETE] voice assets ready in ${targetDir.path}',
+      '[DOWNLOAD_COMPLETE] '
+      'voice assets ready in ${targetDir.path}',
     );
 
     onProgress(1.0);
@@ -116,98 +118,58 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (await partialFile.exists()) {
       existingBytes = await partialFile.length();
 
-      if (existingBytes >= expectedBytes) {
+      if (existingBytes > 0) {
         logEvent(
           _tag,
-          '[$assetName_RESUME] partial file already has '
-          '$existingBytes bytes',
-        );
-      } else if (existingBytes > 0) {
-        logEvent(
-          _tag,
-          '[$assetName_RESUME] resuming from byte $existingBytes',
+          '[${assetName}_RESUME] '
+          'partial=$existingBytes bytes',
         );
       }
     }
 
-    Future<void> downloadFromScratch() async {
-      if (await partialFile.exists()) {
-        await partialFile.delete();
+    // Se il parziale ha già raggiunto la dimensione attesa,
+    // lo consideriamo candidato al completamento.
+    if (existingBytes >= expectedBytes) {
+      final destination = File(destinationPath);
+
+      if (await destination.exists()) {
+        await destination.delete();
       }
 
-      existingBytes = 0;
+      await partialFile.rename(destinationPath);
 
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_BEGIN] starting from byte 0',
+        '[${assetName}_RESUME_COMPLETE] '
+        'promoted existing partial file',
       );
 
-      final response = await _dio.get<ResponseBody>(
-        url,
-        options: Options(
-          responseType: ResponseType.stream,
-          followRedirects: true,
-          maxRedirects: 10,
-        ),
-      );
-
-      final body = response.data;
-
-      if (body == null) {
-        throw const VoiceAssetException(
-          'Risposta HTTP senza corpo durante il download.',
-        );
-      }
-
-      final total = _contentLength(response) ?? expectedBytes;
-
-      final sink = partialFile.openWrite();
-
-      var received = 0;
-
-      try {
-        await for (final chunk in body.stream) {
-          sink.add(chunk);
-          received += chunk.length;
-
-          final progress = total > 0
-              ? received / total
-              : 0.0;
-
-          onProgress(
-            progress.clamp(0.0, 1.0),
-          );
-        }
-      } finally {
-        await sink.flush();
-        await sink.close();
-      }
+      onProgress(1.0);
+      return;
     }
 
     try {
-      if (existingBytes > 0 && existingBytes < expectedBytes) {
+      if (existingBytes > 0) {
         final response = await _dio.get<ResponseBody>(
           url,
           options: Options(
             responseType: ResponseType.stream,
+            followRedirects: true,
+            maxRedirects: 10,
             headers: {
               HttpHeaders.rangeHeader:
                   'bytes=$existingBytes-',
             },
-            followRedirects: true,
-            maxRedirects: 10,
             validateStatus: (status) {
-              return status != null &&
-                  (status == HttpStatus.ok ||
-                      status == HttpStatus.partialContent ||
-                      status == HttpStatus.requestedRangeNotSatisfiable);
+              return status == HttpStatus.ok ||
+                  status == HttpStatus.partialContent ||
+                  status == HttpStatus.requestedRangeNotSatisfiable;
             },
           ),
         );
 
         final status = response.statusCode;
 
-        // 206 = il server supporta realmente il resume.
         if (status == HttpStatus.partialContent) {
           final body = response.data;
 
@@ -217,7 +179,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
             );
           }
 
-          final total =
+          final totalBytes =
               _totalBytesFromContentRange(response) ??
                   expectedBytes;
 
@@ -225,15 +187,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
             mode: FileMode.append,
           );
 
-          var received = existingBytes;
+          var receivedBytes = existingBytes;
 
           try {
             await for (final chunk in body.stream) {
               sink.add(chunk);
-              received += chunk.length;
+              receivedBytes += chunk.length;
 
               onProgress(
-                (received / total).clamp(0.0, 1.0),
+                (receivedBytes / totalBytes)
+                    .clamp(0.0, 1.0),
               );
             }
           } finally {
@@ -243,53 +206,75 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
           logEvent(
             _tag,
-            '[$assetName_RESUME_COMPLETE] '
-            '$received bytes',
+            '[${assetName}_RESUME_COMPLETE] '
+            '$receivedBytes bytes',
           );
-        } else if (status == HttpStatus.requestedRangeNotSatisfiable) {
+        } else if (status ==
+            HttpStatus.requestedRangeNotSatisfiable) {
+          // Il server non accetta più il range richiesto.
+          // Ripartiamo pulitamente.
           logEvent(
             _tag,
-            '[$assetName_RANGE_416] '
+            '[${assetName}_RANGE_416] '
             'server rejected range; restarting',
           );
 
-          await downloadFromScratch();
+          await _downloadFromZero(
+            url: url,
+            partialFile: partialFile,
+            expectedBytes: expectedBytes,
+            onProgress: onProgress,
+            assetName: assetName,
+          );
         } else {
-          // 200 = il server ha ignorato Range.
+          // HTTP 200 significa che il server ha ignorato
+          // il Range e ci sta inviando il file completo.
           logEvent(
             _tag,
-            '[$assetName_RANGE_UNSUPPORTED] '
-            'server returned HTTP 200; restarting from zero',
+            '[${assetName}_RANGE_UNSUPPORTED] '
+            'server returned HTTP 200; restarting',
           );
 
-          await downloadFromScratch();
+          await _downloadFromZero(
+            url: url,
+            partialFile: partialFile,
+            expectedBytes: expectedBytes,
+            onProgress: onProgress,
+            assetName: assetName,
+          );
         }
       } else {
-        await downloadFromScratch();
+        await _downloadFromZero(
+          url: url,
+          partialFile: partialFile,
+          expectedBytes: expectedBytes,
+          onProgress: onProgress,
+          assetName: assetName,
+        );
       }
     } on DioException catch (error) {
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] '
-        'partial file preserved at $partialPath',
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
+        'partial file preserved',
       );
 
       throw VoiceAssetException(
         'Download $assetName interrotto '
         '(HTTP ${error.response?.statusCode ?? "?"}): '
         '${error.message ?? "errore di rete"}. '
-        'Il download verrà ripreso dal punto raggiunto al prossimo tentativo.',
+        'Il file parziale è stato conservato.',
       );
     } catch (error) {
-      logEvent(
-        _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] '
-        'partial file preserved at $partialPath',
-      );
-
       if (error is VoiceAssetException) {
         rethrow;
       }
+
+      logEvent(
+        _tag,
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
+        'partial file preserved',
+      );
 
       throw VoiceAssetException(
         'Download $assetName interrotto: $error. '
@@ -302,7 +287,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (completedBytes < expectedBytes) {
       throw VoiceAssetException(
         'Download $assetName incompleto: '
-        '$completedBytes / $expectedBytes bytes.',
+        '$completedBytes / $expectedBytes bytes. '
+        'Il file parziale è stato conservato.',
       );
     }
 
@@ -316,16 +302,87 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_DOWNLOAD_COMPLETE] '
+      '[${assetName}_DOWNLOAD_COMPLETE] '
       '$completedBytes bytes',
     );
 
     onProgress(1.0);
   }
 
-  int? _contentLength(Response<ResponseBody> response) {
+  Future<void> _downloadFromZero({
+    required String url,
+    required File partialFile,
+    required int expectedBytes,
+    required Function(double) onProgress,
+    required String assetName,
+  }) async {
+    if (await partialFile.exists()) {
+      await partialFile.delete();
+    }
+
+    logEvent(
+      _tag,
+      '[${assetName}_DOWNLOAD_BEGIN] starting from byte 0',
+    );
+
+    final response = await _dio.get<ResponseBody>(
+      url,
+      options: Options(
+        responseType: ResponseType.stream,
+        followRedirects: true,
+        maxRedirects: 10,
+      ),
+    );
+
+    final body = response.data;
+
+    if (body == null) {
+      throw const VoiceAssetException(
+        'Risposta HTTP senza corpo durante il download.',
+      );
+    }
+
+    final responseLength =
+        _contentLength(response);
+
+    final totalBytes =
+        responseLength != null && responseLength > 0
+            ? responseLength
+            : expectedBytes;
+
+    final sink = partialFile.openWrite();
+
+    var receivedBytes = 0;
+
+    try {
+      await for (final chunk in body.stream) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+
+        onProgress(
+          (receivedBytes / totalBytes)
+              .clamp(0.0, 1.0),
+        );
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+
+    logEvent(
+      _tag,
+      '[${assetName}_DOWNLOAD_COMPLETE] '
+      '$receivedBytes bytes downloaded',
+    );
+  }
+
+  int? _contentLength(
+    Response<ResponseBody> response,
+  ) {
     final value =
-        response.headers.value(HttpHeaders.contentLengthHeader);
+        response.headers.value(
+      HttpHeaders.contentLengthHeader,
+    );
 
     return int.tryParse(value ?? '');
   }
@@ -334,13 +391,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     Response<ResponseBody> response,
   ) {
     final value =
-        response.headers.value(HttpHeaders.contentRangeHeader);
+        response.headers.value(
+      HttpHeaders.contentRangeHeader,
+    );
 
-    if (value == null) return null;
+    if (value == null) {
+      return null;
+    }
 
     final slashIndex = value.lastIndexOf('/');
 
-    if (slashIndex < 0) return null;
+    if (slashIndex < 0) {
+      return null;
+    }
 
     return int.tryParse(
       value.substring(slashIndex + 1).trim(),
@@ -404,13 +467,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         );
       }
 
-      final partial = File('${file.path}.part');
+      // IMPORTANTE:
+      // il file .part non viene cancellato.
+      final partial =
+          File('${file.path}.part');
 
       if (await partial.exists()) {
-        // I .part NON vengono cancellati automaticamente.
         logEvent(
           _tag,
-          '[CLEANUP_SKIP_PARTIAL] preserved ${partial.path}',
+          '[CLEANUP_SKIP_PARTIAL] '
+          'preserved ${partial.path}',
         );
       }
     }
@@ -478,7 +544,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
 
       for (final file in archive) {
-        if (!file.isFile) continue;
+        if (!file.isFile) {
+          continue;
+        }
 
         var name = file.name;
 
@@ -577,7 +645,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[STT_EXTRACT_COMPLETE] all STT files valid',
+      '[STT_EXTRACT_COMPLETE] '
+      'all STT files valid',
     );
 
     onProgress(1.0);
@@ -648,12 +717,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         );
       }
 
-      final partial = File('${file.path}.part');
+      // Non cancelliamo il .part:
+      // deve poter essere ripreso.
+      final partial =
+          File('${file.path}.part');
 
       if (await partial.exists()) {
         logEvent(
           _tag,
-          '[CLEANUP_SKIP_PARTIAL] preserved ${partial.path}',
+          '[CLEANUP_SKIP_PARTIAL] '
+          'preserved ${partial.path}',
         );
       }
     }
@@ -666,7 +739,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     );
 
     if (await espeak.exists()) {
-      await espeak.delete(recursive: true);
+      await espeak.delete(
+        recursive: true,
+      );
 
       logEvent(
         _tag,
@@ -744,7 +819,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
               outputPath.substring(prefix.length);
         }
 
-        if (outputPath.isEmpty) continue;
+        if (outputPath.isEmpty) {
+          continue;
+        }
 
         if (outputPath == 'tokens.txt') {
           outputPath =
@@ -800,7 +877,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[TTS_EXTRACT_COMPLETE] all TTS files valid',
+      '[TTS_EXTRACT_COMPLETE] '
+      'all TTS files valid',
     );
 
     onProgress(1.0);
