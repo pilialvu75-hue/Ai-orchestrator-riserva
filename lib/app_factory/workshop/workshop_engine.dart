@@ -6,8 +6,8 @@ import 'workshop_inference_gateway.dart';
 
 /// Motore centrale del Cantiere.
 ///
-/// Il WorkshopEngine coordina il ciclo di vita di una richiesta di
-/// programmazione senza essere accoppiato:
+/// Il WorkshopEngine coordina il ciclo di vita di una richiesta senza essere
+/// accoppiato:
 ///
 /// - alla Chat Assistente;
 /// - a un particolare LLM;
@@ -18,7 +18,7 @@ import 'workshop_inference_gateway.dart';
 /// L'inferenza passa esclusivamente attraverso
 /// [WorkshopInferenceGateway].
 ///
-/// Questo mantiene il Cantiere indipendente dalla Chat Assistente:
+/// Pipeline attuale:
 ///
 ///   richiesta naturale
 ///        ↓
@@ -26,9 +26,7 @@ import 'workshop_inference_gateway.dart';
 ///        ↓
 ///   pianificazione
 ///        ↓
-///   WorkshopInferenceGateway
-///        ↓
-///   modello locale/cloud
+///   inferenza Workshop
 ///        ↓
 ///   review
 ///        ↓
@@ -37,9 +35,10 @@ import 'workshop_inference_gateway.dart';
 ///   risultato
 ///
 /// IMPORTANTE:
-/// questo livello NON modifica autonomamente file reali.
-/// Le operazioni mutanti saranno introdotte attraverso il workspace
-/// e i relativi guardrail.
+/// questo livello non modifica autonomamente file reali.
+///
+/// Le modifiche reali verranno introdotte attraverso il workspace,
+/// le change proposal e i relativi guardrail.
 final class WorkshopEngine {
   WorkshopEngine({
     CollaborationBus? collaborationBus,
@@ -80,6 +79,9 @@ final class WorkshopEngine {
   ///
   /// La richiesta può provenire direttamente dall'utente oppure
   /// dall'Assistente/A-team.
+  ///
+  /// Il Cantiere resta comunque autonomo: [request.source] è informativo
+  /// e non rende obbligatoria la presenza dell'Assistente.
   Future<WorkshopResult> execute(
     WorkshopRequest request,
   ) async {
@@ -93,6 +95,7 @@ final class WorkshopEngine {
       final analysisResult = _analyse(request);
 
       if (!analysisResult.success) {
+        _publishResult(request, analysisResult);
         return analysisResult;
       }
 
@@ -101,6 +104,7 @@ final class WorkshopEngine {
       final planResult = _plan(request);
 
       if (!planResult.success) {
+        _publishResult(request, planResult);
         return planResult;
       }
 
@@ -110,22 +114,31 @@ final class WorkshopEngine {
           await _prepareImplementation(request);
 
       if (!implementationResult.success) {
+        _publishResult(request, implementationResult);
         return implementationResult;
       }
 
       _setStage(request, WorkshopStage.review);
 
-      final reviewResult = _review(request);
+      final reviewResult = _review(
+        request,
+        implementationResult,
+      );
 
       if (!reviewResult.success) {
+        _publishResult(request, reviewResult);
         return reviewResult;
       }
 
       _setStage(request, WorkshopStage.validation);
 
-      final validationResult = await _validate(request);
+      final validationResult = await _validate(
+        request,
+        implementationResult,
+      );
 
       if (!validationResult.success) {
+        _publishResult(request, validationResult);
         return validationResult;
       }
 
@@ -135,11 +148,16 @@ final class WorkshopEngine {
         requestId: request.id,
         stage: WorkshopStage.completed,
         success: true,
-        summary: 'Workshop task completed.',
-        message:
-            'The Workshop completed the requested construction pipeline.',
+        summary: 'Workshop pipeline completed.',
+        message: implementationResult.message,
+        warnings: <String>[
+          ...implementationResult.warnings,
+          ...reviewResult.warnings,
+          ...validationResult.warnings,
+        ],
         nextActions: const <String>[
           'Present the result to the user.',
+          'Apply approved workspace changes in the next Workshop stage.',
           'Optionally request an A-team review.',
         ],
       );
@@ -257,10 +275,7 @@ final class WorkshopEngine {
     );
   }
 
-  /// Passa finalmente la richiesta reale al modello del Cantiere.
-  ///
-  /// Questa è la prima connessione effettiva tra il Workshop e la
-  /// pipeline di inferenza.
+  /// Passa la richiesta reale alla pipeline di inferenza del Cantiere.
   ///
   /// Nessun passaggio dalla Chat Assistente viene effettuato.
   Future<WorkshopResult> _prepareImplementation(
@@ -268,13 +283,6 @@ final class WorkshopEngine {
   ) async {
     final gateway = _inferenceGateway;
 
-    /*
-     * Compatibilità conservativa:
-     *
-     * se un'istanza del WorkshopEngine non dispone ancora del gateway,
-     * manteniamo il comportamento precedente invece di introdurre
-     * un crash o una dipendenza obbligatoria.
-     */
     if (gateway == null) {
       return WorkshopResult(
         requestId: request.id,
@@ -321,7 +329,8 @@ final class WorkshopEngine {
         requestId: request.id,
         stage: WorkshopStage.implementation,
         success: false,
-        summary: 'Workshop produced no implementation response.',
+        summary:
+            'Workshop produced no implementation response.',
         message:
             'The Workshop inference completed without generated content.',
         errors: const <String>[
@@ -345,35 +354,77 @@ final class WorkshopEngine {
             ],
       nextActions: const <String>[
         'Review the generated implementation.',
-        'Apply only explicitly approved file changes.',
-        'Run validation before completion.',
+        'Prepare explicit workspace changes.',
+        'Run validation before applying completion status.',
       ],
     );
   }
 
+  /// Review preliminare del risultato generato.
+  ///
+  /// Non modifica il progetto.
   WorkshopResult _review(
     WorkshopRequest request,
+    WorkshopResult implementationResult,
   ) {
+    if (!implementationResult.success) {
+      return WorkshopResult(
+        requestId: request.id,
+        stage: WorkshopStage.review,
+        success: false,
+        summary: 'Review cannot continue.',
+        message:
+            'The implementation result is not valid for review.',
+        errors: const <String>[
+          'implementation_not_successful',
+        ],
+      );
+    }
+
     return WorkshopResult(
       requestId: request.id,
       stage: WorkshopStage.review,
       success: true,
       summary: 'Review stage passed.',
       message:
-          'No destructive operation was performed by the Workshop engine.',
+          'The generated result passed the preliminary Workshop review boundary.',
+      warnings: const <String>[
+        'workspace_changes_not_yet_applied',
+      ],
     );
   }
 
+  /// Validazione preliminare.
+  ///
+  /// Il vero build/test runner verrà collegato al Workshop validation layer.
   Future<WorkshopResult> _validate(
     WorkshopRequest request,
+    WorkshopResult implementationResult,
   ) async {
+    if (!implementationResult.success) {
+      return WorkshopResult(
+        requestId: request.id,
+        stage: WorkshopStage.validation,
+        success: false,
+        summary: 'Validation cannot continue.',
+        message:
+            'The implementation result is not valid for validation.',
+        errors: const <String>[
+          'implementation_not_successful',
+        ],
+      );
+    }
+
     return WorkshopResult(
       requestId: request.id,
       stage: WorkshopStage.validation,
       success: true,
-      summary: 'Validation stage prepared.',
+      summary: 'Validation boundary passed.',
       message:
-          'The validation boundary is ready for the real project validators.',
+          'The Workshop validation boundary is ready for the real project validators.',
+      warnings: const <String>[
+        'real_build_and_test_validation_not_connected',
+      ],
     );
   }
 
@@ -411,6 +462,10 @@ separate:
 1. what is known;
 2. what must be changed;
 3. what should be validated.
+
+When the user asks to build an application, treat the request as a real
+software project rather than a toy example. Identify architecture,
+requirements, implementation phases, validation and remaining work.
 ''';
 
   String _buildWorkshopPrompt(
@@ -421,7 +476,9 @@ separate:
     buffer.writeln('WORKSHOP REQUEST');
     buffer.writeln('Title: ${request.title}');
     buffer.writeln('Operation: ${request.operation.name}');
-    buffer.writeln('Instruction:');
+    buffer.writeln('Source: ${request.source.name}');
+    buffer.writeln();
+    buffer.writeln('INSTRUCTION:');
     buffer.writeln(request.instruction);
 
     if (request.projectPath != null &&
