@@ -1,54 +1,58 @@
 import 'dart:async';
 
 import '../collaboration/collaboration_bus.dart';
+import '../workspace/workspace_session.dart';
 import 'workshop_contract.dart';
 import 'workshop_inference_gateway.dart';
+import 'workshop_project_executor.dart';
+import 'workshop_project_plan.dart';
 
 /// Motore centrale del Cantiere.
 ///
-/// Il WorkshopEngine coordina il ciclo di vita di una richiesta senza essere
-/// accoppiato:
+/// Il WorkshopEngine coordina il ciclo di vita di una richiesta e, quando
+/// disponibile un [WorkshopProjectExecutor], può trasformare la richiesta
+/// in un vero progetto composto da fasi e task.
 ///
-/// - alla Chat Assistente;
-/// - a un particolare LLM;
-/// - a GitHub;
-/// - alla UI;
-/// - a una specifica implementazione del workspace.
-///
-/// L'inferenza passa esclusivamente attraverso
-/// [WorkshopInferenceGateway].
-///
-/// Pipeline attuale:
+/// Pipeline:
 ///
 ///   richiesta naturale
 ///        ↓
 ///   analisi
 ///        ↓
-///   pianificazione
+///   project plan
 ///        ↓
-///   inferenza Workshop
+///   task eseguibile
+///        ↓
+///   WorkspaceSession
+///        ↓
+///   inferenza
 ///        ↓
 ///   review
 ///        ↓
-///   validazione
+///   validation
 ///        ↓
-///   risultato
+///   approval
+///        ↓
+///   apply
 ///
-/// IMPORTANTE:
-/// questo livello non modifica autonomamente file reali.
+/// Il motore NON applica automaticamente modifiche al repository.
 ///
-/// Le modifiche reali verranno introdotte attraverso il workspace,
-/// le change proposal e i relativi guardrail.
+/// La Chat Assistente resta indipendente:
+/// il Cantiere può essere utilizzato direttamente dall'utente senza
+/// richiedere la presenza dell'A-team.
 final class WorkshopEngine {
   WorkshopEngine({
     CollaborationBus? collaborationBus,
     WorkshopInferenceGateway? inferenceGateway,
+    WorkshopProjectExecutor? projectExecutor,
   })  : _collaborationBus =
             collaborationBus ?? CollaborationBus.instance,
-        _inferenceGateway = inferenceGateway;
+        _inferenceGateway = inferenceGateway,
+        _projectExecutor = projectExecutor;
 
   final CollaborationBus _collaborationBus;
   final WorkshopInferenceGateway? _inferenceGateway;
+  final WorkshopProjectExecutor? _projectExecutor;
 
   final Map<String, WorkshopRequest> _requests =
       <String, WorkshopRequest>{};
@@ -56,32 +60,36 @@ final class WorkshopEngine {
   final Map<String, WorkshopStage> _stages =
       <String, WorkshopStage>{};
 
+  final Map<String, WorkshopProjectPlan> _plans =
+      <String, WorkshopProjectPlan>{};
+
   final StreamController<WorkshopStageEvent> _stageController =
       StreamController<WorkshopStageEvent>.broadcast();
 
-  /// Stream degli avanzamenti del Cantiere.
   Stream<WorkshopStageEvent> get stageStream =>
       _stageController.stream;
 
-  /// Snapshot delle richieste attualmente conosciute.
   List<WorkshopRequest> get requests =>
       List.unmodifiable(_requests.values);
 
-  /// Restituisce lo stato corrente di una richiesta.
+  List<WorkshopProjectPlan> get plans =>
+      List.unmodifiable(_plans.values);
+
   WorkshopStage? stageOf(String requestId) =>
       _stages[requestId];
 
-  /// Indica se il Cantiere dispone di un gateway di inferenza.
+  WorkshopProjectPlan? planOf(String requestId) =>
+      _plans[requestId];
+
   bool get hasInferenceGateway =>
       _inferenceGateway != null;
 
-  /// Avvia una nuova lavorazione.
+  bool get hasProjectExecutor =>
+      _projectExecutor != null;
+
+  /// Esegue una richiesta semplice del Cantiere.
   ///
-  /// La richiesta può provenire direttamente dall'utente oppure
-  /// dall'Assistente/A-team.
-  ///
-  /// Il Cantiere resta comunque autonomo: [request.source] è informativo
-  /// e non rende obbligatoria la presenza dell'Assistente.
+  /// Questa API mantiene compatibilità con il precedente motore.
   Future<WorkshopResult> execute(
     WorkshopRequest request,
   ) async {
@@ -157,7 +165,7 @@ final class WorkshopEngine {
         ],
         nextActions: const <String>[
           'Present the result to the user.',
-          'Apply approved workspace changes in the next Workshop stage.',
+          'Review workspace changes before applying them.',
           'Optionally request an A-team review.',
         ],
       );
@@ -186,16 +194,206 @@ final class WorkshopEngine {
     }
   }
 
-  /// Cancella una lavorazione ancora in corso.
+  /// Crea un piano di progetto per una richiesta.
   ///
-  /// Non modifica file e non annulla automaticamente eventuali
-  /// operazioni già autorizzate da livelli inferiori.
+  /// Questo è il percorso utilizzato quando l'utente chiede qualcosa
+  /// di sostanziale, ad esempio:
+  ///
+  ///   "Fammi questa applicazione."
+  ///
+  /// Il piano non viene considerato automaticamente completato.
+  WorkshopProjectPlan createProjectPlan(
+    WorkshopRequest request, {
+    WorkshopProjectDomain domain =
+        WorkshopProjectDomain.software,
+    List<WorkshopProjectPhase> phases =
+        const <WorkshopProjectPhase>[],
+    List<WorkshopProjectTask> tasks =
+        const <WorkshopProjectTask>[],
+    List<String> requirements = const <String>[],
+    List<String> constraints = const <String>[],
+    List<String> technologies = const <String>[],
+    List<String> hardware = const <String>[],
+    List<String> deliverables = const <String>[],
+    List<String> validationCriteria = const <String>[],
+  }) {
+    final plan = WorkshopProjectPlan(
+      id: 'project:${request.id}',
+      title: request.title,
+      goal: request.instruction,
+      domain: domain,
+      status: WorkshopProjectStatus.planned,
+      requirements: requirements,
+      constraints: constraints,
+      technologies: technologies,
+      hardware: hardware,
+      deliverables: deliverables,
+      validationCriteria: validationCriteria,
+      phases: phases,
+      tasks: tasks,
+    );
+
+    _plans[request.id] = plan;
+
+    return plan;
+  }
+
+  /// Prepara il prossimo task del piano.
+  ///
+  /// Non applica modifiche.
+  ///
+  /// Restituisce la WorkspaceSession pronta per il successivo ciclo
+  /// di implementazione.
+  Future<WorkspaceSession?> prepareNextProjectTask(
+    String requestId, {
+    WorkshopBrief? brief,
+  }) async {
+    final executor = _projectExecutor;
+
+    if (executor == null) {
+      throw StateError(
+        'WorkshopProjectExecutor is not attached to WorkshopEngine.',
+      );
+    }
+
+    final plan = _plans[requestId];
+
+    if (plan == null) {
+      throw StateError(
+        'No WorkshopProjectPlan exists for request "$requestId".',
+      );
+    }
+
+    final session = await executor.prepareNextTask(
+      plan,
+      brief: brief,
+    );
+
+    if (session == null) {
+      return null;
+    }
+
+    _setStage(
+      _requests[requestId] ??
+          WorkshopRequest(
+            id: requestId,
+            title: plan.title,
+            instruction: plan.goal,
+          ),
+      WorkshopStage.implementation,
+    );
+
+    return session;
+  }
+
+  /// Prepara un task specifico del progetto.
+  Future<WorkspaceSession> prepareProjectTask(
+    String requestId,
+    String taskId, {
+    WorkshopBrief? brief,
+  }) async {
+    final executor = _projectExecutor;
+
+    if (executor == null) {
+      throw StateError(
+        'WorkshopProjectExecutor is not attached to WorkshopEngine.',
+      );
+    }
+
+    final plan = _plans[requestId];
+
+    if (plan == null) {
+      throw StateError(
+        'No WorkshopProjectPlan exists for request "$requestId".',
+      );
+    }
+
+    final session = await executor.prepareTask(
+      plan,
+      taskId,
+      brief: brief,
+    );
+
+    _setStage(
+      _requests[requestId] ??
+          WorkshopRequest(
+            id: requestId,
+            title: plan.title,
+            instruction: plan.goal,
+          ),
+      WorkshopStage.implementation,
+    );
+
+    return session;
+  }
+
+  /// Segna il task come completato solo dopo che la WorkspaceSession
+  /// ha realmente raggiunto lo stato completed.
+  void completeProjectTask(
+    String requestId,
+    String taskId,
+  ) {
+    final executor = _projectExecutor;
+
+    if (executor == null) {
+      throw StateError(
+        'WorkshopProjectExecutor is not attached to WorkshopEngine.',
+      );
+    }
+
+    final plan = _plans[requestId];
+
+    if (plan == null) {
+      throw StateError(
+        'No WorkshopProjectPlan exists for request "$requestId".',
+      );
+    }
+
+    executor.completeTask(plan, taskId);
+
+    final request = _requests[requestId];
+
+    if (request != null) {
+      if (plan.status == WorkshopProjectStatus.completed) {
+        _setStage(request, WorkshopStage.completed);
+      } else {
+        _setStage(request, WorkshopStage.planning);
+      }
+    }
+  }
+
+  /// Restituisce il riepilogo del progetto corrente.
+  WorkshopProjectSummary? projectSummary(
+    String requestId,
+  ) {
+    final plan = _plans[requestId];
+
+    if (plan == null) {
+      return null;
+    }
+
+    final nextTask = plan.nextAvailableTask;
+
+    return WorkshopProjectSummary(
+      projectId: plan.id,
+      title: plan.title,
+      status: plan.status,
+      progress: plan.progress,
+      completedTasks: plan.completedTasks,
+      totalTasks: plan.totalTasks,
+      nextTaskId: nextTask?.id,
+      nextTaskTitle: nextTask?.title,
+    );
+  }
+
   void cancel(String requestId) {
     final request = _requests[requestId];
 
     if (request == null) {
       return;
     }
+
+    _projectExecutor?.cancelActiveSessions();
 
     _setStage(request, WorkshopStage.cancelled);
 
@@ -210,21 +408,18 @@ final class WorkshopEngine {
     _publishResult(request, result);
   }
 
-  /// Rimuove una richiesta dalla memoria volatile del motore.
-  ///
-  /// Non elimina file, commit, repository o memoria persistente.
   void forget(String requestId) {
     _requests.remove(requestId);
     _stages.remove(requestId);
+    _plans.remove(requestId);
   }
 
-  /// Chiude lo stream del motore.
   Future<void> dispose() async {
     await _stageController.close();
   }
 
   // ---------------------------------------------------------------------------
-  // Pipeline stages
+  // Basic pipeline
   // ---------------------------------------------------------------------------
 
   WorkshopResult _analyse(
@@ -259,25 +454,20 @@ final class WorkshopEngine {
   WorkshopResult _plan(
     WorkshopRequest request,
   ) {
-    final operation = request.operation;
-
     return WorkshopResult(
       requestId: request.id,
       stage: WorkshopStage.planning,
       success: true,
       summary: 'Construction plan prepared.',
       message:
-          'Workshop operation ${operation.name} selected.',
+          'Workshop operation ${request.operation.name} selected.',
       nextActions: const <String>[
-        'Prepare the workspace context.',
-        'Generate or refine the implementation.',
+        'Create or load the project plan.',
+        'Select the next executable task.',
       ],
     );
   }
 
-  /// Passa la richiesta reale alla pipeline di inferenza del Cantiere.
-  ///
-  /// Nessun passaggio dalla Chat Assistente viene effettuato.
   Future<WorkshopResult> _prepareImplementation(
     WorkshopRequest request,
   ) async {
@@ -339,14 +529,12 @@ final class WorkshopEngine {
       );
     }
 
-    final generatedText = inferenceResult.text.trim();
-
     return WorkshopResult(
       requestId: request.id,
       stage: WorkshopStage.implementation,
       success: true,
       summary: 'Workshop implementation generated.',
-      message: generatedText,
+      message: inferenceResult.text.trim(),
       warnings: inferenceResult.runtimeNotice == null
           ? const <String>[]
           : <String>[
@@ -354,15 +542,12 @@ final class WorkshopEngine {
             ],
       nextActions: const <String>[
         'Review the generated implementation.',
-        'Prepare explicit workspace changes.',
-        'Run validation before applying completion status.',
+        'Prepare workspace changes.',
+        'Validate before approval.',
       ],
     );
   }
 
-  /// Review preliminare del risultato generato.
-  ///
-  /// Non modifica il progetto.
   WorkshopResult _review(
     WorkshopRequest request,
     WorkshopResult implementationResult,
@@ -387,16 +572,13 @@ final class WorkshopEngine {
       success: true,
       summary: 'Review stage passed.',
       message:
-          'The generated result passed the preliminary Workshop review boundary.',
+          'The result is ready for workspace review.',
       warnings: const <String>[
         'workspace_changes_not_yet_applied',
       ],
     );
   }
 
-  /// Validazione preliminare.
-  ///
-  /// Il vero build/test runner verrà collegato al Workshop validation layer.
   Future<WorkshopResult> _validate(
     WorkshopRequest request,
     WorkshopResult implementationResult,
@@ -421,7 +603,7 @@ final class WorkshopEngine {
       success: true,
       summary: 'Validation boundary passed.',
       message:
-          'The Workshop validation boundary is ready for the real project validators.',
+          'The result is ready for the real project validation layer.',
       warnings: const <String>[
         'real_build_and_test_validation_not_connected',
       ],
@@ -429,43 +611,41 @@ final class WorkshopEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // Workshop prompt boundary
+  // Prompt
   // ---------------------------------------------------------------------------
 
   static const String _workshopSystemPrompt = '''
 You are the coding intelligence of the Workshop (Cantiere).
 
-Your primary responsibility is software engineering.
+You are not the personal Assistant.
 
-Focus on:
-- understanding existing code before changing it;
-- architecture;
-- implementation;
-- debugging;
-- refactoring;
-- tests;
-- build stability;
-- performance;
-- maintainability;
-- platform constraints.
+Your responsibility is to help construct serious, maintainable projects.
 
-The Workshop is independent from the personal Assistant.
+Always:
+- understand the existing project before changing it;
+- respect the existing architecture;
+- preserve working behaviour unless explicitly instructed otherwise;
+- consider the whole project, not only one file;
+- produce implementation plans for substantial requests;
+- separate requirements, architecture, implementation and validation;
+- prefer reversible and reviewable changes;
+- never claim that a file was changed when it was only proposed.
 
-Do not assume access to the Assistant conversation.
-Do not invent repository contents that were not supplied.
-Do not propose destructive changes without explicit justification.
-Prefer small, reviewable and reversible changes.
-Preserve working functionality unless the task explicitly requires otherwise.
+For application-building requests, think in terms of:
+requirements,
+architecture,
+project structure,
+components,
+dependencies,
+implementation phases,
+tests,
+validation,
+documentation,
+and remaining work.
 
-When the request concerns an existing project, analyse first and clearly
-separate:
-1. what is known;
-2. what must be changed;
-3. what should be validated.
-
-When the user asks to build an application, treat the request as a real
-software project rather than a toy example. Identify architecture,
-requirements, implementation phases, validation and remaining work.
+The Workshop can later support software, embedded systems, electronics,
+robotics, CAD and other engineering domains. Do not assume that every
+request is a simple code snippet.
 ''';
 
   String _buildWorkshopPrompt(
@@ -578,4 +758,33 @@ final class WorkshopStageEvent {
   final String requestId;
   final WorkshopStage stage;
   final DateTime timestamp;
+}
+
+/// Riepilogo leggero di un progetto Workshop.
+final class WorkshopProjectSummary {
+  const WorkshopProjectSummary({
+    required this.projectId,
+    required this.title,
+    required this.status,
+    required this.progress,
+    required this.completedTasks,
+    required this.totalTasks,
+    this.nextTaskId,
+    this.nextTaskTitle,
+  });
+
+  final String projectId;
+  final String title;
+  final WorkshopProjectStatus status;
+  final double progress;
+  final int completedTasks;
+  final int totalTasks;
+  final String? nextTaskId;
+  final String? nextTaskTitle;
+
+  bool get isComplete =>
+      status == WorkshopProjectStatus.completed;
+
+  bool get hasNextTask =>
+      nextTaskId != null;
 }
