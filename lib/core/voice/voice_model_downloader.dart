@@ -121,7 +121,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       if (existingBytes > 0) {
         logEvent(
           _tag,
-          '[$assetName_RESUME] partial=$existingBytes bytes',
+          '[${assetName}_RESUME] partial=$existingBytes bytes',
         );
       }
     }
@@ -136,7 +136,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (existingBytes > 0 && existingBytes >= expectedBytes) {
       logEvent(
         _tag,
-        '[$assetName_RESUME_SIZE_REACHED] '
+        '[${assetName}_RESUME_SIZE_REACHED] '
         'partial=$existingBytes expected=$expectedBytes',
       );
     }
@@ -163,7 +163,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     } on DioException catch (error) {
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] '
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
         'partial file preserved',
       );
 
@@ -180,7 +180,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] '
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
         'partial file preserved',
       );
 
@@ -215,7 +215,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_DOWNLOAD_COMPLETE] '
+      '[${assetName}_DOWNLOAD_COMPLETE] '
       '$completedBytes bytes',
     );
 
@@ -251,7 +251,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_RANGE_RESPONSE] '
+      '[${assetName}_RANGE_RESPONSE] '
       'status=$status existing=$existingBytes',
     );
 
@@ -281,7 +281,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       if (total != null && existingBytes >= total) {
         logEvent(
           _tag,
-          '[$assetName_RANGE_COMPLETE] '
+          '[${assetName}_RANGE_COMPLETE] '
           'existing=$existingBytes total=$total',
         );
         onProgress(1.0);
@@ -290,7 +290,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       logEvent(
         _tag,
-        '[$assetName_RANGE_416] '
+        '[${assetName}_RANGE_416] '
         'range rejected; restarting safely',
       );
 
@@ -317,7 +317,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (status == HttpStatus.ok) {
       logEvent(
         _tag,
-        '[$assetName_RANGE_UNSUPPORTED] '
+        '[${assetName}_RANGE_UNSUPPORTED] '
         'server returned HTTP 200; replacing partial safely',
       );
 
@@ -353,11 +353,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
     }
 
-    final totalBytes =
-        _totalBytesFromContentRange(response) ??
-            _contentLength(response) != null
-            ? existingBytes + _contentLength(response)!
-            : expectedBytes;
+    final rangeTotal =
+        _totalBytesFromContentRange(response);
+
+    final responseLength =
+        _contentLength(response);
+
+    final totalBytes = rangeTotal ??
+        (responseLength != null
+            ? existingBytes + responseLength
+            : expectedBytes);
 
     final sink = partialFile.openWrite(
       mode: FileMode.append,
@@ -401,7 +406,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_RESUME_CHUNK_COMPLETE] '
+      '[${assetName}_RESUME_CHUNK_COMPLETE] '
       '$receivedBytes bytes',
     );
 
@@ -427,7 +432,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_DOWNLOAD_BEGIN] starting from byte 0',
+      '[${assetName}_DOWNLOAD_BEGIN] starting from byte 0',
     );
 
     final response = await _dio.get<ResponseBody>(
@@ -502,7 +507,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_DOWNLOAD_STREAM_COMPLETE] '
+      '[${assetName}_DOWNLOAD_STREAM_COMPLETE] '
       '$receivedBytes bytes',
     );
 
