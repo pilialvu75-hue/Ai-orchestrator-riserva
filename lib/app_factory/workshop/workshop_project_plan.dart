@@ -1,8 +1,7 @@
 /// Project planning model for the Workshop/Cantiere.
 ///
 /// The Workshop is primarily a software-engineering environment, but the
-/// project model is intentionally broader so that it can later support
-/// technical projects involving:
+/// project model is intentionally broader so that it can later support:
 ///
 /// - software;
 /// - embedded systems;
@@ -23,7 +22,7 @@ enum WorkshopProjectDomain {
   embedded,
   electronics,
   robotics,
-  3dPrinting,
+  threeDPrinting,
   mechanical,
   iot,
   multidisciplinary,
@@ -61,20 +60,6 @@ enum WorkshopProjectPriority {
 }
 
 /// A single phase in the Workshop project plan.
-///
-/// A phase represents a meaningful part of the construction rather than
-/// an individual file change.
-///
-/// Example:
-///
-/// 1. Requirements
-/// 2. Architecture
-/// 3. Hardware design
-/// 4. Firmware
-/// 5. Application
-/// 6. Integration
-/// 7. Testing
-/// 8. Final validation
 final class WorkshopProjectPhase {
   WorkshopProjectPhase({
     required this.id,
@@ -140,6 +125,15 @@ final class WorkshopProjectPhase {
           validationCriteria ?? this.validationCriteria,
     );
   }
+
+  @override
+  String toString() {
+    return 'WorkshopProjectPhase('
+        'id: $id, '
+        'title: $title, '
+        'status: $status'
+        ')';
+  }
 }
 
 /// A concrete task belonging to a Workshop project.
@@ -167,11 +161,23 @@ final class WorkshopProjectTask {
 
   bool completed;
 
+  /// IDs of tasks that must be completed before this task can start.
   final List<String> dependencies;
+
   final List<String> affectedPaths;
   final List<String> validationCriteria;
 
-  bool get isBlocked => dependencies.isNotEmpty;
+  /// A task is blocked only when at least one dependency is still incomplete.
+  ///
+  /// A task with no dependencies is immediately available.
+  bool get isBlocked {
+    // Dependency resolution is performed by [WorkshopProjectPlan].
+    //
+    // This local getter therefore only identifies the presence of
+    // dependencies. The plan-level [isTaskBlocked] method performs the
+    // authoritative dependency check.
+    return dependencies.isNotEmpty;
+  }
 
   WorkshopProjectTask copyWith({
     String? id,
@@ -196,6 +202,15 @@ final class WorkshopProjectTask {
       validationCriteria:
           validationCriteria ?? this.validationCriteria,
     );
+  }
+
+  @override
+  String toString() {
+    return 'WorkshopProjectTask('
+        'id: $id, '
+        'phaseId: $phaseId, '
+        'completed: $completed'
+        ')';
   }
 }
 
@@ -256,37 +271,21 @@ final class WorkshopProjectPlan {
   final DateTime createdAt;
   DateTime updatedAt;
 
-  /// Functional and technical requirements.
   final List<String> requirements;
-
-  /// Explicit constraints.
   final List<String> constraints;
-
-  /// Assumptions made during planning.
   final List<String> assumptions;
 
   /// Software technologies, frameworks, languages or protocols.
   final List<String> technologies;
 
   /// Physical components relevant to the project.
-  ///
-  /// This allows the same project plan to represent Arduino, ESP32,
-  /// Raspberry Pi, sensors, motors, batteries, controllers, etc.
   final List<String> hardware;
 
-  /// Expected project deliverables.
   final List<String> deliverables;
-
-  /// Conditions required for project completion.
   final List<String> validationCriteria;
-
-  /// Known risks or open technical concerns.
   final List<String> risks;
 
-  /// Ordered construction phases.
   final List<WorkshopProjectPhase> phases;
-
-  /// Concrete tasks belonging to the phases.
   final List<WorkshopProjectTask> tasks;
 
   int get completedTasks =>
@@ -339,24 +338,48 @@ final class WorkshopProjectPlan {
     );
   }
 
+  /// Returns true when all dependencies of [phase] are completed.
+  bool arePhaseDependenciesComplete(
+    WorkshopProjectPhase phase,
+  ) {
+    return phase.dependencies.every(
+      (dependencyId) =>
+          phaseById(dependencyId)?.isComplete ?? false,
+    );
+  }
+
+  /// Returns true when all dependencies of [task] are completed.
+  bool areTaskDependenciesComplete(
+    WorkshopProjectTask task,
+  ) {
+    return task.dependencies.every(
+      (dependencyId) =>
+          taskById(dependencyId)?.completed ?? false,
+    );
+  }
+
+  /// Authoritative project-level blocked state for a task.
+  ///
+  /// This is preferable to [WorkshopProjectTask.isBlocked] when the
+  /// complete project graph is available.
+  bool isTaskBlocked(
+    WorkshopProjectTask task,
+  ) {
+    if (task.completed) {
+      return false;
+    }
+
+    return !areTaskDependenciesComplete(task);
+  }
+
   /// Returns the first phase that can currently be worked on.
-  ///
-  /// A phase is available when:
-  ///
-  /// - it is pending;
-  /// - all its dependencies are completed.
   WorkshopProjectPhase? get nextAvailablePhase {
     for (final phase in phases) {
       if (phase.status != WorkshopProjectPhaseStatus.pending) {
         continue;
       }
 
-      final dependenciesComplete = phase.dependencies.every(
-        (dependencyId) =>
-            phaseById(dependencyId)?.isComplete ?? false,
-      );
-
-      if (dependenciesComplete) {
+      if (arePhaseDependenciesComplete(phase)) {
         return phase;
       }
     }
@@ -371,12 +394,7 @@ final class WorkshopProjectPlan {
         continue;
       }
 
-      final dependenciesComplete = task.dependencies.every(
-        (dependencyId) =>
-            taskById(dependencyId)?.completed ?? false,
-      );
-
-      if (dependenciesComplete) {
+      if (areTaskDependenciesComplete(task)) {
         return task;
       }
     }
