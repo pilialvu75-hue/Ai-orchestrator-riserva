@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../collaboration/collaboration_bus.dart';
 import 'workshop_contract.dart';
+import 'workshop_inference_gateway.dart';
 
 /// Motore centrale del Cantiere.
 ///
@@ -14,7 +15,10 @@ import 'workshop_contract.dart';
 /// - alla UI;
 /// - a una specifica implementazione del workspace.
 ///
-/// Il motore prepara il terreno per la pipeline:
+/// L'inferenza passa esclusivamente attraverso
+/// [WorkshopInferenceGateway].
+///
+/// Questo mantiene il Cantiere indipendente dalla Chat Assistente:
 ///
 ///   richiesta naturale
 ///        ↓
@@ -22,7 +26,9 @@ import 'workshop_contract.dart';
 ///        ↓
 ///   pianificazione
 ///        ↓
-///   implementazione
+///   WorkshopInferenceGateway
+///        ↓
+///   modello locale/cloud
 ///        ↓
 ///   review
 ///        ↓
@@ -31,16 +37,19 @@ import 'workshop_contract.dart';
 ///   risultato
 ///
 /// IMPORTANTE:
-/// questo primo livello NON modifica autonomamente file reali.
+/// questo livello NON modifica autonomamente file reali.
 /// Le operazioni mutanti saranno introdotte attraverso il workspace
 /// e i relativi guardrail.
 final class WorkshopEngine {
   WorkshopEngine({
     CollaborationBus? collaborationBus,
-  }) : _collaborationBus =
-            collaborationBus ?? CollaborationBus.instance;
+    WorkshopInferenceGateway? inferenceGateway,
+  })  : _collaborationBus =
+            collaborationBus ?? CollaborationBus.instance,
+        _inferenceGateway = inferenceGateway;
 
   final CollaborationBus _collaborationBus;
+  final WorkshopInferenceGateway? _inferenceGateway;
 
   final Map<String, WorkshopRequest> _requests =
       <String, WorkshopRequest>{};
@@ -62,6 +71,10 @@ final class WorkshopEngine {
   /// Restituisce lo stato corrente di una richiesta.
   WorkshopStage? stageOf(String requestId) =>
       _stages[requestId];
+
+  /// Indica se il Cantiere dispone di un gateway di inferenza.
+  bool get hasInferenceGateway =>
+      _inferenceGateway != null;
 
   /// Avvia una nuova lavorazione.
   ///
@@ -244,16 +257,97 @@ final class WorkshopEngine {
     );
   }
 
+  /// Passa finalmente la richiesta reale al modello del Cantiere.
+  ///
+  /// Questa è la prima connessione effettiva tra il Workshop e la
+  /// pipeline di inferenza.
+  ///
+  /// Nessun passaggio dalla Chat Assistente viene effettuato.
   Future<WorkshopResult> _prepareImplementation(
     WorkshopRequest request,
   ) async {
+    final gateway = _inferenceGateway;
+
+    /*
+     * Compatibilità conservativa:
+     *
+     * se un'istanza del WorkshopEngine non dispone ancora del gateway,
+     * manteniamo il comportamento precedente invece di introdurre
+     * un crash o una dipendenza obbligatoria.
+     */
+    if (gateway == null) {
+      return WorkshopResult(
+        requestId: request.id,
+        stage: WorkshopStage.implementation,
+        success: true,
+        summary: 'Implementation stage prepared.',
+        message:
+            'The Workshop is ready to pass the request to its coding pipeline.',
+        warnings: const <String>[
+          'inference_gateway_not_attached',
+        ],
+      );
+    }
+
+    final prompt = _buildWorkshopPrompt(request);
+
+    final inferenceResult = await gateway.complete(
+      prompt: prompt,
+      systemPrompt: _workshopSystemPrompt,
+      sessionId: 'workshop:${request.id}',
+      isOffline: true,
+      modelId: null,
+      modelPath: null,
+    );
+
+    if (inferenceResult.hasError) {
+      return WorkshopResult(
+        requestId: request.id,
+        stage: WorkshopStage.implementation,
+        success: false,
+        summary: 'Workshop inference failed.',
+        message:
+            inferenceResult.errorMessage ??
+            'The Workshop inference pipeline returned an error.',
+        errors: <String>[
+          inferenceResult.errorMessage ??
+              'workshop_inference_error',
+        ],
+      );
+    }
+
+    if (!inferenceResult.hasText) {
+      return WorkshopResult(
+        requestId: request.id,
+        stage: WorkshopStage.implementation,
+        success: false,
+        summary: 'Workshop produced no implementation response.',
+        message:
+            'The Workshop inference completed without generated content.',
+        errors: const <String>[
+          'empty_inference_response',
+        ],
+      );
+    }
+
+    final generatedText = inferenceResult.text.trim();
+
     return WorkshopResult(
       requestId: request.id,
       stage: WorkshopStage.implementation,
       success: true,
-      summary: 'Implementation stage prepared.',
-      message:
-          'The Workshop is ready to pass the request to its coding pipeline.',
+      summary: 'Workshop implementation generated.',
+      message: generatedText,
+      warnings: inferenceResult.runtimeNotice == null
+          ? const <String>[]
+          : <String>[
+              inferenceResult.runtimeNotice!,
+            ],
+      nextActions: const <String>[
+        'Review the generated implementation.',
+        'Apply only explicitly approved file changes.',
+        'Run validation before completion.',
+      ],
     );
   }
 
@@ -281,6 +375,95 @@ final class WorkshopEngine {
       message:
           'The validation boundary is ready for the real project validators.',
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Workshop prompt boundary
+  // ---------------------------------------------------------------------------
+
+  static const String _workshopSystemPrompt = '''
+You are the coding intelligence of the Workshop (Cantiere).
+
+Your primary responsibility is software engineering.
+
+Focus on:
+- understanding existing code before changing it;
+- architecture;
+- implementation;
+- debugging;
+- refactoring;
+- tests;
+- build stability;
+- performance;
+- maintainability;
+- platform constraints.
+
+The Workshop is independent from the personal Assistant.
+
+Do not assume access to the Assistant conversation.
+Do not invent repository contents that were not supplied.
+Do not propose destructive changes without explicit justification.
+Prefer small, reviewable and reversible changes.
+Preserve working functionality unless the task explicitly requires otherwise.
+
+When the request concerns an existing project, analyse first and clearly
+separate:
+1. what is known;
+2. what must be changed;
+3. what should be validated.
+''';
+
+  String _buildWorkshopPrompt(
+    WorkshopRequest request,
+  ) {
+    final buffer = StringBuffer();
+
+    buffer.writeln('WORKSHOP REQUEST');
+    buffer.writeln('Title: ${request.title}');
+    buffer.writeln('Operation: ${request.operation.name}');
+    buffer.writeln('Instruction:');
+    buffer.writeln(request.instruction);
+
+    if (request.projectPath != null &&
+        request.projectPath!.trim().isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('PROJECT PATH:');
+      buffer.writeln(request.projectPath);
+    }
+
+    if (request.targetFiles.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('TARGET FILES:');
+
+      for (final file in request.targetFiles) {
+        buffer.writeln('- $file');
+      }
+    }
+
+    if (request.constraints.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('CONSTRAINTS:');
+
+      for (final constraint in request.constraints) {
+        buffer.writeln('- $constraint');
+      }
+    }
+
+    if (request.context.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('WORKSHOP CONTEXT:');
+
+      for (final contextItem in request.context) {
+        buffer.writeln('- $contextItem');
+      }
+    }
+
+    buffer.writeln();
+    buffer.writeln(
+      'Return a coding-oriented response suitable for the next Workshop stage.',
+    );
+
+    return buffer.toString();
   }
 
   // ---------------------------------------------------------------------------
