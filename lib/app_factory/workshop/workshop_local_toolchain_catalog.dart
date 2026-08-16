@@ -196,7 +196,7 @@ final class WorkshopLocalToolchainCatalog {
       name: 'Android Build Tools',
       description:
           'Strumenti Android utilizzati durante packaging, linking e '
-          'generazione dell'APK/AAB.',
+          "generazione dell'APK/AAB.",
       requirement: WorkshopToolchainRequirement.required,
       platforms: <WorkshopToolchainPlatform>[
         WorkshopToolchainPlatform.android,
