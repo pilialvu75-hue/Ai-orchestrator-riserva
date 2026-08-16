@@ -4,45 +4,27 @@ import 'dart:io';
 
 import 'workshop_build_lab.dart';
 
-/// Configurazione del rilevatore della toolchain locale.
+/// Configurazione del detector della toolchain locale.
+///
+/// Il detector non installa nulla e non scarica nulla.
+/// Controlla solamente ciò che è già disponibile.
 final class WorkshopLocalToolchainDetectorConfiguration {
   const WorkshopLocalToolchainDetectorConfiguration({
-    required this.flutterExecutable,
+    this.flutterExecutable = 'flutter',
     this.javaExecutable = 'java',
-    this.gradleExecutable = 'gradle',
     this.androidSdkPath,
-    this.androidSdkManagerExecutable,
-    this.timeout = const Duration(seconds: 20),
     this.environment = const <String, String>{},
+    this.timeout = const Duration(seconds: 15),
   });
 
-  /// Percorso dell'eseguibile Flutter.
-  ///
-  /// Può essere:
-  /// - flutter
-  /// - flutter.bat
-  /// - percorso assoluto della Flutter SDK.
   final String flutterExecutable;
-
   final String javaExecutable;
-  final String gradleExecutable;
-
-  /// Percorso esplicito dell'Android SDK.
-  ///
-  /// Se nullo vengono controllati:
-  /// ANDROID_SDK_ROOT
-  /// ANDROID_HOME
-  /// percorsi standard della piattaforma.
   final String? androidSdkPath;
-
-  final String? androidSdkManagerExecutable;
-
-  final Duration timeout;
-
   final Map<String, String> environment;
+  final Duration timeout;
 }
 
-/// Risultato complessivo dell'ispezione.
+/// Risultato completo dell'ispezione.
 final class WorkshopLocalToolchainReport {
   const WorkshopLocalToolchainReport({
     required this.checkedAt,
@@ -66,11 +48,9 @@ final class WorkshopLocalToolchainReport {
   final bool javaAvailable;
   final bool androidSdkAvailable;
 
-  /// Indica se almeno un target locale può essere costruito offline.
   final bool offlineCapable;
 
-  final Map<WorkshopBuildTarget, WorkshopToolchainInfo>
-      targets;
+  final Map<WorkshopBuildTarget, WorkshopToolchainInfo> targets;
 
   final String? flutterVersion;
   final String? dartVersion;
@@ -92,51 +72,46 @@ final class WorkshopLocalToolchainReport {
   }
 }
 
-/// Rilevatore della toolchain disponibile sul dispositivo.
+/// Analizza la toolchain locale senza modificarla.
 ///
-/// IMPORTANTE:
-/// questo componente NON installa SDK e NON scarica nulla.
+/// Responsabilità:
+/// - verificare Flutter;
+/// - verificare Dart;
+/// - verificare Java;
+/// - verificare Android SDK;
+/// - determinare quali target possono essere gestiti localmente.
 ///
-/// Il suo unico compito è rispondere alla domanda:
-///
-/// "Con ciò che è realmente installato adesso,
-///  cosa posso costruire localmente e offline?"
-///
-/// In questo modo il futuro ToolchainManager potrà installare
-/// solamente ciò che manca.
+/// Non installa SDK.
+/// Non scarica file.
+/// Non esegue build.
 final class WorkshopLocalToolchainDetector {
   WorkshopLocalToolchainDetector({
-    required WorkshopLocalToolchainDetectorConfiguration
-        configuration,
+    WorkshopLocalToolchainDetectorConfiguration configuration =
+        const WorkshopLocalToolchainDetectorConfiguration(),
   }) : _configuration = configuration;
 
-  final WorkshopLocalToolchainDetectorConfiguration
-      _configuration;
+  final WorkshopLocalToolchainDetectorConfiguration _configuration;
 
   bool _disposed = false;
 
   Future<WorkshopLocalToolchainReport> inspectAll() async {
     _ensureAvailable();
 
-    final checkedAt = DateTime.now();
-
-    final flutter = await _inspectFlutter();
-    final dart = await _inspectDart();
-    final java = await _inspectJava();
-
-    final androidSdk =
-        await _inspectAndroidSdk();
+    final flutter = await _checkFlutter();
+    final dart = await _checkDart();
+    final java = await _checkJava();
+    final android = await _checkAndroidSdk();
 
     final targets =
         <WorkshopBuildTarget, WorkshopToolchainInfo>{};
 
     for (final target in WorkshopBuildTarget.values) {
-      targets[target] = await _inspectTarget(
+      targets[target] = _buildTargetInfo(
         target: target,
         flutter: flutter,
         dart: dart,
         java: java,
-        androidSdk: androidSdk,
+        android: android,
       );
     }
 
@@ -145,22 +120,22 @@ final class WorkshopLocalToolchainDetector {
     );
 
     return WorkshopLocalToolchainReport(
-      checkedAt: checkedAt,
+      checkedAt: DateTime.now(),
       flutterAvailable: flutter.available,
       dartAvailable: dart.available,
       javaAvailable: java.available,
-      androidSdkAvailable: androidSdk.available,
+      androidSdkAvailable: android.available,
       offlineCapable: offlineCapable,
       targets: Map.unmodifiable(targets),
       flutterVersion: flutter.version,
       dartVersion: dart.version,
       javaVersion: java.version,
-      androidSdkPath: androidSdk.path,
-      message: _reportMessage(
+      androidSdkPath: android.path,
+      message: _buildReportMessage(
         flutter: flutter,
         dart: dart,
         java: java,
-        androidSdk: androidSdk,
+        android: android,
       ),
     );
   }
@@ -170,22 +145,21 @@ final class WorkshopLocalToolchainDetector {
   ) async {
     _ensureAvailable();
 
-    final flutter = await _inspectFlutter();
-    final dart = await _inspectDart();
-    final java = await _inspectJava();
-    final androidSdk =
-        await _inspectAndroidSdk();
+    final flutter = await _checkFlutter();
+    final dart = await _checkDart();
+    final java = await _checkJava();
+    final android = await _checkAndroidSdk();
 
-    return _inspectTarget(
+    return _buildTargetInfo(
       target: target,
       flutter: flutter,
       dart: dart,
       java: java,
-      androidSdk: androidSdk,
+      android: android,
     );
   }
 
-  Future<_CommandInspection> _inspectFlutter() async {
+  Future<_CommandCheck> _checkFlutter() async {
     final result = await _run(
       _configuration.flutterExecutable,
       const <String>[
@@ -195,26 +169,32 @@ final class WorkshopLocalToolchainDetector {
     );
 
     if (!result.success) {
-      return _CommandInspection.unavailable(
-        executable: _configuration.flutterExecutable,
+      return _CommandCheck.unavailable(
         message: result.message,
       );
     }
 
-    final version =
-        _extractJsonString(
-      result.stdout,
-      'frameworkVersion',
-    );
+    String? version;
 
-    return _CommandInspection.available(
-      executable: _configuration.flutterExecutable,
+    try {
+      final decoded = jsonDecode(result.stdout);
+
+      if (decoded is Map &&
+          decoded['frameworkVersion'] is String) {
+        version = decoded['frameworkVersion'] as String;
+      }
+    } catch (_) {
+      version = _firstLine(result.stdout);
+    }
+
+    return _CommandCheck(
+      available: true,
       version: version,
-      stdout: result.stdout,
+      output: result.stdout,
     );
   }
 
-  Future<_CommandInspection> _inspectDart() async {
+  Future<_CommandCheck> _checkDart() async {
     final result = await _run(
       _configuration.flutterExecutable,
       const <String>[
@@ -224,26 +204,24 @@ final class WorkshopLocalToolchainDetector {
     );
 
     if (!result.success) {
-      return _CommandInspection.unavailable(
-        executable:
-            '${_configuration.flutterExecutable} dart',
+      return _CommandCheck.unavailable(
         message: result.message,
       );
     }
 
-    return _CommandInspection.available(
-      executable:
-          '${_configuration.flutterExecutable} dart',
-      version: _firstUsefulLine(
+    final output =
         result.stderr.isNotEmpty
             ? result.stderr
-            : result.stdout,
-      ),
-      stdout: result.stdout,
+            : result.stdout;
+
+    return _CommandCheck(
+      available: true,
+      version: _firstLine(output),
+      output: output,
     );
   }
 
-  Future<_CommandInspection> _inspectJava() async {
+  Future<_CommandCheck> _checkJava() async {
     final result = await _run(
       _configuration.javaExecutable,
       const <String>[
@@ -252,156 +230,158 @@ final class WorkshopLocalToolchainDetector {
     );
 
     if (!result.success) {
-      return _CommandInspection.unavailable(
-        executable:
-            _configuration.javaExecutable,
+      return _CommandCheck.unavailable(
         message: result.message,
       );
     }
 
-    final versionOutput =
+    final output =
         result.stderr.isNotEmpty
             ? result.stderr
             : result.stdout;
 
-    return _CommandInspection.available(
-      executable:
-          _configuration.javaExecutable,
-      version:
-          _firstUsefulLine(versionOutput),
-      stdout: result.stdout,
+    return _CommandCheck(
+      available: true,
+      version: _firstLine(output),
+      output: output,
     );
   }
 
-  Future<_AndroidSdkInspection>
-      _inspectAndroidSdk() async {
-    final configuredPath =
-        _configuration.androidSdkPath;
-
-    final candidates = <String>[
-      if (configuredPath != null &&
-          configuredPath.trim().isNotEmpty)
-        configuredPath,
-      _configuration.environment[
-            'ANDROID_SDK_ROOT',
-          ] ??
-          '',
-      _configuration.environment[
-            'ANDROID_HOME',
-          ] ??
-          '',
-      Platform.environment[
-            'ANDROID_SDK_ROOT',
-          ] ??
-          '',
-      Platform.environment[
-            'ANDROID_HOME',
-          ] ??
-          '',
-      ..._standardAndroidSdkPaths(),
-    ];
-
-    String? sdkPath;
-
-    for (final candidate in candidates) {
-      final normalized = candidate.trim();
-
-      if (normalized.isEmpty) {
-        continue;
-      }
-
-      if (await Directory(normalized).exists()) {
-        sdkPath = normalized;
-        break;
-      }
-    }
+  Future<_AndroidCheck> _checkAndroidSdk() async {
+    final sdkPath = _findAndroidSdkPath();
 
     if (sdkPath == null) {
-      return const _AndroidSdkInspection(
+      return const _AndroidCheck(
         available: false,
         path: null,
-        platformToolsAvailable: false,
-        buildToolsAvailable: false,
-        platformsAvailable: false,
-        message:
-            'Android SDK was not found.',
+        platformTools: false,
+        buildTools: false,
+        platforms: false,
       );
     }
 
-    final platformTools =
-        await _directoryExists(
-      Directory(
-        '$sdkPath/platform-tools',
-      ),
+    final platformTools = await Directory(
+      _join(sdkPath, 'platform-tools'),
+    ).exists();
+
+    final buildTools = await _hasDirectory(
+      _join(sdkPath, 'build-tools'),
     );
 
-    final buildTools =
-        await _directoryHasChildDirectory(
-      Directory(
-        '$sdkPath/build-tools',
-      ),
+    final platforms = await _hasDirectory(
+      _join(sdkPath, 'platforms'),
     );
 
-    final platforms =
-        await _directoryHasChildDirectory(
-      Directory(
-        '$sdkPath/platforms',
-      ),
-    );
-
-    final complete =
-        platformTools &&
-        buildTools &&
-        platforms;
-
-    return _AndroidSdkInspection(
-      available: complete,
-      path: sdkPath,
-      platformToolsAvailable:
-          platformTools,
-      buildToolsAvailable:
-          buildTools,
-      platformsAvailable:
+    return _AndroidCheck(
+      available:
+          platformTools &&
+          buildTools &&
           platforms,
-      message: complete
-          ? 'Android SDK appears complete.'
-          : 'Android SDK exists but is incomplete.',
+      path: sdkPath,
+      platformTools: platformTools,
+      buildTools: buildTools,
+      platforms: platforms,
     );
   }
 
-  Future<WorkshopToolchainInfo> _inspectTarget({
+  String? _findAndroidSdkPath() {
+    final configured =
+        _configuration.androidSdkPath;
+
+    if (configured != null &&
+        configured.trim().isNotEmpty &&
+        Directory(configured).existsSync()) {
+      return configured;
+    }
+
+    final configuredRoot =
+        _configuration.environment['ANDROID_SDK_ROOT'];
+
+    if (configuredRoot != null &&
+        configuredRoot.isNotEmpty &&
+        Directory(configuredRoot).existsSync()) {
+      return configuredRoot;
+    }
+
+    final configuredHome =
+        _configuration.environment['ANDROID_HOME'];
+
+    if (configuredHome != null &&
+        configuredHome.isNotEmpty &&
+        Directory(configuredHome).existsSync()) {
+      return configuredHome;
+    }
+
+    final root =
+        Platform.environment['ANDROID_SDK_ROOT'];
+
+    if (root != null &&
+        root.isNotEmpty &&
+        Directory(root).existsSync()) {
+      return root;
+    }
+
+    final home =
+        Platform.environment['ANDROID_HOME'];
+
+    if (home != null &&
+        home.isNotEmpty &&
+        Directory(home).existsSync()) {
+      return home;
+    }
+
+    final candidates = _standardAndroidSdkPaths();
+
+    for (final candidate in candidates) {
+      if (Directory(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  List<String> _standardAndroidSdkPaths() {
+    final home =
+        Platform.environment['HOME'];
+
+    if (home == null || home.isEmpty) {
+      return const <String>[];
+    }
+
+    if (Platform.isMacOS || Platform.isLinux) {
+      return <String>[
+        _join(home, 'Android/Sdk'),
+        _join(home, 'android-sdk'),
+      ];
+    }
+
+    return const <String>[];
+  }
+
+  WorkshopToolchainInfo _buildTargetInfo({
     required WorkshopBuildTarget target,
-    required _CommandInspection flutter,
-    required _CommandInspection dart,
-    required _CommandInspection java,
-    required _AndroidSdkInspection androidSdk,
-  }) async {
+    required _CommandCheck flutter,
+    required _CommandCheck dart,
+    required _CommandCheck java,
+    required _AndroidCheck android,
+  }) {
     if (!flutter.available) {
-      return WorkshopToolchainInfo(
+      return _unavailable(
         target: target,
-        status: WorkshopToolchainStatus.unavailable,
-        executionMode:
-            WorkshopBuildExecutionMode.offlineLocal,
-        name: 'Flutter local toolchain',
-        path: _configuration.flutterExecutable,
-        missingComponents: const <String>[
+        missing: const <String>[
           'flutter',
         ],
         message:
-            'Flutter executable is unavailable.',
+            'Flutter is not available on this host.',
       );
     }
 
     if (!dart.available) {
-      return WorkshopToolchainInfo(
+      return _incomplete(
         target: target,
-        status: WorkshopToolchainStatus.incomplete,
-        executionMode:
-            WorkshopBuildExecutionMode.offlineLocal,
-        name: 'Flutter local toolchain',
-        path: _configuration.flutterExecutable,
         version: flutter.version,
-        missingComponents: const <String>[
+        missing: const <String>[
           'dart',
         ],
         message:
@@ -414,300 +394,225 @@ final class WorkshopLocalToolchainDetector {
         return _androidInfo(
           flutter: flutter,
           java: java,
-          androidSdk: androidSdk,
+          android: android,
         );
 
       case WorkshopBuildTarget.web:
-        return _webInfo(
-          flutter: flutter,
+        return _hostTargetInfo(
+          target: target,
+          name: 'Flutter Web',
+          available: _flutterHostAvailable(),
+          missing: const <String>[
+            'flutter_execution_host',
+          ],
         );
 
       case WorkshopBuildTarget.windows:
-        return _windowsInfo(
-          flutter: flutter,
+        return _hostTargetInfo(
+          target: target,
+          name: 'Flutter Windows',
+          available:
+              Platform.isWindows &&
+              _flutterHostAvailable(),
+          missing: const <String>[
+            'windows_build_host',
+          ],
         );
 
       case WorkshopBuildTarget.linux:
-        return _linuxInfo(
-          flutter: flutter,
+        return _hostTargetInfo(
+          target: target,
+          name: 'Flutter Linux',
+          available:
+              Platform.isLinux &&
+              _flutterHostAvailable(),
+          missing: const <String>[
+            'linux_build_host',
+          ],
         );
 
       case WorkshopBuildTarget.macos:
-        return _macosInfo(
-          flutter: flutter,
+        return _hostTargetInfo(
+          target: target,
+          name: 'Flutter macOS',
+          available:
+              Platform.isMacOS &&
+              _flutterHostAvailable(),
+          missing: const <String>[
+            'macos_build_host',
+          ],
         );
 
       case WorkshopBuildTarget.ios:
-        return _iosInfo(
-          flutter: flutter,
+        return _hostTargetInfo(
+          target: target,
+          name: 'Flutter iOS',
+          available:
+              Platform.isMacOS &&
+              _flutterHostAvailable(),
+          missing: const <String>[
+            'ios_macos_build_host',
+          ],
         );
     }
   }
 
   WorkshopToolchainInfo _androidInfo({
-    required _CommandInspection flutter,
-    required _CommandInspection java,
-    required _AndroidSdkInspection androidSdk,
+    required _CommandCheck flutter,
+    required _CommandCheck java,
+    required _AndroidCheck android,
   }) {
-    final missing =
-        <String>[];
+    final missing = <String>[];
 
     if (!java.available) {
       missing.add('java');
     }
 
-    if (!androidSdk.available) {
-      if (!androidSdk.platformToolsAvailable) {
-        missing.add('android_platform_tools');
-      }
+    if (!android.platformTools) {
+      missing.add('android_platform_tools');
+    }
 
-      if (!androidSdk.buildToolsAvailable) {
-        missing.add('android_build_tools');
-      }
+    if (!android.buildTools) {
+      missing.add('android_build_tools');
+    }
 
-      if (!androidSdk.platformsAvailable) {
-        missing.add('android_platforms');
-      }
+    if (!android.platforms) {
+      missing.add('android_platforms');
+    }
+
+    final hostAvailable =
+        _androidHostAvailable();
+
+    if (!hostAvailable) {
+      missing.add('android_build_host');
     }
 
     final available =
-        missing.isEmpty &&
-        _hostCanRunAndroid();
-
-    if (!available &&
-        !_hostCanRunAndroid()) {
-      missing.add('android_local_execution_host');
-    }
+        missing.isEmpty;
 
     return WorkshopToolchainInfo(
       target: WorkshopBuildTarget.android,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.incomplete,
+      status:
+          available
+              ? WorkshopToolchainStatus.available
+              : WorkshopToolchainStatus.incomplete,
       executionMode:
           WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter + Android local toolchain',
+      name: 'Flutter Android local toolchain',
       version: flutter.version,
       path: _configuration.flutterExecutable,
       missingComponents:
           List.unmodifiable(missing),
-      message: available
-          ? 'Android can be built locally with the '
-              'currently detected toolchain.'
-          : 'Android local build is not currently '
-              'guaranteed by the detected environment.',
+      message:
+          available
+              ? 'Android local build environment is available.'
+              : 'Android local build environment is incomplete.',
     );
   }
 
-  WorkshopToolchainInfo _webInfo({
-    required _CommandInspection flutter,
+  WorkshopToolchainInfo _hostTargetInfo({
+    required WorkshopBuildTarget target,
+    required String name,
+    required bool available,
+    required List<String> missing,
   }) {
-    final available =
-        _hostCanRunFlutter();
-
     return WorkshopToolchainInfo(
-      target: WorkshopBuildTarget.web,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.unavailable,
+      target: target,
+      status:
+          available
+              ? WorkshopToolchainStatus.available
+              : WorkshopToolchainStatus.unavailable,
       executionMode:
           WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter Web local toolchain',
-      version: flutter.version,
+      name: name,
       path: _configuration.flutterExecutable,
-      missingComponents: available
-          ? const <String>[]
-          : const <String>[
-              'flutter_local_execution_host',
-            ],
-      message: available
-          ? 'Flutter Web can be built locally.'
-          : 'Flutter executable cannot be executed '
-              'by the current host.',
+      missingComponents:
+          available
+              ? const <String>[]
+              : missing,
+      message:
+          available
+              ? '$name can be handled locally.'
+              : '$name requires a compatible build host.',
     );
   }
 
-  WorkshopToolchainInfo _windowsInfo({
-    required _CommandInspection flutter,
+  WorkshopToolchainInfo _unavailable({
+    required WorkshopBuildTarget target,
+    required List<String> missing,
+    required String message,
   }) {
-    final available =
-        Platform.isWindows &&
-        _hostCanRunFlutter();
-
     return WorkshopToolchainInfo(
-      target: WorkshopBuildTarget.windows,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.unavailable,
+      target: target,
+      status:
+          WorkshopToolchainStatus.unavailable,
       executionMode:
           WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter Windows local toolchain',
-      version: flutter.version,
+      name: 'Flutter local toolchain',
       path: _configuration.flutterExecutable,
-      missingComponents: available
-          ? const <String>[]
-          : const <String>[
-              'windows_build_host',
-            ],
-      message: available
-          ? 'Windows target can be evaluated locally.'
-          : 'Windows requires a Windows build host.',
+      missingComponents: missing,
+      message: message,
     );
   }
 
-  WorkshopToolchainInfo _linuxInfo({
-    required _CommandInspection flutter,
+  WorkshopToolchainInfo _incomplete({
+    required WorkshopBuildTarget target,
+    required String? version,
+    required List<String> missing,
+    required String message,
   }) {
-    final available =
-        Platform.isLinux &&
-        _hostCanRunFlutter();
-
     return WorkshopToolchainInfo(
-      target: WorkshopBuildTarget.linux,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.unavailable,
+      target: target,
+      status:
+          WorkshopToolchainStatus.incomplete,
       executionMode:
           WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter Linux local toolchain',
-      version: flutter.version,
+      name: 'Flutter local toolchain',
+      version: version,
       path: _configuration.flutterExecutable,
-      missingComponents: available
-          ? const <String>[]
-          : const <String>[
-              'linux_build_host',
-            ],
-      message: available
-          ? 'Linux target can be evaluated locally.'
-          : 'Linux requires a Linux build host.',
+      missingComponents: missing,
+      message: message,
     );
   }
 
-  WorkshopToolchainInfo _macosInfo({
-    required _CommandInspection flutter,
-  }) {
-    final available =
-        Platform.isMacOS &&
-        _hostCanRunFlutter();
-
-    return WorkshopToolchainInfo(
-      target: WorkshopBuildTarget.macos,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.unavailable,
-      executionMode:
-          WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter macOS local toolchain',
-      version: flutter.version,
-      path: _configuration.flutterExecutable,
-      missingComponents: available
-          ? const <String>[]
-          : const <String>[
-              'macos_build_host',
-            ],
-      message: available
-          ? 'macOS target can be evaluated locally.'
-          : 'macOS requires a macOS build host.',
-    );
+  bool _flutterHostAvailable() {
+    // Su Android non dichiariamo una toolchain Flutter
+    // eseguibile solo perché esiste un file "flutter".
+    return !Platform.isAndroid;
   }
 
-  WorkshopToolchainInfo _iosInfo({
-    required _CommandInspection flutter,
-  }) {
-    final available =
-        Platform.isMacOS &&
-        _hostCanRunFlutter();
-
-    return WorkshopToolchainInfo(
-      target: WorkshopBuildTarget.ios,
-      status: available
-          ? WorkshopToolchainStatus.available
-          : WorkshopToolchainStatus.unavailable,
-      executionMode:
-          WorkshopBuildExecutionMode.offlineLocal,
-      name: 'Flutter iOS local toolchain',
-      version: flutter.version,
-      path: _configuration.flutterExecutable,
-      missingComponents: available
-          ? const <String>[]
-          : const <String>[
-              'ios_build_host',
-            ],
-      message: available
-          ? 'iOS target can be evaluated locally.'
-          : 'iOS requires a macOS/Xcode build host.',
-    );
-  }
-
-  bool _hostCanRunFlutter() {
-    if (Platform.isAndroid) {
-      // Questo è volutamente conservativo.
-      //
-      // Avere un binario Flutter archiviato sul dispositivo
-      // non significa automaticamente avere un ambiente POSIX
-      // completo in cui eseguirlo.
-      return false;
-    }
-
+  bool _androidHostAvailable() {
+    // Il detector è conservativo:
+    // Android SDK + Java devono essere eseguibili
+    // su un host compatibile.
     return Platform.isLinux ||
         Platform.isWindows ||
         Platform.isMacOS;
   }
 
-  bool _hostCanRunAndroid() {
-    return Platform.isLinux ||
-        Platform.isWindows ||
-        Platform.isMacOS;
-  }
-
-  List<String> _standardAndroidSdkPaths() {
-    if (Platform.isWindows) {
-      final localAppData =
-          Platform.environment['LOCALAPPDATA'];
-
-      if (localAppData != null &&
-          localAppData.isNotEmpty) {
-        return <String>[
-          '$localAppData/Android/Sdk',
-        ];
-      }
+  String _buildReportMessage({
+    required _CommandCheck flutter,
+    required _CommandCheck dart,
+    required _CommandCheck java,
+    required _AndroidCheck android,
+  }) {
+    if (!flutter.available) {
+      return 'Flutter is not available.';
     }
 
-    final home =
-        Platform.environment['HOME'];
-
-    if (home != null &&
-        home.isNotEmpty) {
-      return <String>[
-        '$home/Android/Sdk',
-        '$home/android-sdk',
-      ];
+    if (!dart.available) {
+      return 'Dart could not be verified.';
     }
 
-    return const <String>[];
-  }
-
-  Future<bool> _directoryExists(
-    Directory directory,
-  ) {
-    return directory.exists();
-  }
-
-  Future<bool> _directoryHasChildDirectory(
-    Directory directory,
-  ) async {
-    if (!await directory.exists()) {
-      return false;
+    if (!java.available) {
+      return 'Java is not available.';
     }
 
-    await for (final entity
-        in directory.list()) {
-      if (entity is Directory) {
-        return true;
-      }
+    if (!android.available) {
+      return 'Flutter is available but Android SDK is incomplete.';
     }
 
-    return false;
+    return 'Local toolchain inspection completed.';
   }
 
   Future<_CommandResult> _run(
@@ -715,12 +620,14 @@ final class WorkshopLocalToolchainDetector {
     List<String> arguments,
   ) async {
     try {
-      final environment = <String, String>{
+      final environment =
+          <String, String>{
         ...Platform.environment,
         ..._configuration.environment,
       };
 
-      final process = await Process.start(
+      final process =
+          await Process.start(
         executable,
         arguments,
         environment: environment,
@@ -737,11 +644,8 @@ final class WorkshopLocalToolchainDetector {
               .transform(utf8.decoder)
               .join();
 
-      final exitCodeFuture =
-          process.exitCode;
-
       final exitCode =
-          await exitCodeFuture.timeout(
+          await process.exitCode.timeout(
         _configuration.timeout,
         onTimeout: () {
           process.kill();
@@ -780,77 +684,62 @@ final class WorkshopLocalToolchainDetector {
     }
   }
 
-  String? _extractJsonString(
-    String output,
-    String key,
-  ) {
-    final trimmed =
-        output.trim();
+  Future<bool> _hasDirectory(
+    String path,
+  ) async {
+    final directory = Directory(path);
 
-    if (trimmed.isEmpty) {
-      return null;
+    if (!await directory.exists()) {
+      return false;
     }
 
-    try {
-      final decoded =
-          jsonDecode(trimmed);
-
-      if (decoded is Map &&
-          decoded[key] is String) {
-        return decoded[key] as String;
+    await for (final entity
+        in directory.list()) {
+      if (entity is Directory) {
+        return true;
       }
-    } catch (_) {
-      // Flutter potrebbe produrre output
-      // aggiuntivo. Utilizziamo il fallback.
     }
 
-    return _firstUsefulLine(trimmed);
+    return false;
   }
 
-  String? _firstUsefulLine(
+  String _join(
+    String first,
+    String second,
+  ) {
+    final separator =
+        Platform.pathSeparator;
+
+    final left =
+        first.endsWith(separator)
+            ? first.substring(
+                0,
+                first.length - 1,
+              )
+            : first;
+
+    final right =
+        second.startsWith(separator)
+            ? second.substring(1)
+            : second;
+
+    return '$left$separator$right';
+  }
+
+  String? _firstLine(
     String value,
   ) {
     for (final line
         in value.split(RegExp(r'\r?\n'))) {
-      final trimmed =
+      final result =
           line.trim();
 
-      if (trimmed.isNotEmpty) {
-        return trimmed;
+      if (result.isNotEmpty) {
+        return result;
       }
     }
 
     return null;
-  }
-
-  String? _reportMessage({
-    required _CommandInspection flutter,
-    required _CommandInspection dart,
-    required _CommandInspection java,
-    required _AndroidSdkInspection androidSdk,
-  }) {
-    if (!flutter.available) {
-      return 'Flutter SDK is not available.';
-    }
-
-    if (!dart.available) {
-      return 'Flutter is available but Dart could not be verified.';
-    }
-
-    if (!java.available) {
-      return 'Java is not available.';
-    }
-
-    if (!androidSdk.available) {
-      return 'Flutter is available, but the Android SDK '
-          'is incomplete or unavailable.';
-    }
-
-    return 'Local toolchain inspection completed.';
-  }
-
-  Future<void> dispose() async {
-    _disposed = true;
   }
 
   void _ensureAvailable() {
@@ -861,45 +750,29 @@ final class WorkshopLocalToolchainDetector {
       );
     }
   }
+
+  Future<void> dispose() async {
+    _disposed = true;
+  }
 }
 
-final class _CommandInspection {
-  const _CommandInspection({
+final class _CommandCheck {
+  const _CommandCheck({
     required this.available,
-    this.executable,
     this.version,
-    this.stdout = '',
+    this.output = '',
     this.message,
   });
 
-  factory _CommandInspection.available({
-    required String executable,
-    String? version,
-    String stdout = '',
-  }) {
-    return _CommandInspection(
-      available: true,
-      executable: executable,
-      version: version,
-      stdout: stdout,
-    );
-  }
-
-  factory _CommandInspection.unavailable({
-    required String executable,
-    String? message,
-  }) {
-    return _CommandInspection(
-      available: false,
-      executable: executable,
-      message: message,
-    );
-  }
+  const _CommandCheck.unavailable({
+    this.message,
+  })  : available = false,
+        version = null,
+        output = '';
 
   final bool available;
-  final String? executable;
   final String? version;
-  final String stdout;
+  final String output;
   final String? message;
 }
 
@@ -919,22 +792,18 @@ final class _CommandResult {
   bool get success => exitCode == 0;
 }
 
-final class _AndroidSdkInspection {
-  const _AndroidSdkInspection({
+final class _AndroidCheck {
+  const _AndroidCheck({
     required this.available,
     required this.path,
-    required this.platformToolsAvailable,
-    required this.buildToolsAvailable,
-    required this.platformsAvailable,
-    required this.message,
+    required this.platformTools,
+    required this.buildTools,
+    required this.platforms,
   });
 
   final bool available;
   final String? path;
-
-  final bool platformToolsAvailable;
-  final bool buildToolsAvailable;
-  final bool platformsAvailable;
-
-  final String message;
+  final bool platformTools;
+  final bool buildTools;
+  final bool platforms;
 }
