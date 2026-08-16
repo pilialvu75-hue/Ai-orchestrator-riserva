@@ -931,26 +931,30 @@ final class WorkshopLocalToolchainManager {
   }
 
   Future<File> _partialFile(
-    WorkshopToolchainComponent component,
-  ) async {
-    final partialRoot =
-        _partialRoot ??
-            await initialize()
-                .then(
-                  (_) => _partialRoot!,
-                );
+  WorkshopToolchainComponent component,
+) async {
+  if (_partialRoot == null) {
+    await initialize();
+  }
 
-    final safeId =
-        _safeFileName(
-      '${component.id}-${component.version}',
-    );
+  final partialRoot = _partialRoot;
 
-    return File(
-      p.join(
-        partialRoot.path,
-        '$safeId.part',
-      ),
+  if (partialRoot == null) {
+    throw StateError(
+      'Workshop toolchain partial directory could not be initialized.',
     );
+  }
+
+  final safeId = _safeFileName(
+    '${component.id}-${component.version}',
+  );
+
+  return File(
+    p.join(
+      partialRoot.path,
+      '$safeId.part',
+    ),
+  );
   }
 
   String _safeFileName(
