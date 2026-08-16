@@ -10,13 +10,14 @@ final class WorkshopTaskPlan {
     required this.id,
     required this.projectObjective,
     required this.tasks,
-    this.createdAt,
+    DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toUtc();
 
   final String id;
   final String projectObjective;
   final List<WorkshopTaskContract> tasks;
   final DateTime createdAt;
+  
 
   bool get isEmpty => tasks.isEmpty;
 
