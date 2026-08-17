@@ -1,3 +1,4 @@
+import 'workshop_budget_controller.dart';
 import 'workshop_resource_budget_policy.dart';
 import 'workshop_task_contract.dart';
 import 'workshop_task_resource_allocator.dart';
