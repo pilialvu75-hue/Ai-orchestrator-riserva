@@ -627,7 +627,3 @@ final class WorkshopExecutionJournal {
     return 0;
   }
 }
-
-Questo è volutamente un componente passivo: registra e analizza, ma non prende decisioni operative. È importante perché in futuro potremo alimentarlo con dati provenienti da Local, OpenAI, Gemini, Claude, Grok, GitHub Agent senza cambiare la struttura del Cantiere.
-
-Fai ora la build verde; se passa, procediamo con il collegamento del Journal alla pipeline.
