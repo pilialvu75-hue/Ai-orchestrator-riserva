@@ -1,81 +1,72 @@
+import 'workshop_build_lab.dart';
 import 'workshop_local_toolchain_service.dart';
 
-/// Modalità operative del Cantiere.
-///
-/// Il router sceglie il percorso, ma non esegue direttamente
-/// l'operazione.
-enum WorkshopExecutionMode {
+/// Preferenza operativa richiesta al Cantiere.
+enum WorkshopExecutionPreference {
+  automatic,
   local,
   offline,
   github,
   hybrid,
 }
 
-/// Motivo principale della scelta del router.
-enum WorkshopExecutionReason {
-  explicitOfflineRequest,
-  explicitGithubRequest,
-  explicitHybridRequest,
-  localToolchainAvailable,
-  localToolchainUnavailable,
-  offlinePreferred,
-  networkUnavailable,
-  deviceConstrained,
-  cloudPreferred,
-  hybridPreferred,
-  noLocalCapability,
-}
-
-/// Vincoli dichiarati dall'utente.
+/// Vincoli operativi dichiarati dall'utente.
 ///
-/// Questi valori possono essere prodotti dalla UI in futuro:
-///
-/// - "telefono lento"
-/// - "batteria scarica"
-/// - "sono in viaggio"
-/// - "problemi di rete"
-/// - "fai tutto online"
-/// - "fai tutto offline"
+/// Esempi:
+/// - telefono lento;
+/// - batteria scarica;
+/// - viaggio;
+/// - rete assente;
+/// - richiesta esplicita di GitHub;
+/// - richiesta esplicita di lavoro offline.
 final class WorkshopExecutionConstraints {
   const WorkshopExecutionConstraints({
-    this.forceOffline = false,
-    this.forceGithub = false,
-    this.preferHybrid = false,
+    this.preference = WorkshopExecutionPreference.automatic,
     this.networkAvailable = true,
     this.deviceSlow = false,
     this.batteryLow = false,
     this.travelMode = false,
-    this.cloudAvailable = true,
     this.githubAvailable = true,
+    this.cloudAvailable = true,
   });
 
-  final bool forceOffline;
-  final bool forceGithub;
-  final bool preferHybrid;
+  final WorkshopExecutionPreference preference;
 
   final bool networkAvailable;
-
   final bool deviceSlow;
   final bool batteryLow;
   final bool travelMode;
 
-  final bool cloudAvailable;
   final bool githubAvailable;
+  final bool cloudAvailable;
 
   bool get deviceConstrained =>
       deviceSlow || batteryLow;
 
   bool get offlinePreferred =>
-      forceOffline || travelMode;
+      preference == WorkshopExecutionPreference.offline ||
+      travelMode;
+}
 
-  bool get remotePreferred =>
-      forceGithub ||
-      deviceConstrained;
+/// Motivo della decisione del router.
+enum WorkshopExecutionRouteReason {
+  explicitLocal,
+  explicitOffline,
+  explicitGithub,
+  explicitHybrid,
+  localToolchainAvailable,
+  offlineToolchainAvailable,
+  networkUnavailable,
+  deviceConstrained,
+  localToolchainUnavailable,
+  githubUnavailable,
+  noExecutionResource,
 }
 
 /// Decisione prodotta dal router.
 ///
-/// È un contratto decisionale e non esegue alcuna operazione.
+/// Il router non esegue la task.
+/// Restituisce esclusivamente una decisione.
 final class WorkshopExecutionRoute {
   const WorkshopExecutionRoute({
     required this.mode,
@@ -88,9 +79,8 @@ final class WorkshopExecutionRoute {
     this.warnings = const <String>[],
   });
 
-  final WorkshopExecutionMode mode;
-
-  final WorkshopExecutionReason reason;
+  final WorkshopBuildExecutionMode mode;
+  final WorkshopExecutionRouteReason reason;
 
   final String explanation;
 
@@ -102,15 +92,17 @@ final class WorkshopExecutionRoute {
   final List<String> warnings;
 
   bool get isLocal =>
-      mode == WorkshopExecutionMode.local ||
-      mode == WorkshopExecutionMode.offline;
+      mode == WorkshopBuildExecutionMode.local ||
+      mode == WorkshopBuildExecutionMode.offlineLocal;
 
   bool get isOffline =>
-      mode == WorkshopExecutionMode.offline;
+      mode == WorkshopBuildExecutionMode.offlineLocal;
 
   bool get isRemote =>
-      mode == WorkshopExecutionMode.github ||
-      mode == WorkshopExecutionMode.hybrid;
+      mode == WorkshopBuildExecutionMode.remote;
+
+  bool get requiresRemoteBuilder =>
+      mode == WorkshopBuildExecutionMode.remote;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -120,22 +112,26 @@ final class WorkshopExecutionRoute {
       'networkRequired': networkRequired,
       'requiresGithub': requiresGithub,
       'requiresCloudAi': requiresCloudAi,
-      'requiresLocalToolchain': requiresLocalToolchain,
+      'requiresLocalToolchain':
+          requiresLocalToolchain,
       'warnings': warnings,
+      'isLocal': isLocal,
+      'isOffline': isOffline,
+      'isRemote': isRemote,
     };
   }
 }
 
-/// Router principale del Cantiere.
+/// Router operativo del Cantiere.
 ///
 /// Responsabilità:
 ///
 /// - scegliere LOCAL;
-/// - scegliere OFFLINE;
-/// - scegliere GITHUB;
-/// - scegliere HYBRID;
+/// - scegliere OFFLINE LOCAL;
+/// - scegliere REMOTE/GitHub;
+/// - identificare HYBRID come percorso AI-assistito;
 /// - rispettare i vincoli espliciti dell'utente;
-/// - evitare di consumare risorse remote inutilmente.
+/// - evitare operazioni remote inutili.
 ///
 /// NON:
 ///
@@ -146,7 +142,9 @@ final class WorkshopExecutionRoute {
 /// - consuma crediti;
 /// - modifica file.
 ///
-/// Il router produce esclusivamente una decisione.
+/// La modalità `hybrid` qui rappresenta una decisione di
+/// orchestrazione. L'effettivo collegamento ai provider AI
+/// verrà effettuato da un livello superiore.
 final class WorkshopExecutionModeRouter {
   const WorkshopExecutionModeRouter({
     required this.toolchainService,
@@ -156,27 +154,69 @@ final class WorkshopExecutionModeRouter {
 
   /// Calcola il percorso operativo.
   WorkshopExecutionRoute route({
-    required WorkshopExecutionConstraints constraints,
-    String? target,
+    required WorkshopBuildTarget target,
+    WorkshopExecutionConstraints constraints =
+        const WorkshopExecutionConstraints(),
   }) {
-    // 1. Richiesta esplicita OFFLINE:
-    //
-    // Ha precedenza su qualsiasi preferenza automatica.
-    if (constraints.forceOffline) {
-      return _offlineRoute(
-        constraints,
-        target: target,
+    final localAvailable =
+        _localAvailable(target);
+
+    final offlineAvailable =
+        _offlineAvailable(target);
+
+    // ----------------------------------------------------------
+    // 1. OFFLINE esplicito.
+    // ----------------------------------------------------------
+    if (constraints.preference ==
+        WorkshopExecutionPreference.offline) {
+      if (offlineAvailable) {
+        return const WorkshopExecutionRoute(
+          mode:
+              WorkshopBuildExecutionMode.offlineLocal,
+          reason:
+              WorkshopExecutionRouteReason.explicitOffline,
+          explanation:
+              'Offline execution was explicitly requested '
+              'and the target is available locally.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+        );
+      }
+
+      return const WorkshopExecutionRoute(
+        mode:
+            WorkshopBuildExecutionMode.offlineLocal,
+        reason:
+            WorkshopExecutionRouteReason.explicitOffline,
+        explanation:
+            'Offline execution was explicitly requested, '
+            'but the target is not confirmed as locally available.',
+        networkRequired: false,
+        requiresGithub: false,
+        requiresCloudAi: false,
+        requiresLocalToolchain: true,
+        warnings: <String>[
+          'Offline execution cannot currently be confirmed.',
+          'No remote fallback is selected automatically.',
+        ],
       );
     }
 
-    // 2. Richiesta esplicita GitHub.
-    if (constraints.forceGithub) {
-      if (constraints.githubAvailable) {
+    // ----------------------------------------------------------
+    // 2. GitHub esplicito.
+    // ----------------------------------------------------------
+    if (constraints.preference ==
+        WorkshopExecutionPreference.github) {
+      if (constraints.githubAvailable &&
+          constraints.networkAvailable) {
         return const WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.github,
-          reason: WorkshopExecutionReason.explicitGithubRequest,
+          mode: WorkshopBuildExecutionMode.remote,
+          reason:
+              WorkshopExecutionRouteReason.explicitGithub,
           explanation:
-              'The user explicitly requested GitHub execution.',
+              'GitHub remote execution was explicitly requested.',
           networkRequired: true,
           requiresGithub: true,
           requiresCloudAi: false,
@@ -185,30 +225,37 @@ final class WorkshopExecutionModeRouter {
       }
 
       return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.local,
-        reason: WorkshopExecutionReason.localToolchainAvailable,
+        mode: WorkshopBuildExecutionMode.remote,
+        reason:
+            WorkshopExecutionRouteReason.githubUnavailable,
         explanation:
-            'GitHub was requested but is unavailable. '
-            'Local execution remains available.',
-        networkRequired: false,
-        requiresGithub: false,
+            'GitHub execution was requested but is not currently '
+            'available.',
+        networkRequired: true,
+        requiresGithub: true,
         requiresCloudAi: false,
-        requiresLocalToolchain: true,
+        requiresLocalToolchain: false,
         warnings: <String>[
-          'GitHub was explicitly requested but is unavailable.',
+          'GitHub execution cannot currently be started.',
         ],
       );
     }
 
+    // ----------------------------------------------------------
     // 3. HYBRID esplicito.
-    if (constraints.preferHybrid) {
+    // ----------------------------------------------------------
+    if (constraints.preference ==
+        WorkshopExecutionPreference.hybrid) {
       if (constraints.cloudAvailable &&
           constraints.networkAvailable) {
         return const WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.hybrid,
-          reason: WorkshopExecutionReason.explicitHybridRequest,
+          mode: WorkshopBuildExecutionMode.remote,
+          reason:
+              WorkshopExecutionRouteReason.explicitHybrid,
           explanation:
-              'Hybrid execution was explicitly preferred.',
+              'Hybrid execution was explicitly requested. '
+              'The higher-level AI coordinator may combine local '
+              'execution with available cloud AI resources.',
           networkRequired: true,
           requiresGithub: false,
           requiresCloudAi: true,
@@ -216,35 +263,46 @@ final class WorkshopExecutionModeRouter {
         );
       }
 
-      // Se HYBRID non è disponibile, proviamo LOCAL.
-      if (target != null &&
-          _localAvailable(target)) {
-        return const WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.local,
-          reason: WorkshopExecutionReason.localToolchainAvailable,
+      if (localAvailable) {
+        return WorkshopExecutionRoute(
+          mode: offlineAvailable
+              ? WorkshopBuildExecutionMode.offlineLocal
+              : WorkshopBuildExecutionMode.local,
+          reason:
+              WorkshopExecutionRouteReason.localToolchainAvailable,
           explanation:
-              'Hybrid execution is unavailable; '
-              'local execution is available.',
+              'Hybrid resources are unavailable; '
+              'local execution remains available.',
           networkRequired: false,
           requiresGithub: false,
           requiresCloudAi: false,
           requiresLocalToolchain: true,
+          warnings: const <String>[
+            'Cloud AI is currently unavailable.',
+            'Falling back to local execution.',
+          ],
         );
       }
     }
 
-    // 4. Nessuna rete:
-    //
-    // Non tentiamo GitHub né AI cloud.
-    if (!constraints.networkAvailable) {
-      if (target != null &&
-          _localAvailable(target)) {
+    // ----------------------------------------------------------
+    // 4. LOCAL esplicito.
+    // ----------------------------------------------------------
+    if (constraints.preference ==
+        WorkshopExecutionPreference.local) {
+      if (localAvailable) {
         return WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.offline,
-          reason: WorkshopExecutionReason.networkUnavailable,
+          mode: offlineAvailable
+              ? WorkshopBuildExecutionMode.offlineLocal
+              : WorkshopBuildExecutionMode.local,
+          reason:
+              WorkshopExecutionRouteReason.explicitLocal,
           explanation:
-              'Network is unavailable and local execution '
-              'is available.',
+              offlineAvailable
+                  ? 'Local execution was requested and '
+                    'the target is available offline.'
+                  : 'Local execution was requested and '
+                    'the target is available locally.',
           networkRequired: false,
           requiresGithub: false,
           requiresCloudAi: false,
@@ -253,30 +311,91 @@ final class WorkshopExecutionModeRouter {
       }
 
       return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.offline,
-        reason: WorkshopExecutionReason.noLocalCapability,
+        mode: WorkshopBuildExecutionMode.local,
+        reason:
+            WorkshopExecutionRouteReason.localToolchainUnavailable,
         explanation:
-            'Network is unavailable and no remote execution '
-            'can be requested.',
+            'Local execution was explicitly requested but '
+            'the required local toolchain is unavailable.',
+        networkRequired: false,
+        requiresGithub: false,
+        requiresCloudAi: false,
+        requiresLocalToolchain: true,
+        warnings: <String>[
+          'Required local toolchain is unavailable.',
+        ],
+      );
+    }
+
+    // ----------------------------------------------------------
+    // 5. Nessuna rete.
+    // ----------------------------------------------------------
+    if (!constraints.networkAvailable) {
+      if (offlineAvailable) {
+        return const WorkshopExecutionRoute(
+          mode:
+              WorkshopBuildExecutionMode.offlineLocal,
+          reason:
+              WorkshopExecutionRouteReason.networkUnavailable,
+          explanation:
+              'Network is unavailable and the target can '
+              'be executed locally offline.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+        );
+      }
+
+      if (localAvailable) {
+        return const WorkshopExecutionRoute(
+          mode: WorkshopBuildExecutionMode.local,
+          reason:
+              WorkshopExecutionRouteReason.networkUnavailable,
+          explanation:
+              'Network is unavailable. Local execution is '
+              'available, but offline capability was not confirmed.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+          warnings: <String>[
+            'Offline dependency availability was not confirmed.',
+          ],
+        );
+      }
+
+      return const WorkshopExecutionRoute(
+        mode:
+            WorkshopBuildExecutionMode.offlineLocal,
+        reason:
+            WorkshopExecutionRouteReason.noExecutionResource,
+        explanation:
+            'Network is unavailable and the requested target '
+            'is not locally available.',
         networkRequired: false,
         requiresGithub: false,
         requiresCloudAi: false,
         requiresLocalToolchain: false,
         warnings: <String>[
-          'No local capability was confirmed.',
-          'Remote execution is unavailable without network.',
+          'No local execution capability is available.',
+          'Remote execution cannot be requested without network.',
         ],
       );
     }
 
-    // 5. Telefono lento / batteria bassa:
+    // ----------------------------------------------------------
+    // 6. Telefono lento / batteria bassa.
     //
-    // Evitiamo di forzare il telefono se abbiamo un builder remoto.
-    if (constraints.remotePreferred) {
+    // In automatic mode preferiamo il builder remoto se
+    // disponibile, evitando di consumare inutilmente il telefono.
+    // ----------------------------------------------------------
+    if (constraints.deviceConstrained) {
       if (constraints.githubAvailable) {
         return const WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.github,
-          reason: WorkshopExecutionReason.deviceConstrained,
+          mode: WorkshopBuildExecutionMode.remote,
+          reason:
+              WorkshopExecutionRouteReason.deviceConstrained,
           explanation:
               'The device is constrained, so remote GitHub '
               'execution is preferred.',
@@ -289,27 +408,99 @@ final class WorkshopExecutionModeRouter {
 
       if (constraints.cloudAvailable) {
         return const WorkshopExecutionRoute(
-          mode: WorkshopExecutionMode.hybrid,
-          reason: WorkshopExecutionReason.deviceConstrained,
+          mode: WorkshopBuildExecutionMode.remote,
+          reason:
+              WorkshopExecutionRouteReason.deviceConstrained,
           explanation:
-              'The device is constrained and GitHub is unavailable; '
-              'cloud-assisted execution is preferred.',
+              'The device is constrained and GitHub is '
+              'unavailable. Cloud-assisted execution is available.',
           networkRequired: true,
           requiresGithub: false,
           requiresCloudAi: true,
           requiresLocalToolchain: false,
         );
       }
+
+      if (localAvailable) {
+        return WorkshopExecutionRoute(
+          mode: offlineAvailable
+              ? WorkshopBuildExecutionMode.offlineLocal
+              : WorkshopBuildExecutionMode.local,
+          reason:
+              WorkshopExecutionRouteReason.deviceConstrained,
+          explanation:
+              'Remote resources are unavailable; local execution '
+              'is the remaining available option.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+          warnings: const <String>[
+            'Device is constrained.',
+            'Remote resources were unavailable.',
+          ],
+        );
+      }
     }
 
-    // 6. LOCAL normale.
-    if (target != null &&
-        _localAvailable(target)) {
-      return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.local,
-        reason: WorkshopExecutionReason.localToolchainAvailable,
-        explanation:
-            'The requested target is available locally.',
+    // ----------------------------------------------------------
+    // 7. Modalità viaggio.
+    //
+    // Se l'utente è in viaggio, preferiamo offline quando
+    // possibile, ma senza impedire il lavoro locale normale.
+    // ----------------------------------------------------------
+    if (constraints.travelMode) {
+      if (offlineAvailable) {
+        return const WorkshopExecutionRoute(
+          mode:
+              WorkshopBuildExecutionMode.offlineLocal,
+          reason:
+              WorkshopExecutionRouteReason.offlineToolchainAvailable,
+          explanation:
+              'Travel mode is active and offline local '
+              'execution is available.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+        );
+      }
+
+      if (localAvailable) {
+        return const WorkshopExecutionRoute(
+          mode: WorkshopBuildExecutionMode.local,
+          reason:
+              WorkshopExecutionRouteReason.localToolchainAvailable,
+          explanation:
+              'Travel mode is active. Local execution is '
+              'available although offline capability was not confirmed.',
+          networkRequired: false,
+          requiresGithub: false,
+          requiresCloudAi: false,
+          requiresLocalToolchain: true,
+        );
+      }
+    }
+
+    // ----------------------------------------------------------
+    // 8. Automatico: LOCAL prima.
+    //
+    // Evitiamo di consumare risorse remote quando il telefono
+    // è perfettamente in grado di svolgere la task.
+    // ----------------------------------------------------------
+    if (localAvailable) {
+      return WorkshopExecutionRoute(
+        mode: offlineAvailable
+            ? WorkshopBuildExecutionMode.offlineLocal
+            : WorkshopBuildExecutionMode.local,
+        reason: offlineAvailable
+            ? WorkshopExecutionRouteReason
+                .offlineToolchainAvailable
+            : WorkshopExecutionRouteReason
+                .localToolchainAvailable,
+        explanation: offlineAvailable
+            ? 'Local execution is available offline.'
+            : 'Local execution is available.',
         networkRequired: false,
         requiresGithub: false,
         requiresCloudAi: false,
@@ -317,13 +508,17 @@ final class WorkshopExecutionModeRouter {
       );
     }
 
-    // 7. GitHub come builder remoto.
+    // ----------------------------------------------------------
+    // 9. Automatico: GitHub come builder.
+    // ----------------------------------------------------------
     if (constraints.githubAvailable) {
       return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.github,
-        reason: WorkshopExecutionReason.localToolchainUnavailable,
+        mode: WorkshopBuildExecutionMode.remote,
+        reason:
+            WorkshopExecutionRouteReason
+                .localToolchainUnavailable,
         explanation:
-            'The local toolchain is unavailable; '
+            'The target is not available locally. '
             'GitHub is available as a remote builder.',
         networkRequired: true,
         requiresGithub: true,
@@ -332,14 +527,18 @@ final class WorkshopExecutionModeRouter {
       );
     }
 
-    // 8. HYBRID come fallback AI.
+    // ----------------------------------------------------------
+    // 10. Automatico: cloud AI / HYBRID.
+    // ----------------------------------------------------------
     if (constraints.cloudAvailable) {
       return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.hybrid,
-        reason: WorkshopExecutionReason.cloudPreferred,
+        mode: WorkshopBuildExecutionMode.remote,
+        reason:
+            WorkshopExecutionRouteReason
+                .localToolchainUnavailable,
         explanation:
-            'Local and GitHub execution are unavailable; '
-            'cloud-assisted execution remains available.',
+            'Local and GitHub build resources are unavailable. '
+            'Cloud-assisted orchestration remains available.',
         networkRequired: true,
         requiresGithub: false,
         requiresCloudAi: true,
@@ -347,10 +546,13 @@ final class WorkshopExecutionModeRouter {
       );
     }
 
-    // 9. Nessuna risorsa disponibile.
+    // ----------------------------------------------------------
+    // 11. Nessuna risorsa.
+    // ----------------------------------------------------------
     return const WorkshopExecutionRoute(
-      mode: WorkshopExecutionMode.offline,
-      reason: WorkshopExecutionReason.noLocalCapability,
+      mode: WorkshopBuildExecutionMode.remote,
+      reason:
+          WorkshopExecutionRouteReason.noExecutionResource,
       explanation:
           'No usable local or remote execution resource '
           'is currently available.',
@@ -364,63 +566,15 @@ final class WorkshopExecutionModeRouter {
     );
   }
 
-  WorkshopExecutionRoute _offlineRoute(
-    WorkshopExecutionConstraints constraints, {
-    String? target,
-  }) {
-    if (target != null &&
-        _localAvailable(target)) {
-      return const WorkshopExecutionRoute(
-        mode: WorkshopExecutionMode.offline,
-        reason: WorkshopExecutionReason.explicitOfflineRequest,
-        explanation:
-            'Offline execution was explicitly requested '
-            'and local execution is available.',
-        networkRequired: false,
-        requiresGithub: false,
-        requiresCloudAi: false,
-        requiresLocalToolchain: true,
-      );
-    }
-
-    return const WorkshopExecutionRoute(
-      mode: WorkshopExecutionMode.offline,
-      reason: WorkshopExecutionReason.explicitOfflineRequest,
-      explanation:
-          'Offline execution was explicitly requested, '
-          'but local toolchain capability is not confirmed.',
-      networkRequired: false,
-      requiresGithub: false,
-      requiresCloudAi: false,
-      requiresLocalToolchain: false,
-      warnings: <String>[
-        'Requested offline mode cannot guarantee execution.',
-        'No remote fallback will be attempted automatically.',
-      ],
-    );
+  bool _localAvailable(
+    WorkshopBuildTarget target,
+  ) {
+    return toolchainService.canBuildLocally(target);
   }
 
-  bool _localAvailable(String target) {
-    // Il router non conosce direttamente Flutter, Dart o Android SDK.
-    //
-    // Per ora utilizziamo il service solo se il target corrisponde
-    // a una capability già esposta dal report.
-    //
-    // Il collegamento definitivo con WorkshopBuildTarget verrà
-    // effettuato nel componente adapter successivo.
-    final report = toolchainService.lastReport;
-
-    if (report == null) {
-      return false;
-    }
-
-    for (final entry in report.targets.entries) {
-      if (entry.key.name == target &&
-          entry.value.isAvailable) {
-        return true;
-      }
-    }
-
-    return false;
+  bool _offlineAvailable(
+    WorkshopBuildTarget target,
+  ) {
+    return toolchainService.canBuildOffline(target);
   }
 }
