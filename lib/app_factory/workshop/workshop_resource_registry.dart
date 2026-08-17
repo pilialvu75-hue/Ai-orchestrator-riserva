@@ -778,7 +778,6 @@ abstract final class WorkshopResourceDefaults {
           estimatedLatencyMs,
       capabilities: const <WorkshopResourceCapability>[
         WorkshopResourceCapability.codeGeneration,
-        WorkshopResourceCapability.codeModification,
         WorkshopResourceCapability.repositoryWork,
         WorkshopResourceCapability.codeReview,
         WorkshopResourceCapability.testing,
