@@ -1,0 +1,302 @@
+import 'workshop_resource_budget_policy.dart';
+import 'workshop_task_contract.dart';
+import 'workshop_task_resource_allocator.dart';
+
+/// Risultato finale del tentativo di allocazione.
+///
+/// L'allocator decide la risorsa in base alle capacità e allo stato.
+/// Il Budget Controller verifica invece che quella scelta sia
+/// economicamente autorizzabile.
+///
+/// Questo oggetto unisce le due decisioni senza eseguire la task.
+final class WorkshopResourceAllocationDecision {
+  const WorkshopResourceAllocationDecision({
+    required this.authorized,
+    required this.taskId,
+    this.allocation,
+    this.reason,
+    this.fallbackResource,
+  });
+
+  final bool authorized;
+  final String taskId;
+  final WorkshopResourceAllocation? allocation;
+  final String? reason;
+  final WorkshopTaskResource? fallbackResource;
+
+  bool get hasAllocation =>
+      allocation != null;
+
+  bool get isLocal =>
+      allocation?.isLocal ?? false;
+
+  bool get isGithub =>
+      allocation?.isGithub ?? false;
+
+  bool get isHybrid =>
+      allocation?.isHybrid ?? false;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'authorized': authorized,
+      'taskId': taskId,
+      'allocation': allocation?.toJson(),
+      'reason': reason,
+      'fallbackResource':
+          fallbackResource?.name,
+    };
+  }
+}
+
+/// Controller che collega:
+///
+///     Resource Allocator
+///             ↓
+///     Budget Controller
+///             ↓
+///     Execution Dispatcher
+///
+/// Il controller NON:
+///
+/// - esegue task;
+/// - chiama provider AI;
+/// - modifica file;
+/// - avvia GitHub Actions;
+/// - consuma direttamente crediti.
+///
+/// Si limita a combinare:
+///
+/// 1. disponibilità tecnica della risorsa;
+/// 2. policy;
+/// 3. budget;
+/// 4. fallback.
+///
+/// Questo è particolarmente importante per HYBRID:
+/// un provider cloud non viene utilizzato semplicemente perché
+/// esiste; deve essere tecnicamente adatto e finanziariamente
+/// autorizzato.
+final class WorkshopResourceAllocationController {
+  WorkshopResourceAllocationController({
+    WorkshopTaskResourceAllocator? allocator,
+    WorkshopBudgetController? budgetController,
+  })  : _allocator =
+            allocator ??
+                const WorkshopTaskResourceAllocator(),
+        _budgetController =
+            budgetController ??
+                WorkshopBudgetController();
+
+  final WorkshopTaskResourceAllocator _allocator;
+  final WorkshopBudgetController _budgetController;
+
+  WorkshopTaskResourceAllocator get allocator =>
+      _allocator;
+
+  WorkshopBudgetController get budgetController =>
+      _budgetController;
+
+  /// Tenta di produrre una decisione completa.
+  ///
+  /// La risorsa viene prima selezionata tecnicamente,
+  /// poi sottoposta al controllo economico.
+  WorkshopResourceAllocationDecision allocate({
+    required WorkshopTaskContract task,
+    required List<WorkshopResourceSnapshot> resources,
+    bool networkAvailable = true,
+  }) {
+    final allocation = _allocator.allocate(
+      task: task,
+      resources: resources,
+      networkAvailable: networkAvailable,
+    );
+
+    if (allocation == null) {
+      return WorkshopResourceAllocationDecision(
+        authorized: false,
+        taskId: task.id,
+        reason:
+            'No technically suitable execution resource is available.',
+      );
+    }
+
+    final budgetDecision =
+        _budgetController.evaluate(
+      task: task,
+      resource: allocation.resource,
+    );
+
+    if (budgetDecision.authorized) {
+      return WorkshopResourceAllocationDecision(
+        authorized: true,
+        taskId: task.id,
+        allocation: allocation,
+      );
+    }
+
+    final fallback =
+        budgetDecision.fallbackResource;
+
+    return WorkshopResourceAllocationDecision(
+      authorized: false,
+      taskId: task.id,
+      allocation: allocation,
+      reason:
+          'The selected resource is technically suitable '
+          'but is not authorized by the current budget.',
+      fallbackResource: fallback,
+    );
+  }
+
+  /// Tenta di allocare direttamente una risorsa preferita.
+  ///
+  /// Se la risorsa preferita non è autorizzabile, viene cercata
+  /// una soluzione alternativa attraverso la policy.
+  WorkshopResourceAllocationDecision allocateWithPreference({
+    required WorkshopTaskContract task,
+    required List<WorkshopResourceSnapshot> resources,
+    required WorkshopTaskResource preferredResource,
+    bool networkAvailable = true,
+  }) {
+    final preferred =
+        resources.where(
+      (snapshot) =>
+          snapshot.resource ==
+          preferredResource,
+    );
+
+    if (preferred.isNotEmpty) {
+      final preferredAllocation =
+          _allocator.allocate(
+        task: task,
+        resources:
+            preferred.toList(growable: false),
+        networkAvailable:
+            networkAvailable,
+      );
+
+      if (preferredAllocation != null) {
+        final budgetDecision =
+            _budgetController.evaluate(
+          task: task,
+          resource:
+              preferredAllocation.resource,
+        );
+
+        if (budgetDecision.authorized) {
+          return WorkshopResourceAllocationDecision(
+            authorized: true,
+            taskId: task.id,
+            allocation:
+                preferredAllocation,
+          );
+        }
+      }
+    }
+
+    // La preferenza non è disponibile/autorizzabile:
+    // lasciamo che la policy + allocator trovino
+    // la migliore alternativa.
+    return allocate(
+      task: task,
+      resources: resources,
+      networkAvailable:
+          networkAvailable,
+    );
+  }
+
+  /// Prenota logicamente il budget della risorsa scelta.
+  ///
+  /// Non effettua alcun consumo presso il provider.
+  bool tryReserve(
+    WorkshopResourceAllocationDecision decision,
+  ) {
+    final allocation =
+        decision.allocation;
+
+    if (!decision.authorized ||
+        allocation == null) {
+      return false;
+    }
+
+    return _budgetController.tryReserve(
+      task: _taskFromAllocation(
+        allocation,
+      ),
+      resource: allocation.resource,
+    );
+  }
+
+  /// Rilascia una prenotazione.
+  void release({
+    required WorkshopTaskResource resource,
+    required double credits,
+  }) {
+    _budgetController.release(
+      resource: resource,
+      credits: credits,
+    );
+  }
+
+  /// Aggiorna il budget conosciuto di una risorsa.
+  void updateBudget({
+    required WorkshopTaskResource resource,
+    required double availableCredits,
+    double? minimumReserveCredits,
+  }) {
+    _budgetController.updateBudget(
+      resource: resource,
+      availableCredits:
+          availableCredits,
+      minimumReserveCredits:
+          minimumReserveCredits,
+    );
+  }
+
+  /// Restituisce una fotografia diagnostica.
+  Map<String, dynamic> diagnostics() {
+    return <String, dynamic>{
+      'budget':
+          _budgetController.diagnostics(),
+    };
+  }
+
+  /// Il BudgetController richiede il contratto completo della task
+  /// per effettuare una prenotazione.
+  ///
+  /// L'allocation contiene però soltanto il taskId, quindi questa
+  /// funzione non viene usata per decisioni normali.
+  ///
+  /// Viene mantenuta volutamente non operativa per evitare di
+  /// ricostruire artificialmente un WorkshopTaskContract.
+  WorkshopTaskContract _taskFromAllocation(
+    WorkshopResourceAllocation allocation,
+  ) {
+    throw StateError(
+      'A WorkshopTaskContract is required to reserve '
+      'an allocation. Use tryReserveForTask instead.',
+    );
+  }
+
+  /// Variante corretta per la prenotazione, che mantiene il
+  /// contratto originale della task.
+  bool tryReserveForTask({
+    required WorkshopTaskContract task,
+    required WorkshopResourceAllocationDecision decision,
+  }) {
+    final allocation =
+        decision.allocation;
+
+    if (!decision.authorized ||
+        allocation == null ||
+        allocation.resource ==
+            WorkshopTaskResource.local) {
+      return decision.authorized &&
+          allocation != null;
+    }
+
+    return _budgetController.tryReserve(
+      task: task,
+      resource: allocation.resource,
+    );
+  }
+}
