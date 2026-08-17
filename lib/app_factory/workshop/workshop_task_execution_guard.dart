@@ -24,7 +24,7 @@ final class WorkshopTaskExecutionGuardDecision {
     required this.taskId,
     required this.resource,
     this.providerId,
-    this.reason = 'Execution allowed.',
+    String reason = 'Execution allowed.',
   })  : isAllowed = true,
         blockReason = null,
         message = reason;
