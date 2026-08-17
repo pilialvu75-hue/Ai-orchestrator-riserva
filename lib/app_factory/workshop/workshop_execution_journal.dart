@@ -206,6 +206,52 @@ final class WorkshopExecutionRecord {
           usedFallback ?? this.usedFallback,
     );
   }
+
+  static List<String> _stringList(
+    dynamic value,
+  ) {
+    if (value is! List) {
+      return const <String>[];
+    }
+
+    return value
+        .whereType<String>()
+        .toList(
+          growable: false,
+        );
+  }
+
+  static Map<String, dynamic> _map(
+    dynamic value,
+  ) {
+    if (value is! Map) {
+      return const <String, dynamic>{};
+    }
+
+    return Map<String, dynamic>.from(
+      value,
+    );
+  }
+
+  static double _doubleValue(
+    dynamic value,
+  ) {
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return 0;
+  }
+
+  static int _intValue(
+    dynamic value,
+  ) {
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return 0;
+  }
 }
 
 /// Statistiche aggregate del Journal.
@@ -579,51 +625,5 @@ final class WorkshopExecutionJournal {
     return WorkshopExecutionJournal(
       initialRecords: records,
     );
-  }
-
-  static List<String> _stringList(
-    dynamic value,
-  ) {
-    if (value is! List) {
-      return const <String>[];
-    }
-
-    return value
-        .whereType<String>()
-        .toList(
-          growable: false,
-        );
-  }
-
-  static Map<String, dynamic> _map(
-    dynamic value,
-  ) {
-    if (value is! Map) {
-      return const <String, dynamic>{};
-    }
-
-    return Map<String, dynamic>.from(
-      value,
-    );
-  }
-
-  static double _doubleValue(
-    dynamic value,
-  ) {
-    if (value is num) {
-      return value.toDouble();
-    }
-
-    return 0;
-  }
-
-  static int _intValue(
-    dynamic value,
-  ) {
-    if (value is num) {
-      return value.toInt();
-    }
-
-    return 0;
   }
 }
