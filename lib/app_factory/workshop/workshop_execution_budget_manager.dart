@@ -43,8 +43,10 @@ final class WorkshopExecutionBudget {
 
     return WorkshopExecutionBudget(
       availableCredits: availableCredits,
-      reservedCredits: reservedCredits + credits,
-      minimumReserveCredits: minimumReserveCredits,
+      reservedCredits:
+          reservedCredits + credits,
+      minimumReserveCredits:
+          minimumReserveCredits,
     );
   }
 
@@ -61,7 +63,9 @@ final class WorkshopExecutionBudget {
     return WorkshopExecutionBudget(
       availableCredits: availableCredits,
       reservedCredits:
-          nextReserved < 0 ? 0 : nextReserved,
+          nextReserved < 0
+              ? 0
+              : nextReserved,
       minimumReserveCredits:
           minimumReserveCredits,
     );
@@ -69,11 +73,14 @@ final class WorkshopExecutionBudget {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'availableCredits': availableCredits,
-      'reservedCredits': reservedCredits,
+      'availableCredits':
+          availableCredits,
+      'reservedCredits':
+          reservedCredits,
       'minimumReserveCredits':
           minimumReserveCredits,
-      'usableCredits': usableCredits,
+      'usableCredits':
+          usableCredits,
     };
   }
 }
@@ -85,19 +92,25 @@ final class WorkshopExecutionBudget {
 /// Le risorse cloud/GitHub possono avere un budget separato.
 final class WorkshopExecutionResourceBudgets {
   const WorkshopExecutionResourceBudgets({
-    this.local = const WorkshopExecutionBudget(
-      availableCredits: double.infinity,
+    this.local =
+        const WorkshopExecutionBudget(
+      availableCredits:
+          double.infinity,
     ),
-    this.githubAgent = const WorkshopExecutionBudget(
+    this.githubAgent =
+        const WorkshopExecutionBudget(
       availableCredits: 0,
     ),
-    this.githubActions = const WorkshopExecutionBudget(
+    this.githubActions =
+        const WorkshopExecutionBudget(
       availableCredits: 0,
     ),
-    this.hybridAi = const WorkshopExecutionBudget(
+    this.hybridAi =
+        const WorkshopExecutionBudget(
       availableCredits: 0,
     ),
-    this.cloud = const WorkshopExecutionBudget(
+    this.cloud =
+        const WorkshopExecutionBudget(
       availableCredits: 0,
     ),
   });
@@ -132,9 +145,12 @@ final class WorkshopExecutionResourceBudgets {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'local': local.toJson(),
-      'githubAgent': githubAgent.toJson(),
-      'githubActions': githubActions.toJson(),
-      'hybridAi': hybridAi.toJson(),
+      'githubAgent':
+          githubAgent.toJson(),
+      'githubActions':
+          githubActions.toJson(),
+      'hybridAi':
+          hybridAi.toJson(),
       'cloud': cloud.toJson(),
     };
   }
@@ -168,8 +184,10 @@ final class WorkshopExecutionBudgetDecision {
     return <String, dynamic>{
       'authorized': authorized,
       'resource': resource.name,
-      'estimatedCredits': estimatedCredits,
-      'usableCredits': usableCredits,
+      'estimatedCredits':
+          estimatedCredits,
+      'usableCredits':
+          usableCredits,
       'reason': reason,
       'fallbackResource':
           fallbackResource?.name,
@@ -230,7 +248,8 @@ final class WorkshopExecutionBudgetManager {
         authorized: true,
         resource: resource,
         estimatedCredits: 0,
-        usableCredits: budget.usableCredits,
+        usableCredits:
+            budget.usableCredits,
         reason:
             'The selected resource has no estimated credit cost.',
         fallbackResource:
@@ -241,12 +260,16 @@ final class WorkshopExecutionBudgetManager {
       );
     }
 
-    if (budget.canAfford(estimatedCredits)) {
+    if (budget.canAfford(
+      estimatedCredits,
+    )) {
       return WorkshopExecutionBudgetDecision(
         authorized: true,
         resource: resource,
-        estimatedCredits: estimatedCredits,
-        usableCredits: budget.usableCredits,
+        estimatedCredits:
+            estimatedCredits,
+        usableCredits:
+            budget.usableCredits,
         reason:
             'Sufficient budget is available for the selected resource.',
         fallbackResource:
@@ -260,8 +283,10 @@ final class WorkshopExecutionBudgetManager {
     return WorkshopExecutionBudgetDecision(
       authorized: false,
       resource: resource,
-      estimatedCredits: estimatedCredits,
-      usableCredits: budget.usableCredits,
+      estimatedCredits:
+          estimatedCredits,
+      usableCredits:
+          budget.usableCredits,
       reason:
           'The selected resource does not have enough usable budget.',
       fallbackResource:
@@ -301,7 +326,10 @@ final class WorkshopExecutionBudgetManager {
     _budgets =
         _replaceBudget(
       resource: resource,
-      budget: current.reserve(estimated),
+      budget:
+          current.reserve(
+        estimated,
+      ),
     );
 
     return true;
@@ -322,7 +350,10 @@ final class WorkshopExecutionBudgetManager {
     _budgets =
         _replaceBudget(
       resource: resource,
-      budget: current.release(credits),
+      budget:
+          current.release(
+        credits,
+      ),
     );
   }
 
@@ -330,30 +361,49 @@ final class WorkshopExecutionBudgetManager {
   ///
   /// Utile quando l'app riceve informazioni aggiornate
   /// dal provider remoto.
+  ///
+  /// IMPORTANTE:
+  /// una sincronizzazione del budget disponibile non deve
+  /// cancellare le prenotazioni logiche già effettuate.
   void updateBudget({
     required WorkshopTaskResource resource,
     required double availableCredits,
     double minimumReserveCredits = 0,
   }) {
+    final current =
+        _budgets.forResource(resource);
+
+    final normalizedAvailable =
+        availableCredits.isNaN ||
+                availableCredits < 0
+            ? 0
+            : availableCredits;
+
+    final normalizedMinimumReserve =
+        minimumReserveCredits.isNaN ||
+                minimumReserveCredits < 0
+            ? 0
+            : minimumReserveCredits;
+
     _budgets =
         _replaceBudget(
       resource: resource,
-      budget: WorkshopExecutionBudget(
+      budget:
+          WorkshopExecutionBudget(
         availableCredits:
-            availableCredits < 0
-                ? 0
-                : availableCredits,
+            normalizedAvailable,
+        reservedCredits:
+            current.reservedCredits,
         minimumReserveCredits:
-            minimumReserveCredits < 0
-                ? 0
-                : minimumReserveCredits,
+            normalizedMinimumReserve,
       ),
     );
   }
 
   /// Cerca il primo fallback dichiarato dalla task
   /// che può essere utilizzato senza superare il budget.
-  WorkshopTaskResource? _findAffordableFallback({
+  WorkshopTaskResource?
+      _findAffordableFallback({
     required WorkshopTaskContract task,
     required WorkshopTaskResource excluded,
   }) {
@@ -375,10 +425,13 @@ final class WorkshopExecutionBudgetManager {
 
     // Local è sempre il fallback più importante:
     // costo zero e nessun credito cloud.
-    if (excluded != WorkshopTaskResource.local) {
-      final localDecision = evaluate(
+    if (excluded !=
+        WorkshopTaskResource.local) {
+      final localDecision =
+          evaluate(
         task: task,
-        resource: WorkshopTaskResource.local,
+        resource:
+            WorkshopTaskResource.local,
       );
 
       if (localDecision.authorized) {
@@ -399,37 +452,44 @@ final class WorkshopExecutionBudgetManager {
     );
   }
 
-  WorkshopExecutionResourceBudgets _replaceBudget({
+  WorkshopExecutionResourceBudgets
+      _replaceBudget({
     required WorkshopTaskResource resource,
     required WorkshopExecutionBudget budget,
   }) {
     return WorkshopExecutionResourceBudgets(
-      local: resource ==
-              WorkshopTaskResource.local
-          ? budget
-          : _budgets.local,
-      githubAgent: resource ==
-              WorkshopTaskResource.githubAgent
-          ? budget
-          : _budgets.githubAgent,
-      githubActions: resource ==
-              WorkshopTaskResource.githubActions
-          ? budget
-          : _budgets.githubActions,
-      hybridAi: resource ==
-              WorkshopTaskResource.hybridAi
-          ? budget
-          : _budgets.hybridAi,
-      cloud: resource ==
-              WorkshopTaskResource.cloud
-          ? budget
-          : _budgets.cloud,
+      local:
+          resource ==
+                  WorkshopTaskResource.local
+              ? budget
+              : _budgets.local,
+      githubAgent:
+          resource ==
+                  WorkshopTaskResource.githubAgent
+              ? budget
+              : _budgets.githubAgent,
+      githubActions:
+          resource ==
+                  WorkshopTaskResource.githubActions
+              ? budget
+              : _budgets.githubActions,
+      hybridAi:
+          resource ==
+                  WorkshopTaskResource.hybridAi
+              ? budget
+              : _budgets.hybridAi,
+      cloud:
+          resource ==
+                  WorkshopTaskResource.cloud
+              ? budget
+              : _budgets.cloud,
     );
   }
 
   Map<String, dynamic> diagnostics() {
     return <String, dynamic>{
-      'budgets': _budgets.toJson(),
+      'budgets':
+          _budgets.toJson(),
     };
   }
 }
