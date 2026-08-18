@@ -17,13 +17,9 @@ final class WorkshopTaskExecutionContext {
   });
 
   final WorkshopTaskContract task;
-
   final WorkshopResourceAllocation allocation;
-
   final String? projectId;
-
   final String sessionId;
-
   final bool networkAvailable;
 
   /// Directory virtuale/staging dove l'executor può lavorare.
@@ -51,19 +47,12 @@ final class WorkshopTaskExecutionResult {
   });
 
   final String taskId;
-
   final WorkshopTaskResource resource;
-
   final String? providerId;
-
   final bool success;
-
   final String message;
-
   final String? output;
-
   final String? artifactPath;
-
   final String? error;
 
   /// True quando il lavoro è terminato ma non può essere applicato
@@ -74,8 +63,7 @@ final class WorkshopTaskExecutionResult {
 
   bool get isFailure => !success;
 
-  bool get isCompleted =>
-      success && !requiresApproval;
+  bool get isCompleted => success && !requiresApproval;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -119,9 +107,7 @@ abstract interface class WorkshopTaskExecutor {
   String? get providerId;
 
   /// True quando l'executor può gestire la task.
-  bool canExecute(
-    WorkshopTaskExecutionContext context,
-  );
+  bool canExecute(WorkshopTaskExecutionContext context);
 
   /// Esegue la task.
   ///
@@ -161,11 +147,9 @@ final class WorkshopTaskExecutionRouter {
     WorkshopTaskResourceAllocator? allocator,
     Iterable<WorkshopTaskExecutor> executors =
         const <WorkshopTaskExecutor>[],
-  })  : _registry =
-            registry ?? WorkshopResourceRegistry(),
+  })  : _registry = registry ?? WorkshopResourceRegistry(),
         _allocator =
-            allocator ??
-                const WorkshopTaskResourceAllocator() {
+            allocator ?? const WorkshopTaskResourceAllocator() {
     registerExecutors(executors);
   }
 
@@ -181,7 +165,9 @@ final class WorkshopTaskExecutionRouter {
 
   /// Executor attualmente registrati.
   List<WorkshopTaskExecutor> get executors {
-    return List.unmodifiable(_executors);
+    return List<WorkshopTaskExecutor>.unmodifiable(
+      _executors,
+    );
   }
 
   /// Registra un executor.
@@ -228,6 +214,9 @@ final class WorkshopTaskExecutionRouter {
   /// dal Resource Allocator.
   ///
   /// Se nessuna risorsa è disponibile, la task non viene eseguita.
+  ///
+  /// Il Router non effettua fallback impliciti dopo che
+  /// l'allocatore ha selezionato una risorsa.
   Future<WorkshopTaskExecutionResult> execute({
     required WorkshopTaskContract task,
     String? projectId,
@@ -235,6 +224,15 @@ final class WorkshopTaskExecutionRouter {
     bool networkAvailable = true,
     String? stagingRoot,
   }) async {
+    if (sessionId.trim().isEmpty) {
+      return _failure(
+        task: task,
+        resource: task.preferredResource,
+        message: 'Execution session is invalid.',
+        error: 'sessionId cannot be empty.',
+      );
+    }
+
     final allocation = _allocator.allocate(
       task: task,
       resources: _registry.snapshot(),
@@ -242,14 +240,39 @@ final class WorkshopTaskExecutionRouter {
     );
 
     if (allocation == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
+      return _failure(
+        task: task,
         resource: task.preferredResource,
-        success: false,
         message:
             'No safe execution resource is currently available.',
         error:
             'Resource allocation failed for task ${task.id}.',
+      );
+    }
+
+    if (allocation.taskId != task.id) {
+      return _failure(
+        task: task,
+        resource: allocation.resource,
+        providerId: allocation.providerId,
+        message:
+            'Execution allocation does not match the task.',
+        error:
+            'Allocation taskId ${allocation.taskId} '
+            'does not match ${task.id}.',
+      );
+    }
+
+    if (allocation.requiresNetwork &&
+        !networkAvailable) {
+      return _failure(
+        task: task,
+        resource: allocation.resource,
+        providerId: allocation.providerId,
+        message:
+            'Execution requires network access.',
+        error:
+            'Network is unavailable for the allocated resource.',
       );
     }
 
@@ -268,39 +291,88 @@ final class WorkshopTaskExecutionRouter {
     );
 
     if (executor == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
+      return _failure(
+        task: task,
         resource: allocation.resource,
         providerId: allocation.providerId,
-        success: false,
         message:
-            'A resource was allocated, but no executor is registered.',
+            'A resource was allocated, but no executor '
+            'is registered.',
         error:
-            'Missing executor for '
-            '${allocation.resource.name}'
+            'Missing executor for ${allocation.resource.name}'
             '${allocation.providerId == null ? '' : ':${allocation.providerId}'}.',
       );
     }
 
     try {
-      return await executor.execute(context);
-    } catch (error) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
+      final result = await executor.execute(context);
+
+      // L'executor deve restituire il risultato della stessa task.
+      // Il Router non corregge silenziosamente risultati incoerenti.
+      if (result.taskId != task.id) {
+        return _failure(
+          task: task,
+          resource: allocation.resource,
+          providerId: allocation.providerId,
+          message:
+              'Executor returned an invalid task result.',
+          error:
+              'Result taskId ${result.taskId} '
+              'does not match ${task.id}.',
+        );
+      }
+
+      // La risorsa effettivamente usata deve corrispondere
+      // alla risorsa autorizzata dall'allocator.
+      if (result.resource != allocation.resource) {
+        return _failure(
+          task: task,
+          resource: allocation.resource,
+          providerId: allocation.providerId,
+          message:
+              'Executor returned an invalid resource result.',
+          error:
+              'Result resource ${result.resource.name} '
+              'does not match ${allocation.resource.name}.',
+        );
+      }
+
+      return result;
+    } catch (error, stackTrace) {
+      return _failure(
+        task: task,
         resource: allocation.resource,
         providerId: allocation.providerId,
-        success: false,
         message: 'Task executor failed.',
-        error: error.toString(),
+        error: '$error\n$stackTrace',
       );
     }
   }
 
+  WorkshopTaskExecutionResult _failure({
+    required WorkshopTaskContract task,
+    required WorkshopTaskResource resource,
+    required String message,
+    required String error,
+    String? providerId,
+  }) {
+    return WorkshopTaskExecutionResult(
+      taskId: task.id,
+      resource: resource,
+      providerId: providerId,
+      success: false,
+      message: message,
+      error: error,
+    );
+  }
+
   /// Determina quale executor deve ricevere la task.
   ///
-  /// Prima viene cercata una corrispondenza esatta resource + provider.
-  /// Successivamente viene cercato un executor generico della stessa
-  /// categoria.
+  /// Prima viene cercata una corrispondenza esatta
+  /// resource + provider.
+  ///
+  /// Successivamente viene cercato un executor generico
+  /// della stessa categoria.
   WorkshopTaskExecutor? _findExecutor({
     required WorkshopResourceAllocation allocation,
     required WorkshopTaskExecutionContext context,
@@ -319,7 +391,7 @@ final class WorkshopTaskExecutionRouter {
 
       if (executor.providerId == null &&
           executor.canExecute(context)) {
-        generic = executor;
+        generic ??= executor;
       }
     }
 
@@ -349,6 +421,10 @@ final class WorkshopTaskExecutionRouter {
   }) {
     final result = <WorkshopTaskExecutor>[];
 
+    if (sessionId.trim().isEmpty) {
+      return const <WorkshopTaskExecutor>[];
+    }
+
     for (final executor in _executors) {
       final allocation = WorkshopResourceAllocation(
         taskId: task.id,
@@ -356,9 +432,17 @@ final class WorkshopTaskExecutionRouter {
         providerId: executor.providerId,
         reason: 'Compatibility inspection.',
         fallbacks: const <WorkshopTaskResource>[],
-        requiresNetwork: executor.resource !=
-            WorkshopTaskResource.local,
+        estimatedCredits: 0,
+        estimatedLatencyMs: 0,
+        requiresNetwork:
+            executor.resource !=
+                WorkshopTaskResource.local,
       );
+
+      if (allocation.requiresNetwork &&
+          !networkAvailable) {
+        continue;
+      }
 
       final context = WorkshopTaskExecutionContext(
         task: task,
@@ -374,7 +458,9 @@ final class WorkshopTaskExecutionRouter {
       }
     }
 
-    return List.unmodifiable(result);
+    return List<WorkshopTaskExecutor>.unmodifiable(
+      result,
+    );
   }
 
   /// Aggiorna il registry utilizzato dal Router.
