@@ -1,5 +1,4 @@
 import 'workshop_budget_controller.dart';
-import 'workshop_resource_budget_policy.dart';
 import 'workshop_task_contract.dart';
 import 'workshop_task_resource_allocator.dart';
 
@@ -134,28 +133,31 @@ final class WorkshopResourceAllocationController {
       );
     }
 
-    final fallback =
-        budgetDecision.fallbackResource;
-
     return WorkshopResourceAllocationDecision(
       authorized: false,
       taskId: task.id,
       allocation: allocation,
       reason:
-          'The selected resource is technically suitable '
-          'but is not authorized by the current budget.',
-      fallbackResource: fallback,
+          budgetDecision.reason ??
+              'The selected resource is technically suitable '
+                  'but is not authorized by the current budget.',
+      fallbackResource:
+          budgetDecision.fallbackResource,
     );
   }
 
   /// Tenta di allocare direttamente una risorsa preferita.
   ///
   /// Se la risorsa preferita non è autorizzabile, viene cercata
-  /// una soluzione alternativa attraverso la policy.
-  WorkshopResourceAllocationDecision allocateWithPreference({
+  /// una soluzione alternativa attraverso la normale policy
+  /// dell'allocator e del Budget Controller.
+  WorkshopResourceAllocationDecision
+      allocateWithPreference({
     required WorkshopTaskContract task,
-    required List<WorkshopResourceSnapshot> resources,
-    required WorkshopTaskResource preferredResource,
+    required List<WorkshopResourceSnapshot>
+        resources,
+    required WorkshopTaskResource
+        preferredResource,
     bool networkAvailable = true,
   }) {
     final preferred =
@@ -170,7 +172,9 @@ final class WorkshopResourceAllocationController {
           _allocator.allocate(
         task: task,
         resources:
-            preferred.toList(growable: false),
+            preferred.toList(
+          growable: false,
+        ),
         networkAvailable:
             networkAvailable,
       );
@@ -191,12 +195,25 @@ final class WorkshopResourceAllocationController {
                 preferredAllocation,
           );
         }
+
+        return WorkshopResourceAllocationDecision(
+          authorized: false,
+          taskId: task.id,
+          allocation:
+              preferredAllocation,
+          reason:
+              budgetDecision.reason ??
+                  'The preferred resource is not authorized '
+                      'by the current budget.',
+          fallbackResource:
+              budgetDecision.fallbackResource,
+        );
       }
     }
 
-    // La preferenza non è disponibile/autorizzabile:
-    // lasciamo che la policy + allocator trovino
-    // la migliore alternativa.
+    // La preferenza non è disponibile o non è tecnicamente
+    // utilizzabile: lasciamo che allocator + budget policy
+    // trovino la migliore alternativa.
     return allocate(
       task: task,
       resources: resources,
@@ -205,12 +222,19 @@ final class WorkshopResourceAllocationController {
     );
   }
 
-  /// Prenota logicamente il budget della risorsa scelta.
+  /// Prenota logicamente il budget della risorsa scelta
+  /// mantenendo il contratto originale della task.
   ///
   /// Non effettua alcun consumo presso il provider.
-  bool tryReserve(
-    WorkshopResourceAllocationDecision decision,
-  ) {
+  ///
+  /// È intenzionalmente l'unica API pubblica di prenotazione:
+  /// non è sicuro ricostruire una WorkshopTaskContract partendo
+  /// dalla sola allocation.
+  bool tryReserveForTask({
+    required WorkshopTaskContract task,
+    required WorkshopResourceAllocationDecision
+        decision,
+  }) {
     final allocation =
         decision.allocation;
 
@@ -219,10 +243,15 @@ final class WorkshopResourceAllocationController {
       return false;
     }
 
+    // La risorsa Local non richiede un consumo
+    // di crediti remoti.
+    if (allocation.resource ==
+        WorkshopTaskResource.local) {
+      return true;
+    }
+
     return _budgetController.tryReserve(
-      task: _taskFromAllocation(
-        allocation,
-      ),
+      task: task,
       resource: allocation.resource,
     );
   }
@@ -256,48 +285,10 @@ final class WorkshopResourceAllocationController {
   /// Restituisce una fotografia diagnostica.
   Map<String, dynamic> diagnostics() {
     return <String, dynamic>{
+      'allocator':
+          _allocator.diagnostics(),
       'budget':
           _budgetController.diagnostics(),
     };
-  }
-
-  /// Il BudgetController richiede il contratto completo della task
-  /// per effettuare una prenotazione.
-  ///
-  /// L'allocation contiene però soltanto il taskId, quindi questa
-  /// funzione non viene usata per decisioni normali.
-  ///
-  /// Viene mantenuta volutamente non operativa per evitare di
-  /// ricostruire artificialmente un WorkshopTaskContract.
-  WorkshopTaskContract _taskFromAllocation(
-    WorkshopResourceAllocation allocation,
-  ) {
-    throw StateError(
-      'A WorkshopTaskContract is required to reserve '
-      'an allocation. Use tryReserveForTask instead.',
-    );
-  }
-
-  /// Variante corretta per la prenotazione, che mantiene il
-  /// contratto originale della task.
-  bool tryReserveForTask({
-    required WorkshopTaskContract task,
-    required WorkshopResourceAllocationDecision decision,
-  }) {
-    final allocation =
-        decision.allocation;
-
-    if (!decision.authorized ||
-        allocation == null ||
-        allocation.resource ==
-            WorkshopTaskResource.local) {
-      return decision.authorized &&
-          allocation != null;
-    }
-
-    return _budgetController.tryReserve(
-      task: task,
-      resource: allocation.resource,
-    );
   }
 }
