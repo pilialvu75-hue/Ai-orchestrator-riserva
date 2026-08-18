@@ -31,6 +31,10 @@ import 'workshop_task_resource_allocator.dart';
 /// - decide autonomamente di passare da Local a Cloud.
 ///
 /// È il coordinatore tecnico della singola esecuzione.
+///
+/// I contratti di Context, Result, Executor e ProgressCallback
+/// sono definiti esclusivamente in workshop_task_executor.dart.
+/// La Pipeline li utilizza senza ridefinirli.
 final class WorkshopTaskExecutionPipeline {
   WorkshopTaskExecutionPipeline({
     WorkshopResourceExecutionBridge? resourceBridge,
@@ -69,16 +73,20 @@ final class WorkshopTaskExecutionPipeline {
 
   /// Esegue la pipeline completa.
   ///
-  /// Il metodo restituisce sempre un risultato esplicito:
+  /// Ordine rigoroso:
   ///
-  /// - completed;
-  /// - failed;
-  /// - waitingApproval;
-  /// - cancelled;
-  /// - altro stato previsto dal contratto.
+  /// 1. allocation;
+  /// 2. resource resolution;
+  /// 3. execution guard;
+  /// 4. context enrichment;
+  /// 5. dispatcher;
+  /// 6. result validation;
+  /// 7. pipeline metadata.
   ///
   /// Nessuna fase successiva viene eseguita se quella precedente
   /// non produce una decisione valida.
+  ///
+  /// La Pipeline non effettua fallback autonomi.
   Future<WorkshopTaskExecutionResult> execute({
     required WorkshopTaskContract task,
     required List<WorkshopResourceSnapshot> resources,
@@ -89,6 +97,16 @@ final class WorkshopTaskExecutionPipeline {
     WorkshopTaskExecutionProgressCallback?
         onProgress,
   }) async {
+    if (task.id.trim().isEmpty) {
+      return _failure(
+        task: task,
+        message: 'Task id cannot be empty.',
+        metadata: <String, dynamic>{
+          'pipelinePhase': 'validation',
+        },
+      );
+    }
+
     final allocationDecision =
         _resourceBridge.prepare(
       task: task,
@@ -99,9 +117,8 @@ final class WorkshopTaskExecutionPipeline {
 
     if (!allocationDecision.authorized ||
         allocationDecision.allocation == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
-        status: WorkshopTaskStatus.failed,
+      return _failure(
+        task: task,
         message:
             allocationDecision.reason ??
                 'Resource allocation was not authorized.',
@@ -116,6 +133,10 @@ final class WorkshopTaskExecutionPipeline {
               allocationDecision
                   .allocation
                   ?.providerId,
+          'fallbackResource':
+              allocationDecision
+                  .fallbackResource
+                  ?.name,
         },
       );
     }
@@ -123,20 +144,15 @@ final class WorkshopTaskExecutionPipeline {
     final allocation =
         allocationDecision.allocation!;
 
-    final resourceSnapshot =
-        _findMatchingResource(
-      allocation: allocation,
-      resources: resources,
-    );
-
-    if (resourceSnapshot == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
-        status: WorkshopTaskStatus.failed,
+    if (allocation.taskId != task.id) {
+      return _failure(
+        task: task,
         message:
-            'The allocated resource snapshot could not be found.',
+            'Resource allocation does not belong to the current task.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'resource-resolution',
+          'pipelinePhase': 'allocation-validation',
+          'expectedTaskId': task.id,
+          'allocatedTaskId': allocation.taskId,
           'resource':
               allocation.resource.name,
           'providerId':
@@ -145,134 +161,9 @@ final class WorkshopTaskExecutionPipeline {
       );
     }
 
-    final guardDecision =
-        _executionGuard.check(
-      task: task,
-      allocation: allocation,
-      resource: resourceSnapshot,
-      networkAvailable:
-          networkAvailable,
-      approvalGranted:
-          approvalGranted,
-    );
-
-    if (!guardDecision.isAllowed) {
-      final status =
-          guardDecision.blockReason ==
-                  WorkshopTaskExecutionBlockReason
-                      .approvalRequired
-              ? WorkshopTaskStatus.waitingApproval
-              : WorkshopTaskStatus.failed;
-
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
-        status: status,
-        message:
-            guardDecision.message,
-        metadata: <String, dynamic>{
-          'pipelinePhase': 'execution-guard',
-          'blockReason':
-              guardDecision
-                  .blockReason
-                  ?.name,
-          'resource':
-              guardDecision.resource?.name,
-          'providerId':
-              guardDecision.providerId,
-        },
-      );
-    }
-
-    final enrichedContext =
-        WorkshopTaskExecutionContext(
-      stagingRoot:
-          context.stagingRoot,
-      workingDirectory:
-          context.workingDirectory,
-      networkAvailable:
-          context.networkAvailable &&
-              networkAvailable,
-      metadata: <String, dynamic>{
-        ...context.metadata,
-        'pipeline': 'workshop-task-execution',
-        'resource':
-            allocation.resource.name,
-        'providerId':
-            allocation.providerId,
-        'allocationReason':
-            allocation.reason,
-        'estimatedCredits':
-            allocation.estimatedCredits,
-        'estimatedLatencyMs':
-            allocation.estimatedLatencyMs,
-      },
-    );
-
-    final result =
-        await _dispatcher.dispatch(
-      task: task,
-      guardDecision:
-          guardDecision,
-      context: enrichedContext,
-      onProgress:
-          onProgress,
-    );
-
-    return _attachPipelineMetadata(
-      task: task,
-      allocation: allocation,
-      result: result,
-    );
-  }
-
-  /// Variante che privilegia esplicitamente una risorsa.
-  ///
-  /// Utile per HYBRID quando il livello superiore ha già deciso
-  /// che una determinata risorsa/provider deve essere preferita,
-  /// senza però bypassare allocator, budget e Guard.
-  Future<WorkshopTaskExecutionResult>
-      executeWithPreference({
-    required WorkshopTaskContract task,
-    required List<WorkshopResourceSnapshot> resources,
-    required WorkshopTaskResource
-        preferredResource,
-    WorkshopTaskExecutionContext context =
-        const WorkshopTaskExecutionContext(),
-    bool networkAvailable = true,
-    bool approvalGranted = false,
-    WorkshopTaskExecutionProgressCallback?
-        onProgress,
-  }) async {
-    final allocationDecision =
-        _resourceBridge.prepareWithPreference(
-      task: task,
-      resources: resources,
-      preferredResource:
-          preferredResource,
-      networkAvailable:
-          networkAvailable,
-    );
-
-    if (!allocationDecision.authorized ||
-        allocationDecision.allocation == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
-        status: WorkshopTaskStatus.failed,
-        message:
-            allocationDecision.reason ??
-                'Preferred resource allocation was not authorized.',
-        metadata: <String, dynamic>{
-          'pipelinePhase': 'allocation',
-          'preferredResource':
-              preferredResource.name,
-        },
-      );
-    }
-
     return _executeFromAllocation(
       task: task,
-      allocation:
-          allocationDecision.allocation!,
+      allocation: allocation,
       resources: resources,
       context: context,
       networkAvailable:
@@ -284,6 +175,117 @@ final class WorkshopTaskExecutionPipeline {
     );
   }
 
+  /// Variante che privilegia esplicitamente una risorsa.
+  ///
+  /// Utile soprattutto in HYBRID quando il livello superiore
+  /// ha già deciso quale risorsa preferire.
+  ///
+  /// La preferenza NON bypassa:
+  ///
+  /// - allocator;
+  /// - budget;
+  /// - resource validation;
+  /// - Execution Guard;
+  /// - approval policy.
+  ///
+  /// Se la risorsa preferita non è disponibile, la decisione
+  /// viene lasciata al Resource Allocation Controller secondo
+  /// la sua normale politica.
+  Future<WorkshopTaskExecutionResult>
+      executeWithPreference({
+    required WorkshopTaskContract task,
+    required List<WorkshopResourceSnapshot>
+        resources,
+    required WorkshopTaskResource
+        preferredResource,
+    WorkshopTaskExecutionContext context =
+        const WorkshopTaskExecutionContext(),
+    bool networkAvailable = true,
+    bool approvalGranted = false,
+    WorkshopTaskExecutionProgressCallback?
+        onProgress,
+  }) async {
+    if (task.id.trim().isEmpty) {
+      return _failure(
+        task: task,
+        message: 'Task id cannot be empty.',
+        metadata: <String, dynamic>{
+          'pipelinePhase': 'validation',
+          'preferredResource':
+              preferredResource.name,
+        },
+      );
+    }
+
+    final allocationDecision =
+        _resourceBridge
+            .prepareWithPreference(
+      task: task,
+      resources: resources,
+      preferredResource:
+          preferredResource,
+      networkAvailable:
+          networkAvailable,
+    );
+
+    if (!allocationDecision.authorized ||
+        allocationDecision.allocation == null) {
+      return _failure(
+        task: task,
+        message:
+            allocationDecision.reason ??
+                'Preferred resource allocation was not authorized.',
+        metadata: <String, dynamic>{
+          'pipelinePhase': 'allocation',
+          'preferredResource':
+              preferredResource.name,
+          'fallbackResource':
+              allocationDecision
+                  .fallbackResource
+                  ?.name,
+        },
+      );
+    }
+
+    final allocation =
+        allocationDecision.allocation!;
+
+    if (allocation.taskId != task.id) {
+      return _failure(
+        task: task,
+        message:
+            'Resource allocation does not belong to the current task.',
+        metadata: <String, dynamic>{
+          'pipelinePhase': 'allocation-validation',
+          'expectedTaskId': task.id,
+          'allocatedTaskId': allocation.taskId,
+          'preferredResource':
+              preferredResource.name,
+          'allocatedResource':
+              allocation.resource.name,
+        },
+      );
+    }
+
+    return _executeFromAllocation(
+      task: task,
+      allocation: allocation,
+      resources: resources,
+      context: context,
+      networkAvailable:
+          networkAvailable,
+      approvalGranted:
+          approvalGranted,
+      onProgress:
+          onProgress,
+    );
+  }
+
+  /// Esegue la pipeline a partire da una decisione di allocazione
+  /// già validata.
+  ///
+  /// Questo metodo centralizza la seconda metà della pipeline
+  /// evitando duplicazioni tra execute() e executeWithPreference().
   Future<WorkshopTaskExecutionResult>
       _executeFromAllocation({
     required WorkshopTaskContract task,
@@ -305,9 +307,8 @@ final class WorkshopTaskExecutionPipeline {
     );
 
     if (resourceSnapshot == null) {
-      return WorkshopTaskExecutionResult(
-        taskId: task.id,
-        status: WorkshopTaskStatus.failed,
+      return _failure(
+        task: task,
         message:
             'The allocated resource snapshot could not be found.',
         metadata: <String, dynamic>{
@@ -353,7 +354,9 @@ final class WorkshopTaskExecutionPipeline {
                   .blockReason
                   ?.name,
           'resource':
-              guardDecision.resource?.name,
+              guardDecision
+                  .resource
+                  ?.name,
           'providerId':
               guardDecision.providerId,
         },
@@ -361,7 +364,45 @@ final class WorkshopTaskExecutionPipeline {
     }
 
     final enrichedContext =
-        WorkshopTaskExecutionContext(
+        _buildContext(
+      context: context,
+      allocation: allocation,
+      networkAvailable:
+          networkAvailable,
+    );
+
+    final result =
+        await _dispatcher.dispatch(
+      task: task,
+      guardDecision:
+          guardDecision,
+      context:
+          enrichedContext,
+      onProgress:
+          onProgress,
+    );
+
+    return _normalizeResult(
+      task: task,
+      allocation: allocation,
+      result: result,
+    );
+  }
+
+  /// Costruisce il Context senza modificare quello originale.
+  ///
+  /// Questo mantiene la Pipeline immutabile dal punto di vista
+  /// del chiamante e permette di aggiungere esclusivamente
+  /// informazioni infrastrutturali.
+  WorkshopTaskExecutionContext
+      _buildContext({
+    required WorkshopTaskExecutionContext
+        context,
+    required WorkshopResourceAllocation
+        allocation,
+    required bool networkAvailable,
+  }) {
+    return WorkshopTaskExecutionContext(
       stagingRoot:
           context.stagingRoot,
       workingDirectory:
@@ -383,30 +424,25 @@ final class WorkshopTaskExecutionPipeline {
             allocation.estimatedCredits,
         'estimatedLatencyMs':
             allocation.estimatedLatencyMs,
+        'requiresNetwork':
+            allocation.requiresNetwork,
+        'isLocal':
+            allocation.isLocal,
+        'isHybrid':
+            allocation.isHybrid,
+        'isGithub':
+            allocation.isGithub,
       },
-    );
-
-    final result =
-        await _dispatcher.dispatch(
-      task: task,
-      guardDecision:
-          guardDecision,
-      context: enrichedContext,
-      onProgress:
-          onProgress,
-    );
-
-    return _attachPipelineMetadata(
-      task: task,
-      allocation: allocation,
-      result: result,
     );
   }
 
   /// Cerca lo snapshot corrispondente alla decisione dell'allocator.
   ///
-  /// La corrispondenza providerId viene preferita.
-  /// Se la decisione non specifica un provider, basta la risorsa.
+  /// Se è presente un providerId viene cercata prima
+  /// la corrispondenza resource + provider.
+  ///
+  /// Solo quando il provider non è specificato viene utilizzata
+  /// la prima risorsa compatibile.
   WorkshopResourceSnapshot?
       _findMatchingResource({
     required WorkshopResourceAllocation
@@ -423,6 +459,8 @@ final class WorkshopTaskExecutionPipeline {
           return resource;
         }
       }
+
+      return null;
     }
 
     for (final resource in resources) {
@@ -435,18 +473,40 @@ final class WorkshopTaskExecutionPipeline {
     return null;
   }
 
-  /// Aggiunge informazioni diagnostiche della pipeline
-  /// senza alterare il risultato prodotto dal Dispatcher.
+  /// Valida il risultato prodotto dal Dispatcher.
+  ///
+  /// Un executor non deve poter restituire silenziosamente
+  /// un risultato appartenente a una task diversa.
   WorkshopTaskExecutionResult
-      _attachPipelineMetadata({
+      _normalizeResult({
     required WorkshopTaskContract task,
     required WorkshopResourceAllocation
         allocation,
     required WorkshopTaskExecutionResult
         result,
   }) {
+    if (result.taskId != task.id) {
+      return _failure(
+        task: task,
+        message:
+            'Executor returned a result for a different task.',
+        metadata: <String, dynamic>{
+          'pipelinePhase':
+              'result-validation',
+          'expectedTaskId':
+              task.id,
+          'returnedTaskId':
+              result.taskId,
+          'resource':
+              allocation.resource.name,
+          'providerId':
+              allocation.providerId,
+        },
+      );
+    }
+
     return WorkshopTaskExecutionResult(
-      taskId: task.id,
+      taskId: result.taskId,
       status: result.status,
       message: result.message,
       checkpoint: result.checkpoint,
@@ -466,19 +526,46 @@ final class WorkshopTaskExecutionPipeline {
             allocation.estimatedCredits,
         'estimatedLatencyMs':
             allocation.estimatedLatencyMs,
+        'requiresNetwork':
+            allocation.requiresNetwork,
       },
     );
   }
 
-  /// Diagnostica completa della pipeline.
+  WorkshopTaskExecutionResult _failure({
+    required WorkshopTaskContract task,
+    required String message,
+    Map<String, dynamic> metadata =
+        const <String, dynamic>{},
+  }) {
+    return WorkshopTaskExecutionResult(
+      taskId: task.id,
+      status:
+          WorkshopTaskStatus.failed,
+      message: message,
+      metadata: metadata,
+    );
+  }
+
+  /// Diagnostica completa della Pipeline.
+  ///
+  /// Pensata per:
+  ///
+  /// - Developer Mode;
+  /// - forensic logs;
+  /// - diagnostica del Cantiere;
+  /// - future sincronizzazione con il sito privato;
+  /// - supervisione da parte di Hannibal.
   Map<String, dynamic> diagnostics() {
     return <String, dynamic>{
+      'pipeline': 'workshop-task-execution',
       'allocation':
           _resourceBridge
-              .allocationController
               .diagnostics(),
-      'executors':
+      'dispatcher':
           _dispatcher.diagnostics(),
+      'executorCount':
+          _dispatcher.executorCount,
     };
   }
 }
