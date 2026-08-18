@@ -376,13 +376,13 @@ final class WorkshopExecutionBudgetManager {
     final normalizedAvailable =
         availableCredits.isNaN ||
                 availableCredits < 0
-            ? 0
+            ? 0.0
             : availableCredits;
 
     final normalizedMinimumReserve =
         minimumReserveCredits.isNaN ||
                 minimumReserveCredits < 0
-            ? 0
+            ? 0.0
             : minimumReserveCredits;
 
     _budgets =
