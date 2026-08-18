@@ -283,10 +283,38 @@ final class WorkshopResourceAllocationController {
   }
 
   /// Restituisce una fotografia diagnostica.
+  ///
+  /// L'Allocator non espone un proprio metodo diagnostics(),
+  /// quindi il controller registra esclusivamente informazioni
+  /// realmente disponibili dal suo contratto pubblico.
   Map<String, dynamic> diagnostics() {
     return <String, dynamic>{
-      'allocator':
-          _allocator.diagnostics(),
+      'allocator': <String, dynamic>{
+        'policy': <String, dynamic>{
+          'preferLocal':
+              _allocator.policy.preferLocal,
+          'allowDegradedResources':
+              _allocator
+                  .policy
+                  .allowDegradedResources,
+          'allowHybridFallback':
+              _allocator
+                  .policy
+                  .allowHybridFallback,
+          'allowGithubAgent':
+              _allocator
+                  .policy
+                  .allowGithubAgent,
+          'allowGithubActions':
+              _allocator
+                  .policy
+                  .allowGithubActions,
+          'minimumCreditReserve':
+              _allocator
+                  .policy
+                  .minimumCreditReserve,
+        },
+      },
       'budget':
           _budgetController.diagnostics(),
     };
