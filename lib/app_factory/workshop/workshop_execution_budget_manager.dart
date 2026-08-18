@@ -9,8 +9,8 @@ import 'workshop_task_contract.dart';
 final class WorkshopExecutionBudget {
   const WorkshopExecutionBudget({
     required this.availableCredits,
-    this.reservedCredits = 0.0,
-    this.minimumReserveCredits = 0.0,
+    this.reservedCredits = 0,
+    this.minimumReserveCredits = 0,
   });
 
   final double availableCredits;
