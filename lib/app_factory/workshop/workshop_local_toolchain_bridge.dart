@@ -81,7 +81,7 @@ final class WorkshopLocalToolchainResult {
     return <String, dynamic>{
       'command': command.name,
       'executable': executable,
-      'arguments': arguments,
+      'arguments': List<String>.unmodifiable(arguments),
       'exitCode': exitCode,
       'stdout': stdout,
       'stderr': stderr,
@@ -90,7 +90,9 @@ final class WorkshopLocalToolchainResult {
       'finishedAt': finishedAt.toUtc().toIso8601String(),
       'timedOut': timedOut,
       'cancelled': cancelled,
-      'metadata': metadata,
+      'metadata': Map<String, dynamic>.unmodifiable(
+        metadata,
+      ),
     };
   }
 }
@@ -152,6 +154,7 @@ final class WorkshopLocalToolchainBridge {
   final WorkshopLocalToolchainConfig config;
 
   Process? _activeProcess;
+  bool _cancelRequested = false;
 
   bool get isRunning => _activeProcess != null;
 
@@ -187,10 +190,13 @@ final class WorkshopLocalToolchainBridge {
     _validateCommand(
       command,
       specification,
-      allowNetwork: allowNetwork ?? config.allowNetwork,
+      allowNetwork:
+          allowNetwork ?? config.allowNetwork,
     );
 
     final startedAt = DateTime.now().toUtc();
+
+    _cancelRequested = false;
 
     Process? process;
 
@@ -222,6 +228,7 @@ final class WorkshopLocalToolchainBridge {
         effectiveTimeout,
         onTimeout: () async {
           await _killProcess(process!);
+
           throw TimeoutException(
             'Local toolchain command timed out.',
             effectiveTimeout,
@@ -234,6 +241,8 @@ final class WorkshopLocalToolchainBridge {
 
       final finishedAt = DateTime.now().toUtc();
 
+      final cancelled = _cancelRequested;
+
       return WorkshopLocalToolchainResult(
         command: command,
         executable: specification.executable,
@@ -244,9 +253,11 @@ final class WorkshopLocalToolchainBridge {
         duration: finishedAt.difference(startedAt),
         startedAt: startedAt,
         finishedAt: finishedAt,
+        cancelled: cancelled,
         metadata: <String, dynamic>{
           'workingDirectory': directory.path,
-          'offline': !(allowNetwork ?? config.allowNetwork),
+          'offline':
+              !(allowNetwork ?? config.allowNetwork),
         },
       );
     } on TimeoutException {
@@ -280,12 +291,32 @@ final class WorkshopLocalToolchainBridge {
         duration: finishedAt.difference(startedAt),
         startedAt: startedAt,
         finishedAt: finishedAt,
+        cancelled: _cancelRequested,
+        metadata: <String, dynamic>{
+          'workingDirectory': directory.path,
+        },
+      );
+    } catch (error) {
+      final finishedAt = DateTime.now().toUtc();
+
+      return WorkshopLocalToolchainResult(
+        command: command,
+        executable: specification.executable,
+        arguments: specification.arguments,
+        exitCode: -1,
+        stdout: '',
+        stderr: error.toString(),
+        duration: finishedAt.difference(startedAt),
+        startedAt: startedAt,
+        finishedAt: finishedAt,
+        cancelled: _cancelRequested,
         metadata: <String, dynamic>{
           'workingDirectory': directory.path,
         },
       );
     } finally {
       _activeProcess = null;
+      _cancelRequested = false;
     }
   }
 
@@ -297,12 +328,16 @@ final class WorkshopLocalToolchainBridge {
       return false;
     }
 
+    _cancelRequested = true;
+
     await _killProcess(process);
 
     return true;
   }
 
-  Future<void> _killProcess(Process process) async {
+  Future<void> _killProcess(
+    Process process,
+  ) async {
     try {
       process.kill(ProcessSignal.sigterm);
 
@@ -310,7 +345,7 @@ final class WorkshopLocalToolchainBridge {
         const Duration(milliseconds: 250),
       );
 
-      if (_activeProcess != null) {
+      if (identical(_activeProcess, process)) {
         process.kill(ProcessSignal.sigkill);
       }
     } catch (_) {
@@ -534,7 +569,9 @@ final class WorkshopLocalToolchainBridge {
     return false;
   }
 
-  String _limitOutput(String value) {
+  String _limitOutput(
+    String value,
+  ) {
     if (value.length <= config.maxOutputCharacters) {
       return value;
     }
