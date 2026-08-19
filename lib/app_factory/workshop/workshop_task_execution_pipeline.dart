@@ -14,11 +14,17 @@ import 'workshop_task_resource_allocator.dart';
 ///     ↓
 ///   Resource Execution Bridge
 ///     ↓
+///   Resource Allocation
+///     ↓
+///   Budget Reservation
+///     ↓
 ///   Execution Guard
 ///     ↓
 ///   Dispatcher
 ///     ↓
 ///   Executor
+///     ↓
+///   Budget Release
 ///
 /// La pipeline NON:
 ///
@@ -75,13 +81,15 @@ final class WorkshopTaskExecutionPipeline {
   ///
   /// Ordine rigoroso:
   ///
-  /// 1. allocation;
-  /// 2. resource resolution;
-  /// 3. execution guard;
-  /// 4. context enrichment;
-  /// 5. dispatcher;
-  /// 6. result validation;
-  /// 7. pipeline metadata.
+  /// 1. validation;
+  /// 2. allocation;
+  /// 3. resource resolution;
+  /// 4. budget reservation;
+  /// 5. execution guard;
+  /// 6. context enrichment;
+  /// 7. dispatcher;
+  /// 8. result validation;
+  /// 9. budget release.
   ///
   /// Nessuna fase successiva viene eseguita se quella precedente
   /// non produce una decisione valida.
@@ -89,7 +97,8 @@ final class WorkshopTaskExecutionPipeline {
   /// La Pipeline non effettua fallback autonomi.
   Future<WorkshopTaskExecutionResult> execute({
     required WorkshopTaskContract task,
-    required List<WorkshopResourceSnapshot> resources,
+    required List<WorkshopResourceSnapshot>
+        resources,
     WorkshopTaskExecutionContext context =
         const WorkshopTaskExecutionContext(),
     bool networkAvailable = true,
@@ -100,15 +109,18 @@ final class WorkshopTaskExecutionPipeline {
     if (task.id.trim().isEmpty) {
       return _failure(
         task: task,
-        message: 'Task id cannot be empty.',
+        message:
+            'Task id cannot be empty.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'validation',
+          'pipelinePhase':
+              'validation',
         },
       );
     }
 
     final allocationDecision =
-        _resourceBridge.prepare(
+        _resourceBridge
+            .prepareAndReserve(
       task: task,
       resources: resources,
       networkAvailable:
@@ -116,14 +128,16 @@ final class WorkshopTaskExecutionPipeline {
     );
 
     if (!allocationDecision.authorized ||
-        allocationDecision.allocation == null) {
+        allocationDecision.allocation ==
+            null) {
       return _failure(
         task: task,
         message:
             allocationDecision.reason ??
                 'Resource allocation was not authorized.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'allocation',
+          'pipelinePhase':
+              'allocation',
           'resource':
               allocationDecision
                   .allocation
@@ -137,6 +151,8 @@ final class WorkshopTaskExecutionPipeline {
               allocationDecision
                   .fallbackResource
                   ?.name,
+          'reserved':
+              allocationDecision.reserved,
         },
       );
     }
@@ -145,14 +161,24 @@ final class WorkshopTaskExecutionPipeline {
         allocationDecision.allocation!;
 
     if (allocation.taskId != task.id) {
+      _releaseReservation(
+        task: task,
+        allocation: allocation,
+        decision:
+            allocationDecision,
+      );
+
       return _failure(
         task: task,
         message:
             'Resource allocation does not belong to the current task.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'allocation-validation',
-          'expectedTaskId': task.id,
-          'allocatedTaskId': allocation.taskId,
+          'pipelinePhase':
+              'allocation-validation',
+          'expectedTaskId':
+              task.id,
+          'allocatedTaskId':
+              allocation.taskId,
           'resource':
               allocation.resource.name,
           'providerId':
@@ -172,6 +198,8 @@ final class WorkshopTaskExecutionPipeline {
           approvalGranted,
       onProgress:
           onProgress,
+      reservationHeld:
+          allocationDecision.reserved,
     );
   }
 
@@ -208,9 +236,11 @@ final class WorkshopTaskExecutionPipeline {
     if (task.id.trim().isEmpty) {
       return _failure(
         task: task,
-        message: 'Task id cannot be empty.',
+        message:
+            'Task id cannot be empty.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'validation',
+          'pipelinePhase':
+              'validation',
           'preferredResource':
               preferredResource.name,
         },
@@ -219,7 +249,7 @@ final class WorkshopTaskExecutionPipeline {
 
     final allocationDecision =
         _resourceBridge
-            .prepareWithPreference(
+            .prepareAndReserveWithPreference(
       task: task,
       resources: resources,
       preferredResource:
@@ -229,20 +259,24 @@ final class WorkshopTaskExecutionPipeline {
     );
 
     if (!allocationDecision.authorized ||
-        allocationDecision.allocation == null) {
+        allocationDecision.allocation ==
+            null) {
       return _failure(
         task: task,
         message:
             allocationDecision.reason ??
                 'Preferred resource allocation was not authorized.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'allocation',
+          'pipelinePhase':
+              'allocation',
           'preferredResource':
               preferredResource.name,
           'fallbackResource':
               allocationDecision
                   .fallbackResource
                   ?.name,
+          'reserved':
+              allocationDecision.reserved,
         },
       );
     }
@@ -251,14 +285,24 @@ final class WorkshopTaskExecutionPipeline {
         allocationDecision.allocation!;
 
     if (allocation.taskId != task.id) {
+      _releaseReservation(
+        task: task,
+        allocation: allocation,
+        decision:
+            allocationDecision,
+      );
+
       return _failure(
         task: task,
         message:
             'Resource allocation does not belong to the current task.',
         metadata: <String, dynamic>{
-          'pipelinePhase': 'allocation-validation',
-          'expectedTaskId': task.id,
-          'allocatedTaskId': allocation.taskId,
+          'pipelinePhase':
+              'allocation-validation',
+          'expectedTaskId':
+              task.id,
+          'allocatedTaskId':
+              allocation.taskId,
           'preferredResource':
               preferredResource.name,
           'allocatedResource':
@@ -278,11 +322,13 @@ final class WorkshopTaskExecutionPipeline {
           approvalGranted,
       onProgress:
           onProgress,
+      reservationHeld:
+          allocationDecision.reserved,
     );
   }
 
   /// Esegue la pipeline a partire da una decisione di allocazione
-  /// già validata.
+  /// già validata e con eventuale prenotazione già effettuata.
   ///
   /// Questo metodo centralizza la seconda metà della pipeline
   /// evitando duplicazioni tra execute() e executeWithPreference().
@@ -299,7 +345,10 @@ final class WorkshopTaskExecutionPipeline {
     required bool approvalGranted,
     WorkshopTaskExecutionProgressCallback?
         onProgress,
+    required bool reservationHeld,
   }) async {
+    WorkshopTaskExecutionResult result;
+
     final resourceSnapshot =
         _findMatchingResource(
       allocation: allocation,
@@ -307,7 +356,7 @@ final class WorkshopTaskExecutionPipeline {
     );
 
     if (resourceSnapshot == null) {
-      return _failure(
+      result = _failure(
         task: task,
         message:
             'The allocated resource snapshot could not be found.',
@@ -320,6 +369,15 @@ final class WorkshopTaskExecutionPipeline {
               allocation.providerId,
         },
       );
+
+      _releaseReservationIfNeeded(
+        task: task,
+        allocation: allocation,
+        reservationHeld:
+            reservationHeld,
+      );
+
+      return result;
     }
 
     final guardDecision =
@@ -338,15 +396,18 @@ final class WorkshopTaskExecutionPipeline {
           guardDecision.blockReason ==
                   WorkshopTaskExecutionBlockReason
                       .approvalRequired
-              ? WorkshopTaskStatus.waitingApproval
+              ? WorkshopTaskStatus
+                  .waitingApproval
               : WorkshopTaskStatus.failed;
 
-      return WorkshopTaskExecutionResult(
+      result =
+          WorkshopTaskExecutionResult(
         taskId: task.id,
         status: status,
         message:
             guardDecision.message,
-        metadata: <String, dynamic>{
+        metadata:
+            <String, dynamic>{
           'pipelinePhase':
               'execution-guard',
           'blockReason':
@@ -361,6 +422,15 @@ final class WorkshopTaskExecutionPipeline {
               guardDecision.providerId,
         },
       );
+
+      _releaseReservationIfNeeded(
+        task: task,
+        allocation: allocation,
+        reservationHeld:
+            reservationHeld,
+      );
+
+      return result;
     }
 
     final enrichedContext =
@@ -371,22 +441,50 @@ final class WorkshopTaskExecutionPipeline {
           networkAvailable,
     );
 
-    final result =
-        await _dispatcher.dispatch(
-      task: task,
-      guardDecision:
-          guardDecision,
-      context:
-          enrichedContext,
-      onProgress:
-          onProgress,
-    );
+    try {
+      final dispatchedResult =
+          await _dispatcher.dispatch(
+        task: task,
+        guardDecision:
+            guardDecision,
+        context:
+            enrichedContext,
+        onProgress:
+            onProgress,
+      );
 
-    return _normalizeResult(
-      task: task,
-      allocation: allocation,
-      result: result,
-    );
+      result = _normalizeResult(
+        task: task,
+        allocation: allocation,
+        result: dispatchedResult,
+      );
+    } catch (error) {
+      result =
+          _failure(
+        task: task,
+        message:
+            'Workshop execution pipeline failed unexpectedly.',
+        metadata: <String, dynamic>{
+          'pipelinePhase':
+              'dispatcher',
+          'resource':
+              allocation.resource.name,
+          'providerId':
+              allocation.providerId,
+          'error':
+              error.toString(),
+        },
+      );
+    } finally {
+      _releaseReservationIfNeeded(
+        task: task,
+        allocation: allocation,
+        reservationHeld:
+            reservationHeld,
+      );
+    }
+
+    return result;
   }
 
   /// Costruisce il Context senza modificare quello originale.
@@ -509,9 +607,12 @@ final class WorkshopTaskExecutionPipeline {
       taskId: result.taskId,
       status: result.status,
       message: result.message,
-      checkpoint: result.checkpoint,
-      changedFiles: result.changedFiles,
-      artifacts: result.artifacts,
+      checkpoint:
+          result.checkpoint,
+      changedFiles:
+          result.changedFiles,
+      artifacts:
+          result.artifacts,
       metadata: <String, dynamic>{
         ...result.metadata,
         'pipelinePhase':
@@ -532,7 +633,50 @@ final class WorkshopTaskExecutionPipeline {
     );
   }
 
-  WorkshopTaskExecutionResult _failure({
+  /// Rilascia una prenotazione se effettivamente presente.
+  void _releaseReservationIfNeeded({
+    required WorkshopTaskContract task,
+    required WorkshopResourceAllocation
+        allocation,
+    required bool reservationHeld,
+  }) {
+    if (!reservationHeld) {
+      return;
+    }
+
+    final credits =
+        allocation.estimatedCredits;
+
+    if (credits <= 0) {
+      return;
+    }
+
+    _resourceBridge.release(
+      resource:
+          allocation.resource,
+      credits: credits,
+    );
+  }
+
+  /// Variante utilizzata nei casi in cui una validazione
+  /// fallisca immediatamente dopo l'allocazione.
+  void _releaseReservation({
+    required WorkshopTaskContract task,
+    required WorkshopResourceAllocation
+        allocation,
+    required WorkshopResourceExecutionDecision
+        decision,
+  }) {
+    _releaseReservationIfNeeded(
+      task: task,
+      allocation: allocation,
+      reservationHeld:
+          decision.reserved,
+    );
+  }
+
+  WorkshopTaskExecutionResult
+      _failure({
     required WorkshopTaskContract task,
     required String message,
     Map<String, dynamic> metadata =
@@ -558,7 +702,8 @@ final class WorkshopTaskExecutionPipeline {
   /// - supervisione da parte di Hannibal.
   Map<String, dynamic> diagnostics() {
     return <String, dynamic>{
-      'pipeline': 'workshop-task-execution',
+      'pipeline':
+          'workshop-task-execution',
       'allocation':
           _resourceBridge
               .diagnostics(),
@@ -566,6 +711,32 @@ final class WorkshopTaskExecutionPipeline {
           _dispatcher.diagnostics(),
       'executorCount':
           _dispatcher.executorCount,
+      'guard': <String, dynamic>{
+        'requireApprovalForCodeChanges':
+            _executionGuard
+                .policy
+                .requireApprovalForCodeChanges,
+        'requireApprovalForRepositoryWork':
+            _executionGuard
+                .policy
+                .requireApprovalForRepositoryWork,
+        'requireNetworkForRemoteResources':
+            _executionGuard
+                .policy
+                .requireNetworkForRemoteResources,
+        'minimumCreditReserve':
+            _executionGuard
+                .policy
+                .minimumCreditReserve,
+        'allowCloudInLocalMode':
+            _executionGuard
+                .policy
+                .allowCloudInLocalMode,
+        'allowLocalFallbackInCloudMode':
+            _executionGuard
+                .policy
+                .allowLocalFallbackInCloudMode,
+      },
     };
   }
 }
