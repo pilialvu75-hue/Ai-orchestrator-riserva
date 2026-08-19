@@ -20,7 +20,7 @@ import 'workshop_contract.dart';
 /// - provide a safe boundary for future file/diff operations.
 ///
 /// IMPORTANT:
-/// This first implementation does not automatically write files.
+/// This controller does not automatically write files.
 /// Actual mutations remain explicitly controlled by the workspace layer.
 final class WorkshopWorkspaceController {
   WorkshopWorkspaceController({
@@ -34,6 +34,10 @@ final class WorkshopWorkspaceController {
 
   /// Whether a workspace is currently attached.
   bool get hasWorkspace => _workspace != null;
+
+  /// Whether the attached workspace has already been initialized.
+  bool get isWorkspaceInitialized =>
+      _workspace?.isInitialized ?? false;
 
   /// Attaches an existing workspace to the Workshop.
   ///
@@ -52,23 +56,51 @@ final class WorkshopWorkspaceController {
 
   /// Prepares the workspace boundary for a Workshop request.
   ///
-  /// At this stage this method intentionally performs no destructive action.
-  /// It validates that the Workshop has a workspace available when the
-  /// request explicitly identifies a project path.
+  /// This method intentionally performs no destructive action and does not
+  /// initialize the workspace automatically. Initialization belongs to the
+  /// workspace lifecycle and must be explicitly controlled by the caller.
+  ///
+  /// The preparation result therefore answers one simple question:
+  /// "Can this Workshop request proceed because a workspace boundary exists?"
+  ///
+  /// If the request identifies a project path while no workspace is
+  /// attached, the result remains blocked and exposes the reason through
+  /// [WorkshopWorkspacePreparation.warnings].
   WorkshopWorkspacePreparation prepare(
     WorkshopRequest request,
   ) {
     final currentWorkspace = _workspace;
 
     if (currentWorkspace == null) {
+      final warnings = <String>[
+        'workspace_not_attached',
+      ];
+
+      if (request.projectPath != null &&
+          request.projectPath!.trim().isNotEmpty) {
+        warnings.add('project_path_requires_workspace');
+      }
+
       return WorkshopWorkspacePreparation(
         requestId: request.id,
         ready: false,
         message:
             'No local workspace is attached to the Workshop.',
-        warnings: const <String>[
-          'workspace_not_attached',
-        ],
+        warnings: List<String>.unmodifiable(warnings),
+      );
+    }
+
+    final warnings = <String>[];
+
+    if (!currentWorkspace.isInitialized) {
+      warnings.add('workspace_not_initialized');
+    }
+
+    final projectPath = request.projectPath?.trim();
+
+    if (projectPath != null && projectPath.isNotEmpty) {
+      warnings.add(
+        'project_path_validation_deferred_to_workspace',
       );
     }
 
@@ -76,7 +108,10 @@ final class WorkshopWorkspaceController {
       requestId: request.id,
       ready: true,
       message:
-          'Local workspace is ready for Workshop operations.',
+          currentWorkspace.isInitialized
+              ? 'Local workspace is ready for Workshop operations.'
+              : 'Local workspace is attached and must be initialized before file operations.',
+      warnings: List<String>.unmodifiable(warnings),
     );
   }
 
@@ -103,4 +138,10 @@ final class WorkshopWorkspacePreparation {
   final List<String> warnings;
 
   bool get hasWarnings => warnings.isNotEmpty;
+
+  /// Indicates whether the workspace can safely be used for operations
+  /// that require an initialized virtual workspace.
+  bool get canOperate => ready && !warnings.contains(
+        'workspace_not_initialized',
+      );
 }
