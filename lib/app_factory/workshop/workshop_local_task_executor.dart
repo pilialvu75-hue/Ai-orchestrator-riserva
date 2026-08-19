@@ -393,4 +393,4 @@ final class WorkshopLocalTaskExecutor
         .replaceAll('\\', '/')
         .replaceFirst(RegExp(r'^\.\/'), '');
   }
-}j
+}
