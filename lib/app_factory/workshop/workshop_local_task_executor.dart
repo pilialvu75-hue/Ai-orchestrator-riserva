@@ -7,7 +7,7 @@ import 'workshop_task_executor.dart';
 
 /// Executor locale del Cantiere.
 ///
-/// Questa prima implementazione è volutamente conservativa.
+/// Questa implementazione è volutamente conservativa.
 ///
 /// Responsabilità:
 ///
@@ -393,4 +393,4 @@ final class WorkshopLocalTaskExecutor
         .replaceAll('\\', '/')
         .replaceFirst(RegExp(r'^\.\/'), '');
   }
-}
+}j
