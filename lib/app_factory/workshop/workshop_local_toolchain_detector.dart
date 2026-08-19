@@ -97,10 +97,48 @@ final class WorkshopLocalToolchainDetector {
   Future<WorkshopLocalToolchainReport> inspectAll() async {
     _ensureAvailable();
 
-    final flutter = await _checkFlutter();
-    final dart = await _checkDart();
-    final java = await _checkJava();
-    final android = await _checkAndroidSdk();
+    final checks = await Future.wait<_ToolchainCheck>(
+      <Future<_ToolchainCheck>>[
+        _checkFlutter().then(
+          (value) => _ToolchainCheck.flutter(value),
+        ),
+        _checkDart().then(
+          (value) => _ToolchainCheck.dart(value),
+        ),
+        _checkJava().then(
+          (value) => _ToolchainCheck.java(value),
+        ),
+        _checkAndroidSdk().then(
+          (value) => _ToolchainCheck.android(value),
+        ),
+      ],
+    );
+
+    _ensureAvailable();
+
+    final flutter = checks
+        .firstWhere(
+          (check) => check.flutter != null,
+        )
+        .flutter!;
+
+    final dart = checks
+        .firstWhere(
+          (check) => check.dart != null,
+        )
+        .dart!;
+
+    final java = checks
+        .firstWhere(
+          (check) => check.java != null,
+        )
+        .java!;
+
+    final android = checks
+        .firstWhere(
+          (check) => check.android != null,
+        )
+        .android!;
 
     final targets =
         <WorkshopBuildTarget, WorkshopToolchainInfo>{};
@@ -120,7 +158,7 @@ final class WorkshopLocalToolchainDetector {
     );
 
     return WorkshopLocalToolchainReport(
-      checkedAt: DateTime.now(),
+      checkedAt: DateTime.now().toUtc(),
       flutterAvailable: flutter.available,
       dartAvailable: dart.available,
       javaAvailable: java.available,
@@ -145,10 +183,48 @@ final class WorkshopLocalToolchainDetector {
   ) async {
     _ensureAvailable();
 
-    final flutter = await _checkFlutter();
-    final dart = await _checkDart();
-    final java = await _checkJava();
-    final android = await _checkAndroidSdk();
+    final checks = await Future.wait<_ToolchainCheck>(
+      <Future<_ToolchainCheck>>[
+        _checkFlutter().then(
+          (value) => _ToolchainCheck.flutter(value),
+        ),
+        _checkDart().then(
+          (value) => _ToolchainCheck.dart(value),
+        ),
+        _checkJava().then(
+          (value) => _ToolchainCheck.java(value),
+        ),
+        _checkAndroidSdk().then(
+          (value) => _ToolchainCheck.android(value),
+        ),
+      ],
+    );
+
+    _ensureAvailable();
+
+    final flutter = checks
+        .firstWhere(
+          (check) => check.flutter != null,
+        )
+        .flutter!;
+
+    final dart = checks
+        .firstWhere(
+          (check) => check.dart != null,
+        )
+        .dart!;
+
+    final java = checks
+        .firstWhere(
+          (check) => check.java != null,
+        )
+        .java!;
+
+    final android = checks
+        .firstWhere(
+          (check) => check.android != null,
+        )
+        .android!;
 
     return _buildTargetInfo(
       target: target,
@@ -260,17 +336,23 @@ final class WorkshopLocalToolchainDetector {
       );
     }
 
-    final platformTools = await Directory(
-      _join(sdkPath, 'platform-tools'),
-    ).exists();
-
-    final buildTools = await _hasDirectory(
-      _join(sdkPath, 'build-tools'),
+    final results = await Future.wait<bool>(
+      <Future<bool>>[
+        Directory(
+          _join(sdkPath, 'platform-tools'),
+        ).exists(),
+        _hasDirectory(
+          _join(sdkPath, 'build-tools'),
+        ),
+        _hasDirectory(
+          _join(sdkPath, 'platforms'),
+        ),
+      ],
     );
 
-    final platforms = await _hasDirectory(
-      _join(sdkPath, 'platforms'),
-    );
+    final platformTools = results[0];
+    final buildTools = results[1];
+    final platforms = results[2];
 
     return _AndroidCheck(
       available:
@@ -330,7 +412,8 @@ final class WorkshopLocalToolchainDetector {
       return home;
     }
 
-    final candidates = _standardAndroidSdkPaths();
+    final candidates =
+        _standardAndroidSdkPaths();
 
     for (final candidate in candidates) {
       if (Directory(candidate).existsSync()) {
@@ -754,6 +837,41 @@ final class WorkshopLocalToolchainDetector {
   Future<void> dispose() async {
     _disposed = true;
   }
+}
+
+final class _ToolchainCheck {
+  const _ToolchainCheck.flutter(
+    _CommandCheck value,
+  ) : flutter = value,
+       dart = null,
+       java = null,
+       android = null;
+
+  const _ToolchainCheck.dart(
+    _CommandCheck value,
+  ) : flutter = null,
+       dart = value,
+       java = null,
+       android = null;
+
+  const _ToolchainCheck.java(
+    _CommandCheck value,
+  ) : flutter = null,
+       dart = null,
+       java = value,
+       android = null;
+
+  const _ToolchainCheck.android(
+    _AndroidCheck value,
+  ) : flutter = null,
+       dart = null,
+       java = null,
+       android = value;
+
+  final _CommandCheck? flutter;
+  final _CommandCheck? dart;
+  final _CommandCheck? java;
+  final _AndroidCheck? android;
 }
 
 final class _CommandCheck {
