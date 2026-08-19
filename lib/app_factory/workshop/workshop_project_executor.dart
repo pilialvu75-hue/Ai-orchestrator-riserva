@@ -108,11 +108,7 @@ final class WorkshopProjectExecutor {
 
     _sessions[task.id] = session;
 
-    await session.initialize(
-      directory: plan.title.trim().isEmpty
-          ? null
-          : null,
-    );
+    await session.initialize();
 
     return session;
   }
@@ -362,7 +358,8 @@ final class WorkshopProjectExecutor {
           phaseTasks.every((task) => task.completed);
 
       if (allCompleted) {
-        phase.status = WorkshopProjectPhaseStatus.completed;
+        phase.status =
+            WorkshopProjectPhaseStatus.completed;
         continue;
       }
 
@@ -383,7 +380,8 @@ final class WorkshopProjectExecutor {
               phase.status ==
               WorkshopProjectPhaseStatus.completed,
         )) {
-      plan.status = WorkshopProjectStatus.completed;
+      plan.status =
+          WorkshopProjectStatus.completed;
       return;
     }
 
@@ -392,12 +390,14 @@ final class WorkshopProjectExecutor {
           phase.status ==
           WorkshopProjectPhaseStatus.blocked,
     )) {
-      plan.status = WorkshopProjectStatus.blocked;
+      plan.status =
+          WorkshopProjectStatus.blocked;
       return;
     }
 
     if (plan.tasks.isNotEmpty) {
-      plan.status = WorkshopProjectStatus.inProgress;
+      plan.status =
+          WorkshopProjectStatus.inProgress;
     }
   }
 }
