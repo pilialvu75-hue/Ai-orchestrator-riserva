@@ -47,7 +47,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
-import 'package0/features/cloud_ai/data/datasources/grok_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/repositories/ai_repository_impl.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
@@ -73,7 +73,7 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
-import 'package0/features/onboarding/data/datasources/model_registry_datasource.dart';
+import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
 import 'package:ai_orchestrator/features/onboarding/presentation/bloc/onboarding_bloc.dart';
 import 'package:ai_orchestrator/features/projects/data/datasources/project_memory_local_datasource.dart';
 import 'package:ai_orchestrator/features/projects/data/repositories/project_memory_repository_impl.dart';
@@ -86,13 +86,13 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_m
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/features/project_memory/workspace_project_memory_service.dart';
-import 'package:ai_orchestrator/features/code_context/code_chunker.dart';
+import 'package0/code_context/code_chunker.dart';
 import 'package:ai_orchestrator/features/code_context/context_retrieval_service.dart';
 import 'package:ai_orchestrator/features/semantic_index/project_indexer.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
 import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
 import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
-import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
+import 'package0/workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
@@ -102,7 +102,7 @@ import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.da
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_feature_flags_service.dart';
-import 'package:ai_orchestrator/core/app_health/contracts/abstract_remote_config_service.dart';
+import 'package0/app_health/contracts/abstract_remote_config_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
@@ -210,19 +210,20 @@ Future<void> initDependencies({
   sl.registerLazySingleton<AgentTaskRouter>(() => AgentTaskRouter());
   sl.registerLazySingleton<CodeChunker>(() => const CodeChunker());
 
+  // Registrazione dell'interfaccia astratta di stima volumetrica per disaccoppiare i Tokenizer
   sl.registerLazySingleton<ITokenEstimator>(
     () => const CharacterLengthEstimator(),
   );
 
   sl.registerFactory<MemoryWindowConfig>(
-    () => sl<AiRuntimeSettingsService>().memoryWindowConfig,
+   () => sl<AiRuntimeSettingsService>().memoryWindowConfig,
   );
 
   sl.registerLazySingleton<MemoryWindowManager>(
-    () => MemoryWindowManager(
-      tokenEstimator: sl<ITokenEstimator>(),
-      configProvider: () => sl<MemoryWindowConfig>(),
-    ),
+   () => MemoryWindowManager(
+     tokenEstimator: sl<ITokenEstimator>(),
+     configProvider: () => sl<MemoryWindowConfig>(),
+   ),
   );
   sl.registerLazySingleton<RollingContextBuilder>(
     () => RollingContextBuilder(
@@ -367,32 +368,22 @@ Future<void> initDependencies({
       chatRepository: sl<ChatRepository>(),
     ),
   );
-
-  // Use cases con tipi generici espliciti per evitare runtime cast error in GetIt
-  sl.registerLazySingleton<GetAvailableModels>(
-      () => GetAvailableModels(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<DownloadModel>(
-      () => DownloadModel(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<ImportLocalModel>(
-      () => ImportLocalModel(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<DownloadModelFromUrl>(
+  sl.registerLazySingleton(() => GetAvailableModels(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => DownloadModel(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => ImportLocalModel(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(
       () => DownloadModelFromUrl(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<CheckForUpdates>(
-      () => CheckForUpdates(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<SelectModel>(
-      () => SelectModel(sl<LocalAiRepository>()));
-  sl.registerLazySingleton<GetSelectedModel>(
-      () => GetSelectedModel(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => CheckForUpdates(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => SelectModel(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => GetSelectedModel(sl<LocalAiRepository>()));
 
   // ── Voice ─────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<VoiceTextNormalizer>(
     () => const VoiceTextNormalizer(),
   );
-  sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
-    () => SherpaOnnxVoiceEngine(),
-  );
+  // Main VoiceEngine instance for Chat UI and general voice input/output
   sl.registerLazySingleton<VoiceEngine>(
-    () => sl<SherpaOnnxVoiceEngine>(),
+    () => SherpaOnnxVoiceEngine(),
   );
   sl.registerLazySingleton<VoiceInputService>(
     () => VoiceInputService(
@@ -405,6 +396,12 @@ Future<void> initDependencies({
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
+  );
+  // Dedicated engine for the voice-loop fast lane (bypasses chat UI).
+  // Model paths are supplied at runtime when voice models are downloaded;
+  // the engine starts in an uninitialised state and initialises on first use.
+  sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
+    () => SherpaOnnxVoiceEngine(),
   );
   sl.registerLazySingleton<VoiceModelDownloader>(
     () => VoiceModelDownloader(),
@@ -474,6 +471,9 @@ Future<void> initDependencies({
         final result = await sl<LocalAiRepository>().getSelectedModel();
         return result.fold(
           (failure) {
+            // Model selection failures are logged and treated as "no local
+            // model" so the runtime can fall back to cloud inference instead
+            // of crashing the session.  This is a diagnostic log, not silent.
             debugPrint('[RUNTIME] model selection failed: ${failure.message}');
             return null;
           },
@@ -514,23 +514,22 @@ Future<void> initDependencies({
   );
 
   // ── Use cases ──────────────────────────────────────────────────────────────
-  sl.registerLazySingleton<GetProjectMemories>(
+  sl.registerLazySingleton(
       () => GetProjectMemories(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<GetLatestProjectMemory>(
+  sl.registerLazySingleton(
       () => GetLatestProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<SaveProjectMemory>(
+  sl.registerLazySingleton(
       () => SaveProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<UpdateProjectMemory>(
+  sl.registerLazySingleton(
       () => UpdateProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<DeleteProjectMemory>(
+  sl.registerLazySingleton(
       () => DeleteProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<DeleteAllProjectMemories>(
+  sl.registerLazySingleton(
       () => DeleteAllProjectMemories(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton<SendAiQuery>(
-      () => SendAiQuery(sl<AiRepository>()));
+  sl.registerLazySingleton(() => SendAiQuery(sl<AiRepository>()));
 
   // ── BLoCs ──────────────────────────────────────────────────────────────────
-  sl.registerFactory<ProjectMemoryBloc>(
+  sl.registerFactory(
     () => ProjectMemoryBloc(
       getProjectMemories: sl<GetProjectMemories>(),
       getLatestProjectMemory: sl<GetLatestProjectMemory>(),
@@ -540,16 +539,16 @@ Future<void> initDependencies({
       deleteAllProjectMemories: sl<DeleteAllProjectMemories>(),
     ),
   );
-  sl.registerFactory<OrchestratorStateEngine>(
+  sl.registerFactory(
     () => OrchestratorStateEngine(
       chatRepository: sl<ChatRepository>(),
     ),
   );
-  sl.registerFactory<OnboardingBloc>(
+  sl.registerFactory(
     () => OnboardingBloc(
         modelRegistryDataSource: sl<ModelRegistryDataSource>()),
   );
-  sl.registerFactory<ModelDownloadBloc>(
+  sl.registerFactory(
     () => ModelDownloadBloc(
       getAvailableModels: sl<GetAvailableModels>(),
       downloadModel: sl<DownloadModel>(),
@@ -564,16 +563,22 @@ Future<void> initDependencies({
 }
 
 /// Resolves a stable node ID for this installation.
+///
+/// Reads from [SharedPreferences] if already set; otherwise generates a new
+/// hex ID, persists it, and returns it so that subsequent launches use the
+/// same identity.
 String _resolveNodeId(SharedPreferences prefs) {
   const key = 'sync_node_id';
   final existing = prefs.getString(key);
   if (existing != null && existing.isNotEmpty) return existing;
   final nodeId = _generateNodeId();
-  prefs.setString(key, nodeId);
+  prefs.setString(key, nodeId); // fire-and-forget; non-critical
   return nodeId;
 }
 
-/// Generates a unique node ID combining timestamp and entropy.
+/// Generates a unique node ID combining the current microsecond timestamp
+/// and a hash of the [DateTime.now()] microsecond/millisecond mix to reduce
+/// collision risk when multiple installations are created simultaneously.
 String _generateNodeId() {
   final t = DateTime.now();
   final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
