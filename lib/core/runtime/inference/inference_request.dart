@@ -92,7 +92,7 @@ class InferenceRequest {
 
     for (final turn in context) {
       messages.add({
-        'role': turn.role,
+        'role': turn.role.name, // Convertito da ChatRole enum a String
         'content': turn.content,
       });
     }
