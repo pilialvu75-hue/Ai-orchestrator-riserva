@@ -129,10 +129,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return false;
     }
 
-    return model.isDownloaded &&
-        (model.validationStatus == ModelValidationStatus.validatedOk ||
-            _isDeveloperMode ||
-            _isImportedModelSafeForMobile(modelId));
+    if (!model.isDownloaded) return false;
+
+    return model.validationStatus == ModelValidationStatus.validatedOk ||
+        _isDeveloperMode;
   }
 
   Future<LocalRuntimeState> validateRuntime({
