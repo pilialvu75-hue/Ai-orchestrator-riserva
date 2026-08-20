@@ -42,10 +42,12 @@ class MemoryWindowConfig {
     required this.minContextSize,
   });
 
-  static const int _desktopMaxTotalSize = 16000;
-  static const int _webMaxTotalSize = 8000;
-  static const int _desktopMaxContextLines = 120;
-  static const int _webMaxContextLines = 80;
+  // FIX C4/B1: Limiti ricalibrati per nCtx = 2048 nativo (1 token ≈ 4 caratteri)
+  // Max 6144 caratteri ≈ 1536 token, lasciando ~512 token per la generazione
+  static const int _desktopMaxTotalSize = 6144;
+  static const int _webMaxTotalSize = 4096;
+  static const int _desktopMaxContextLines = 80;
+  static const int _webMaxContextLines = 40;
   static const int _minimumContextSizeFloor = 256;
 
   final MemoryWindowProfile profile;
@@ -150,21 +152,21 @@ class MemoryWindowConfig {
     switch (profile) {
       case MemoryWindowProfile.compact:
         return (
-          isWeb ? 6 : 6,
-          4096,
+          isWeb ? 16 : 24,
+          3072, // ~768 token
           256,
         );
       case MemoryWindowProfile.standard:
         return (
-          isWeb ? 48 : 60,
-          isWeb ? _webMaxTotalSize : 8000,
+          isWeb ? 32 : 48,
+          isWeb ? _webMaxTotalSize : 4608, // ~1152 token
           512,
         );
       case MemoryWindowProfile.performance:
         return (
-          isWeb ? 60 : 96,
-          isWeb ? _webMaxTotalSize : _desktopMaxTotalSize,
-          isWeb ? 768 : 1024,
+          isWeb ? 40 : 64,
+          isWeb ? _webMaxTotalSize : _desktopMaxTotalSize, // 6144 chars (~1536 token)
+          isWeb ? 512 : 768,
         );
       case MemoryWindowProfile.custom:
       case MemoryWindowProfile.automatic:
@@ -207,7 +209,7 @@ class MemoryWindowConfig {
         'performance',
       ],
     )) {
-      return MemoryWindowProfile.compact;
+      return MemoryWindowProfile.performance;
     }
 
     return MemoryWindowProfile.standard;
