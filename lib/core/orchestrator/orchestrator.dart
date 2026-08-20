@@ -267,7 +267,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: systemPrompt,
         context: context,
-        isOffline: isOffline, // CORRETTO: Passa il flag reale invece di false hardcoded
+        isOffline: isOffline,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
@@ -305,7 +305,7 @@ class Orchestrator {
           hasResults: hasSearchResults,
         ),
         context: context,
-        isOffline: isOffline, // CORRETTO: Garantisce che il local RAG mantenga il runtime FFI attivo
+        isOffline: isOffline,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
@@ -318,7 +318,7 @@ class Orchestrator {
         prompt: input,
         systemPrompt: systemPrompt,
         context: context,
-        isOffline: isOffline, // CORRETTO: Gestione dell'errore coerente con lo stato offline richiesto
+        isOffline: isOffline,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       );
@@ -342,7 +342,12 @@ class Orchestrator {
       sections.add(base);
     }
 
-    if (hasResults && searchContext.trim().isNotEmpty) {
+    final cleanedContext = searchContext.trim();
+    final isUsableResult = hasResults &&
+        cleanedContext.isNotEmpty &&
+        !cleanedContext.toLowerCase().contains('no search results found');
+
+    if (isUsableResult) {
       sections.add(_buildWebSearchSystemPrompt());
       sections.add(searchContext);
       _logForensic(
