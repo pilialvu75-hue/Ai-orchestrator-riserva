@@ -131,59 +131,56 @@ class ConversationMemoryService {
 
     final workspaceId = _workspaceId(sessionId);
 
-    // FIX G2: Cortocircuito. Se l'indice per la sessione è vuoto, evita il calcolo dell'embedding
-    final hasEntries = await _semanticWorkspaceIndex.hasWorkspaceEntries(workspaceId);
-    if (!hasEntries) {
-      debugPrint(
-        '[SEMANTIC_RETRIEVE_SKIP] session=$sessionId reason=empty_workspace',
+    // FIX G2: Calcolo dell'embedding e ricerca gestiti in blocco try-catch
+    try {
+      final queryVector = await _embeddingService.embedTextAsync(normalized);
+
+      final matches = await _semanticWorkspaceIndex.search(
+        queryVector: queryVector,
+        workspaceId: workspaceId,
+        topK: topK,
       );
+
+      debugPrint(
+        '[SEMANTIC_RETRIEVE] scope=chat session=$sessionId top_k=$topK matches=${matches.length}',
+      );
+
+      final recalled = <ChatTurn>[];
+      final seen = <String>{};
+
+      for (final match in matches) {
+        final normalizedContent = _normalizer.normalizeContent(
+          match.chunkText,
+          fallbackRole: _roleFromMetadata(match.documentTitle),
+        );
+
+        if (normalizedContent.isEmpty) continue;
+
+        final turn = ChatTurn(
+          role: _roleFromMetadata(match.documentTitle),
+          content: normalizedContent,
+        );
+
+        if (turn.content.toLowerCase() == normalized.toLowerCase()) {
+          continue;
+        }
+
+        if (!seen.add('${turn.role.name}:${turn.content.toLowerCase()}')) {
+          continue;
+        }
+
+        recalled.add(turn);
+      }
+
+      debugPrint(
+        '[MEMORY_RECALL] session=$sessionId recalled_turns=${recalled.length}',
+      );
+
+      return recalled;
+    } catch (e) {
+      debugPrint('[MEMORY_RECALL_ERROR] session=$sessionId error=$e');
       return const <ChatTurn>[];
     }
-
-    final queryVector = await _embeddingService.embedTextAsync(normalized);
-
-    final matches = await _semanticWorkspaceIndex.search(
-      queryVector: queryVector,
-      workspaceId: workspaceId,
-      topK: topK,
-    );
-
-    debugPrint(
-      '[SEMANTIC_RETRIEVE] scope=chat session=$sessionId top_k=$topK matches=${matches.length}',
-    );
-
-    final recalled = <ChatTurn>[];
-    final seen = <String>{};
-
-    for (final match in matches) {
-      final normalizedContent = _normalizer.normalizeContent(
-        match.chunkText,
-        fallbackRole: _roleFromMetadata(match.documentTitle),
-      );
-
-      if (normalizedContent.isEmpty) continue;
-
-      final turn = ChatTurn(
-        role: _roleFromMetadata(match.documentTitle),
-        content: normalizedContent,
-      );
-
-      if (turn.content.toLowerCase() == normalized.toLowerCase()) {
-        continue;
-      }
-
-      if (!seen.add('${turn.role.name}:${turn.content.toLowerCase()}')) {
-        continue;
-      }
-
-      recalled.add(turn);
-    }
-
-    debugPrint(
-      '[MEMORY_RECALL] session=$sessionId recalled_turns=${recalled.length}',
-    );
-
-    return recalled;
   }
 
   Future<void> clearSessionMemory(String sessionId) {
