@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
@@ -62,6 +64,29 @@ class ConversationMemoryService {
     return result.contextTurns;
   }
 
+  /// FIX B3: Invocazione non-bloccante dell'embedding in background per non frenare lo streaming
+  void storeMessageEmbeddingAsync({
+    required String sessionId,
+    required String messageId,
+    required String role,
+    required String content,
+    required int timestamp,
+  }) {
+    unawaited(
+      storeMessageEmbedding(
+        sessionId: sessionId,
+        messageId: messageId,
+        role: role,
+        content: content,
+        timestamp: timestamp,
+      ).catchError((Object error, StackTrace stackTrace) {
+        debugPrint(
+          '[EMBEDDING_STORE_ASYNC_ERROR] session=$sessionId message=$messageId error=$error',
+        );
+      }),
+    );
+  }
+
   Future<void> storeMessageEmbedding({
     required String sessionId,
     required String messageId,
@@ -104,11 +129,22 @@ class ConversationMemoryService {
       return const <ChatTurn>[];
     }
 
+    final workspaceId = _workspaceId(sessionId);
+
+    // FIX G2: Cortocircuito. Se l'indice per la sessione è vuoto, evita il calcolo dell'embedding
+    final hasEntries = await _semanticWorkspaceIndex.hasWorkspaceEntries(workspaceId);
+    if (!hasEntries) {
+      debugPrint(
+        '[SEMANTIC_RETRIEVE_SKIP] session=$sessionId reason=empty_workspace',
+      );
+      return const <ChatTurn>[];
+    }
+
     final queryVector = await _embeddingService.embedTextAsync(normalized);
 
     final matches = await _semanticWorkspaceIndex.search(
       queryVector: queryVector,
-      workspaceId: _workspaceId(sessionId),
+      workspaceId: workspaceId,
       topK: topK,
     );
 
