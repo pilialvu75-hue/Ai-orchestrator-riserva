@@ -90,7 +90,7 @@ class WebSearchTool implements Tool {
         );
         return ToolResult(
           toolId: id,
-          output: 'No search results found for "$query".',
+          output: '', // Modificato: stringa vuota per evitare di iniettare falsi risultati nel prompt
           success: false,
           error: 'No search results found.',
         );
