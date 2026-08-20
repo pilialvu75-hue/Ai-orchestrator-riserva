@@ -60,14 +60,16 @@ final class WorkshopLocalToolchainService {
     final report = await _detector.inspectAll();
 
     _lastReport = report;
-    _lastInspectionAt = DateTime.now().toUtc();
+    _lastInspectionAt =
+        DateTime.now().toUtc();
 
     return report;
   }
 
   /// Restituisce il report esistente oppure esegue la prima
   /// ispezione.
-  Future<WorkshopLocalToolchainReport> ensureInspected() async {
+  Future<WorkshopLocalToolchainReport>
+      ensureInspected() async {
     final existing = _lastReport;
 
     if (existing != null) {
@@ -81,7 +83,8 @@ final class WorkshopLocalToolchainService {
   Future<WorkshopToolchainInfo> inspectTarget(
     WorkshopBuildTarget target,
   ) async {
-    final info = await _detector.inspectTarget(target);
+    final info =
+        await _detector.inspectTarget(target);
 
     _updateTargetInCachedReport(info);
 
@@ -103,7 +106,8 @@ final class WorkshopLocalToolchainService {
   bool canBuildLocally(
     WorkshopBuildTarget target,
   ) {
-    final info = _lastReport?.infoFor(target);
+    final info =
+        _lastReport?.infoFor(target);
 
     return info?.isAvailable ?? false;
   }
@@ -113,7 +117,8 @@ final class WorkshopLocalToolchainService {
   bool canBuildOffline(
     WorkshopBuildTarget target,
   ) {
-    final info = _lastReport?.infoFor(target);
+    final info =
+        _lastReport?.infoFor(target);
 
     return info?.canBuildOffline ?? false;
   }
@@ -152,7 +157,7 @@ final class WorkshopLocalToolchainService {
       return const <WorkshopBuildTarget>[];
     }
 
-    return List.unmodifiable(
+    return List<WorkshopBuildTarget>.unmodifiable(
       report.targets.entries
           .where(
             (entry) => entry.value.isAvailable,
@@ -171,7 +176,7 @@ final class WorkshopLocalToolchainService {
       return const <WorkshopBuildTarget>[];
     }
 
-    return List.unmodifiable(
+    return List<WorkshopBuildTarget>.unmodifiable(
       report.targets.entries
           .where(
             (entry) => entry.value.canBuildOffline,
@@ -204,7 +209,8 @@ final class WorkshopLocalToolchainService {
   WorkshopBuildExecutionMode recommendedExecutionMode(
     WorkshopBuildTarget target,
   ) {
-    final info = _lastReport?.infoFor(target);
+    final info =
+        _lastReport?.infoFor(target);
 
     if (info == null) {
       return WorkshopBuildExecutionMode.remote;
@@ -234,24 +240,29 @@ final class WorkshopLocalToolchainService {
         target: target,
         available: false,
         offline: false,
-        mode: WorkshopBuildExecutionMode.remote,
+        mode:
+            WorkshopBuildExecutionMode.remote,
         reason:
             'Local toolchain has not been inspected yet.',
-        missingComponents: const <String>[],
+        missingComponents:
+            const <String>[],
       );
     }
 
-    final info = report.infoFor(target);
+    final info =
+        report.infoFor(target);
 
     if (info == null) {
       return WorkshopLocalToolchainDecision(
         target: target,
         available: false,
         offline: false,
-        mode: WorkshopBuildExecutionMode.remote,
+        mode:
+            WorkshopBuildExecutionMode.remote,
         reason:
             'No toolchain information is available for this target.',
-        missingComponents: const <String>[],
+        missingComponents:
+            const <String>[],
       );
     }
 
@@ -260,11 +271,14 @@ final class WorkshopLocalToolchainService {
         target: target,
         available: true,
         offline: true,
-        mode: WorkshopBuildExecutionMode.offlineLocal,
+        mode:
+            WorkshopBuildExecutionMode.offlineLocal,
         reason:
             'Target is available through the local offline toolchain.',
         missingComponents:
-            List.unmodifiable(info.missingComponents),
+            List<String>.unmodifiable(
+          info.missingComponents,
+        ),
       );
     }
 
@@ -273,11 +287,14 @@ final class WorkshopLocalToolchainService {
         target: target,
         available: true,
         offline: false,
-        mode: WorkshopBuildExecutionMode.local,
+        mode:
+            WorkshopBuildExecutionMode.local,
         reason:
             'Target is available through the local toolchain.',
         missingComponents:
-            List.unmodifiable(info.missingComponents),
+            List<String>.unmodifiable(
+          info.missingComponents,
+        ),
       );
     }
 
@@ -285,12 +302,15 @@ final class WorkshopLocalToolchainService {
       target: target,
       available: false,
       offline: false,
-      mode: WorkshopBuildExecutionMode.remote,
+      mode:
+          WorkshopBuildExecutionMode.remote,
       reason:
           info.message ??
           'Local toolchain is unavailable for this target.',
       missingComponents:
-          List.unmodifiable(info.missingComponents),
+          List<String>.unmodifiable(
+        info.missingComponents,
+      ),
     );
   }
 
@@ -303,15 +323,19 @@ final class WorkshopLocalToolchainService {
         'inspected': false,
         'localBuildCapability': false,
         'offlineBuildCapability': false,
-        'localTargets': const <String>[],
-        'offlineTargets': const <String>[],
+        'localTargets':
+            const <String>[],
+        'offlineTargets':
+            const <String>[],
       };
     }
 
     return <String, dynamic>{
       'inspected': true,
       'checkedAt':
-          report.checkedAt.toUtc().toIso8601String(),
+          report.checkedAt
+              .toUtc()
+              .toIso8601String(),
       'flutterAvailable':
           report.flutterAvailable,
       'dartAvailable':
@@ -328,18 +352,31 @@ final class WorkshopLocalToolchainService {
           hasOfflineBuildCapability,
       'localTargets':
           localTargets
-              .map((target) => target.name)
-              .toList(growable: false),
+              .map(
+                (target) => target.name,
+              )
+              .toList(
+                growable: false,
+              ),
       'offlineTargets':
           offlineTargets
-              .map((target) => target.name)
-              .toList(growable: false),
+              .map(
+                (target) => target.name,
+              )
+              .toList(
+                growable: false,
+              ),
       'targets': <String, dynamic>{
-        for (final entry in report.targets.entries)
-          entry.key.name: <String, dynamic>{
-            'status': entry.value.status.name,
+        for (final entry
+            in report.targets.entries)
+          entry.key.name:
+              <String, dynamic>{
+            'status':
+                entry.value.status.name,
             'executionMode':
-                entry.value.executionMode.name,
+                entry.value
+                    .executionMode
+                    .name,
             'available':
                 entry.value.isAvailable,
             'canBuildOffline':
@@ -351,7 +388,8 @@ final class WorkshopLocalToolchainService {
             'path':
                 entry.value.path,
             'missingComponents':
-                entry.value.missingComponents,
+                entry.value
+                    .missingComponents,
             'message':
                 entry.value.message,
           },
@@ -379,13 +417,16 @@ final class WorkshopLocalToolchainService {
     }
 
     final targets =
-        <WorkshopBuildTarget, WorkshopToolchainInfo>{
+        <WorkshopBuildTarget,
+            WorkshopToolchainInfo>{
       ...report.targets,
       info.target: info,
     };
 
-    _lastReport = WorkshopLocalToolchainReport(
-      checkedAt: report.checkedAt,
+    _lastReport =
+        WorkshopLocalToolchainReport(
+      checkedAt:
+          report.checkedAt,
       flutterAvailable:
           report.flutterAvailable,
       dartAvailable:
@@ -396,9 +437,13 @@ final class WorkshopLocalToolchainService {
           report.androidSdkAvailable,
       offlineCapable:
           targets.values.any(
-            (item) => item.canBuildOffline,
-          ),
-      targets: Map.unmodifiable(targets),
+        (item) => item.canBuildOffline,
+      ),
+      targets:
+          Map<WorkshopBuildTarget,
+              WorkshopToolchainInfo>.unmodifiable(
+        targets,
+      ),
       flutterVersion:
           report.flutterVersion,
       dartVersion:
@@ -439,11 +484,14 @@ final class WorkshopLocalToolchainDecision {
   final List<String> missingComponents;
 
   bool get requiresRemoteBuilder =>
-      mode == WorkshopBuildExecutionMode.remote;
+      mode ==
+      WorkshopBuildExecutionMode.remote;
 
   bool get isLocal =>
-      mode == WorkshopBuildExecutionMode.local ||
-      mode == WorkshopBuildExecutionMode.offlineLocal;
+      mode ==
+          WorkshopBuildExecutionMode.local ||
+      mode ==
+          WorkshopBuildExecutionMode.offlineLocal;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -452,7 +500,10 @@ final class WorkshopLocalToolchainDecision {
       'offline': offline,
       'mode': mode.name,
       'reason': reason,
-      'missingComponents': missingComponents,
+      'missingComponents':
+          List<String>.unmodifiable(
+        missingComponents,
+      ),
       'requiresRemoteBuilder':
           requiresRemoteBuilder,
       'isLocal': isLocal,
