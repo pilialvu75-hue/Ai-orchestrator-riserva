@@ -33,13 +33,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  // Modifica 1: final Set<String> con tipo esplicito
   static final Set<String> _mobileValidatedModelIds = {
     ...AndroidFfiRuntimeModelIds.validatedModelIds,
     LocalInferenceModelIds.phi3_5_mini, 
   };
 
-  // Modifica 2: Set<String> tipo esplicito
   static const Set<String> _desktopValidatedModelIds =
       AndroidFfiRuntimeModelIds.validatedModelIds;
 
@@ -131,9 +129,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return false;
     }
 
-    return model.validationStatus ==
-            ModelValidationStatus.validatedOk ||
-        (_isDeveloperMode && model.isDownloaded);
+    return model.isDownloaded &&
+        (model.validationStatus == ModelValidationStatus.validatedOk ||
+            _isDeveloperMode ||
+            _isImportedModelSafeForMobile(modelId));
   }
 
   Future<LocalRuntimeState> validateRuntime({
@@ -508,16 +507,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return controller.stream;
   }
 
-  // Modifica 3: _isModelAllowedOnPlatform completo di pattern matching per modelli custom
   bool _isModelAllowedOnPlatform(String modelId) {
-    // 1. Set statici validati (modelli certificati)
     final baseAllowed = _isDesktopPlatform()
         ? _desktopValidatedModelIds
         : _mobileValidatedModelIds;
 
     if (baseAllowed.contains(modelId)) return true;
 
-    // 2. Set dinamici (modelli registrati via template)
     if (LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
         LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
         LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
@@ -525,15 +521,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return true;
     }
 
-    // 3. Pattern matching per modelli importati dall'utente con nome libero.
     return _isImportedModelSafeForMobile(modelId);
   }
 
-  /// Pattern matching per modelli importati con nome arbitrario.
   static bool _isImportedModelSafeForMobile(String modelId) {
     final id = modelId.trim().toLowerCase();
 
-    // Su desktop non si applica il limite di dimensione
     if (_isDesktopPlatform()) {
       return id.contains('llama') ||
           id.contains('mistral') ||
@@ -546,7 +539,6 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           id.contains('tinyllama');
     }
 
-    // Mobile: blocca modelli >8B per protezione OOM
     if (id.contains('70b') || id.contains('65b') || id.contains('34b') ||
         id.contains('30b') || id.contains('22b') || id.contains('20b') ||
         id.contains('14b') || id.contains('13b') || id.contains('12b')) {
