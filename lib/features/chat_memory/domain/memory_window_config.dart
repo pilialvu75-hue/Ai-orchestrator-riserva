@@ -180,6 +180,7 @@ class MemoryWindowConfig {
       return MemoryWindowProfile.standard;
     }
 
+    // 1. Modelli piccoli/compatti (inclusa famiglia Phi) -> COMPACT
     if (_containsAny(
       normalized,
       const <String>[
@@ -189,11 +190,17 @@ class MemoryWindowConfig {
         '2b',
         'tiny',
         'small',
+        'phi',
+        'phi3',
+        'phi-3',
+        'phi3.5',
+        'phi3_5',
       ],
     )) {
       return MemoryWindowProfile.compact;
     }
 
+    // 2. Modelli grandi/pesanti -> PERFORMANCE
     if (_containsAny(
       normalized,
       const <String>[
@@ -202,10 +209,6 @@ class MemoryWindowConfig {
         '13b',
         'qwen3',
         'deepseek',
-        'phi',
-        'phi3',
-        'phi-3',
-        'phi3.5',
         'performance',
       ],
     )) {
