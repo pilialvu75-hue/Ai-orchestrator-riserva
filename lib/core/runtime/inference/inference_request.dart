@@ -51,18 +51,6 @@ class InferenceRequest {
     return 0.4;
   }
 
-  /// Converte un vecchio turno utente/assistente in due `ChatTurn` distinti
-  /// compatibili con la nuova struttura `(role, content)`.
-  static List<ChatTurn> createTurnsFromPair({
-    required String userMessage,
-    required String assistantMessage,
-  }) {
-    return [
-      ChatTurn(role: 'user', content: userMessage),
-      ChatTurn(role: 'assistant', content: assistantMessage),
-    ];
-  }
-
   InferenceRequest copyWith({
     String? sessionId,
     String? prompt,
@@ -89,5 +77,31 @@ class InferenceRequest {
       modelId: modelId ?? this.modelId,
       modelPath: modelPath ?? this.modelPath,
     );
+  }
+
+  /// Mappa la richiesta in formato JSON o lista di messaggi per l'engine LLM.
+  List<Map<String, String>> toMessageList() {
+    final List<Map<String, String>> messages = [];
+
+    if (systemPrompt != null && systemPrompt!.isNotEmpty) {
+      messages.add({
+        'role': 'system',
+        'content': systemPrompt!,
+      });
+    }
+
+    for (final turn in context) {
+      messages.add({
+        'role': turn.role,
+        'content': turn.content,
+      });
+    }
+
+    messages.add({
+      'role': 'user',
+      'content': prompt,
+    });
+
+    return messages;
   }
 }
