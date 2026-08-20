@@ -220,7 +220,7 @@ final class WorkshopTaskExecutionGuard {
 
   WorkshopTaskExecutionGuardDecision? _checkMode({
     required WorkshopTaskContract task,
-    required WorkshopTaskResourceAllocation allocation,
+    required WorkshopResourceAllocation allocation,
   }) {
     switch (task.mode) {
       case WorkshopTaskMode.local:
@@ -316,7 +316,7 @@ final class WorkshopTaskExecutionGuard {
 
   WorkshopTaskExecutionGuardDecision? _checkBudget({
     required WorkshopTaskContract task,
-    required WorkshopTaskResourceAllocation allocation,
+    required WorkshopResourceAllocation allocation,
     required WorkshopResourceSnapshot resource,
   }) {
     final estimatedCost = allocation.estimatedCredits >
@@ -359,7 +359,7 @@ final class WorkshopTaskExecutionGuard {
 
   WorkshopTaskExecutionGuardDecision? _checkCapabilities({
     required WorkshopTaskContract task,
-    required WorkshopTaskResourceAllocation allocation,
+    required WorkshopResourceAllocation allocation,
     required WorkshopResourceSnapshot resource,
   }) {
     final required = _requiredCapabilities(task);
@@ -478,7 +478,7 @@ final class WorkshopTaskExecutionGuard {
 
   WorkshopTaskExecutionGuardDecision? _checkApproval({
     required WorkshopTaskContract task,
-    required WorkshopTaskResourceAllocation allocation,
+    required WorkshopResourceAllocation allocation,
     required bool approvalGranted,
   }) {
     final modifiesCode =
