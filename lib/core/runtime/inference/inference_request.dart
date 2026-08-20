@@ -84,7 +84,7 @@ class InferenceRequest {
       'sessionId': sessionId,
       'prompt': prompt,
       'systemPrompt': systemPrompt,
-      'context': context.map((x) => x.toMap()).toList(),
+      'context': context.map((x) => x.toJson()).toList(),
       'isOffline': isOffline,
       'maxTokens': maxTokens,
       'temperature': temperature,
@@ -101,7 +101,7 @@ class InferenceRequest {
       prompt: map['prompt'] as String? ?? '',
       systemPrompt: map['systemPrompt'] as String?,
       context: (map['context'] as List<dynamic>?)
-              ?.map((x) => ChatTurn.fromMap(x as Map<String, dynamic>))
+              ?.map((x) => ChatTurn.fromJson(x as Map<String, dynamic>))
               .toList() ??
           const [],
       isOffline: map['isOffline'] as bool? ?? false,
