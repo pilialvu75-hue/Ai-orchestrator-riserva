@@ -10,7 +10,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
-import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart'; // RIGA 11: UTILIZZATA CON SUCCESSO
+import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -33,16 +33,15 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // 12GB safety cap
 
-  // ——— FIX: Set Mobile con Phi-3.5-mini aggiunto ———
+  // Modifica 1: final Set<String> con tipo esplicito
   static final Set<String> _mobileValidatedModelIds = {
     ...AndroidFfiRuntimeModelIds.validatedModelIds,
     LocalInferenceModelIds.phi3_5_mini, 
   };
 
-  static final Set<String> _desktopValidatedModelIds = {
-    ...AndroidFfiRuntimeModelIds.validatedModelIds,
-  };
-  // —————————————————————————————————————————————————
+  // Modifica 2: Set<String> tipo esplicito
+  static const Set<String> _desktopValidatedModelIds =
+      AndroidFfiRuntimeModelIds.validatedModelIds;
 
   final bool Function() _developerModeProvider;
 
@@ -509,24 +508,60 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return controller.stream;
   }
 
-  bool _isModelAllowedOnPlatform(
-    String modelId,
-  ) {
-    // 1. Controlla prima i set statici di base delle piattaforme
-    final baseAllowed =
-        _isDesktopPlatform()
-           ? _desktopValidatedModelIds
-            : _mobileValidatedModelIds;
+  // Modifica 3: _isModelAllowedOnPlatform completo di pattern matching per modelli custom
+  bool _isModelAllowedOnPlatform(String modelId) {
+    // 1. Set statici validati (modelli certificati)
+    final baseAllowed = _isDesktopPlatform()
+        ? _desktopValidatedModelIds
+        : _mobileValidatedModelIds;
 
-    if (baseAllowed.contains(modelId)) {
+    if (baseAllowed.contains(modelId)) return true;
+
+    // 2. Set dinamici (modelli registrati via template)
+    if (LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
+        LocalInferenceModelIds.phi3ChatTemplateModels.contains(modelId)) {
       return true;
     }
 
-    // 2. Integrazione dinamica: Controlla se il modelId è presente in uno dei set di template dinamici
-    return LocalInferenceModelIds.llama3ChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.qwenChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.gemmaChatTemplateModels.contains(modelId) ||
-        LocalInferenceModelIds.phi3ChatTemplateModels.contains(modelId); // <- Sblocca l'ammissione dinamica di Phi-3.5
+    // 3. Pattern matching per modelli importati dall'utente con nome libero.
+    return _isImportedModelSafeForMobile(modelId);
+  }
+
+  /// Pattern matching per modelli importati con nome arbitrario.
+  static bool _isImportedModelSafeForMobile(String modelId) {
+    final id = modelId.trim().toLowerCase();
+
+    // Su desktop non si applica il limite di dimensione
+    if (_isDesktopPlatform()) {
+      return id.contains('llama') ||
+          id.contains('mistral') ||
+          id.contains('mixtral') ||
+          id.contains('qwen') ||
+          id.contains('deepseek') ||
+          id.contains('gemma') ||
+          id.contains('phi') ||
+          id.contains('smollm') ||
+          id.contains('tinyllama');
+    }
+
+    // Mobile: blocca modelli >8B per protezione OOM
+    if (id.contains('70b') || id.contains('65b') || id.contains('34b') ||
+        id.contains('30b') || id.contains('22b') || id.contains('20b') ||
+        id.contains('14b') || id.contains('13b') || id.contains('12b')) {
+      return false;
+    }
+
+    return id.contains('llama') ||
+        id.contains('mistral') ||
+        id.contains('mixtral') ||
+        id.contains('qwen') ||
+        id.contains('deepseek') ||
+        id.contains('gemma') ||
+        id.contains('phi') ||
+        id.contains('smollm') ||
+        id.contains('tinyllama');
   }
 
   String _resolveLlamaExecutable() {
