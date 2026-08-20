@@ -54,15 +54,15 @@ void main() {
 
       await service.setMemoryWindowProfile(MemoryWindowProfile.custom);
       await service.setMemoryWindowCustomSettings(
-        tokenBudget: 12000,
-        lineBudget: 72,
+        tokenBudget: 5120,
+        lineBudget: 60,
       );
 
       expect(service.memoryWindowProfile, MemoryWindowProfile.custom);
-      expect(service.customMemoryTokenBudget, 12000);
-      expect(service.customMemoryLineBudget, 72);
-      expect(service.memoryWindowConfig.maxTotalSize, 12000);
-      expect(service.memoryWindowConfig.maxContextLines, 72);
+      expect(service.customMemoryTokenBudget, 5120);
+      expect(service.customMemoryLineBudget, 60);
+      expect(service.memoryWindowConfig.maxTotalSize, 5120);
+      expect(service.memoryWindowConfig.maxContextLines, 60);
     });
 
     test('resolves automatic config from the selected model', () async {
@@ -77,8 +77,8 @@ void main() {
 
       expect(config.profile, MemoryWindowProfile.automatic);
       expect(config.activeProfile, MemoryWindowProfile.compact);
-      expect(config.maxTotalSize, 4096);
-      expect(config.maxContextLines, 6);
+      expect(config.maxTotalSize, 3072);
+      expect(config.maxContextLines, 24);
     });
   });
 }
