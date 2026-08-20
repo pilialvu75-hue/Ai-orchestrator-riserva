@@ -78,4 +78,39 @@ class InferenceRequest {
       modelPath: modelPath ?? this.modelPath,
     );
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'sessionId': sessionId,
+      'prompt': prompt,
+      'systemPrompt': systemPrompt,
+      'context': context.map((x) => x.toMap()).toList(),
+      'isOffline': isOffline,
+      'maxTokens': maxTokens,
+      'temperature': temperature,
+      'topP': topP,
+      'repeatPenalty': repeatPenalty,
+      'modelId': modelId,
+      'modelPath': modelPath,
+    };
+  }
+
+  factory InferenceRequest.fromMap(Map<String, dynamic> map) {
+    return InferenceRequest(
+      sessionId: map['sessionId'] as String? ?? '',
+      prompt: map['prompt'] as String? ?? '',
+      systemPrompt: map['systemPrompt'] as String?,
+      context: (map['context'] as List<dynamic>?)
+              ?.map((x) => ChatTurn.fromMap(x as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      isOffline: map['isOffline'] as bool? ?? false,
+      maxTokens: map['maxTokens'] as int? ?? defaultMaxTokens,
+      temperature: (map['temperature'] as num?)?.toDouble() ?? defaultTemperature,
+      topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
+      repeatPenalty: (map['repeatPenalty'] as num?)?.toDouble() ?? 1.1,
+      modelId: map['modelId'] as String?,
+      modelPath: map['modelPath'] as String?,
+    );
+  }
 }
