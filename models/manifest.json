@@ -1,5 +1,8 @@
 {
   "llama_1b": {
     "version": "1.0.0"
+  },
+  "phi3_5_mini": {
+    "version": "1.0.0"
   }
 }

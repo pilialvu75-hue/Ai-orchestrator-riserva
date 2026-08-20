@@ -133,7 +133,7 @@ class AppConstants {
       'version': '1.0.0',
       'sizeBytes': 2390000000,
       'description':
-          'Phi-3.5 Mini Instruct (Q4_K_M) – mobile-friendly 3.5B local model for concise reasoning and tool use.',
+          'Phi-3.5 Mini Instruct (Q4_K_M) mobile-friendly local model for concise reasoning and tool use.',
       'platformTarget': 'android',
       'sizeCategory': '4B',
     },
