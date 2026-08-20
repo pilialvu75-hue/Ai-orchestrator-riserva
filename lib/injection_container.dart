@@ -8,13 +8,13 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
-import 'package0/core/orchestrator/intent_analyzer.dart';
+import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/plugins/plugin_registry.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
-import 'package0/core/runtime/chat_ui_preferences_service.dart';
+import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
@@ -47,8 +47,8 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
-import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
-import 'package0/features/cloud_ai/data/datasources/openai_datasource.dart';
+import 'package0/features/cloud_ai/data/datasources/grok_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/repositories/ai_repository_impl.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/usecases/send_ai_query.dart';
@@ -73,7 +73,7 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
-import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
+import 'package0/features/onboarding/data/datasources/model_registry_datasource.dart';
 import 'package:ai_orchestrator/features/onboarding/presentation/bloc/onboarding_bloc.dart';
 import 'package:ai_orchestrator/features/projects/data/datasources/project_memory_local_datasource.dart';
 import 'package:ai_orchestrator/features/projects/data/repositories/project_memory_repository_impl.dart';
@@ -84,7 +84,7 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/get_latest_pro
 import 'package:ai_orchestrator/features/projects/domain/usecases/get_project_memories.dart';
 import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
-import 'package0/features/projects/presentation/bloc/project_memory_bloc.dart';
+import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/features/project_memory/workspace_project_memory_service.dart';
 import 'package:ai_orchestrator/features/code_context/code_chunker.dart';
 import 'package:ai_orchestrator/features/code_context/context_retrieval_service.dart';
@@ -96,8 +96,6 @@ import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
-
-// Corretti i refusi 'package0' con 'package:ai_orchestrator'
 import 'package:ai_orchestrator/native/runtime/execution_engine_factory.dart';
 import 'package:ai_orchestrator/native/runtime/local_runtime_provider_factory.dart';
 import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.dart';
@@ -289,7 +287,7 @@ Future<void> initDependencies({
     ),
   );
 
-  // ── Core AI & Inference Services ──────────────────────────────────────────
+  // ── Core AI ────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ModelManager>(() => const ModelManager());
   sl.registerLazySingleton<RuntimeSessionManager>(() => RuntimeSessionManager());
   sl.registerLazySingleton<RuntimeStateMachine>(() => RuntimeStateMachine());
@@ -324,33 +322,7 @@ Future<void> initDependencies({
         apiKey: copilotApiKey, httpClient: sl<http.Client>()),
   );
 
-  // ── Repositories & Cloud Runtime ──────────────────────────────────────────
-  sl.registerLazySingleton<AiRepository>(
-    () => AiRepositoryImpl(
-      openAiDataSource: sl<OpenAiDataSource>(),
-      geminiDataSource: sl<GeminiDataSource>(),
-      claudeDataSource: sl<ClaudeDataSource>(),
-      grokDataSource: sl<GrokDataSource>(),
-      copilotDataSource: sl<CopilotDataSource>(),
-    )..setProvider(sl<AiRuntimeSettingsService>().activeProvider),
-  );
-  sl.registerLazySingleton<CloudRuntimeProvider>(
-    () => CloudRuntimeProvider(
-      sendQuery: (provider, request) async {
-        final result = await sl<AiRepository>().sendQueryWithProvider(provider, request);
-        return result.fold(
-          (failure) => throw failure,
-          (response) => response,
-        );
-      },
-      supportedProviders: () => sl<AiRepository>().supportedProviders,
-      isProviderAvailable: (provider) => sl<AiRepository>().isProviderAvailable(provider),
-      providerDisplayName: ([providerName]) =>
-          sl<AiRepository>().providerDisplayName(providerName),
-    ),
-  );
-
-  // ── Project memory & Chat Data Source ─────────────────────────────────────
+  // ── Project memory ─────────────────────────────────────────────────────────
   sl.registerLazySingleton<ProjectMemoryLocalDataSource>(
     () => ProjectMemoryLocalDataSourceImpl(
         databaseHelper: sl<DatabaseHelper>()),
@@ -359,14 +331,18 @@ Future<void> initDependencies({
     () => ProjectMemoryRepositoryImpl(
         localDataSource: sl<ProjectMemoryLocalDataSource>()),
   );
+
+  // ── Chat ───────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ChatLocalDataSource>(
     () => ChatLocalDataSourceImpl(databaseHelper: sl<DatabaseHelper>()),
   );
 
-  // ── Onboarding & Local AI ─────────────────────────────────────────────────
+  // ── Onboarding ─────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ModelRegistryDataSource>(
     () => const ModelRegistryDataSource(),
   );
+
+  // ── Local AI (offline model download / selection) ──────────────────────────
   sl.registerLazySingleton<BundledModelRegistryService>(
     () => const BundledModelRegistryService(),
   );
@@ -384,42 +360,15 @@ Future<void> initDependencies({
       localAiRepository: sl<LocalAiRepository>(),
     ),
   );
-
-  // ── Inference Service ─────────────────────────────────────────────────────
-  sl.registerLazySingleton<InferenceService>(
-    () => InferenceService(
-      loadSelectedModel: () async {
-        final result = await sl<LocalAiRepository>().getSelectedModel();
-        return result.fold(
-          (failure) {
-            debugPrint('[RUNTIME] model selection failed: ${failure.message}');
-            return null;
-          },
-          (model) => model,
-        );
-      },
-      loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
+  sl.registerLazySingleton<RuntimeSelfTestService>(
+    () => RuntimeSelfTestService(
       runtimeProvider: sl<LocalRuntimeProvider>(),
-      cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
-      sessionManager: sl<RuntimeSessionManager>(),
+      localAiRepository: sl<LocalAiRepository>(),
+      chatRepository: sl<ChatRepository>(),
     ),
   );
 
-  // ── Planning Engine ───────────────────────────────────────────────────────
-  sl.registerLazySingleton<PlannerService>(
-    () => PlannerService(inferenceService: sl<InferenceService>()),
-  );
-  sl.registerLazySingleton<SequentialPlanningStrategy>(
-    () => SequentialPlanningStrategy(plannerService: sl<PlannerService>()),
-  );
-  sl.registerLazySingleton<CodingAssistantAgentImpl>(
-    () => CodingAssistantAgentImpl(
-      plannerService: sl<PlannerService>(),
-      inferenceService: sl<InferenceService>(),
-    ),
-  );
-
-  // ── Local AI Use Cases (Aggiunti tipi espliciti) ──────────────────────────
+  // Use cases con tipi generici espliciti per evitare runtime cast error in GetIt
   sl.registerLazySingleton<GetAvailableModels>(
       () => GetAvailableModels(sl<LocalAiRepository>()));
   sl.registerLazySingleton<DownloadModel>(
@@ -479,6 +428,64 @@ Future<void> initDependencies({
   // ── Orchestrator components ───────────────────────────────────────────────
   sl.registerLazySingleton<IntentAnalyzer>(() => const IntentAnalyzer());
   sl.registerLazySingleton<ExecutionEngine>(() => createExecutor());
+
+  // ── Planning engine (TaskWeaver-inspired) ─────────────────────────────────
+  sl.registerLazySingleton<PlannerService>(
+    () => PlannerService(inferenceService: sl<InferenceService>()),
+  );
+  sl.registerLazySingleton<SequentialPlanningStrategy>(
+    () => SequentialPlanningStrategy(plannerService: sl<PlannerService>()),
+  );
+  sl.registerLazySingleton<CodingAssistantAgentImpl>(
+    () => CodingAssistantAgentImpl(
+      plannerService: sl<PlannerService>(),
+      inferenceService: sl<InferenceService>(),
+    ),
+  );
+
+  // ── Repositories ───────────────────────────────────────────────────────────
+  sl.registerLazySingleton<AiRepository>(
+    () => AiRepositoryImpl(
+      openAiDataSource: sl<OpenAiDataSource>(),
+      geminiDataSource: sl<GeminiDataSource>(),
+      claudeDataSource: sl<ClaudeDataSource>(),
+      grokDataSource: sl<GrokDataSource>(),
+      copilotDataSource: sl<CopilotDataSource>(),
+    )..setProvider(sl<AiRuntimeSettingsService>().activeProvider),
+  );
+  sl.registerLazySingleton<CloudRuntimeProvider>(
+    () => CloudRuntimeProvider(
+      sendQuery: (provider, request) async {
+        final result = await sl<AiRepository>().sendQueryWithProvider(provider, request);
+        return result.fold(
+          (failure) => throw failure,
+          (response) => response,
+        );
+      },
+      supportedProviders: () => sl<AiRepository>().supportedProviders,
+      isProviderAvailable: (provider) => sl<AiRepository>().isProviderAvailable(provider),
+      providerDisplayName: ([providerName]) =>
+          sl<AiRepository>().providerDisplayName(providerName),
+    ),
+  );
+  sl.registerLazySingleton<InferenceService>(
+    () => InferenceService(
+      loadSelectedModel: () async {
+        final result = await sl<LocalAiRepository>().getSelectedModel();
+        return result.fold(
+          (failure) {
+            debugPrint('[RUNTIME] model selection failed: ${failure.message}');
+            return null;
+          },
+          (model) => model,
+        );
+      },
+      loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
+      runtimeProvider: sl<LocalRuntimeProvider>(),
+      cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+      sessionManager: sl<RuntimeSessionManager>(),
+    ),
+  );
   sl.registerLazySingleton<SearchProvider>(
     () => DuckDuckGoProvider(client: sl<http.Client>()),
   );
@@ -506,15 +513,7 @@ Future<void> initDependencies({
     ),
   );
 
-  sl.registerLazySingleton<RuntimeSelfTestService>(
-    () => RuntimeSelfTestService(
-      runtimeProvider: sl<LocalRuntimeProvider>(),
-      localAiRepository: sl<LocalAiRepository>(),
-      chatRepository: sl<ChatRepository>(),
-    ),
-  );
-
-  // ── Project Memory Use Cases ──────────────────────────────────────────────
+  // ── Use cases ──────────────────────────────────────────────────────────────
   sl.registerLazySingleton<GetProjectMemories>(
       () => GetProjectMemories(sl<ProjectMemoryRepository>()));
   sl.registerLazySingleton<GetLatestProjectMemory>(
@@ -564,6 +563,7 @@ Future<void> initDependencies({
   );
 }
 
+/// Resolves a stable node ID for this installation.
 String _resolveNodeId(SharedPreferences prefs) {
   const key = 'sync_node_id';
   final existing = prefs.getString(key);
@@ -573,6 +573,7 @@ String _resolveNodeId(SharedPreferences prefs) {
   return nodeId;
 }
 
+/// Generates a unique node ID combining timestamp and entropy.
 String _generateNodeId() {
   final t = DateTime.now();
   final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
