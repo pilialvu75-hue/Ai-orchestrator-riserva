@@ -51,6 +51,18 @@ class InferenceRequest {
     return 0.4;
   }
 
+  /// Converte un vecchio turno utente/assistente in due `ChatTurn` distinti
+  /// compatibili con la nuova struttura `(role, content)`.
+  static List<ChatTurn> createTurnsFromPair({
+    required String userMessage,
+    required String assistantMessage,
+  }) {
+    return [
+      ChatTurn(role: 'user', content: userMessage),
+      ChatTurn(role: 'assistant', content: assistantMessage),
+    ];
+  }
+
   InferenceRequest copyWith({
     String? sessionId,
     String? prompt,
@@ -76,56 +88,6 @@ class InferenceRequest {
       repeatPenalty: repeatPenalty ?? this.repeatPenalty,
       modelId: modelId ?? this.modelId,
       modelPath: modelPath ?? this.modelPath,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'sessionId': sessionId,
-      'prompt': prompt,
-      'systemPrompt': systemPrompt,
-      'context': context.map((turn) {
-        return {
-          'userMessage': turn.userMessage,
-          'assistantMessage': turn.assistantMessage,
-          'timestamp': turn.timestamp?.toIso8601String(),
-        };
-      }).toList(),
-      'isOffline': isOffline,
-      'maxTokens': maxTokens,
-      'temperature': temperature,
-      'topP': topP,
-      'repeatPenalty': repeatPenalty,
-      'modelId': modelId,
-      'modelPath': modelPath,
-    };
-  }
-
-  factory InferenceRequest.fromMap(Map<String, dynamic> map) {
-    return InferenceRequest(
-      sessionId: map['sessionId'] as String? ?? '',
-      prompt: map['prompt'] as String? ?? '',
-      systemPrompt: map['systemPrompt'] as String?,
-      context: (map['context'] as List<dynamic>?)?.map((item) {
-            final turnMap = item as Map<String, dynamic>;
-            final rawTimestamp = turnMap['timestamp'] as String?;
-            return ChatTurn(
-              userMessage: turnMap['userMessage'] as String? ?? '',
-              assistantMessage: turnMap['assistantMessage'] as String? ?? '',
-              timestamp: rawTimestamp != null
-                  ? DateTime.tryParse(rawTimestamp)
-                  : null,
-            );
-          }).toList() ??
-          const [],
-      isOffline: map['isOffline'] as bool? ?? false,
-      maxTokens: map['maxTokens'] as int? ?? defaultMaxTokens,
-      temperature:
-          (map['temperature'] as num?)?.toDouble() ?? defaultTemperature,
-      topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
-      repeatPenalty: (map['repeatPenalty'] as num?)?.toDouble() ?? 1.1,
-      modelId: map['modelId'] as String?,
-      modelPath: map['modelPath'] as String?,
     );
   }
 }
