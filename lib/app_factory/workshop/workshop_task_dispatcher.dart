@@ -38,7 +38,9 @@ final class WorkshopTaskDispatcher {
 
   /// Executor registrati.
   List<WorkshopTaskExecutor> get executors =>
-      List.unmodifiable(_executors);
+      List<WorkshopTaskExecutor>.unmodifiable(
+        _executors,
+      );
 
   /// Numero di executor disponibili.
   int get executorCount => _executors.length;
@@ -141,10 +143,12 @@ final class WorkshopTaskDispatcher {
     if (!guardDecision.isAllowed) {
       return WorkshopTaskExecutionResult(
         taskId: task.id,
-        status: guardDecision.blockReason ==
-                WorkshopTaskExecutionBlockReason.approvalRequired
-            ? WorkshopTaskStatus.waitingApproval
-            : WorkshopTaskStatus.failed,
+        status:
+            guardDecision.blockReason ==
+                    WorkshopTaskExecutionBlockReason
+                        .approvalRequired
+                ? WorkshopTaskStatus.waitingApproval
+                : WorkshopTaskStatus.failed,
         message:
             'Task execution blocked by the Workshop Execution Guard: '
             '${guardDecision.message}',
@@ -223,7 +227,7 @@ final class WorkshopTaskDispatcher {
   List<WorkshopTaskExecutor> executorsForResource(
     WorkshopTaskResource resource,
   ) {
-    return List.unmodifiable(
+    return List<WorkshopTaskExecutor>.unmodifiable(
       _executors.where(
         (executor) =>
             executor.resource == resource &&
@@ -251,7 +255,7 @@ final class WorkshopTaskDispatcher {
   ///
   /// Utile per log, debug e schermata Developer Mode.
   List<Map<String, dynamic>> diagnostics() {
-    return List.unmodifiable(
+    return List<Map<String, dynamic>>.unmodifiable(
       _executors.map(
         (executor) => <String, dynamic>{
           'executorId': executor.executorId,
