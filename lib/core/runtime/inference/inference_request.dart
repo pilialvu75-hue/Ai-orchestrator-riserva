@@ -84,7 +84,13 @@ class InferenceRequest {
       'sessionId': sessionId,
       'prompt': prompt,
       'systemPrompt': systemPrompt,
-      'context': context.map((x) => x.toJson()).toList(),
+      'context': context.map((turn) {
+        return {
+          'userMessage': turn.userMessage,
+          'assistantMessage': turn.assistantMessage,
+          'timestamp': turn.timestamp?.toIso8601String(),
+        };
+      }).toList(),
       'isOffline': isOffline,
       'maxTokens': maxTokens,
       'temperature': temperature,
@@ -100,13 +106,22 @@ class InferenceRequest {
       sessionId: map['sessionId'] as String? ?? '',
       prompt: map['prompt'] as String? ?? '',
       systemPrompt: map['systemPrompt'] as String?,
-      context: (map['context'] as List<dynamic>?)
-              ?.map((x) => ChatTurn.fromJson(x as Map<String, dynamic>))
-              .toList() ??
+      context: (map['context'] as List<dynamic>?)?.map((item) {
+            final turnMap = item as Map<String, dynamic>;
+            final rawTimestamp = turnMap['timestamp'] as String?;
+            return ChatTurn(
+              userMessage: turnMap['userMessage'] as String? ?? '',
+              assistantMessage: turnMap['assistantMessage'] as String? ?? '',
+              timestamp: rawTimestamp != null
+                  ? DateTime.tryParse(rawTimestamp)
+                  : null,
+            );
+          }).toList() ??
           const [],
       isOffline: map['isOffline'] as bool? ?? false,
       maxTokens: map['maxTokens'] as int? ?? defaultMaxTokens,
-      temperature: (map['temperature'] as num?)?.toDouble() ?? defaultTemperature,
+      temperature:
+          (map['temperature'] as num?)?.toDouble() ?? defaultTemperature,
       topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
       repeatPenalty: (map['repeatPenalty'] as num?)?.toDouble() ?? 1.1,
       modelId: map['modelId'] as String?,
