@@ -4,12 +4,13 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
-import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
-import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
-import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -18,9 +19,6 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provide
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
-
-// Importazione polimorfica per gestire la deviazione nativa FFI su sistemi Android
-import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
 
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
   LocalRuntimeProvider({
@@ -31,11 +29,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const String _localProviderTag = 'LOCAL_RUNTIME';
 
   static const int _maxModelFileSizeBytes =
-      12 * 1024 * 1024 * 1024; // 12GB safety cap
+      12 * 1024 * 1024 * 1024; // Cap di sicurezza 12GB
 
   static final Set<String> _mobileValidatedModelIds = {
     ...AndroidFfiRuntimeModelIds.validatedModelIds,
-    LocalInferenceModelIds.phi3_5_mini, 
+    LocalInferenceModelIds.phi3_5_mini,
   };
 
   static const Set<String> _desktopValidatedModelIds =
@@ -75,6 +73,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       _verifiedModelPath != null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
+  @override
   bool isRuntimeVerified({String? modelPath}) {
     if (modelPath == null || modelPath.trim().isEmpty) {
       return _verifiedModelPath != null;
@@ -82,8 +81,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return hasVerifiedRuntimeForModel(modelPath);
   }
 
+  @override
   int get activeLifecycleTransitionId => -1;
 
+  @override
   String get lifecycleRuntimeStateName => 'unknown';
 
   void recordVerificationSuccess({
@@ -103,6 +104,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
   }
 
+  @override
   bool supportsModel(AiModel model) {
     final modelId = model.effectiveRuntimeModelId;
 
@@ -135,6 +137,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         _isDeveloperMode;
   }
 
+  @override
   Future<LocalRuntimeState> validateRuntime({
     AiModel? selectedModel,
   }) async {
