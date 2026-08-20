@@ -10,18 +10,20 @@ void main() {
 
       expect(compact.profile, MemoryWindowProfile.compact);
       expect(compact.activeProfile, MemoryWindowProfile.compact);
-      expect(compact.maxContextLines, 6);
-      expect(compact.maxTotalSize, 4096);
+      expect(compact.maxContextLines, 24);
+      expect(compact.maxTotalSize, 3072);
       expect(compact.minContextSize, 256);
 
       expect(standard.profile, MemoryWindowProfile.standard);
       expect(standard.activeProfile, MemoryWindowProfile.standard);
-      expect(standard.maxContextLines, 60);
-      expect(standard.maxTotalSize, 8000);
+      expect(standard.maxContextLines, 48);
+      expect(standard.maxTotalSize, 4608);
       expect(standard.minContextSize, 512);
 
       expect(performance.profile, MemoryWindowProfile.performance);
-      expect(performance.maxTotalSize, 16000);
+      expect(performance.maxContextLines, 64);
+      expect(performance.maxTotalSize, 6144);
+      expect(performance.minContextSize, 768);
     });
 
     test('automatic profile follows the active model', () {
@@ -32,7 +34,7 @@ void main() {
 
       expect(config.profile, MemoryWindowProfile.automatic);
       expect(config.activeProfile, MemoryWindowProfile.compact);
-      expect(config.maxTotalSize, 4096);
+      expect(config.maxTotalSize, 3072);
     });
 
     test('Phi-3.5 automatic profile stays compact', () {
@@ -42,8 +44,8 @@ void main() {
       );
 
       expect(config.activeProfile, MemoryWindowProfile.compact);
-      expect(config.maxContextLines, 6);
-      expect(config.maxTotalSize, 4096);
+      expect(config.maxContextLines, 24);
+      expect(config.maxTotalSize, 3072);
     });
 
     test('custom web values clamp to conservative thresholds', () {
@@ -56,9 +58,9 @@ void main() {
 
       expect(config.profile, MemoryWindowProfile.custom);
       expect(config.activeProfile, MemoryWindowProfile.custom);
-      expect(config.maxContextLines, 80);
-      expect(config.maxTotalSize, 8000);
-      expect(config.minContextSize, 8000);
+      expect(config.maxContextLines, 40);
+      expect(config.maxTotalSize, 4096);
+      expect(config.minContextSize, 4096);
     });
   });
 }
