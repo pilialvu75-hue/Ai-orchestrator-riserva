@@ -86,13 +86,13 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_m
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/features/project_memory/workspace_project_memory_service.dart';
-import 'package:ai_orchestrator/features//code_context/code_chunker.dart';
+import 'package:ai_orchestrator/features/code_context/code_chunker.dart';
 import 'package:ai_orchestrator/features/code_context/context_retrieval_service.dart';
 import 'package:ai_orchestrator/features/semantic_index/project_indexer.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
 import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
 import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
-import 'package:ai_orchestrator/features//workspace/file_tree_service.dart';
+import 'package:ai_orchestrator/features/workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
@@ -381,9 +381,8 @@ Future<void> initDependencies({
   sl.registerLazySingleton<VoiceTextNormalizer>(
     () => const VoiceTextNormalizer(),
   );
-  // Main VoiceEngine instance for Chat UI and general voice input/output
   sl.registerLazySingleton<VoiceEngine>(
-    () => SherpaOnnxVoiceEngine(),
+    () => sl<SherpaOnnxVoiceEngine>(),
   );
   sl.registerLazySingleton<VoiceInputService>(
     () => VoiceInputService(
