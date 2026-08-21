@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -10,26 +8,21 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
-/// This component is the **preferential lane** that routes audio directly
-/// between [VoiceEngine] and [LocalRuntimeProvider] — bypassing the chat UI,
-/// its Bloc layer, and the SQLite repositories.  It is inspired by the
-/// real-time barge-in design of Gemini Live.
+/// Live mode deliberately bypasses the normal Chat UI / Bloc / repository
+/// pipeline. The flow is:
 ///
-/// Pipeline
-/// ─────────
-/// ```
-/// Microphone → [VoiceEngine.startListening]
-///             → (final STT text)
-///             → [LocalRuntimeProvider.streamInference]
-///             → (token stream, punctuation-chunked)
-///             → [VoiceEngine.speak]
-/// ```
+///   microphone -> STT -> local inference -> TTS
 ///
-/// Barge-in
-/// ─────────
-/// When the user speaks while TTS is active, [stopLiveSession] cancels the
-/// current inference and stops speaking; the loop is re-armed from the top
-/// of [startLiveSession].
+/// The manager owns the lifecycle of one live iteration and protects the
+/// pipeline from duplicate starts, cancellation races and asynchronous audio
+/// failures.
+///
+/// Important:
+/// - No ChatRepository is involved.
+/// - No conversation-memory window is constructed here.
+/// - No semantic workspace context is injected here.
+/// - The spoken text is used as the inference prompt directly.
+///
 class VoiceLoopManager with RuntimeEventEmitter {
   VoiceLoopManager({
     required VoiceEngine engine,
@@ -39,38 +32,48 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   static const String _tag = 'VOICE_LOOP';
 
+  static const Duration _sttTimeout = Duration(seconds: 30);
+
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
 
   CancellationToken? _activeCancellation;
+
   bool _sessionActive = false;
   bool _disposed = false;
+  bool _stopRequested = false;
 
-  /// The session-level cancellation token; exposed so callers can integrate
-  /// with external lifecycle events (e.g. app backgrounding).
+  /// Token belonging to the currently active live session.
   CancellationToken? get activeCancellationToken => _activeCancellation;
 
   bool get isSessionActive => _sessionActive;
 
-  /// Stops any active session and marks this manager as disposed.
+  /// Permanently disposes this manager.
   ///
-  /// After [dispose] returns, calls to [startLiveSession] are silently ignored
-  /// so that in-flight audio callbacks cannot restart the loop after the
-  /// owning widget is unmounted.
+  /// The VoiceEngine itself is owned by dependency injection and therefore
+  /// isn't disposed here.
   Future<void> dispose() async {
     if (_disposed) return;
+
     _disposed = true;
-    await stopLiveSession();
-    logEvent(_tag, '[DISPOSED]');
+
+    try {
+      await stopLiveSession();
+    } catch (_) {
+      // Disposal must never propagate an audio/native exception.
+    }
   }
 
-  /// Starts the live Voice-to-Voice loop.
+  /// Starts one Live voice session.
   ///
-  /// [modelPath] and [modelId] identify the local GGUF model to use for
-  /// inference; if omitted the runtime will use its last validated model.
-  /// [systemPrompt] is forwarded verbatim to the LLM.
-  /// [onSubtitle] receives real-time subtitle updates when
-  /// [VoiceEngineStatus.enableLiveSubtitles] is `true` on the engine status.
+  /// The session performs one complete:
+  ///
+  /// STT -> inference -> TTS
+  ///
+  /// iteration.
+  ///
+  /// The existing API is intentionally preserved so callers such as
+  /// LiveVoiceOverlay don't need to change.
   Future<void> startLiveSession({
     String? modelPath,
     String? modelId,
@@ -78,116 +81,197 @@ class VoiceLoopManager with RuntimeEventEmitter {
     void Function(String text, bool isFinal)? onSubtitle,
     void Function(String error)? onError,
   }) async {
-    if (_sessionActive) {
-      logEvent(_tag, '[SESSION_START_SKIPPED] session already active');
+    if (_disposed) {
       return;
     }
-    if (_disposed) {
-      logEvent(_tag, '[SESSION_START_SKIPPED] manager is disposed');
+
+    if (_sessionActive) {
       return;
     }
 
     _sessionActive = true;
-    _activeCancellation = CancellationToken();
+    _stopRequested = false;
 
-    logEvent(
-      _tag,
-      '[SESSION_START] modelId=${modelId ?? "auto"} '
-      'systemPrompt=${systemPrompt != null ? "set" : "none"}',
-    );
+    final cancellation = CancellationToken();
+    _activeCancellation = cancellation;
 
     try {
       await _runLoop(
+        token: cancellation,
         modelPath: modelPath,
         modelId: modelId,
         systemPrompt: systemPrompt,
         onSubtitle: onSubtitle,
         onError: onError,
       );
-    } catch (e, st) {
-      final msg = 'VoiceLoopManager fatal error: $e';
-      debugPrint('[$_tag] $msg\n$st');
-      logEvent(_tag, '[SESSION_FATAL] $msg');
-      onError?.call(msg);
+    } catch (error) {
+      if (!cancellation.isCancelled && !_stopRequested) {
+        final message = 'Voice session failed: $error';
+
+        logEvent(
+          _tag,
+          '[SESSION_ERROR] $message',
+        );
+
+        onError?.call(message);
+      }
     } finally {
+      if (identical(_activeCancellation, cancellation)) {
+        _activeCancellation = null;
+      }
+
       _sessionActive = false;
-      _activeCancellation = null;
+      _stopRequested = false;
     }
   }
 
-  /// Stops the active session, cancels ongoing inference, and silences TTS.
+  /// Stops the current Live session.
+  ///
+  /// Cancellation happens before touching the audio engine so that callbacks
+  /// arriving during shutdown cannot start another inference/TTS operation.
   Future<void> stopLiveSession() async {
-    if (!_sessionActive) return;
-    logEvent(_tag, '[SESSION_STOP_REQUESTED]');
-    _activeCancellation?.cancel();
-    await _engine.stopListening();
-    await _engine.stopSpeaking();
+    _stopRequested = true;
+
+    final cancellation = _activeCancellation;
+    cancellation?.cancel();
+
+    try {
+      await _engine.stopListening();
+    } catch (_) {
+      // Native audio shutdown must not escape through UI lifecycle code.
+    }
+
+    try {
+      await _engine.stopSpeaking();
+    } catch (_) {
+      // Native audio shutdown must not escape through UI lifecycle code.
+    }
+
     _sessionActive = false;
-    logEvent(_tag, '[SESSION_STOP_DONE]');
   }
 
-  // ── Core loop ─────────────────────────────────────────────────────────────
-
   Future<void> _runLoop({
+    required CancellationToken token,
     required String? modelPath,
     required String? modelId,
     required String? systemPrompt,
     required void Function(String text, bool isFinal)? onSubtitle,
     required void Function(String error)? onError,
   }) async {
-    final token = _activeCancellation!;
+    if (_disposed || token.isCancelled) {
+      return;
+    }
 
-    // ── 1. STT: listen until a final result arrives ────────────────────────
-    logEvent(_tag, '[STT_LISTEN_BEGIN]');
+    // -----------------------------------------------------------------------
+    // 1. STT
+    // -----------------------------------------------------------------------
 
     final sttCompleter = Completer<String>();
 
-    await _engine.startListening(
-      onResult: (text, isFinal) {
-        if (token.isCancelled) return;
+    void completeStt(String text) {
+      if (sttCompleter.isCompleted) {
+        return;
+      }
 
-        // Forward to subtitle callback if enabled.
-        onSubtitle?.call(text, isFinal);
+      final normalized = text.trim();
 
-        if (isFinal && !sttCompleter.isCompleted) {
-          logEvent(_tag, '[STT_FINAL_RESULT] text="${text.length > 80 ? text.substring(0, 80) : text}..."');
-          sttCompleter.complete(text);
-        }
-      },
-    );
+      if (normalized.isEmpty) {
+        return;
+      }
 
-    // Wait for the first final STT result, respecting cancellation.
-    final String spokenText;
+      sttCompleter.complete(normalized);
+    }
+
     try {
-      spokenText = await sttCompleter.future.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          logEvent(_tag, '[STT_TIMEOUT] No final STT result within 30s');
-          return '';
+      await _engine.startListening(
+        onResult: (text, isFinal) {
+          if (_disposed || token.isCancelled || _stopRequested) {
+            return;
+          }
+
+          final normalized = text.trim();
+
+          if (normalized.isEmpty) {
+            return;
+          }
+
+          // Live subtitles are intentionally lightweight. They do not enter
+          // ChatRepository or MemoryWindowManager.
+          onSubtitle?.call(normalized, isFinal);
+
+          if (isFinal) {
+            completeStt(normalized);
+          }
         },
       );
-    } finally {
-      await _engine.stopListening();
-    }
+    } catch (error) {
+      if (!token.isCancelled && !_stopRequested) {
+        final message = 'Voice input failed: $error';
 
-    if (token.isCancelled) {
-      logEvent(_tag, '[STT_CANCELLED]');
+        logEvent(
+          _tag,
+          '[STT_START_ERROR] $message',
+        );
+
+        onError?.call(message);
+      }
+
       return;
     }
+
+    String spokenText;
+
+    try {
+      spokenText = await sttCompleter.future.timeout(
+        _sttTimeout,
+        onTimeout: () => '',
+      );
+    } catch (error) {
+      if (!token.isCancelled && !_stopRequested) {
+        final message = 'Voice input timeout: $error';
+
+        logEvent(
+          _tag,
+          '[STT_WAIT_ERROR] $message',
+        );
+
+        onError?.call(message);
+      }
+
+      return;
+    } finally {
+      try {
+        await _engine.stopListening();
+      } catch (_) {
+        // Keep the Live pipeline alive; shutdown errors are non-fatal here.
+      }
+    }
+
+    if (_disposed || token.isCancelled || _stopRequested) {
+      return;
+    }
+
+    spokenText = spokenText.trim();
 
     if (spokenText.isEmpty) {
-      logEvent(_tag, '[STT_EMPTY_RESULT] skipping inference');
       return;
     }
 
-    // ── 2. LLM inference: stream tokens directly from the runtime ──────────
-    logEvent(
-      _tag,
-      '[INFERENCE_BEGIN] prompt="${spokenText.length > 60 ? spokenText.substring(0, 60) : spokenText}"',
-    );
+    // -----------------------------------------------------------------------
+    // 2. INFERENCE
+    // -----------------------------------------------------------------------
+    //
+    // IMPORTANT:
+    // The spoken text is sent directly to the local runtime.
+    //
+    // No ChatRepository.
+    // No rolling memory.
+    // No semantic retrieval.
+    // No UI prompt reconstruction.
+    //
 
     final request = InferenceRequest(
-      sessionId: 'voice_loop_${DateTime.now().millisecondsSinceEpoch}',
+      sessionId: 'voice_loop_${DateTime.now().microsecondsSinceEpoch}',
       prompt: spokenText,
       systemPrompt: systemPrompt,
       isOffline: true,
@@ -197,65 +281,136 @@ class VoiceLoopManager with RuntimeEventEmitter {
       modelPath: modelPath,
     );
 
-    final inferenceStream = _runtimeProvider.streamInference(
-      request: request,
-      cancellationToken: token,
-    );
+    Stream<dynamic> inferenceStream;
 
-    // ── 3. Token accumulation with punctuation-based TTS chunking ──────────
-    // Tokens are buffered until a sentence-boundary character is detected,
-    // then the buffered chunk is sent to TTS.  This mirrors the Gemini Live
-    // barge-in design where TTS starts before the full response is available.
+    try {
+      inferenceStream = _runtimeProvider.streamInference(
+        request: request,
+        cancellationToken: token,
+      );
+    } catch (error) {
+      if (!token.isCancelled && !_stopRequested) {
+        final message = 'Voice inference failed to start: $error';
+
+        logEvent(
+          _tag,
+          '[INFERENCE_START_ERROR] $message',
+        );
+
+        onError?.call(message);
+      }
+
+      return;
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. TOKEN -> TTS
+    // -----------------------------------------------------------------------
+
     final tokenBuffer = StringBuffer();
-    final sentenceBoundaryPattern = RegExp(r'[.!?,;:\n]');
+
+    // Do not flush on ',' or ';'.
+    //
+    // Those characters are too frequent in normal model output and can create
+    // dozens of tiny TTS requests. This is particularly harmful on mobile.
+    final sentenceBoundaryPattern = RegExp(r'[.!?\n]');
 
     await for (final response in inferenceStream) {
-      if (token.isCancelled) {
-        logEvent(_tag, '[INFERENCE_CANCELLED]');
+      if (_disposed || token.isCancelled || _stopRequested) {
         break;
       }
 
       if (response.isError) {
-        final msg = response.errorMessage ?? 'Inference error';
-        logEvent(_tag, '[INFERENCE_ERROR] $msg');
-        onError?.call(msg);
+        final message = response.errorMessage ?? 'Voice inference error';
+
+        logEvent(
+          _tag,
+          '[INFERENCE_ERROR] $message',
+        );
+
+        onError?.call(message);
         break;
       }
 
       final chunk = response.text;
-      if (chunk.isEmpty) continue;
+
+      if (chunk.isEmpty) {
+        continue;
+      }
 
       tokenBuffer.write(chunk);
 
-      // Forward token to subtitle stream.
-      onSubtitle?.call(tokenBuffer.toString(), response.isFinal);
+      final currentText = tokenBuffer.toString();
 
-      // Flush to TTS on sentence boundary or at final chunk.
-      if (response.isFinal || sentenceBoundaryPattern.hasMatch(chunk)) {
-        final speakChunk = tokenBuffer.toString().trim();
-        tokenBuffer.clear();
+      onSubtitle?.call(
+        currentText,
+        response.isFinal,
+      );
 
-        if (speakChunk.isNotEmpty) {
+      final shouldFlush =
+          response.isFinal ||
+          sentenceBoundaryPattern.hasMatch(chunk);
+
+      if (!shouldFlush) {
+        continue;
+      }
+
+      final speakChunk = tokenBuffer.toString().trim();
+      tokenBuffer.clear();
+
+      if (speakChunk.isEmpty) {
+        continue;
+      }
+
+      if (_disposed || token.isCancelled || _stopRequested) {
+        break;
+      }
+
+      try {
+        await _engine.speak(speakChunk);
+      } catch (error) {
+        if (!token.isCancelled && !_stopRequested) {
+          final message = 'Voice output failed: $error';
+
           logEvent(
             _tag,
-            '[TTS_CHUNK_FLUSH] length=${speakChunk.length} '
-            'isFinal=${response.isFinal}',
+            '[TTS_ERROR] $message',
           );
-          // Barge-in guard: only speak if not cancelled.
-          if (!token.isCancelled) {
-            unawaited(_engine.speak(speakChunk));
-          }
+
+          onError?.call(message);
         }
+
+        break;
       }
     }
 
-    // Flush any remaining tokens.
-    final trailing = tokenBuffer.toString().trim();
-    if (trailing.isNotEmpty && !token.isCancelled) {
-      logEvent(_tag, '[TTS_TRAILING_FLUSH] length=${trailing.length}');
-      unawaited(_engine.speak(trailing));
+    // -----------------------------------------------------------------------
+    // 4. TRAILING TTS
+    // -----------------------------------------------------------------------
+
+    if (_disposed || token.isCancelled || _stopRequested) {
+      return;
     }
 
-    logEvent(_tag, '[LOOP_ITERATION_DONE]');
+    final trailing = tokenBuffer.toString().trim();
+
+    if (trailing.isEmpty) {
+      return;
+    }
+
+    try {
+      await _engine.speak(trailing);
+    } catch (error) {
+      if (!token.isCancelled && !_stopRequested) {
+        final message = 'Voice output failed: $error';
+
+        logEvent(
+          _tag,
+          '[TTS_TRAILING_ERROR] $message',
+        );
+
+        onError?.call(message);
+      }
+    }
   }
 }
