@@ -845,9 +845,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           continue;
         }
 
-        if (outputPath == 'tokens.txt') {
-          outputPath =
-              AppConstants.ttsTokensFile;
+        final filename = outputPath.split('/').last;
+
+        // NORMALIZZAZIONE NOMI FILE TTS
+        if (filename.endsWith('.onnx') && !filename.endsWith('.onnx.json')) {
+          outputPath = AppConstants.ttsModelFile;
+        } else if (filename == 'tokens.txt') {
+          outputPath = AppConstants.ttsTokensFile;
         }
 
         final destinationPath = p.join(
