@@ -559,13 +559,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     Directory targetDir,
   ) async {
     /*
-     * NON usiamo più soglie arbitrarie come:
-     *
-     * encoder >= 100 MB
-     * joiner >= 10 MB
-     *
-     * Le dimensioni reali dell'archivio Zipformer2 sono diverse.
-     *
      * Per il momento la validazione primaria è:
      * file presente + dimensione > 0.
      *
@@ -655,34 +648,24 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       final archive =
           TarDecoder().decodeBytes(decompressed);
 
-      const prefix =
-          'sherpa-onnx-streaming-zipformer-en-2023-06-26/';
-
       for (final file in archive) {
         if (!file.isFile) {
           continue;
         }
 
-        var name = file.name;
-
-        if (name.startsWith(prefix)) {
-          name = name.substring(prefix.length);
-        }
+        final filename = file.name.split('/').last;
 
         String? destinationName;
 
-        if (name.contains('encoder')) {
-          destinationName =
-              AppConstants.sttEncoderFile;
-        } else if (name.contains('decoder')) {
-          destinationName =
-              AppConstants.sttDecoderFile;
-        } else if (name.contains('joiner')) {
-          destinationName =
-              AppConstants.sttJoinerFile;
-        } else if (name == 'tokens.txt') {
-          destinationName =
-              AppConstants.sttTokensFile;
+        // NORMALIZZAZIONE NOMI FILE STT
+        if (filename.startsWith('encoder') && filename.endsWith('.onnx')) {
+          destinationName = AppConstants.sttEncoderFile;
+        } else if (filename.startsWith('decoder') && filename.endsWith('.onnx')) {
+          destinationName = AppConstants.sttDecoderFile;
+        } else if (filename.startsWith('joiner') && filename.endsWith('.onnx')) {
+          destinationName = AppConstants.sttJoinerFile;
+        } else if (filename == 'tokens.txt') {
+          destinationName = AppConstants.sttTokensFile;
         } else {
           continue;
         }
