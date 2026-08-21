@@ -81,6 +81,7 @@ class VoiceEngineStatus {
   final String activeVoiceId;
   final bool isVoiceDownloaded;
 
+  /// STT isolato: microfono + permessi + libreria native + modello ASR
   bool get readyForInput =>
       initialized &&
       supportedPlatform &&
@@ -89,11 +90,11 @@ class VoiceEngineStatus {
       audioSessionReady &&
       offlineAsrAvailable;
 
+  /// TTS isolato: speaker/audio output + libreria native + modello TTS (nessuna dipendenza dal microfono/audioSessionReady)
   bool get readyForOutput =>
       initialized &&
       supportedPlatform &&
       nativeLibrariesLoaded &&
-      audioSessionReady &&
       speakerOutputReady &&
       offlineTtsAvailable;
 
@@ -132,27 +133,53 @@ class VoiceEngineStatus {
     );
   }
 
-  VoiceEngineStatus copyWithSettings({
+  VoiceEngineStatus copyWith({
+    String? engineId,
+    bool? supportedPlatform,
+    bool? nativeLibrariesLoaded,
+    bool? microphonePermissionGranted,
+    bool? audioSessionReady,
+    bool? speakerOutputReady,
+    bool? initialized,
+    bool? offlineAsrAvailable,
+    bool? offlineTtsAvailable,
+    String? details,
     double? speechRate,
     bool? enableLiveSubtitles,
     String? activeVoiceId,
     bool? isVoiceDownloaded,
   }) {
     return VoiceEngineStatus(
-      engineId: engineId,
-      supportedPlatform: supportedPlatform,
-      nativeLibrariesLoaded: nativeLibrariesLoaded,
-      microphonePermissionGranted: microphonePermissionGranted,
-      audioSessionReady: audioSessionReady,
-      speakerOutputReady: speakerOutputReady,
-      initialized: initialized,
-      offlineAsrAvailable: offlineAsrAvailable,
-      offlineTtsAvailable: offlineTtsAvailable,
-      details: details,
+      engineId: engineId ?? this.engineId,
+      supportedPlatform: supportedPlatform ?? this.supportedPlatform,
+      nativeLibrariesLoaded:
+          nativeLibrariesLoaded ?? this.nativeLibrariesLoaded,
+      microphonePermissionGranted:
+          microphonePermissionGranted ?? this.microphonePermissionGranted,
+      audioSessionReady: audioSessionReady ?? this.audioSessionReady,
+      speakerOutputReady: speakerOutputReady ?? this.speakerOutputReady,
+      initialized: initialized ?? this.initialized,
+      offlineAsrAvailable: offlineAsrAvailable ?? this.offlineAsrAvailable,
+      offlineTtsAvailable: offlineTtsAvailable ?? this.offlineTtsAvailable,
+      details: details ?? this.details,
       speechRate: speechRate ?? this.speechRate,
       enableLiveSubtitles: enableLiveSubtitles ?? this.enableLiveSubtitles,
       activeVoiceId: activeVoiceId ?? this.activeVoiceId,
       isVoiceDownloaded: isVoiceDownloaded ?? this.isVoiceDownloaded,
+    );
+  }
+
+  VoiceEngineStatus copyWithSettings({
+    double? speechRate,
+    bool? enableLiveSubtitles,
+    String? activeVoiceId,
+    bool? isVoiceDownloaded,
+  }) {
+    return copyWith(
+      speechRate: speechRate,
+      enableLiveSubtitles: enableLiveSubtitles,
+      activeVoiceId: activeVoiceId,
+      isVoiceDownloaded: isVoiceDownloaded,
     );
   }
 }
