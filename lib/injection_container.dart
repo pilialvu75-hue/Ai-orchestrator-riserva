@@ -86,13 +86,13 @@ import 'package:ai_orchestrator/features/projects/domain/usecases/save_project_m
 import 'package:ai_orchestrator/features/projects/domain/usecases/update_project_memory.dart';
 import 'package:ai_orchestrator/features/projects/presentation/bloc/project_memory_bloc.dart';
 import 'package:ai_orchestrator/features/project_memory/workspace_project_memory_service.dart';
-import 'package0/code_context/code_chunker.dart';
+import 'package:ai_orchestrator/features//code_context/code_chunker.dart';
 import 'package:ai_orchestrator/features/code_context/context_retrieval_service.dart';
 import 'package:ai_orchestrator/features/semantic_index/project_indexer.dart';
 import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
 import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
 import 'package:ai_orchestrator/features/workspace/agent_task_router.dart';
-import 'package0/workspace/file_tree_service.dart';
+import 'package:ai_orchestrator/features//workspace/file_tree_service.dart';
 import 'package:ai_orchestrator/features/workspace/workspace_manager.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 import 'package:ai_orchestrator/native/platform/bixby_handler.dart';
@@ -102,7 +102,7 @@ import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.da
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_feature_flags_service.dart';
-// import 'package0/app_health/contracts/abstract_remote_config_service.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_remote_config_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
