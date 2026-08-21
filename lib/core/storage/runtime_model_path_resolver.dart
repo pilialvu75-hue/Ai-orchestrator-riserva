@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+
 enum RuntimeModelStorageLocation {
   publicDownload,
   privateApp,
@@ -38,12 +40,13 @@ class RuntimeModelPathResolver {
     String? relativeDirectory,
   }) async {
     final privateRoot = await privateModelsDirectory();
-    final privateDirPath = (relativeDirectory == null || relativeDirectory.trim().isEmpty)
-        ? privateRoot.path
-        : p.join(
-            privateRoot.parent.path,
-            relativeDirectory,
-          );
+    final privateDirPath =
+        (relativeDirectory == null || relativeDirectory.trim().isEmpty)
+            ? privateRoot.path
+            : p.join(
+                privateRoot.parent.path,
+                relativeDirectory,
+              );
     return File(p.join(privateDirPath, fileName));
   }
 
@@ -102,6 +105,34 @@ class RuntimeModelPathResolver {
       privateFile: privateFile,
       location: null,
     );
+  }
+
+  // ===========================================================================
+  // PERCORSI MODELLI VOCALI FASE 2 (STT & TTS)
+  // ===========================================================================
+
+  Future<String> get sttEncoderPath async =>
+      (await resolveForRead(fileName: AppConstants.sttEncoderFile)).file.path;
+
+  Future<String> get sttDecoderPath async =>
+      (await resolveForRead(fileName: AppConstants.sttDecoderFile)).file.path;
+
+  Future<String> get sttJoinerPath async =>
+      (await resolveForRead(fileName: AppConstants.sttJoinerFile)).file.path;
+
+  Future<String> get sttTokensPath async =>
+      (await resolveForRead(fileName: AppConstants.sttTokensFile)).file.path;
+
+  Future<String> get ttsModelPath async =>
+      (await resolveForRead(fileName: AppConstants.ttsModelFile)).file.path;
+
+  Future<String> get ttsTokensPath async =>
+      (await resolveForRead(fileName: AppConstants.ttsTokensFile)).file.path;
+
+  Future<String> get ttsEspeakDataDirPath async {
+    final privateRoot = await privateModelsDirectory();
+    final dir = Directory(p.join(privateRoot.path, AppConstants.ttsEspeakDataDir));
+    return dir.path;
   }
 
   Future<bool> _safeExistsWithContent(File file) async {
