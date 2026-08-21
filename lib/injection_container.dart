@@ -136,29 +136,18 @@ Future<void> initDependencies({
   sl.registerLazySingleton<LlmRoleAssignmentService>(
     () => LlmRoleAssignmentService(configRepository: sl<ConfigRepository>()),
   );
-  final languageService =
-      LanguageService(configRepository: sl<ConfigRepository>());
+  final languageService = LanguageService(configRepository: sl<ConfigRepository>());
   await languageService.loadSavedLanguage();
   sl.registerSingleton<LanguageService>(languageService);
 
   // ── App Health / Observability Foundation ────────────────────────────────
-  sl.registerLazySingleton<AbstractTelemetryService>(
-    () => const MockTelemetryService(),
-  );
-  sl.registerLazySingleton<AbstractFeatureFlagsService>(
-    () => const DefaultFeatureFlagsService(),
-  );
-  sl.registerLazySingleton<AbstractRemoteConfigService>(
-    () => const NoopRemoteConfigService(),
-  );
+  sl.registerLazySingleton<AbstractTelemetryService>(() => const MockTelemetryService());
+  sl.registerLazySingleton<AbstractFeatureFlagsService>(() => const DefaultFeatureFlagsService());
+  sl.registerLazySingleton<AbstractRemoteConfigService>(() => const NoopRemoteConfigService());
 
   // ── AppLegalCore ──────────────────────────────────────────────────────────
-  sl.registerLazySingleton<LegalStorageService>(
-    () => LegalStorageService(sl<PreferencesService>()),
-  );
-  sl.registerLazySingleton<EulaService>(
-    () => EulaService(storageService: sl<LegalStorageService>()),
-  );
+  sl.registerLazySingleton<LegalStorageService>(() => LegalStorageService(sl<PreferencesService>()));
+  sl.registerLazySingleton<EulaService>(() => EulaService(storageService: sl<LegalStorageService>()));
 
   // ── Core ──────────────────────────────────────────────────────────────────
   sl.registerSingleton<DatabaseHelper>(DatabaseHelper.instance);
@@ -169,16 +158,11 @@ Future<void> initDependencies({
   sl.registerLazySingleton<BixbyHandler>(() => const BixbyHandler());
   sl.registerLazySingleton<CacheManager>(() => const CacheManager());
   sl.registerLazySingleton<OfflineDocumentIntelligencePlugin>(
-    () => OfflineDocumentIntelligencePlugin(
-      indexService: sl<LocalDocumentIndexService>(),
-    ),
+    () => OfflineDocumentIntelligencePlugin(indexService: sl<LocalDocumentIndexService>()),
   );
 
-  if (PluginRegistry.instance.get(OfflineDocumentIntelligencePlugin.pluginId) ==
-      null) {
-    await PluginRegistry.instance.register(
-      sl<OfflineDocumentIntelligencePlugin>(),
-    );
+  if (PluginRegistry.instance.get(OfflineDocumentIntelligencePlugin.pluginId) == null) {
+    await PluginRegistry.instance.register(sl<OfflineDocumentIntelligencePlugin>());
   }
   sl.registerLazySingleton<VersionComparator>(() => const VersionComparator());
   sl.registerLazySingleton<UpdateChecker>(
@@ -210,14 +194,9 @@ Future<void> initDependencies({
   sl.registerLazySingleton<AgentTaskRouter>(() => AgentTaskRouter());
   sl.registerLazySingleton<CodeChunker>(() => const CodeChunker());
 
-  // Registrazione dell'interfaccia astratta di stima volumetrica per disaccoppiare i Tokenizer
-  sl.registerLazySingleton<ITokenEstimator>(
-    () => const CharacterLengthEstimator(),
-  );
+  sl.registerLazySingleton<ITokenEstimator>(() => const CharacterLengthEstimator());
 
-  sl.registerFactory<MemoryWindowConfig>(
-   () => sl<AiRuntimeSettingsService>().memoryWindowConfig,
-  );
+  sl.registerFactory<MemoryWindowConfig>(() => sl<AiRuntimeSettingsService>().memoryWindowConfig);
 
   sl.registerLazySingleton<MemoryWindowManager>(
    () => MemoryWindowManager(
@@ -226,13 +205,9 @@ Future<void> initDependencies({
    ),
   );
   sl.registerLazySingleton<RollingContextBuilder>(
-    () => RollingContextBuilder(
-      windowManager: sl<MemoryWindowManager>(),
-    ),
+    () => RollingContextBuilder(windowManager: sl<MemoryWindowManager>()),
   );
-  sl.registerLazySingleton<WorkspaceEmbeddingService>(
-    () => const WorkspaceEmbeddingService(),
-  );
+  sl.registerLazySingleton<WorkspaceEmbeddingService>(() => const WorkspaceEmbeddingService());
   sl.registerLazySingleton<SemanticWorkspaceIndex>(
     () => SemanticWorkspaceIndex(databaseHelper: sl<DatabaseHelper>()),
   );
@@ -300,57 +275,26 @@ Future<void> initDependencies({
   );
 
   // ── AI data sources ────────────────────────────────────────────────────────
-  sl.registerLazySingleton<OpenAiDataSource>(
-    () => OpenAiDataSource(
-        apiKey: openAiApiKey, httpClient: sl<http.Client>()),
-  );
-  sl.registerLazySingleton<GeminiDataSource>(
-    () => GeminiDataSource(
-        apiKey: geminiApiKey, httpClient: sl<http.Client>()),
-  );
-  sl.registerLazySingleton<ClaudeDataSource>(
-    () => ClaudeDataSource(
-      apiKey: claudeApiKey,
-      httpClient: sl<http.Client>(),
-    ),
-  );
-  sl.registerLazySingleton<GrokDataSource>(
-    () => GrokDataSource(
-        apiKey: grokApiKey, httpClient: sl<http.Client>()),
-  );
-  sl.registerLazySingleton<CopilotDataSource>(
-    () => CopilotDataSource(
-        apiKey: copilotApiKey, httpClient: sl<http.Client>()),
-  );
+  sl.registerLazySingleton<OpenAiDataSource>(() => OpenAiDataSource(apiKey: openAiApiKey, httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<GeminiDataSource>(() => GeminiDataSource(apiKey: geminiApiKey, httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<ClaudeDataSource>(() => ClaudeDataSource(apiKey: claudeApiKey, httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<GrokDataSource>(() => GrokDataSource(apiKey: grokApiKey, httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<CopilotDataSource>(() => CopilotDataSource(apiKey: copilotApiKey, httpClient: sl<http.Client>()));
 
   // ── Project memory ─────────────────────────────────────────────────────────
-  sl.registerLazySingleton<ProjectMemoryLocalDataSource>(
-    () => ProjectMemoryLocalDataSourceImpl(
-        databaseHelper: sl<DatabaseHelper>()),
-  );
-  sl.registerLazySingleton<ProjectMemoryRepository>(
-    () => ProjectMemoryRepositoryImpl(
-        localDataSource: sl<ProjectMemoryLocalDataSource>()),
-  );
+  sl.registerLazySingleton<ProjectMemoryLocalDataSource>(() => ProjectMemoryLocalDataSourceImpl(databaseHelper: sl<DatabaseHelper>()));
+  sl.registerLazySingleton<ProjectMemoryRepository>(() => ProjectMemoryRepositoryImpl(localDataSource: sl<ProjectMemoryLocalDataSource>()));
 
   // ── Chat ───────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton<ChatLocalDataSource>(
-    () => ChatLocalDataSourceImpl(databaseHelper: sl<DatabaseHelper>()),
-  );
+  sl.registerLazySingleton<ChatLocalDataSource>(() => ChatLocalDataSourceImpl(databaseHelper: sl<DatabaseHelper>()));
 
   // ── Onboarding ─────────────────────────────────────────────────────────────
-  sl.registerLazySingleton<ModelRegistryDataSource>(
-    () => const ModelRegistryDataSource(),
-  );
+  sl.registerLazySingleton<ModelRegistryDataSource>(() => const ModelRegistryDataSource());
 
   // ── Local AI (offline model download / selection) ──────────────────────────
-  sl.registerLazySingleton<BundledModelRegistryService>(
-    () => const BundledModelRegistryService(),
-  );
+  sl.registerLazySingleton<BundledModelRegistryService>(() => const BundledModelRegistryService());
   sl.registerLazySingleton<ModelDownloadService>(
-    () => ModelDownloadService(
-      bundledModelRegistryService: sl<BundledModelRegistryService>(),
-    ),
+    () => ModelDownloadService(bundledModelRegistryService: sl<BundledModelRegistryService>()),
   );
   sl.registerLazySingleton<LocalAiRepository>(
     () => LocalAiRepositoryImpl(downloadService: sl<ModelDownloadService>()),
@@ -371,45 +315,51 @@ Future<void> initDependencies({
   sl.registerLazySingleton(() => GetAvailableModels(sl<LocalAiRepository>()));
   sl.registerLazySingleton(() => DownloadModel(sl<LocalAiRepository>()));
   sl.registerLazySingleton(() => ImportLocalModel(sl<LocalAiRepository>()));
-  sl.registerLazySingleton(
-      () => DownloadModelFromUrl(sl<LocalAiRepository>()));
+  sl.registerLazySingleton(() => DownloadModelFromUrl(sl<LocalAiRepository>()));
   sl.registerLazySingleton(() => CheckForUpdates(sl<LocalAiRepository>()));
   sl.registerLazySingleton(() => SelectModel(sl<LocalAiRepository>()));
   sl.registerLazySingleton(() => GetSelectedModel(sl<LocalAiRepository>()));
 
   // ── Voice ─────────────────────────────────────────────────────────────────
+  // SherpaOnnxVoiceEngine è registrato PRIMA dell'interfaccia VoiceEngine 
+  // che lo implementa. In questo modo le dipendenze si risolvono sempre 
+  // verso la stessa instanza Singleton (nessun duplicato STT/TTS).
+  sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
+    () => SherpaOnnxVoiceEngine(),
+  );
+  
   sl.registerLazySingleton<VoiceTextNormalizer>(
     () => const VoiceTextNormalizer(),
   );
+
   sl.registerLazySingleton<VoiceEngine>(
     () => sl<SherpaOnnxVoiceEngine>(),
   );
+  
   sl.registerLazySingleton<VoiceInputService>(
     () => VoiceInputService(
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );
+  
   sl.registerLazySingleton<VoiceOutputService>(
     () => VoiceOutputService(
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );
-  // Dedicated engine for the voice-loop fast lane (bypasses chat UI).
-  // Model paths are supplied at runtime when voice models are downloaded;
-  // the engine starts in an uninitialised state and initialises on first use.
-  sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
-    () => SherpaOnnxVoiceEngine(),
-  );
+  
   sl.registerLazySingleton<VoiceModelDownloader>(
     () => VoiceModelDownloader(),
   );
+  
   sl.registerLazySingleton<ModelManagementService>(
     () => ModelManagementService(
       localAiRepository: sl<LocalAiRepository>(),
     ),
   );
+  
   sl.registerLazySingleton<VoiceLoopManager>(
     () => VoiceLoopManager(
       engine: sl<SherpaOnnxVoiceEngine>(),
@@ -470,9 +420,6 @@ Future<void> initDependencies({
         final result = await sl<LocalAiRepository>().getSelectedModel();
         return result.fold(
           (failure) {
-            // Model selection failures are logged and treated as "no local
-            // model" so the runtime can fall back to cloud inference instead
-            // of crashing the session.  This is a diagnostic log, not silent.
             debugPrint('[RUNTIME] model selection failed: ${failure.message}');
             return null;
           },
@@ -513,18 +460,12 @@ Future<void> initDependencies({
   );
 
   // ── Use cases ──────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(
-      () => GetProjectMemories(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton(
-      () => GetLatestProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton(
-      () => SaveProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton(
-      () => UpdateProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton(
-      () => DeleteProjectMemory(sl<ProjectMemoryRepository>()));
-  sl.registerLazySingleton(
-      () => DeleteAllProjectMemories(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => GetProjectMemories(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => GetLatestProjectMemory(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => SaveProjectMemory(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => UpdateProjectMemory(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => DeleteProjectMemory(sl<ProjectMemoryRepository>()));
+  sl.registerLazySingleton(() => DeleteAllProjectMemories(sl<ProjectMemoryRepository>()));
   sl.registerLazySingleton(() => SendAiQuery(sl<AiRepository>()));
 
   // ── BLoCs ──────────────────────────────────────────────────────────────────
@@ -544,8 +485,7 @@ Future<void> initDependencies({
     ),
   );
   sl.registerFactory(
-    () => OnboardingBloc(
-        modelRegistryDataSource: sl<ModelRegistryDataSource>()),
+    () => OnboardingBloc(modelRegistryDataSource: sl<ModelRegistryDataSource>()),
   );
   sl.registerFactory(
     () => ModelDownloadBloc(
@@ -561,23 +501,15 @@ Future<void> initDependencies({
   );
 }
 
-/// Resolves a stable node ID for this installation.
-///
-/// Reads from [SharedPreferences] if already set; otherwise generates a new
-/// hex ID, persists it, and returns it so that subsequent launches use the
-/// same identity.
 String _resolveNodeId(SharedPreferences prefs) {
   const key = 'sync_node_id';
   final existing = prefs.getString(key);
   if (existing != null && existing.isNotEmpty) return existing;
   final nodeId = _generateNodeId();
-  prefs.setString(key, nodeId); // fire-and-forget; non-critical
+  prefs.setString(key, nodeId); 
   return nodeId;
 }
 
-/// Generates a unique node ID combining the current microsecond timestamp
-/// and a hash of the [DateTime.now()] microsecond/millisecond mix to reduce
-/// collision risk when multiple installations are created simultaneously.
 String _generateNodeId() {
   final t = DateTime.now();
   final entropy = t.microsecondsSinceEpoch ^ (t.millisecondsSinceEpoch * 1000003);
