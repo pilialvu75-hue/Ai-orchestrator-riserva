@@ -85,16 +85,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     return _status;
   }
 
-  @override
-  Future<VoiceEngineStatus> initialize() async {
-    if (_initialized) {
-      logEvent(_tag, 'initialize() skipped — already initialised');
-      return _status;
-    }
-
-    logEvent(_tag, 'initialize() start — binding ONNX libraries');
-
-    // ── 1. Platform support guard ──────────────────────────────────────────
+  // ── 1. Inizializzazione Binding Nativi ────────────────────────────────────
+  Future<bool> _initNativeBindings() async {
     final supported = !kIsWeb &&
         (Platform.isAndroid ||
             Platform.isWindows ||
@@ -105,148 +97,81 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
           'Sherpa-ONNX voice engine is not supported on this platform.';
       logEvent(_tag, '[VOICE_UNSUPPORTED] $msg');
       _status = VoiceEngineStatus.unsupported(details: msg);
-      return _status;
+      return false;
     }
 
-    // ── 2. Resolve STT model paths ─────────────────────────────────────────
-    final sttEncoderResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttEncoderFile,
-      privateAbsolutePathHint: _modelPaths.sttEncoder,
-    );
-    final sttDecoderResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttDecoderFile,
-      privateAbsolutePathHint: _modelPaths.sttDecoder,
-    );
-    final sttJoinerResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttJoinerFile,
-      privateAbsolutePathHint: _modelPaths.sttJoiner,
-    );
-    final sttTokensResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.sttTokensFile,
-      privateAbsolutePathHint: _modelPaths.sttTokens,
-    );
-
-    final String sttEncoderPath =
-        _modelPaths.sttEncoder ??
-        _preferredResolvedPath(sttEncoderResolution);
-    final String sttDecoderPath =
-        _modelPaths.sttDecoder ??
-        _preferredResolvedPath(sttDecoderResolution);
-    final String sttJoinerPath =
-        _modelPaths.sttJoiner ??
-        _preferredResolvedPath(sttJoinerResolution);
-    final String sttTokensPath =
-        _modelPaths.sttTokens ??
-        _preferredResolvedPath(sttTokensResolution);
-
-    // ── 3. Resolve TTS model paths (Piper: data_dir, no lexicon) ──────────
-    final ttsModelResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.ttsModelFile,
-      privateAbsolutePathHint: _modelPaths.ttsModel,
-    );
-    final ttsTokensResolution = await _pathResolver.resolveForRead(
-      fileName: AppConstants.ttsTokensFile,
-      privateAbsolutePathHint: _modelPaths.ttsTokens,
-    );
-
-    final String ttsModelPath =
-        _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
-    final String ttsTokensPath =
-        _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
-
-    // espeak-ng-data: da VoiceModelPaths.ttsDataDir oppure
-    // calcolato come sottocartella nella directory privata dei modelli.
-    final privateDir = await _pathResolver.privateModelsDirectory();
-    final String ttsDataDir =
-        (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
-            ? _modelPaths.ttsDataDir!
-            : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
-
-    logEvent(_tag, '[ASSET_CHECK_BEGIN] validating required voice files');
-
-    // Valida file STT.
-    final requiredSttPaths = <String, String>{
-      AppConstants.sttEncoderFile: sttEncoderPath,
-      AppConstants.sttDecoderFile: sttDecoderPath,
-      AppConstants.sttJoinerFile: sttJoinerPath,
-      AppConstants.sttTokensFile: sttTokensPath,
-    };
-    final missingStt = requiredSttPaths.entries
-        .where((e) => !_isReadableAssetFileSync(e.value))
-        .map((e) => '${e.key}(${e.value})')
-        .toList();
-
-    // Valida file TTS.
-    final missingTts = <String>[];
-    if (!_isReadableAssetFileSync(ttsModelPath)) {
-      missingTts.add('${AppConstants.ttsModelFile}($ttsModelPath)');
-    }
-    if (!_isReadableAssetFileSync(ttsTokensPath)) {
-      missingTts.add('${AppConstants.ttsTokensFile}($ttsTokensPath)');
-    }
-    if (!_isReadableDirectorySync(ttsDataDir)) {
-      missingTts.add('${AppConstants.ttsEspeakDataDir}($ttsDataDir)');
-    }
-
-    final allMissing = [...missingStt, ...missingTts];
-    final assetsReady = allMissing.isEmpty;
-
-    if (!assetsReady) {
-      const msg =
-          'Risorse vocali mancanti o non valide. '
-          'Scarica di nuovo i modelli vocali e riapri Live Mode.';
-      logEvent(
-        _tag,
-        '[ASSET_CHECK_FAIL] $msg missing=${allMissing.join(", ")}',
-      );
-      _forensicPrint(
-        '[VOICE_ENGINE] [ASSET_CHECK_FAIL] $msg '
-        'missing=${allMissing.join(", ")}',
-      );
-      _status = const VoiceEngineStatus(
-        engineId: sherpaOnnxEngineId,
-        supportedPlatform: true,
-        nativeLibrariesLoaded: false,
-        microphonePermissionGranted: false,
-        audioSessionReady: false,
-        speakerOutputReady: false,
-        initialized: false,
-        offlineAsrAvailable: false,
-        offlineTtsAvailable: false,
-        isVoiceDownloaded: false,
-        details:
-            'Risorse vocali mancanti o non valide. '
-            'Scarica di nuovo i modelli vocali e riapri Live Mode.',
-      );
-      return _status;
-    }
-    logEvent(
-        _tag, '[ASSET_CHECK_COMPLETE] all required voice files are present');
-
-    // ── 4. Bind native ONNX libraries ──────────────────────────────────────
     _forensicPrint(
         '[VOICE_ENGINE] [ONNX_BIND_BEGIN] Calling sherpa_onnx.initBindings()');
     try {
       sherpa_onnx.initBindings();
       _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_OK]');
       logEvent(_tag, '[ONNX_BIND_OK] Native ONNX bindings loaded successfully');
+      return true;
     } catch (e, st) {
       final msg = 'Failed to load Sherpa-ONNX native libraries: $e';
       _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_FAIL] $msg\n$st');
       logEvent(_tag, '[ONNX_BIND_FAIL] $msg');
       _status = VoiceEngineStatus.unsupported(details: msg);
-      return _status;
+      return false;
     }
+  }
 
-    // ── 5. Build STT recognizer ────────────────────────────────────────────
-    bool sttReady = false;
-    logEvent(_tag, '[STT_INIT_BEGIN] Constructing OnlineRecognizer');
-    _forensicPrint(
-      '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
-      'encoder=$sttEncoderPath decoder=$sttDecoderPath '
-      'joiner=$sttJoinerPath tokens=$sttTokensPath',
-    );
+  // ── 2. Inizializzazione Indipendente STT (Input) ──────────────────────────
+  Future<bool> _initializeStt() async {
+    logEvent(_tag, '[STT_INIT_BEGIN] Resolving STT paths');
     try {
+      final sttEncoderResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttEncoderFile,
+        privateAbsolutePathHint: _modelPaths.sttEncoder,
+      );
+      final sttDecoderResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttDecoderFile,
+        privateAbsolutePathHint: _modelPaths.sttDecoder,
+      );
+      final sttJoinerResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttJoinerFile,
+        privateAbsolutePathHint: _modelPaths.sttJoiner,
+      );
+      final sttTokensResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttTokensFile,
+        privateAbsolutePathHint: _modelPaths.sttTokens,
+      );
+
+      final String sttEncoderPath =
+          _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
+      final String sttDecoderPath =
+          _modelPaths.sttDecoder ?? _preferredResolvedPath(sttDecoderResolution);
+      final String sttJoinerPath =
+          _modelPaths.sttJoiner ?? _preferredResolvedPath(sttJoinerResolution);
+      final String sttTokensPath =
+          _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
+
+      final requiredSttPaths = <String, String>{
+        AppConstants.sttEncoderFile: sttEncoderPath,
+        AppConstants.sttDecoderFile: sttDecoderPath,
+        AppConstants.sttJoinerFile: sttJoinerPath,
+        AppConstants.sttTokensFile: sttTokensPath,
+      };
+
+      final missingStt = requiredSttPaths.entries
+          .where((e) => !_isReadableAssetFileSync(e.value))
+          .map((e) => '${e.key}(${e.value})')
+          .toList();
+
+      if (missingStt.isNotEmpty) {
+        logEvent(
+          _tag,
+          '[STT_INIT_FAIL] Missing STT assets: ${missingStt.join(", ")}',
+        );
+        return false;
+      }
+
+      _forensicPrint(
+        '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
+        'encoder=$sttEncoderPath decoder=$sttDecoderPath '
+        'joiner=$sttJoinerPath tokens=$sttTokensPath',
+      );
+
       final modelConfig = sherpa_onnx.OnlineModelConfig(
         transducer: sherpa_onnx.OnlineTransducerModelConfig(
           encoder: sttEncoderPath,
@@ -266,24 +191,67 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         rule2MinTrailingSilence: 1.4,
         rule3MinUtteranceLength: 20.0,
       );
+
       _recognizer = sherpa_onnx.OnlineRecognizer(config);
-      sttReady = true;
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
       logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
+      return true;
     } catch (e, st) {
       final msg = 'STT recognizer init failed: $e';
       _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
       logEvent(_tag, '[STT_RECOGNIZER_ALLOC_FAIL] $msg');
+      return false;
     }
+  }
 
-    // ── 6. Build TTS engine (Piper: data_dir, no lexicon) ─────────────────
-    bool ttsReady = false;
-    logEvent(_tag, '[TTS_INIT_BEGIN] Constructing OfflineTts (Piper)');
-    _forensicPrint(
-      '[VOICE_ENGINE] [TTS_ALLOC_BEGIN] '
-      'model=$ttsModelPath tokens=$ttsTokensPath dataDir=$ttsDataDir',
-    );
+  // ── 3. Inizializzazione Indipendente TTS (Output) ─────────────────────────
+  Future<bool> _initializeTts() async {
+    logEvent(_tag, '[TTS_INIT_BEGIN] Resolving TTS paths');
     try {
+      final ttsModelResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.ttsModelFile,
+        privateAbsolutePathHint: _modelPaths.ttsModel,
+      );
+      final ttsTokensResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.ttsTokensFile,
+        privateAbsolutePathHint: _modelPaths.ttsTokens,
+      );
+
+      final String ttsModelPath =
+          _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
+      final String ttsTokensPath =
+          _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
+
+      final privateDir = await _pathResolver.privateModelsDirectory();
+      final String ttsDataDir =
+          (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
+              ? _modelPaths.ttsDataDir!
+              : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
+
+      final missingTts = <String>[];
+      if (!_isReadableAssetFileSync(ttsModelPath)) {
+        missingTts.add('${AppConstants.ttsModelFile}($ttsModelPath)');
+      }
+      if (!_isReadableAssetFileSync(ttsTokensPath)) {
+        missingTts.add('${AppConstants.ttsTokensFile}($ttsTokensPath)');
+      }
+      if (!_isReadableDirectorySync(ttsDataDir)) {
+        missingTts.add('${AppConstants.ttsEspeakDataDir}($ttsDataDir)');
+      }
+
+      if (missingTts.isNotEmpty) {
+        logEvent(
+          _tag,
+          '[TTS_INIT_FAIL] Missing TTS assets: ${missingTts.join(", ")}',
+        );
+        return false;
+      }
+
+      _forensicPrint(
+        '[VOICE_ENGINE] [TTS_ALLOC_BEGIN] '
+        'model=$ttsModelPath tokens=$ttsTokensPath dataDir=$ttsDataDir',
+      );
+
       final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
         vits: sherpa_onnx.OfflineTtsVitsModelConfig(
           model: ttsModelPath,
@@ -298,47 +266,71 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       final ttsConfig = sherpa_onnx.OfflineTtsConfig(
         model: ttsModelConfig,
       );
+
       _tts = sherpa_onnx.OfflineTts(ttsConfig);
-      ttsReady = true;
       _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_OK]');
       logEvent(_tag, '[TTS_ALLOC_OK] OfflineTts (Piper) ready');
+      return true;
     } catch (e, st) {
       final msg = 'TTS engine init failed: $e';
       _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_FAIL] $msg\n$st');
       logEvent(_tag, '[TTS_ALLOC_FAIL] $msg');
+      return false;
     }
+  }
 
-    // ── 7. Audio-channel allocation ────────────────────────────────────────
-    bool micReady = false;
+  // ── 4. Controllo Microfono ────────────────────────────────────────────────
+  Future<bool> _initializeMic() async {
     logEvent(_tag, '[AUDIO_SESSION_CHECK_BEGIN] Verifying AudioRecorder');
     _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN]');
     try {
       final hasPerm = await _recorder.hasPermission();
-      micReady = hasPerm;
       _forensicPrint(
           '[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_RESULT] hasPerm=$hasPerm');
-      logEvent(_tag, '[AUDIO_SESSION_CHECK_RESULT] micReady=$micReady');
+      logEvent(_tag, '[AUDIO_SESSION_CHECK_RESULT] micReady=$hasPerm');
+      return hasPerm;
     } catch (e, st) {
       final msg = 'Audio session check failed: $e';
       _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_FAIL] $msg\n$st');
       logEvent(_tag, '[AUDIO_SESSION_CHECK_FAIL] $msg');
+      return false;
+    }
+  }
+
+  // ── 5. Inizializzazione Globale ──────────────────────────────────────────
+  @override
+  Future<VoiceEngineStatus> initialize() async {
+    if (_initialized) {
+      logEvent(_tag, 'initialize() skipped — already initialised');
+      return _status;
     }
 
-    // ── 8. Compute final status ────────────────────────────────────────────
+    logEvent(_tag, 'initialize() start — binding ONNX libraries & initializing modules');
+
+    final nativeReady = await _initNativeBindings();
+    if (!nativeReady) return _status;
+
+    final sttReady = await _initializeStt();
+    final ttsReady = await _initializeTts();
+    final micReady = await _initializeMic();
+
     final initOk = sttReady || ttsReady;
     _initialized = initOk;
+
     _status = VoiceEngineStatus(
       engineId: sherpaOnnxEngineId,
       supportedPlatform: true,
-      nativeLibrariesLoaded: initOk,
+      nativeLibrariesLoaded: true,
       microphonePermissionGranted: micReady,
       audioSessionReady: micReady,
       speakerOutputReady: ttsReady,
       initialized: initOk,
       offlineAsrAvailable: sttReady,
       offlineTtsAvailable: ttsReady,
-      isVoiceDownloaded: assetsReady,
-      details: initOk ? null : 'STT=$sttReady TTS=$ttsReady mic=$micReady',
+      isVoiceDownloaded: initOk,
+      details: initOk
+          ? null
+          : 'Risorse vocali mancanti per STT e TTS. Scarica i modelli in Live Mode.',
     );
 
     logEvent(
