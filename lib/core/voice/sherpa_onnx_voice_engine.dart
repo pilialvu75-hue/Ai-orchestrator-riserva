@@ -85,7 +85,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     return _status;
   }
 
-  // ── 1. Inizializzazione Binding Nativi ────────────────────────────────────
   Future<bool> _initNativeBindings() async {
     final supported = !kIsWeb &&
         (Platform.isAndroid ||
@@ -116,7 +115,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── 2. Inizializzazione Indipendente STT (Input) ──────────────────────────
   Future<bool> _initializeStt() async {
     logEvent(_tag, '[STT_INIT_BEGIN] Resolving STT paths');
     try {
@@ -204,7 +202,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── 3. Inizializzazione Indipendente TTS (Output) ─────────────────────────
   Future<bool> _initializeTts() async {
     logEvent(_tag, '[TTS_INIT_BEGIN] Resolving TTS paths');
     try {
@@ -279,7 +276,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── 4. Controllo Microfono ────────────────────────────────────────────────
   Future<bool> _initializeMic() async {
     logEvent(_tag, '[AUDIO_SESSION_CHECK_BEGIN] Verifying AudioRecorder');
     _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN]');
@@ -297,7 +293,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  // ── 5. Inizializzazione Globale ──────────────────────────────────────────
   @override
   Future<VoiceEngineStatus> initialize() async {
     if (_initialized) {
