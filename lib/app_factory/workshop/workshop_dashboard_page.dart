@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'workshop_app_emission_controller.dart';
-import 'workshop_app_emission_manifest.dart';
-import 'workshop_app_emission_registry.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 
 /// Prima schermata operativa del Cantiere.
 ///
@@ -16,18 +16,16 @@ import 'workshop_app_emission_registry.dart';
 ///
 /// Visualizza invece ciò che il Cantiere ha già prodotto.
 ///
-/// Questo ci permette di collegare progressivamente la UI ai
+/// Questo permette di collegare progressivamente la UI ai
 /// componenti reali senza introdurre side-effect durante il primo
 /// passaggio di integrazione grafica.
 class WorkshopDashboardPage extends StatefulWidget {
   const WorkshopDashboardPage({
     super.key,
     WorkshopAppEmissionController? emissionController,
-  }) : _emissionController =
-            emissionController;
+  }) : _emissionController = emissionController;
 
-  final WorkshopAppEmissionController?
-      _emissionController;
+  final WorkshopAppEmissionController? _emissionController;
 
   @override
   State<WorkshopDashboardPage> createState() =>
@@ -36,8 +34,7 @@ class WorkshopDashboardPage extends StatefulWidget {
 
 class _WorkshopDashboardPageState
     extends State<WorkshopDashboardPage> {
-  late final WorkshopAppEmissionController
-      _emissionController;
+  late final WorkshopAppEmissionController _emissionController;
 
   @override
   void initState() {
@@ -45,33 +42,27 @@ class _WorkshopDashboardPageState
 
     _emissionController =
         widget._emissionController ??
-            WorkshopAppEmissionController();
+        WorkshopAppEmissionController();
   }
 
   @override
   Widget build(BuildContext context) {
-    final state =
-        _emissionController.state;
+    final state = _emissionController.state;
 
-    final packages =
-        _emissionController.recent(
+    final packages = _emissionController.recent(
       limit: 20,
     );
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Cantiere',
-        ),
+        title: const Text('Cantiere'),
         actions: <Widget>[
           IconButton(
             tooltip: 'Aggiorna',
             onPressed: () {
               setState(() {});
             },
-            icon: const Icon(
-              Icons.refresh,
-            ),
+            icon: const Icon(Icons.refresh),
           ),
         ],
       ),
@@ -80,8 +71,7 @@ class _WorkshopDashboardPageState
           setState(() {});
         },
         child: ListView(
-          physics:
-              const AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
           children: <Widget>[
             _WorkshopHeader(
@@ -108,8 +98,7 @@ class _WorkshopDashboardPageState
             else
               ...packages.map(
                 (package) => Padding(
-                  padding:
-                      const EdgeInsets.only(
+                  padding: const EdgeInsets.only(
                     bottom: 12,
                   ),
                   child: _WorkshopEmissionCard(
@@ -119,8 +108,7 @@ class _WorkshopDashboardPageState
               ),
             const SizedBox(height: 24),
             _WorkshopDiagnosticsCard(
-              controller:
-                  _emissionController,
+              controller: _emissionController,
             ),
           ],
         ),
@@ -138,20 +126,15 @@ class _WorkshopHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme =
-        Theme.of(context);
+    final theme = Theme.of(context);
 
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
           'App Factory',
-          style:
-              theme.textTheme.headlineMedium
-                  ?.copyWith(
-            fontWeight:
-                FontWeight.bold,
+          style: theme.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 6),
@@ -159,16 +142,14 @@ class _WorkshopHeader extends StatelessWidget {
           state.hasEmittedApp
               ? 'Il Cantiere ha già prodotto applicazioni.'
               : 'Il Cantiere è pronto per iniziare la produzione.',
-          style:
-              theme.textTheme.bodyLarge,
+          style: theme.textTheme.bodyLarge,
         ),
       ],
     );
   }
 }
 
-class _WorkshopStatusCard
-    extends StatelessWidget {
+class _WorkshopStatusCard extends StatelessWidget {
   const _WorkshopStatusCard({
     required this.state,
   });
@@ -177,23 +158,19 @@ class _WorkshopStatusCard
 
   @override
   Widget build(BuildContext context) {
-    final theme =
-        Theme.of(context);
+    final theme = Theme.of(context);
 
-    final color =
-        state.hasEmittedApp
-            ? Colors.green
-            : theme.colorScheme.primary;
+    final color = state.hasEmittedApp
+        ? Colors.green
+        : theme.colorScheme.primary;
 
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
             CircleAvatar(
-              backgroundColor:
-                  color.withValues(
+              backgroundColor: color.withValues(
                 alpha: 0.12,
               ),
               child: Icon(
@@ -206,19 +183,14 @@ class _WorkshopStatusCard
             const SizedBox(width: 14),
             Expanded(
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
                     state.hasEmittedApp
                         ? 'Cantiere operativo'
                         : 'Cantiere pronto',
-                    style: theme
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                      fontWeight:
-                          FontWeight.bold,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -236,8 +208,7 @@ class _WorkshopStatusCard
   }
 }
 
-class _WorkshopActionsCard
-    extends StatelessWidget {
+class _WorkshopActionsCard extends StatelessWidget {
   const _WorkshopActionsCard({
     required this.onRefresh,
   });
@@ -248,49 +219,36 @@ class _WorkshopActionsCard
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             const Text(
               'Cantiere',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                    FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: onRefresh,
-              icon: const Icon(
-                Icons.refresh,
-              ),
-              label: const Text(
-                'Aggiorna stato',
-              ),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Aggiorna stato'),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(
+                ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
-                      'L'esecuzione reale verrà collegata al prossimo anello.',
+                      "L'esecuzione reale verrà collegata al prossimo anello.",
                     ),
                   ),
                 );
               },
-              icon: const Icon(
-                Icons.play_arrow,
-              ),
-              label: const Text(
-                'Nuova produzione',
-              ),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Nuova produzione'),
             ),
           ],
         ),
@@ -299,8 +257,7 @@ class _WorkshopActionsCard
   }
 }
 
-class _WorkshopSectionTitle
-    extends StatelessWidget {
+class _WorkshopSectionTitle extends StatelessWidget {
   const _WorkshopSectionTitle({
     required this.title,
     required this.count,
@@ -311,69 +268,55 @@ class _WorkshopSectionTitle
 
   @override
   Widget build(BuildContext context) {
-    final theme =
-        Theme.of(context);
+    final theme = Theme.of(context);
 
     return Row(
       children: <Widget>[
         Expanded(
           child: Text(
             title,
-            style:
-                theme.textTheme.titleLarge
-                    ?.copyWith(
-              fontWeight:
-                  FontWeight.bold,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
         if (count > 0)
           Chip(
-            label: Text(
-              '$count',
-            ),
+            label: Text('$count'),
           ),
       ],
     );
   }
 }
 
-class _WorkshopEmptyState
-    extends StatelessWidget {
+class _WorkshopEmptyState extends StatelessWidget {
   const _WorkshopEmptyState();
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: <Widget>[
             Icon(
               Icons.inventory_2_outlined,
               size: 48,
-              color: Theme.of(
-                context,
-              ).colorScheme.primary,
+              color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 12),
             const Text(
               'Nessuna app emessa',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                    FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               'Le prime applicazioni prodotte dal Cantiere appariranno qui.',
-              textAlign:
-                  TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],
         ),
@@ -382,33 +325,26 @@ class _WorkshopEmptyState
   }
 }
 
-class _WorkshopEmissionCard
-    extends StatelessWidget {
+class _WorkshopEmissionCard extends StatelessWidget {
   const _WorkshopEmissionCard({
     required this.package,
   });
 
-  final WorkshopAppEmissionPackage
-      package;
+  final WorkshopAppEmissionPackage package;
 
   @override
   Widget build(BuildContext context) {
-    final theme =
-        Theme.of(context);
+    final theme = Theme.of(context);
 
-    final manifest =
-        WorkshopAppEmissionManifest
-            .fromPackage(
+    final manifest = WorkshopAppEmissionManifest.fromPackage(
       package,
     );
 
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
@@ -422,18 +358,11 @@ class _WorkshopEmissionCard
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    package.appName
-                            ?.trim()
-                            .isNotEmpty ==
-                        true
+                    package.appName?.trim().isNotEmpty == true
                         ? package.appName!
                         : 'Applicazione senza nome',
-                    style: theme
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                      fontWeight:
-                          FontWeight.bold,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
@@ -446,26 +375,20 @@ class _WorkshopEmissionCard
             ),
             _WorkshopInfoRow(
               label: 'Versione',
-              value:
-                  package.version ??
-                      '—',
+              value: package.version ?? '—',
             ),
             _WorkshopInfoRow(
               label: 'Request',
-              value:
-                  package.requestId,
+              value: package.requestId,
             ),
             _WorkshopInfoRow(
               label: 'Artifact',
-              value:
-                  package.artifactPath,
+              value: package.artifactPath,
             ),
             const SizedBox(height: 8),
             Text(
-              package.message ??
-                  'Artifact pronto.',
-              style:
-                  theme.textTheme.bodySmall,
+              package.message ?? 'Artifact pronto.',
+              style: theme.textTheme.bodySmall,
             ),
           ],
         ),
@@ -474,8 +397,7 @@ class _WorkshopEmissionCard
   }
 }
 
-class _WorkshopInfoRow
-    extends StatelessWidget {
+class _WorkshopInfoRow extends StatelessWidget {
   const _WorkshopInfoRow({
     required this.label,
     required this.value,
@@ -487,29 +409,24 @@ class _WorkshopInfoRow
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.only(
+      padding: const EdgeInsets.only(
         bottom: 6,
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           SizedBox(
             width: 82,
             child: Text(
               label,
               style: const TextStyle(
-                fontWeight:
-                    FontWeight.w600,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
           Expanded(
             child: SelectableText(
-              value.isEmpty
-                  ? '—'
-                  : value,
+              value.isEmpty ? '—' : value,
             ),
           ),
         ],
@@ -518,19 +435,16 @@ class _WorkshopInfoRow
   }
 }
 
-class _WorkshopDiagnosticsCard
-    extends StatelessWidget {
+class _WorkshopDiagnosticsCard extends StatelessWidget {
   const _WorkshopDiagnosticsCard({
     required this.controller,
   });
 
-  final WorkshopAppEmissionController
-      controller;
+  final WorkshopAppEmissionController controller;
 
   @override
   Widget build(BuildContext context) {
-    final diagnostics =
-        controller.diagnostics();
+    final diagnostics = controller.diagnostics();
 
     return Card(
       child: ExpansionTile(
@@ -542,25 +456,19 @@ class _WorkshopDiagnosticsCard
         ),
         children: <Widget>[
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
+            padding: const EdgeInsets.fromLTRB(
               16,
               0,
               16,
               16,
             ),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: diagnostics.entries
                   .map(
-                    (
-                      entry,
-                    ) =>
-                        _WorkshopInfoRow(
+                    (entry) => _WorkshopInfoRow(
                       label: entry.key,
-                      value:
-                          _formatDiagnosticValue(
+                      value: _formatDiagnosticValue(
                         entry.value,
                       ),
                     ),
@@ -575,15 +483,12 @@ class _WorkshopDiagnosticsCard
     );
   }
 
-  String _formatDiagnosticValue(
-    Object? value,
-  ) {
+  String _formatDiagnosticValue(Object? value) {
     if (value == null) {
       return '—';
     }
 
-    if (value is Map ||
-        value is List) {
+    if (value is Map || value is List) {
       return value.toString();
     }
 
