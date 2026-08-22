@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -19,22 +20,29 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   static const String _tag = 'VOICE_ENGINE';
 
+  static const int _sampleRate = 16000;
+  static const int _channels = 1;
+
   final VoiceModelPaths _modelPaths;
+
   final RuntimeModelPathResolver _pathResolver =
       const RuntimeModelPathResolver();
+
+  final AudioRecorder _recorder = AudioRecorder();
+  final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
 
   sherpa_onnx.OnlineRecognizer? _recognizer;
   sherpa_onnx.OnlineStream? _asrStream;
   sherpa_onnx.OfflineTts? _tts;
 
-  final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micSubscription;
 
   VoiceEngineStatus _status = VoiceEngineStatus.unsupported();
+
   bool _isListening = false;
   bool _initialized = false;
-
-  final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
+  bool _initializing = false;
+  bool _disposed = false;
 
   Float32List? _pendingTtsSamples;
   int _pendingTtsSampleRate = 22050;
@@ -46,6 +54,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   bool get isSpeaking => _audioPlayer.isPlaying;
 
   Float32List? get pendingTtsSamples => _pendingTtsSamples;
+
   int get pendingTtsSampleRate => _pendingTtsSampleRate;
 
   static void _forensicPrint(String message) {
@@ -69,106 +78,138 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
-  static String _preferredResolvedPath(RuntimeModelResolution resolution) {
+  static String _preferredResolvedPath(
+    RuntimeModelResolution resolution,
+  ) {
     if (_isReadableAssetFileSync(resolution.privateFile.path)) {
       return resolution.privateFile.path;
     }
+
     if (_isReadableAssetFileSync(resolution.publicFile.path)) {
       return resolution.publicFile.path;
     }
+
     return resolution.file.path;
   }
 
   @override
   Future<VoiceEngineStatus> inspect() async {
-    logEvent(_tag, 'inspect() called — returning cached status');
+    if (_disposed) {
+      return VoiceEngineStatus.unsupported(
+        details: 'Voice engine has been disposed.',
+      );
+    }
+
+    // Intentionally cached: inspect() must remain cheap and side-effect free.
     return _status;
   }
 
   Future<bool> _initNativeBindings() async {
+    if (_disposed) {
+      return false;
+    }
+
     final supported = !kIsWeb &&
         (Platform.isAndroid ||
             Platform.isWindows ||
             Platform.isLinux ||
             Platform.isMacOS);
+
     if (!supported) {
-      const msg =
+      const message =
           'Sherpa-ONNX voice engine is not supported on this platform.';
-      logEvent(_tag, '[VOICE_UNSUPPORTED] $msg');
-      _status = VoiceEngineStatus.unsupported(details: msg);
+
+      logEvent(_tag, '[VOICE_UNSUPPORTED] $message');
+
+      _status = VoiceEngineStatus.unsupported(
+        details: message,
+      );
+
       return false;
     }
 
-    _forensicPrint(
-        '[VOICE_ENGINE] [ONNX_BIND_BEGIN] Calling sherpa_onnx.initBindings()');
     try {
       sherpa_onnx.initBindings();
-      _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_OK]');
-      logEvent(_tag, '[ONNX_BIND_OK] Native ONNX bindings loaded successfully');
+
+      logEvent(_tag, '[ONNX_BIND_OK]');
+
       return true;
-    } catch (e, st) {
-      final msg = 'Failed to load Sherpa-ONNX native libraries: $e';
-      _forensicPrint('[VOICE_ENGINE] [ONNX_BIND_FAIL] $msg\n$st');
-      logEvent(_tag, '[ONNX_BIND_FAIL] $msg');
-      _status = VoiceEngineStatus.unsupported(details: msg);
+    } catch (error) {
+      final message =
+          'Failed to load Sherpa-ONNX native libraries: $error';
+
+      logEvent(_tag, '[ONNX_BIND_FAIL] $message');
+
+      _status = VoiceEngineStatus.unsupported(
+        details: message,
+      );
+
       return false;
     }
   }
 
   Future<bool> _initializeStt() async {
-    logEvent(_tag, '[STT_INIT_BEGIN] Resolving STT paths');
+    if (_disposed) {
+      return false;
+    }
+
     try {
       final sttEncoderResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.sttEncoderFile,
         privateAbsolutePathHint: _modelPaths.sttEncoder,
       );
+
       final sttDecoderResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.sttDecoderFile,
         privateAbsolutePathHint: _modelPaths.sttDecoder,
       );
+
       final sttJoinerResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.sttJoinerFile,
         privateAbsolutePathHint: _modelPaths.sttJoiner,
       );
+
       final sttTokensResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.sttTokensFile,
         privateAbsolutePathHint: _modelPaths.sttTokens,
       );
 
-      final String sttEncoderPath =
-          _modelPaths.sttEncoder ?? _preferredResolvedPath(sttEncoderResolution);
-      final String sttDecoderPath =
-          _modelPaths.sttDecoder ?? _preferredResolvedPath(sttDecoderResolution);
-      final String sttJoinerPath =
-          _modelPaths.sttJoiner ?? _preferredResolvedPath(sttJoinerResolution);
-      final String sttTokensPath =
-          _modelPaths.sttTokens ?? _preferredResolvedPath(sttTokensResolution);
+      final sttEncoderPath = _modelPaths.sttEncoder ??
+          _preferredResolvedPath(sttEncoderResolution);
 
-      final requiredSttPaths = <String, String>{
+      final sttDecoderPath = _modelPaths.sttDecoder ??
+          _preferredResolvedPath(sttDecoderResolution);
+
+      final sttJoinerPath = _modelPaths.sttJoiner ??
+          _preferredResolvedPath(sttJoinerResolution);
+
+      final sttTokensPath = _modelPaths.sttTokens ??
+          _preferredResolvedPath(sttTokensResolution);
+
+      final requiredPaths = <String, String>{
         AppConstants.sttEncoderFile: sttEncoderPath,
         AppConstants.sttDecoderFile: sttDecoderPath,
         AppConstants.sttJoinerFile: sttJoinerPath,
         AppConstants.sttTokensFile: sttTokensPath,
       };
 
-      final missingStt = requiredSttPaths.entries
-          .where((e) => !_isReadableAssetFileSync(e.value))
-          .map((e) => '${e.key}(${e.value})')
+      final missing = requiredPaths.entries
+          .where(
+            (entry) => !_isReadableAssetFileSync(entry.value),
+          )
+          .map(
+            (entry) => '${entry.key}(${entry.value})',
+          )
           .toList();
 
-      if (missingStt.isNotEmpty) {
+      if (missing.isNotEmpty) {
         logEvent(
           _tag,
-          '[STT_INIT_FAIL] Missing STT assets: ${missingStt.join(", ")}',
+          '[STT_INIT_FAIL] Missing STT assets: ${missing.join(", ")}',
         );
+
         return false;
       }
-
-      _forensicPrint(
-        '[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_BEGIN] '
-        'encoder=$sttEncoderPath decoder=$sttDecoderPath '
-        'joiner=$sttJoinerPath tokens=$sttTokensPath',
-      );
 
       final modelConfig = sherpa_onnx.OnlineModelConfig(
         transducer: sherpa_onnx.OnlineTransducerModelConfig(
@@ -182,7 +223,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         debug: false,
         modelType: AppConstants.sttModelType,
       );
-      final config = sherpa_onnx.OnlineRecognizerConfig(
+
+      final recognizerConfig = sherpa_onnx.OnlineRecognizerConfig(
         model: modelConfig,
         enableEndpoint: true,
         rule1MinTrailingSilence: 2.4,
@@ -190,66 +232,104 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         rule3MinUtteranceLength: 20.0,
       );
 
-      _recognizer = sherpa_onnx.OnlineRecognizer(config);
-      _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_OK]');
-      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_OK] OnlineRecognizer ready');
+      final recognizer = sherpa_onnx.OnlineRecognizer(
+        recognizerConfig,
+      );
+
+      if (_disposed) {
+        try {
+          recognizer.free();
+        } catch (_) {}
+
+        return false;
+      }
+
+      _recognizer = recognizer;
+
+      logEvent(
+        _tag,
+        '[STT_READY] OnlineRecognizer ready',
+      );
+
       return true;
-    } catch (e, st) {
-      final msg = 'STT recognizer init failed: $e';
-      _forensicPrint('[VOICE_ENGINE] [STT_RECOGNIZER_ALLOC_FAIL] $msg\n$st');
-      logEvent(_tag, '[STT_RECOGNIZER_ALLOC_FAIL] $msg');
+    } catch (error) {
+      final message = 'STT recognizer init failed: $error';
+
+      logEvent(
+        _tag,
+        '[STT_INIT_FAIL] $message',
+      );
+
+      _recognizer = null;
+
       return false;
     }
   }
 
   Future<bool> _initializeTts() async {
-    logEvent(_tag, '[TTS_INIT_BEGIN] Resolving TTS paths');
+    if (_disposed) {
+      return false;
+    }
+
     try {
       final ttsModelResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.ttsModelFile,
         privateAbsolutePathHint: _modelPaths.ttsModel,
       );
+
       final ttsTokensResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.ttsTokensFile,
         privateAbsolutePathHint: _modelPaths.ttsTokens,
       );
 
-      final String ttsModelPath =
-          _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
-      final String ttsTokensPath =
-          _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
+      final ttsModelPath = _modelPaths.ttsModel ??
+          _preferredResolvedPath(ttsModelResolution);
 
-      final privateDir = await _pathResolver.privateModelsDirectory();
-      final String ttsDataDir =
+      final ttsTokensPath = _modelPaths.ttsTokens ??
+          _preferredResolvedPath(ttsTokensResolution);
+
+      final privateDir =
+          await _pathResolver.privateModelsDirectory();
+
+      final ttsDataDir =
           (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
               ? _modelPaths.ttsDataDir!
-              : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
+              : p.join(
+                  privateDir.path,
+                  AppConstants.ttsEspeakDataDir,
+                );
 
-      final missingTts = <String>[];
+      final missing = <String>[];
+
       if (!_isReadableAssetFileSync(ttsModelPath)) {
-        missingTts.add('${AppConstants.ttsModelFile}($ttsModelPath)');
-      }
-      if (!_isReadableAssetFileSync(ttsTokensPath)) {
-        missingTts.add('${AppConstants.ttsTokensFile}($ttsTokensPath)');
-      }
-      if (!_isReadableDirectorySync(ttsDataDir)) {
-        missingTts.add('${AppConstants.ttsEspeakDataDir}($ttsDataDir)');
+        missing.add(
+          '${AppConstants.ttsModelFile}($ttsModelPath)',
+        );
       }
 
-      if (missingTts.isNotEmpty) {
+      if (!_isReadableAssetFileSync(ttsTokensPath)) {
+        missing.add(
+          '${AppConstants.ttsTokensFile}($ttsTokensPath)',
+        );
+      }
+
+      if (!_isReadableDirectorySync(ttsDataDir)) {
+        missing.add(
+          '${AppConstants.ttsEspeakDataDir}($ttsDataDir)',
+        );
+      }
+
+      if (missing.isNotEmpty) {
         logEvent(
           _tag,
-          '[TTS_INIT_FAIL] Missing TTS assets: ${missingTts.join(", ")}',
+          '[TTS_INIT_FAIL] Missing TTS assets: ${missing.join(", ")}',
         );
+
         return false;
       }
 
-      _forensicPrint(
-        '[VOICE_ENGINE] [TTS_ALLOC_BEGIN] '
-        'model=$ttsModelPath tokens=$ttsTokensPath dataDir=$ttsDataDir',
-      );
-
-      final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
+      final ttsModelConfig =
+          sherpa_onnx.OfflineTtsModelConfig(
         vits: sherpa_onnx.OfflineTtsVitsModelConfig(
           model: ttsModelPath,
           lexicon: '',
@@ -260,90 +340,170 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         debug: false,
         provider: 'cpu',
       );
+
       final ttsConfig = sherpa_onnx.OfflineTtsConfig(
         model: ttsModelConfig,
       );
 
-      _tts = sherpa_onnx.OfflineTts(ttsConfig);
-      _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_OK]');
-      logEvent(_tag, '[TTS_ALLOC_OK] OfflineTts (Piper) ready');
+      final tts = sherpa_onnx.OfflineTts(ttsConfig);
+
+      if (_disposed) {
+        try {
+          tts.free();
+        } catch (_) {}
+
+        return false;
+      }
+
+      _tts = tts;
+
+      logEvent(
+        _tag,
+        '[TTS_READY] OfflineTts ready',
+      );
+
       return true;
-    } catch (e, st) {
-      final msg = 'TTS engine init failed: $e';
-      _forensicPrint('[VOICE_ENGINE] [TTS_ALLOC_FAIL] $msg\n$st');
-      logEvent(_tag, '[TTS_ALLOC_FAIL] $msg');
+    } catch (error) {
+      final message = 'TTS engine init failed: $error';
+
+      logEvent(
+        _tag,
+        '[TTS_INIT_FAIL] $message',
+      );
+
+      _tts = null;
+
       return false;
     }
   }
 
   Future<bool> _initializeMic() async {
-    logEvent(_tag, '[AUDIO_SESSION_CHECK_BEGIN] Verifying AudioRecorder');
-    _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_BEGIN]');
+    if (_disposed) {
+      return false;
+    }
+
     try {
-      final hasPerm = await _recorder.hasPermission();
-      _forensicPrint(
-          '[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_RESULT] hasPerm=$hasPerm');
-      logEvent(_tag, '[AUDIO_SESSION_CHECK_RESULT] micReady=$hasPerm');
-      return hasPerm;
-    } catch (e, st) {
-      final msg = 'Audio session check failed: $e';
-      _forensicPrint('[VOICE_ENGINE] [MIC_CHANNEL_ALLOC_FAIL] $msg\n$st');
-      logEvent(_tag, '[AUDIO_SESSION_CHECK_FAIL] $msg');
+      final hasPermission = await _recorder.hasPermission();
+
+      if (_disposed) {
+        return false;
+      }
+
+      logEvent(
+        _tag,
+        '[MIC_STATUS] permission=$hasPermission',
+      );
+
+      return hasPermission;
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[MIC_STATUS_FAIL] $error',
+      );
+
       return false;
     }
   }
 
   @override
   Future<VoiceEngineStatus> initialize() async {
-    if (_initialized) {
-      logEvent(_tag, 'initialize() skipped — already initialised');
-      return _status;
-    }
-
-    logEvent(_tag, 'initialize() start — binding ONNX libraries & initializing modules');
-
-    final nativeReady = await _initNativeBindings();
-    if (!nativeReady) return _status;
-
-    final sttReady = await _initializeStt();
-    final ttsReady = await _initializeTts();
-    final micReady = await _initializeMic();
-
-    final initOk = sttReady || ttsReady;
-    _initialized = initOk;
-
-    _status = VoiceEngineStatus(
-      engineId: sherpaOnnxEngineId,
-      supportedPlatform: true,
-      nativeLibrariesLoaded: true,
-      microphonePermissionGranted: micReady,
-      audioSessionReady: micReady,
-      speakerOutputReady: ttsReady,
-      initialized: initOk,
-      offlineAsrAvailable: sttReady,
-      offlineTtsAvailable: ttsReady,
-      isVoiceDownloaded: initOk,
-      details: initOk
-          ? null
-          : 'Risorse vocali mancanti per STT e TTS. Scarica i modelli in Live Mode.',
-    );
-
-    logEvent(
-      _tag,
-      '[INIT_COMPLETE] stt=$sttReady tts=$ttsReady mic=$micReady '
-      'readyForInput=${_status.readyForInput} '
-      'readyForOutput=${_status.readyForOutput}',
-    );
-
-    if (!initOk) {
-      logEvent(
-        _tag,
-        '[INIT_FAIL_LOUD] initialize() completed with no functional subsystem '
-        '— details: ${_status.details}',
+    if (_disposed) {
+      return VoiceEngineStatus.unsupported(
+        details: 'Voice engine has been disposed.',
       );
     }
 
-    return _status;
+    if (_initialized) {
+      return _status;
+    }
+
+    if (_initializing) {
+      return _status;
+    }
+
+    _initializing = true;
+
+    try {
+      final nativeReady = await _initNativeBindings();
+
+      if (!nativeReady || _disposed) {
+        return _status;
+      }
+
+      final sttReady = await _initializeStt();
+
+      if (_disposed) {
+        return _status;
+      }
+
+      final ttsReady = await _initializeTts();
+
+      if (_disposed) {
+        return _status;
+      }
+
+      /*
+       * Microphone permission is deliberately independent from
+       * STT/TTS initialization.
+       *
+       * Live must not be considered broken merely because the
+       * microphone is unavailable.
+       */
+      final micReady = await _initializeMic();
+
+      if (_disposed) {
+        return _status;
+      }
+
+      final initOk = sttReady || ttsReady;
+
+      _initialized = initOk;
+
+      _status = VoiceEngineStatus(
+        engineId: sherpaOnnxEngineId,
+        supportedPlatform: true,
+        nativeLibrariesLoaded: true,
+        microphonePermissionGranted: micReady,
+        audioSessionReady: micReady,
+        speakerOutputReady: ttsReady,
+        initialized: initOk,
+        offlineAsrAvailable: sttReady,
+        offlineTtsAvailable: ttsReady,
+        isVoiceDownloaded: initOk,
+        details: initOk
+            ? null
+            : 'Risorse vocali STT/TTS non disponibili.',
+      );
+
+      logEvent(
+        _tag,
+        '[INIT_COMPLETE] '
+        'stt=$sttReady '
+        'tts=$ttsReady '
+        'mic=$micReady',
+      );
+
+      return _status;
+    } catch (error) {
+      /*
+       * Never allow an initialization failure to propagate into
+       * the Live UI.
+       */
+      logEvent(
+        _tag,
+        '[INIT_FAIL] Voice initialization failed: $error',
+      );
+
+      _initialized = false;
+
+      _status = VoiceEngineStatus.unsupported(
+        details: 'Voice initialization failed.',
+      );
+
+      return _status;
+    } finally {
+      _initializing = false;
+    }
   }
 
   @override
@@ -351,129 +511,279 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     required VoiceRecognitionResultCallback onResult,
     String localeId = AppConstants.sttDefaultLocaleId,
   }) async {
-    if (!_status.readyForInput) {
-      logEvent(_tag, '[ASR_START_BLOCKED] engine not ready for input');
+    if (_disposed) {
       return;
     }
+
     if (_isListening) {
-      logEvent(_tag, '[ASR_START_SKIPPED] already listening');
       return;
     }
+
     final recognizer = _recognizer;
+
     if (recognizer == null) {
-      logEvent(_tag, '[ASR_START_FAIL] recognizer is null');
+      logEvent(
+        _tag,
+        '[ASR_BLOCKED] recognizer unavailable',
+      );
+
       return;
     }
 
-    _asrStream?.free();
-    _asrStream = recognizer.createStream();
-
-    logEvent(_tag, '[ASR_START_BEGIN] opening mic stream locale=$localeId');
-    _forensicPrint(
-        '[VOICE_ENGINE] [MIC_STREAM_OPEN_BEGIN] sampleRate=16000 pcm16bit');
-
+    /*
+     * The native stream lifecycle is deliberately handled inside
+     * the protected section. Previously createStream/free happened
+     * before the try block.
+     */
     try {
+      await _closeAsrStreamSafely();
+
+      if (_disposed) {
+        return;
+      }
+
+      final activeStream = recognizer.createStream();
+
+      if (_disposed) {
+        try {
+          activeStream.free();
+        } catch (_) {}
+
+        return;
+      }
+
+      _asrStream = activeStream;
+
+      /*
+       * Check permission immediately before opening the stream.
+       * This prevents Live from attempting to open a recorder that
+       * is unavailable.
+       */
+      final hasPermission = await _recorder.hasPermission();
+
+      if (!hasPermission || _disposed) {
+        logEvent(
+          _tag,
+          '[ASR_BLOCKED] microphone unavailable',
+        );
+
+        await _closeAsrStreamSafely();
+        return;
+      }
+
       final audioStream = await _recorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
+          sampleRate: _sampleRate,
+          numChannels: _channels,
         ),
       );
 
-      _forensicPrint('[VOICE_ENGINE] [MIC_STREAM_OPEN_OK]');
-      logEvent(_tag, '[MIC_STREAM_OPEN_OK] PCM16 stream active');
+      if (_disposed) {
+        try {
+          await _recorder.stop();
+        } catch (_) {}
+
+        await _closeAsrStreamSafely();
+        return;
+      }
 
       _isListening = true;
-      final activeStream = _asrStream!;
+
+      logEvent(
+        _tag,
+        '[ASR_STARTED] sampleRate=$_sampleRate',
+      );
 
       _micSubscription = audioStream.listen(
         (Uint8List bytes) {
-          if (!_isListening) return;
-          final samples = _pcm16BytesToFloat32(bytes);
-          activeStream.acceptWaveform(samples: samples, sampleRate: 16000);
-          recognizer.decode(activeStream);
+          if (_disposed || !_isListening) {
+            return;
+          }
 
-          if (recognizer.isEndpoint(activeStream)) {
-            final result = recognizer.getResult(activeStream);
-            final text = result.text.trim();
+          /*
+           * Keep all native recognition operations protected.
+           * A bad audio frame must not terminate the whole Live
+           * isolate/UI lifecycle.
+           */
+          try {
+            if (bytes.length < 2) {
+              return;
+            }
+
+            final stream = _asrStream;
+
+            if (stream == null) {
+              return;
+            }
+
+            final samples = _pcm16BytesToFloat32(bytes);
+
+            if (samples.isEmpty) {
+              return;
+            }
+
+            stream.acceptWaveform(
+              samples: samples,
+              sampleRate: _sampleRate,
+            );
+
+            recognizer.decode(stream);
+
+            if (recognizer.isEndpoint(stream)) {
+              final result = recognizer.getResult(stream);
+              final text = result.text.trim();
+
+              if (text.isNotEmpty) {
+                onResult(text, true);
+              }
+
+              recognizer.reset(stream);
+            } else {
+              final result = recognizer.getResult(stream);
+              final partialText = result.text.trim();
+
+              if (partialText.isNotEmpty) {
+                onResult(partialText, false);
+              }
+            }
+          } catch (error) {
+            /*
+             * Do not throw from the audio callback.
+             *
+             * This is particularly important with FFI/native
+             * recognizers because an exception escaping this
+             * callback can terminate the voice lifecycle.
+             */
             logEvent(
               _tag,
-              '[VAD_ENDPOINT] isEndpoint=true '
-              'text="${text.isEmpty ? "<empty>" : text}"',
+              '[ASR_FRAME_FAIL] $error',
             );
-            if (text.isNotEmpty) {
-              onResult(text, true);
-            }
-            recognizer.reset(activeStream);
-          } else {
-            final partial = recognizer.getResult(activeStream);
-            final partialText = partial.text.trim();
-            if (partialText.isNotEmpty) {
-              onResult(partialText, false);
-            }
           }
         },
-        onError: (Object error, StackTrace st) {
-          final msg = 'Mic stream error: $error';
-          _forensicPrint('[VOICE_ENGINE] [MIC_STREAM_ERROR] $msg\n$st');
-          logEvent(_tag, '[MIC_STREAM_ERROR] $msg');
+        onError: (Object error, StackTrace stackTrace) {
+          if (_disposed) {
+            return;
+          }
+
+          logEvent(
+            _tag,
+            '[MIC_STREAM_ERROR] $error',
+          );
+
           _isListening = false;
         },
         onDone: () {
-          logEvent(_tag, '[MIC_STREAM_DONE] mic stream closed');
+          if (_disposed) {
+            return;
+          }
+
           _isListening = false;
+
+          logEvent(
+            _tag,
+            '[MIC_STREAM_DONE]',
+          );
         },
         cancelOnError: false,
       );
-    } catch (e, st) {
-      final msg = 'Failed to open mic stream: $e';
-      _forensicPrint('[VOICE_ENGINE] [MIC_STREAM_OPEN_FAIL] $msg\n$st');
-      logEvent(_tag, '[MIC_STREAM_OPEN_FAIL] $msg');
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[ASR_START_FAIL] $error',
+      );
+
       _isListening = false;
+
+      await _closeMicSafely();
+      await _closeAsrStreamSafely();
     }
   }
 
   @override
   Future<void> stopListening() async {
-    logEvent(_tag, '[ASR_STOP_BEGIN]');
-    _forensicPrint('[VOICE_ENGINE] [MIC_STREAM_CLOSE_BEGIN]');
+    if (_disposed && !_isListening) {
+      return;
+    }
 
     _isListening = false;
-    await _micSubscription?.cancel();
+
+    await _closeMicSafely();
+    await _closeAsrStreamSafely();
+  }
+
+  Future<void> _closeMicSafely() async {
+    final subscription = _micSubscription;
     _micSubscription = null;
+
+    if (subscription != null) {
+      try {
+        await subscription.cancel();
+      } catch (error) {
+        logEvent(
+          _tag,
+          '[MIC_CANCEL_WARN] $error',
+        );
+      }
+    }
 
     try {
       await _recorder.stop();
-    } catch (e) {
-      logEvent(_tag, '[MIC_STREAM_STOP_WARN] recorder.stop() error: $e');
+    } catch (error) {
+      /*
+       * recorder.stop() can legitimately report that the recorder
+       * is already stopped. This must never crash Live.
+       */
+      logEvent(
+        _tag,
+        '[MIC_STOP_WARN] $error',
+      );
+    }
+  }
+
+  Future<void> _closeAsrStreamSafely() async {
+    final stream = _asrStream;
+    _asrStream = null;
+
+    if (stream == null) {
+      return;
     }
 
-    _forensicPrint('[VOICE_ENGINE] [MIC_STREAM_CLOSE_OK]');
-    logEvent(_tag, '[ASR_STOP_DONE]');
+    try {
+      stream.free();
+    } catch (error) {
+      /*
+       * Native free must never escape into the UI lifecycle.
+       */
+      logEvent(
+        _tag,
+        '[ASR_STREAM_FREE_WARN] $error',
+      );
+    }
   }
 
   @override
   Future<void> speak(String text) async {
-    final sanitized = text.trim();
-    if (sanitized.isEmpty) return;
+    if (_disposed) {
+      return;
+    }
 
-    if (!_status.readyForOutput) {
-      logEvent(
-          _tag, '[TTS_BLOCKED] engine not ready text="$sanitized"');
+    final sanitized = text.trim();
+
+    if (sanitized.isEmpty) {
       return;
     }
 
     final tts = _tts;
+
     if (tts == null) {
-      logEvent(_tag, '[TTS_NULL] tts engine is null');
+      logEvent(
+        _tag,
+        '[TTS_BLOCKED] engine unavailable',
+      );
+
       return;
     }
-
-    logEvent(
-      _tag,
-      '[TTS_GENERATE_BEGIN] text="${sanitized.length > 60 ? sanitized.substring(0, 60) : sanitized}..."',
-    );
 
     try {
       final audio = tts.generate(
@@ -481,95 +791,125 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         sid: 0,
         speed: _status.speechRate,
       );
+
+      if (_disposed) {
+        return;
+      }
+
       _pendingTtsSamples = audio.samples;
       _pendingTtsSampleRate = audio.sampleRate;
 
+      _audioPlayer.push(
+        audio.samples,
+        audio.sampleRate,
+      );
+    } catch (error) {
       logEvent(
         _tag,
-        '[TTS_GENERATE_OK] samples=${audio.samples.length} '
-        'sampleRate=${audio.sampleRate}',
+        '[TTS_FAIL] $error',
       );
-
-      _audioPlayer.push(audio.samples, audio.sampleRate);
-      logEvent(
-        _tag,
-        '[TTS_PLAYBACK_ENQUEUED] queued ${audio.samples.length} samples '
-        'at ${audio.sampleRate} Hz',
-      );
-    } catch (e, st) {
-      final msg = 'TTS generation error: $e';
-      _forensicPrint('[VOICE_ENGINE] [TTS_GENERATE_FAIL] $msg\n$st');
-      logEvent(_tag, '[TTS_GENERATE_FAIL] $msg');
     }
   }
 
   @override
   Future<void> stopSpeaking() async {
-    logEvent(_tag, '[TTS_STOP]');
-    _audioPlayer.stop();
+    if (_disposed && !_audioPlayer.isPlaying) {
+      return;
+    }
+
+    try {
+      _audioPlayer.stop();
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[TTS_STOP_WARN] $error',
+      );
+    }
+
     _pendingTtsSamples = null;
   }
 
   @override
   Future<void> dispose() async {
-    logEvent(_tag, '[DISPOSE_BEGIN]');
-    _forensicPrint(
-        '[VOICE_ENGINE] [DISPOSE_BEGIN] releasing all native handles');
-
-    await stopListening();
-    await stopSpeaking();
-
-    try {
-      _asrStream?.free();
-      _asrStream = null;
-      logEvent(_tag, '[DISPOSE_ASR_STREAM_FREE_OK]');
-    } catch (e) {
-      logEvent(_tag, '[DISPOSE_ASR_STREAM_FREE_FAIL] $e');
+    if (_disposed) {
+      return;
     }
+
+    _disposed = true;
+    _isListening = false;
+    _initialized = false;
+
+    await _closeMicSafely();
+    await _closeAsrStreamSafely();
 
     try {
       _recognizer?.free();
-      _recognizer = null;
-      logEvent(_tag, '[DISPOSE_RECOGNIZER_FREE_OK]');
-    } catch (e) {
-      logEvent(_tag, '[DISPOSE_RECOGNIZER_FREE_FAIL] $e');
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[RECOGNIZER_FREE_WARN] $error',
+      );
     }
+
+    _recognizer = null;
 
     try {
       _tts?.free();
-      _tts = null;
-      logEvent(_tag, '[DISPOSE_TTS_FREE_OK]');
-    } catch (e) {
-      logEvent(_tag, '[DISPOSE_TTS_FREE_FAIL] $e');
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[TTS_FREE_WARN] $error',
+      );
     }
+
+    _tts = null;
 
     try {
       await _recorder.dispose();
-      logEvent(_tag, '[DISPOSE_RECORDER_OK]');
-    } catch (e) {
-      logEvent(_tag, '[DISPOSE_RECORDER_FAIL] $e');
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[RECORDER_DISPOSE_WARN] $error',
+      );
     }
 
     try {
       _audioPlayer.dispose();
-      logEvent(_tag, '[DISPOSE_AUDIO_PLAYER_OK]');
-    } catch (e) {
-      logEvent(_tag, '[DISPOSE_AUDIO_PLAYER_FAIL] $e');
+    } catch (error) {
+      logEvent(
+        _tag,
+        '[AUDIO_PLAYER_DISPOSE_WARN] $error',
+      );
     }
 
-    _initialized = false;
-    _status = VoiceEngineStatus.unsupported(details: 'Engine disposed.');
-    _forensicPrint('[VOICE_ENGINE] [DISPOSE_DONE] all handles released');
-    logEvent(_tag, '[DISPOSE_DONE]');
+    _pendingTtsSamples = null;
+
+    _status = VoiceEngineStatus.unsupported(
+      details: 'Engine disposed.',
+    );
   }
 
-  static Float32List _pcm16BytesToFloat32(Uint8List bytes) {
+  static Float32List _pcm16BytesToFloat32(
+    Uint8List bytes,
+  ) {
     final numSamples = bytes.length ~/ 2;
+
+    if (numSamples <= 0) {
+      return Float32List(0);
+    }
+
     final samples = Float32List(numSamples);
     final byteData = ByteData.sublistView(bytes);
-    for (int i = 0; i < numSamples; i++) {
-      samples[i] = byteData.getInt16(i * 2, Endian.little) / 32768.0;
+
+    for (var i = 0; i < numSamples; i++) {
+      samples[i] =
+          byteData.getInt16(
+                i * 2,
+                Endian.little,
+              ) /
+              32768.0;
     }
+
     return samples;
   }
 }
