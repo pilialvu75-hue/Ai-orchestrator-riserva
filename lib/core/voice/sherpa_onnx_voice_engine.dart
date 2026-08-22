@@ -442,13 +442,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         return _status;
       }
 
-      /*
-       * Microphone permission is deliberately independent from
-       * STT/TTS initialization.
-       *
-       * Live must not be considered broken merely because the
-       * microphone is unavailable.
-       */
       final micReady = await _initializeMic();
 
       if (_disposed) {
@@ -485,10 +478,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       return _status;
     } catch (error) {
-      /*
-       * Never allow an initialization failure to propagate into
-       * the Live UI.
-       */
       logEvent(
         _tag,
         '[INIT_FAIL] Voice initialization failed: $error',
@@ -530,15 +519,22 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return;
     }
 
-    /*
-     * The native stream lifecycle is deliberately handled inside
-     * the protected section. Previously createStream/free happened
-     * before the try block.
-     */
     try {
+      await _closeMicSafely();
       await _closeAsrStreamSafely();
 
       if (_disposed) {
+        return;
+      }
+
+      final hasPermission = await _recorder.hasPermission();
+
+      if (!hasPermission || _disposed) {
+        logEvent(
+          _tag,
+          '[ASR_BLOCKED] microphone unavailable',
+        );
+
         return;
       }
 
@@ -553,23 +549,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       }
 
       _asrStream = activeStream;
-
-      /*
-       * Check permission immediately before opening the stream.
-       * This prevents Live from attempting to open a recorder that
-       * is unavailable.
-       */
-      final hasPermission = await _recorder.hasPermission();
-
-      if (!hasPermission || _disposed) {
-        logEvent(
-          _tag,
-          '[ASR_BLOCKED] microphone unavailable',
-        );
-
-        await _closeAsrStreamSafely();
-        return;
-      }
 
       final audioStream = await _recorder.startStream(
         const RecordConfig(
@@ -601,11 +580,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             return;
           }
 
-          /*
-           * Keep all native recognition operations protected.
-           * A bad audio frame must not terminate the whole Live
-           * isolate/UI lifecycle.
-           */
           try {
             if (bytes.length < 2) {
               return;
@@ -628,7 +602,22 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
               sampleRate: _sampleRate,
             );
 
-            recognizer.decode(stream);
+            /*
+             * IMPORTANT:
+             *
+             * Sherpa-ONNX streaming recognizers must only be
+             * decoded while the stream reports that it is ready.
+             *
+             * Calling decode() unconditionally on the first,
+             * potentially very small PCM frame can enter the native
+             * recognizer before enough input is available.
+             *
+             * This is intentionally a while loop because one audio
+             * callback can make more than one decoding step ready.
+             */
+            while (recognizer.isReady(stream)) {
+              recognizer.decode(stream);
+            }
 
             if (recognizer.isEndpoint(stream)) {
               final result = recognizer.getResult(stream);
@@ -649,11 +638,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             }
           } catch (error) {
             /*
-             * Do not throw from the audio callback.
-             *
-             * This is particularly important with FFI/native
-             * recognizers because an exception escaping this
-             * callback can terminate the voice lifecycle.
+             * Never let a Dart exception escape from the audio
+             * callback.
              */
             logEvent(
               _tag,
@@ -706,6 +692,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return;
     }
 
+    /*
+     * Stop accepting new frames first.
+     *
+     * Then cancel the subscription and stop the recorder.
+     * Only after the Dart stream subscription is cancelled do we
+     * release the native OnlineStream.
+     */
     _isListening = false;
 
     await _closeMicSafely();
@@ -718,6 +711,11 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     if (subscription != null) {
       try {
+        /*
+         * cancel() completes after the subscription has finished
+         * its pending stream cleanup. This must happen before
+         * freeing the native OnlineStream.
+         */
         await subscription.cancel();
       } catch (error) {
         logEvent(
@@ -752,9 +750,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       stream.free();
     } catch (error) {
-      /*
-       * Native free must never escape into the UI lifecycle.
-       */
       logEvent(
         _tag,
         '[ASR_STREAM_FREE_WARN] $error',
@@ -835,10 +830,26 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return;
     }
 
+    /*
+     * Mark the engine disposed before touching native resources.
+     * Any already queued audio callback will therefore return
+     * without accessing the recognizer/stream.
+     */
     _disposed = true;
     _isListening = false;
     _initialized = false;
 
+    /*
+     * IMPORTANT ORDER:
+     *
+     * 1. stop accepting audio
+     * 2. cancel mic subscription
+     * 3. stop recorder
+     * 4. free OnlineStream
+     * 5. free recognizer
+     *
+     * This minimizes the possibility of a native use-after-free.
+     */
     await _closeMicSafely();
     await _closeAsrStreamSafely();
 
