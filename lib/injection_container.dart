@@ -361,12 +361,12 @@ Future<void> initDependencies({
   );
   
   sl.registerLazySingleton<VoiceLoopManager>(
-    () => VoiceLoopManager(
-      engine: sl<SherpaOnnxVoiceEngine>(),
-      runtimeProvider: sl<LocalRuntimeProvider>(),
-      localAiRepository: sl<LocalAiRepository>(),
-    ),
-  );
+  () => VoiceLoopManager(
+    engine: sl<SherpaOnnxVoiceEngine>(),
+    runtimeProvider: sl<LocalRuntimeProvider>(),
+    localAiRepository: sl<LocalAiRepository>(),
+  ),
+);
 
   // ── Multimodal ────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ImageService>(() => ImageService());
