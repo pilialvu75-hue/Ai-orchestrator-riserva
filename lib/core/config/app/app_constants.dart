@@ -149,7 +149,7 @@ class AppConstants {
 
   // ── STT runtime hints ────────────────────────────────────────────────────────
   static const String sttDefaultLocaleId = 'en_US';
-  static const String sttModelType = 'zipformer2';
+  static const String sttModelType = 'zipformer';
   static const int sttNumThreads = 2;
 
   // ── Sherpa-ONNX STT file names ───────────────────────────────────────────────
