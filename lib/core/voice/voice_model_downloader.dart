@@ -151,7 +151,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       if (existingBytes > 0) {
         logEvent(
           _tag,
-          '[$assetName_RESUME] partial=$existingBytes',
+          '[${assetName}_RESUME] partial=$existingBytes',
         );
       }
     }
@@ -178,7 +178,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     } on DioException catch (error) {
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] partial preserved',
+        '[${assetName}_DOWNLOAD_INTERRUPTED] partial preserved',
       );
 
       throw VoiceAssetException(
@@ -194,7 +194,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       logEvent(
         _tag,
-        '[$assetName_DOWNLOAD_INTERRUPTED] partial preserved',
+        '[${assetName}_DOWNLOAD_INTERRUPTED] partial preserved',
       );
 
       throw VoiceAssetException(
@@ -221,7 +221,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[$assetName_DOWNLOAD_COMPLETE] bytes=$completedBytes',
+      '[${assetName}_DOWNLOAD_COMPLETE] bytes=$completedBytes',
     );
 
     onProgress(1.0);
@@ -850,19 +850,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       if (modelSource == null) {
         throw const VoiceAssetException(
-          'Modello TTS ONNX non trovato nell\\'archivio.',
+          'Modello TTS ONNX non trovato nell\'archivio.',
         );
       }
 
       if (tokensSource == null) {
         throw const VoiceAssetException(
-          'tokens.txt TTS non trovato nell\\'archivio.',
+          'tokens.txt TTS non trovato nell\'archivio.',
         );
       }
 
       if (espeakSource == null) {
         throw const VoiceAssetException(
-          'espeak-ng-data non trovato nell\\'archivio TTS.',
+          'espeak-ng-data non trovato nell\'archivio TTS.',
         );
       }
 
