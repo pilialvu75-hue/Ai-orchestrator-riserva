@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -9,26 +11,31 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
 /// Live mode deliberately bypasses the normal Chat UI / Bloc / repository
-/// pipeline. The flow is:
+/// pipeline for conversation history.
 ///
-///   microphone -> STT -> local inference -> TTS
+/// Flow:
 ///
-/// The manager owns the lifecycle of one live iteration and protects the
-/// pipeline from duplicate starts, cancellation races and asynchronous audio
-/// failures.
+///   microphone -> STT -> selected local model -> inference -> TTS
+///
+/// The selected local model is resolved from LocalAiRepository immediately
+/// before inference. This prevents Live mode from creating an
+/// InferenceRequest without modelId/modelPath.
 ///
 /// Important:
 /// - No ChatRepository is involved.
 /// - No conversation-memory window is constructed here.
 /// - No semantic workspace context is injected here.
-/// - The spoken text is used as the inference prompt directly.
+/// - Spoken text is used directly as the inference prompt.
+/// - The active local model is resolved from LocalAiRepository.
 ///
 class VoiceLoopManager with RuntimeEventEmitter {
   VoiceLoopManager({
     required VoiceEngine engine,
     required LocalRuntimeProvider runtimeProvider,
+    required LocalAiRepository localAiRepository,
   })  : _engine = engine,
-        _runtimeProvider = runtimeProvider;
+        _runtimeProvider = runtimeProvider,
+        _localAiRepository = localAiRepository;
 
   static const String _tag = 'VOICE_LOOP';
 
@@ -36,6 +43,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
+  final LocalAiRepository _localAiRepository;
 
   CancellationToken? _activeCancellation;
 
@@ -43,17 +51,17 @@ class VoiceLoopManager with RuntimeEventEmitter {
   bool _disposed = false;
   bool _stopRequested = false;
 
-  /// Token belonging to the currently active live session.
   CancellationToken? get activeCancellationToken => _activeCancellation;
 
   bool get isSessionActive => _sessionActive;
 
   /// Permanently disposes this manager.
   ///
-  /// The VoiceEngine itself is owned by dependency injection and therefore
-  /// isn't disposed here.
+  /// VoiceEngine ownership remains with dependency injection.
   Future<void> dispose() async {
-    if (_disposed) return;
+    if (_disposed) {
+      return;
+    }
 
     _disposed = true;
 
@@ -64,16 +72,13 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
   }
 
-  /// Starts one Live voice session.
+  /// Starts one complete Live voice iteration:
   ///
-  /// The session performs one complete:
+  /// STT -> local inference -> TTS
   ///
-  /// STT -> inference -> TTS
-  ///
-  /// iteration.
-  ///
-  /// The existing API is intentionally preserved so callers such as
-  /// LiveVoiceOverlay don't need to change.
+  /// [modelPath] and [modelId] are optional compatibility parameters.
+  /// If they are not supplied, the manager resolves the currently selected
+  /// local model from LocalAiRepository.
   Future<void> startLiveSession({
     String? modelPath,
     String? modelId,
@@ -127,8 +132,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   /// Stops the current Live session.
   ///
-  /// Cancellation happens before touching the audio engine so that callbacks
-  /// arriving during shutdown cannot start another inference/TTS operation.
+  /// Cancellation is requested before shutting down the voice engine so
+  /// asynchronous callbacks cannot continue into inference/TTS.
   Future<void> stopLiveSession() async {
     _stopRequested = true;
 
@@ -138,16 +143,124 @@ class VoiceLoopManager with RuntimeEventEmitter {
     try {
       await _engine.stopListening();
     } catch (_) {
-      // Native audio shutdown must not escape through UI lifecycle code.
+      // Native audio shutdown must never escape UI lifecycle code.
     }
 
     try {
       await _engine.stopSpeaking();
     } catch (_) {
-      // Native audio shutdown must not escape through UI lifecycle code.
+      // Native audio shutdown must never escape UI lifecycle code.
     }
 
     _sessionActive = false;
+  }
+
+  /// Resolves the model that Live must use.
+  ///
+  /// Priority:
+  ///
+  /// 1. Explicit modelPath/modelId supplied by caller.
+  /// 2. Currently selected local model from LocalAiRepository.
+  ///
+  /// The second path is the normal Live path.
+  Future<AiModel?> _resolveSelectedModel({
+    String? modelPath,
+    String? modelId,
+  }) async {
+    final explicitPath = modelPath?.trim();
+    final explicitId = modelId?.trim();
+
+    if (explicitPath != null &&
+        explicitPath.isNotEmpty &&
+        explicitId != null &&
+        explicitId.isNotEmpty) {
+      return null;
+    }
+
+    final result = await _localAiRepository.getSelectedModel();
+
+    return result.fold(
+      (failure) {
+        logEvent(
+          _tag,
+          '[MODEL_RESOLVE_FAIL] ${failure.message}',
+        );
+
+        return null;
+      },
+      (model) {
+        if (model == null) {
+          logEvent(
+            _tag,
+            '[MODEL_RESOLVE_FAIL] no selected local model',
+          );
+          return null;
+        }
+
+        return model;
+      },
+    );
+  }
+
+  /// Resolves modelId/modelPath for the inference request.
+  ///
+  /// This method never fabricates a model path.
+  /// If the selected model does not have a local path, inference is blocked
+  /// with a user-visible error instead of sending an invalid request.
+  Future<({String? modelId, String? modelPath, String? error})>
+      _resolveInferenceModel({
+    String? modelPath,
+    String? modelId,
+  }) async {
+    final explicitPath = modelPath?.trim();
+    final explicitId = modelId?.trim();
+
+    if (explicitPath != null &&
+        explicitPath.isNotEmpty &&
+        explicitId != null &&
+        explicitId.isNotEmpty) {
+      return (
+        modelId: explicitId,
+        modelPath: explicitPath,
+        error: null,
+      );
+    }
+
+    final selectedModel = await _resolveSelectedModel(
+      modelPath: modelPath,
+      modelId: modelId,
+    );
+
+    if (selectedModel == null) {
+      return (
+        modelId: null,
+        modelPath: null,
+        error: 'Nessun modello locale selezionato.',
+      );
+    }
+
+    final selectedPath = selectedModel.localPath?.trim();
+
+    if (selectedPath == null || selectedPath.isEmpty) {
+      logEvent(
+        _tag,
+        '[MODEL_RESOLVE_FAIL] selected model has no local path '
+        'modelId=${selectedModel.effectiveRuntimeModelId}',
+      );
+
+      return (
+        modelId: selectedModel.effectiveRuntimeModelId,
+        modelPath: null,
+        error:
+            'Il modello locale selezionato non ha un percorso locale valido.',
+      );
+    }
+
+    return (
+      modelId: selectedModel.effectiveRuntimeModelId,
+      modelPath: selectedPath,
+      error: null,
+    );
   }
 
   Future<void> _runLoop({
@@ -195,8 +308,6 @@ class VoiceLoopManager with RuntimeEventEmitter {
             return;
           }
 
-          // Live subtitles are intentionally lightweight. They do not enter
-          // ChatRepository or MemoryWindowManager.
           onSubtitle?.call(normalized, isFinal);
 
           if (isFinal) {
@@ -243,7 +354,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       try {
         await _engine.stopListening();
       } catch (_) {
-        // Keep the Live pipeline alive; shutdown errors are non-fatal here.
+        // Keep the Live pipeline alive.
       }
     }
 
@@ -258,17 +369,51 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     // -----------------------------------------------------------------------
-    // 2. INFERENCE
+    // 2. RESOLVE ACTIVE LOCAL MODEL
     // -----------------------------------------------------------------------
-    //
-    // IMPORTANT:
-    // The spoken text is sent directly to the local runtime.
-    //
-    // No ChatRepository.
-    // No rolling memory.
-    // No semantic retrieval.
-    // No UI prompt reconstruction.
-    //
+
+    final resolvedModel = await _resolveInferenceModel(
+      modelPath: modelPath,
+      modelId: modelId,
+    );
+
+    if (_disposed || token.isCancelled || _stopRequested) {
+      return;
+    }
+
+    if (resolvedModel.error != null) {
+      final message = resolvedModel.error!;
+
+      logEvent(
+        _tag,
+        '[MODEL_RESOLVE_ERROR] $message',
+      );
+
+      onError?.call(message);
+      return;
+    }
+
+    final resolvedModelId = resolvedModel.modelId;
+    final resolvedModelPath = resolvedModel.modelPath;
+
+    if (resolvedModelId == null ||
+        resolvedModelId.isEmpty ||
+        resolvedModelPath == null ||
+        resolvedModelPath.isEmpty) {
+      const message = 'Percorso del modello locale mancante.';
+
+      logEvent(
+        _tag,
+        '[MODEL_RESOLVE_ERROR] $message',
+      );
+
+      onError?.call(message);
+      return;
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. INFERENCE
+    // -----------------------------------------------------------------------
 
     final request = InferenceRequest(
       sessionId: 'voice_loop_${DateTime.now().microsecondsSinceEpoch}',
@@ -277,8 +422,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
       isOffline: true,
       maxTokens: 256,
       temperature: 0.7,
-      modelId: modelId,
-      modelPath: modelPath,
+      modelId: resolvedModelId,
+      modelPath: resolvedModelPath,
     );
 
     Stream<dynamic> inferenceStream;
@@ -304,15 +449,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     // -----------------------------------------------------------------------
-    // 3. TOKEN -> TTS
+    // 4. TOKEN -> TTS
     // -----------------------------------------------------------------------
 
     final tokenBuffer = StringBuffer();
 
-    // Do not flush on ',' or ';'.
-    //
-    // Those characters are too frequent in normal model output and can create
-    // dozens of tiny TTS requests. This is particularly harmful on mobile.
     final sentenceBoundaryPattern = RegExp(r'[.!?\n]');
 
     await for (final response in inferenceStream) {
@@ -385,7 +526,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     // -----------------------------------------------------------------------
-    // 4. TRAILING TTS
+    // 5. TRAILING TTS
     // -----------------------------------------------------------------------
 
     if (_disposed || token.isCancelled || _stopRequested) {
