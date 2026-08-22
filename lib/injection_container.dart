@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/ai/model_manager.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
-import 'package0/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
@@ -58,7 +58,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
-import 'package0/features/chat_memory/rolling_context_builder.dart';
+import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
 import 'package:ai_orchestrator/features/coding_assistant/coding_assistant_agent_impl.dart';
 import 'package:ai_orchestrator/features/coding_assistant/sequential_planning_strategy.dart';
@@ -72,7 +72,7 @@ import 'package:ai_orchestrator/features/local_ai/domain/usecases/local_ai_useca
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
-import 'package0/features/multimodal/data/services/file_attachment_service.dart';
+import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
 import 'package:ai_orchestrator/features/onboarding/presentation/bloc/onboarding_bloc.dart';
 import 'package:ai_orchestrator/features/projects/data/datasources/project_memory_local_datasource.dart';
@@ -102,7 +102,7 @@ import 'package:ai_orchestrator/core/app_legal/services/legal_storage_service.da
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_feature_flags_service.dart';
-import 'package0/core/app_health/contracts/abstract_remote_config_service.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_remote_config_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
@@ -361,12 +361,11 @@ Future<void> initDependencies({
   );
   
   sl.registerLazySingleton<VoiceLoopManager>(
-  () => VoiceLoopManager(
-    engine: sl<SherpaOnnxVoiceEngine>(),
-    runtimeProvider: sl<LocalRuntimeProvider>(),
-    localAiRepository: sl<LocalAiRepository>(),
-  ),
-);
+    () => VoiceLoopManager(
+      engine: sl<SherpaOnnxVoiceEngine>(),
+      runtimeProvider: sl<LocalRuntimeProvider>(),
+    ),
+  );
 
   // ── Multimodal ────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ImageService>(() => ImageService());
