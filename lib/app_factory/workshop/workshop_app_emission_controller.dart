@@ -1,95 +1,152 @@
-import 'workshop_build_lab.dart';
+import 'workshop_app_emission_package.dart';
+import 'workshop_app_emission_registry.dart';
 
-/// Punto di emissione del Cantiere.
+/// Stato osservabile dell'emissione del Cantiere.
 ///
-/// Separa la build dalla decisione di rendere disponibile l'artifact.
-/// Non installa APK e non pubblica autonomamente su servizi esterni:
-/// produce solamente una decisione immutabile che la UI o il livello
-/// superiore può utilizzare per il passo successivo.
-final class WorkshopAppEmissionDecision {
-  const WorkshopAppEmissionDecision({
-    required this.requestId,
-    required this.target,
-    required this.emittable,
-    this.artifactPath,
-    this.message,
-    this.errors = const <String>[],
+/// È volutamente indipendente dalla UI: la schermata del Cantiere
+/// potrà ascoltare questo stato senza conoscere il Registry interno.
+final class WorkshopAppEmissionState {
+  const WorkshopAppEmissionState({
+    required this.totalPackages,
+    required this.readyPackages,
+    this.latestPackage,
   });
 
-  final String requestId;
-  final WorkshopBuildTarget target;
-  final bool emittable;
-  final String? artifactPath;
-  final String? message;
-  final List<String> errors;
+  final int totalPackages;
+  final int readyPackages;
+  final WorkshopAppEmissionPackage? latestPackage;
 
-  bool get hasArtifact =>
-      artifactPath != null && artifactPath!.trim().isNotEmpty;
+  bool get hasEmittedApp =>
+      readyPackages > 0;
+
+  bool get isEmpty =>
+      totalPackages == 0;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'totalPackages': totalPackages,
+      'readyPackages': readyPackages,
+      'hasEmittedApp': hasEmittedApp,
+      'latestPackage':
+          latestPackage?.toJson(),
+    };
+  }
 }
 
-/// Controller che trasforma un risultato di build in una decisione
-/// di emissione sicura.
+/// Controller tra Registry e futura UI del Cantiere.
 ///
-/// Questo anello non modifica il progetto e non bypassa il Build Lab.
+/// Non esegue build e non emette direttamente artifact.
+/// Legge il Registry e mantiene una fotografia coerente dello
+/// stato di emissione attualmente disponibile.
 final class WorkshopAppEmissionController {
-  const WorkshopAppEmissionController();
+  WorkshopAppEmissionController({
+    WorkshopAppEmissionRegistry? registry,
+  }) : _registry =
+            registry ??
+                WorkshopAppEmissionRegistry();
 
-  WorkshopAppEmissionDecision evaluate(
-    WorkshopBuildResult result,
-  ) {
-    if (!result.succeeded) {
-      return WorkshopAppEmissionDecision(
-        requestId: result.requestId,
-        target: result.target,
-        emittable: false,
-        artifactPath: result.artifactPath,
-        message:
-            result.message ?? 'Build did not succeed.',
-        errors: result.errors.isEmpty
-            ? const <String>['build_not_succeeded']
-            : result.errors,
-      );
+  final WorkshopAppEmissionRegistry _registry;
+
+  WorkshopAppEmissionRegistry get registry =>
+      _registry;
+
+  WorkshopAppEmissionState get state {
+    final packages =
+        _registry.recent(
+      limit: _registry.length,
+    );
+
+    WorkshopAppEmissionPackage? latest;
+
+    if (packages.isNotEmpty) {
+      latest = packages.first;
     }
 
-    if (!result.hasArtifact) {
-      return WorkshopAppEmissionDecision(
-        requestId: result.requestId,
-        target: result.target,
-        emittable: false,
-        message:
-            'Build succeeded but no artifact was detected.',
-        errors: const <String>[
-          'build_artifact_not_detected',
-        ],
-      );
-    }
-
-    return WorkshopAppEmissionDecision(
-      requestId: result.requestId,
-      target: result.target,
-      emittable: true,
-      artifactPath: result.artifactPath,
-      message:
-          result.message ?? 'Artifact is ready for emission.',
+    return WorkshopAppEmissionState(
+      totalPackages:
+          _registry.length,
+      readyPackages:
+          _registry.readyCount,
+      latestPackage: latest,
     );
   }
 
-  Map<String, dynamic> diagnostics(
-    WorkshopBuildResult result,
+  WorkshopAppEmissionPackage? get latest =>
+      state.latestPackage;
+
+  bool get hasEmittedApp =>
+      state.hasEmittedApp;
+
+  void register(
+    WorkshopAppEmissionPackage package,
   ) {
-    final decision = evaluate(result);
+    if (!package.isReady) {
+      return;
+    }
+
+    _registry.register(package);
+  }
+
+  void registerAll(
+    Iterable<WorkshopAppEmissionPackage> packages,
+  ) {
+    for (final package in packages) {
+      register(package);
+    }
+  }
+
+  WorkshopAppEmissionPackage? findById(
+    String id,
+  ) {
+    return _registry.findById(id);
+  }
+
+  WorkshopAppEmissionPackage? findByRequestId(
+    String requestId,
+  ) {
+    return _registry.findByRequestId(
+      requestId,
+    );
+  }
+
+  List<WorkshopAppEmissionPackage> recent({
+    int limit = 20,
+  }) {
+    return _registry.recent(
+      limit: limit,
+    );
+  }
+
+  bool removeById(String id) {
+    return _registry.removeById(id);
+  }
+
+  void clear() {
+    _registry.clear();
+  }
+
+  Map<String, dynamic> diagnostics() {
+    final currentState = state;
 
     return <String, dynamic>{
-      'requestId': result.requestId,
-      'target': result.target.name,
-      'buildStatus': result.status.name,
-      'emittable': decision.emittable,
-      'hasArtifact': decision.hasArtifact,
-      'artifactPath': decision.artifactPath,
-      'testsPassed': result.testsPassed,
-      'analysisPassed': result.analysisPassed,
-      'formatPassed': result.formatPassed,
-      'errors': decision.errors,
+      'controller':
+          'workshop-app-emission',
+      'totalPackages':
+          currentState.totalPackages,
+      'readyPackages':
+          currentState.readyPackages,
+      'hasEmittedApp':
+          currentState.hasEmittedApp,
+      'latestPackageId':
+          currentState.latestPackage?.id,
+      'latestRequestId':
+          currentState.latestPackage?.requestId,
+      'latestArtifactPath':
+          currentState
+              .latestPackage
+              ?.artifactPath,
+      'registry':
+          _registry.diagnostics(),
     };
   }
 }
