@@ -142,11 +142,13 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
       }
 
       /*
-       * If the engine initialized correctly, never enter the downloader
-       * pipeline. The downloader is only a recovery path for genuinely
-       * missing voice assets.
+       * Live Mode requires only input readiness.
+       *
+       * TTS is intentionally lazy and is initialized on the first speak().
+       * Waiting for readyForOutput here would prevent Live from starting
+       * immediately after the engine was changed to lazy TTS initialization.
        */
-      if (status.readyForInput && status.readyForOutput) {
+      if (status.readyForInput) {
         _log('[ENGINE_READY]');
 
         _startLiveLoop();
@@ -181,7 +183,11 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
           return;
         }
 
-        if (status.readyForInput && status.readyForOutput) {
+        /*
+         * Live Mode is ready when STT + microphone are ready.
+         * TTS may still be unloaded and will be initialized lazily.
+         */
+        if (status.readyForInput) {
           _log('[ENGINE_READY_AFTER_DOWNLOAD]');
 
           _startLiveLoop();
@@ -190,11 +196,10 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
       }
 
       /*
-       * At this point initialization completed without a usable complete
-       * voice-to-voice configuration.
+       * At this point initialization completed without usable STT/input.
        *
        * Do not enter VoiceLoopManager. This prevents the loop from reaching
-       * microphone/STT/TTS in an invalid state.
+       * microphone/STT in an invalid state.
        */
       _showStatusError(status);
     } catch (error) {
@@ -257,15 +262,12 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
       return;
     }
 
-    if (!status.offlineTtsAvailable) {
-      _showError(
-        detail.isEmpty
-            ? 'Sintesi vocale non disponibile. '
-                'Verifica i modelli TTS.'
-            : 'Live Mode: $detail',
-      );
-      return;
-    }
+    /*
+     * TTS is intentionally NOT a blocking condition here.
+     *
+     * Piper is initialized lazily by VoiceEngine.speak().
+     * Live can therefore start as soon as STT + microphone are ready.
+     */
 
     _showError(
       detail.isEmpty
