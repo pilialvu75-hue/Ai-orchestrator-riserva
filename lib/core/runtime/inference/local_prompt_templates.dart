@@ -3,10 +3,11 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
-const String _completeSystemPrompt = 'You are a helpful assistant. Give complete answers when appropriate.';
+const String _completeSystemPrompt =
+    'You are a helpful assistant. Give complete answers when appropriate.';
 
 // Istruzione globale per l'abilitazione della ricerca web
-const String _webSearchInstruction = 
+const String _webSearchInstruction =
     "IMPORTANTE: Hai accesso a Internet tramite il tag <search>query</search>. "
     "Se l'utente chiede notizie, meteo, fatti recenti, dati in tempo reale o informazioni che cambiano nel tempo, "
     "NON rispondere d'istinto. DEVI invocare una ricerca scrivendo ESCLUSIVAMENTE il tag <search>query di ricerca</search>. "
@@ -22,22 +23,28 @@ class LocalPromptTemplates {
     List<ChatTurn> context = const [],
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
-    
+
     // Iniezione forzata dell'istruzione di ricerca web nel system prompt
-    final finalSystemPrompt = "${cleanedSystemPrompt ?? _completeSystemPrompt}\n\n$_webSearchInstruction";
+    final finalSystemPrompt =
+        "${cleanedSystemPrompt ?? _completeSystemPrompt}\n\n$_webSearchInstruction";
 
     // Filtro contestuale centralizzato per il RAG locale e la memoria
     final cleanedContext = context
-        .where((turn) => !turn.excludeFromContext && turn.content.trim().isNotEmpty)
+        .where(
+          (turn) =>
+              !turn.excludeFromContext && turn.content.trim().isNotEmpty,
+        )
         .map((turn) => turn.copyWith(content: turn.content.trim()))
         .toList(growable: false);
-        
+
     final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
-    final contextChars = cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
-    final webSystemPromptChars = finalSystemPrompt.contains('Web search results:')
-        ? finalSystemPrompt.length
-        : 0;
+    final contextChars =
+        cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
+    final webSystemPromptChars =
+        finalSystemPrompt.contains('Web search results:')
+            ? finalSystemPrompt.length
+            : 0;
 
     RuntimeEventLog.instance.emit(
       '[PROMPT_BEGIN] model=$modelId prompt_chars=${userPrompt.length}',
@@ -64,7 +71,8 @@ class LocalPromptTemplates {
           systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
-          suppressThinking: LocalInferenceModelIds.isQwen3Thinking(modelId),
+          suppressThinking:
+              LocalInferenceModelIds.isQwen3Thinking(modelId),
         );
       case 'gemma':
         return _buildGemmaPrompt(
@@ -86,12 +94,12 @@ class LocalPromptTemplates {
         );
       default:
         final buffer = StringBuffer();
-        final isFactual = _isFactualQuery(userPrompt);
+
         buffer.writeln('');
-        
+
         buffer.writeln('System: $finalSystemPrompt');
         buffer.writeln();
-        
+
         for (final turn in cleanedContext) {
           buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
         }
@@ -111,20 +119,20 @@ class LocalPromptTemplates {
 
   static bool _isFactualQuery(String prompt) {
     final p = prompt.toLowerCase();
-    return p.contains('quanto') || 
-           p.contains('quando') || 
-           p.contains('chi è') || 
-           p.contains('chi gioca') || 
-           p.contains('dove') || 
-           p.contains('cosè') || 
-           p.contains('cosa è') || 
-           p.contains('definizione') ||
-           p.contains('colore') ||
-           p.contains('cerca') ||
-           p.contains('data') ||
-           p.contains('anno') ||
-           p.contains('meteo') ||
-           p.contains('notizie');
+    return p.contains('quanto') ||
+        p.contains('quando') ||
+        p.contains('chi è') ||
+        p.contains('chi gioca') ||
+        p.contains('dove') ||
+        p.contains('cosè') ||
+        p.contains('cosa è') ||
+        p.contains('definizione') ||
+        p.contains('colore') ||
+        p.contains('cerca') ||
+        p.contains('data') ||
+        p.contains('anno') ||
+        p.contains('meteo') ||
+        p.contains('notizie');
   }
 
   static String _buildLlama3Prompt({
@@ -133,21 +141,22 @@ class LocalPromptTemplates {
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
-    final isFactual = _isFactualQuery(userPrompt);
-    
+
     buffer.writeln('');
     buffer.write('<|begin_of_text|>');
     buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
-    
+
     buffer.write(systemPrompt);
     buffer.write('<|eot_id|>');
-    
+
     for (final turn in context) {
-      buffer.write('<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n');
+      buffer.write(
+        '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n',
+      );
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
-    
+
     buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
@@ -164,21 +173,21 @@ class LocalPromptTemplates {
     bool suppressThinking = false,
   }) {
     final buffer = StringBuffer();
-    final isFactual = _isFactualQuery(userPrompt);
-    
+
     buffer.writeln('');
     buffer.write('<|im_start|>system\n');
-    
+
     buffer.write(systemPrompt);
     buffer.write('\n<|im_end|>\n');
-    
+
     for (final turn in context) {
       buffer.write('<|im_start|>${_roleName(turn.role)}\n');
       buffer.write(turn.content);
       buffer.write('\n<|im_end|>\n');
     }
-    
-    final effectiveUserPrompt = suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
+
+    final effectiveUserPrompt =
+        suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
     buffer.write('<|im_start|>user\n');
     buffer.write(effectiveUserPrompt);
     buffer.write('\n<|im_end|>\n');
@@ -194,12 +203,13 @@ class LocalPromptTemplates {
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
-    final isFactual = _isFactualQuery(userPrompt);
-    
+
     buffer.writeln('');
-    
-    buffer.write('<start_of_turn>system\n$systemPrompt\n<end_of_turn>\n');
-    
+
+    buffer.write(
+      '<start_of_turn>system\n$systemPrompt\n<end_of_turn>\n',
+    );
+
     for (final turn in context) {
       buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
       buffer.write('${turn.content}\n');
@@ -219,7 +229,9 @@ class LocalPromptTemplates {
   }) {
     final buffer = StringBuffer();
 
-    buffer.write('<|system|>\n${systemPrompt.trim()}\n<|end|>\n');
+    buffer.write(
+      '<|system|>\n${systemPrompt.trim()}\n<|end|>\n',
+    );
 
     for (final turn in context) {
       buffer.write('<|${_roleName(turn.role)}|>\n');
@@ -240,12 +252,11 @@ class LocalPromptTemplates {
     required String userPrompt,
   }) {
     final buffer = StringBuffer();
-    final isFactual = _isFactualQuery(userPrompt);
-    
+
     buffer.writeln('');
-    
+
     buffer.write('<|system|>\n$systemPrompt\n</s>\n');
-    
+
     for (final turn in context) {
       final tag = _zephyrRoleName(turn.role);
       buffer.write('$tag\n${turn.content}\n</s>\n');
@@ -257,7 +268,10 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  static void _logFinalPromptMetrics(String composed, int userPromptChars) {
+  static void _logFinalPromptMetrics(
+    String composed,
+    int userPromptChars,
+  ) {
     RuntimeEventLog.instance.emit(
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
