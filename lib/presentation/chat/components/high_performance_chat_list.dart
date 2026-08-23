@@ -10,21 +10,31 @@ class HighPerformanceChatList extends StatelessWidget {
     required this.controller,
     required this.messages,
     required this.assistantTextSize,
+    this.onEditUserMessage,
+    this.onSpeakAssistantMessage,
   });
 
   final ScrollController controller;
   final List<ChatMessage> messages;
   final AssistantMessageTextSize assistantTextSize;
 
-  Future<void> _showContextMenu(
+  /// Called when the user selects "Modifica" from the long-press
+  /// menu on a user message.
+  final ValueChanged<ChatMessage>? onEditUserMessage;
+
+  /// Called when the user taps "Ascolta" below an assistant message.
+  final ValueChanged<ChatMessage>? onSpeakAssistantMessage;
+
+  Future<void> _showUserContextMenu(
     BuildContext context,
     Offset position,
-    String text,
+    ChatMessage message,
   ) async {
     HapticFeedback.lightImpact();
 
     final RenderBox overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
+
     final selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -34,43 +44,97 @@ class HighPerformanceChatList extends StatelessWidget {
       color: const Color(0xFF1E1F20),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Colors.white12, width: 1),
+        side: const BorderSide(
+          color: Colors.white12,
+          width: 1,
+        ),
       ),
       items: const [
         PopupMenuItem<String>(
           value: 'copy',
           child: Row(
             children: [
-              Icon(Icons.copy_rounded, size: 20, color: Colors.white70),
+              Icon(
+                Icons.copy_rounded,
+                size: 20,
+                color: Colors.white70,
+              ),
               SizedBox(width: 10),
-              Text('Copia', style: TextStyle(color: Colors.white)),
+              Text(
+                'Copia',
+                style: TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(
+                Icons.edit_rounded,
+                size: 20,
+                color: Colors.white70,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Modifica',
+                style: TextStyle(color: Colors.white),
+              ),
             ],
           ),
         ),
       ],
     );
 
-    if (!context.mounted || selected != 'copy') return;
-    _copyToClipboard(context, text);
+    if (!context.mounted || selected == null) {
+      return;
+    }
+
+    switch (selected) {
+      case 'copy':
+        _copyToClipboard(
+          context,
+          message.content,
+          'Messaggio copiato negli appunti!',
+        );
+        break;
+
+      case 'edit':
+        onEditUserMessage?.call(message);
+        break;
+    }
   }
 
-  void _copyToClipboard(BuildContext context, String text) {
-    if (text.trim().isEmpty) return;
-    Clipboard.setData(ClipboardData(text: text)).then((_) {
-      if (!context.mounted) return;
+  void _copyToClipboard(
+    BuildContext context,
+    String text,
+    String confirmation,
+  ) {
+    if (text.trim().isEmpty) {
+      return;
+    }
+
+    Clipboard.setData(
+      ClipboardData(text: text),
+    ).then((_) {
+      if (!context.mounted) {
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Row(
+          content: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.assignment_turned_in_rounded,
                 color: Color(0xFF4ADE80),
                 size: 18,
               ),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Text(
-                'Risposta copiata negli appunti!',
-                style: TextStyle(
+                confirmation,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
@@ -83,12 +147,49 @@ class HighPerformanceChatList extends StatelessWidget {
           elevation: 4,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: Colors.white12, width: 1),
+            side: const BorderSide(
+              color: Colors.white12,
+              width: 1,
+            ),
           ),
           duration: const Duration(seconds: 2),
         ),
       );
     });
+  }
+
+  Widget _buildAssistantActions(
+    BuildContext context,
+    ChatMessage message,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(
+        left: 12,
+        top: 2,
+        bottom: 4,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MessageActionButton(
+            icon: Icons.volume_up_outlined,
+            tooltip: 'Ascolta',
+            onPressed: onSpeakAssistantMessage == null
+                ? null
+                : () => onSpeakAssistantMessage!(message),
+          ),
+          _MessageActionButton(
+            icon: Icons.copy_outlined,
+            tooltip: 'Copia',
+            onPressed: () => _copyToClipboard(
+              context,
+              message.content,
+              'Risposta copiata negli appunti!',
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -97,7 +198,9 @@ class HighPerformanceChatList extends StatelessWidget {
       return const Center(
         child: Text(
           'Nessun messaggio in questa sessione',
-          style: TextStyle(color: Color(0xFF8E9194)),
+          style: TextStyle(
+            color: Color(0xFF8E9194),
+          ),
         ),
       );
     }
@@ -105,21 +208,28 @@ class HighPerformanceChatList extends StatelessWidget {
     return ListView.builder(
       controller: controller,
       cacheExtent: 1200.0,
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior:
+          ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final message = messages[index];
-        return RepaintBoundary(
+
+        final isUser = message.role == 'user';
+        final isAssistant = message.role == 'assistant';
+
+        final bubble = RepaintBoundary(
           child: _AnimatedBubble(
             key: ValueKey(message.id),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onLongPressStart: (details) => _showContextMenu(
-                context,
-                details.globalPosition,
-                message.content,
-              ),
+              onLongPressStart: isUser
+                  ? (details) => _showUserContextMenu(
+                        context,
+                        details.globalPosition,
+                        message,
+                      )
+                  : null,
               child: ChatBubble(
                 message: message,
                 assistantTextSize: assistantTextSize,
@@ -127,13 +237,64 @@ class HighPerformanceChatList extends StatelessWidget {
             ),
           ),
         );
+
+        if (!isAssistant) {
+          return bubble;
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            bubble,
+            _buildAssistantActions(
+              context,
+              message,
+            ),
+          ],
+        );
       },
     );
   }
 }
 
+class _MessageActionButton extends StatelessWidget {
+  const _MessageActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: tooltip,
+      splashRadius: 18,
+      padding: const EdgeInsets.all(7),
+      constraints: const BoxConstraints(
+        minWidth: 34,
+        minHeight: 34,
+      ),
+      icon: Icon(
+        icon,
+        size: 19,
+        color: onPressed == null
+            ? const Color(0xFF55585B)
+            : const Color(0xFF8E9194),
+      ),
+    );
+  }
+}
+
 class _AnimatedBubble extends StatefulWidget {
-  const _AnimatedBubble({super.key, required this.child});
+  const _AnimatedBubble({
+    super.key,
+    required this.child,
+  });
 
   final Widget child;
 
@@ -150,15 +311,27 @@ class _AnimatedBubbleState extends State<_AnimatedBubble>
   @override
   void initState() {
     super.initState();
+
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
     );
-    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+
+    _opacity = CurvedAnimation(
+      parent: _ctrl,
+      curve: Curves.easeOut,
+    );
+
     _slide = Tween<Offset>(
       begin: const Offset(0, 0.06),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    ).animate(
+      CurvedAnimation(
+        parent: _ctrl,
+        curve: Curves.easeOut,
+      ),
+    );
+
     _ctrl.forward();
   }
 
@@ -172,7 +345,10 @@ class _AnimatedBubbleState extends State<_AnimatedBubble>
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _opacity,
-      child: SlideTransition(position: _slide, child: widget.child),
+      child: SlideTransition(
+        position: _slide,
+        child: widget.child,
+      ),
     );
   }
 }
