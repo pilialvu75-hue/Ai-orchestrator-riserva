@@ -34,11 +34,11 @@ class ChatInputBar extends StatefulWidget {
 
   final bool liveSessionEnabled;
 
-  /// When non-null, the input enters message-editing mode and
-  /// this text is loaded into the composer.
+  /// When non-null, the composer enters edit mode and
+  /// loads this text into the input field.
   final String? editingText;
 
-  /// Called when the user cancels message editing.
+  /// Called when editing is cancelled or completed.
   final VoidCallback? onCancelEdit;
 
   @override
@@ -48,7 +48,7 @@ class ChatInputBar extends StatefulWidget {
 class _ChatInputBarState extends State<ChatInputBar> {
   static const _uuid = Uuid();
 
-  final _controller = TextEditingController();
+  final TextEditingController _controller = TextEditingController();
 
   final List<ChatAttachment> _attachments = <ChatAttachment>[];
 
@@ -57,6 +57,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   late final VoiceInputService _voiceInputService;
 
   bool _hasText = false;
+  String? _loadedEditingText;
 
   bool get _isEditing => widget.editingText != null;
 
@@ -70,7 +71,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
     _controller.addListener(_handleTextChanged);
 
-    _applyEditingTextIfNeeded();
+    _loadEditingText(force: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.editingText != oldWidget.editingText) {
+      _loadEditingText(force: true);
+    }
   }
 
   void _handleTextChanged() {
@@ -78,34 +88,55 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
     final hasText = _controller.text.trim().isNotEmpty;
 
-    if (hasText != _hasText) {
-      setState(() {
-        _hasText = hasText;
-      });
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant ChatInputBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    final editingTextChanged =
-        widget.editingText != oldWidget.editingText;
-
-    if (editingTextChanged) {
-      _applyEditingTextIfNeeded();
-    }
-  }
-
-  void _applyEditingTextIfNeeded() {
-    final text = widget.editingText;
-
-    if (text == null) {
+    if (hasText == _hasText) {
       return;
     }
 
+    setState(() {
+      _hasText = hasText;
+    });
+  }
+
+  void _loadEditingText({required bool force}) {
+    final text = widget.editingText;
+
+    if (text == null) {
+      if (_loadedEditingText != null) {
+        _loadedEditingText = null;
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+
+          _controller.clear();
+
+          if (_hasText) {
+            setState(() {
+              _hasText = false;
+            });
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (!force && _loadedEditingText == text) {
+      return;
+    }
+
+    _loadedEditingText = text;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      final currentText = _controller.text;
+
+      // Do not overwrite text the user has already started editing.
+      if (_isEditing &&
+          currentText.isNotEmpty &&
+          currentText != _loadedEditingText) {
+        return;
+      }
 
       _controller.value = TextEditingValue(
         text: text,
@@ -114,9 +145,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
         ),
       );
 
-      setState(() {
-        _hasText = text.trim().isNotEmpty;
-      });
+      if (_hasText != text.trim().isNotEmpty) {
+        setState(() {
+          _hasText = text.trim().isNotEmpty;
+        });
+      }
+
+      FocusScope.of(context).requestFocus(
+        FocusNode(),
+      );
     });
   }
 
@@ -131,11 +168,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _hasText || _attachments.isNotEmpty;
 
   void _submit() {
+    if (widget.isLoading) {
+      return;
+    }
+
     final text = _controller.text.trim();
 
     if (text.isEmpty && _attachments.isEmpty) {
       return;
     }
+
+    final bool wasEditing = _isEditing;
 
     debugPrint(
       '[UI_SEND] '
@@ -143,7 +186,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       'state=${hashCode.toRadixString(16)} '
       'chars=${text.length} '
       'attachments=${_attachments.length} '
-      'editing=$_isEditing',
+      'editing=$wasEditing',
     );
 
     RuntimeEventLog.instance.emit(
@@ -152,34 +195,65 @@ class _ChatInputBarState extends State<ChatInputBar> {
       'state=${hashCode.toRadixString(16)} '
       'chars=${text.length} '
       'attachments=${_attachments.length} '
-      'editing=$_isEditing',
+      'editing=$wasEditing',
     );
 
     final outgoingAttachments =
         List<ChatAttachment>.from(_attachments);
 
+    // Clear the composer before dispatching the event.
+    // This prevents duplicate submission if the UI rebuilds immediately.
     _controller.clear();
 
     setState(() {
       _attachments.clear();
+      _hasText = false;
     });
 
     RuntimeEventLog.instance.emit(
-      '[FORENSIC_BEFORE_ONSEND]',
+      '[FORENSIC_BEFORE_ONSEND] '
+      'editing=$wasEditing',
     );
 
+    // This is the ONLY place where the actual new request is dispatched.
     widget.onSend(
       text,
       outgoingAttachments,
     );
 
     RuntimeEventLog.instance.emit(
-      '[FORENSIC_AFTER_ONSEND]',
+      '[FORENSIC_AFTER_ONSEND] '
+      'editing=$wasEditing',
     );
 
-    if (_isEditing) {
+    // Exit edit mode only after the new request has been dispatched.
+    if (wasEditing) {
+      _loadedEditingText = null;
       widget.onCancelEdit?.call();
     }
+  }
+
+  void _cancelEditing() {
+    if (!_isEditing) {
+      return;
+    }
+
+    _loadedEditingText = null;
+
+    _controller.clear();
+
+    if (mounted) {
+      setState(() {
+        _hasText = false;
+      });
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[CHAT_EDIT_CANCELLED] '
+      'state=${hashCode.toRadixString(16)}',
+    );
+
+    widget.onCancelEdit?.call();
   }
 
   Future<void> _pickAttachment(
@@ -191,30 +265,28 @@ class _ChatInputBarState extends State<ChatInputBar> {
       case _AttachmentPickerAction.image:
         final file = await _imageService.pickFromGallery();
 
-        if (file != null) {
+        if (file != null && mounted) {
           _addAttachment(
             _buildImageAttachment(file),
           );
         }
-
         break;
 
       case _AttachmentPickerAction.camera:
         final file = await _imageService.pickFromCamera();
 
-        if (file != null) {
+        if (file != null && mounted) {
           _addAttachment(
             _buildImageAttachment(file),
           );
         }
-
         break;
 
       case _AttachmentPickerAction.file:
         final file =
             await _fileAttachmentService.pickDocument();
 
-        if (file != null) {
+        if (file != null && mounted) {
           _addAttachment(
             ChatAttachment(
               id: _uuid.v4(),
@@ -228,14 +300,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
             ),
           );
         }
-
         break;
 
       case _AttachmentPickerAction.video:
         final file =
             await _fileAttachmentService.pickVideo();
 
-        if (file != null) {
+        if (file != null && mounted) {
           _addAttachment(
             ChatAttachment(
               id: _uuid.v4(),
@@ -249,7 +320,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
             ),
           );
         }
-
         break;
     }
   }
@@ -271,12 +341,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _addAttachment(ChatAttachment attachment) {
+    if (!mounted) return;
+
     setState(() {
       _attachments.add(attachment);
     });
   }
 
   void _removeAttachment(String attachmentId) {
+    if (!mounted) return;
+
     setState(() {
       _attachments.removeWhere(
         (attachment) =>
@@ -342,20 +416,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
             children: [
               if (_isEditing)
                 _EditingBanner(
-                  onCancel: widget.onCancelEdit,
+                  onCancel: _cancelEditing,
                 ),
 
               if (_attachments.isNotEmpty) ...[
                 SizedBox(
                   height: 96,
                   child: ListView.separated(
-                    scrollDirection:
-                        Axis.horizontal,
+                    scrollDirection: Axis.horizontal,
                     itemCount: _attachments.length,
                     separatorBuilder: (_, __) =>
                         const SizedBox(width: 10),
-                    itemBuilder:
-                        (context, index) {
+                    itemBuilder: (context, index) {
                       final attachment =
                           _attachments[index];
 
@@ -402,6 +474,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       child: TextField(
                         controller: _controller,
                         autofocus: _isEditing,
+                        enabled: !widget.isLoading,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 15,
@@ -410,14 +483,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         minLines: 1,
                         textInputAction:
                             TextInputAction.newline,
-                        decoration:
-                            InputDecoration(
-                          hintText:
-                              _isEditing
-                                  ? 'Modifica il messaggio...'
-                                  : l10n.t(
-                                      'message_hint',
-                                    ),
+                        decoration: InputDecoration(
+                          hintText: _isEditing
+                              ? 'Modifica il messaggio...'
+                              : l10n.t(
+                                  'message_hint',
+                                ),
                           hintStyle:
                               const TextStyle(
                             color: Colors.white38,
@@ -449,8 +520,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         Tooltip(
                           message:
                               'Sessione Live',
-                          child:
-                              IconButton(
+                          child: IconButton(
                             style:
                                 IconButton.styleFrom(
                               backgroundColor:
@@ -662,7 +732,7 @@ class _EditingBanner extends StatelessWidget {
                 VisualDensity.compact,
             icon: const Icon(
               Icons.close_rounded,
-              color: Colors.white60,
+              color: Colors.white54,
               size: 19,
             ),
           ),
@@ -736,8 +806,10 @@ class _AttachmentPreviewCard
         borderRadius:
             BorderRadius.circular(18),
         border: Border.all(
-          color: Colors.white
-              .withValues(alpha: 0.08),
+          color:
+              Colors.white.withValues(
+            alpha: 0.08,
+          ),
         ),
       ),
       child: Row(
@@ -759,7 +831,8 @@ class _AttachmentPreviewCard
                   maxLines: 1,
                   overflow:
                       TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:
+                      const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
                     fontWeight:
@@ -772,7 +845,8 @@ class _AttachmentPreviewCard
                     attachment.uploadState,
                   ),
                   style: TextStyle(
-                    color: const Color(
+                    color:
+                        const Color(
                       0xFF8AB4F8,
                     ).withValues(
                       alpha: 0.88,
@@ -804,10 +878,8 @@ class _AttachmentPreviewCard
     switch (state) {
       case ChatAttachmentUploadState.preparing:
         return 'Preparing';
-
       case ChatAttachmentUploadState.ready:
         return 'Ready to send';
-
       case ChatAttachmentUploadState.failed:
         return 'Failed';
     }
@@ -834,9 +906,7 @@ class _AttachmentThumb
       return ClipRRect(
         borderRadius: borderRadius,
         child: Image.file(
-          File(
-            attachment.thumbnailPath!,
-          ),
+          File(attachment.thumbnailPath!),
           width: size,
           height: size,
           fit: BoxFit.cover,
@@ -878,8 +948,7 @@ class _FallbackAttachmentIcon
         ChatAttachmentType.image) {
       icon = Icons.image_rounded;
     } else {
-      icon =
-          Icons.description_rounded;
+      icon = Icons.description_rounded;
     }
 
     return Container(
@@ -892,8 +961,7 @@ class _FallbackAttachmentIcon
       ),
       child: Icon(
         icon,
-        color:
-            const Color(0xFF8AB4F8),
+        color: const Color(0xFF8AB4F8),
       ),
     );
   }
@@ -938,8 +1006,10 @@ class _AttachmentPickerSheet
         borderRadius:
             BorderRadius.circular(28),
         border: Border.all(
-          color: Colors.white
-              .withValues(alpha: 0.06),
+          color:
+              Colors.white.withValues(
+            alpha: 0.06,
+          ),
         ),
         boxShadow: const [
           BoxShadow(
@@ -959,10 +1029,9 @@ class _AttachmentPickerSheet
             child: Container(
               width: 44,
               height: 4,
-              decoration:
-                  BoxDecoration(
-                color: Colors.white
-                    .withValues(
+              decoration: BoxDecoration(
+                color:
+                    Colors.white.withValues(
                   alpha: 0.16,
                 ),
                 borderRadius:
@@ -1072,8 +1141,10 @@ class _AttachmentActionTile
           borderRadius:
               BorderRadius.circular(20),
           border: Border.all(
-            color: Colors.white
-                .withValues(alpha: 0.06),
+            color:
+                Colors.white.withValues(
+              alpha: 0.06,
+            ),
           ),
         ),
         child: Column(
