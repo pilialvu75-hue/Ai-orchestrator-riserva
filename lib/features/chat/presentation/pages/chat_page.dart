@@ -716,10 +716,13 @@ class _ChatBodyState extends State<_ChatBody> {
                                   TextScaler.linear(_appearanceViewModel.textScale),
                             ),
                             child: HighPerformanceChatList(
-                              controller: widget.scrollController,
-                              messages: combinedMessages,
-                              assistantTextSize: _appearanceViewModel.assistantTextSize,
-                            ),
+                                controller: widget.scrollController,
+                                messages: combinedMessages,
+                                assistantTextSize: _appearanceViewModel.assistantTextSize,
+                                onSpeakAssistantMessage: (message) {
+                                unawaited(_speakAssistantResponse(message.content));
+                            },
+                           ),
                           ),
                   ),
 
