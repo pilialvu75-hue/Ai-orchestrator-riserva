@@ -3,29 +3,29 @@ import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 
 /// Prima schermata operativa del Cantiere.
 ///
-/// Questa pagina è volutamente autonoma:
+/// La pagina rimane una UI sottile:
 ///
-/// - non avvia build;
-/// - non modifica il progetto;
-/// - non installa APK;
-/// - non accede direttamente a GitHub;
-/// - non interroga provider AI.
+///   UI
+///    ↓
+///   WorkshopDashboardController
+///    ↓
+///   WorkshopEngine / Workshop toolchain
 ///
-/// Visualizza invece ciò che il Cantiere ha già prodotto.
-///
-/// Questo permette di collegare progressivamente la UI ai
-/// componenti reali senza introdurre side-effect durante il primo
-/// passaggio di integrazione grafica.
+/// La pagina non contiene logica di esecuzione del progetto.
 class WorkshopDashboardPage extends StatefulWidget {
   const WorkshopDashboardPage({
     super.key,
     WorkshopAppEmissionController? emissionController,
-  }) : _emissionController = emissionController;
+    WorkshopDashboardController? dashboardController,
+  })  : _emissionController = emissionController,
+        _dashboardController = dashboardController;
 
   final WorkshopAppEmissionController? _emissionController;
+  final WorkshopDashboardController? _dashboardController;
 
   @override
   State<WorkshopDashboardPage> createState() =>
@@ -35,6 +35,11 @@ class WorkshopDashboardPage extends StatefulWidget {
 class _WorkshopDashboardPageState
     extends State<WorkshopDashboardPage> {
   late final WorkshopAppEmissionController _emissionController;
+  late final WorkshopDashboardController?
+      _dashboardController;
+
+  bool get _ownsDashboardController =>
+      widget._dashboardController != null;
 
   @override
   void initState() {
@@ -43,6 +48,99 @@ class _WorkshopDashboardPageState
     _emissionController =
         widget._emissionController ??
         WorkshopAppEmissionController();
+
+    _dashboardController =
+        widget._dashboardController;
+
+    _dashboardController?.addListener(
+      _onDashboardChanged,
+    );
+  }
+
+  @override
+  void dispose() {
+    _dashboardController?.removeListener(
+      _onDashboardChanged,
+    );
+
+    if (_ownsDashboardController) {
+      _dashboardController?.dispose();
+    }
+
+    super.dispose();
+  }
+
+  void _onDashboardChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
+
+  void _refresh() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
+
+  Future<void> _startProduction() async {
+    final controller = _dashboardController;
+
+    if (controller == null) {
+      _showMessage(
+        'Il controller del Cantiere non è stato collegato.',
+      );
+      return;
+    }
+
+    final result =
+        await showDialog<_WorkshopProductionInput>(
+      context: context,
+      builder: (context) =>
+          const _WorkshopProductionDialog(),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    try {
+      controller.startProduction(
+        title: result.title,
+        instruction: result.instruction,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {});
+
+      _showMessage(
+        'Produzione preparata nel Cantiere.',
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage(
+        'Impossibile preparare la produzione: $error',
+      );
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
   }
 
   @override
@@ -53,25 +151,27 @@ class _WorkshopDashboardPageState
       limit: 20,
     );
 
+    final dashboardState =
+        _dashboardController?.state;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cantiere'),
         actions: <Widget>[
           IconButton(
             tooltip: 'Aggiorna',
-            onPressed: () {
-              setState(() {});
-            },
+            onPressed: _refresh,
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          setState(() {});
+          _refresh();
         },
         child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics:
+              const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
           children: <Widget>[
             _WorkshopHeader(
@@ -82,10 +182,17 @@ class _WorkshopDashboardPageState
               state: state,
             ),
             const SizedBox(height: 16),
+            if (dashboardState != null)
+              _WorkshopProductionStatusCard(
+                state: dashboardState,
+              ),
+            if (dashboardState != null)
+              const SizedBox(height: 16),
             _WorkshopActionsCard(
-              onRefresh: () {
-                setState(() {});
-              },
+              onRefresh: _refresh,
+              onNewProduction: _startProduction,
+              controllerConnected:
+                  _dashboardController != null,
             ),
             const SizedBox(height: 24),
             _WorkshopSectionTitle(
@@ -129,11 +236,13 @@ class _WorkshopHeader extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: <Widget>[
         Text(
           'App Factory',
-          style: theme.textTheme.headlineMedium?.copyWith(
+          style:
+              theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -149,7 +258,8 @@ class _WorkshopHeader extends StatelessWidget {
   }
 }
 
-class _WorkshopStatusCard extends StatelessWidget {
+class _WorkshopStatusCard
+    extends StatelessWidget {
   const _WorkshopStatusCard({
     required this.state,
   });
@@ -170,9 +280,8 @@ class _WorkshopStatusCard extends StatelessWidget {
         child: Row(
           children: <Widget>[
             CircleAvatar(
-              backgroundColor: color.withValues(
-                alpha: 0.12,
-              ),
+              backgroundColor:
+                  color.withValues(alpha: 0.12),
               child: Icon(
                 state.hasEmittedApp
                     ? Icons.check_circle
@@ -183,13 +292,16 @@ class _WorkshopStatusCard extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
                     state.hasEmittedApp
                         ? 'Cantiere operativo'
                         : 'Cantiere pronto',
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: theme
+                        .textTheme.titleMedium
+                        ?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -208,12 +320,105 @@ class _WorkshopStatusCard extends StatelessWidget {
   }
 }
 
-class _WorkshopActionsCard extends StatelessWidget {
+class _WorkshopProductionStatusCard
+    extends StatelessWidget {
+  const _WorkshopProductionStatusCard({
+    required this.state,
+  });
+
+  final WorkshopDashboardControllerState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final progress =
+        state.progress.clamp(0.0, 1.0);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.engineering_outlined,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    state.projectTitle ??
+                        'Produzione Cantiere',
+                    style: theme
+                        .textTheme.titleMedium
+                        ?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                if (state.isBusy)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child:
+                        CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: progress,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${state.completedTasks}/'
+              '${state.totalTasks} task completati',
+            ),
+            if (state.activeTaskTitle != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Task: ${state.activeTaskTitle}',
+              ),
+            ],
+            if (state.lastMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                state.lastMessage!,
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            if (state.lastError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                state.lastError!,
+                style: TextStyle(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkshopActionsCard
+    extends StatelessWidget {
   const _WorkshopActionsCard({
     required this.onRefresh,
+    required this.onNewProduction,
+    required this.controllerConnected,
   });
 
   final VoidCallback onRefresh;
+  final VoidCallback onNewProduction;
+  final bool controllerConnected;
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +426,8 @@ class _WorkshopActionsCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment:
+              CrossAxisAlignment.stretch,
           children: <Widget>[
             const Text(
               'Cantiere',
@@ -234,22 +440,31 @@ class _WorkshopActionsCard extends StatelessWidget {
             FilledButton.icon(
               onPressed: onRefresh,
               icon: const Icon(Icons.refresh),
-              label: const Text('Aggiorna stato'),
+              label: const Text(
+                'Aggiorna stato',
+              ),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      "L'esecuzione reale verrà collegata al prossimo anello.",
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Nuova produzione'),
+              onPressed: controllerConnected
+                  ? onNewProduction
+                  : null,
+              icon: const Icon(
+                Icons.play_arrow,
+              ),
+              label: const Text(
+                'Nuova produzione',
+              ),
             ),
+            if (!controllerConnected) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Controller Cantiere non collegato.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
       ),
@@ -257,7 +472,130 @@ class _WorkshopActionsCard extends StatelessWidget {
   }
 }
 
-class _WorkshopSectionTitle extends StatelessWidget {
+class _WorkshopProductionDialog
+    extends StatefulWidget {
+  const _WorkshopProductionDialog();
+
+  @override
+  State<_WorkshopProductionDialog> createState() =>
+      _WorkshopProductionDialogState();
+}
+
+class _WorkshopProductionDialogState
+    extends State<_WorkshopProductionDialog> {
+  final TextEditingController _titleController =
+      TextEditingController();
+
+  final TextEditingController
+      _instructionController =
+      TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _instructionController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title =
+        _titleController.text.trim();
+    final instruction =
+        _instructionController.text.trim();
+
+    if (title.isEmpty ||
+        instruction.isEmpty) {
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _WorkshopProductionInput(
+        title: title,
+        instruction: instruction,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSubmit =
+        _titleController.text.trim().isNotEmpty &&
+        _instructionController.text
+            .trim()
+            .isNotEmpty;
+
+    return AlertDialog(
+      title: const Text(
+        'Nuova produzione',
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            TextField(
+              controller: _titleController,
+              textInputAction:
+                  TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Nome progetto',
+                hintText:
+                    'La mia prima app',
+              ),
+              onChanged: (_) {
+                setState(() {});
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller:
+                  _instructionController,
+              minLines: 4,
+              maxLines: 8,
+              decoration:
+                  const InputDecoration(
+                labelText: 'Cosa vuoi produrre?',
+                hintText:
+                    'Descrivi brevemente l’app da creare.',
+                alignLabelWithHint: true,
+              ),
+              onChanged: (_) {
+                setState(() {});
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+          child: const Text('Annulla'),
+        ),
+        FilledButton(
+          onPressed:
+              canSubmit ? _submit : null,
+          child: const Text(
+            'Prepara produzione',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkshopProductionInput {
+  const _WorkshopProductionInput({
+    required this.title,
+    required this.instruction,
+  });
+
+  final String title;
+  final String instruction;
+}
+
+class _WorkshopSectionTitle
+    extends StatelessWidget {
   const _WorkshopSectionTitle({
     required this.title,
     required this.count,
@@ -275,7 +613,8 @@ class _WorkshopSectionTitle extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: theme.textTheme.titleLarge?.copyWith(
+            style:
+                theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -289,7 +628,8 @@ class _WorkshopSectionTitle extends StatelessWidget {
   }
 }
 
-class _WorkshopEmptyState extends StatelessWidget {
+class _WorkshopEmptyState
+    extends StatelessWidget {
   const _WorkshopEmptyState();
 
   @override
@@ -302,7 +642,9 @@ class _WorkshopEmptyState extends StatelessWidget {
             Icon(
               Icons.inventory_2_outlined,
               size: 48,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context)
+                  .colorScheme
+                  .primary,
             ),
             const SizedBox(height: 12),
             const Text(
@@ -314,9 +656,12 @@ class _WorkshopEmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Le prime applicazioni prodotte dal Cantiere appariranno qui.',
+              'Le prime applicazioni prodotte dal '
+              'Cantiere appariranno qui.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium,
             ),
           ],
         ),
@@ -325,7 +670,8 @@ class _WorkshopEmptyState extends StatelessWidget {
   }
 }
 
-class _WorkshopEmissionCard extends StatelessWidget {
+class _WorkshopEmissionCard
+    extends StatelessWidget {
   const _WorkshopEmissionCard({
     required this.package,
   });
@@ -336,7 +682,8 @@ class _WorkshopEmissionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final manifest = WorkshopAppEmissionManifest.fromPackage(
+    final manifest =
+        WorkshopAppEmissionManifest.fromPackage(
       package,
     );
 
@@ -344,7 +691,8 @@ class _WorkshopEmissionCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
@@ -358,10 +706,15 @@ class _WorkshopEmissionCard extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    package.appName?.trim().isNotEmpty == true
+                    package.appName
+                                ?.trim()
+                                .isNotEmpty ==
+                            true
                         ? package.appName!
                         : 'Applicazione senza nome',
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: theme
+                        .textTheme.titleMedium
+                        ?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -387,7 +740,8 @@ class _WorkshopEmissionCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              package.message ?? 'Artifact pronto.',
+              package.message ??
+                  'Artifact pronto.',
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -397,7 +751,8 @@ class _WorkshopEmissionCard extends StatelessWidget {
   }
 }
 
-class _WorkshopInfoRow extends StatelessWidget {
+class _WorkshopInfoRow
+    extends StatelessWidget {
   const _WorkshopInfoRow({
     required this.label,
     required this.value,
@@ -413,7 +768,8 @@ class _WorkshopInfoRow extends StatelessWidget {
         bottom: 6,
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
         children: <Widget>[
           SizedBox(
             width: 82,
@@ -435,16 +791,19 @@ class _WorkshopInfoRow extends StatelessWidget {
   }
 }
 
-class _WorkshopDiagnosticsCard extends StatelessWidget {
+class _WorkshopDiagnosticsCard
+    extends StatelessWidget {
   const _WorkshopDiagnosticsCard({
     required this.controller,
   });
 
-  final WorkshopAppEmissionController controller;
+  final WorkshopAppEmissionController
+      controller;
 
   @override
   Widget build(BuildContext context) {
-    final diagnostics = controller.diagnostics();
+    final diagnostics =
+        controller.diagnostics();
 
     return Card(
       child: ExpansionTile(
@@ -463,12 +822,15 @@ class _WorkshopDiagnosticsCard extends StatelessWidget {
               16,
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
               children: diagnostics.entries
                   .map(
-                    (entry) => _WorkshopInfoRow(
+                    (entry) =>
+                        _WorkshopInfoRow(
                       label: entry.key,
-                      value: _formatDiagnosticValue(
+                      value:
+                          _formatDiagnosticValue(
                         entry.value,
                       ),
                     ),
@@ -483,13 +845,11 @@ class _WorkshopDiagnosticsCard extends StatelessWidget {
     );
   }
 
-  String _formatDiagnosticValue(Object? value) {
+  String _formatDiagnosticValue(
+    Object? value,
+  ) {
     if (value == null) {
       return '—';
-    }
-
-    if (value is Map || value is List) {
-      return value.toString();
     }
 
     return value.toString();
