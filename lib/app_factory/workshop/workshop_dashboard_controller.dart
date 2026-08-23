@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'workshop_build_lab.dart';
 import 'workshop_engine.dart';
+import 'workshop_local_toolchain_detector.dart';
 import 'workshop_local_toolchain_service.dart';
 import 'workshop_project_plan.dart';
 import 'workshop_project_executor.dart';
@@ -704,14 +707,20 @@ final class WorkshopDashboardController
 
     final requestId = _state.requestId;
 
-    if (requestId == null ||
-        event.request.id != requestId) {
+    if (requestId == null) {
+      return;
+    }
+
+    final currentStage =
+        _engine.stageOf(requestId);
+
+    if (currentStage == null) {
       return;
     }
 
     _updateState(
       _state.copyWith(
-        stage: event.stage,
+        stage: currentStage,
         isBusy: false,
       ),
     );
