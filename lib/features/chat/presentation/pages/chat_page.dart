@@ -22,6 +22,7 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
+import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
@@ -1120,10 +1121,13 @@ class _ChatBodyState
     });
   }
 
+  // ── MODIFICA CORRETTA ────────────────────────────────────────
+  // Dispatcha EditMessageEvent invece di SendMessageEvent quando
+  // si è in modalità modifica. EditMessageEvent tronca la storia
+  // al messaggio originale e reinvia il testo modificato.
   void _sendFromComposer(
     String text,
-    List<ChatAttachment>
-        attachments,
+    List<ChatAttachment> attachments,
   ) {
     final wasEditing =
         _isEditingUserMessage;
@@ -1131,21 +1135,36 @@ class _ChatBodyState
     final editedMessage =
         _editingUserMessage;
 
-    if (wasEditing) {
+    if (wasEditing &&
+        editedMessage != null) {
       _uiDebugLog(
         action:
             'user_message_edit_submitted',
         sessionId:
             _kDefaultSessionId,
         details:
-            'message_id=${editedMessage!.id} '
+            'message_id=${editedMessage.id} '
             'new_chars=${text.length}',
       );
 
       setState(() {
-        _editingUserMessage =
-            null;
+        _editingUserMessage = null;
       });
+
+      context
+          .read<OrchestratorStateEngine>()
+          .add(
+            EditMessageEvent(
+              sessionId:
+                  _kDefaultSessionId,
+              originalMessageId:
+                  editedMessage.id,
+              newUserPrompt: text,
+              attachments:
+                  attachments,
+            ),
+          );
+      return;
     }
 
     widget.onSend(
@@ -1407,12 +1426,8 @@ class _ChatBodyState
                                   assistantTextSize:
                                       _appearanceViewModel
                                           .assistantTextSize,
-
-                                  // MODIFICA MESSAGGIO UTENTE
                                   onEditUserMessage:
                                       _startEditingUserMessage,
-
-                                  // ASCOLTA RISPOSTA ASSISTENTE
                                   onSpeakAssistantMessage:
                                       (message) {
                                     unawaited(
@@ -1438,7 +1453,6 @@ class _ChatBodyState
                         onSendThroughChatPipeline:
                             widget
                                 .onSend,
-
                         onRenderVoiceInference:
                             ({
                           required String
@@ -1454,14 +1468,11 @@ class _ChatBodyState
                                 response,
                           );
                         },
-
                         onClearChat:
                             _clearChatDebug,
-
                         assistantTextSize:
                             _appearanceViewModel
                                 .assistantTextSize,
-
                         onAssistantTextSizeChanged:
                             (size) {
                           unawaited(
@@ -1476,10 +1487,6 @@ class _ChatBodyState
               ),
             ),
 
-            // --------------------------------------------------
-            // CHAT INPUT
-            // --------------------------------------------------
-
             ChatInputBar(
               onSend:
                   _sendFromComposer,
@@ -1491,13 +1498,9 @@ class _ChatBodyState
               liveSessionEnabled:
                   widget
                       .liveSessionEnabled,
-
-              // MODIFICA
               editingText:
                   _editingUserMessage
                       ?.content,
-
-              // ANNULLA MODIFICA
               onCancelEdit:
                   _cancelEditingUserMessage,
             ),
@@ -1711,7 +1714,7 @@ class _ChatBodyState
                                           0xE6FFFFFF,
                                         ),
                                         fontWeight:
-                                            FontWeight.w600,
+                                            FontWeight.bold,
                                         fontSize:
                                             14,
                                       ),
@@ -1907,7 +1910,6 @@ class _ChatBodyState
                                 Navigator.of(
                                   context,
                                 ).pop();
-
                                 widget
                                     .onSettings();
                               },
@@ -1952,7 +1954,6 @@ class _ChatBodyState
                                 Navigator.of(
                                   context,
                                 ).pop();
-
                                 widget
                                     .onSettings();
                               },
@@ -2035,15 +2036,9 @@ class _ChatBodyState
               size: 42,
             ),
           ),
-
-          const SizedBox(
-            height: 16,
-          ),
-
+          const SizedBox(height: 16),
           Text(
-            l10n.t(
-              'ai_orchestrator',
-            ),
+            l10n.t('ai_orchestrator'),
             style:
                 const TextStyle(
               color:
@@ -2053,15 +2048,9 @@ class _ChatBodyState
                   FontWeight.w500,
             ),
           ),
-
-          const SizedBox(
-            height: 8,
-          ),
-
+          const SizedBox(height: 8),
           Text(
-            l10n.t(
-              'start_conversation',
-            ),
+            l10n.t('start_conversation'),
             style:
                 TextStyle(
               color:
@@ -2071,11 +2060,7 @@ class _ChatBodyState
               fontSize: 14,
             ),
           ),
-
-          const SizedBox(
-            height: 14,
-          ),
-
+          const SizedBox(height: 14),
           Container(
             padding:
                 const EdgeInsets
@@ -2105,9 +2090,7 @@ class _ChatBodyState
             ),
             child:
                 Text(
-              l10n.t(
-                'chat_surface_tagline',
-              ),
+              l10n.t('chat_surface_tagline'),
               style:
                   TextStyle(
                 color:
@@ -2115,8 +2098,7 @@ class _ChatBodyState
                   alpha: 0.52,
                 ),
                 fontSize: 12,
-                letterSpacing:
-                    0.2,
+                letterSpacing: 0.2,
               ),
             ),
           ),
@@ -2139,18 +2121,14 @@ class _SidebarTile
   final VoidCallback onTap;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Material(
-      color:
-          Colors.transparent,
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
           padding:
-              const EdgeInsets
-                  .symmetric(
+              const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 12,
           ),
@@ -2159,20 +2137,15 @@ class _SidebarTile
               Icon(
                 icon,
                 color:
-                    const Color(
-                  0xFF8AB4F8,
-                ),
+                    const Color(0xFF8AB4F8),
                 size: 20,
               ),
-              const SizedBox(
-                width: 14,
-              ),
+              const SizedBox(width: 14),
               Text(
                 label,
                 style:
                     const TextStyle(
-                  color:
-                      Colors.white,
+                  color: Colors.white,
                   fontSize: 14,
                 ),
               ),
