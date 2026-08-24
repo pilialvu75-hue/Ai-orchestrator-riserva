@@ -36,6 +36,31 @@ class SendMessageEvent extends ChatEvent {
   List<Object?> get props => [sessionId, userPrompt, systemPrompt, attachments];
 }
 
+/// Modifica un messaggio utente esistente.
+/// Rimuove il messaggio originale e tutti i messaggi successivi
+/// (inclusa la risposta dell'assistente), poi reinvia il nuovo testo.
+class EditMessageEvent extends ChatEvent {
+  const EditMessageEvent({
+    required this.sessionId,
+    required this.originalMessageId,
+    required this.newUserPrompt,
+    this.attachments = const <ChatAttachment>[],
+  });
+
+  final String sessionId;
+  final String originalMessageId;
+  final String newUserPrompt;
+  final List<ChatAttachment> attachments;
+
+  @override
+  List<Object?> get props => [
+        sessionId,
+        originalMessageId,
+        newUserPrompt,
+        attachments,
+      ];
+}
+
 class PruneHistoryEvent extends ChatEvent {
   const PruneHistoryEvent();
 }
