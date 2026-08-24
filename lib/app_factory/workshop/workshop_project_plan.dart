@@ -59,6 +59,51 @@ enum WorkshopProjectPriority {
   critical,
 }
 
+/// A lightweight immutable snapshot of a Workshop project.
+///
+/// This model is intentionally separate from [WorkshopProjectPlan].
+/// It allows the WorkshopEngine to expose project state without leaking
+/// the mutable project graph itself.
+final class WorkshopProjectSummary {
+  const WorkshopProjectSummary({
+    required this.projectId,
+    required this.title,
+    required this.status,
+    required this.progress,
+    required this.completedTasks,
+    required this.totalTasks,
+    this.nextTaskId,
+    this.nextTaskTitle,
+  });
+
+  final String projectId;
+  final String title;
+  final WorkshopProjectStatus status;
+  final double progress;
+  final int completedTasks;
+  final int totalTasks;
+  final String? nextTaskId;
+  final String? nextTaskTitle;
+
+  bool get isComplete =>
+      status == WorkshopProjectStatus.completed;
+
+  bool get hasNextTask =>
+      nextTaskId != null;
+
+  @override
+  String toString() {
+    return 'WorkshopProjectSummary('
+        'projectId: $projectId, '
+        'title: $title, '
+        'status: $status, '
+        'progress: ${(progress * 100).toStringAsFixed(1)}%, '
+        'completedTasks: $completedTasks/$totalTasks, '
+        'nextTaskId: $nextTaskId'
+        ')';
+  }
+}
+
 /// A single phase in the Workshop project plan.
 final class WorkshopProjectPhase {
   WorkshopProjectPhase({
@@ -163,7 +208,8 @@ final class WorkshopProjectTask {
   /// The authoritative dependency state is calculated by
   /// [WorkshopProjectPlan.isTaskBlocked], because only the complete
   /// project graph can determine whether those dependencies are complete.
-  bool get hasDependencies => dependencies.isNotEmpty;
+  bool get hasDependencies =>
+      dependencies.isNotEmpty;
 
   WorkshopProjectTask copyWith({
     String? id,
@@ -264,7 +310,8 @@ final class WorkshopProjectPlan {
   int get completedTasks =>
       tasks.where((task) => task.completed).length;
 
-  int get totalTasks => tasks.length;
+  int get totalTasks =>
+      tasks.length;
 
   double get progress {
     if (totalTasks == 0) {
