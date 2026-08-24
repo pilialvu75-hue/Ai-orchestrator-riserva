@@ -17,6 +17,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         super(const ChatInitial()) {
     on<LoadMessagesEvent>(_onLoadMessages);
     on<SendMessageEvent>(_onSendMessage);
+    on<EditMessageEvent>(_onEditMessage);
     on<PruneHistoryEvent>(_onPruneHistory);
   }
 
@@ -78,8 +79,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         timestamp: now,
         attachments: event.attachments,
       );
-      
-      // Aggiorna immediatamente la lista locale con il messaggio dell'utente
+
       _messages.add(optimisticUserMessage);
 
       final optimisticAssistantMessage = ChatMessage(
@@ -113,7 +113,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       )) {
         if (isClosed) return;
         lastAssistantMessage = assistantMessage;
-        
+
         emit(ChatSending(
           messages: List.unmodifiable(<ChatMessage>[
             ..._messages,
@@ -123,23 +123,81 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ));
       }
 
-      // Consolida la risposta finale dell'assistente nella lista locale
       if (lastAssistantMessage != null) {
         _messages.add(lastAssistantMessage);
       }
 
-      // Emette lo stato Loaded stabile prima di invocare il ricaricamento in background
       if (!isClosed) {
         emit(ChatLoaded(
           messages: List.unmodifiable(_messages),
           activeProvider: _activeProvider,
         ));
-        
+
         add(LoadMessagesEvent(sessionId: event.sessionId));
       }
     } catch (e, stackTrace) {
       developer.log(
         'CRITICAL: Unhandled exception in send streaming pipeline',
+        name: 'ai_orchestrator.ChatBloc',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
+      if (!isClosed) {
+        emit(ChatError(message: e.toString()));
+      }
+    }
+  }
+
+  /// Gestisce la modifica di un messaggio utente esistente.
+  ///
+  /// 1. Trova il messaggio originale nella lista per ID.
+  /// 2. Tronca _messages rimuovendo il messaggio originale e tutti
+  ///    i messaggi successivi (incluse le risposte dell'assistente).
+  /// 3. Dispatcha un nuovo SendMessageEvent con il testo modificato.
+  Future<void> _onEditMessage(
+      EditMessageEvent event, Emitter<ChatState> emit) async {
+    try {
+      developer.log(
+        'EDIT: Modifica messaggio id=${event.originalMessageId} '
+        'session=${event.sessionId} '
+        'newChars=${event.newUserPrompt.length}',
+        name: 'ai_orchestrator.ChatBloc',
+      );
+
+      final originalIndex = _messages.indexWhere(
+        (m) => m.id == event.originalMessageId,
+      );
+
+      if (originalIndex == -1) {
+        developer.log(
+          'EDIT_WARN: messaggio ${event.originalMessageId} non trovato '
+          'in _messages — tronco tutto e reinvio',
+          name: 'ai_orchestrator.ChatBloc',
+        );
+        _messages.clear();
+      } else {
+        // Rimuove il messaggio originale e tutto ciò che viene dopo.
+        _messages = _messages.sublist(0, originalIndex);
+      }
+
+      // Aggiorna la UI con la lista troncata prima della nuova risposta.
+      if (!isClosed) {
+        emit(ChatLoaded(
+          messages: List.unmodifiable(_messages),
+          activeProvider: _activeProvider,
+        ));
+      }
+
+      // Reinvia come nuovo messaggio.
+      add(SendMessageEvent(
+        sessionId: event.sessionId,
+        userPrompt: event.newUserPrompt,
+        attachments: event.attachments,
+      ));
+    } catch (e, stackTrace) {
+      developer.log(
+        'CRITICAL: Eccezione durante la modifica del messaggio',
         name: 'ai_orchestrator.ChatBloc',
         error: e,
         stackTrace: stackTrace,
