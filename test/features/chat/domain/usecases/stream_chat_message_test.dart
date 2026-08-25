@@ -7,45 +7,48 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('StreamChatMessage', () {
-    test('emits partial assistant updates before the final persisted message',
-        () async {
-      final repository = _FakeChatRepository(
-        onSendMessage: ({
-          required String sessionId,
-          required String userPrompt,
-          String? systemPrompt,
-          List<ChatAttachment> attachments = const <ChatAttachment>[],
-          void Function(String partialText)? onPartialResponse,
-          void Function(String notice)? onRuntimeNotice,
-        }) async {
-          onPartialResponse?.call('Hel');
-          onPartialResponse?.call('Hello');
-          return ChatMessage(
-            id: 'assistant-final',
-            sessionId: sessionId,
-            role: 'assistant',
-            content: 'Hello world',
-            timestamp: 3,
-            provider: 'local',
-          );
-        },
-      );
+    test(
+      'emits partial assistant updates before the final persisted message',
+      () async {
+        final repository = _FakeChatRepository(
+          onSendMessage: ({
+            required String sessionId,
+            required String userPrompt,
+            String? systemPrompt,
+            List<ChatAttachment> attachments =
+                const <ChatAttachment>[],
+            void Function(String partialText)? onPartialResponse,
+            void Function(String notice)? onRuntimeNotice,
+          }) async {
+            onPartialResponse?.call('Hel');
+            onPartialResponse?.call('Hello');
+            return ChatMessage(
+              id: 'assistant-final',
+              sessionId: sessionId,
+              role: 'assistant',
+              content: 'Hello world',
+              timestamp: 3,
+              provider: 'local',
+            );
+          },
+        );
 
-      final usecase = StreamChatMessage(repository);
-      final messages = await usecase(
-        const StreamChatMessageParams(
-          sessionId: 's1',
-          userPrompt: 'Hi',
-          activeProvider: 'local',
-        ),
-      ).toList();
+        final usecase = StreamChatMessage(repository);
+        final messages = await usecase(
+          const StreamChatMessageParams(
+            sessionId: 's1',
+            userPrompt: 'Hi',
+            activeProvider: 'local',
+          ),
+        ).toList();
 
-      expect(messages, hasLength(3));
-      expect(messages[0].content, 'Hel');
-      expect(messages[1].content, 'Hello');
-      expect(messages[2].content, 'Hello world');
-      expect(messages[2].id, 'assistant-final');
-    });
+        expect(messages, hasLength(3));
+        expect(messages[0].content, 'Hel');
+        expect(messages[1].content, 'Hello');
+        expect(messages[2].content, 'Hello world');
+        expect(messages[2].id, 'assistant-final');
+      },
+    );
 
     test('maps repository exceptions to stream errors', () async {
       final repository = _FakeChatRepository(
@@ -53,7 +56,8 @@ void main() {
           required String sessionId,
           required String userPrompt,
           String? systemPrompt,
-          List<ChatAttachment> attachments = const <ChatAttachment>[],
+          List<ChatAttachment> attachments =
+              const <ChatAttachment>[],
           void Function(String partialText)? onPartialResponse,
           void Function(String notice)? onRuntimeNotice,
         }) async {
@@ -91,7 +95,15 @@ class _FakeChatRepository implements ChatRepository {
   }) onSendMessage;
 
   @override
-  Future<void> clearSession(String sessionId) => Future<void>.value();
+  Future<void> clearSession(String sessionId) =>
+      Future<void>.value();
+
+  @override
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) =>
+      Future<int>.value(0);
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
@@ -109,7 +121,8 @@ class _FakeChatRepository implements ChatRepository {
     required String sessionId,
     required String userPrompt,
     String? systemPrompt,
-    List<ChatAttachment> attachments = const <ChatAttachment>[],
+    List<ChatAttachment> attachments =
+        const <ChatAttachment>[],
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) {
