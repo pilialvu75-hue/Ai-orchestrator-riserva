@@ -266,7 +266,38 @@ class InferenceService {
         tokens = chunk.tokensGenerated;
         timestamp = chunk.timestamp;
       } else {
-        buffer.write(chunk.text);
+        /*
+         * Local runtimes may emit either:
+         *
+         *   1. delta chunks:
+         *        "Hello " -> "world"
+         *
+         *   2. cumulative snapshots:
+         *        "Hello " -> "Hello world"
+         *
+         * The previous implementation always appended non-final
+         * chunks. When a provider emitted a cumulative snapshot,
+         * that produced duplicated output such as:
+         *
+         *        "Hello worldHello world"
+         *
+         * Preserve delta semantics while replacing an incoming
+         * cumulative snapshot that already contains the complete
+         * buffer.
+         */
+        final currentText = buffer.toString();
+        final incomingText = chunk.text;
+
+        if (incomingText.isNotEmpty &&
+            currentText.isNotEmpty &&
+            incomingText.startsWith(currentText)) {
+          buffer
+            ..clear()
+            ..write(incomingText);
+        } else {
+          buffer.write(incomingText);
+        }
+
         model = chunk.model ?? model;
       }
     }
