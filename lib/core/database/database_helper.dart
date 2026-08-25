@@ -154,41 +154,59 @@ class DatabaseHelper {
 
   Future<int> insertProjectMemory(Map<String, dynamic> row) async {
     final db = await database;
-    return db.insert(AppConstants.tableProjectMemory, row,
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    return db.insert(
+      AppConstants.tableProjectMemory,
+      row,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Map<String, dynamic>>> getAllProjectMemories() async {
     final db = await database;
-    return db.query(AppConstants.tableProjectMemory,
-        orderBy: '${AppConstants.colTimestamp} DESC');
+    return db.query(
+      AppConstants.tableProjectMemory,
+      orderBy: '${AppConstants.colTimestamp} DESC',
+    );
   }
 
   Future<Map<String, dynamic>?> getProjectMemoryById(String id) async {
     final db = await database;
-    final results = await db.query(AppConstants.tableProjectMemory,
-        where: '${AppConstants.colId} = ?', whereArgs: [id], limit: 1);
+    final results = await db.query(
+      AppConstants.tableProjectMemory,
+      where: '${AppConstants.colId} = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
     return results.isEmpty ? null : results.first;
   }
 
   Future<Map<String, dynamic>?> getLatestProjectMemory() async {
     final db = await database;
-    final results = await db.query(AppConstants.tableProjectMemory,
-        orderBy: '${AppConstants.colTimestamp} DESC', limit: 1);
+    final results = await db.query(
+      AppConstants.tableProjectMemory,
+      orderBy: '${AppConstants.colTimestamp} DESC',
+      limit: 1,
+    );
     return results.isEmpty ? null : results.first;
   }
 
   Future<int> updateProjectMemory(Map<String, dynamic> row) async {
     final db = await database;
-    return db.update(AppConstants.tableProjectMemory, row,
-        where: '${AppConstants.colId} = ?',
-        whereArgs: [row[AppConstants.colId]]);
+    return db.update(
+      AppConstants.tableProjectMemory,
+      row,
+      where: '${AppConstants.colId} = ?',
+      whereArgs: [row[AppConstants.colId]],
+    );
   }
 
   Future<int> deleteProjectMemory(String id) async {
     final db = await database;
-    return db.delete(AppConstants.tableProjectMemory,
-        where: '${AppConstants.colId} = ?', whereArgs: [id]);
+    return db.delete(
+      AppConstants.tableProjectMemory,
+      where: '${AppConstants.colId} = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> deleteAllProjectMemories() async {
@@ -200,12 +218,17 @@ class DatabaseHelper {
 
   Future<void> insertChatMessage(Map<String, dynamic> row) async {
     final db = await database;
-    await db.insert(AppConstants.tableChatHistory, row,
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(
+      AppConstants.tableChatHistory,
+      row,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
-  Future<List<Map<String, dynamic>>> getChatMessages(String sessionId,
-      {int? limit}) async {
+  Future<List<Map<String, dynamic>>> getChatMessages(
+    String sessionId, {
+    int? limit,
+  }) async {
     final db = await database;
     return db.query(
       AppConstants.tableChatHistory,
@@ -218,8 +241,9 @@ class DatabaseHelper {
 
   Future<int> countChatMessages() async {
     final db = await database;
-    final result = await db
-        .rawQuery('SELECT COUNT(*) as c FROM ${AppConstants.tableChatHistory}');
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as c FROM ${AppConstants.tableChatHistory}',
+    );
     return (result.first['c'] as int?) ?? 0;
   }
 
@@ -236,15 +260,23 @@ class DatabaseHelper {
     final db = await database;
     final count = await countChatMessages();
     if (count <= maxRows) return 0;
+
     final excess = count - maxRows;
+
     final result = await db.rawQuery(
       'SELECT ${AppConstants.colId} FROM ${AppConstants.tableChatHistory} '
       'ORDER BY ${AppConstants.colTimestamp} ASC LIMIT ?',
       [excess],
     );
+
     if (result.isEmpty) return 0;
-    final ids = result.map((r) => r[AppConstants.colId] as String).toList();
+
+    final ids = result
+        .map((r) => r[AppConstants.colId] as String)
+        .toList();
+
     final placeholders = List.filled(ids.length, '?').join(',');
+
     return db.delete(
       AppConstants.tableChatHistory,
       where: '${AppConstants.colId} IN ($placeholders)',
@@ -252,19 +284,113 @@ class DatabaseHelper {
     );
   }
 
+  /// Removes a conversation branch starting at [messageId].
+  ///
+  /// The target message and every message after it in the same session
+  /// are removed atomically from:
+  ///
+  /// 1. chat_history
+  /// 2. document_chunks semantic memory
+  ///
+  /// Messages before [messageId] are preserved.
+  ///
+  /// The ordering used here is the same logical ordering used by the chat
+  /// history: timestamp ASC, with message id as a deterministic tie-breaker.
+  ///
+  /// Returns the number of chat messages removed.
+  Future<int> deleteChatMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) async {
+    final db = await database;
+
+    return db.transaction<int>((txn) async {
+      final rows = await txn.query(
+        AppConstants.tableChatHistory,
+        columns: [
+          AppConstants.colId,
+          AppConstants.colTimestamp,
+        ],
+        where: '${AppConstants.colSessionId} = ?',
+        whereArgs: [sessionId],
+        orderBy:
+            '${AppConstants.colTimestamp} ASC, ${AppConstants.colId} ASC',
+      );
+
+      if (rows.isEmpty) {
+        return 0;
+      }
+
+      final targetIndex = rows.indexWhere(
+        (row) => row[AppConstants.colId] == messageId,
+      );
+
+      if (targetIndex < 0) {
+        return 0;
+      }
+
+      final idsToDelete = rows
+          .skip(targetIndex)
+          .map((row) => row[AppConstants.colId] as String)
+          .toList(growable: false);
+
+      if (idsToDelete.isEmpty) {
+        return 0;
+      }
+
+      final placeholders = List.filled(idsToDelete.length, '?').join(',');
+
+      // The semantic memory uses:
+      //
+      // documentId   = chat_memory:<sessionId>
+      // documentPath = chat://<sessionId>/<messageId>
+      //
+      // Remove only the vectors belonging to the branch being edited.
+      final workspaceId = 'chat_memory:$sessionId';
+
+      final documentPaths = idsToDelete
+          .map((id) => 'chat://$sessionId/$id')
+          .toList(growable: false);
+
+      final documentPathPlaceholders =
+          List.filled(documentPaths.length, '?').join(',');
+
+      await txn.delete(
+        AppConstants.tableDocumentChunks,
+        where:
+            '${AppConstants.colDocumentId} = ? AND '
+            '${AppConstants.colDocumentPath} IN ($documentPathPlaceholders)',
+        whereArgs: [
+          workspaceId,
+          ...documentPaths,
+        ],
+      );
+
+      final rowsDeleted = await txn.delete(
+        AppConstants.tableChatHistory,
+        where: '${AppConstants.colId} IN ($placeholders)',
+        whereArgs: idsToDelete,
+      );
+
+      return rowsDeleted;
+    });
+  }
+
   Future<int> deleteChatSession(String sessionId) async {
     final db = await database;
-    
-    // Transazione atomica per eliminare sia i vettori matematici sia la cronologia messaggi
+
+    // Transazione atomica per eliminare sia i vettori matematici
+    // sia la cronologia messaggi.
     return await db.transaction<int>((txn) async {
-      // 1. Rimuove i vettori associati a questa sessione specifica da document_chunks
+      // 1. Rimuove i vettori associati a questa sessione specifica
+      //    da document_chunks.
       await txn.delete(
         AppConstants.tableDocumentChunks,
         where: '${AppConstants.colDocumentId} = ?',
         whereArgs: [sessionId],
       );
 
-      // 2. Rimuove la cronologia dei messaggi di testo
+      // 2. Rimuove la cronologia dei messaggi di testo.
       final rowsDeleted = await txn.delete(
         AppConstants.tableChatHistory,
         where: '${AppConstants.colSessionId} = ?',
@@ -304,7 +430,9 @@ class DatabaseHelper {
     );
   }
 
-  Future<List<Map<String, dynamic>>> getAllDocumentChunks({int? limit}) async {
+  Future<List<Map<String, dynamic>>> getAllDocumentChunks({
+    int? limit,
+  }) async {
     final db = await database;
     return db.query(
       AppConstants.tableDocumentChunks,
@@ -319,7 +447,10 @@ class DatabaseHelper {
     final db = await database;
     await db.insert(
       AppConstants.tableUserPreferences,
-      {AppConstants.colPrefKey: key, AppConstants.colPrefValue: value},
+      {
+        AppConstants.colPrefKey: key,
+        AppConstants.colPrefValue: value,
+      },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -332,13 +463,18 @@ class DatabaseHelper {
       whereArgs: [key],
       limit: 1,
     );
+
     if (rows.isEmpty) return null;
+
     return rows.first[AppConstants.colPrefValue] as String?;
   }
 
   Future<Map<String, String>> getAllPreferences() async {
     final db = await database;
-    final rows = await db.query(AppConstants.tableUserPreferences);
+    final rows = await db.query(
+      AppConstants.tableUserPreferences,
+    );
+
     return {
       for (final r in rows)
         r[AppConstants.colPrefKey] as String:
@@ -357,7 +493,9 @@ class DatabaseHelper {
     );
   }
 
-  Future<List<Map<String, dynamic>>> getSyncChangesSince(String hlc) async {
+  Future<List<Map<String, dynamic>>> getSyncChangesSince(
+    String hlc,
+  ) async {
     final db = await database;
     return db.query(
       AppConstants.tableSyncChanges,
@@ -380,6 +518,7 @@ class DatabaseHelper {
       orderBy: '${AppConstants.colSyncHlc} DESC',
       limit: 1,
     );
+
     return rows.isEmpty ? null : rows.first;
   }
 
@@ -389,6 +528,7 @@ class DatabaseHelper {
       'SELECT MAX(${AppConstants.colSyncHlc}) AS max_hlc'
       ' FROM ${AppConstants.tableSyncChanges}',
     );
+
     return result.first['max_hlc'] as String?;
   }
 
@@ -397,6 +537,7 @@ class DatabaseHelper {
     final result = await db.rawQuery(
       'SELECT COUNT(*) AS c FROM ${AppConstants.tableSyncChanges}',
     );
+
     return (result.first['c'] as int?) ?? 0;
   }
 
