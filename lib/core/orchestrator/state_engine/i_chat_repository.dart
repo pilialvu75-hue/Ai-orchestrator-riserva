@@ -23,4 +23,13 @@ abstract class IChatRepository {
   });
 
   Future<void> clearSession(String sessionId);
+
+  /// Removes the selected message and every message after it
+  /// from the specified conversation session.
+  ///
+  /// Messages before [messageId] remain untouched.
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  );
 }
