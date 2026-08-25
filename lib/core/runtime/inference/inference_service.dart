@@ -12,7 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
-import 'package:ai_orchestrator/core/runtime/inference/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/tool_interceptor_transformer.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
