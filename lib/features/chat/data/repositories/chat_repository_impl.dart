@@ -69,7 +69,9 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               '[ENTRY_REENTRANCY_BLOCK] scope=chat_repository session=$sessionId hash=${hashCode.toRadixString(16)}',
             );
-            throw const ServerFailure('A response is already in progress for this session.');
+            throw const ServerFailure(
+              'A response is already in progress for this session.',
+            );
           }
           try {
             final attachmentsSnapshot =
@@ -90,7 +92,9 @@ class ChatRepositoryImpl implements ChatRepository {
               attachments: attachmentsSnapshot,
             );
             await localDataSource.insertMessage(userMsg);
-            _log('message persistence session=$sessionId role=user id=${userMsg.id}');
+            _log(
+              'message persistence session=$sessionId role=user id=${userMsg.id}',
+            );
             await conversationMemoryService.storeMessageEmbedding(
               sessionId: sessionId,
               messageId: userMsg.id,
@@ -107,7 +111,8 @@ class ChatRepositoryImpl implements ChatRepository {
               return userMsg;
             }
 
-            final sessionMessages = await localDataSource.getMessages(sessionId);
+            final sessionMessages =
+                await localDataSource.getMessages(sessionId);
             final context = await conversationMemoryService.buildContext(
               sessionId: sessionId,
               messages: sessionMessages,
@@ -128,7 +133,8 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
             );
-            final previousSubscription = _activeInferenceSubscriptions[sessionId];
+            final previousSubscription =
+                _activeInferenceSubscriptions[sessionId];
             if (previousSubscription != null) {
               _log(
                 '[DUPLICATE_SUBSCRIPTION] session=$sessionId action=cancel_previous',
@@ -146,6 +152,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
+
             // Ensures listener setup failures still release the abort signal.
             try {
               _log(
@@ -154,8 +161,11 @@ class ChatRepositoryImpl implements ChatRepository {
               final subscription = stream.listen(
                 (chunk) {
                   try {
-                    if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
-                      _log('[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"');
+                    if (chunk.runtimeNotice != null &&
+                        chunk.runtimeNotice!.trim().isNotEmpty) {
+                      _log(
+                        '[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"',
+                      );
                       onRuntimeNotice?.call(chunk.runtimeNotice!);
                       return;
                     }
@@ -176,7 +186,8 @@ class ChatRepositoryImpl implements ChatRepository {
                         streamedResponse.clear();
                         streamedResponse.write(merged);
                       }
-                      if (chunk.model != null && chunk.model!.trim().isNotEmpty) {
+                      if (chunk.model != null &&
+                          chunk.model!.trim().isNotEmpty) {
                         responseProvider = chunk.model!;
                       }
                       _log(
@@ -217,7 +228,9 @@ class ChatRepositoryImpl implements ChatRepository {
                   abortSignal.future.then((_) => true),
                 ]);
                 if (wasAborted) {
-                  _log('[CHAT_PIPELINE] action=stream_aborted session=$sessionId');
+                  _log(
+                    '[CHAT_PIPELINE] action=stream_aborted session=$sessionId',
+                  );
                   return userMsg;
                 }
               } finally {
@@ -233,7 +246,9 @@ class ChatRepositoryImpl implements ChatRepository {
 
             final responseText = streamedResponse.toString().trim();
             if (responseText.isEmpty) {
-              throw const ServerFailure('Inference returned an empty response.');
+              throw const ServerFailure(
+                'Inference returned an empty response.',
+              );
             }
 
             final assistantMsg = ChatMessageModel(
@@ -252,14 +267,18 @@ class ChatRepositoryImpl implements ChatRepository {
               content: assistantMsg.content,
               timestamp: assistantMsg.timestamp,
             );
-            _log('[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}');
+            _log(
+              '[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}',
+            );
             return assistantMsg;
           } finally {
             _activeSendSessions.remove(sessionId);
           }
         },
         onError: (error, stackTrace) {
-          _log('[ASYNC_FATAL] scope=chat_repository.send_message session=$sessionId error=$error stack=$stackTrace');
+          _log(
+            '[ASYNC_FATAL] scope=chat_repository.send_message session=$sessionId error=$error stack=$stackTrace',
+          );
         },
       );
     } on DatabaseException catch (e) {
@@ -303,23 +322,47 @@ class ChatRepositoryImpl implements ChatRepository {
       }
       await _cancelActiveSubscription(sessionId);
       _activeSendSessions.remove(sessionId);
+
       Object? error;
       StackTrace? stackTrace;
+
       try {
         await localDataSource.clearSession(sessionId);
       } catch (e, st) {
         error ??= e;
         stackTrace ??= st;
       }
+
       try {
         await conversationMemoryService.clearSessionMemory(sessionId);
       } catch (e, st) {
         error ??= e;
         stackTrace ??= st;
       }
+
       if (error != null) {
-        Error.throwWithStackTrace(error, stackTrace ?? StackTrace.current);
+        Error.throwWithStackTrace(
+          error,
+          stackTrace ?? StackTrace.current,
+        );
       }
+    } on DatabaseException catch (e) {
+      throw DatabaseFailure(e.message);
+    } catch (e) {
+      throw DatabaseFailure(e.toString());
+    }
+  }
+
+  @override
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) async {
+    try {
+      return await localDataSource.deleteMessagesFrom(
+        sessionId,
+        messageId,
+      );
     } on DatabaseException catch (e) {
       throw DatabaseFailure(e.message);
     } catch (e) {
@@ -337,11 +380,14 @@ class ChatRepositoryImpl implements ChatRepository {
     String? stage;
     String? message;
     String? details;
+
     for (final part in parts) {
       final idx = part.indexOf('=');
       if (idx <= 0) continue;
+
       final key = part.substring(0, idx).trim().toLowerCase();
       final value = part.substring(idx + 1).trim();
+
       if (value.isEmpty) continue;
       if (key == 'stage') stage = value;
       if (key == 'message') message = value;
@@ -350,12 +396,15 @@ class ChatRepositoryImpl implements ChatRepository {
 
     final buffer = StringBuffer();
     buffer.write(message ?? 'Local runtime failed.');
+
     if (details != null && details.isNotEmpty) {
       buffer.write('\nDetails: $details');
     }
+
     if (stage != null && stage.isNotEmpty) {
       buffer.write('\nStage: $stage');
     }
+
     return buffer.toString();
   }
 
@@ -364,7 +413,9 @@ class ChatRepositoryImpl implements ChatRepository {
   }
 
   Future<void> _cancelActiveSubscription(String sessionId) async {
-    final activeSubscription = _activeInferenceSubscriptions.remove(sessionId);
+    final activeSubscription =
+        _activeInferenceSubscriptions.remove(sessionId);
+
     if (activeSubscription != null) {
       await activeSubscription.cancel();
     }
