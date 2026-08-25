@@ -16,7 +16,8 @@ void main() {
             required String sessionId,
             required String userPrompt,
             String? systemPrompt,
-            List<ChatAttachment> attachments = const <ChatAttachment>[],
+            List<ChatAttachment> attachments =
+                const <ChatAttachment>[],
             void Function(String partialText)? onPartialResponse,
             void Function(String notice)? onRuntimeNotice,
           }) async {
@@ -52,9 +53,11 @@ void main() {
           },
         );
 
-        final engine = OrchestratorStateEngine(chatRepository: repository);
+        final engine =
+            OrchestratorStateEngine(chatRepository: repository);
         final emittedStates = <ChatState>[];
-        final subscription = engine.stream.listen(emittedStates.add);
+        final subscription =
+            engine.stream.listen(emittedStates.add);
 
         engine.add(
           const SendMessageEvent(
@@ -71,18 +74,31 @@ void main() {
           ),
         );
 
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-
-        final sendingStates = emittedStates.whereType<ChatSending>().toList();
-        final sendingStateWithNotice = sendingStates.lastWhere(
-          (state) => state.runtimeMessage == 'runtime still processing',
+        await Future<void>.delayed(
+          const Duration(milliseconds: 50),
         );
-        final assistantMessages = sendingStateWithNotice.messages
-            .where((message) => message.role == 'assistant')
-            .toList();
+
+        final sendingStates =
+            emittedStates.whereType<ChatSending>().toList();
+
+        final sendingStateWithNotice =
+            sendingStates.lastWhere(
+          (state) =>
+              state.runtimeMessage == 'runtime still processing',
+        );
+
+        final assistantMessages =
+            sendingStateWithNotice.messages
+                .where(
+                  (message) => message.role == 'assistant',
+                )
+                .toList();
 
         expect(assistantMessages, hasLength(1));
-        expect(assistantMessages.single.content, 'partial vision response');
+        expect(
+          assistantMessages.single.content,
+          'partial vision response',
+        );
 
         await subscription.cancel();
         await engine.close();
@@ -105,10 +121,19 @@ class _FakeChatRepository implements IChatRepository {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) onSendMessage;
-  final Future<List<ChatMessage>> Function(String sessionId) onGetMessages;
+
+  final Future<List<ChatMessage>> Function(String sessionId)
+      onGetMessages;
 
   @override
   Future<void> clearSession(String sessionId) async {}
+
+  @override
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) async =>
+      0;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
@@ -126,7 +151,8 @@ class _FakeChatRepository implements IChatRepository {
     required String sessionId,
     required String userPrompt,
     String? systemPrompt,
-    List<ChatAttachment> attachments = const <ChatAttachment>[],
+    List<ChatAttachment> attachments =
+        const <ChatAttachment>[],
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) {
