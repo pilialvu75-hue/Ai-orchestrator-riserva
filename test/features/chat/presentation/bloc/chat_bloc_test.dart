@@ -11,88 +11,112 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('ChatBloc', () {
-    test('emits incremental assistant updates before loading persisted messages',
-        () async {
-      final persistedMessages = <ChatMessage>[];
-      final repository = _FakeChatRepository(
-        onGetMessages: (_) async => List<ChatMessage>.from(persistedMessages),
-        onSendMessage: ({
-          required String sessionId,
-          required String userPrompt,
-          String? systemPrompt,
-          List<ChatAttachment> attachments = const <ChatAttachment>[],
-          void Function(String partialText)? onPartialResponse,
-          void Function(String notice)? onRuntimeNotice,
-        }) async {
-          onPartialResponse?.call('Par');
-          onPartialResponse?.call('Partial');
-          final finalMessage = ChatMessage(
-            id: 'assistant-final',
-            sessionId: sessionId,
-            role: 'assistant',
-            content: 'Partial response',
-            timestamp: 2,
-            provider: 'local',
-          );
-          persistedMessages
-            ..add(
-              ChatMessage(
-                id: 'user-1',
-                sessionId: sessionId,
-                role: 'user',
-                content: userPrompt,
-                timestamp: 1,
-                attachments: attachments,
-              ),
-            )
-            ..add(finalMessage);
-          return finalMessage;
-        },
-      );
-      final bloc = ChatBloc(
-        streamChatMessage: StreamChatMessage(repository),
-        loadChatMessages: LoadChatMessages(repository),
-        pruneChatHistory: PruneChatHistory(repository),
-      );
+    test(
+      'emits incremental assistant updates before loading persisted messages',
+      () async {
+        final persistedMessages = <ChatMessage>[];
 
-      final emittedStates = <ChatState>[];
-      final subscription = bloc.stream.listen(emittedStates.add);
+        final repository = _FakeChatRepository(
+          onGetMessages: (_) async =>
+              List<ChatMessage>.from(persistedMessages),
+          onSendMessage: ({
+            required String sessionId,
+            required String userPrompt,
+            String? systemPrompt,
+            List<ChatAttachment> attachments =
+                const <ChatAttachment>[],
+            void Function(String partialText)? onPartialResponse,
+            void Function(String notice)? onRuntimeNotice,
+          }) async {
+            onPartialResponse?.call('Par');
+            onPartialResponse?.call('Partial');
 
-      bloc.add(const SendMessageEvent(
-        sessionId: 'session-1',
-        userPrompt: 'hello',
-      ));
+            final finalMessage = ChatMessage(
+              id: 'assistant-final',
+              sessionId: sessionId,
+              role: 'assistant',
+              content: 'Partial response',
+              timestamp: 2,
+              provider: 'local',
+            );
 
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+            persistedMessages
+              ..add(
+                ChatMessage(
+                  id: 'user-1',
+                  sessionId: sessionId,
+                  role: 'user',
+                  content: userPrompt,
+                  timestamp: 1,
+                  attachments: attachments,
+                ),
+              )
+              ..add(finalMessage);
 
-      await subscription.cancel();
-      await bloc.close();
+            return finalMessage;
+          },
+        );
 
-      final sendingStates = emittedStates.whereType<ChatSending>().toList();
-      expect(sendingStates, isNotEmpty);
-      expect(
-        sendingStates.any(
-          (state) => state.messages.any(
-            (message) =>
-                message.role == 'assistant' && message.content == 'Par',
+        final bloc = ChatBloc(
+          streamChatMessage: StreamChatMessage(repository),
+          loadChatMessages: LoadChatMessages(repository),
+          pruneChatHistory: PruneChatHistory(repository),
+        );
+
+        final emittedStates = <ChatState>[];
+        final subscription = bloc.stream.listen(emittedStates.add);
+
+        bloc.add(
+          const SendMessageEvent(
+            sessionId: 'session-1',
+            userPrompt: 'hello',
           ),
-        ),
-        isTrue,
-      );
-      expect(
-        sendingStates.any(
-          (state) => state.messages.any(
-            (message) =>
-                message.role == 'assistant' && message.content == 'Partial',
-          ),
-        ),
-        isTrue,
-      );
+        );
 
-      final loadedState = emittedStates.whereType<ChatLoaded>().last;
-      expect(loadedState.messages, hasLength(2));
-      expect(loadedState.messages.last.content, 'Partial response');
-    });
+        await Future<void>.delayed(
+          const Duration(milliseconds: 50),
+        );
+
+        await subscription.cancel();
+        await bloc.close();
+
+        final sendingStates =
+            emittedStates.whereType<ChatSending>().toList();
+
+        expect(sendingStates, isNotEmpty);
+
+        expect(
+          sendingStates.any(
+            (state) => state.messages.any(
+              (message) =>
+                  message.role == 'assistant' &&
+                  message.content == 'Par',
+            ),
+          ),
+          isTrue,
+        );
+
+        expect(
+          sendingStates.any(
+            (state) => state.messages.any(
+              (message) =>
+                  message.role == 'assistant' &&
+                  message.content == 'Partial',
+            ),
+          ),
+          isTrue,
+        );
+
+        final loadedState =
+            emittedStates.whereType<ChatLoaded>().last;
+
+        expect(loadedState.messages, hasLength(2));
+        expect(
+          loadedState.messages.last.content,
+          'Partial response',
+        );
+      },
+    );
   });
 }
 
@@ -110,10 +134,19 @@ class _FakeChatRepository implements ChatRepository {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) onSendMessage;
-  final Future<List<ChatMessage>> Function(String sessionId) onGetMessages;
+
+  final Future<List<ChatMessage>> Function(String sessionId)
+      onGetMessages;
 
   @override
   Future<void> clearSession(String sessionId) async {}
+
+  @override
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) async =>
+      0;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
@@ -131,7 +164,8 @@ class _FakeChatRepository implements ChatRepository {
     required String sessionId,
     required String userPrompt,
     String? systemPrompt,
-    List<ChatAttachment> attachments = const <ChatAttachment>[],
+    List<ChatAttachment> attachments =
+        const <ChatAttachment>[],
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) {
