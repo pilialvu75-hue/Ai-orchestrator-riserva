@@ -9,6 +9,15 @@ abstract class ChatLocalDataSource {
   Future<int> countMessages();
   Future<int> deleteExcessMessages(int max);
   Future<int> clearSession(String sessionId);
+
+  /// Removes the selected message and every message after it
+  /// from the specified conversation session.
+  ///
+  /// Messages before [messageId] remain untouched.
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  );
 }
 
 class ChatLocalDataSourceImpl implements ChatLocalDataSource {
@@ -68,6 +77,23 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
       return databaseHelper.deleteChatSession(sessionId);
     } catch (e) {
       throw DatabaseException('Failed to clear session: $e');
+    }
+  }
+
+  @override
+  Future<int> deleteMessagesFrom(
+    String sessionId,
+    String messageId,
+  ) async {
+    try {
+      return databaseHelper.deleteChatMessagesFrom(
+        sessionId,
+        messageId,
+      );
+    } catch (e) {
+      throw DatabaseException(
+        'Failed to delete messages from selected message: $e',
+      );
     }
   }
 }
