@@ -12,7 +12,8 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
-import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/tool_interceptor_transformer.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:flutter/foundation.dart';
@@ -23,6 +24,9 @@ class InferenceService {
   static const Duration _streamIdleTimeout = Duration(seconds: 75);
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
+
+  static const String _searchNoticePrefix = 'search:';
+
   bool _runtimeLookupInProgress = false;
 
   InferenceService({
@@ -53,95 +57,198 @@ class InferenceService {
 
   TokenStream stream(InferenceRequest request) async* {
     final isolatedRequest = request.copyWith();
+
     _log('[INFERENCE_BEGIN] session=${isolatedRequest.sessionId}');
-    _log('[FORENSIC_INFERENCE_SERVICE_ENTRY] session=${isolatedRequest.sessionId} prompt_chars=${isolatedRequest.prompt.length} provider=${_runtimeProvider.runtimeType}');
+    _log(
+      '[FORENSIC_INFERENCE_SERVICE_ENTRY] '
+      'session=${isolatedRequest.sessionId} '
+      'prompt_chars=${isolatedRequest.prompt.length} '
+      'provider=${_runtimeProvider.runtimeType}',
+    );
     _log('[ORCHESTRATOR_BEGIN] session=${isolatedRequest.sessionId}');
     _log(
-      '[RUNTIME_PATH] stream_start session=${isolatedRequest.sessionId} provider=${_runtimeProvider.runtimeType}',
+      '[RUNTIME_PATH] '
+      'stream_start session=${isolatedRequest.sessionId} '
+      'provider=${_runtimeProvider.runtimeType}',
     );
+
     final promptHash = _promptHash(isolatedRequest);
+
     _log(
-      'prompt creation session=${isolatedRequest.sessionId} prompt_hash=$promptHash prompt_chars=${isolatedRequest.prompt.length} '
-      'context_turns=${isolatedRequest.context.length} offline=${isolatedRequest.isOffline}',
+      'prompt creation '
+      'session=${isolatedRequest.sessionId} '
+      'prompt_hash=$promptHash '
+      'prompt_chars=${isolatedRequest.prompt.length} '
+      'context_turns=${isolatedRequest.context.length} '
+      'offline=${isolatedRequest.isOffline}',
     );
-    _log('[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=runtime_mode_load');
-    
+
+    _log(
+      '[RUNTIME_LOOKUP] '
+      'session=${isolatedRequest.sessionId} '
+      'stage=runtime_mode_load',
+    );
+
     if (_runtimeLookupInProgress) {
-      _log('[RUNTIME_INIT_RECURSION] session=${isolatedRequest.sessionId} scope=inference_service.runtime_lookup');
+      _log(
+        '[RUNTIME_INIT_RECURSION] '
+        'session=${isolatedRequest.sessionId} '
+        'scope=inference_service.runtime_lookup',
+      );
     }
-    
+
     _runtimeLookupInProgress = true;
-    final session = _sessionManager.startSession(isolatedRequest.sessionId);
-    _log('[INFERENCE_SESSION_CREATED] session=${isolatedRequest.sessionId}');
-    
+
+    final session =
+        _sessionManager.startSession(isolatedRequest.sessionId);
+
+    _log(
+      '[INFERENCE_SESSION_CREATED] '
+      'session=${isolatedRequest.sessionId}',
+    );
+
     try {
       final runtimeMode = await _loadRuntimeMode();
-      _log('[INFERENCE_RUNTIME_SELECTED] session=${isolatedRequest.sessionId} runtime=${runtimeMode.name}');
+
       _log(
-       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} mode=${runtimeMode.name} provider=${_runtimeProvider.runtimeType}',
-      );
-      _log(
-       '[RUNTIME_PATH] routing session=${isolatedRequest.sessionId} mode=${runtimeMode.name} '
-       'provider=${_runtimeProvider.runtimeType} prompt_hash=$promptHash',
+        '[INFERENCE_RUNTIME_SELECTED] '
+        'session=${isolatedRequest.sessionId} '
+        'runtime=${runtimeMode.name}',
       );
 
-      final selectedModel = await _resolveSelectedModelForLocalRuntime();
-      _log('[INFERENCE_MODEL] session=${isolatedRequest.sessionId} model=${selectedModel?.effectiveRuntimeModelId ?? 'none'}');
-      final localRequest = _buildLocalRequest(isolatedRequest, selectedModel);
       _log(
-       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=provider_lookup local_provider=${_runtimeProvider.runtimeType} cloud_provider=${_cloudRuntimeProvider.runtimeType}',
+        '[RUNTIME_LOOKUP] '
+        'session=${isolatedRequest.sessionId} '
+        'mode=${runtimeMode.name} '
+        'provider=${_runtimeProvider.runtimeType}',
       );
+
       _log(
-       '[MODEL_LOAD] selection session=${isolatedRequest.sessionId} selected_model=${selectedModel?.id ?? 'none'} '
-       'local_runtime_connected=${localRequest != null} path=${selectedModel?.localPath ?? 'none'}',
+        '[RUNTIME_PATH] '
+        'routing session=${isolatedRequest.sessionId} '
+        'mode=${runtimeMode.name} '
+        'provider=${_runtimeProvider.runtimeType} '
+        'prompt_hash=$promptHash',
       );
+
+      final selectedModel =
+          await _resolveSelectedModelForLocalRuntime();
+
       _log(
-       '[RUNTIME_LOOKUP] session=${isolatedRequest.sessionId} stage=request_construction local_request=${localRequest != null}',
+        '[INFERENCE_MODEL] '
+        'session=${isolatedRequest.sessionId} '
+        'model=${selectedModel?.effectiveRuntimeModelId ?? 'none'}',
       );
+
+      final localRequest =
+          _buildLocalRequest(isolatedRequest, selectedModel);
+
       _log(
-       '[INFERENCE_STREAM_BEGIN] session=${isolatedRequest.sessionId} mode=${runtimeMode.name}',
+        '[RUNTIME_LOOKUP] '
+        'session=${isolatedRequest.sessionId} '
+        'stage=provider_lookup '
+        'local_provider=${_runtimeProvider.runtimeType} '
+        'cloud_provider=${_cloudRuntimeProvider.runtimeType}',
+      );
+
+      _log(
+        '[MODEL_LOAD] '
+        'selection session=${isolatedRequest.sessionId} '
+        'selected_model=${selectedModel?.id ?? 'none'} '
+        'local_runtime_connected=${localRequest != null} '
+        'path=${selectedModel?.localPath ?? 'none'}',
+      );
+
+      _log(
+        '[RUNTIME_LOOKUP] '
+        'session=${isolatedRequest.sessionId} '
+        'stage=request_construction '
+        'local_request=${localRequest != null}',
+      );
+
+      _log(
+        '[INFERENCE_STREAM_BEGIN] '
+        'session=${isolatedRequest.sessionId} '
+        'mode=${runtimeMode.name}',
       );
 
       _runtimeLookupInProgress = false;
 
       yield* _streamWithRetryAndGuards(
-       runtimeMode: runtimeMode,
-       cloudRequest: isolatedRequest,
-       localRequest: localRequest,
-       cancellationToken: session.cancellationToken,
+        runtimeMode: runtimeMode,
+        cloudRequest: isolatedRequest,
+        localRequest: localRequest,
+        cancellationToken: session.cancellationToken,
       );
     } catch (error, stackTrace) {
-      _log('[INFERENCE_ERROR] session=${isolatedRequest.sessionId} error=$error');
-      _log('[ASYNC_FATAL] scope=inference_service.stream session=${isolatedRequest.sessionId} error=$error stack=$stackTrace');
+      _log(
+        '[INFERENCE_ERROR] '
+        'session=${isolatedRequest.sessionId} '
+        'error=$error',
+      );
+
+      _log(
+        '[ASYNC_FATAL] '
+        'scope=inference_service.stream '
+        'session=${isolatedRequest.sessionId} '
+        'error=$error '
+        'stack=$stackTrace',
+      );
+
       yield InferenceResponse.error(
-       'Inference service failed before runtime stream start: $error',
+        'Inference service failed before runtime stream start: $error',
       );
     } finally {
       _runtimeLookupInProgress = false;
+
       _sessionManager.complete(session);
-      _log('[INFERENCE_FINISHED] session=${isolatedRequest.sessionId}');
-      _log('async listener cleanup session=${isolatedRequest.sessionId}');
-      _log('stream end session=${isolatedRequest.sessionId}');
-      _log('[ORCHESTRATOR_END] session=${isolatedRequest.sessionId}');
+
+      _log(
+        '[INFERENCE_FINISHED] '
+        'session=${isolatedRequest.sessionId}',
+      );
+
+      _log(
+        'async listener cleanup '
+        'session=${isolatedRequest.sessionId}',
+      );
+
+      _log(
+        'stream end '
+        'session=${isolatedRequest.sessionId}',
+      );
+
+      _log(
+        '[ORCHESTRATOR_END] '
+        'session=${isolatedRequest.sessionId}',
+      );
     }
   }
 
   Future<InferenceResponse> infer(InferenceRequest request) async {
     final buffer = StringBuffer();
+
     String model = InferenceConstants.localModelName;
     int tokens = 0;
     int timestamp = DateTime.now().millisecondsSinceEpoch;
 
     await for (final chunk in stream(request)) {
       _log(
-        'infer chunk session=${request.sessionId} isFinal=${chunk.isFinal} isError=${chunk.isError} '
-        'text_len=${chunk.text.length} tokens=${chunk.tokensGenerated} notice=${chunk.runtimeNotice != null}',
+        'infer chunk '
+        'session=${request.sessionId} '
+        'isFinal=${chunk.isFinal} '
+        'isError=${chunk.isError} '
+        'text_len=${chunk.text.length} '
+        'tokens=${chunk.tokensGenerated} '
+        'notice=${chunk.runtimeNotice != null}',
       );
+
       if (chunk.isError) {
         return InferenceResponse.error(
           chunk.errorMessage ?? 'Inference failed.',
         );
       }
+
       if (chunk.isFinal) {
         if (chunk.text.isNotEmpty) {
           final merged = mergeStreamedText(
@@ -149,9 +256,12 @@ class InferenceService {
             incomingText: chunk.text,
             isFinalChunk: true,
           );
-          buffer.clear();
-          buffer.write(merged);
+
+          buffer
+            ..clear()
+            ..write(merged);
         }
+
         model = chunk.model ?? model;
         tokens = chunk.tokensGenerated;
         timestamp = chunk.timestamp;
@@ -172,96 +282,135 @@ class InferenceService {
 
   Future<AiModel?> _resolveSelectedModelForLocalRuntime() async {
     AiModel? selected;
+
     try {
       selected = await _loadSelectedModel();
     } on Exception catch (e) {
       _log(
-        '[VALIDATION] reason=model_selection_exception detail=$e – falling back to cloud',
+        '[VALIDATION] '
+        'reason=model_selection_exception '
+        'detail=$e – falling back to cloud',
       );
+
       return null;
     }
 
     if (selected == null) {
-      _log('[VALIDATION] reason=selected_null – no model has been chosen');
+      _log(
+        '[VALIDATION] '
+        'reason=selected_null – no model has been chosen',
+      );
+
       return null;
     }
 
     if (!selected.isDownloaded) {
       _log(
-        '[VALIDATION] reason=model_not_downloaded'
-        ' modelId=${selected.id} displayName="${selected.displayName}"',
+        '[VALIDATION] '
+        'reason=model_not_downloaded '
+        'modelId=${selected.id} '
+        'displayName="${selected.displayName}"',
       );
+
       return null;
     }
 
-    if (selected.localPath == null || selected.localPath!.trim().isEmpty) {
+    if (selected.localPath == null ||
+        selected.localPath!.trim().isEmpty) {
       _log(
-        '[VALIDATION] reason=localPath_missing'
-        ' modelId=${selected.id} localPath=${selected.localPath}',
+        '[VALIDATION] '
+        'reason=localPath_missing '
+        'modelId=${selected.id} '
+        'localPath=${selected.localPath}',
       );
+
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.invalidModel) {
+    if (selected.validationStatus ==
+        ModelValidationStatus.invalidModel) {
       _log(
-        '[VALIDATION] reason=invalidModel'
-        ' modelId=${selected.id} path=${selected.localPath}',
+        '[VALIDATION] '
+        'reason=invalidModel '
+        'modelId=${selected.id} '
+        'path=${selected.localPath}',
       );
+
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.missingFile) {
+    if (selected.validationStatus ==
+        ModelValidationStatus.missingFile) {
       _log(
-        '[VALIDATION] reason=missingFile'
-        ' modelId=${selected.id} path=${selected.localPath}',
+        '[VALIDATION] '
+        'reason=missingFile '
+        'modelId=${selected.id} '
+        'path=${selected.localPath}',
       );
+
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.notDownloaded) {
+    if (selected.validationStatus ==
+        ModelValidationStatus.notDownloaded) {
       _log(
-        '[VALIDATION] reason=notDownloaded'
-        ' modelId=${selected.id}',
+        '[VALIDATION] '
+        'reason=notDownloaded '
+        'modelId=${selected.id}',
       );
+
       return null;
     }
 
-    if (selected.validationStatus == ModelValidationStatus.downloading) {
+    if (selected.validationStatus ==
+        ModelValidationStatus.downloading) {
       _log(
-        '[VALIDATION] reason=downloading – model transfer in progress'
-        ' modelId=${selected.id}',
+        '[VALIDATION] '
+        'reason=downloading – model transfer in progress '
+        'modelId=${selected.id}',
       );
+
       return null;
     }
 
     if (!_runtimeProvider.supportsModel(selected)) {
       final effectiveId = selected.effectiveRuntimeModelId;
       final vs = selected.validationStatus;
+
       String rejectionReason;
+
       if (vs != ModelValidationStatus.validatedOk) {
-        rejectionReason = 'unsupported_quantization_or_validation_status'
-            ' (validationStatus=$vs)';
+        rejectionReason =
+            'unsupported_quantization_or_validation_status '
+            '(validationStatus=$vs)';
       } else {
         rejectionReason =
-            'runtime_provider_incompatibility – modelId="$effectiveId"'
-            ' not in validated set; possible unsupported architecture'
-            ' or tokenizer mismatch';
+            'runtime_provider_incompatibility – '
+            'modelId="$effectiveId" '
+            'not in validated set; possible unsupported architecture '
+            'or tokenizer mismatch';
       }
+
       _log(
-        '[VALIDATION] reason=$rejectionReason'
-        ' modelId=${selected.id}'
-        ' effectiveRuntimeModelId=$effectiveId'
-        ' validationStatus=$vs'
-        ' path=${selected.localPath}',
+        '[VALIDATION] '
+        'reason=$rejectionReason '
+        'modelId=${selected.id} '
+        'effectiveRuntimeModelId=$effectiveId '
+        'validationStatus=$vs '
+        'path=${selected.localPath}',
       );
+
       return null;
     }
 
     _log(
-      '[VALIDATION] status=ok modelId=${selected.id}'
-      ' effectiveRuntimeModelId=${selected.effectiveRuntimeModelId}'
-      ' path=${selected.localPath}',
+      '[VALIDATION] '
+      'status=ok '
+      'modelId=${selected.id} '
+      'effectiveRuntimeModelId=${selected.effectiveRuntimeModelId} '
+      'path=${selected.localPath}',
     );
+
     return selected;
   }
 
@@ -271,31 +420,43 @@ class InferenceService {
   ) {
     if (selectedModel == null) {
       _log(
-        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId}'
-        ' reason=selected_model_unavailable state=model_not_selected',
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] '
+        'session=${request.sessionId} '
+        'reason=selected_model_unavailable '
+        'state=model_not_selected',
       );
+
       return null;
     }
+
     if (selectedModel.localPath == null) {
       _log(
-        '[PRE_STREAM_LOCAL_REQUEST_SKIP] session=${request.sessionId}'
-        ' reason=selected_model_missing_local_path modelId=${selectedModel.id}',
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] '
+        'session=${request.sessionId} '
+        'reason=selected_model_missing_local_path '
+        'modelId=${selectedModel.id}',
       );
+
       return null;
     }
 
-    final effectiveModelId = selectedModel.effectiveRuntimeModelId;
+    final effectiveModelId =
+        selectedModel.effectiveRuntimeModelId;
 
     _log(
-      '[PRE_STREAM_LOCAL_REQUEST_READY] session=${request.sessionId}'
-      ' modelId=$effectiveModelId modelPath=${selectedModel.localPath}',
+      '[PRE_STREAM_LOCAL_REQUEST_READY] '
+      'session=${request.sessionId} '
+      'modelId=$effectiveModelId '
+      'modelPath=${selectedModel.localPath}',
     );
 
     return request.copyWith(
       modelId: effectiveModelId,
       modelPath: selectedModel.localPath,
-      maxTokens: InferenceRequest.maxTokensForModel(effectiveModelId),
-      temperature: InferenceRequest.temperatureForModel(effectiveModelId),
+      maxTokens:
+          InferenceRequest.maxTokensForModel(effectiveModelId),
+      temperature:
+          InferenceRequest.temperatureForModel(effectiveModelId),
     );
   }
 
@@ -307,119 +468,264 @@ class InferenceService {
   }) async* {
     var emittedLocalToken = false;
     var localChunkCount = 0;
-    final runtimeState = _runtimeProvider.lifecycleRuntimeStateName;
-    final activeTransitionId = _runtimeProvider.activeLifecycleTransitionId;
+
+    final runtimeState =
+        _runtimeProvider.lifecycleRuntimeStateName;
+
+    final activeTransitionId =
+        _runtimeProvider.activeLifecycleTransitionId;
+
     final verificationState =
-        _runtimeProvider.isRuntimeVerified(modelPath: localRequest.modelPath);
-    _log(
-      '[PRE_INFERENCE_GATE] runtime_state=$runtimeState provider_hash=${_runtimeProvider.hashCode.toRadixString(16)} verification_state=$verificationState active_transition_id=$activeTransitionId',
-    );
-    _log(
-      '[PRE_STREAM_INFERENCE] session=${localRequest.sessionId} runtime=${_runtimeProvider.runtimeType} modelId=${localRequest.modelId} modelPath=${localRequest.modelPath}',
+        _runtimeProvider.isRuntimeVerified(
+      modelPath: localRequest.modelPath,
     );
 
-    final textAccumulator = StringBuffer();
+    _log(
+      '[PRE_INFERENCE_GATE] '
+      'runtime_state=$runtimeState '
+      'provider_hash=${_runtimeProvider.hashCode.toRadixString(16)} '
+      'verification_state=$verificationState '
+      'active_transition_id=$activeTransitionId',
+    );
+
+    _log(
+      '[PRE_STREAM_INFERENCE] '
+      'session=${localRequest.sessionId} '
+      'runtime=${_runtimeProvider.runtimeType} '
+      'modelId=${localRequest.modelId} '
+      'modelPath=${localRequest.modelPath}',
+    );
+
     String? detectedQuery;
-    final firstGenerationToken = CancellationToken();
-    cancellationToken.onCancel(firstGenerationToken.cancel);
 
-    await for (final chunk in _runtimeProvider.streamInference(
+    final firstGenerationToken = CancellationToken();
+
+    cancellationToken.onCancel(
+      firstGenerationToken.cancel,
+    );
+
+    final rawStream = _runtimeProvider.streamInference(
       request: localRequest,
       cancellationToken: firstGenerationToken,
-    )) {
+    );
+
+    /*
+     * IMPORTANT:
+     *
+     * <search> is no longer parsed here with a local RegExp.
+     *
+     * ToolInterceptorTransformer is now the single interception boundary.
+     * This keeps tool-call recognition independent from the selected LLM.
+     *
+     * Every model therefore enters the same protocol:
+     *
+     * LLM stream
+     *     ↓
+     * ToolInterceptorTransformer
+     *     ↓
+     * normal token OR search tool-call
+     */
+    final interceptedStream =
+        rawStream.transform(ToolInterceptorTransformer());
+
+    await for (final chunk in interceptedStream) {
       localChunkCount++;
-      textAccumulator.write(chunk.text);
 
-      // --- Recursive search-tag detection ---
-      final searchPattern = RegExp(r'<search>(.*?)</search>');
-      final match = searchPattern.firstMatch(textAccumulator.toString());
+      /*
+       * The transformer emits a notice using the stable internal
+       * `search:<query>` protocol.
+       *
+       * Do not expose that internal protocol to the UI.
+       * Convert it into the existing human-readable runtime notice.
+       */
+      final runtimeNotice = chunk.runtimeNotice;
 
-      if (match != null && detectedQuery == null) {
-        detectedQuery = match.group(1)?.trim();
-        _log('[INTERCEPTOR] Detected internet search tag. Query: "$detectedQuery"');
-        
-        // Emit an immediate visual notice for the user in the UI.
-        yield InferenceResponse.notice(
-          '\n\n🔍 *Searching the web for: "$detectedQuery"...*\n\n',
-        );
-        
-        // Stop the first local generation without canceling the outer token.
-        firstGenerationToken.cancel();
-        break;
+      if (runtimeNotice != null &&
+          runtimeNotice.startsWith(_searchNoticePrefix)) {
+        final query = runtimeNotice
+            .substring(_searchNoticePrefix.length)
+            .trim();
+
+        if (query.isNotEmpty && detectedQuery == null) {
+          detectedQuery = query;
+
+          _log(
+            '[INTERCEPTOR] '
+            'Detected internet search tool-call. '
+            'Query: "$detectedQuery"',
+          );
+
+          yield InferenceResponse.notice(
+            '\n\n'
+            '🔍 *Searching the web for: "$detectedQuery"...*'
+            '\n\n',
+          );
+
+          /*
+           * The transformer has already terminated its upstream
+           * subscription. We cancel the generation token as an
+           * additional deterministic guard.
+           */
+          firstGenerationToken.cancel();
+
+          continue;
+        }
       }
 
       _log(
-        '[TOKEN_STREAM] local chunk session=${localRequest.sessionId} chunk=$localChunkCount '
-        'isFinal=${chunk.isFinal} isError=${chunk.isError} text_len=${chunk.text.length} '
-        'tokens=${chunk.tokensGenerated} notice=${chunk.runtimeNotice}',
+        '[TOKEN_STREAM] '
+        'local chunk '
+        'session=${localRequest.sessionId} '
+        'chunk=$localChunkCount '
+        'isFinal=${chunk.isFinal} '
+        'isError=${chunk.isError} '
+        'text_len=${chunk.text.length} '
+        'tokens=${chunk.tokensGenerated} '
+        'notice=${chunk.runtimeNotice}',
       );
+
       if (chunk.isError &&
           _isStalledPreInferenceError(chunk.errorMessage)) {
         cancellationToken.cancel();
-        _log('[INFERENCE_ERROR] session=${localRequest.sessionId} reason=stalled_pre_inference');
+
         _log(
-          '[TERMINAL_STATE] state=stalled_pre_inference session=${localRequest.sessionId}'
-          ' stage=local_stream_guard',
+          '[INFERENCE_ERROR] '
+          'session=${localRequest.sessionId} '
+          'reason=stalled_pre_inference',
+        );
+
+        _log(
+          '[TERMINAL_STATE] '
+          'state=stalled_pre_inference '
+          'session=${localRequest.sessionId} '
+          'stage=local_stream_guard',
         );
       }
+
       if (chunk.isError &&
           allowCloudFallback &&
           !emittedLocalToken &&
           _cloudRuntimeProvider.canInfer) {
         _log(
-          '[RUNTIME_PATH] fallback session=${localRequest.sessionId} from=local to=cloud reason=${chunk.errorMessage}',
+          '[RUNTIME_PATH] '
+          'fallback session=${localRequest.sessionId} '
+          'from=local to=cloud '
+          'reason=${chunk.errorMessage}',
         );
+
         yield InferenceResponse.notice(
           'Local runtime failed, switching to cloud runtime.',
         );
+
         yield* _cloudRuntimeProvider.streamInference(
           request: cloudRequest,
           cancellationToken: cancellationToken,
         );
+
         return;
       }
 
-      if (!chunk.isError && !chunk.isFinal && chunk.text.isNotEmpty) {
+      if (!chunk.isError &&
+          !chunk.isFinal &&
+          chunk.text.isNotEmpty) {
         emittedLocalToken = true;
       }
 
       yield chunk;
     }
 
-    // If a query was detected, fetch results asynchronously and rerun inference.
-    if (detectedQuery != null && detectedQuery.isNotEmpty) {
+    /*
+     * A search tool-call terminates the first generation.
+     * We now execute the tool and start a clean continuation request.
+     */
+    if (detectedQuery != null &&
+        detectedQuery!.isNotEmpty) {
       try {
-        final searchTool = _webSearchTool ?? WebSearchTool();
-        final searchResult = await searchTool.execute({'query': detectedQuery});
-        
-        _log('[INTERCEPTOR] Search completed successfully. Restarting local inference with the results.');
+        final searchTool =
+            _webSearchTool ?? WebSearchTool();
 
-        final enrichedPrompt = '${localRequest.prompt}\n\n'
-            '[INTERNET SEARCH RESULTS]\n${searchResult.output}\n\n'
-            'Use the information above to accurately complete the user\'s original request.';
+        _log(
+          '[TOOL_EXECUTION_BEGIN] '
+          'tool=web_search '
+          'session=${localRequest.sessionId} '
+          'query="$detectedQuery"',
+        );
 
-        final updatedLocalRequest = localRequest.copyWith(
-          sessionId: '${localRequest.sessionId}::search',
+        final searchResult = await searchTool.execute(
+          {'query': detectedQuery},
+        );
+
+        _log(
+          '[INTERCEPTOR] '
+          'Search completed successfully. '
+          'Restarting local inference with the results.',
+        );
+
+        final enrichedPrompt =
+            '${localRequest.prompt}\n\n'
+            '[INTERNET SEARCH RESULTS]\n'
+            '${searchResult.output}\n\n'
+            'Use the information above to accurately complete '
+            'the user\'s original request.';
+
+        final updatedLocalRequest =
+            localRequest.copyWith(
+          sessionId:
+              '${localRequest.sessionId}::search',
           prompt: enrichedPrompt,
         );
-        final continuationToken = CancellationToken();
-        cancellationToken.onCancel(continuationToken.cancel);
 
+        final continuationToken =
+            CancellationToken();
+
+        cancellationToken.onCancel(
+          continuationToken.cancel,
+        );
+
+        _log(
+          '[TOOL_EXECUTION_END] '
+          'tool=web_search '
+          'session=${localRequest.sessionId} '
+          'status=success '
+          'continuation_session=${updatedLocalRequest.sessionId}',
+        );
+
+        /*
+         * IMPORTANT:
+         *
+         * The continuation is a normal inference request.
+         * We intentionally do not special-case the selected model.
+         *
+         * Phi-3.5, DeepSeek, Qwen or any other supported model
+         * receives the same enriched request path.
+         */
         yield* _runtimeProvider.streamInference(
           request: updatedLocalRequest,
           cancellationToken: continuationToken,
         );
+
         return;
       } catch (e) {
-        _log('[INTERCEPTOR_ERROR] code=WEB_SEARCH_RECOVERY_FAILED error=$e');
+        _log(
+          '[INTERCEPTOR_ERROR] '
+          'code=WEB_SEARCH_RECOVERY_FAILED '
+          'error=$e',
+        );
+
         yield InferenceResponse.error(
           'Unable to retrieve web data. See logs for details.',
         );
+
+        return;
       }
     }
 
     _log(
-      '[FINAL_RESPONSE] local stream end session=${localRequest.sessionId} emittedLocalToken=$emittedLocalToken chunks=$localChunkCount',
+      '[FINAL_RESPONSE] '
+      'local stream end '
+      'session=${localRequest.sessionId} '
+      'emittedLocalToken=$emittedLocalToken '
+      'chunks=$localChunkCount',
     );
   }
 
@@ -429,67 +735,111 @@ class InferenceService {
     required InferenceRequest? localRequest,
     required CancellationToken cancellationToken,
   }) async* {
-    for (var attempt = 1; attempt <= _maxRetryCount + 1; attempt++) {
+    for (var attempt = 1;
+        attempt <= _maxRetryCount + 1;
+        attempt++) {
       var emittedContent = false;
       var shouldRetry = false;
       var retryReason = '';
       var firstTokenLogged = false;
       var streamedTokenCount = 0;
+
       final routedStream = _routeInference(
         runtimeMode: runtimeMode,
         cloudRequest: cloudRequest,
         localRequest: localRequest,
         cancellationToken: cancellationToken,
       );
+
       await for (final chunk in _guardInferenceStream(
         stream: routedStream,
         sessionId: cloudRequest.sessionId,
         cancellationToken: cancellationToken,
         attempt: attempt,
       )) {
-        if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+        if (chunk.runtimeNotice != null &&
+            chunk.runtimeNotice!.trim().isNotEmpty) {
           _log(
-            '[TOKEN_STREAM] notice session=${cloudRequest.sessionId} notice="${chunk.runtimeNotice}"',
+            '[TOKEN_STREAM] '
+            'notice session=${cloudRequest.sessionId} '
+            'notice="${chunk.runtimeNotice}"',
           );
+
           yield chunk;
           continue;
         }
+
         if (chunk.text.trim().isNotEmpty) {
           emittedContent = true;
           streamedTokenCount++;
+
           if (!firstTokenLogged) {
             firstTokenLogged = true;
-            _log('[INFERENCE_FIRST_TOKEN] session=${cloudRequest.sessionId} attempt=$attempt');
+
+            _log(
+              '[INFERENCE_FIRST_TOKEN] '
+              'session=${cloudRequest.sessionId} '
+              'attempt=$attempt',
+            );
           }
         }
+
         if (chunk.isError &&
             runtimeMode != AiRuntimeMode.local &&
             attempt <= _maxRetryCount &&
             !emittedContent &&
             _isRetryableError(chunk.errorMessage)) {
           shouldRetry = true;
-          retryReason = chunk.errorMessage ?? 'transient runtime failure';
+          retryReason =
+              chunk.errorMessage ??
+              'transient runtime failure';
+
           _log(
-            '[RUNTIME_PATH] retry session=${cloudRequest.sessionId} attempt=$attempt reason="$retryReason"',
+            '[RUNTIME_PATH] '
+            'retry session=${cloudRequest.sessionId} '
+            'attempt=$attempt '
+            'reason="$retryReason"',
           );
+
           continue;
         }
+
         if (chunk.isFinal && !chunk.isError) {
-          _log('[INFERENCE_LAST_TOKEN] session=${cloudRequest.sessionId} attempt=$attempt');
-          _log('[STREAM_TOKEN_COUNT] session=${cloudRequest.sessionId} attempt=$attempt tokens=$streamedTokenCount');
+          _log(
+            '[INFERENCE_LAST_TOKEN] '
+            'session=${cloudRequest.sessionId} '
+            'attempt=$attempt',
+          );
+
+          _log(
+            '[STREAM_TOKEN_COUNT] '
+            'session=${cloudRequest.sessionId} '
+            'attempt=$attempt '
+            'tokens=$streamedTokenCount',
+          );
         }
+
         _log(
-          '[FINAL_RESPONSE] session=${cloudRequest.sessionId} attempt=$attempt isFinal=${chunk.isFinal} '
-          'isError=${chunk.isError} text_len=${chunk.text.length}',
+          '[FINAL_RESPONSE] '
+          'session=${cloudRequest.sessionId} '
+          'attempt=$attempt '
+          'isFinal=${chunk.isFinal} '
+          'isError=${chunk.isError} '
+          'text_len=${chunk.text.length}',
         );
+
         yield chunk;
+
         if (chunk.isFinal) {
           return;
         }
       }
-      if (!shouldRetry || cancellationToken.isCancelled) {
+
+      if (!shouldRetry ||
+          cancellationToken.isCancelled) {
         return;
       }
+
       yield InferenceResponse.notice(
         'Transient runtime issue detected, retrying once.',
       );
@@ -505,17 +855,29 @@ class InferenceService {
     switch (runtimeMode) {
       case AiRuntimeMode.local:
         _log(
-          'A[RUNTIME_PATH] mode=local session=${cloudRequest.sessionId} local_request=${localRequest != null}',
+          '[RUNTIME_PATH] '
+          'mode=local '
+          'session=${cloudRequest.sessionId} '
+          'local_request=${localRequest != null}',
         );
+
         _log(
-          '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType} '
-          'runtime_mode=${runtimeMode.name} branch=local '
+          '[RUNTIME_PROVIDER_BRANCH] '
+          'provider=${_runtimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} '
+          'branch=local '
           'local_request_available=${localRequest != null}',
         );
+
         if (localRequest != null) {
           _log(
-            '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=inference_service._streamLocalInference',
+            '[PRE_STREAM_FORWARD] '
+            'session=${cloudRequest.sessionId} '
+            'boundary=inference_service.route '
+            'mode=${runtimeMode.name} '
+            'target=inference_service._streamLocalInference',
           );
+
           return _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
@@ -523,39 +885,79 @@ class InferenceService {
             allowCloudFallback: false,
           );
         }
+
         _log(
-          '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} reason=local_request_unavailable target=inference_service._streamLocalInference_not_invoked',
+          '[PRE_STREAM_BYPASS] '
+          'session=${cloudRequest.sessionId} '
+          'boundary=inference_service.route '
+          'mode=${runtimeMode.name} '
+          'reason=local_request_unavailable '
+          'target=inference_service._streamLocalInference_not_invoked',
         );
+
         return Stream<InferenceResponse>.value(
           InferenceResponse.error(
-            'Local AI mode requires a downloaded validated model. Please download one in Settings > Models or switch to Cloud or Hybrid mode.',
+            'Local AI mode requires a downloaded validated model. '
+            'Please download one in Settings > Models or switch to '
+            'Cloud or Hybrid mode.',
           ),
         );
+
       case AiRuntimeMode.cloud:
-        _log('[RUNTIME_PATH] mode=cloud session=${cloudRequest.sessionId}');
         _log(
-          '[RUNTIME_PROVIDER_BRANCH] provider=${_cloudRuntimeProvider.runtimeType} '
-          'runtime_mode=${runtimeMode.name} branch=cloud local_request_available=false',
+          '[RUNTIME_PATH] '
+          'mode=cloud '
+          'session=${cloudRequest.sessionId}',
         );
+
         _log(
-          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=cloud_runtime_provider.streamInference',
+          '[RUNTIME_PROVIDER_BRANCH] '
+          'provider=${_cloudRuntimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} '
+          'branch=cloud '
+          'local_request_available=false',
         );
+
+        _log(
+          '[PRE_STREAM_FORWARD] '
+          'session=${cloudRequest.sessionId} '
+          'boundary=inference_service.route '
+          'mode=${runtimeMode.name} '
+          'target=cloud_runtime_provider.streamInference',
+        );
+
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
           cancellationToken: cancellationToken,
           forceCloudPrimary: true,
         );
+
       case AiRuntimeMode.hybrid:
-        _log('[RUNTIME_PATH] mode=hybrid session=${cloudRequest.sessionId}');
         _log(
-          '[RUNTIME_PROVIDER_BRANCH] provider=${_runtimeProvider.runtimeType}|${_cloudRuntimeProvider.runtimeType} '
-          'runtime_mode=${runtimeMode.name} branch=hybrid '
+          '[RUNTIME_PATH] '
+          'mode=hybrid '
+          'session=${cloudRequest.sessionId}',
+        );
+
+        _log(
+          '[RUNTIME_PROVIDER_BRANCH] '
+          'provider=${_runtimeProvider.runtimeType}|'
+          '${_cloudRuntimeProvider.runtimeType} '
+          'runtime_mode=${runtimeMode.name} '
+          'branch=hybrid '
           'local_request_available=${localRequest != null}',
         );
+
         _log(
-          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.route mode=${runtimeMode.name} target=automatic_orchestration local_request_available=${localRequest != null}',
+          '[PRE_STREAM_FORWARD] '
+          'session=${cloudRequest.sessionId} '
+          'boundary=inference_service.route '
+          'mode=${runtimeMode.name} '
+          'target=automatic_orchestration '
+          'local_request_available=${localRequest != null}',
         );
+
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
@@ -572,47 +974,68 @@ class InferenceService {
   }) async* {
     final startedAt = DateTime.now();
     var chunkCount = 0;
+
     await for (final chunk in stream.timeout(
       _streamIdleTimeout,
       onTimeout: (sink) {
         cancellationToken.cancel();
+
         sink.add(
           InferenceResponse.error(
             'Inference stream timed out waiting for tokens.',
             state: InferenceTerminalState.timeout,
           ),
         );
+
         sink.close();
       },
     )) {
       chunkCount++;
+
       if (chunkCount > _maxChunksPerRequest) {
         cancellationToken.cancel();
+
         _log(
-          'hard stop protection session=$sessionId attempt=$attempt max_chunks=$_maxChunksPerRequest',
+          'hard stop protection '
+          'session=$sessionId '
+          'attempt=$attempt '
+          'max_chunks=$_maxChunksPerRequest',
         );
+
         yield InferenceResponse.error(
           'Inference stopped after exceeding safe stream chunk limit.',
         );
+
         return;
       }
-      if (DateTime.now().difference(startedAt) > _requestTimeout) {
+
+      if (DateTime.now().difference(startedAt) >
+          _requestTimeout) {
         cancellationToken.cancel();
+
         _log(
-          'hard stop protection session=$sessionId attempt=$attempt request_timeout_ms=${_requestTimeout.inMilliseconds}',
+          'hard stop protection '
+          'session=$sessionId '
+          'attempt=$attempt '
+          'request_timeout_ms=${_requestTimeout.inMilliseconds}',
         );
+
         yield InferenceResponse.error(
           'Inference request timed out.',
           state: InferenceTerminalState.timeout,
         );
+
         return;
       }
+
       yield chunk;
     }
   }
 
   bool _isRetryableError(String? errorMessage) {
-    final normalized = (errorMessage ?? '').toLowerCase();
+    final normalized =
+        (errorMessage ?? '').toLowerCase();
+
     return normalized.contains('timeout') ||
         normalized.contains('timed out') ||
         normalized.contains('stalled') ||
@@ -620,9 +1043,15 @@ class InferenceService {
         normalized.contains('network');
   }
 
-  bool _isStalledPreInferenceError(String? errorMessage) {
-    final normalized = (errorMessage ?? '').toLowerCase();
-    return normalized.contains('stage=stalled_pre_inference') ||
+  bool _isStalledPreInferenceError(
+    String? errorMessage,
+  ) {
+    final normalized =
+        (errorMessage ?? '').toLowerCase();
+
+    return normalized.contains(
+          'stage=stalled_pre_inference',
+        ) ||
         normalized.contains('stalled_pre_inference');
   }
 
@@ -633,7 +1062,10 @@ class InferenceService {
         request.prompt.trim(),
         request.systemPrompt?.trim() ?? '',
         request.context
-            .map((turn) => '${turn.role.name}:${turn.content}')
+            .map(
+              (turn) =>
+                  '${turn.role.name}:${turn.content}',
+            )
             .join('\n'),
       ].join('\u0000'),
     );
@@ -648,80 +1080,140 @@ class InferenceService {
     if (cloudRequest.isOffline) {
       if (localRequest != null) {
         _log(
-          'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=offline',
+          'fallback routing '
+          'session=${cloudRequest.sessionId} '
+          'from=cloud to=local '
+          'reason=offline',
         );
+
         _log(
-          '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline target=inference_service._streamLocalInference',
+          '[PRE_STREAM_FORWARD] '
+          'session=${cloudRequest.sessionId} '
+          'boundary=inference_service.automatic_orchestration '
+          'reason=offline '
+          'target=inference_service._streamLocalInference',
         );
+
         yield* _streamLocalInference(
           localRequest: localRequest,
           cloudRequest: cloudRequest,
           cancellationToken: cancellationToken,
           allowCloudFallback: false,
         );
+
         return;
       }
+
       _log(
-        '[PRE_STREAM_BYPASS] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=offline_without_local_request target=inference_service._streamLocalInference_not_invoked',
+        '[PRE_STREAM_BYPASS] '
+        'session=${cloudRequest.sessionId} '
+        'boundary=inference_service.automatic_orchestration '
+        'reason=offline_without_local_request '
+        'target=inference_service._streamLocalInference_not_invoked',
       );
+
       yield InferenceResponse.error(
         'Network is unavailable and no local model is ready for use.',
       );
+
       return;
     }
 
     final shouldPreferCloud =
-        forceCloudPrimary || _cloudRuntimeProvider.shouldPreferCloudFor(cloudRequest);
+        forceCloudPrimary ||
+        _cloudRuntimeProvider.shouldPreferCloudFor(
+          cloudRequest,
+        );
 
-    if (!shouldPreferCloud && localRequest != null) {
+    if (!shouldPreferCloud &&
+        localRequest != null) {
       _log(
-        'routing session=${cloudRequest.sessionId} mode=local-first cloudPreferred=$shouldPreferCloud',
+        'routing '
+        'session=${cloudRequest.sessionId} '
+        'mode=local-first '
+        'cloudPreferred=$shouldPreferCloud',
       );
+
       _log(
-        '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=hybrid_local_first target=inference_service._streamLocalInference',
+        '[PRE_STREAM_FORWARD] '
+        'session=${cloudRequest.sessionId} '
+        'boundary=inference_service.automatic_orchestration '
+        'reason=hybrid_local_first '
+        'target=inference_service._streamLocalInference',
       );
+
       yield* _streamLocalInference(
         localRequest: localRequest,
         cloudRequest: cloudRequest,
         cancellationToken: cancellationToken,
         allowCloudFallback: true,
       );
+
       return;
     }
 
     _log(
-      '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=${forceCloudPrimary ? 'force_cloud_primary' : 'cloud_preferred'} target=cloud_runtime_provider.streamInference local_request_available=${localRequest != null}',
+      '[PRE_STREAM_FORWARD] '
+      'session=${cloudRequest.sessionId} '
+      'boundary=inference_service.automatic_orchestration '
+      'reason=${forceCloudPrimary ? 'force_cloud_primary' : 'cloud_preferred'} '
+      'target=cloud_runtime_provider.streamInference '
+      'local_request_available=${localRequest != null}',
     );
-    await for (final chunk in _cloudRuntimeProvider.streamInference(
+
+    await for (final chunk
+        in _cloudRuntimeProvider.streamInference(
       request: cloudRequest,
       cancellationToken: cancellationToken,
     )) {
-      if (chunk.runtimeNotice != null && chunk.runtimeNotice!.trim().isNotEmpty) {
+      if (chunk.runtimeNotice != null &&
+          chunk.runtimeNotice!.trim().isNotEmpty) {
         yield chunk;
         continue;
       }
+
       if (chunk.isError) {
         if (localRequest != null &&
-            _cloudRuntimeProvider.shouldFallBackToLocal(chunk.errorMessage)) {
+            _cloudRuntimeProvider
+                .shouldFallBackToLocal(
+              chunk.errorMessage,
+            )) {
           _log(
-            'fallback routing session=${cloudRequest.sessionId} from=cloud to=local reason=${chunk.errorMessage}',
+            'fallback routing '
+            'session=${cloudRequest.sessionId} '
+            'from=cloud to=local '
+            'reason=${chunk.errorMessage}',
           );
+
           _log(
-            '[PRE_STREAM_FORWARD] session=${cloudRequest.sessionId} boundary=inference_service.automatic_orchestration reason=cloud_error_fallback target=inference_service._streamLocalInference',
+            '[PRE_STREAM_FORWARD] '
+            'session=${cloudRequest.sessionId} '
+            'boundary=inference_service.automatic_orchestration '
+            'reason=cloud_error_fallback '
+            'target=inference_service._streamLocalInference',
           );
-          final notice = _cloudRuntimeProvider.consumeRuntimeNotice();
+
+          final notice =
+              _cloudRuntimeProvider
+                  .consumeRuntimeNotice();
+
           if (notice != null) {
-            yield InferenceResponse.notice(notice);
+            yield InferenceResponse.notice(
+              notice,
+            );
           }
+
           yield* _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
             cancellationToken: cancellationToken,
             allowCloudFallback: false,
           );
+
           return;
         }
       }
+
       yield chunk;
     }
   }
