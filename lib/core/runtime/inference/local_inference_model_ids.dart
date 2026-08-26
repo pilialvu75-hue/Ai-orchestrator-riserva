@@ -39,12 +39,20 @@ class LocalInferenceModelIds {
     llama1b,
   };
 
+  /// Modelli DeepSeek-R1 (e distillati) che usano il proprio template
+  /// conversazionale DeepSeek.
+  ///
+  /// NON devono essere classificati come Qwen/ChatML, anche se i modelli
+  /// DeepSeek-R1-Distill-Qwen sono basati sull'architettura Qwen.
+  static final Set<String> deepseekChatTemplateModels = {
+    deepSeekR1_1_5b,
+    deepSeekR1_7b,
+  };
+
   /// Modelli che usano il template ChatML / Qwen
   /// (<|im_start|> / <|im_end|>).
   static final Set<String> qwenChatTemplateModels = {
-    deepSeekR1_1_5b,
     qwen3_1_7b,
-    deepSeekR1_7b,
   };
 
   /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
@@ -86,6 +94,14 @@ class LocalInferenceModelIds {
       return 'llama3';
     }
 
+    // DeepSeek deve essere risolto prima di Qwen.
+    //
+    // I modelli DeepSeek-R1-Distill-Qwen contengono "Qwen" nel nome
+    // del modello, ma NON devono essere trattati come Qwen ChatML.
+    if (deepseekChatTemplateModels.contains(modelId)) {
+      return 'deepseek';
+    }
+
     if (qwenChatTemplateModels.contains(modelId)) {
       return 'qwen';
     }
@@ -112,6 +128,12 @@ class LocalInferenceModelIds {
 
     if (_matchesLlama3(id)) {
       return 'llama3';
+    }
+
+    // DeepSeek prima di Qwen: un nome/path può contenere sia
+    // "deepseek" sia "qwen".
+    if (_matchesDeepSeek(id)) {
+      return 'deepseek';
     }
 
     if (_matchesQwen(id)) {
@@ -154,9 +176,13 @@ class LocalInferenceModelIds {
         id.contains('meta-llama');
   }
 
+  static bool _matchesDeepSeek(String id) {
+    return id.contains('deepseek');
+  }
+
   static bool _matchesQwen(String id) {
-    return id.contains('deepseek') ||
-        id.contains('qwen') ||
+    // DeepSeek è gestito da _matchesDeepSeek() ed è valutato prima.
+    return id.contains('qwen') ||
         id.contains('mistral');
   }
 
@@ -191,15 +217,20 @@ class LocalInferenceModelIds {
         }
         break;
 
+      case 'deepseek':
+        deepseekChatTemplateModels.add(modelId);
+        break;
+
       case 'gemma':
         gemmaChatTemplateModels.add(modelId);
         break;
 
       case 'phi3':
-      case 'zephyr':
-        // Zephyr usa la stessa forma di prompt del template
-        // precedentemente utilizzato per il routing Phi.
         phi3ChatTemplateModels.add(modelId);
+        break;
+
+      case 'zephyr':
+        zephyrChatTemplateModels.add(modelId);
         break;
 
       default:
