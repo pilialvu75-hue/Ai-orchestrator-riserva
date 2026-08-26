@@ -6,7 +6,8 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 const String _completeSystemPrompt =
     'You are a helpful assistant. Give complete answers when appropriate.';
 
-// Istruzione globale per l'abilitazione della ricerca web
+// Istruzione per l'abilitazione della ricerca web.
+// Viene aggiunta SOLO quando la richiesta è realmente fattuale/dinamica.
 const String _webSearchInstruction =
     "IMPORTANTE: Hai accesso a Internet tramite il tag <search>query</search>. "
     "Se l'utente chiede notizie, meteo, fatti recenti, dati in tempo reale o informazioni che cambiano nel tempo, "
@@ -24,9 +25,32 @@ class LocalPromptTemplates {
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
 
-    // Iniezione forzata dell'istruzione di ricerca web nel system prompt
-    final finalSystemPrompt =
-        "${cleanedSystemPrompt ?? _completeSystemPrompt}\n\n$_webSearchInstruction";
+    final userPrompt = prompt.trim();
+
+    /*
+     * IMPORTANT:
+     *
+     * The web-search protocol must NOT be injected into every prompt.
+     *
+     * Previously the instruction was always appended to the system prompt.
+     * That caused simple requests such as:
+     *
+     *   "ciao"
+     *   "cavolo"
+     *
+     * to be interpreted by the local model as search requests.
+     *
+     * The search instruction is now enabled only for prompts that are
+     * actually likely to require factual/current information.
+     */
+    final enableWebSearch = _isFactualQuery(userPrompt);
+
+    final baseSystemPrompt =
+        cleanedSystemPrompt ?? _completeSystemPrompt;
+
+    final finalSystemPrompt = enableWebSearch
+        ? '$baseSystemPrompt\n\n$_webSearchInstruction'
+        : baseSystemPrompt;
 
     // Filtro contestuale centralizzato per il RAG locale e la memoria
     final cleanedContext = context
@@ -37,26 +61,39 @@ class LocalPromptTemplates {
         .map((turn) => turn.copyWith(content: turn.content.trim()))
         .toList(growable: false);
 
-    final userPrompt = prompt.trim();
     final template = LocalInferenceModelIds.resolveTemplate(modelId);
-    final contextChars =
-        cleanedContext.fold<int>(0, (sum, turn) => sum + turn.content.length);
-    final webSystemPromptChars =
-        finalSystemPrompt.contains('Web search results:')
-            ? finalSystemPrompt.length
-            : 0;
+
+    final contextChars = cleanedContext.fold<int>(
+      0,
+      (sum, turn) => sum + turn.content.length,
+    );
+
+    final webSystemPromptChars = enableWebSearch
+        ? finalSystemPrompt.length
+        : 0;
 
     RuntimeEventLog.instance.emit(
       '[PROMPT_BEGIN] model=$modelId prompt_chars=${userPrompt.length}',
     );
+
     RuntimeEventLog.instance.emit(
       '[PROMPT_SYSTEM_SIZE] chars=${finalSystemPrompt.length}',
     );
+
     RuntimeEventLog.instance.emit(
-      '[PROMPT_CONTEXT_SIZE] turns=${cleanedContext.length} chars=$contextChars',
+      '[PROMPT_CONTEXT_SIZE] '
+      'turns=${cleanedContext.length} '
+      'chars=$contextChars',
     );
+
     RuntimeEventLog.instance.emit(
       '[PROMPT_WEB_RESULTS_SIZE] chars=$webSystemPromptChars',
+    );
+
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_WEB_SEARCH] '
+      'enabled=$enableWebSearch '
+      'reason=${enableWebSearch ? 'factual_query' : 'ordinary_conversation'}',
     );
 
     switch (template) {
@@ -66,6 +103,7 @@ class LocalPromptTemplates {
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+
       case 'qwen':
         return _buildQwenChatPrompt(
           systemPrompt: finalSystemPrompt,
@@ -74,65 +112,122 @@ class LocalPromptTemplates {
           suppressThinking:
               LocalInferenceModelIds.isQwen3Thinking(modelId),
         );
+
       case 'gemma':
         return _buildGemmaPrompt(
           systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+
       case 'phi3':
         return _buildPhi3Prompt(
           systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+
       case 'zephyr':
         return _buildZephyrPrompt(
           systemPrompt: finalSystemPrompt,
           context: cleanedContext,
           userPrompt: userPrompt,
         );
+
       default:
         final buffer = StringBuffer();
 
         buffer.writeln('');
-
         buffer.writeln('System: $finalSystemPrompt');
         buffer.writeln();
 
         for (final turn in cleanedContext) {
-          buffer.writeln('${_roleName(turn.role)}: ${turn.content}');
+          buffer.writeln(
+            '${_roleName(turn.role)}: ${turn.content}',
+          );
         }
-        if (cleanedContext.isNotEmpty) buffer.writeln();
+
+        if (cleanedContext.isNotEmpty) {
+          buffer.writeln();
+        }
+
         buffer.write('User: $userPrompt');
+
         final composed = buffer.toString();
-        _logFinalPromptMetrics(composed, userPrompt.length);
+
+        _logFinalPromptMetrics(
+          composed,
+          userPrompt.length,
+        );
+
         return composed;
     }
   }
 
   static String? _clean(String? value) {
-    if (value == null) return null;
+    if (value == null) {
+      return null;
+    }
+
     final trimmed = value.trim();
+
     return trimmed.isEmpty ? null : trimmed;
   }
 
   static bool _isFactualQuery(String prompt) {
-    final p = prompt.toLowerCase();
+    final p = prompt.trim().toLowerCase();
+
+    if (p.isEmpty) {
+      return false;
+    }
+
+    /*
+     * Keep this deliberately conservative.
+     *
+     * Ordinary conversational messages such as:
+     *
+     *   ciao
+     *   cavolo
+     *   grazie
+     *   ok
+     *
+     * must NOT activate the search protocol.
+     *
+     * Search activation is reserved for explicit factual/current
+     * information requests.
+     */
+
     return p.contains('quanto') ||
         p.contains('quando') ||
         p.contains('chi è') ||
+        p.contains('chi e ') ||
         p.contains('chi gioca') ||
         p.contains('dove') ||
         p.contains('cosè') ||
+        p.contains('cos\'è') ||
         p.contains('cosa è') ||
+        p.contains('cosa sono') ||
         p.contains('definizione') ||
         p.contains('colore') ||
         p.contains('cerca') ||
+        p.contains('cercami') ||
+        p.contains('ricerca') ||
+        p.contains('trova') ||
         p.contains('data') ||
         p.contains('anno') ||
         p.contains('meteo') ||
-        p.contains('notizie');
+        p.contains('notizie') ||
+        p.contains('news') ||
+        p.contains('oggi') ||
+        p.contains('attuale') ||
+        p.contains('attualmente') ||
+        p.contains('ultimo') ||
+        p.contains('ultima') ||
+        p.contains('ultime') ||
+        p.contains('recente') ||
+        p.contains('recenti') ||
+        p.contains('in tempo reale') ||
+        p.contains('tempo reale');
   }
 
   static String _buildLlama3Prompt({
@@ -144,25 +239,41 @@ class LocalPromptTemplates {
 
     buffer.writeln('');
     buffer.write('<|begin_of_text|>');
-    buffer.write('<|start_header_id|>system<|end_header_id|>\n\n');
+    buffer.write(
+      '<|start_header_id|>system<|end_header_id|>\n\n',
+    );
 
     buffer.write(systemPrompt);
     buffer.write('<|eot_id|>');
 
     for (final turn in context) {
       buffer.write(
-        '<|start_header_id|>${_roleName(turn.role)}<|end_header_id|>\n\n',
+        '<|start_header_id|>${_roleName(turn.role)}'
+        '<|end_header_id|>\n\n',
       );
+
       buffer.write(turn.content);
       buffer.write('<|eot_id|>');
     }
 
-    buffer.write('<|start_header_id|>user<|end_header_id|>\n\n');
+    buffer.write(
+      '<|start_header_id|>user<|end_header_id|>\n\n',
+    );
+
     buffer.write(userPrompt);
     buffer.write('<|eot_id|>');
-    buffer.write('<|start_header_id|>assistant<|end_header_id|>\n\n');
+
+    buffer.write(
+      '<|start_header_id|>assistant<|end_header_id|>\n\n',
+    );
+
     final composed = buffer.toString();
-    _logFinalPromptMetrics(composed, userPrompt.length);
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
     return composed;
   }
 
@@ -181,19 +292,30 @@ class LocalPromptTemplates {
     buffer.write('\n<|im_end|>\n');
 
     for (final turn in context) {
-      buffer.write('<|im_start|>${_roleName(turn.role)}\n');
+      buffer.write(
+        '<|im_start|>${_roleName(turn.role)}\n',
+      );
+
       buffer.write(turn.content);
       buffer.write('\n<|im_end|>\n');
     }
 
-    final effectiveUserPrompt =
-        suppressThinking ? '/no_think\n$userPrompt' : userPrompt;
+    final effectiveUserPrompt = suppressThinking
+        ? '/no_think\n$userPrompt'
+        : userPrompt;
+
     buffer.write('<|im_start|>user\n');
     buffer.write(effectiveUserPrompt);
     buffer.write('\n<|im_end|>\n');
     buffer.write('<|im_start|>assistant\n');
+
     final composed = buffer.toString();
-    _logFinalPromptMetrics(composed, userPrompt.length);
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
     return composed;
   }
 
@@ -207,18 +329,35 @@ class LocalPromptTemplates {
     buffer.writeln('');
 
     buffer.write(
-      '<start_of_turn>system\n$systemPrompt\n<end_of_turn>\n',
+      '<start_of_turn>system\n'
+      '$systemPrompt\n'
+      '<end_of_turn>\n',
     );
 
     for (final turn in context) {
-      buffer.write('<start_of_turn>${_gemmaRoleName(turn.role)}\n');
+      buffer.write(
+        '<start_of_turn>${_gemmaRoleName(turn.role)}\n',
+      );
+
       buffer.write('${turn.content}\n');
       buffer.write('<end_of_turn>\n');
     }
-    buffer.write('<start_of_turn>user\n$userPrompt\n<end_of_turn>\n');
+
+    buffer.write(
+      '<start_of_turn>user\n'
+      '$userPrompt\n'
+      '<end_of_turn>\n',
+    );
+
     buffer.write('<start_of_turn>model\n');
+
     final composed = buffer.toString();
-    _logFinalPromptMetrics(composed, userPrompt.length);
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
     return composed;
   }
 
@@ -230,19 +369,35 @@ class LocalPromptTemplates {
     final buffer = StringBuffer();
 
     buffer.write(
-      '<|system|>\n${systemPrompt.trim()}\n<|end|>\n',
+      '<|system|>\n'
+      '${systemPrompt.trim()}\n'
+      '<|end|>\n',
     );
 
     for (final turn in context) {
-      buffer.write('<|${_roleName(turn.role)}|>\n');
+      buffer.write(
+        '<|${_roleName(turn.role)}|>\n',
+      );
+
       buffer.write('${turn.content}\n');
       buffer.write('<|end|>\n');
     }
 
-    buffer.write('<|user|>\n$userPrompt\n<|end|>\n');
+    buffer.write(
+      '<|user|>\n'
+      '$userPrompt\n'
+      '<|end|>\n',
+    );
+
     buffer.write('<|assistant|>\n');
+
     final composed = buffer.toString();
-    _logFinalPromptMetrics(composed, userPrompt.length);
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
     return composed;
   }
 
@@ -255,16 +410,37 @@ class LocalPromptTemplates {
 
     buffer.writeln('');
 
-    buffer.write('<|system|>\n$systemPrompt\n</s>\n');
+    buffer.write(
+      '<|system|>\n'
+      '$systemPrompt\n'
+      '</s>\n',
+    );
 
     for (final turn in context) {
       final tag = _zephyrRoleName(turn.role);
-      buffer.write('$tag\n${turn.content}\n</s>\n');
+
+      buffer.write(
+        '$tag\n'
+        '${turn.content}\n'
+        '</s>\n',
+      );
     }
-    buffer.write('<|user|>\n$userPrompt\n</s>\n');
+
+    buffer.write(
+      '<|user|>\n'
+      '$userPrompt\n'
+      '</s>\n',
+    );
+
     buffer.write('<|assistant|>\n');
+
     final composed = buffer.toString();
-    _logFinalPromptMetrics(composed, userPrompt.length);
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
     return composed;
   }
 
@@ -275,11 +451,16 @@ class LocalPromptTemplates {
     RuntimeEventLog.instance.emit(
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
+
     RuntimeEventLog.instance.emit(
-      '[PROMPT_FINAL_TOKENS] estimate=${(composed.length / 4).ceil()}',
+      '[PROMPT_FINAL_TOKENS] '
+      'estimate=${(composed.length / 4).ceil()}',
     );
+
     RuntimeEventLog.instance.emit(
-      '[PROMPT_SENT] hash=${secureForensicHash(composed)} prompt_chars=$userPromptChars',
+      '[PROMPT_SENT] '
+      'hash=${secureForensicHash(composed)} '
+      'prompt_chars=$userPromptChars',
     );
   }
 
@@ -287,8 +468,10 @@ class LocalPromptTemplates {
     switch (role) {
       case ChatRole.assistant:
         return 'assistant';
+
       case ChatRole.system:
         return 'system';
+
       case ChatRole.user:
         return 'user';
     }
@@ -298,8 +481,10 @@ class LocalPromptTemplates {
     switch (role) {
       case ChatRole.assistant:
         return 'model';
+
       case ChatRole.system:
         return 'system';
+
       case ChatRole.user:
         return 'user';
     }
@@ -309,8 +494,10 @@ class LocalPromptTemplates {
     switch (role) {
       case ChatRole.assistant:
         return '<|assistant|>';
+
       case ChatRole.system:
         return '<|system|>';
+
       case ChatRole.user:
         return '<|user|>';
     }
