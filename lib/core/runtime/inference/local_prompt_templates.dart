@@ -52,7 +52,7 @@ class LocalPromptTemplates {
         ? '$baseSystemPrompt\n\n$_webSearchInstruction'
         : baseSystemPrompt;
 
-    // Filtro contestuale centralizzato per il RAG locale e la memoria
+    // Filtro contestuale centralizzato per il RAG locale e la memoria.
     final cleanedContext = context
         .where(
           (turn) =>
@@ -111,6 +111,13 @@ class LocalPromptTemplates {
           userPrompt: userPrompt,
           suppressThinking:
               LocalInferenceModelIds.isQwen3Thinking(modelId),
+        );
+
+      case 'deepseek':
+        return _buildDeepSeekR1Prompt(
+          systemPrompt: finalSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
         );
 
       case 'gemma':
@@ -317,6 +324,150 @@ class LocalPromptTemplates {
     );
 
     return composed;
+  }
+
+  /// Template DeepSeek-R1 / DeepSeek-R1-Distill-*.
+  ///
+  /// Il formato è basato sul chat_template dichiarato dai tokenizer
+  /// DeepSeek-R1-Distill e sul template DeepSeek utilizzato da llama.cpp.
+  ///
+  /// Struttura:
+  ///
+  ///   <｜begin▁of▁sentence｜>
+  ///   {system}
+  ///   <｜User｜>{user}<｜end▁of▁sentence｜>
+  ///   <｜Assistant｜>{assistant}<｜end▁of▁sentence｜>
+  ///   ...
+  ///   <｜User｜>{current user}<｜end▁of▁sentence｜>
+  ///   <｜Assistant｜><think>
+  ///
+  /// Importante:
+  /// - DeepSeek-R1 non usa ChatML Qwen.
+  /// - Il BOS viene emesso esplicitamente.
+  /// - I turni già completati ricevono EOS.
+  /// - Il turno corrente termina prima dell'assistant generation prompt.
+  /// - La generazione viene aperta con <think>, coerentemente con
+  ///   il comportamento reasoning di DeepSeek-R1.
+  /// - Non viene usato /no_think: è una direttiva propria di Qwen3,
+  ///   non di DeepSeek-R1-Distill.
+  ///
+  /// La scelta del template avviene tramite LocalInferenceModelIds:
+  /// quindi la stessa funzione è valida per DeepSeek 1.5B, 7B,
+  /// 14B, 32B, 70B e futuri GGUF della stessa famiglia.
+  static String _buildDeepSeekR1Prompt({
+    required String systemPrompt,
+    required List<ChatTurn> context,
+    required String userPrompt,
+  }) {
+    const bos = '<｜begin▁of▁sentence｜>';
+    const userTag = '<｜User｜>';
+    const assistantTag = '<｜Assistant｜>';
+    const eos = '<｜end▁of▁sentence｜>';
+
+    final buffer = StringBuffer();
+
+    // BOS ufficiale DeepSeek.
+    buffer.write(bos);
+
+    // Nel template ufficiale il system prompt segue direttamente il BOS.
+    if (systemPrompt.trim().isNotEmpty) {
+      buffer.write(systemPrompt.trim());
+    }
+
+    for (final turn in context) {
+      final content = _cleanDeepSeekAssistantContent(turn.content);
+
+      if (content.isEmpty) {
+        continue;
+      }
+
+      switch (turn.role) {
+        case ChatRole.system:
+          /*
+           * Il template DeepSeek raccoglie il system prompt all'inizio.
+           * Un eventuale system turn presente nella history non deve
+           * diventare un falso ruolo "system" che il modello non conosce.
+           *
+           * Lo manteniamo come testo continuo, evitando di introdurre
+           * marker conversazionali non supportati.
+           */
+          buffer.write(content);
+          break;
+
+        case ChatRole.user:
+          buffer.write(userTag);
+          buffer.write(content);
+          buffer.write(eos);
+          break;
+
+        case ChatRole.assistant:
+          buffer.write(assistantTag);
+          buffer.write(content);
+          buffer.write(eos);
+          break;
+      }
+    }
+
+    // Turno corrente dell'utente.
+    buffer.write(userTag);
+    buffer.write(userPrompt);
+    buffer.write(eos);
+
+    /*
+     * Generation prompt DeepSeek-R1.
+     *
+     * Il modello reasoning viene aperto con <think>. Il contenuto
+     * del reasoning sarà successivamente gestito dalla pipeline
+     * output/sanity già esistente.
+     */
+    buffer.write(assistantTag);
+    buffer.write('<think>\n');
+
+    final composed = buffer.toString();
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_TEMPLATE_DEEPSEEK] '
+      'bos=true '
+      'reasoning_prompt=true '
+      'context_turns=${context.length}',
+    );
+
+    return composed;
+  }
+
+  /// Rimuove il blocco di reasoning dalle risposte DeepSeek già presenti
+  /// nella history.
+  ///
+  /// Il template ufficiale DeepSeek e quello di llama.cpp trattano
+  /// `</think>` come separatore del reasoning. Per la history chat
+  /// vogliamo conservare la risposta finale, non trascinare nuovamente
+  /// tutto il chain-of-thought nel prompt successivo.
+  static String _cleanDeepSeekAssistantContent(String content) {
+    final trimmed = content.trim();
+
+    if (trimmed.isEmpty) {
+      return '';
+    }
+
+    final closingThink = trimmed.lastIndexOf('</think>');
+
+    if (closingThink >= 0) {
+      final finalAnswer =
+          trimmed.substring(closingThink + '</think>'.length).trim();
+
+      if (finalAnswer.isNotEmpty) {
+        return finalAnswer;
+      }
+
+      return '';
+    }
+
+    return trimmed;
   }
 
   static String _buildGemmaPrompt({
