@@ -22,8 +22,8 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// - Error responses are forwarded immediately.
 /// - Empty responses are forwarded immediately.
 /// - Terminal stream completion flushes any safe residual text.
+/// - Final responses preserve their original metadata.
 /// - No unbounded regular-expression scan is performed on every token.
-///
 class ToolInterceptorTransformer
     extends StreamTransformerBase<InferenceResponse, InferenceResponse> {
   static const String _searchTagStart = '<search>';
@@ -38,12 +38,45 @@ class ToolInterceptorTransformer
       sync: true,
       onListen: () {
         final buffer = StringBuffer();
-        var searchDetected = false;
         var streamTerminated = false;
         String? lastModel;
 
-        void emitToken(String text) {
+        void emitToken(
+          String text, {
+          InferenceResponse? source,
+        }) {
           if (text.isEmpty || controller.isClosed) {
+            return;
+          }
+
+          /*
+           * Preserve the original response metadata whenever possible.
+           *
+           * In particular, the previous implementation converted every
+           * normal response into InferenceResponse.token(), which silently
+           * discarded isFinal, terminalState and tokensGenerated.
+           *
+           * That caused a final cumulative snapshot such as:
+           *
+           *   "Hello world"
+           *
+           * to become a non-final token, making InferenceService append it
+           * after the already streamed "Hello world".
+           */
+          if (source != null) {
+            controller.add(
+              InferenceResponse(
+                text: text,
+                model: source.model ?? lastModel,
+                tokensGenerated: source.tokensGenerated,
+                timestamp: source.timestamp,
+                isFinal: source.isFinal,
+                isError: source.isError,
+                errorMessage: source.errorMessage,
+                runtimeNotice: source.runtimeNotice,
+                terminalState: source.terminalState,
+              ),
+            );
             return;
           }
 
@@ -80,7 +113,6 @@ class ToolInterceptorTransformer
           }
 
           streamTerminated = true;
-          searchDetected = true;
 
           await subscription?.cancel();
 
@@ -89,7 +121,7 @@ class ToolInterceptorTransformer
           }
         }
 
-        void processBuffer() {
+        void processBuffer(InferenceResponse response) {
           if (streamTerminated || controller.isClosed) {
             return;
           }
@@ -97,6 +129,14 @@ class ToolInterceptorTransformer
           final text = buffer.toString();
 
           if (text.isEmpty) {
+            /*
+             * Preserve empty responses containing metadata/state exactly as
+             * they arrived.
+             */
+            if (response.text.isEmpty) {
+              controller.add(response);
+            }
+
             return;
           }
 
@@ -107,9 +147,27 @@ class ToolInterceptorTransformer
             final safeLength = _safeFlushLength(text);
 
             if (safeLength > 0) {
+              /*
+               * If this response is final, the safe text is itself the
+               * terminal response. Preserve its final metadata.
+               */
+              final isEntireBufferedResponse =
+                  safeLength == text.length;
+
+              if (response.isFinal && isEntireBufferedResponse) {
+                emitToken(
+                  text,
+                  source: response,
+                );
+
+                buffer.clear();
+                return;
+              }
+
               emitToken(text.substring(0, safeLength));
 
               final remainder = text.substring(safeLength);
+
               buffer
                 ..clear()
                 ..write(remainder);
@@ -126,6 +184,7 @@ class ToolInterceptorTransformer
             emitToken(text.substring(0, searchStartIndex));
 
             final remainder = text.substring(searchStartIndex);
+
             buffer
               ..clear()
               ..write(remainder);
@@ -175,7 +234,8 @@ class ToolInterceptorTransformer
 
             final textChunk = response.text;
 
-            if (response.model != null && response.model!.isNotEmpty) {
+            if (response.model != null &&
+                response.model!.isNotEmpty) {
               lastModel = response.model;
             }
 
@@ -187,14 +247,18 @@ class ToolInterceptorTransformer
             }
 
             buffer.write(textChunk);
-            processBuffer();
+
+            processBuffer(response);
           },
           onError: (Object error, StackTrace stackTrace) {
             if (controller.isClosed) {
               return;
             }
 
-            controller.addError(error, stackTrace);
+            controller.addError(
+              error,
+              stackTrace,
+            );
           },
           onDone: () {
             if (streamTerminated || controller.isClosed) {
@@ -204,7 +268,8 @@ class ToolInterceptorTransformer
             final pendingText = buffer.toString();
 
             if (pendingText.isNotEmpty) {
-              final searchStartIndex = pendingText.indexOf(_searchTagStart);
+              final searchStartIndex =
+                  pendingText.indexOf(_searchTagStart);
 
               if (searchStartIndex == -1) {
                 // If the pending text ends with a partial `<search>` opening
@@ -228,7 +293,9 @@ class ToolInterceptorTransformer
             buffer.clear();
 
             if (!controller.isClosed) {
-              unawaited(controller.close());
+              unawaited(
+                controller.close(),
+              );
             }
           },
           cancelOnError: false,
@@ -262,14 +329,22 @@ class ToolInterceptorTransformer
       return 0;
     }
 
-    final maxPrefixLength = _searchTagStart.length - 1;
+    final maxPrefixLength =
+        _searchTagStart.length - 1;
 
-    final maximumCheckLength = text.length < maxPrefixLength
-        ? text.length
-        : maxPrefixLength;
+    final maximumCheckLength =
+        text.length < maxPrefixLength
+            ? text.length
+            : maxPrefixLength;
 
-    for (int length = maximumCheckLength; length > 0; length--) {
-      final suffix = text.substring(text.length - length);
+    for (
+      int length = maximumCheckLength;
+      length > 0;
+      length--
+    ) {
+      final suffix = text.substring(
+        text.length - length,
+      );
 
       if (_searchTagStart.startsWith(suffix)) {
         return text.length - length;
@@ -288,13 +363,21 @@ class ToolInterceptorTransformer
       return false;
     }
 
-    final maxLength = text.length < _searchTagStart.length
-        ? text.length
-        : _searchTagStart.length - 1;
+    final maxLength =
+        text.length < _searchTagStart.length
+            ? text.length
+            : _searchTagStart.length - 1;
 
-    for (int length = 1; length <= maxLength; length++) {
+    for (
+      int length = 1;
+      length <= maxLength;
+      length++
+    ) {
       if (text.endsWith(
-        _searchTagStart.substring(0, length),
+        _searchTagStart.substring(
+          0,
+          length,
+        ),
       )) {
         return true;
       }
