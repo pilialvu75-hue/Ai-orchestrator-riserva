@@ -56,24 +56,31 @@ class LocalPromptTemplates {
     final cleanedContext = context
         .where(
           (turn) =>
-              !turn.excludeFromContext && turn.content.trim().isNotEmpty,
+              !turn.excludeFromContext &&
+              turn.content.trim().isNotEmpty,
         )
-        .map((turn) => turn.copyWith(content: turn.content.trim()))
+        .map(
+          (turn) => turn.copyWith(
+            content: turn.content.trim(),
+          ),
+        )
         .toList(growable: false);
 
-    final template = LocalInferenceModelIds.resolveTemplate(modelId);
+    final template =
+        LocalInferenceModelIds.resolveTemplate(modelId);
 
     final contextChars = cleanedContext.fold<int>(
       0,
       (sum, turn) => sum + turn.content.length,
     );
 
-    final webSystemPromptChars = enableWebSearch
-        ? finalSystemPrompt.length
-        : 0;
+    final webSystemPromptChars =
+        enableWebSearch ? finalSystemPrompt.length : 0;
 
     RuntimeEventLog.instance.emit(
-      '[PROMPT_BEGIN] model=$modelId prompt_chars=${userPrompt.length}',
+      '[PROMPT_BEGIN] '
+      'model=$modelId '
+      'prompt_chars=${userPrompt.length}',
     );
 
     RuntimeEventLog.instance.emit(
@@ -87,7 +94,8 @@ class LocalPromptTemplates {
     );
 
     RuntimeEventLog.instance.emit(
-      '[PROMPT_WEB_RESULTS_SIZE] chars=$webSystemPromptChars',
+      '[PROMPT_WEB_RESULTS_SIZE] '
+      'chars=$webSystemPromptChars',
     );
 
     RuntimeEventLog.instance.emit(
@@ -326,34 +334,29 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// Template DeepSeek-R1 / DeepSeek-R1-Distill-*.
+  /// Template ufficiale DeepSeek-R1 / DeepSeek-R1-Distill-*.
   ///
-  /// Il formato è basato sul chat_template dichiarato dai tokenizer
-  /// DeepSeek-R1-Distill e sul template DeepSeek utilizzato da llama.cpp.
+  /// Basato sul chat_template ufficiale del tokenizer
+  /// DeepSeek-R1-Distill-Qwen.
   ///
   /// Struttura:
   ///
-  ///   <｜begin▁of▁sentence｜>
-  ///   {system}
-  ///   <｜User｜>{user}<｜end▁of▁sentence｜>
-  ///   <｜Assistant｜>{assistant}<｜end▁of▁sentence｜>
-  ///   ...
-  ///   <｜User｜>{current user}<｜end▁of▁sentence｜>
-  ///   <｜Assistant｜><think>
+  /// <｜begin▁of▁sentence｜>{system}
+  /// <｜User｜>{user}
+  /// <｜Assistant｜>{assistant}<｜end▁of▁sentence｜>
+  /// ...
+  /// <｜User｜>{current user}
+  /// <｜Assistant｜><think>
   ///
-  /// Importante:
-  /// - DeepSeek-R1 non usa ChatML Qwen.
+  /// IMPORTANTE:
+  ///
+  /// - NON usare ChatML Qwen.
+  /// - NON inserire EOS dopo il messaggio USER corrente.
+  /// - I messaggi ASSISTANT già completati ricevono EOS.
+  /// - La generazione corrente viene aperta con
+  ///   <｜Assistant｜><think>\n.
   /// - Il BOS viene emesso esplicitamente.
-  /// - I turni già completati ricevono EOS.
-  /// - Il turno corrente termina prima dell'assistant generation prompt.
-  /// - La generazione viene aperta con <think>, coerentemente con
-  ///   il comportamento reasoning di DeepSeek-R1.
-  /// - Non viene usato /no_think: è una direttiva propria di Qwen3,
-  ///   non di DeepSeek-R1-Distill.
-  ///
-  /// La scelta del template avviene tramite LocalInferenceModelIds:
-  /// quindi la stessa funzione è valida per DeepSeek 1.5B, 7B,
-  /// 14B, 32B, 70B e futuri GGUF della stessa famiglia.
+  /// - DeepSeek-R1-Distill non usa /no_think.
   static String _buildDeepSeekR1Prompt({
     required String systemPrompt,
     required List<ChatTurn> context,
@@ -369,13 +372,14 @@ class LocalPromptTemplates {
     // BOS ufficiale DeepSeek.
     buffer.write(bos);
 
-    // Nel template ufficiale il system prompt segue direttamente il BOS.
+    // Il system prompt segue direttamente il BOS.
     if (systemPrompt.trim().isNotEmpty) {
       buffer.write(systemPrompt.trim());
     }
 
     for (final turn in context) {
-      final content = _cleanDeepSeekAssistantContent(turn.content);
+      final content =
+          _cleanDeepSeekAssistantContent(turn.content);
 
       if (content.isEmpty) {
         continue;
@@ -384,12 +388,9 @@ class LocalPromptTemplates {
       switch (turn.role) {
         case ChatRole.system:
           /*
-           * Il template DeepSeek raccoglie il system prompt all'inizio.
-           * Un eventuale system turn presente nella history non deve
-           * diventare un falso ruolo "system" che il modello non conosce.
-           *
-           * Lo manteniamo come testo continuo, evitando di introdurre
-           * marker conversazionali non supportati.
+           * DeepSeek non usa un marker <system> nel proprio
+           * template. Un eventuale system turn storico viene
+           * quindi mantenuto come testo continuo.
            */
           buffer.write(content);
           break;
@@ -408,17 +409,23 @@ class LocalPromptTemplates {
       }
     }
 
-    // Turno corrente dell'utente.
+    /*
+     * Turno USER corrente.
+     *
+     * ATTENZIONE:
+     * NON aggiungere EOS qui.
+     *
+     * Il tokenizer ufficiale DeepSeek usa:
+     *
+     * <｜User｜>domanda<｜Assistant｜><think>
+     *
+     * senza <｜end▁of▁sentence｜> tra domanda e assistant.
+     */
     buffer.write(userTag);
     buffer.write(userPrompt);
-    buffer.write(eos);
 
     /*
-     * Generation prompt DeepSeek-R1.
-     *
-     * Il modello reasoning viene aperto con <think>. Il contenuto
-     * del reasoning sarà successivamente gestito dalla pipeline
-     * output/sanity già esistente.
+     * Generation prompt ufficiale DeepSeek-R1.
      */
     buffer.write(assistantTag);
     buffer.write('<think>\n');
@@ -440,14 +447,14 @@ class LocalPromptTemplates {
     return composed;
   }
 
-  /// Rimuove il blocco di reasoning dalle risposte DeepSeek già presenti
+  /// Rimuove il reasoning dalle risposte DeepSeek già presenti
   /// nella history.
   ///
-  /// Il template ufficiale DeepSeek e quello di llama.cpp trattano
-  /// `</think>` come separatore del reasoning. Per la history chat
-  /// vogliamo conservare la risposta finale, non trascinare nuovamente
-  /// tutto il chain-of-thought nel prompt successivo.
-  static String _cleanDeepSeekAssistantContent(String content) {
+  /// Conserviamo la risposta finale dopo </think>, evitando di
+  /// trascinare il chain-of-thought nella conversazione successiva.
+  static String _cleanDeepSeekAssistantContent(
+    String content,
+  ) {
     final trimmed = content.trim();
 
     if (trimmed.isEmpty) {
@@ -458,7 +465,9 @@ class LocalPromptTemplates {
 
     if (closingThink >= 0) {
       final finalAnswer =
-          trimmed.substring(closingThink + '</think>'.length).trim();
+          trimmed.substring(
+            closingThink + '</think>'.length,
+          ).trim();
 
       if (finalAnswer.isNotEmpty) {
         return finalAnswer;
