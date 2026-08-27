@@ -30,24 +30,121 @@ class InferenceRequest {
   final String? modelId;
   final String? modelPath;
 
+  /// Restituisce il limite di token predefinito in base alla taglia
+  /// del modello.
+  ///
+  /// IMPORTANTE:
+  ///
+  /// La taglia del modello NON determina:
+  /// - la famiglia LLM;
+  /// - il chat template;
+  /// - la piattaforma supportata;
+  /// - il ruolo dell'agente.
+  ///
+  /// Queste responsabilità appartengono ai rispettivi livelli
+  /// dell'architettura.
+  ///
+  /// La funzione serve solamente a evitare fallback troppo bassi
+  /// quando introduciamo modelli più grandi in futuro.
   static int maxTokensForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
-    if (id.contains('14b') || id.contains('13b') || id.contains('12b')) return 2048;
-    if (id.contains('7b') || id.contains('8b')) return 1024;
-    if (id.contains('phi3_5') || id.contains('phi-3.5') || id.contains('phi3.5')) {
+
+    // -------------------------------------------------------------------------
+    // Modelli molto grandi
+    // -------------------------------------------------------------------------
+
+    if (id.contains('70b') ||
+        id.contains('72b') ||
+        id.contains('65b')) {
+      return 4096;
+    }
+
+    if (id.contains('32b') ||
+        id.contains('30b') ||
+        id.contains('34b') ||
+        id.contains('27b')) {
+      return 3072;
+    }
+
+    // -------------------------------------------------------------------------
+    // Modelli medio-grandi
+    // -------------------------------------------------------------------------
+
+    if (id.contains('14b') ||
+        id.contains('13b') ||
+        id.contains('12b')) {
+      return 2048;
+    }
+
+    if (id.contains('9b') ||
+        id.contains('8b') ||
+        id.contains('7b')) {
       return 1024;
     }
-    if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) return 768;
-    return 512;
+
+    // -------------------------------------------------------------------------
+    // Modelli piccoli / mobile
+    // -------------------------------------------------------------------------
+
+    if (id.contains('phi3_5') ||
+        id.contains('phi-3.5') ||
+        id.contains('phi3.5')) {
+      return 1024;
+    }
+
+    if (id.contains('4b') ||
+        id.contains('3.8b') ||
+        id.contains('3b')) {
+      return 768;
+    }
+
+    if (id.contains('2b') ||
+        id.contains('1.8b') ||
+        id.contains('1.7b') ||
+        id.contains('1.5b') ||
+        id.contains('1b')) {
+      return 512;
+    }
+
+    return defaultMaxTokens;
   }
 
+  /// Temperatura base associata alla taglia/famiglia del modello.
+  ///
+  /// Manteniamo volutamente valori conservativi.
+  /// Il runtime può sovrascrivere questi valori tramite le proprie
+  /// impostazioni di sampling.
   static double temperatureForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
-    if (id.contains('14b') || id.contains('7b') || id.contains('8b')) return 0.6;
-    if (id.contains('phi3_5') || id.contains('phi-3.5') || id.contains('phi3.5')) {
+
+    if (id.contains('70b') ||
+        id.contains('72b') ||
+        id.contains('65b') ||
+        id.contains('32b') ||
+        id.contains('30b') ||
+        id.contains('34b') ||
+        id.contains('27b') ||
+        id.contains('14b') ||
+        id.contains('13b') ||
+        id.contains('12b') ||
+        id.contains('9b') ||
+        id.contains('8b') ||
+        id.contains('7b')) {
+      return 0.6;
+    }
+
+    if (id.contains('phi3_5') ||
+        id.contains('phi-3.5') ||
+        id.contains('phi3.5')) {
       return 0.5;
     }
-    if (id.contains('3b') || id.contains('4b') || id.contains('3.8b')) return 0.5;
+
+    if (id.contains('4b') ||
+        id.contains('3.8b') ||
+        id.contains('3b')) {
+      return 0.5;
+    }
+
     return 0.4;
   }
 
@@ -92,7 +189,7 @@ class InferenceRequest {
 
     for (final turn in context) {
       messages.add({
-        'role': turn.role.name, // Convertito da ChatRole enum a String
+        'role': turn.role.name,
         'content': turn.content,
       });
     }
