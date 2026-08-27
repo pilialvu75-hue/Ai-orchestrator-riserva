@@ -17,6 +17,31 @@ const String _webSearchInstruction =
 class LocalPromptTemplates {
   LocalPromptTemplates._();
 
+  // ===========================================================================
+  // CONTEXT BUDGET
+  // ===========================================================================
+  //
+  // AndroidFfiRuntimeProvider usa attualmente nCtx=2048.
+  //
+  // Non dobbiamo occupare tutto il context window con la history:
+  //
+  //   system prompt
+  //   + history
+  //   + current user prompt
+  //   + generation headroom
+  //
+  // devono poter convivere nello stesso context.
+  //
+  // Il limite è intenzionalmente conservativo e si applica a TUTTE le famiglie.
+  //
+  // Non tronchiamo un messaggio a metà:
+  // manteniamo solamente turni completi, partendo dai più recenti.
+  //
+  // Questo non modifica la memoria persistente: modifica solamente ciò che
+  // viene inviato al modello per la singola inferenza.
+  static const int _maxContextChars = 5600;
+  static const int _maxContextTurns = 12;
+
   static String compose({
     required String modelId,
     required String prompt,
@@ -52,7 +77,16 @@ class LocalPromptTemplates {
         ? '$baseSystemPrompt\n\n$_webSearchInstruction'
         : baseSystemPrompt;
 
-    // Filtro contestuale centralizzato per il RAG locale e la memoria.
+    // -------------------------------------------------------------------------
+    // Context cleaning
+    // -------------------------------------------------------------------------
+    //
+    // Prima eliminiamo turni vuoti/esclusi.
+    // Poi applichiamo il budget di contesto mantenendo i turni più recenti.
+    //
+    // IMPORTANTE:
+    // il contesto filtrato non modifica request.context;
+    // viene usata esclusivamente la lista locale per questa composizione.
     final cleanedContext = context
         .where(
           (turn) =>
@@ -66,10 +100,21 @@ class LocalPromptTemplates {
         )
         .toList(growable: false);
 
+    final boundedContext = _boundContext(
+      cleanedContext,
+      maxChars: _maxContextChars,
+      maxTurns: _maxContextTurns,
+    );
+
     final template =
         LocalInferenceModelIds.resolveTemplate(modelId);
 
-    final contextChars = cleanedContext.fold<int>(
+    final originalContextChars = cleanedContext.fold<int>(
+      0,
+      (sum, turn) => sum + turn.content.length,
+    );
+
+    final boundedContextChars = boundedContext.fold<int>(
       0,
       (sum, turn) => sum + turn.content.length,
     );
@@ -84,13 +129,23 @@ class LocalPromptTemplates {
     );
 
     RuntimeEventLog.instance.emit(
-      '[PROMPT_SYSTEM_SIZE] chars=${finalSystemPrompt.length}',
+      '[PROMPT_SYSTEM_SIZE] '
+      'chars=${finalSystemPrompt.length}',
     );
 
     RuntimeEventLog.instance.emit(
       '[PROMPT_CONTEXT_SIZE] '
-      'turns=${cleanedContext.length} '
-      'chars=$contextChars',
+      'turns=${boundedContext.length} '
+      'chars=$boundedContextChars '
+      'original_turns=${cleanedContext.length} '
+      'original_chars=$originalContextChars',
+    );
+
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_CONTEXT_BOUND] '
+      'applied=${boundedContext.length != cleanedContext.length || boundedContextChars != originalContextChars} '
+      'max_chars=$_maxContextChars '
+      'max_turns=$_maxContextTurns',
     );
 
     RuntimeEventLog.instance.emit(
@@ -108,14 +163,14 @@ class LocalPromptTemplates {
       case 'llama3':
         return _buildLlama3Prompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
       case 'qwen':
         return _buildQwenChatPrompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
           suppressThinking:
               LocalInferenceModelIds.isQwen3Thinking(modelId),
@@ -124,35 +179,35 @@ class LocalPromptTemplates {
       case 'deepseek':
         return _buildDeepSeekR1Prompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
       case 'gemma':
         return _buildGemmaPrompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
       case 'phi3':
         return _buildPhi3Prompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
       case 'mistral':
         return _buildMistralPrompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
       case 'zephyr':
         return _buildZephyrPrompt(
           systemPrompt: finalSystemPrompt,
-          context: cleanedContext,
+          context: boundedContext,
           userPrompt: userPrompt,
         );
 
@@ -163,13 +218,13 @@ class LocalPromptTemplates {
         buffer.writeln('System: $finalSystemPrompt');
         buffer.writeln();
 
-        for (final turn in cleanedContext) {
+        for (final turn in boundedContext) {
           buffer.writeln(
             '${_roleName(turn.role)}: ${turn.content}',
           );
         }
 
-        if (cleanedContext.isNotEmpty) {
+        if (boundedContext.isNotEmpty) {
           buffer.writeln();
         }
 
@@ -184,6 +239,75 @@ class LocalPromptTemplates {
 
         return composed;
     }
+  }
+
+  // ===========================================================================
+  // CONTEXT BOUNDING
+  // ===========================================================================
+
+  /// Mantiene il contesto più recente entro un budget conservativo.
+  ///
+  /// Il metodo:
+  ///
+  /// - non modifica la lista originale;
+  /// - non tronca singoli messaggi;
+  /// - mantiene i turni più recenti;
+  /// - rispetta un limite sia di caratteri sia di numero di turni;
+  /// - evita che una history molto lunga consumi tutto il context window.
+  static List<ChatTurn> _boundContext(
+    List<ChatTurn> context, {
+    required int maxChars,
+    required int maxTurns,
+  }) {
+    if (context.isEmpty) {
+      return const [];
+    }
+
+    if (maxChars <= 0 || maxTurns <= 0) {
+      return const [];
+    }
+
+    var usedChars = 0;
+    final selected = <ChatTurn>[];
+
+    /*
+     * Partiamo dalla fine perché il contesto più recente ha il maggior
+     * valore per una conversazione multi-turno.
+     *
+     * Non interrompiamo un messaggio a metà.
+     */
+    for (var index = context.length - 1;
+        index >= 0 && selected.length < maxTurns;
+        index--) {
+      final turn = context[index];
+      final contentLength = turn.content.length;
+
+      if (contentLength == 0) {
+        continue;
+      }
+
+      /*
+       * Se il singolo turno supera il budget totale, non lo tronchiamo.
+       * In questo caso non possiamo conservarlo insieme al resto della
+       * history senza violare la regola "messaggi completi".
+       *
+       * Il prompt corrente resterà comunque sempre presente.
+       */
+      if (contentLength > maxChars) {
+        continue;
+      }
+
+      if (usedChars + contentLength > maxChars) {
+        continue;
+      }
+
+      selected.add(turn);
+      usedChars += contentLength;
+    }
+
+    selected.reverse();
+
+    return List<ChatTurn>.unmodifiable(selected);
   }
 
   static String? _clean(String? value) {
@@ -376,10 +500,8 @@ class LocalPromptTemplates {
 
     final buffer = StringBuffer();
 
-    // BOS ufficiale DeepSeek.
     buffer.write(bos);
 
-    // Il system prompt segue direttamente il BOS.
     if (systemPrompt.trim().isNotEmpty) {
       buffer.write(systemPrompt.trim());
     }
@@ -394,11 +516,6 @@ class LocalPromptTemplates {
 
       switch (turn.role) {
         case ChatRole.system:
-          /*
-           * DeepSeek non usa un marker <system> nel proprio
-           * template. Un eventuale system turn storico viene
-           * quindi mantenuto come testo continuo.
-           */
           buffer.write(content);
           break;
 
@@ -416,24 +533,9 @@ class LocalPromptTemplates {
       }
     }
 
-    /*
-     * Turno USER corrente.
-     *
-     * ATTENZIONE:
-     * NON aggiungere EOS qui.
-     *
-     * Il tokenizer ufficiale DeepSeek usa:
-     *
-     * <｜User｜>domanda<｜Assistant｜><think>
-     *
-     * senza <｜end▁of▁sentence｜> tra domanda e assistant.
-     */
     buffer.write(userTag);
     buffer.write(userPrompt);
 
-    /*
-     * Generation prompt ufficiale DeepSeek-R1.
-     */
     buffer.write(assistantTag);
     buffer.write('<think>\n');
 
@@ -500,14 +602,6 @@ class LocalPromptTemplates {
   ///
   /// Il system prompt viene incorporato nel primo blocco USER,
   /// coerentemente con il chat template Mistral 7B Instruct.
-  ///
-  /// NOTA:
-  ///
-  /// Modelli Mistral più recenti possono avere chat template
-  /// specifici differenti. Quando introdurremo uno specifico
-  /// GGUF Mistral con un template proprietario, verrà registrato
-  /// esplicitamente come nuova variante senza alterare questa
-  /// famiglia di base.
   static String _buildMistralPrompt({
     required String systemPrompt,
     required List<ChatTurn> context,
@@ -535,6 +629,7 @@ class LocalPromptTemplates {
               ? content
               : '$systemText\n\n$content';
         }
+
         continue;
       }
 
@@ -545,19 +640,13 @@ class LocalPromptTemplates {
      * Mistral Instruct richiede alternanza user/assistant.
      *
      * Non ricostruiamo artificialmente turni mancanti e non
-     * duplichiamo la history. Il contesto viene serializzato
-     * nell'ordine originale.
+     * duplichiamo la history.
      */
     final normalizedTurns = <ChatTurn>[];
     ChatRole? previousRole;
 
     for (final turn in turns) {
       if (previousRole == turn.role) {
-        /*
-         * Due messaggi consecutivi dello stesso ruolo non vanno
-         * trasformati in due [INST] consecutivi: li uniamo con
-         * una separazione testuale, preservando il contenuto.
-         */
         final previous = normalizedTurns.removeLast();
 
         final mergedContent =
@@ -574,42 +663,37 @@ class LocalPromptTemplates {
       }
     }
 
-    /*
-     * Se il primo turno storico non è USER, non inventiamo un
-     * messaggio USER: lo conserviamo come testo nel primo blocco.
-     *
-     * Nella normale cronologia chat il primo turno sarà USER.
-     */
     for (final turn in normalizedTurns) {
       if (turn.role == ChatRole.user) {
         var userContent = turn.content.trim();
 
         if (systemText.isNotEmpty &&
             buffer.length == bos.length) {
-          userContent = '$systemText\n\n$userContent';
+          userContent =
+              '$systemText\n\n$userContent';
         }
 
-        buffer.write('$instOpen $userContent $instClose');
+        buffer.write(
+          '$instOpen $userContent $instClose',
+        );
       } else if (turn.role == ChatRole.assistant) {
-        buffer.write(' ${turn.content.trim()}$eos');
+        buffer.write(
+          ' ${turn.content.trim()}$eos',
+        );
       }
     }
 
-    /*
-     * USER corrente.
-     *
-     * Se la history termina con un USER, aggiungiamo comunque
-     * il nuovo prompt nello stesso modo senza duplicare un
-     * assistant artificiale.
-     */
     var currentUserContent = userPrompt;
 
     if (systemText.isNotEmpty &&
         normalizedTurns.isEmpty) {
-      currentUserContent = '$systemText\n\n$currentUserContent';
+      currentUserContent =
+          '$systemText\n\n$currentUserContent';
     }
 
-    buffer.write('$instOpen $currentUserContent $instClose');
+    buffer.write(
+      '$instOpen $currentUserContent $instClose',
+    );
 
     final composed = buffer.toString();
 
