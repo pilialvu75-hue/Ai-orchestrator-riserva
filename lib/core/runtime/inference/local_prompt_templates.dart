@@ -142,6 +142,13 @@ class LocalPromptTemplates {
           userPrompt: userPrompt,
         );
 
+      case 'mistral':
+        return _buildMistralPrompt(
+          systemPrompt: finalSystemPrompt,
+          context: cleanedContext,
+          userPrompt: userPrompt,
+        );
+
       case 'zephyr':
         return _buildZephyrPrompt(
           systemPrompt: finalSystemPrompt,
@@ -477,6 +484,148 @@ class LocalPromptTemplates {
     }
 
     return trimmed;
+  }
+
+  /// Template Mistral Instruct.
+  ///
+  /// Per la famiglia Mistral manteniamo il protocollo storico
+  /// [INST] ... [/INST] con BOS <s> e EOS </s>.
+  ///
+  /// Formato tipico:
+  ///
+  /// <s>[INST] system
+  ///
+  /// user [/INST] assistant</s>
+  /// [INST] next user [/INST] next assistant</s>
+  ///
+  /// Il system prompt viene incorporato nel primo blocco USER,
+  /// coerentemente con il chat template Mistral 7B Instruct.
+  ///
+  /// NOTA:
+  ///
+  /// Modelli Mistral più recenti possono avere chat template
+  /// specifici differenti. Quando introdurremo uno specifico
+  /// GGUF Mistral con un template proprietario, verrà registrato
+  /// esplicitamente come nuova variante senza alterare questa
+  /// famiglia di base.
+  static String _buildMistralPrompt({
+    required String systemPrompt,
+    required List<ChatTurn> context,
+    required String userPrompt,
+  }) {
+    const bos = '<s>';
+    const eos = '</s>';
+    const instOpen = '[INST]';
+    const instClose = '[/INST]';
+
+    final buffer = StringBuffer();
+
+    buffer.write(bos);
+
+    var systemText = systemPrompt.trim();
+
+    final turns = <ChatTurn>[];
+
+    for (final turn in context) {
+      if (turn.role == ChatRole.system) {
+        final content = turn.content.trim();
+
+        if (content.isNotEmpty) {
+          systemText = systemText.isEmpty
+              ? content
+              : '$systemText\n\n$content';
+        }
+        continue;
+      }
+
+      turns.add(turn);
+    }
+
+    /*
+     * Mistral Instruct richiede alternanza user/assistant.
+     *
+     * Non ricostruiamo artificialmente turni mancanti e non
+     * duplichiamo la history. Il contesto viene serializzato
+     * nell'ordine originale.
+     */
+    final normalizedTurns = <ChatTurn>[];
+    ChatRole? previousRole;
+
+    for (final turn in turns) {
+      if (previousRole == turn.role) {
+        /*
+         * Due messaggi consecutivi dello stesso ruolo non vanno
+         * trasformati in due [INST] consecutivi: li uniamo con
+         * una separazione testuale, preservando il contenuto.
+         */
+        final previous = normalizedTurns.removeLast();
+
+        final mergedContent =
+            '${previous.content.trim()}\n\n${turn.content.trim()}';
+
+        normalizedTurns.add(
+          previous.copyWith(
+            content: mergedContent.trim(),
+          ),
+        );
+      } else {
+        normalizedTurns.add(turn);
+        previousRole = turn.role;
+      }
+    }
+
+    /*
+     * Se il primo turno storico non è USER, non inventiamo un
+     * messaggio USER: lo conserviamo come testo nel primo blocco.
+     *
+     * Nella normale cronologia chat il primo turno sarà USER.
+     */
+    for (final turn in normalizedTurns) {
+      if (turn.role == ChatRole.user) {
+        var userContent = turn.content.trim();
+
+        if (systemText.isNotEmpty &&
+            buffer.length == bos.length) {
+          userContent = '$systemText\n\n$userContent';
+        }
+
+        buffer.write('$instOpen $userContent $instClose');
+      } else if (turn.role == ChatRole.assistant) {
+        buffer.write(' ${turn.content.trim()}$eos');
+      }
+    }
+
+    /*
+     * USER corrente.
+     *
+     * Se la history termina con un USER, aggiungiamo comunque
+     * il nuovo prompt nello stesso modo senza duplicare un
+     * assistant artificiale.
+     */
+    var currentUserContent = userPrompt;
+
+    if (systemText.isNotEmpty &&
+        normalizedTurns.isEmpty) {
+      currentUserContent = '$systemText\n\n$currentUserContent';
+    }
+
+    buffer.write('$instOpen $currentUserContent $instClose');
+
+    final composed = buffer.toString();
+
+    _logFinalPromptMetrics(
+      composed,
+      userPrompt.length,
+    );
+
+    RuntimeEventLog.instance.emit(
+      '[PROMPT_TEMPLATE_MISTRAL] '
+      'bos=true '
+      'inst=true '
+      'context_turns=${normalizedTurns.length}',
+    );
+
+    return composed;
   }
 
   static String _buildGemmaPrompt({
