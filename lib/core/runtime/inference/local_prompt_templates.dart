@@ -268,7 +268,7 @@ class LocalPromptTemplates {
     }
 
     var usedChars = 0;
-    final selected = <ChatTurn>[];
+    var selected = <ChatTurn>[];
 
     /*
      * Partiamo dalla fine perché il contesto più recente ha il maggior
