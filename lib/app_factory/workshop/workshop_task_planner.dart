@@ -1,4 +1,4 @@
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 /// Piano di lavoro prodotto dal Task Planner.
 ///
@@ -252,12 +252,12 @@ final class WorkshopTaskPlanner {
       ],
       constraints: constraints,
       acceptanceCriteria: <WorkshopTaskAcceptanceCriterion>[
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'requirements-understood',
           description:
               'The main functional requirements are explicitly identified.',
         ),
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'resources-identified',
           description:
               'Required local, cloud and remote resources are identified.',
@@ -303,12 +303,12 @@ final class WorkshopTaskPlanner {
       ],
       constraints: constraints,
       acceptanceCriteria: <WorkshopTaskAcceptanceCriterion>[
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'architecture-defined',
           description:
               'The major modules and responsibilities are defined.',
         ),
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'interfaces-defined',
           description:
               'Important boundaries between modules are identified.',
@@ -362,12 +362,12 @@ final class WorkshopTaskPlanner {
       ],
       constraints: constraints,
       acceptanceCriteria: <WorkshopTaskAcceptanceCriterion>[
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'implementation-complete',
           description:
               'The requested foundation is implemented.',
         ),
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'tests-added',
           description:
               'Relevant tests exist for the implemented behavior.',
@@ -423,12 +423,12 @@ final class WorkshopTaskPlanner {
       ],
       constraints: constraints,
       acceptanceCriteria: <WorkshopTaskAcceptanceCriterion>[
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'tests-pass',
           description:
               'Relevant tests pass.',
         ),
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'analysis-pass',
           description:
               'Static analysis does not report blocking errors.',
@@ -476,12 +476,12 @@ final class WorkshopTaskPlanner {
       ],
       constraints: constraints,
       acceptanceCriteria: <WorkshopTaskAcceptanceCriterion>[
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'build-complete',
           description:
               'The requested build completes successfully.',
         ),
-        WorkshopTaskAcceptanceCriterion(
+        const WorkshopTaskAcceptanceCriterion(
           id: 'artifact-available',
           description:
               'The generated artifact is available for review.',
