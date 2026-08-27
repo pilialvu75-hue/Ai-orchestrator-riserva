@@ -45,7 +45,6 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 ///
 /// Riutilizza esclusivamente l'infrastruttura di inferenza già presente
 /// nell'applicazione attraverso un contratto stabile.
-///
 final class WorkshopFactory {
   const WorkshopFactory._();
 
