@@ -85,6 +85,14 @@ class LocalInferenceModelIds {
   /// esplicitamente i modelli Llama moderni.
   static final Set<String> llamaChatTemplateModels = <String>{};
 
+  /// Compatibilità con il vecchio nome utilizzato da
+  /// local_runtime_provider.dart e da eventuale codice legacy.
+  ///
+  /// IMPORTANTE:
+  /// Questo è lo stesso Set di [llamaChatTemplateModels].
+  static final Set<String> llama3ChatTemplateModels =
+      llamaChatTemplateModels;
+
   /// Gemma.
   static final Set<String> gemmaChatTemplateModels = {
     gemma2b,
@@ -95,6 +103,13 @@ class LocalInferenceModelIds {
   static final Set<String> phiChatTemplateModels = {
     phi35Mini,
   };
+
+  /// Compatibilità con il vecchio nome utilizzato da
+  /// local_runtime_provider.dart e da eventuale codice legacy.
+  ///
+  /// Questo è lo stesso Set di [phiChatTemplateModels].
+  static final Set<String> phi3ChatTemplateModels =
+      phiChatTemplateModels;
 
   /// Mistral.
   ///
@@ -222,8 +237,6 @@ class LocalInferenceModelIds {
   // ===========================================================================
 
   /// Restituisce la famiglia logica del modello.
-  ///
-  /// Questo metodo è separato da [resolveTemplate] appositamente:
   ///
   /// famiglia != template != dimensione != piattaforma
   ///
