@@ -305,8 +305,8 @@ class LocalPromptTemplates {
       usedChars += contentLength;
     }
 
-    selected.reverse();
-
+    selected = selected.reversed.toList();
+      
     return List<ChatTurn>.unmodifiable(selected);
   }
 
