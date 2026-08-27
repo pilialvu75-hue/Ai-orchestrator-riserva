@@ -1,8 +1,14 @@
+import 'package:get_it/get_it.dart';
+
 import '../workspace/local_git_workspace_gateway.dart';
 
 import 'workshop_dashboard_controller.dart';
 import 'workshop_engine.dart';
+import 'workshop_inference_gateway.dart';
+import 'workshop_inference_provider_adapter.dart';
 import 'workshop_project_executor.dart';
+
+import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
 /// Composition root del Cantiere.
 ///
@@ -15,6 +21,18 @@ import 'workshop_project_executor.dart';
 ///          ↓
 ///   WorkshopEngine
 ///          ↓
+///   WorkshopInferenceGateway
+///          ↓
+///   WorkshopInferenceProviderAdapter
+///          ↓
+///   InferenceService
+///          ↓
+///   Local / Cloud runtime
+///
+/// e parallelamente:
+///
+///   WorkshopEngine
+///          ↓
 ///   WorkshopProjectExecutor
 ///          ↓
 ///   LocalGitWorkspaceGateway
@@ -23,10 +41,11 @@ import 'workshop_project_executor.dart';
 ///          ↓
 ///   VirtualWorkspace
 ///
-/// Il factory non avvia automaticamente una produzione.
+/// Il Cantiere NON dipende dalla Chat Assistente.
 ///
-/// La sua responsabilità è esclusivamente costruire il blocco
-/// operativo del Cantiere in modo esplicito e verificabile.
+/// Riutilizza esclusivamente l'infrastruttura di inferenza già presente
+/// nell'applicazione attraverso un contratto stabile.
+///
 final class WorkshopFactory {
   const WorkshopFactory._();
 
@@ -88,16 +107,118 @@ final class WorkshopFactory {
     );
   }
 
-  /// Crea un WorkshopEngine già collegato al ProjectExecutor.
+  /// Risolve l'InferenceService già registrato nell'application container.
+  ///
+  /// Il Cantiere non crea un secondo runtime AI.
+  ///
+  /// Utilizza esclusivamente il contratto InferenceService già esistente,
+  /// che mantiene la propria gestione di:
+  ///
+  /// - runtime locale;
+  /// - runtime cloud;
+  /// - modello selezionato;
+  /// - sessione;
+  /// - fallback;
+  /// - provider.
+  ///
+  /// Se l'applicazione non ha ancora inizializzato il container DI,
+  /// l'errore viene lasciato propagare invece di creare un falso provider.
+  static InferenceService resolveInferenceService({
+    InferenceService? inferenceService,
+  }) {
+    if (inferenceService != null) {
+      return inferenceService;
+    }
+
+    final locator = GetIt.instance;
+
+    if (!locator.isRegistered<InferenceService>()) {
+      throw StateError(
+        'InferenceService is not registered. '
+        'Initialize application dependencies before creating the Workshop.',
+      );
+    }
+
+    return locator<InferenceService>();
+  }
+
+  /// Crea il provider indipendente del Cantiere sopra InferenceService.
+  ///
+  /// Questo adapter mantiene separati:
+  ///
+  ///   Assistente
+  ///       ↓
+  ///   InferenceService
+  ///
+  /// e
+  ///
+  ///   Cantiere
+  ///       ↓
+  ///   WorkshopInferenceGateway
+  ///       ↓
+  ///   WorkshopInferenceProviderAdapter
+  ///       ↓
+  ///   InferenceService
+  ///
+  /// Condividono quindi infrastruttura, ma non controller,
+  /// conversazione o memoria dell'Assistente.
+  static WorkshopInferenceProviderAdapter
+      createInferenceProviderAdapter({
+    InferenceService? inferenceService,
+  }) {
+    final resolvedInferenceService =
+        resolveInferenceService(
+      inferenceService: inferenceService,
+    );
+
+    return WorkshopInferenceProviderAdapter(
+      inferenceService: resolvedInferenceService,
+    );
+  }
+
+  /// Crea il gateway di inferenza del Cantiere.
+  ///
+  /// [inferenceGateway] può essere fornito esplicitamente per test,
+  /// sostituzioni o configurazioni future.
+  ///
+  /// In assenza di un gateway esplicito viene utilizzato il runtime
+  /// dell'applicazione attraverso il Workshop adapter.
+  static WorkshopInferenceGateway
+      createInferenceGateway({
+    InferenceService? inferenceService,
+    WorkshopInferenceGateway? inferenceGateway,
+  }) {
+    if (inferenceGateway != null) {
+      return inferenceGateway;
+    }
+
+    final provider =
+        createInferenceProviderAdapter(
+      inferenceService: inferenceService,
+    );
+
+    return WorkshopInferenceGateway(
+      provider: provider,
+    );
+  }
+
+  /// Crea un WorkshopEngine già collegato al ProjectExecutor e
+  /// al cervello AI indipendente del Cantiere.
   ///
   /// Se [projectExecutor] viene fornito esplicitamente, viene usato
   /// direttamente.
   ///
-  /// Altrimenti il factory costruisce automaticamente il ProjectExecutor
-  /// sul Workspace locale.
+  /// Se [projectExecutor] non viene fornito, il factory lo costruisce
+  /// automaticamente quando è disponibile [workspaceRootPath].
+  ///
+  /// Se [inferenceGateway] non viene fornito, il factory collega
+  /// automaticamente il Workshop al RuntimeInferenceProvider
+  /// dell'applicazione attraverso WorkshopInferenceProviderAdapter.
   static WorkshopEngine createEngine({
     String? workspaceRootPath,
     WorkshopProjectExecutor? projectExecutor,
+    InferenceService? inferenceService,
+    WorkshopInferenceGateway? inferenceGateway,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -109,7 +230,14 @@ final class WorkshopFactory {
           maxFileSizeBytes: maxFileSizeBytes,
         );
 
+    final resolvedInferenceGateway =
+        createInferenceGateway(
+      inferenceService: inferenceService,
+      inferenceGateway: inferenceGateway,
+    );
+
     return WorkshopEngine(
+      inferenceGateway: resolvedInferenceGateway,
       projectExecutor: resolvedExecutor,
     );
   }
@@ -118,10 +246,7 @@ final class WorkshopFactory {
   ///
   /// Il controller riceve l'engine già configurato.
   ///
-  /// [workspaceRootPath] è opzionale per mantenere il factory utilizzabile
-  /// anche quando la UI non è ancora stata collegata ad un progetto locale.
-  ///
-  /// Quando viene fornito:
+  /// Quando viene fornito [workspaceRootPath]:
   ///
   ///   workspaceRootPath
   ///          ↓
@@ -129,13 +254,24 @@ final class WorkshopFactory {
   ///          ↓
   ///   ProjectExecutor
   ///          ↓
-  ///   Engine
+  ///   WorkshopEngine
+  ///
+  /// e contemporaneamente:
+  ///
+  ///   InferenceService
   ///          ↓
-  ///   Controller
-  static WorkshopDashboardController createDashboardController({
+  ///   WorkshopInferenceProviderAdapter
+  ///          ↓
+  ///   WorkshopInferenceGateway
+  ///          ↓
+  ///   WorkshopEngine
+  static WorkshopDashboardController
+      createDashboardController({
     String? workspaceRootPath,
     WorkshopEngine? engine,
     WorkshopProjectExecutor? projectExecutor,
+    InferenceService? inferenceService,
+    WorkshopInferenceGateway? inferenceGateway,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -144,6 +280,8 @@ final class WorkshopFactory {
         createEngine(
           workspaceRootPath: workspaceRootPath,
           projectExecutor: projectExecutor,
+          inferenceService: inferenceService,
+          inferenceGateway: inferenceGateway,
           includeHiddenFiles: includeHiddenFiles,
           maxFileSizeBytes: maxFileSizeBytes,
         );
@@ -159,15 +297,17 @@ final class WorkshopFactory {
   /// successivamente da:
   ///
   /// - Dashboard;
-  /// - Assistente;
+  /// - Assistente attraverso un contratto stabile;
   /// - A-Team;
   /// - servizi background;
   /// - altri domini della Factory.
   ///
-  /// La creazione delle dipendenze non avvia alcuna produzione.
+  /// La creazione delle dipendenze NON avvia automaticamente una produzione.
   static WorkshopDashboardController create({
     String? workspaceRootPath,
     WorkshopProjectExecutor? projectExecutor,
+    InferenceService? inferenceService,
+    WorkshopInferenceGateway? inferenceGateway,
     WorkshopEngine? engine,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
@@ -181,6 +321,8 @@ final class WorkshopFactory {
     return createDashboardController(
       workspaceRootPath: workspaceRootPath,
       projectExecutor: projectExecutor,
+      inferenceService: inferenceService,
+      inferenceGateway: inferenceGateway,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
