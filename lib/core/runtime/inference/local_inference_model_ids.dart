@@ -1,179 +1,292 @@
 class LocalInferenceModelIds {
   LocalInferenceModelIds._();
 
-  // ── Costanti originali (invariate per retrocompatibilità) ─────────────────
+  // ===========================================================================
+  // MODEL IDS — COMPATIBILITÀ STORICA
+  // ===========================================================================
+
   static const String llama1b = 'llama_1b';
   static const String gemma2b = 'gemma_2b';
   static const String gemma2_2bIt = 'gemma_2b_it';
-  static const String deepSeekR1_1_5b = 'deepseek_r1_1_5b';
-  static const String qwen3_1_7b = 'qwen3_1_7b';
 
-  /// Desktop/PC-only model (non nella lista Android-safe).
+  static const String deepSeekR1_1_5b = 'deepseek_r1_1_5b';
   static const String deepSeekR1_7b = 'deepseek_r1_7b';
 
-  // ── Nuove costanti Phi-3.5-mini ────────────────────────────────────────────
+  static const String qwen3_1_7b = 'qwen3_1_7b';
+
   static const String phi35Mini = 'phi3_5_mini';
 
-  @Deprecated('Usa phi35Mini per rispettare lo stile lowerCamelCase')
+  @Deprecated('Usa phi35Mini')
   static const String phi3_5_mini = phi35Mini;
 
-  // ── Set di appartenenza per match esatto ─────────────────────────────────
+  // ===========================================================================
+  // MODEL FAMILY IDS
+  //
+  // La famiglia determina il template conversazionale.
+  //
+  // La dimensione del modello NON deve determinare il template.
+  //
+  // Questo permette di supportare in futuro:
+  //
+  //   1.5B / 3B / 4B / 7B / 9B / 14B / 32B / 70B / ...
+  //
+  // senza creare un nuovo template per ogni dimensione.
+  // ===========================================================================
 
-  /// Modelli che usano il template Llama 3 Instruct
-  /// (<|begin_of_text|> / <|start_header_id|> / <|eot_id|>).
-  ///
-  /// ATTENZIONE:
-  /// TinyLlama 1.1B Chat NON appartiene a questo gruppo.
-  static final Set<String> llama3ChatTemplateModels = <String>{};
+  static const String familyDeepSeek = 'deepseek';
+  static const String familyQwen = 'qwen';
+  static const String familyLlama = 'llama';
+  static const String familyGemma = 'gemma';
+  static const String familyPhi = 'phi3';
+  static const String familyMistral = 'mistral';
 
-  /// TinyLlama 1.1B Chat usa il formato chat stile Zephyr:
-  ///
-  /// <|system|>
-  /// <|user|>
-  /// <|assistant|>
-  /// </s>
-  ///
-  /// Il modelId storico `llama_1b` identifica proprio TinyLlama
-  /// nel manifest Android.
-  static final Set<String> zephyrChatTemplateModels = {
-    llama1b,
-  };
+  // ===========================================================================
+  // TEMPLATE IDS
+  //
+  // Ogni famiglia avrà il proprio template dedicato in
+  // local_prompt_templates.dart.
+  // ===========================================================================
 
-  /// Modelli DeepSeek-R1 (e distillati) che usano il proprio template
-  /// conversazionale DeepSeek.
+  static const String templateDeepSeek = 'deepseek';
+  static const String templateQwen = 'qwen';
+  static const String templateLlama = 'llama3';
+  static const String templateGemma = 'gemma';
+  static const String templatePhi = 'phi3';
+  static const String templateMistral = 'mistral';
+
+  /// Template legacy per TinyLlama / Zephyr.
   ///
-  /// NON devono essere classificati come Qwen/ChatML, anche se i modelli
-  /// DeepSeek-R1-Distill-Qwen sono basati sull'architettura Qwen.
+  /// Non viene eliminato perché `llama_1b` identifica storicamente
+  /// TinyLlama nel manifest Android.
+  static const String templateZephyr = 'zephyr';
+
+  // ===========================================================================
+  // MODELLI PER FAMIGLIA
+  // ===========================================================================
+
+  /// DeepSeek-R1 e DeepSeek-R1-Distill.
+  ///
+  /// IMPORTANTE:
+  /// DeepSeek-R1-Distill-Qwen NON viene classificato come Qwen
+  /// solamente perché l'architettura sottostante è Qwen.
   static final Set<String> deepseekChatTemplateModels = {
     deepSeekR1_1_5b,
     deepSeekR1_7b,
   };
 
-  /// Modelli che usano il template ChatML / Qwen
-  /// (<|im_start|> / <|im_end|>).
+  /// Qwen3 nativo.
   static final Set<String> qwenChatTemplateModels = {
     qwen3_1_7b,
   };
 
-  /// Sottoinsieme di [qwenChatTemplateModels] che supportano la direttiva
-  /// Qwen3 `/no_think` per sopprimere il chain-of-thought.
-  /// Necessario su Android dove il budget token è troppo stretto per
-  /// accomodare i thinking token prima della risposta finale.
-  static final Set<String> qwen3ThinkingModels = {
-    qwen3_1_7b,
-    // Phi-3.5-mini NON supporta /no_think
-  };
+  /// Llama 3/3.x.
+  ///
+  /// Rimane vuoto per i modelId storici finché non registriamo
+  /// esplicitamente i modelli Llama moderni.
+  static final Set<String> llamaChatTemplateModels = <String>{};
 
+  /// Gemma.
   static final Set<String> gemmaChatTemplateModels = {
+    gemma2b,
     gemma2_2bIt,
   };
 
-  /// Modelli che usano il template Phi-3 / Phi-3.5.
-  static final Set<String> phi3ChatTemplateModels = {
+  /// Phi-3 / Phi-3.5.
+  static final Set<String> phiChatTemplateModels = {
     phi35Mini,
   };
 
-  // ── Risoluzione template ──────────────────────────────────────────────────
-
-  /// Risolve il template corretto per un modelId arbitrario.
+  /// Mistral.
   ///
-  /// Priorità:
-  /// 1. Match esatto nei set registrati
-  /// 2. Pattern matching sul nome
-  /// 3. Fallback 'plain'
+  /// Predisposto per i modelli Mistral GGUF futuri.
+  static final Set<String> mistralChatTemplateModels = <String>{};
+
+  // ===========================================================================
+  // LEGACY / SPECIAL TEMPLATE MODELS
+  // ===========================================================================
+
+  /// TinyLlama 1.1B Chat.
+  ///
+  /// Il modelId storico `llama_1b` identifica TinyLlama nel manifest Android.
+  ///
+  /// NON deve essere trattato come Llama 3.
+  static final Set<String> zephyrChatTemplateModels = {
+    llama1b,
+  };
+
+  // ===========================================================================
+  // QWEN3 THINKING
+  // ===========================================================================
+
+  /// Modelli Qwen3 che supportano `/no_think`.
+  ///
+  /// DeepSeek-R1-Distill e Phi-3 NON vengono inseriti qui.
+  static final Set<String> qwen3ThinkingModels = {
+    qwen3_1_7b,
+  };
+
+  // ===========================================================================
+  // TEMPLATE RESOLUTION
+  // ===========================================================================
+
+  /// Risolve il template corretto per un modelId.
+  ///
+  /// Ordine:
+  ///
+  /// 1. Match esatto
+  /// 2. Modelli speciali legacy
+  /// 3. Pattern matching
+  /// 4. Fallback plain
+  ///
+  /// La priorità DeepSeek > Qwen è intenzionale:
+  ///
+  /// DeepSeek-R1-Distill-Qwen
+  ///
+  /// contiene "qwen" nel nome ma non deve essere trattato come Qwen3.
   static String resolveTemplate(String modelId) {
-    // 1. Match esatto nei set
+    final exactId = modelId.trim();
 
-    // IMPORTANTISSIMO:
-    // TinyLlama 1.1B Chat -> Zephyr-style template.
-    if (zephyrChatTemplateModels.contains(modelId)) {
-      return 'zephyr';
+    // -------------------------------------------------------------------------
+    // Match esatto
+    // -------------------------------------------------------------------------
+
+    if (zephyrChatTemplateModels.contains(exactId)) {
+      return templateZephyr;
     }
 
-    if (llama3ChatTemplateModels.contains(modelId)) {
-      return 'llama3';
+    if (deepseekChatTemplateModels.contains(exactId)) {
+      return templateDeepSeek;
     }
 
-    // DeepSeek deve essere risolto prima di Qwen.
-    //
-    // I modelli DeepSeek-R1-Distill-Qwen contengono "Qwen" nel nome
-    // del modello, ma NON devono essere trattati come Qwen ChatML.
-    if (deepseekChatTemplateModels.contains(modelId)) {
-      return 'deepseek';
+    if (qwenChatTemplateModels.contains(exactId)) {
+      return templateQwen;
     }
 
-    if (qwenChatTemplateModels.contains(modelId)) {
-      return 'qwen';
+    if (llamaChatTemplateModels.contains(exactId)) {
+      return templateLlama;
     }
 
-    if (gemmaChatTemplateModels.contains(modelId)) {
-      return 'gemma';
+    if (gemmaChatTemplateModels.contains(exactId)) {
+      return templateGemma;
     }
 
-    if (phi3ChatTemplateModels.contains(modelId)) {
-      return 'phi3';
+    if (phiChatTemplateModels.contains(exactId)) {
+      return templatePhi;
     }
 
-    // 2. Pattern matching (case-insensitive)
-    final id = modelId.trim().toLowerCase();
+    if (mistralChatTemplateModels.contains(exactId)) {
+      return templateMistral;
+    }
 
-    // TinyLlama deve essere intercettato PRIMA di llama3.
+    // -------------------------------------------------------------------------
+    // Pattern matching
+    // -------------------------------------------------------------------------
+
+    final id = exactId.toLowerCase();
+
+    // TinyLlama deve avere precedenza assoluta.
     if (_matchesTinyLlama(id)) {
-      return 'zephyr';
+      return templateZephyr;
     }
 
-    if (_matchesPhi(id)) {
-      return 'phi3';
-    }
-
-    if (_matchesLlama3(id)) {
-      return 'llama3';
-    }
-
-    // DeepSeek prima di Qwen: un nome/path può contenere sia
-    // "deepseek" sia "qwen".
+    // DeepSeek PRIMA di Qwen.
     if (_matchesDeepSeek(id)) {
-      return 'deepseek';
+      return templateDeepSeek;
     }
 
     if (_matchesQwen(id)) {
-      return 'qwen';
+      return templateQwen;
+    }
+
+    if (_matchesLlama(id)) {
+      return templateLlama;
     }
 
     if (_matchesGemma(id)) {
-      return 'gemma';
+      return templateGemma;
     }
 
-    // 3. Fallback plain text
+    if (_matchesPhi(id)) {
+      return templatePhi;
+    }
+
+    if (_matchesMistral(id)) {
+      return templateMistral;
+    }
+
     return 'plain';
   }
 
-  /// Restituisce true se il modello supporta la direttiva /no_think.
+  // ===========================================================================
+  // FAMILY RESOLUTION
+  // ===========================================================================
+
+  /// Restituisce la famiglia logica del modello.
   ///
-  /// Solo Qwen3 nativo supporta /no_think.
-  /// DeepSeek-R1-Distill e Phi-3 non lo supportano.
+  /// Questo metodo è separato da [resolveTemplate] appositamente:
+  ///
+  /// famiglia != template != dimensione != piattaforma
+  ///
+  /// In questo modo l'architettura futura può scegliere il modello migliore
+  /// per ruolo/hardware senza modificare il sistema dei prompt.
+  static String resolveFamily(String modelId) {
+    final template = resolveTemplate(modelId);
+
+    switch (template) {
+      case templateDeepSeek:
+        return familyDeepSeek;
+
+      case templateQwen:
+        return familyQwen;
+
+      case templateLlama:
+        return familyLlama;
+
+      case templateGemma:
+        return familyGemma;
+
+      case templatePhi:
+        return familyPhi;
+
+      case templateMistral:
+        return familyMistral;
+
+      case templateZephyr:
+        // TinyLlama appartiene logicamente alla famiglia Llama,
+        // anche se utilizza un template legacy differente.
+        return familyLlama;
+
+      default:
+        return 'unknown';
+    }
+  }
+
+  // ===========================================================================
+  // QWEN3 THINKING
+  // ===========================================================================
+
+  /// Indica se il modello supporta `/no_think`.
   static bool isQwen3Thinking(String modelId) {
-    if (qwen3ThinkingModels.contains(modelId)) {
+    final exactId = modelId.trim();
+
+    if (qwen3ThinkingModels.contains(exactId)) {
       return true;
     }
 
-    final id = modelId.trim().toLowerCase();
+    final id = exactId.toLowerCase();
 
-    return id.contains('qwen3') && !id.contains('phi');
+    return id.contains('qwen3') &&
+        !id.contains('deepseek') &&
+        !id.contains('phi');
   }
 
-  // ── Pattern matching privato ──────────────────────────────────────────────
+  // ===========================================================================
+  // PATTERN MATCHING
+  // ===========================================================================
 
   static bool _matchesTinyLlama(String id) {
     return id.contains('tinyllama') ||
         id.contains('tiny-llama');
-  }
-
-  static bool _matchesLlama3(String id) {
-    return id.contains('llama-3') ||
-        id.contains('llama3') ||
-        id.contains('llama_3') ||
-        id.contains('meta-llama');
   }
 
   static bool _matchesDeepSeek(String id) {
@@ -181,9 +294,15 @@ class LocalInferenceModelIds {
   }
 
   static bool _matchesQwen(String id) {
-    // DeepSeek è gestito da _matchesDeepSeek() ed è valutato prima.
-    return id.contains('qwen') ||
-        id.contains('mistral');
+    // DeepSeek viene valutato prima.
+    return id.contains('qwen');
+  }
+
+  static bool _matchesLlama(String id) {
+    return id.contains('llama-3') ||
+        id.contains('llama3') ||
+        id.contains('llama_3') ||
+        id.contains('meta-llama');
   }
 
   static bool _matchesGemma(String id) {
@@ -195,87 +314,107 @@ class LocalInferenceModelIds {
         id.contains('phi3');
   }
 
-  // ── Registrazione dinamica ────────────────────────────────────────────────
+  static bool _matchesMistral(String id) {
+    return id.contains('mistral') ||
+        id.contains('mixtral');
+  }
 
-  /// Registra un modello importato associandolo a un template specifico.
+  // ===========================================================================
+  // REGISTRAZIONE DINAMICA
+  // ===========================================================================
+
+  /// Registra un nuovo modello associandolo esplicitamente a una famiglia/
+  /// template.
   ///
-  /// Utile per modelli con nomi non riconoscibili dai pattern automatici.
+  /// Questo è il meccanismo che useremo quando arriveranno nuovi GGUF:
+  ///
+  ///   registerModel(
+  ///     'nuovo_modello_9b',
+  ///     template: templateQwen,
+  ///   );
+  ///
+  /// Non sarà necessario modificare il resolver.
   static void registerModel(
     String modelId, {
     required String template,
     bool supportsNoThink = false,
   }) {
-    switch (template.toLowerCase()) {
-      case 'llama3':
-        llama3ChatTemplateModels.add(modelId);
+    final normalizedTemplate = template.trim().toLowerCase();
+
+    switch (normalizedTemplate) {
+      case templateDeepSeek:
+        deepseekChatTemplateModels.add(modelId);
         break;
 
-      case 'qwen':
+      case templateQwen:
         qwenChatTemplateModels.add(modelId);
+
         if (supportsNoThink) {
           qwen3ThinkingModels.add(modelId);
         }
         break;
 
-      case 'deepseek':
-        deepseekChatTemplateModels.add(modelId);
+      case templateLlama:
+        llamaChatTemplateModels.add(modelId);
         break;
 
-      case 'gemma':
+      case templateGemma:
         gemmaChatTemplateModels.add(modelId);
         break;
 
-      case 'phi3':
-        phi3ChatTemplateModels.add(modelId);
+      case templatePhi:
+        phiChatTemplateModels.add(modelId);
         break;
 
-      case 'zephyr':
+      case templateMistral:
+        mistralChatTemplateModels.add(modelId);
+        break;
+
+      case templateZephyr:
         zephyrChatTemplateModels.add(modelId);
         break;
 
       default:
-        // Template non riconosciuto:
-        // resolveTemplate() userà il pattern matching
-        // o il fallback plain.
+        // Template sconosciuto: non registrare il modello.
         break;
     }
   }
 
-  // ── Temperatura automatica ────────────────────────────────────────────────
+  // ===========================================================================
+  // TEMPERATURE
+  // ===========================================================================
 
-  /// Temperatura base usata da AiRuntimeSettingsService per config automatica.
-  /// I metadati META nel prompt possono sovrascrivere questo valore
-  /// nel runtime FFI.
+  /// Temperatura base utilizzata da AiRuntimeSettingsService.
+  ///
+  /// La configurazione META/runtime può eventualmente sovrascriverla.
   static double temperatureForModel(String? modelId) {
     if (modelId == null || modelId.trim().isEmpty) {
       return 0.5;
     }
 
-    final id = modelId.trim().toLowerCase();
+    final family = resolveFamily(modelId);
 
-    // TinyLlama / Llama 1B
-    if (id.contains('llama') && id.contains('1b')) {
-      return 0.5;
+    switch (family) {
+      case familyDeepSeek:
+        return 0.5;
+
+      case familyQwen:
+        return 0.5;
+
+      case familyLlama:
+        return 0.5;
+
+      case familyGemma:
+        return 0.5;
+
+      case familyPhi:
+        return 0.5;
+
+      case familyMistral:
+        return 0.5;
+
+      default:
+        return 0.5;
     }
-
-    // Phi-3.5-mini
-    if (id.contains('phi-3.5') ||
-        id.contains('phi3_5') ||
-        id.contains('phi35mini')) {
-      return 0.5;
-    }
-
-    // Qwen / DeepSeek
-    if (id.contains('qwen') ||
-        id.contains('deepseek')) {
-      return 0.5;
-    }
-
-    // Gemma
-    if (id.contains('gemma')) {
-      return 0.5;
-    }
-
-    return 0.5;
   }
 }
