@@ -879,8 +879,7 @@ final class _CommandCheck {
     required this.available,
     this.version,
     this.output = '',
-    this.message,
-  });
+  }) : message = null;
 
   const _CommandCheck.unavailable({
     this.message,
