@@ -303,5 +303,5 @@ final class WorkshopChatController extends ChangeNotifier {
     _messages.clear();
 
     super.dispose();
+   }
   }
-  
