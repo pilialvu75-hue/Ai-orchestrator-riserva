@@ -6,6 +6,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_packa
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 
 /// Interfaccia conversazionale principale del Cantiere.
 ///
@@ -663,7 +665,7 @@ class _WorkshopDashboardPageState
                   _showMessage(
                     packages.isEmpty
                         ? 'Non ci sono ancora app emesse.'
-                        : '${packages.length} app disponibili nell\\'output del Cantiere.',
+                        : '${packages.length} app disponibili nell\'output del Cantiere.',
                   );
                 },
               ),
