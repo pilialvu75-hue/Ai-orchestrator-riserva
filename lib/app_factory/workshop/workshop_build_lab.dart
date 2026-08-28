@@ -235,12 +235,10 @@ final class UnavailableWorkshopBuildProvider
     this.mode = WorkshopBuildExecutionMode.offlineLocal,
   });
 
-  @override
   final WorkshopBuildExecutionMode mode;
 
   @override
   WorkshopBuildExecutionMode get executionMode => mode;
-
   @override
   Future<WorkshopToolchainInfo> inspectToolchain(
     WorkshopBuildTarget target,
