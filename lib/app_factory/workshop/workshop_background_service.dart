@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'workshop_contract.dart';
 import 'workshop_engine.dart';
-import 'workshop_project_plan.dart';
+//import 'workshop_project_plan.dart';
 
 /// Stati persistibili del lavoro in background del Cantiere.
 ///
