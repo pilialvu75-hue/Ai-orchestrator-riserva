@@ -437,7 +437,7 @@ final class WorkshopLocalToolchainManager {
       );
 
       if (_cancelled.contains(component.id)) {
-        return inspect(component);
+        return await inspect(component);
       }
 
       final valid =
