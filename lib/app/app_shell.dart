@@ -114,6 +114,9 @@ class _AppShellState extends State<AppShell> {
       _openingWorkshop = true;
     });
 
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
     WorkshopDashboardController? workshopController;
 
     try {
@@ -142,7 +145,7 @@ class _AppShellState extends State<AppShell> {
         return;
       }
 
-      await Navigator.of(context).push(
+      await navigator.push(
         MaterialPageRoute<void>(
           builder: (_) => WorkshopDashboardPage(
             dashboardController: workshopController!,
@@ -155,7 +158,7 @@ class _AppShellState extends State<AppShell> {
         return;
       }
 
-      ScaffoldMessenger.of(context)
+      messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
