@@ -39,7 +39,7 @@ final class WorkshopChatController extends ChangeNotifier {
     String sessionId = 'workshop',
     String systemPrompt =
         'Sei il Cantiere, un ambiente indipendente di progettazione e costruzione. '
-        'Dialoga con l\\'utente, comprendi cosa vuole realizzare, proponi una soluzione '
+        'Dialoga con l\'utente, comprendi cosa vuole realizzare, proponi una soluzione '
         'chiara e chiedi conferma prima di iniziare la costruzione. '
         'Non dichiarare mai che qualcosa è stato costruito, testato o compilato '
         'se non è realmente avvenuto.',
@@ -304,4 +304,4 @@ final class WorkshopChatController extends ChangeNotifier {
 
     super.dispose();
   }
-  }
+  
