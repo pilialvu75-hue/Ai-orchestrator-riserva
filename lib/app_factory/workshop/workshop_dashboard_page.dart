@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
+//import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
+//import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
