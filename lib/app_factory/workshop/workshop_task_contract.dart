@@ -1,4 +1,4 @@
-import 'workshop_contract.dart';
+//import 'workshop_contract.dart';
 
 /// Risorsa che può essere utilizzata per eseguire una task del Cantiere.
 ///
