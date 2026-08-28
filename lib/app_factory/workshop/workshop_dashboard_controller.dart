@@ -7,7 +7,7 @@ import 'workshop_engine.dart';
 import 'workshop_local_toolchain_detector.dart';
 import 'workshop_local_toolchain_service.dart';
 import 'workshop_project_plan.dart';
-import 'workshop_project_executor.dart';
+//import 'workshop_project_executor.dart';
 import 'workshop_contract.dart';
 import '../workspace/workspace_session.dart';
 
