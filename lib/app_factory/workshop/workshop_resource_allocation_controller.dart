@@ -137,11 +137,8 @@ final class WorkshopResourceAllocationController {
       authorized: false,
       taskId: task.id,
       allocation: allocation,
-      reason:
-          budgetDecision.reason ??
-              'The selected resource is technically suitable '
-                  'but is not authorized by the current budget.',
-      fallbackResource:
+      reason: budgetDecision.reason,
+    
           budgetDecision.fallbackResource,
     );
   }
@@ -201,10 +198,7 @@ final class WorkshopResourceAllocationController {
           taskId: task.id,
           allocation:
               preferredAllocation,
-          reason:
-              budgetDecision.reason ??
-                  'The preferred resource is not authorized '
-                      'by the current budget.',
+          reason: budgetDecision.reason,
           fallbackResource:
               budgetDecision.fallbackResource,
         );
