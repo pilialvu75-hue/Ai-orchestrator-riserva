@@ -2,13 +2,15 @@ import 'package:get_it/get_it.dart';
 
 import '../workspace/local_git_workspace_gateway.dart';
 
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
+
 import 'workshop_dashboard_controller.dart';
 import 'workshop_engine.dart';
 import 'workshop_inference_gateway.dart';
 import 'workshop_inference_provider_adapter.dart';
 import 'workshop_project_executor.dart';
-
-import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
 /// Composition root del Cantiere.
 ///
@@ -24,6 +26,8 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 ///   WorkshopInferenceGateway
 ///          ↓
 ///   WorkshopInferenceProviderAdapter
+///          ↓
+///   Workshop model assignment
 ///          ↓
 ///   InferenceService
 ///          ↓
@@ -43,19 +47,13 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 ///
 /// Il Cantiere NON dipende dalla Chat Assistente.
 ///
-/// Riutilizza esclusivamente l'infrastruttura di inferenza già presente
-/// nell'applicazione attraverso un contratto stabile.
+/// L'infrastruttura di inferenza può essere condivisa, ma il modello,
+/// il ruolo e la configurazione del Workshop vengono risolti
+/// indipendentemente dall'Assistente.
 final class WorkshopFactory {
   const WorkshopFactory._();
 
   /// Crea il gateway locale del Workspace.
-  ///
-  /// [workspaceRootPath] deve indicare la directory reale del progetto
-  /// su cui il Cantiere dovrà lavorare.
-  ///
-  /// Il gateway non esegue automaticamente operazioni Git remote:
-  /// branch, commit, push e Pull Request rimangono responsabilità
-  /// di un backend Git successivo.
   static LocalGitWorkspaceGateway createWorkspaceGateway({
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
@@ -87,9 +85,6 @@ final class WorkshopFactory {
   }
 
   /// Crea un ProjectExecutor collegato al Workspace locale.
-  ///
-  /// Questo è il punto in cui il ProjectPlan del Cantiere viene
-  /// collegato al WorkspaceSession reale.
   static WorkshopProjectExecutor createProjectExecutor({
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
@@ -108,20 +103,11 @@ final class WorkshopFactory {
 
   /// Risolve l'InferenceService già registrato nell'application container.
   ///
-  /// Il Cantiere non crea un secondo runtime AI.
+  /// Il Cantiere riutilizza l'infrastruttura runtime esistente, ma non
+  /// dovrebbe ereditare la selezione logica del modello dell'Assistente.
   ///
-  /// Utilizza esclusivamente il contratto InferenceService già esistente,
-  /// che mantiene la propria gestione di:
-  ///
-  /// - runtime locale;
-  /// - runtime cloud;
-  /// - modello selezionato;
-  /// - sessione;
-  /// - fallback;
-  /// - provider.
-  ///
-  /// Se l'applicazione non ha ancora inizializzato il container DI,
-  /// l'errore viene lasciato propagare invece di creare un falso provider.
+  /// L'isolamento del modello Workshop viene applicato dal relativo
+  /// WorkshopInferenceProviderAdapter.
   static InferenceService resolveInferenceService({
     InferenceService? inferenceService,
   }) {
@@ -141,51 +127,88 @@ final class WorkshopFactory {
     return locator<InferenceService>();
   }
 
-  /// Crea il provider indipendente del Cantiere sopra InferenceService.
+  /// Restituisce il model ID assegnato al ruolo Workshop.
   ///
-  /// Questo adapter mantiene separati:
+  /// La configurazione è completamente separata dalla selezione
+  /// dell'Assistente.
+  static String resolveWorkshopModelId({
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+  }) {
+    final modelId = WorkshopModelAssignments.modelIdFor(
+      role,
+      assignments: assignments,
+    );
+
+    if (modelId == null || modelId.trim().isEmpty) {
+      throw StateError(
+        'No Workshop model is assigned to role "${role.id}".',
+      );
+    }
+
+    return modelId.trim();
+  }
+
+  /// Crea il provider del Cantiere con configurazione modello/ruolo propria.
   ///
-  ///   Assistente
-  ///       ↓
-  ///   InferenceService
+  /// Questo è il confine fondamentale tra:
   ///
-  /// e
+  ///   Assistant
+  ///      ↓
+  ///   propria configurazione
   ///
-  ///   Cantiere
-  ///       ↓
-  ///   WorkshopInferenceGateway
-  ///       ↓
-  ///   WorkshopInferenceProviderAdapter
-  ///       ↓
-  ///   InferenceService
+  /// e:
   ///
-  /// Condividono quindi infrastruttura, ma non controller,
-  /// conversazione o memoria dell'Assistente.
+  ///   Workshop
+  ///      ↓
+  ///   propria configurazione
+  ///
+  /// I due sistemi possono condividere l'InferenceService come infrastruttura
+  /// di basso livello, ma il modello del Workshop viene scelto esplicitamente
+  /// dalla configurazione Workshop.
   static WorkshopInferenceProviderAdapter
       createInferenceProviderAdapter({
     InferenceService? inferenceService,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    String? modelId,
   }) {
     final resolvedInferenceService =
         resolveInferenceService(
       inferenceService: inferenceService,
     );
 
+    final resolvedModelId =
+        modelId?.trim().isNotEmpty == true
+            ? modelId!.trim()
+            : resolveWorkshopModelId(
+                role: role,
+                assignments: assignments,
+              );
+
     return WorkshopInferenceProviderAdapter(
       inferenceService: resolvedInferenceService,
+      role: role,
+      modelId: resolvedModelId,
     );
   }
 
   /// Crea il gateway di inferenza del Cantiere.
   ///
-  /// [inferenceGateway] può essere fornito esplicitamente per test,
-  /// sostituzioni o configurazioni future.
+  /// Se viene fornito un gateway esplicito, quello ha precedenza.
   ///
-  /// In assenza di un gateway esplicito viene utilizzato il runtime
-  /// dell'applicazione attraverso il Workshop adapter.
+  /// In caso contrario viene costruito il provider Workshop con il
+  /// modello assegnato al ruolo richiesto.
   static WorkshopInferenceGateway
       createInferenceGateway({
     InferenceService? inferenceService,
     WorkshopInferenceGateway? inferenceGateway,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    String? modelId,
   }) {
     if (inferenceGateway != null) {
       return inferenceGateway;
@@ -194,6 +217,9 @@ final class WorkshopFactory {
     final provider =
         createInferenceProviderAdapter(
       inferenceService: inferenceService,
+      role: role,
+      assignments: assignments,
+      modelId: modelId,
     );
 
     return WorkshopInferenceGateway(
@@ -202,22 +228,16 @@ final class WorkshopFactory {
   }
 
   /// Crea un WorkshopEngine già collegato al ProjectExecutor e
-  /// al cervello AI indipendente del Cantiere.
-  ///
-  /// Se [projectExecutor] viene fornito esplicitamente, viene usato
-  /// direttamente.
-  ///
-  /// Se [projectExecutor] non viene fornito, il factory lo costruisce
-  /// automaticamente quando è disponibile [workspaceRootPath].
-  ///
-  /// Se [inferenceGateway] non viene fornito, il factory collega
-  /// automaticamente il Workshop al RuntimeInferenceProvider
-  /// dell'applicazione attraverso WorkshopInferenceProviderAdapter.
+  /// al cervello AI del Cantiere.
   static WorkshopEngine createEngine({
     String? workspaceRootPath,
     WorkshopProjectExecutor? projectExecutor,
     InferenceService? inferenceService,
     WorkshopInferenceGateway? inferenceGateway,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    String? modelId,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -233,6 +253,9 @@ final class WorkshopFactory {
         createInferenceGateway(
       inferenceService: inferenceService,
       inferenceGateway: inferenceGateway,
+      role: role,
+      assignments: assignments,
+      modelId: modelId,
     );
 
     return WorkshopEngine(
@@ -242,28 +265,6 @@ final class WorkshopFactory {
   }
 
   /// Crea il controller della Dashboard.
-  ///
-  /// Il controller riceve l'engine già configurato.
-  ///
-  /// Quando viene fornito [workspaceRootPath]:
-  ///
-  ///   workspaceRootPath
-  ///          ↓
-  ///   LocalGitWorkspaceGateway
-  ///          ↓
-  ///   ProjectExecutor
-  ///          ↓
-  ///   WorkshopEngine
-  ///
-  /// e contemporaneamente:
-  ///
-  ///   InferenceService
-  ///          ↓
-  ///   WorkshopInferenceProviderAdapter
-  ///          ↓
-  ///   WorkshopInferenceGateway
-  ///          ↓
-  ///   WorkshopEngine
   static WorkshopDashboardController
       createDashboardController({
     String? workspaceRootPath,
@@ -271,6 +272,10 @@ final class WorkshopFactory {
     WorkshopProjectExecutor? projectExecutor,
     InferenceService? inferenceService,
     WorkshopInferenceGateway? inferenceGateway,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    String? modelId,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -281,6 +286,9 @@ final class WorkshopFactory {
           projectExecutor: projectExecutor,
           inferenceService: inferenceService,
           inferenceGateway: inferenceGateway,
+          role: role,
+          assignments: assignments,
+          modelId: modelId,
           includeHiddenFiles: includeHiddenFiles,
           maxFileSizeBytes: maxFileSizeBytes,
         );
@@ -291,23 +299,16 @@ final class WorkshopFactory {
   }
 
   /// Crea l'intero blocco applicativo del Cantiere.
-  ///
-  /// Questo è il punto di ingresso generale che potrà essere utilizzato
-  /// successivamente da:
-  ///
-  /// - Dashboard;
-  /// - Assistente attraverso un contratto stabile;
-  /// - A-Team;
-  /// - servizi background;
-  /// - altri domini della Factory.
-  ///
-  /// La creazione delle dipendenze NON avvia automaticamente una produzione.
   static WorkshopDashboardController create({
     String? workspaceRootPath,
     WorkshopProjectExecutor? projectExecutor,
     InferenceService? inferenceService,
     WorkshopInferenceGateway? inferenceGateway,
     WorkshopEngine? engine,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    String? modelId,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -322,6 +323,9 @@ final class WorkshopFactory {
       projectExecutor: projectExecutor,
       inferenceService: inferenceService,
       inferenceGateway: inferenceGateway,
+      role: role,
+      assignments: assignments,
+      modelId: modelId,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
@@ -329,10 +333,6 @@ final class WorkshopFactory {
 
   /// Costruisce il ProjectExecutor solo quando è disponibile una root
   /// di workspace reale.
-  ///
-  /// Questo mantiene il factory compatibile con la fase attuale:
-  /// l'app può costruire il Cantiere senza assumere arbitrariamente
-  /// un percorso di progetto.
   static WorkshopProjectExecutor?
       _createOptionalProjectExecutor({
     required String? workspaceRootPath,
