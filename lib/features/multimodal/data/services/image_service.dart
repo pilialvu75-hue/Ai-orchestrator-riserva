@@ -64,7 +64,10 @@ class ImageService {
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return null;
 
-      return _saveBytes(byteData.buffer.asUint8List(), 'screenshot');
+      return await _saveBytes(
+  byteData.buffer.asUint8List(),
+  'screenshot',
+);
     } catch (_) {
       return null;
     }
