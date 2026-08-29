@@ -65,9 +65,9 @@ class ImageService {
       if (byteData == null) return null;
 
       return await _saveBytes(
-  byteData.buffer.asUint8List(),
-  'screenshot',
-);
+        byteData.buffer.asUint8List(),
+        'screenshot',
+      );
     } catch (_) {
       return null;
     }
