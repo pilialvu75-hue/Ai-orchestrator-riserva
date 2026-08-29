@@ -47,7 +47,7 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
   @override
   Future<int> deleteOldMessages(DateTime cutoff) async {
     try {
-      return databaseHelper.deleteOldChatMessages(cutoff);
+      return await databaseHelper.deleteOldChatMessages(cutoff);
     } catch (e) {
       throw DatabaseException('Failed to delete old messages: $e');
     }
@@ -56,7 +56,7 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
   @override
   Future<int> countMessages() async {
     try {
-      return databaseHelper.countChatMessages();
+      return await databaseHelper.countChatMessages();
     } catch (e) {
       throw DatabaseException('Failed to count messages: $e');
     }
@@ -65,7 +65,7 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
   @override
   Future<int> deleteExcessMessages(int max) async {
     try {
-      return databaseHelper.deleteChatMessagesBeyondLimit(max);
+      return await databaseHelper.deleteChatMessagesBeyondLimit(max);
     } catch (e) {
       throw DatabaseException('Failed to trim message history: $e');
     }
@@ -74,7 +74,7 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
   @override
   Future<int> clearSession(String sessionId) async {
     try {
-      return databaseHelper.deleteChatSession(sessionId);
+      return await databaseHelper.deleteChatSession(sessionId);
     } catch (e) {
       throw DatabaseException('Failed to clear session: $e');
     }
@@ -86,7 +86,7 @@ class ChatLocalDataSourceImpl implements ChatLocalDataSource {
     String messageId,
   ) async {
     try {
-      return databaseHelper.deleteChatMessagesFrom(
+      return await databaseHelper.deleteChatMessagesFrom(
         sessionId,
         messageId,
       );
