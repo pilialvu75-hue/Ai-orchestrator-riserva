@@ -647,16 +647,12 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   bool _shouldIgnoreToken(String piece) =>
       _tokenStreamProcessor.isNoiseToken(piece);
 
-  DateTime? _handleFirstTokenIfNeeded(String piece) =>
+    DateTime? _handleFirstTokenIfNeeded(String piece) =>
       _tokenStreamProcessor.handleFirstTokenIfNeeded(piece);
 
   void _throttledLoopLog(String message) {
     _pollingController.throttledLoopLog(message);
   }
-
-  void _increaseIdleBackoff() => _pollingController.increaseIdleBackoff();
-
-  void _resetIdleBackoff() => _pollingController.resetIdleBackoff();
 
   Future<T> _runNativeCallWithTimeout<T>({
     required String stage,
@@ -671,6 +667,9 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   bool _claimInferenceSlot(String sessionId) =>
       _concurrencyManager.claimInferenceSlot(sessionId);
+
+  void _releaseInferenceSlot(String sessionId) =>
+      _concurrencyManager.releaseInferenceSlot(sessionId);
 
   void _releaseInferenceSlot(String sessionId) =>
       _concurrencyManager.releaseInferenceSlot(sessionId);
