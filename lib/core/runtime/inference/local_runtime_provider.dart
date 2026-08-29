@@ -73,7 +73,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       _verifiedModelPath != null &&
       _verifiedModelPath == _normalizeModelPath(modelPath);
 
-  @override
+  //@override
   bool isRuntimeVerified({String? modelPath}) {
     if (modelPath == null || modelPath.trim().isEmpty) {
       return _verifiedModelPath != null;
@@ -81,10 +81,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     return hasVerifiedRuntimeForModel(modelPath);
   }
 
-  @override
+  //@override
   int get activeLifecycleTransitionId => -1;
 
-  @override
+  //@override
   String get lifecycleRuntimeStateName => 'unknown';
 
   void recordVerificationSuccess({
@@ -104,7 +104,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
   }
 
-  @override
+  //@override
   bool supportsModel(AiModel model) {
     final modelId = model.effectiveRuntimeModelId;
 
@@ -137,7 +137,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         _isDeveloperMode;
   }
 
-  @override
+  //@override
   Future<LocalRuntimeState> validateRuntime({
     AiModel? selectedModel,
   }) async {
