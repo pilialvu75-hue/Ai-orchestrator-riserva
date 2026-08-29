@@ -2,14 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_build_lab.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_engine.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_local_toolchain_detector.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_local_toolchain_service.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_project_plan.dart';
-//import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_project_executor.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_contract.dart';
-import 'package:ai_orchestrator_riserva/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_detector.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+//import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 
 /// Stato osservabile del Dashboard Controller del Cantiere.
 ///
@@ -116,15 +116,12 @@ final class WorkshopDashboardControllerState {
           ? null
           : activeTaskTitle ?? this.activeTaskTitle,
       lastMessage: lastMessage ?? this.lastMessage,
-      lastError: clearError
-          ? null
-          : lastError ?? this.lastError,
+      lastError: clearError ? null : lastError ?? this.lastError,
       lastBuildResult: clearBuildResult
           ? null
           : lastBuildResult ?? this.lastBuildResult,
       localToolchainInspected:
-          localToolchainInspected ??
-              this.localToolchainInspected,
+          localToolchainInspected ?? this.localToolchainInspected,
       isBusy: isBusy ?? this.isBusy,
     );
   }
@@ -162,18 +159,15 @@ final class WorkshopDashboardControllerState {
 ///
 /// È il punto di integrazione progressivo tra la UI del Cantiere
 /// e la toolchain reale.
-final class WorkshopDashboardController
-    extends ChangeNotifier {
+final class WorkshopDashboardController extends ChangeNotifier {
   WorkshopDashboardController({
     required WorkshopEngine engine,
     WorkshopLocalToolchainService? localToolchainService,
     WorkshopBuildLab? buildLab,
   })  : _engine = engine,
         _localToolchainService =
-            localToolchainService ??
-                WorkshopLocalToolchainService(),
-        _buildLab =
-            buildLab ?? WorkshopBuildLab() {
+            localToolchainService ?? WorkshopLocalToolchainService(),
+        _buildLab = buildLab ?? WorkshopBuildLab() {
     _stageSubscription = _engine.stageStream.listen(
       _handleStageEvent,
     );
@@ -181,31 +175,25 @@ final class WorkshopDashboardController
 
   final WorkshopEngine _engine;
 
-  final WorkshopLocalToolchainService
-      _localToolchainService;
+  final WorkshopLocalToolchainService _localToolchainService;
 
   final WorkshopBuildLab _buildLab;
 
-  WorkshopDashboardControllerState
-      _state =
+  WorkshopDashboardControllerState _state =
       const WorkshopDashboardControllerState();
 
-  StreamSubscription<WorkshopStageEvent>?
-      _stageSubscription;
+  StreamSubscription<WorkshopStageEvent>? _stageSubscription;
 
   bool _disposed = false;
 
-  WorkshopDashboardControllerState get state =>
-      _state;
+  WorkshopDashboardControllerState get state => _state;
 
   WorkshopEngine get engine => _engine;
 
-  WorkshopLocalToolchainService
-      get localToolchainService =>
-          _localToolchainService;
+  WorkshopLocalToolchainService get localToolchainService =>
+      _localToolchainService;
 
-  WorkshopBuildLab get buildLab =>
-      _buildLab;
+  WorkshopBuildLab get buildLab => _buildLab;
 
   /// Avvia una nuova produzione creando:
   ///
@@ -222,22 +210,16 @@ final class WorkshopDashboardController
   WorkshopProjectPlan startProduction({
     required String title,
     required String instruction,
-    List<String> requirements =
-        const <String>[],
-    List<String> constraints =
-        const <String>[],
-    List<String> technologies =
-        const <String>[],
-    List<String> deliverables =
-        const <String>[],
-    List<String> validationCriteria =
-        const <String>[],
+    List<String> requirements = const <String>[],
+    List<String> constraints = const <String>[],
+    List<String> technologies = const <String>[],
+    List<String> deliverables = const <String>[],
+    List<String> validationCriteria = const <String>[],
   }) {
     _ensureNotDisposed();
 
     final normalizedTitle = title.trim();
-    final normalizedInstruction =
-        instruction.trim();
+    final normalizedInstruction = instruction.trim();
 
     if (normalizedTitle.isEmpty) {
       throw ArgumentError.value(
@@ -287,8 +269,7 @@ final class WorkshopDashboardController
           taskIds: const <String>[
             'task:initial-implementation',
           ],
-          validationCriteria:
-              validationCriteria,
+          validationCriteria: validationCriteria,
         ),
       ],
       tasks: <WorkshopProjectTask>[
@@ -298,8 +279,7 @@ final class WorkshopDashboardController
           description: normalizedInstruction,
           phaseId: 'phase:implementation',
           affectedPaths: const <String>[],
-          validationCriteria:
-              validationCriteria,
+          validationCriteria: validationCriteria,
         ),
       ],
     );
@@ -322,8 +302,7 @@ final class WorkshopDashboardController
         progress: plan.progress,
         completedTasks: plan.completedTasks,
         totalTasks: plan.totalTasks,
-        lastMessage:
-            'Produzione preparata nel Cantiere.',
+        lastMessage: 'Produzione preparata nel Cantiere.',
         clearError: true,
         clearBuildResult: true,
         clearActiveTask: true,
@@ -356,44 +335,32 @@ final class WorkshopDashboardController
     _setBusy(true);
 
     try {
-      final session =
-          await _engine.prepareNextProjectTask(
+      final session = await _engine.prepareNextProjectTask(
         requestId,
         brief: brief,
       );
 
       if (session == null) {
         _refreshProjectState(
-          message:
-              'Non ci sono altri task eseguibili.',
+          message: 'Non ci sono altri task eseguibili.',
           clearActiveTask: true,
         );
 
         return null;
       }
 
-      final summary =
-          _engine.projectSummary(requestId);
+      final summary = _engine.projectSummary(requestId);
 
       _updateState(
         _state.copyWith(
-          projectStatus:
-              summary?.status,
-          progress:
-              summary?.progress ??
-                  _state.progress,
+          projectStatus: summary?.status,
+          progress: summary?.progress ?? _state.progress,
           completedTasks:
-              summary?.completedTasks ??
-                  _state.completedTasks,
-          totalTasks:
-              summary?.totalTasks ??
-                  _state.totalTasks,
-          activeTaskId:
-              summary?.nextTaskId,
-          activeTaskTitle:
-              summary?.nextTaskTitle,
-          lastMessage:
-              'Task preparato nello spazio di lavoro.',
+              summary?.completedTasks ?? _state.completedTasks,
+          totalTasks: summary?.totalTasks ?? _state.totalTasks,
+          activeTaskId: summary?.nextTaskId,
+          activeTaskTitle: summary?.nextTaskTitle,
+          lastMessage: 'Task preparato nello spazio di lavoro.',
           clearError: true,
           isBusy: false,
         ),
@@ -436,38 +403,28 @@ final class WorkshopDashboardController
     _setBusy(true);
 
     try {
-      final session =
-          await _engine.prepareProjectTask(
+      final session = await _engine.prepareProjectTask(
         requestId,
         normalizedTaskId,
         brief: brief,
       );
 
-      final summary =
-          _engine.projectSummary(requestId);
+      final summary = _engine.projectSummary(requestId);
 
       _updateState(
         _state.copyWith(
-          projectStatus:
-              summary?.status,
-          progress:
-              summary?.progress ??
-                  _state.progress,
+          projectStatus: summary?.status,
+          progress: summary?.progress ?? _state.progress,
           completedTasks:
-              summary?.completedTasks ??
-                  _state.completedTasks,
-          totalTasks:
-              summary?.totalTasks ??
-                  _state.totalTasks,
-          activeTaskId:
-              normalizedTaskId,
-          activeTaskTitle:
-              _engine
-                  .planOf(requestId)
-                  ?.taskById(
-                    normalizedTaskId,
-                  )
-                  ?.title,
+              summary?.completedTasks ?? _state.completedTasks,
+          totalTasks: summary?.totalTasks ?? _state.totalTasks,
+          activeTaskId: normalizedTaskId,
+          activeTaskTitle: _engine
+              .planOf(requestId)
+              ?.taskById(
+                normalizedTaskId,
+              )
+              ?.title,
           lastMessage:
               'Task selezionato e preparato nello spazio di lavoro.',
           clearError: true,
@@ -494,14 +451,12 @@ final class WorkshopDashboardController
     _setBusy(true);
 
     try {
-      final report =
-          await _localToolchainService.inspect();
+      final report = await _localToolchainService.inspect();
 
       _updateState(
         _state.copyWith(
           localToolchainInspected: true,
-          lastMessage:
-              'Toolchain locale ispezionata.',
+          lastMessage: 'Toolchain locale ispezionata.',
           clearError: true,
           isBusy: false,
         ),
@@ -518,14 +473,12 @@ final class WorkshopDashboardController
 
   /// Restituisce la decisione corrente della toolchain
   /// per un target specifico.
-  WorkshopLocalToolchainDecision
-      localToolchainDecision(
+  WorkshopLocalToolchainDecision localToolchainDecision(
     WorkshopBuildTarget target,
   ) {
     _ensureNotDisposed();
 
-    return _localToolchainService
-        .decisionFor(target);
+    return _localToolchainService.decisionFor(target);
   }
 
   /// Avvia una build attraverso il Build Lab.
@@ -546,13 +499,11 @@ final class WorkshopDashboardController
     bool runAnalyzer = true,
     bool runFormatter = true,
     bool cleanBuild = false,
-    List<String> arguments =
-        const <String>[],
+    List<String> arguments = const <String>[],
   }) async {
     _ensureNotDisposed();
 
-    final normalizedPath =
-        projectPath.trim();
+    final normalizedPath = projectPath.trim();
 
     if (normalizedPath.isEmpty) {
       throw ArgumentError.value(
@@ -563,9 +514,7 @@ final class WorkshopDashboardController
     }
 
     final resolvedProjectId =
-        projectId ??
-            _state.projectId ??
-            'workshop-project';
+        projectId ?? _state.projectId ?? 'workshop-project';
 
     final requestId =
         'build:$resolvedProjectId:${DateTime.now().microsecondsSinceEpoch}';
@@ -586,15 +535,12 @@ final class WorkshopDashboardController
     _setBusy(true);
 
     try {
-      final result =
-          await _buildLab.build(request);
+      final result = await _buildLab.build(request);
 
       _updateState(
         _state.copyWith(
           lastBuildResult: result,
-          lastMessage:
-              result.message ??
-                  'Build completata.',
+          lastMessage: result.message ?? 'Build completata.',
           clearError: result.succeeded,
           isBusy: false,
         ),
@@ -646,8 +592,7 @@ final class WorkshopDashboardController
       );
 
       _refreshProjectState(
-        message:
-            'Task completato nel piano del Cantiere.',
+        message: 'Task completato nel piano del Cantiere.',
         clearActiveTask: true,
       );
     } catch (error) {
@@ -672,10 +617,8 @@ final class WorkshopDashboardController
 
     _updateState(
       _state.copyWith(
-        projectStatus:
-            WorkshopProjectStatus.cancelled,
-        lastMessage:
-            'Produzione annullata.',
+        projectStatus: WorkshopProjectStatus.cancelled,
+        lastMessage: 'Produzione annullata.',
         clearActiveTask: true,
         clearError: true,
         isBusy: false,
@@ -711,8 +654,7 @@ final class WorkshopDashboardController
       return;
     }
 
-    final currentStage =
-        _engine.stageOf(requestId);
+    final currentStage = _engine.stageOf(requestId);
 
     if (currentStage == null) {
       return;
@@ -736,30 +678,19 @@ final class WorkshopDashboardController
       return;
     }
 
-    final summary =
-        _engine.projectSummary(requestId);
+    final summary = _engine.projectSummary(requestId);
 
     _updateState(
       _state.copyWith(
-        projectStatus:
-            summary?.status,
-        progress:
-            summary?.progress ??
-                _state.progress,
+        projectStatus: summary?.status,
+        progress: summary?.progress ?? _state.progress,
         completedTasks:
-            summary?.completedTasks ??
-                _state.completedTasks,
-        totalTasks:
-            summary?.totalTasks ??
-                _state.totalTasks,
-        activeTaskId:
-            summary?.nextTaskId,
-        activeTaskTitle:
-            summary?.nextTaskTitle,
-        lastMessage:
-            message ?? _state.lastMessage,
-        clearActiveTask:
-            clearActiveTask,
+            summary?.completedTasks ?? _state.completedTasks,
+        totalTasks: summary?.totalTasks ?? _state.totalTasks,
+        activeTaskId: summary?.nextTaskId,
+        activeTaskTitle: summary?.nextTaskTitle,
+        lastMessage: message ?? _state.lastMessage,
+        clearActiveTask: clearActiveTask,
         clearError: true,
         isBusy: false,
       ),
@@ -790,8 +721,7 @@ final class WorkshopDashboardController
   }
 
   void _updateState(
-    WorkshopDashboardControllerState
-        nextState,
+    WorkshopDashboardControllerState nextState,
   ) {
     if (_disposed) {
       return;
