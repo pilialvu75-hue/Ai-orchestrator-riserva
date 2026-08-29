@@ -670,7 +670,7 @@ class InferenceService {
      * We now execute the tool and start a clean continuation request.
      */
     if (detectedQuery != null &&
-        detectedQuery!.isNotEmpty) {
+        detectedQuery.isNotEmpty) {
       try {
         final searchTool =
             _webSearchTool ?? WebSearchTool();
