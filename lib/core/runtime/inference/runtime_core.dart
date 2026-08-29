@@ -668,8 +668,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   bool _claimInferenceSlot(String sessionId) =>
       _concurrencyManager.claimInferenceSlot(sessionId);
 
-  void _releaseInferenceSlot(String sessionId) =>
-      _concurrencyManager.releaseInferenceSlot(sessionId);
+  
 
   void _releaseInferenceSlot(String sessionId) =>
       _concurrencyManager.releaseInferenceSlot(sessionId);
