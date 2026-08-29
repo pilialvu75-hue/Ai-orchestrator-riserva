@@ -131,17 +131,35 @@ class InferenceService {
         'prompt_hash=$promptHash',
       );
 
+      /*
+       * IMPORTANT:
+       *
+       * An explicit modelId belongs to the caller's inference boundary.
+       *
+       * The Assistant normally sends requests without an explicit modelId,
+       * therefore its existing selected-model behaviour is preserved.
+       *
+       * The Workshop sends its own modelId.
+       * That request must never silently fall back to the Assistant's
+       * currently selected model.
+       */
       final selectedModel =
-          await _resolveSelectedModelForLocalRuntime();
+          await _resolveModelForRequest(
+        isolatedRequest,
+      );
 
       _log(
         '[INFERENCE_MODEL] '
         'session=${isolatedRequest.sessionId} '
-        'model=${selectedModel?.effectiveRuntimeModelId ?? 'none'}',
+        'requested_model=${isolatedRequest.modelId ?? 'none'} '
+        'resolved_model=${selectedModel?.effectiveRuntimeModelId ?? 'none'}',
       );
 
       final localRequest =
-          _buildLocalRequest(isolatedRequest, selectedModel);
+          _buildLocalRequest(
+        isolatedRequest,
+        selectedModel,
+      );
 
       _log(
         '[RUNTIME_LOOKUP] '
@@ -154,6 +172,7 @@ class InferenceService {
       _log(
         '[MODEL_LOAD] '
         'selection session=${isolatedRequest.sessionId} '
+        'requested_model=${isolatedRequest.modelId ?? 'none'} '
         'selected_model=${selectedModel?.id ?? 'none'} '
         'local_runtime_connected=${localRequest != null} '
         'path=${selectedModel?.localPath ?? 'none'}',
@@ -225,12 +244,15 @@ class InferenceService {
     }
   }
 
-  Future<InferenceResponse> infer(InferenceRequest request) async {
+  Future<InferenceResponse> infer(
+    InferenceRequest request,
+  ) async {
     final buffer = StringBuffer();
 
     String model = InferenceConstants.localModelName;
     int tokens = 0;
-    int timestamp = DateTime.now().millisecondsSinceEpoch;
+    int timestamp =
+        DateTime.now().millisecondsSinceEpoch;
 
     await for (final chunk in stream(request)) {
       _log(
@@ -266,25 +288,6 @@ class InferenceService {
         tokens = chunk.tokensGenerated;
         timestamp = chunk.timestamp;
       } else {
-        /*
-         * Local runtimes may emit either:
-         *
-         *   1. delta chunks:
-         *        "Hello " -> "world"
-         *
-         *   2. cumulative snapshots:
-         *        "Hello " -> "Hello world"
-         *
-         * The previous implementation always appended non-final
-         * chunks. When a provider emitted a cumulative snapshot,
-         * that produced duplicated output such as:
-         *
-         *        "Hello worldHello world"
-         *
-         * Preserve delta semantics while replacing an incoming
-         * cumulative snapshot that already contains the complete
-         * buffer.
-         */
         final currentText = buffer.toString();
         final incomingText = chunk.text;
 
@@ -311,11 +314,109 @@ class InferenceService {
     );
   }
 
-  Future<AiModel?> _resolveSelectedModelForLocalRuntime() async {
+  /// Resolves the model for the current inference request.
+  ///
+  /// Behaviour:
+  ///
+  /// 1. No explicit modelId:
+  ///      preserve the existing Assistant behaviour.
+  ///
+  /// 2. Explicit modelId:
+  ///      never silently substitute the currently selected Assistant model.
+  ///
+  /// This is the critical isolation boundary between Assistant and Workshop.
+  ///
+  /// At this stage the runtime still obtains concrete local model metadata
+  /// from the existing selected-model loader. If the requested model is
+  /// different, we deliberately return null for the local path instead of
+  /// borrowing the Assistant's model.
+  ///
+  /// This means a Workshop model that is not yet installed/connected will
+  /// fail explicitly rather than accidentally executing against the wrong
+  /// model.
+  Future<AiModel?> _resolveModelForRequest(
+    InferenceRequest request,
+  ) async {
+    final requestedModelId =
+        request.modelId?.trim();
+
+    final selected =
+        await _loadSelectedModelForLocalRuntime();
+
+    if (requestedModelId == null ||
+        requestedModelId.isEmpty) {
+      return selected;
+    }
+
+    /*
+     * An explicit modelPath makes the request self-describing enough to
+     * preserve the caller's model identity even if the Assistant currently
+     * has another model selected.
+     *
+     * Runtime validation still occurs through supportsModel().
+     */
+    if (request.modelPath != null &&
+        request.modelPath!.trim().isNotEmpty) {
+      if (selected != null &&
+          selected.effectiveRuntimeModelId ==
+              requestedModelId &&
+          selected.localPath ==
+              request.modelPath) {
+        return selected;
+      }
+
+      if (selected != null) {
+        _log(
+          '[MODEL_ISOLATION] '
+          'explicit_model=$requestedModelId '
+          'assistant_selected=${selected.effectiveRuntimeModelId} '
+          'action=reject_assistant_fallback',
+        );
+      } else {
+        _log(
+          '[MODEL_ISOLATION] '
+          'explicit_model=$requestedModelId '
+          'assistant_selected=none '
+          'action=reject_assistant_fallback',
+        );
+      }
+
+      /*
+       * We intentionally do not manufacture an AiModel from an arbitrary
+       * request here. The Workshop model must first be connected to the
+       * application's model catalogue/storage boundary.
+       */
+      return null;
+    }
+
+    /*
+     * The caller explicitly named a model but supplied no concrete local
+     * path. Never reuse the Assistant's model.
+     *
+     * Cloud runtimes may still use request.modelId directly through
+     * cloudRequest.
+     */
+    if (selected != null &&
+        selected.effectiveRuntimeModelId !=
+            requestedModelId) {
+      _log(
+        '[MODEL_ISOLATION] '
+        'explicit_model=$requestedModelId '
+        'assistant_selected=${selected.effectiveRuntimeModelId} '
+        'action=reject_assistant_fallback',
+      );
+      return null;
+    }
+
+    return selected;
+  }
+
+  Future<AiModel?> _loadSelectedModelForLocalRuntime() async {
     AiModel? selected;
 
     try {
-      selected = await _loadSelectedModel();
+      selected =
+          await _loadSelectedModel();
     } on Exception catch (e) {
       _log(
         '[VALIDATION] '
@@ -405,12 +506,15 @@ class InferenceService {
     }
 
     if (!_runtimeProvider.supportsModel(selected)) {
-      final effectiveId = selected.effectiveRuntimeModelId;
-      final vs = selected.validationStatus;
+      final effectiveId =
+          selected.effectiveRuntimeModelId;
+      final vs =
+          selected.validationStatus;
 
       String rejectionReason;
 
-      if (vs != ModelValidationStatus.validatedOk) {
+      if (vs !=
+          ModelValidationStatus.validatedOk) {
         rejectionReason =
             'unsupported_quantization_or_validation_status '
             '(validationStatus=$vs)';
@@ -454,7 +558,8 @@ class InferenceService {
         '[PRE_STREAM_LOCAL_REQUEST_SKIP] '
         'session=${request.sessionId} '
         'reason=selected_model_unavailable '
-        'state=model_not_selected',
+        'state=model_not_selected '
+        'requested_model=${request.modelId ?? 'none'}',
       );
 
       return null;
@@ -471,8 +576,30 @@ class InferenceService {
       return null;
     }
 
+    /*
+     * An explicit modelId must match the concrete model selected for the
+     * local runtime. This prevents the Assistant model from leaking into
+     * Workshop inference.
+     */
+    final requestedModelId =
+        request.modelId?.trim();
+
     final effectiveModelId =
         selectedModel.effectiveRuntimeModelId;
+
+    if (requestedModelId != null &&
+        requestedModelId.isNotEmpty &&
+        requestedModelId != effectiveModelId) {
+      _log(
+        '[PRE_STREAM_LOCAL_REQUEST_SKIP] '
+        'session=${request.sessionId} '
+        'reason=explicit_model_mismatch '
+        'requested_model=$requestedModelId '
+        'resolved_model=$effectiveModelId',
+      );
+
+      return null;
+    }
 
     _log(
       '[PRE_STREAM_LOCAL_REQUEST_READY] '
@@ -485,9 +612,13 @@ class InferenceService {
       modelId: effectiveModelId,
       modelPath: selectedModel.localPath,
       maxTokens:
-          InferenceRequest.maxTokensForModel(effectiveModelId),
+          InferenceRequest.maxTokensForModel(
+        effectiveModelId,
+      ),
       temperature:
-          InferenceRequest.temperatureForModel(effectiveModelId),
+          InferenceRequest.temperatureForModel(
+        effectiveModelId,
+      ),
     );
   }
 
@@ -529,15 +660,18 @@ class InferenceService {
 
     String? detectedQuery;
 
-    final firstGenerationToken = CancellationToken();
+    final firstGenerationToken =
+        CancellationToken();
 
     cancellationToken.onCancel(
       firstGenerationToken.cancel,
     );
 
-    final rawStream = _runtimeProvider.streamInference(
+    final rawStream =
+        _runtimeProvider.streamInference(
       request: localRequest,
-      cancellationToken: firstGenerationToken,
+      cancellationToken:
+          firstGenerationToken,
     );
 
     /*
@@ -546,7 +680,6 @@ class InferenceService {
      * <search> is no longer parsed here with a local RegExp.
      *
      * ToolInterceptorTransformer is now the single interception boundary.
-     * This keeps tool-call recognition independent from the selected LLM.
      *
      * Every model therefore enters the same protocol:
      *
@@ -557,27 +690,29 @@ class InferenceService {
      * normal token OR search tool-call
      */
     final interceptedStream =
-        rawStream.transform(ToolInterceptorTransformer());
+        rawStream.transform(
+      ToolInterceptorTransformer(),
+    );
 
-    await for (final chunk in interceptedStream) {
+    await for (final chunk
+        in interceptedStream) {
       localChunkCount++;
 
-      /*
-       * The transformer emits a notice using the stable internal
-       * `search:<query>` protocol.
-       *
-       * Do not expose that internal protocol to the UI.
-       * Convert it into the existing human-readable runtime notice.
-       */
-      final runtimeNotice = chunk.runtimeNotice;
+      final runtimeNotice =
+          chunk.runtimeNotice;
 
       if (runtimeNotice != null &&
-          runtimeNotice.startsWith(_searchNoticePrefix)) {
+          runtimeNotice.startsWith(
+            _searchNoticePrefix,
+          )) {
         final query = runtimeNotice
-            .substring(_searchNoticePrefix.length)
+            .substring(
+              _searchNoticePrefix.length,
+            )
             .trim();
 
-        if (query.isNotEmpty && detectedQuery == null) {
+        if (query.isNotEmpty &&
+            detectedQuery == null) {
           detectedQuery = query;
 
           _log(
@@ -588,15 +723,11 @@ class InferenceService {
 
           yield InferenceResponse.notice(
             '\n\n'
-            '🔍 *Searching the web for: "$detectedQuery"...*'
+            '🔍 *Searching the web for: '
+            '"$detectedQuery"...*'
             '\n\n',
           );
 
-          /*
-           * The transformer has already terminated its upstream
-           * subscription. We cancel the generation token as an
-           * additional deterministic guard.
-           */
           firstGenerationToken.cancel();
 
           continue;
@@ -616,7 +747,9 @@ class InferenceService {
       );
 
       if (chunk.isError &&
-          _isStalledPreInferenceError(chunk.errorMessage)) {
+          _isStalledPreInferenceError(
+            chunk.errorMessage,
+          )) {
         cancellationToken.cancel();
 
         _log(
@@ -648,9 +781,11 @@ class InferenceService {
           'Local runtime failed, switching to cloud runtime.',
         );
 
-        yield* _cloudRuntimeProvider.streamInference(
+        yield*
+            _cloudRuntimeProvider.streamInference(
           request: cloudRequest,
-          cancellationToken: cancellationToken,
+          cancellationToken:
+              cancellationToken,
         );
 
         return;
@@ -665,10 +800,6 @@ class InferenceService {
       yield chunk;
     }
 
-    /*
-     * A search tool-call terminates the first generation.
-     * We now execute the tool and start a clean continuation request.
-     */
     if (detectedQuery != null &&
         detectedQuery.isNotEmpty) {
       try {
@@ -682,7 +813,8 @@ class InferenceService {
           'query="$detectedQuery"',
         );
 
-        final searchResult = await searchTool.execute(
+        final searchResult =
+            await searchTool.execute(
           {'query': detectedQuery},
         );
 
@@ -718,21 +850,15 @@ class InferenceService {
           'tool=web_search '
           'session=${localRequest.sessionId} '
           'status=success '
-          'continuation_session=${updatedLocalRequest.sessionId}',
+          'continuation_session='
+          '${updatedLocalRequest.sessionId}',
         );
 
-        /*
-         * IMPORTANT:
-         *
-         * The continuation is a normal inference request.
-         * We intentionally do not special-case the selected model.
-         *
-         * Phi-3.5, DeepSeek, Qwen or any other supported model
-         * receives the same enriched request path.
-         */
-        yield* _runtimeProvider.streamInference(
+        yield*
+            _runtimeProvider.streamInference(
           request: updatedLocalRequest,
-          cancellationToken: continuationToken,
+          cancellationToken:
+              continuationToken,
         );
 
         return;
@@ -782,17 +908,21 @@ class InferenceService {
         cancellationToken: cancellationToken,
       );
 
-      await for (final chunk in _guardInferenceStream(
+      await for (final chunk
+          in _guardInferenceStream(
         stream: routedStream,
         sessionId: cloudRequest.sessionId,
         cancellationToken: cancellationToken,
         attempt: attempt,
       )) {
         if (chunk.runtimeNotice != null &&
-            chunk.runtimeNotice!.trim().isNotEmpty) {
+            chunk.runtimeNotice!
+                .trim()
+                .isNotEmpty) {
           _log(
             '[TOKEN_STREAM] '
-            'notice session=${cloudRequest.sessionId} '
+            'notice '
+            'session=${cloudRequest.sessionId} '
             'notice="${chunk.runtimeNotice}"',
           );
 
@@ -816,18 +946,23 @@ class InferenceService {
         }
 
         if (chunk.isError &&
-            runtimeMode != AiRuntimeMode.local &&
+            runtimeMode !=
+                AiRuntimeMode.local &&
             attempt <= _maxRetryCount &&
             !emittedContent &&
-            _isRetryableError(chunk.errorMessage)) {
+            _isRetryableError(
+              chunk.errorMessage,
+            )) {
           shouldRetry = true;
+
           retryReason =
               chunk.errorMessage ??
-              'transient runtime failure';
+                  'transient runtime failure';
 
           _log(
             '[RUNTIME_PATH] '
-            'retry session=${cloudRequest.sessionId} '
+            'retry '
+            'session=${cloudRequest.sessionId} '
             'attempt=$attempt '
             'reason="$retryReason"',
           );
@@ -835,7 +970,8 @@ class InferenceService {
           continue;
         }
 
-        if (chunk.isFinal && !chunk.isError) {
+        if (chunk.isFinal &&
+            !chunk.isError) {
           _log(
             '[INFERENCE_LAST_TOKEN] '
             'session=${cloudRequest.sessionId} '
@@ -912,7 +1048,8 @@ class InferenceService {
           return _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
-            cancellationToken: cancellationToken,
+            cancellationToken:
+                cancellationToken,
             allowCloudFallback: false,
           );
         }
@@ -928,9 +1065,8 @@ class InferenceService {
 
         return Stream<InferenceResponse>.value(
           InferenceResponse.error(
-            'Local AI mode requires a downloaded validated model. '
-            'Please download one in Settings > Models or switch to '
-            'Cloud or Hybrid mode.',
+            'Local AI mode requires the requested Workshop model to be '
+            'installed, validated and connected to the local runtime.',
           ),
         );
 
@@ -960,7 +1096,8 @@ class InferenceService {
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
-          cancellationToken: cancellationToken,
+          cancellationToken:
+              cancellationToken,
           forceCloudPrimary: true,
         );
 
@@ -977,7 +1114,8 @@ class InferenceService {
           '${_cloudRuntimeProvider.runtimeType} '
           'runtime_mode=${runtimeMode.name} '
           'branch=hybrid '
-          'local_request_available=${localRequest != null}',
+          'local_request_available='
+          '${localRequest != null}',
         );
 
         _log(
@@ -986,13 +1124,15 @@ class InferenceService {
           'boundary=inference_service.route '
           'mode=${runtimeMode.name} '
           'target=automatic_orchestration '
-          'local_request_available=${localRequest != null}',
+          'local_request_available='
+          '${localRequest != null}',
         );
 
         return _streamAutomaticOrchestration(
           cloudRequest: cloudRequest,
           localRequest: localRequest,
-          cancellationToken: cancellationToken,
+          cancellationToken:
+              cancellationToken,
         );
     }
   }
@@ -1003,10 +1143,12 @@ class InferenceService {
     required CancellationToken cancellationToken,
     required int attempt,
   }) async* {
-    final startedAt = DateTime.now();
+    final startedAt =
+        DateTime.now();
     var chunkCount = 0;
 
-    await for (final chunk in stream.timeout(
+    await for (final chunk
+        in stream.timeout(
       _streamIdleTimeout,
       onTimeout: (sink) {
         cancellationToken.cancel();
@@ -1014,7 +1156,8 @@ class InferenceService {
         sink.add(
           InferenceResponse.error(
             'Inference stream timed out waiting for tokens.',
-            state: InferenceTerminalState.timeout,
+            state:
+                InferenceTerminalState.timeout,
           ),
         );
 
@@ -1023,7 +1166,8 @@ class InferenceService {
     )) {
       chunkCount++;
 
-      if (chunkCount > _maxChunksPerRequest) {
+      if (chunkCount >
+          _maxChunksPerRequest) {
         cancellationToken.cancel();
 
         _log(
@@ -1040,7 +1184,8 @@ class InferenceService {
         return;
       }
 
-      if (DateTime.now().difference(startedAt) >
+      if (DateTime.now()
+              .difference(startedAt) >
           _requestTimeout) {
         cancellationToken.cancel();
 
@@ -1048,12 +1193,14 @@ class InferenceService {
           'hard stop protection '
           'session=$sessionId '
           'attempt=$attempt '
-          'request_timeout_ms=${_requestTimeout.inMilliseconds}',
+          'request_timeout_ms='
+          '${_requestTimeout.inMilliseconds}',
         );
 
         yield InferenceResponse.error(
           'Inference request timed out.',
-          state: InferenceTerminalState.timeout,
+          state:
+              InferenceTerminalState.timeout,
         );
 
         return;
@@ -1063,7 +1210,9 @@ class InferenceService {
     }
   }
 
-  bool _isRetryableError(String? errorMessage) {
+  bool _isRetryableError(
+    String? errorMessage,
+  ) {
     final normalized =
         (errorMessage ?? '').toLowerCase();
 
@@ -1083,10 +1232,14 @@ class InferenceService {
     return normalized.contains(
           'stage=stalled_pre_inference',
         ) ||
-        normalized.contains('stalled_pre_inference');
+        normalized.contains(
+          'stalled_pre_inference',
+        );
   }
 
-  String _promptHash(InferenceRequest request) {
+  String _promptHash(
+    InferenceRequest request,
+  ) {
     return secureForensicHash(
       [
         request.sessionId,
@@ -1128,7 +1281,8 @@ class InferenceService {
         yield* _streamLocalInference(
           localRequest: localRequest,
           cloudRequest: cloudRequest,
-          cancellationToken: cancellationToken,
+          cancellationToken:
+              cancellationToken,
           allowCloudFallback: false,
         );
 
@@ -1152,9 +1306,10 @@ class InferenceService {
 
     final shouldPreferCloud =
         forceCloudPrimary ||
-        _cloudRuntimeProvider.shouldPreferCloudFor(
-          cloudRequest,
-        );
+        _cloudRuntimeProvider
+            .shouldPreferCloudFor(
+      cloudRequest,
+    );
 
     if (!shouldPreferCloud &&
         localRequest != null) {
@@ -1176,7 +1331,8 @@ class InferenceService {
       yield* _streamLocalInference(
         localRequest: localRequest,
         cloudRequest: cloudRequest,
-        cancellationToken: cancellationToken,
+        cancellationToken:
+            cancellationToken,
         allowCloudFallback: true,
       );
 
@@ -1193,12 +1349,16 @@ class InferenceService {
     );
 
     await for (final chunk
-        in _cloudRuntimeProvider.streamInference(
+        in _cloudRuntimeProvider
+            .streamInference(
       request: cloudRequest,
-      cancellationToken: cancellationToken,
+      cancellationToken:
+          cancellationToken,
     )) {
       if (chunk.runtimeNotice != null &&
-          chunk.runtimeNotice!.trim().isNotEmpty) {
+          chunk.runtimeNotice!
+              .trim()
+              .isNotEmpty) {
         yield chunk;
         continue;
       }
@@ -1207,8 +1367,8 @@ class InferenceService {
         if (localRequest != null &&
             _cloudRuntimeProvider
                 .shouldFallBackToLocal(
-              chunk.errorMessage,
-            )) {
+          chunk.errorMessage,
+        )) {
           _log(
             'fallback routing '
             'session=${cloudRequest.sessionId} '
@@ -1237,7 +1397,8 @@ class InferenceService {
           yield* _streamLocalInference(
             localRequest: localRequest,
             cloudRequest: cloudRequest,
-            cancellationToken: cancellationToken,
+            cancellationToken:
+                cancellationToken,
             allowCloudFallback: false,
           );
 
@@ -1249,8 +1410,15 @@ class InferenceService {
     }
   }
 
-  static void _log(String message) {
-    debugPrint('[$_logTag] $message');
-    RuntimeEventLog.instance.emit(message);
+  static void _log(
+    String message,
+  ) {
+    debugPrint(
+      '[$_logTag] $message',
+    );
+
+    RuntimeEventLog.instance.emit(
+      message,
+    );
   }
 }
