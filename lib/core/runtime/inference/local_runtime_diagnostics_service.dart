@@ -23,7 +23,7 @@ class LocalRuntimeDiagnosticsService {
   bool _hasRunStartupValidation = false;
 
   // True while a real validation is executing.
-  bool _refreshInProgress = false;
+  //bool _refreshInProgress = false;
 
   // Shared future prevents concurrent callers from starting multiple
   // validations at the same time.
@@ -125,7 +125,7 @@ class LocalRuntimeDiagnosticsService {
       }
     }
 
-    _refreshInProgress = true;
+    //_refreshInProgress = true;
 
     final refreshFuture = _performRefresh(now);
     _activeRefresh = refreshFuture;
@@ -136,7 +136,7 @@ class LocalRuntimeDiagnosticsService {
       if (identical(_activeRefresh, refreshFuture)) {
         _activeRefresh = null;
       }
-      _refreshInProgress = false;
+      //_refreshInProgress = false;
     }
   }
 
