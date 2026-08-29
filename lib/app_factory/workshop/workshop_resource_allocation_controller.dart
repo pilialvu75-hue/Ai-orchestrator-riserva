@@ -137,10 +137,11 @@ final class WorkshopResourceAllocationController {
       authorized: false,
       taskId: task.id,
       allocation: allocation,
-      reason: budgetDecision.reason,
-    
-          budgetDecision.fallbackResource,
-    );
+      reason:  
+      budgetDecision.reason,
+  fallbackResource: 
+      budgetDecision.fallbackResource,
+   );
   }
 
   /// Tenta di allocare direttamente una risorsa preferita.
