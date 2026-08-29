@@ -2,14 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'workshop_build_lab.dart';
-import 'workshop_engine.dart';
-import 'workshop_local_toolchain_detector.dart';
-import 'workshop_local_toolchain_service.dart';
-import 'workshop_project_plan.dart';
-//import 'workshop_project_executor.dart';
-import 'workshop_contract.dart';
-import '../workspace/workspace_session.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_local_toolchain_detector.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_local_toolchain_service.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_project_plan.dart';
+//import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator_riserva/app_factory/workspace/workspace_session.dart';
 
 /// Stato osservabile del Dashboard Controller del Cantiere.
 ///
