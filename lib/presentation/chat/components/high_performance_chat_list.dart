@@ -179,11 +179,8 @@ class HighPerformanceChatList extends StatelessWidget {
                 ? null
                 : () {
                     RuntimeEventLog.instance.emit(
-                      '[VOICE_ICON_TAP] '
-                      'messageId=${message.id} '
-                      'contentLength=${message.content.length}',
+                      '[VOICE_ICON_TAP] message_id=${message.id}',
                     );
-
                     onSpeakAssistantMessage!(message);
                   },
           ),
