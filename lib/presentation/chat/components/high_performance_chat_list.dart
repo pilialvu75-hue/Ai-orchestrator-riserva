@@ -19,11 +19,11 @@ class HighPerformanceChatList extends StatelessWidget {
   final List<ChatMessage> messages;
   final AssistantMessageTextSize assistantTextSize;
 
-  /// Called when the user selects "Modifica" from the long-press
-  /// menu on a user message.
+  /// Invoked when the user selects "Modifica" from the context menu
+  /// displayed for a user message.
   final ValueChanged<ChatMessage>? onEditUserMessage;
 
-  /// Called when the user taps "Ascolta" below an assistant message.
+  /// Invoked when the user selects "Ascolta" below an assistant message.
   final ValueChanged<ChatMessage>? onSpeakAssistantMessage;
 
   Future<void> _showUserContextMenu(
@@ -159,6 +159,54 @@ class HighPerformanceChatList extends StatelessWidget {
     });
   }
 
+  void _onSpeakAssistantMessage(
+    BuildContext context,
+    ChatMessage message,
+  ) {
+    final callback = onSpeakAssistantMessage;
+
+    if (callback == null) {
+      RuntimeEventLog.instance.emit(
+        '[VOICE_ICON_BLOCKED] callback_unavailable '
+        'message_id=${message.id}',
+      );
+      return;
+    }
+
+    if (message.content.trim().isEmpty) {
+      RuntimeEventLog.instance.emit(
+        '[VOICE_ICON_BLOCKED] empty_message '
+        'message_id=${message.id}',
+      );
+      return;
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[VOICE_ICON_TAP] message_id=${message.id}',
+    );
+
+    try {
+      callback(message);
+    } catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[VOICE_ICON_CALLBACK_FAIL] '
+        'message_id=${message.id} '
+        'error=$error',
+      );
+
+      if (!context.mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossibile avviare la riproduzione vocale.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Widget _buildAssistantActions(
     BuildContext context,
     ChatMessage message,
@@ -177,12 +225,10 @@ class HighPerformanceChatList extends StatelessWidget {
             tooltip: 'Ascolta',
             onPressed: onSpeakAssistantMessage == null
                 ? null
-                : () {
-                    RuntimeEventLog.instance.emit(
-                      '[VOICE_ICON_TAP] message_id=${message.id}',
-                    );
-                    onSpeakAssistantMessage!(message);
-                  },
+                : () => _onSpeakAssistantMessage(
+                      context,
+                      message,
+                    ),
           ),
           _MessageActionButton(
             icon: Icons.copy_outlined,
