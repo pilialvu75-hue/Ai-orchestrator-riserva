@@ -68,13 +68,26 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   bool _bindingsReady = false;
 
   /*
-   * TTS is intentionally lazy.
+   * TTS initialization is lazy.
    *
    * Live must not initialize Piper/espeak together with the microphone.
-   * This future also prevents two simultaneous speak() calls from
-   * creating two native TTS instances.
+   * This future prevents two simultaneous speak() calls from creating
+   * two native TTS instances.
    */
   Future<bool>? _ttsInitFuture;
+
+  /*
+   * TTS generation is serialized independently from TTS initialization.
+   *
+   * OfflineTts.generate() is a synchronous native operation. The Dart
+   * Future queue guarantees that two speak() calls cannot concurrently
+   * invoke generate() on the same native OfflineTts instance.
+   *
+   * The generation number is also used to invalidate queued/in-flight
+   * requests after stopSpeaking() or dispose().
+   */
+  Future<void> _ttsGenerationTail = Future<void>.value();
+  int _ttsGeneration = 0;
 
   Float32List? _pendingTtsSamples;
   int _pendingTtsSampleRate = 22050;
@@ -978,6 +991,115 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
+  /*
+   * Enqueues one TTS generation request.
+   *
+   * Important:
+   * OfflineTts.generate() itself is synchronous, so the Future queue does
+   * not make generation non-blocking. Its purpose here is serialization:
+   * only one native generate() call may execute at a time.
+   *
+   * The lifecycle generation prevents stale queued requests from reaching
+   * the audio player after stopSpeaking() or dispose().
+   */
+  Future<void> _enqueueTtsGeneration(
+    String text, {
+    required int generation,
+  }) async {
+    final previous = _ttsGenerationTail;
+
+    final future = Future<void>(() async {
+      await previous;
+
+      if (_disposed ||
+          generation != _ttsGeneration) {
+        logEvent(
+          _tag,
+          '[TTS_SKIPPED] '
+          'reason=lifecycle_invalidated '
+          'generation=$generation '
+          'currentGeneration=$_ttsGeneration '
+          'disposed=$_disposed',
+        );
+        return;
+      }
+
+      final tts = _tts;
+
+      if (tts == null) {
+        logEvent(
+          _tag,
+          '[TTS_SKIPPED] reason=engine_unavailable',
+        );
+        return;
+      }
+
+      try {
+        logEvent(
+          _tag,
+          '[TTS_GENERATE_BEGIN] '
+          'generation=$generation '
+          'chars=${text.length}',
+        );
+
+        /*
+         * This call is intentionally synchronous because that is the
+         * OfflineTts API exposed by sherpa-onnx.
+         */
+        final audio = tts.generate(
+          text: text,
+          sid: 0,
+          speed: _status.speechRate,
+        );
+
+        if (_disposed ||
+            generation != _ttsGeneration) {
+          logEvent(
+            _tag,
+            '[TTS_GENERATE_DISCARDED] '
+            'generation=$generation '
+            'currentGeneration=$_ttsGeneration '
+            'disposed=$_disposed',
+          );
+          return;
+        }
+
+        _pendingTtsSamples = audio.samples;
+        _pendingTtsSampleRate = audio.sampleRate;
+
+        _audioPlayer.push(
+          audio.samples,
+          audio.sampleRate,
+        );
+
+        logEvent(
+          _tag,
+          '[TTS_AUDIO_READY] '
+          'samples=${audio.samples.length} '
+          'sampleRate=${audio.sampleRate} '
+          'generation=$generation',
+        );
+      } catch (error) {
+        logEvent(
+          _tag,
+          '[TTS_FAIL] '
+          'generation=$generation '
+          'error=$error',
+        );
+      }
+    });
+
+    _ttsGenerationTail = future;
+
+    try {
+      await future;
+    } finally {
+      if (identical(_ttsGenerationTail, future)) {
+        _ttsGenerationTail = Future<void>.value();
+      }
+    }
+  }
+
   @override
   Future<void> speak(String text) async {
     if (_disposed) {
@@ -989,6 +1111,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     if (sanitized.isEmpty) {
       return;
     }
+
+    /*
+     * Capture the current generation before entering the async TTS
+     * initialization path. stopSpeaking() can invalidate it while
+     * initialization is in progress.
+     */
+    final generation = _ttsGeneration;
 
     /*
      * TTS is initialized only when the assistant actually needs
@@ -1005,48 +1134,21 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return;
     }
 
-    final tts = _tts;
-
-    if (tts == null) {
+    if (generation != _ttsGeneration) {
       logEvent(
         _tag,
-        '[TTS_BLOCKED] engine unavailable',
+        '[TTS_SKIPPED] '
+        'reason=generation_changed_after_init '
+        'generation=$generation '
+        'currentGeneration=$_ttsGeneration',
       );
-
       return;
     }
 
-    try {
-      final audio = tts.generate(
-        text: sanitized,
-        sid: 0,
-        speed: _status.speechRate,
-      );
-
-      if (_disposed) {
-        return;
-      }
-
-      _pendingTtsSamples = audio.samples;
-      _pendingTtsSampleRate = audio.sampleRate;
-
-      _audioPlayer.push(
-        audio.samples,
-        audio.sampleRate,
-      );
-
-      logEvent(
-        _tag,
-        '[TTS_AUDIO_READY] '
-        'samples=${audio.samples.length} '
-        'sampleRate=${audio.sampleRate}',
-      );
-    } catch (error) {
-      logEvent(
-        _tag,
-        '[TTS_FAIL] $error',
-      );
-    }
+    await _enqueueTtsGeneration(
+      sanitized,
+      generation: generation,
+    );
   }
 
   @override
@@ -1054,6 +1156,21 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     if (_disposed && !_audioPlayer.isPlaying) {
       return;
     }
+
+    /*
+     * Invalidate all queued TTS generations first.
+     *
+     * A currently executing synchronous OfflineTts.generate() cannot be
+     * interrupted through the API used by this project, but once it
+     * returns its PCM is discarded because its generation is stale.
+     */
+    _ttsGeneration++;
+
+    logEvent(
+      _tag,
+      '[TTS_STOP_REQUESTED] '
+      'generation=$_ttsGeneration',
+    );
 
     try {
       _audioPlayer.stop();
@@ -1065,6 +1182,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     _pendingTtsSamples = null;
+
+    logEvent(
+      _tag,
+      '[TTS_STOP_COMPLETE] '
+      'generation=$_ttsGeneration',
+    );
   }
 
   @override
@@ -1074,9 +1197,16 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     /*
+     * Invalidate TTS generation before touching native resources.
+     * Any queued generation will therefore refuse to use the TTS/audio
+     * objects once its turn arrives.
+     */
+    _ttsGeneration++;
+
+    /*
      * Mark disposed before touching native resources.
      * Any queued callback will therefore stop using the native
-     * recognizer/stream.
+     * recognizer/stream/TTS.
      */
     _disposed = true;
     _isListening = false;
@@ -1088,12 +1218,14 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     /*
      * IMPORTANT ORDER:
      *
-     * 1. stop accepting audio
-     * 2. cancel mic subscription
-     * 3. stop recorder
-     * 4. free OnlineStream
-     * 5. free recognizer
-     * 6. free TTS
+     * 1. invalidate TTS generation
+     * 2. stop accepting audio
+     * 3. cancel mic subscription
+     * 4. stop recorder
+     * 5. free OnlineStream
+     * 6. free recognizer
+     * 7. free TTS
+     * 8. dispose audio player
      */
     await _closeMicSafely();
     await _closeAsrStreamSafely();
