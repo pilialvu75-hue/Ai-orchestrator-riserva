@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -176,7 +177,15 @@ class HighPerformanceChatList extends StatelessWidget {
             tooltip: 'Ascolta',
             onPressed: onSpeakAssistantMessage == null
                 ? null
-                : () => onSpeakAssistantMessage!(message),
+                : () {
+                    RuntimeEventLog.instance.emit(
+                      '[VOICE_ICON_TAP] '
+                      'messageId=${message.id} '
+                      'contentLength=${message.content.length}',
+                    );
+
+                    onSpeakAssistantMessage!(message);
+                  },
           ),
           _MessageActionButton(
             icon: Icons.copy_outlined,
