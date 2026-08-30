@@ -58,6 +58,16 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   bool _disposed = false;
 
   /*
+   * Tracks the binding lifecycle for this VoiceEngine instance.
+   *
+   * sherpa-onnx keeps FFI binding state per isolate. STT and TTS must
+   * therefore be created only after the bindings have been initialized
+   * in the isolate that is executing this engine.
+   */
+  Future<bool>? _bindingsInitFuture;
+  bool _bindingsReady = false;
+
+  /*
    * TTS is intentionally lazy.
    *
    * Live must not initialize Piper/espeak together with the microphone.
@@ -78,10 +88,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   Float32List? get pendingTtsSamples => _pendingTtsSamples;
 
   int get pendingTtsSampleRate => _pendingTtsSampleRate;
-
-  static void _forensicPrint(String message) {
-    stdout.writeln(message);
-  }
 
   static bool _isReadableAssetFileSync(String path) {
     try {
@@ -146,7 +152,54 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     return _status;
   }
 
-  Future<bool> _initNativeBindings() async {
+  /*
+   * Ensure sherpa-onnx native bindings are initialized exactly once
+   * for this engine instance.
+   *
+   * The Future gate is important because initialize() and a lazy TTS
+   * request can otherwise race and both enter initBindings().
+   *
+   * We deliberately use the synchronous API because all callers are
+   * already executing on the same Dart isolate and the native binding
+   * initialization itself is synchronous.
+   */
+  Future<bool> _ensureNativeBindings() async {
+    if (_disposed) {
+      return false;
+    }
+
+    if (_bindingsReady) {
+      return true;
+    }
+
+    final inFlight = _bindingsInitFuture;
+
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = _initializeNativeBindings();
+
+    _bindingsInitFuture = future;
+
+    try {
+      final ready = await future;
+
+      if (_disposed) {
+        return false;
+      }
+
+      _bindingsReady = ready;
+
+      return ready;
+    } finally {
+      if (identical(_bindingsInitFuture, future)) {
+        _bindingsInitFuture = null;
+      }
+    }
+  }
+
+  Future<bool> _initializeNativeBindings() async {
     if (_disposed) {
       return false;
     }
@@ -171,6 +224,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     try {
+      /*
+       * This is the single native binding initialization point for
+       * this VoiceEngine instance.
+       *
+       * Both STT and lazy TTS pass through _ensureNativeBindings().
+       */
       sherpa_onnx.initBindings();
 
       logEvent(_tag, '[ONNX_BIND_OK]');
@@ -196,6 +255,17 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     try {
+      final bindingsReady = await _ensureNativeBindings();
+
+      if (!bindingsReady || _disposed) {
+        logEvent(
+          _tag,
+          '[STT_BLOCKED] native bindings unavailable',
+        );
+
+        return false;
+      }
+
       final sttEncoderResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.sttEncoderFile,
         privateAbsolutePathHint: _modelPaths.sttEncoder,
@@ -228,23 +298,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       final sttTokensPath = _modelPaths.sttTokens ??
           _preferredResolvedPath(sttTokensResolution);
 
-      final requiredPaths = <String, String>{
-        AppConstants.sttEncoderFile: sttEncoderPath,
-        AppConstants.sttDecoderFile: sttDecoderPath,
-        AppConstants.sttJoinerFile: sttJoinerPath,
-        AppConstants.sttTokensFile: sttTokensPath,
-      };
-
-      /*
-       * IMPORTANT:
-       *
-       * Do not merely check exists && length > 0.
-       *
-       * The downloader already expects substantially larger assets.
-       * A truncated encoder.onnx can otherwise pass validation and
-       * make the native OnlineRecognizer abort during construction
-       * or the first actual inference call.
-       */
       final invalid = <String>[];
 
       if (!_isValidSttAssetSync(
@@ -326,12 +379,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         rule3MinUtteranceLength: 20.0,
       );
 
-      /*
-       * Breadcrumb immediately before entering native Sherpa code.
-       *
-       * If the process dies after this line and before STT_READY,
-       * the native recognizer constructor is the next suspect.
-       */
       logEvent(
         _tag,
         '[STT_BEFORE_RECOGNIZER_CREATE] '
@@ -379,6 +426,30 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
 
     try {
+      /*
+       * IMPORTANT:
+       *
+       * TTS is lazy, but it still requires the sherpa-onnx FFI
+       * bindings to be initialized in the current isolate.
+       *
+       * Do this immediately before resolving/creating OfflineTts.
+       */
+      final bindingsReady = await _ensureNativeBindings();
+
+      if (!bindingsReady || _disposed) {
+        logEvent(
+          _tag,
+          '[TTS_INIT_FAIL] Native bindings unavailable',
+        );
+
+        return false;
+      }
+
+      logEvent(
+        _tag,
+        '[TTS_BINDINGS_READY]',
+      );
+
       final ttsModelResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.ttsModelFile,
         privateAbsolutePathHint: _modelPaths.ttsModel,
@@ -592,7 +663,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     _initializing = true;
 
     try {
-      final nativeReady = await _initNativeBindings();
+      final nativeReady = await _ensureNativeBindings();
 
       if (!nativeReady || _disposed) {
         return _status;
@@ -606,10 +677,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
        * 3. microphone
        *
        * TTS/Piper/espeak is intentionally NOT initialized here.
-       *
-       * This prevents the microphone from being opened while two
-       * independent ONNX workloads are being initialized in the
-       * same process.
        */
       final sttReady = await _initializeStt();
 
@@ -623,10 +690,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         return _status;
       }
 
-      /*
-       * Live input depends on STT + microphone.
-       * TTS is deliberately independent and lazy.
-       */
       final initOk = sttReady;
 
       _initialized = initOk;
@@ -637,9 +700,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         nativeLibrariesLoaded: true,
         microphonePermissionGranted: micReady,
         audioSessionReady: micReady,
-        /*
-         * TTS has not been loaded yet.
-         */
         speakerOutputReady: false,
         initialized: initOk,
         offlineAsrAvailable: sttReady,
@@ -791,12 +851,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
               sampleRate: _sampleRate,
             );
 
-            /*
-             * Sherpa-ONNX streaming recognizers must only decode
-             * when the stream reports that decoding is ready.
-             *
-             * Never call decode() unconditionally.
-             */
             while (recognizer.isReady(stream)) {
               logEvent(
                 _tag,
@@ -824,20 +878,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
               }
             }
           } catch (error) {
-            /*
-             * Dart exceptions from the audio callback must never
-             * escape the callback.
-             *
-             * Native SIGSEGV/SIGABRT is not catchable here, which
-             * is why the breadcrumbs above are important.
-             */
             logEvent(
               _tag,
               '[ASR_FRAME_FAIL] $error',
             );
           }
         },
-        onError: (Object error, StackTrace stackTrace) {
+        onError: (Object error) {
           if (_disposed) {
             return;
           }
@@ -882,12 +929,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       return;
     }
 
-    /*
-     * Stop accepting new frames first.
-     *
-     * Then cancel the subscription and stop the recorder.
-     * Only after that do we release the native OnlineStream.
-     */
     _isListening = false;
 
     await _closeMicSafely();
@@ -900,11 +941,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
     if (subscription != null) {
       try {
-        /*
-         * cancel() completes after the subscription has finished
-         * its pending stream cleanup. This must happen before
-         * freeing the native OnlineStream.
-         */
         await subscription.cancel();
       } catch (error) {
         logEvent(
@@ -917,10 +953,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       await _recorder.stop();
     } catch (error) {
-      /*
-       * recorder.stop() can legitimately report that the recorder
-       * is already stopped.
-       */
       logEvent(
         _tag,
         '[MIC_STOP_WARN] $error',
@@ -1002,6 +1034,13 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         audio.samples,
         audio.sampleRate,
       );
+
+      logEvent(
+        _tag,
+        '[TTS_AUDIO_READY] '
+        'samples=${audio.samples.length} '
+        'sampleRate=${audio.sampleRate}',
+      );
     } catch (error) {
       logEvent(
         _tag,
@@ -1043,6 +1082,8 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     _isListening = false;
     _initialized = false;
     _ttsInitFuture = null;
+    _bindingsInitFuture = null;
+    _bindingsReady = false;
 
     /*
      * IMPORTANT ORDER:
