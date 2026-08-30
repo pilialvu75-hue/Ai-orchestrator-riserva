@@ -256,6 +256,8 @@ class _CategoryFilterBar extends StatelessWidget {
         return 'WEBSEARCH';
       case RuntimeEventCategory.hardware:
         return 'HARDWARE';
+      case RuntimeEventCategory.voice:
+        return 'VOICE';
       case RuntimeEventCategory.other:
         return 'OTHER';
     }
@@ -281,6 +283,8 @@ class _CategoryFilterBar extends StatelessWidget {
         return const Color(0xFFF59E0B); // amber
       case RuntimeEventCategory.hardware:
         return const Color(0xFF38BDF8); // sky
+      case RuntimeEventCategory.voice:
+        return const Color(0xFFF472B6); // pink
       case RuntimeEventCategory.other:
         return const Color(0xFF9CA3AF); // grey
     }
@@ -310,7 +314,9 @@ class _FilterChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
           decoration: BoxDecoration(
-            color: selected ? color.withValues(alpha: 0.2) : const Color(0xFF1F2937),
+            color: selected
+                ? color.withValues(alpha: 0.2)
+                : const Color(0xFF1F2937),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: selected ? color : const Color(0xFF374151),
@@ -430,6 +436,8 @@ class _EntryRow extends StatelessWidget {
         return const Color(0xFFF59E0B);
       case RuntimeEventCategory.hardware:
         return const Color(0xFF38BDF8);
+      case RuntimeEventCategory.voice:
+        return const Color(0xFFF472B6);
       case RuntimeEventCategory.other:
         return const Color(0xFF9CA3AF);
     }
