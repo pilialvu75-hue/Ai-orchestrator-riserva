@@ -13,6 +13,16 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// without overlap. Barge-in is handled by [stop], which invalidates any
 /// in-progress or queued chunk and clears the queue.
 ///
+/// IMPORTANT:
+/// [getAudioStream()] creates a new [AudioStream] instance on every call.
+/// The native FFI callbacks (_pushFfi, _uninitFfi, statistics callbacks) are
+/// initialized on the instance by [AudioStream.init].
+///
+/// Therefore this class owns exactly one AudioStream instance and uses that
+/// same instance for init(), push(), uninit(), resume(), and statistics.
+/// Calling getAudioStream() separately for init() and push() would create
+/// different instances and cause LateInitializationError for _pushFfi.
+///
 /// This class also exposes detailed runtime diagnostics for the audio path:
 ///
 ///   TTS
@@ -46,6 +56,19 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// ```
 class AudioStreamPlayer with RuntimeEventEmitter {
   static const String _tag = 'AUDIO_PLAYER';
+
+  /// IMPORTANT:
+  ///
+  /// getAudioStream() returns a NEW AudioStreamImpl on every invocation.
+  /// Keep one instance for the entire lifetime of this player.
+  ///
+  /// The mp_audio_stream implementation initializes _pushFfi and
+  /// _uninitFfi inside init(). Calling getAudioStream().push() after
+  /// initializing another getAudioStream() instance therefore produces:
+  ///
+  /// LateInitializationError:
+  /// Field '_pushFfi...' has not been initialized.
+  final AudioStream _audioStream = getAudioStream();
 
   // Native hardware state.
   bool _initialized = false;
@@ -231,6 +254,9 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     _tail = Future<void>.value();
 
     // Tear down the hardware buffer to flush any queued audio instantly.
+    //
+    // IMPORTANT:
+    // Use the SAME AudioStream instance that was initialized.
     _tearDownNative();
 
     logEvent(
@@ -342,8 +368,10 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     );
 
     try {
-      // Push samples to the hardware ring-buffer.
-      final pushResult = getAudioStream().push(samples);
+      // IMPORTANT:
+      // Push through the exact same AudioStream instance whose init()
+      // initialized _pushFfi.
+      final pushResult = _audioStream.push(samples);
 
       logEvent(
         _tag,
@@ -453,9 +481,13 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       );
     }
 
-    // 1 000 ms ring-buffer: enough for a sentence chunk while still providing
-    // a sub-second response to barge-in after [stop] + [_tearDownNative].
-    final initResult = getAudioStream().init(
+    // 1 000 ms ring-buffer: enough for a sentence chunk while still
+    // providing a sub-second response to barge-in after stop().
+    //
+    // The mp_audio_stream implementation initializes its FFI function
+    // pointers during this call. The SAME [_audioStream] instance is then
+    // used by push() and uninit().
+    final initResult = _audioStream.init(
       sampleRate: sampleRate,
       channels: 1,
       bufferMilliSec: 1000,
@@ -480,6 +512,23 @@ class AudioStreamPlayer with RuntimeEventEmitter {
 
       throw StateError(
         'mp_audio_stream.init failed with result=$initResult.',
+      );
+    }
+
+    // resume() is a no-op on Android/native platforms but is part of the
+    // package lifecycle and keeps this wrapper platform-safe.
+    try {
+      _audioStream.resume();
+      logEvent(
+        _tag,
+        '[AUDIO_RESUME_OK] '
+        'sampleRate=$sampleRate',
+      );
+    } catch (e) {
+      logEvent(
+        _tag,
+        '[AUDIO_RESUME_WARN] '
+        'error=$e',
       );
     }
 
@@ -514,7 +563,9 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     _initSampleRate = 0;
 
     try {
-      getAudioStream().uninit();
+      // IMPORTANT:
+      // Use the same instance whose init() initialized _uninitFfi.
+      _audioStream.uninit();
 
       logEvent(
         _tag,
@@ -622,8 +673,7 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     final durationMs =
         (samples.length / sampleRate * 1000).round();
 
-    final classification =
-        _classifyPcm(
+    final classification = _classifyPcm(
       peak: peak,
       rms: rms,
       nonFiniteSamples: nonFiniteSamples,
