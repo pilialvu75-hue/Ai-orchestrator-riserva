@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -10,24 +11,14 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
-/// Live mode deliberately bypasses the normal Chat UI / Bloc / repository
-/// pipeline for conversation history.
-///
-/// Flow:
+/// Live mode:
 ///
 ///   microphone -> STT -> selected local model -> inference -> TTS
 ///
-/// The selected local model is resolved from LocalAiRepository immediately
-/// before inference. This prevents Live mode from creating an
-/// InferenceRequest without modelId/modelPath.
+/// The normal Chat UI / ChatRepository pipeline is deliberately bypassed.
 ///
-/// Important:
-/// - No ChatRepository is involved.
-/// - No conversation-memory window is constructed here.
-/// - No semantic workspace context is injected here.
-/// - Spoken text is used directly as the inference prompt.
-/// - The active local model is resolved from LocalAiRepository.
-///
+/// STT language is explicitly propagated to the VoiceEngine so Live cannot
+/// silently fall back to an English-only/default recognizer configuration.
 class VoiceLoopManager with RuntimeEventEmitter {
   VoiceLoopManager({
     required VoiceEngine engine,
@@ -39,7 +30,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
   static const String _tag = 'VOICE_LOOP';
 
-  static const Duration _sttTimeout = Duration(seconds: 30);
+  static const Duration _sttTimeout =
+      Duration(seconds: 30);
 
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
@@ -51,13 +43,12 @@ class VoiceLoopManager with RuntimeEventEmitter {
   bool _disposed = false;
   bool _stopRequested = false;
 
-  CancellationToken? get activeCancellationToken => _activeCancellation;
+  CancellationToken? get activeCancellationToken =>
+      _activeCancellation;
 
-  bool get isSessionActive => _sessionActive;
+  bool get isSessionActive =>
+      _sessionActive;
 
-  /// Permanently disposes this manager.
-  ///
-  /// VoiceEngine ownership remains with dependency injection.
   Future<void> dispose() async {
     if (_disposed) {
       return;
@@ -72,18 +63,12 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
   }
 
-  /// Starts one complete Live voice iteration:
-  ///
-  /// STT -> local inference -> TTS
-  ///
-  /// [modelPath] and [modelId] are optional compatibility parameters.
-  /// If they are not supplied, the manager resolves the currently selected
-  /// local model from LocalAiRepository.
   Future<void> startLiveSession({
     String? modelPath,
     String? modelId,
     String? systemPrompt,
-    void Function(String text, bool isFinal)? onSubtitle,
+    void Function(String text, bool isFinal)?
+        onSubtitle,
     void Function(String error)? onError,
   }) async {
     if (_disposed) {
@@ -97,8 +82,17 @@ class VoiceLoopManager with RuntimeEventEmitter {
     _sessionActive = true;
     _stopRequested = false;
 
-    final cancellation = CancellationToken();
-    _activeCancellation = cancellation;
+    final cancellation =
+        CancellationToken();
+
+    _activeCancellation =
+        cancellation;
+
+    logEvent(
+      _tag,
+      '[SESSION_START] '
+      'sttLocale=${AppConstants.sttDefaultLocaleId}',
+    );
 
     try {
       await _runLoop(
@@ -110,8 +104,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
         onError: onError,
       );
     } catch (error) {
-      if (!cancellation.isCancelled && !_stopRequested) {
-        final message = 'Voice session failed: $error';
+      if (!cancellation.isCancelled &&
+          !_stopRequested) {
+        final message =
+            'Voice session failed: $error';
 
         logEvent(
           _tag,
@@ -121,54 +117,56 @@ class VoiceLoopManager with RuntimeEventEmitter {
         onError?.call(message);
       }
     } finally {
-      if (identical(_activeCancellation, cancellation)) {
+      if (identical(
+        _activeCancellation,
+        cancellation,
+      )) {
         _activeCancellation = null;
       }
 
       _sessionActive = false;
       _stopRequested = false;
+
+      logEvent(
+        _tag,
+        '[SESSION_END]',
+      );
     }
   }
 
-  /// Stops the current Live session.
-  ///
-  /// Cancellation is requested before shutting down the voice engine so
-  /// asynchronous callbacks cannot continue into inference/TTS.
   Future<void> stopLiveSession() async {
     _stopRequested = true;
 
-    final cancellation = _activeCancellation;
+    final cancellation =
+        _activeCancellation;
+
     cancellation?.cancel();
 
     try {
       await _engine.stopListening();
-    } catch (_) {
-      // Native audio shutdown must never escape UI lifecycle code.
-    }
+    } catch (_) {}
 
     try {
       await _engine.stopSpeaking();
-    } catch (_) {
-      // Native audio shutdown must never escape UI lifecycle code.
-    }
+    } catch (_) {}
 
     _sessionActive = false;
+
+    logEvent(
+      _tag,
+      '[SESSION_STOP_REQUESTED]',
+    );
   }
 
-  /// Resolves the model that Live must use.
-  ///
-  /// Priority:
-  ///
-  /// 1. Explicit modelPath/modelId supplied by caller.
-  /// 2. Currently selected local model from LocalAiRepository.
-  ///
-  /// The second path is the normal Live path.
   Future<AiModel?> _resolveSelectedModel({
     String? modelPath,
     String? modelId,
   }) async {
-    final explicitPath = modelPath?.trim();
-    final explicitId = modelId?.trim();
+    final explicitPath =
+        modelPath?.trim();
+
+    final explicitId =
+        modelId?.trim();
 
     if (explicitPath != null &&
         explicitPath.isNotEmpty &&
@@ -177,13 +175,16 @@ class VoiceLoopManager with RuntimeEventEmitter {
       return null;
     }
 
-    final result = await _localAiRepository.getSelectedModel();
+    final result =
+        await _localAiRepository
+            .getSelectedModel();
 
     return result.fold(
       (failure) {
         logEvent(
           _tag,
-          '[MODEL_RESOLVE_FAIL] ${failure.message}',
+          '[MODEL_RESOLVE_FAIL] '
+          '${failure.message}',
         );
 
         return null;
@@ -192,8 +193,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
         if (model == null) {
           logEvent(
             _tag,
-            '[MODEL_RESOLVE_FAIL] no selected local model',
+            '[MODEL_RESOLVE_FAIL] '
+            'no selected local model',
           );
+
           return null;
         }
 
@@ -202,18 +205,19 @@ class VoiceLoopManager with RuntimeEventEmitter {
     );
   }
 
-  /// Resolves modelId/modelPath for the inference request.
-  ///
-  /// This method never fabricates a model path.
-  /// If the selected model does not have a local path, inference is blocked
-  /// with a user-visible error instead of sending an invalid request.
-  Future<({String? modelId, String? modelPath, String? error})>
-      _resolveInferenceModel({
+  Future<({
+    String? modelId,
+    String? modelPath,
+    String? error
+  })> _resolveInferenceModel({
     String? modelPath,
     String? modelId,
   }) async {
-    final explicitPath = modelPath?.trim();
-    final explicitId = modelId?.trim();
+    final explicitPath =
+        modelPath?.trim();
+
+    final explicitId =
+        modelId?.trim();
 
     if (explicitPath != null &&
         explicitPath.isNotEmpty &&
@@ -226,7 +230,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
       );
     }
 
-    final selectedModel = await _resolveSelectedModel(
+    final selectedModel =
+        await _resolveSelectedModel(
       modelPath: modelPath,
       modelId: modelId,
     );
@@ -235,29 +240,38 @@ class VoiceLoopManager with RuntimeEventEmitter {
       return (
         modelId: null,
         modelPath: null,
-        error: 'Nessun modello locale selezionato.',
+        error:
+            'Nessun modello locale selezionato.',
       );
     }
 
-    final selectedPath = selectedModel.localPath?.trim();
+    final selectedPath =
+        selectedModel.localPath?.trim();
 
-    if (selectedPath == null || selectedPath.isEmpty) {
+    if (selectedPath == null ||
+        selectedPath.isEmpty) {
       logEvent(
         _tag,
-        '[MODEL_RESOLVE_FAIL] selected model has no local path '
-        'modelId=${selectedModel.effectiveRuntimeModelId}',
+        '[MODEL_RESOLVE_FAIL] '
+        'selected model has no local path '
+        'modelId='
+        '${selectedModel.effectiveRuntimeModelId}',
       );
 
       return (
-        modelId: selectedModel.effectiveRuntimeModelId,
+        modelId:
+            selectedModel
+                .effectiveRuntimeModelId,
         modelPath: null,
         error:
-            'Il modello locale selezionato non ha un percorso locale valido.',
+            'Il modello locale selezionato '
+            'non ha un percorso locale valido.',
       );
     }
 
     return (
-      modelId: selectedModel.effectiveRuntimeModelId,
+      modelId:
+          selectedModel.effectiveRuntimeModelId,
       modelPath: selectedPath,
       error: null,
     );
@@ -268,10 +282,16 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required String? modelPath,
     required String? modelId,
     required String? systemPrompt,
-    required void Function(String text, bool isFinal)? onSubtitle,
-    required void Function(String error)? onError,
+    required void Function(
+      String text,
+      bool isFinal,
+    )? onSubtitle,
+    required void Function(
+      String error,
+    )? onError,
   }) async {
-    if (_disposed || token.isCancelled) {
+    if (_disposed ||
+        token.isCancelled) {
       return;
     }
 
@@ -279,45 +299,80 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 1. STT
     // -----------------------------------------------------------------------
 
-    final sttCompleter = Completer<String>();
+    final sttCompleter =
+        Completer<String>();
 
-    void completeStt(String text) {
+    void completeStt(
+      String text,
+    ) {
       if (sttCompleter.isCompleted) {
         return;
       }
 
-      final normalized = text.trim();
+      final normalized =
+          text.trim();
 
       if (normalized.isEmpty) {
         return;
       }
 
-      sttCompleter.complete(normalized);
+      sttCompleter.complete(
+        normalized,
+      );
     }
 
     try {
+      logEvent(
+        _tag,
+        '[STT_START] '
+        'locale='
+        '${AppConstants.sttDefaultLocaleId}',
+      );
+
       await _engine.startListening(
-        onResult: (text, isFinal) {
-          if (_disposed || token.isCancelled || _stopRequested) {
+        localeId:
+            AppConstants.sttDefaultLocaleId,
+        onResult: (
+          text,
+          isFinal,
+        ) {
+          if (_disposed ||
+              token.isCancelled ||
+              _stopRequested) {
             return;
           }
 
-          final normalized = text.trim();
+          final normalized =
+              text.trim();
 
           if (normalized.isEmpty) {
             return;
           }
 
-          onSubtitle?.call(normalized, isFinal);
+          logEvent(
+            _tag,
+            '[STT_RESULT] '
+            'final=$isFinal '
+            'chars=${normalized.length}',
+          );
+
+          onSubtitle?.call(
+            normalized,
+            isFinal,
+          );
 
           if (isFinal) {
-            completeStt(normalized);
+            completeStt(
+              normalized,
+            );
           }
         },
       );
     } catch (error) {
-      if (!token.isCancelled && !_stopRequested) {
-        final message = 'Voice input failed: $error';
+      if (!token.isCancelled &&
+          !_stopRequested) {
+        final message =
+            'Voice input failed: $error';
 
         logEvent(
           _tag,
@@ -333,13 +388,17 @@ class VoiceLoopManager with RuntimeEventEmitter {
     String spokenText;
 
     try {
-      spokenText = await sttCompleter.future.timeout(
+      spokenText =
+          await sttCompleter.future
+              .timeout(
         _sttTimeout,
         onTimeout: () => '',
       );
     } catch (error) {
-      if (!token.isCancelled && !_stopRequested) {
-        final message = 'Voice input timeout: $error';
+      if (!token.isCancelled &&
+          !_stopRequested) {
+        final message =
+            'Voice input timeout: $error';
 
         logEvent(
           _tag,
@@ -353,36 +412,52 @@ class VoiceLoopManager with RuntimeEventEmitter {
     } finally {
       try {
         await _engine.stopListening();
-      } catch (_) {
-        // Keep the Live pipeline alive.
-      }
+      } catch (_) {}
     }
 
-    if (_disposed || token.isCancelled || _stopRequested) {
+    if (_disposed ||
+        token.isCancelled ||
+        _stopRequested) {
       return;
     }
 
-    spokenText = spokenText.trim();
+    spokenText =
+        spokenText.trim();
 
     if (spokenText.isEmpty) {
+      logEvent(
+        _tag,
+        '[STT_EMPTY]',
+      );
+
       return;
     }
+
+    logEvent(
+      _tag,
+      '[STT_FINAL_TEXT] '
+      'chars=${spokenText.length}',
+    );
 
     // -----------------------------------------------------------------------
     // 2. RESOLVE ACTIVE LOCAL MODEL
     // -----------------------------------------------------------------------
 
-    final resolvedModel = await _resolveInferenceModel(
+    final resolvedModel =
+        await _resolveInferenceModel(
       modelPath: modelPath,
       modelId: modelId,
     );
 
-    if (_disposed || token.isCancelled || _stopRequested) {
+    if (_disposed ||
+        token.isCancelled ||
+        _stopRequested) {
       return;
     }
 
     if (resolvedModel.error != null) {
-      final message = resolvedModel.error!;
+      final message =
+          resolvedModel.error!;
 
       logEvent(
         _tag,
@@ -390,17 +465,22 @@ class VoiceLoopManager with RuntimeEventEmitter {
       );
 
       onError?.call(message);
+
       return;
     }
 
-    final resolvedModelId = resolvedModel.modelId;
-    final resolvedModelPath = resolvedModel.modelPath;
+    final resolvedModelId =
+        resolvedModel.modelId;
+
+    final resolvedModelPath =
+        resolvedModel.modelPath;
 
     if (resolvedModelId == null ||
         resolvedModelId.isEmpty ||
         resolvedModelPath == null ||
         resolvedModelPath.isEmpty) {
-      const message = 'Percorso del modello locale mancante.';
+      const message =
+          'Percorso del modello locale mancante.';
 
       logEvent(
         _tag,
@@ -408,6 +488,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       );
 
       onError?.call(message);
+
       return;
     }
 
@@ -415,8 +496,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 3. INFERENCE
     // -----------------------------------------------------------------------
 
-    final request = InferenceRequest(
-      sessionId: 'voice_loop_${DateTime.now().microsecondsSinceEpoch}',
+    final request =
+        InferenceRequest(
+      sessionId:
+          'voice_loop_'
+          '${DateTime.now().microsecondsSinceEpoch}',
       prompt: spokenText,
       systemPrompt: systemPrompt,
       isOffline: true,
@@ -426,20 +510,34 @@ class VoiceLoopManager with RuntimeEventEmitter {
       modelPath: resolvedModelPath,
     );
 
-    Stream<dynamic> inferenceStream;
+    Stream<dynamic>
+        inferenceStream;
 
     try {
-      inferenceStream = _runtimeProvider.streamInference(
+      logEvent(
+        _tag,
+        '[INFERENCE_START] '
+        'modelId=$resolvedModelId',
+      );
+
+      inferenceStream =
+          _runtimeProvider
+              .streamInference(
         request: request,
-        cancellationToken: token,
+        cancellationToken:
+            token,
       );
     } catch (error) {
-      if (!token.isCancelled && !_stopRequested) {
-        final message = 'Voice inference failed to start: $error';
+      if (!token.isCancelled &&
+          !_stopRequested) {
+        final message =
+            'Voice inference failed '
+            'to start: $error';
 
         logEvent(
           _tag,
-          '[INFERENCE_START_ERROR] $message',
+          '[INFERENCE_START_ERROR] '
+          '$message',
         );
 
         onError?.call(message);
@@ -452,36 +550,50 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 4. TOKEN -> TTS
     // -----------------------------------------------------------------------
 
-    final tokenBuffer = StringBuffer();
+    final tokenBuffer =
+        StringBuffer();
 
-    final sentenceBoundaryPattern = RegExp(r'[.!?\n]');
+    final sentenceBoundaryPattern =
+        RegExp(r'[.!?\n]');
 
-    await for (final response in inferenceStream) {
-      if (_disposed || token.isCancelled || _stopRequested) {
+    await for (
+      final response in inferenceStream
+    ) {
+      if (_disposed ||
+          token.isCancelled ||
+          _stopRequested) {
         break;
       }
 
       if (response.isError) {
-        final message = response.errorMessage ?? 'Voice inference error';
+        final message =
+            response.errorMessage ??
+                'Voice inference error';
 
         logEvent(
           _tag,
-          '[INFERENCE_ERROR] $message',
+          '[INFERENCE_ERROR] '
+          '$message',
         );
 
         onError?.call(message);
+
         break;
       }
 
-      final chunk = response.text;
+      final chunk =
+          response.text;
 
       if (chunk.isEmpty) {
         continue;
       }
 
-      tokenBuffer.write(chunk);
+      tokenBuffer.write(
+        chunk,
+      );
 
-      final currentText = tokenBuffer.toString();
+      final currentText =
+          tokenBuffer.toString();
 
       onSubtitle?.call(
         currentText,
@@ -490,28 +602,46 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
       final shouldFlush =
           response.isFinal ||
-          sentenceBoundaryPattern.hasMatch(chunk);
+          sentenceBoundaryPattern
+              .hasMatch(chunk);
 
       if (!shouldFlush) {
         continue;
       }
 
-      final speakChunk = tokenBuffer.toString().trim();
+      final speakChunk =
+          tokenBuffer
+              .toString()
+              .trim();
+
       tokenBuffer.clear();
 
       if (speakChunk.isEmpty) {
         continue;
       }
 
-      if (_disposed || token.isCancelled || _stopRequested) {
+      if (_disposed ||
+          token.isCancelled ||
+          _stopRequested) {
         break;
       }
 
+      logEvent(
+        _tag,
+        '[TTS_CHUNK] '
+        'chars=${speakChunk.length} '
+        'final=${response.isFinal}',
+      );
+
       try {
-        await _engine.speak(speakChunk);
+        await _engine.speak(
+          speakChunk,
+        );
       } catch (error) {
-        if (!token.isCancelled && !_stopRequested) {
-          final message = 'Voice output failed: $error';
+        if (!token.isCancelled &&
+            !_stopRequested) {
+          final message =
+              'Voice output failed: $error';
 
           logEvent(
             _tag,
@@ -529,25 +659,41 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 5. TRAILING TTS
     // -----------------------------------------------------------------------
 
-    if (_disposed || token.isCancelled || _stopRequested) {
+    if (_disposed ||
+        token.isCancelled ||
+        _stopRequested) {
       return;
     }
 
-    final trailing = tokenBuffer.toString().trim();
+    final trailing =
+        tokenBuffer
+            .toString()
+            .trim();
 
     if (trailing.isEmpty) {
       return;
     }
 
+    logEvent(
+      _tag,
+      '[TTS_TRAILING_CHUNK] '
+      'chars=${trailing.length}',
+    );
+
     try {
-      await _engine.speak(trailing);
+      await _engine.speak(
+        trailing,
+      );
     } catch (error) {
-      if (!token.isCancelled && !_stopRequested) {
-        final message = 'Voice output failed: $error';
+      if (!token.isCancelled &&
+          !_stopRequested) {
+        final message =
+            'Voice output failed: $error';
 
         logEvent(
           _tag,
-          '[TTS_TRAILING_ERROR] $message',
+          '[TTS_TRAILING_ERROR] '
+          '$message',
         );
 
         onError?.call(message);
