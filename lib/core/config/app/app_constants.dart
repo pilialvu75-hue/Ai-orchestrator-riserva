@@ -85,7 +85,7 @@ class AppConstants {
   static const String copilotChatUrl =
       'https://api.githubcopilot.com/chat/completions';
 
-  // ── Android / Bixby Intent actions ─────────────────────────────────────────
+  // ── Android / Bixby Intent actions ──────────────────────────────────────────
   static const String intentActionShareContext =
       'com.aiorchestrator.SHARE_CONTEXT';
   static const String intentActionReceiveCode =
@@ -150,6 +150,10 @@ class AppConstants {
   static const Duration updateCheckInterval = Duration(hours: 12);
 
   // ── STT runtime hints ──────────────────────────────────────────────────────
+  //
+  // Nemotron è il runtime STT attuale.
+  // Manteniamo i nomi delle costanti legacy ancora consumati
+  // da componenti del repository, senza ripristinare il modello inglese.
   static const String sttDefaultLocaleId = 'it_IT';
   static const String sttModelType = '';
   static const int sttNumThreads = 2;
@@ -160,9 +164,10 @@ class AppConstants {
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
 
-  // ── Sherpa-ONNX STT download ────────────────────────────────────────────────
-  // Multilingual streaming Nemotron 3.5 ASR.
-  // Supports Italian (it-IT) and automatic language detection.
+  // ── Sherpa-ONNX STT — Nemotron ──────────────────────────────────────────────
+  //
+  // Modello multilingue streaming Nemotron 3.5 ASR.
+  // Target principale: italiano (it-IT).
   static const String sttNemotronRepository =
       'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11';
 
@@ -173,9 +178,29 @@ class AppConstants {
   static const int sttNemotronTarExpectedBytes =
       1300 * 1024 * 1024;
 
+  // ── Legacy STT compatibility constants ─────────────────────────────────────
+  //
+  // Queste costanti NON selezionano il modello inglese.
+  // Restano disponibili perché alcuni componenti/transizioni del repository
+  // le referenziano ancora. Verranno rimosse solo dopo la migrazione completa
+  // dei consumer a Nemotron.
+  static const String sttZipformerEnRepository =
+      'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
+
+  static const String sttZipformerBaseUrl =
+      'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
+
+  static const String sttZipformerTarUrl =
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
+      'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
+
+  static const int sttZipformerTarExpectedBytes =
+      200 * 1024 * 1024;
+
   // ── Sherpa-ONNX TTS file names (Piper Paola) ────────────────────────────────
-  // Modello Piper: usa espeak-ng-data invece di lexicon.txt.
-  // Scaricato come archivio tar.bz2 da GitHub Releases.
+  //
+  // Modello Piper italiano.
+  // Usa espeak-ng-data invece di lexicon.txt.
   static const String ttsModelFile = 'it_IT-paola-medium.onnx';
   static const String ttsTokensFile = 'tokens.txt';
   static const String ttsEspeakDataDir = 'espeak-ng-data';
@@ -195,6 +220,13 @@ class AppConstants {
   static const String sttDefaultLanguage = 'it-IT';
   static const String ttsDefaultLanguage = 'it-IT';
 
+  // ── Canali Sherpa-ONNX ──────────────────────────────────────────────────────
+  static const String sherpaVoiceMethodChannel =
+      'com.aiorchestrator/sherpa_onnx_voice';
+
+  static const String sherpaAsrEventChannel =
+      'com.aiorchestrator/sherpa_onnx_asr_events';
+
   // ── Voice model storage ─────────────────────────────────────────────────────
   static const String voiceModelsDirectory = 'voice_models';
   static const String sttModelsDirectory = 'stt';
@@ -203,14 +235,15 @@ class AppConstants {
   // ── Voice model archive markers ─────────────────────────────────────────────
   static const String sttModelArchiveMarker =
       'stt_nemotron_multilingual';
+
   static const String ttsModelArchiveMarker =
       'tts_paola_italian';
 
-  // ── Audio ──────────────────────────────────────────────────────────────────
+  // ── Audio ───────────────────────────────────────────────────────────────────
   static const int voiceSampleRate = 16000;
   static const int voiceChannels = 1;
 
-  // ── Voice endpointing ──────────────────────────────────────────────────────
+  // ── Voice endpointing ───────────────────────────────────────────────────────
   static const double sttRule1MinTrailingSilence = 2.4;
   static const double sttRule2MinTrailingSilence = 1.4;
   static const double sttRule3MinUtteranceLength = 20.0;
