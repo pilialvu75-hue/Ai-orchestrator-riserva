@@ -13,7 +13,7 @@ class AppConstants {
   static const String tableDocumentChunks = 'document_chunks';
   static const String tableSyncChanges = 'sync_changes';
 
-  // ── sync_changes columns ─────────────────────────────────────────────────────
+  // ── sync_changes columns ────────────────────────────────────────────────────
   static const String colSyncId = 'sync_id';
   static const String colSyncCollection = 'collection';
   static const String colSyncKey = 'record_key';
@@ -22,7 +22,7 @@ class AppConstants {
   static const String colSyncNodeId = 'node_id';
   static const String colSyncApplied = 'applied';
 
-  // ── Sync / P2P constants ─────────────────────────────────────────────────────
+  // ── Sync / P2P constants ────────────────────────────────────────────────────
   static const int syncDefaultPort = 47847;
   static const int syncDiscoveryPort = 47848;
   static const String syncDiscoveryMulticast = '239.255.47.47';
@@ -36,18 +36,18 @@ class AppConstants {
   static const String colLastCodeSnippet = 'last_code_snippet';
   static const String colTimestamp = 'timestamp';
 
-  // ── chat_history columns ─────────────────────────────────────────────────────
+  // ── chat_history columns ────────────────────────────────────────────────────
   static const String colSessionId = 'session_id';
   static const String colRole = 'role';
   static const String colContent = 'content';
   static const String colProvider = 'provider';
   static const String colAttachments = 'attachments_json';
 
-  // ── user_preferences columns ─────────────────────────────────────────────────
+  // ── user_preferences columns ────────────────────────────────────────────────
   static const String colPrefKey = 'pref_key';
   static const String colPrefValue = 'pref_value';
 
-  // ── document_chunks columns ──────────────────────────────────────────────────
+  // ── document_chunks columns ─────────────────────────────────────────────────
   static const String colDocumentId = 'document_id';
   static const String colDocumentPath = 'document_path';
   static const String colDocumentTitle = 'document_title';
@@ -55,7 +55,7 @@ class AppConstants {
   static const String colChunkText = 'chunk_text';
   static const String colVectorJson = 'vector_json';
 
-  // ── Preference keys ──────────────────────────────────────────────────────────
+  // ── Preference keys ─────────────────────────────────────────────────────────
   static const String prefActiveProvider = 'active_ai_provider';
   static const String prefThemeMode = 'theme_mode';
   static const String prefSelectedModel = 'selected_model';
@@ -76,7 +76,7 @@ class AppConstants {
   static const String prefAssistantTextSize = 'chat.assistant_text_size';
   static const String prefLlmRoleBindingPrefix = 'llm.role.binding.';
 
-  // ── AI providers ─────────────────────────────────────────────────────────────
+  // ── AI providers ────────────────────────────────────────────────────────────
   static const String openAiBaseUrl = 'https://api.openai.com/v1';
   static const String geminiBaseUrl =
       'https://generativelanguage.googleapis.com/v1beta';
@@ -85,7 +85,7 @@ class AppConstants {
   static const String copilotChatUrl =
       'https://api.githubcopilot.com/chat/completions';
 
-  // ── Android / Bixby Intent actions ──────────────────────────────────────────
+  // ── Android / Bixby Intent actions ─────────────────────────────────────────
   static const String intentActionShareContext =
       'com.aiorchestrator.SHARE_CONTEXT';
   static const String intentActionReceiveCode =
@@ -98,11 +98,11 @@ class AppConstants {
   static const String intentBixbyRoutine =
       'com.samsung.android.bixby.routines.ACTION_RUN_ROUTINE';
 
-  // ── Cache management ─────────────────────────────────────────────────────────
+  // ── Cache management ────────────────────────────────────────────────────────
   static const int chatHistoryMaxAgeDays = 30;
   static const int chatHistoryMaxRows = 500;
 
-  // ── Local AI model definitions ────────────────────────────────────────────
+  // ── Local AI model definitions ─────────────────────────────────────────────
   static const String modelVersionManifestUrl =
       'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/models/manifest.json';
 
@@ -141,48 +141,77 @@ class AppConstants {
 
   static const int contextWindowMaxMessages = 20;
   static const Duration modelDownloadTimeout = Duration(hours: 2);
+
   static const String updateManifestUrl =
       'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/update/version.json';
+
   static const String updateGitHubOwner = 'pilialvu75-hue';
   static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
-  // ── STT runtime hints ────────────────────────────────────────────────────────
-  static const String sttDefaultLocaleId = 'en_US';
-  static const String sttModelType = 'zipformer2';
+  // ── STT runtime hints ──────────────────────────────────────────────────────
+  static const String sttDefaultLocaleId = 'it_IT';
+  static const String sttModelType = '';
   static const int sttNumThreads = 2;
 
-  // ── Sherpa-ONNX STT file names ───────────────────────────────────────────────
+  // ── Sherpa-ONNX STT file names ──────────────────────────────────────────────
   static const String sttEncoderFile = 'encoder.onnx';
   static const String sttDecoderFile = 'decoder.onnx';
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
 
-  // ── Sherpa-ONNX STT download ─────────────────────────────────────────────────
-  static const String sttZipformerEnRepository =
-      'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
-  static const String sttZipformerBaseUrl =
-      'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
+  // ── Sherpa-ONNX STT download ────────────────────────────────────────────────
+  // Multilingual streaming Nemotron 3.5 ASR.
+  // Supports Italian (it-IT) and automatic language detection.
+  static const String sttNemotronRepository =
+      'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11';
 
-  // STT scaricato come archivio tar.bz2 da GitHub Releases.
-  // Evita i redirect CDN di Hugging Face che causano download incompleti.
-  static const String sttZipformerTarUrl =
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
-  static const int sttZipformerTarExpectedBytes = 200 * 1024 * 1024;
+  static const String sttNemotronTarUrl =
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
+      'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2';
 
-  // ── Sherpa-ONNX TTS file names (Piper Paola) ─────────────────────────────────
+  static const int sttNemotronTarExpectedBytes =
+      1300 * 1024 * 1024;
+
+  // ── Sherpa-ONNX TTS file names (Piper Paola) ────────────────────────────────
   // Modello Piper: usa espeak-ng-data invece di lexicon.txt.
   // Scaricato come archivio tar.bz2 da GitHub Releases.
   static const String ttsModelFile = 'it_IT-paola-medium.onnx';
-  static const String ttsTokensFile = 'tts-tokens.txt';
+  static const String ttsTokensFile = 'tokens.txt';
   static const String ttsEspeakDataDir = 'espeak-ng-data';
-  static const String ttsPaolaTarUrl =
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-it_IT-paola-medium.tar.bz2';
-  static const int ttsPaolaTarExpectedBytes = 63 * 1024 * 1024;
 
-  // ── Canali Sherpa-ONNX ───────────────────────────────────────────────────────
-  static const String sherpaVoiceMethodChannel =
-      'com.aiorchestrator/sherpa_onnx_voice';
-  static const String sherpaAsrEventChannel =
-      'com.aiorchestrator/sherpa_onnx_asr_events';
+  // ── Sherpa-ONNX TTS download ────────────────────────────────────────────────
+  static const String ttsPaolaRepository =
+      'vits-piper-it_IT-paola-medium';
+
+  static const String ttsPaolaTarUrl =
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
+      'vits-piper-it_IT-paola-medium.tar.bz2';
+
+  static const int ttsPaolaTarExpectedBytes =
+      63 * 1024 * 1024;
+
+  // ── Voice ───────────────────────────────────────────────────────────────────
+  static const String sttDefaultLanguage = 'it-IT';
+  static const String ttsDefaultLanguage = 'it-IT';
+
+  // ── Voice model storage ─────────────────────────────────────────────────────
+  static const String voiceModelsDirectory = 'voice_models';
+  static const String sttModelsDirectory = 'stt';
+  static const String ttsModelsDirectory = 'tts';
+
+  // ── Voice model archive markers ─────────────────────────────────────────────
+  static const String sttModelArchiveMarker =
+      'stt_nemotron_multilingual';
+  static const String ttsModelArchiveMarker =
+      'tts_paola_italian';
+
+  // ── Audio ──────────────────────────────────────────────────────────────────
+  static const int voiceSampleRate = 16000;
+  static const int voiceChannels = 1;
+
+  // ── Voice endpointing ──────────────────────────────────────────────────────
+  static const double sttRule1MinTrailingSilence = 2.4;
+  static const double sttRule2MinTrailingSilence = 1.4;
+  static const double sttRule3MinUtteranceLength = 20.0;
 }
