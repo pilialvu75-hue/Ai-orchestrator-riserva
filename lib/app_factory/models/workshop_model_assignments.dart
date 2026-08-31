@@ -4,9 +4,21 @@ import 'workshop_model_roles.dart';
 
 /// Persistent assignment of a model to a logical AI role.
 ///
-/// The assignment deliberately contains only configuration.
+/// Workshop assignments are intentionally independent from the Assistant
+/// model selection. The Workshop owns its four technical roles:
+///
+///   Orchestrator -> Qwen2.5 3B
+///   Architect    -> Qwen2.5-Coder 7B
+///   Engineer     -> DeepSeek Coder 6.7B
+///   Reviewer     -> StarCoder2 3B
+///
 /// Model downloading, verification, storage and runtime loading remain
-/// responsibilities of the existing model-management infrastructure.
+/// responsibilities of the existing shared model-management infrastructure.
+///
+/// IMPORTANT:
+/// The shared infrastructure is allowed to share the physical GGUF files,
+/// but Workshop selection/configuration must never inherit the Assistant's
+/// selected model.
 @immutable
 class WorkshopModelAssignment {
   const WorkshopModelAssignment({
@@ -53,6 +65,14 @@ class WorkshopModelAssignment {
       );
     }
 
+    // The Assistant role is deliberately not accepted as a Workshop
+    // assignment. The Assistant and Workshop have independent configuration.
+    if (role == AppAiRole.assistantOrchestrator) {
+      throw const FormatException(
+        'Assistant role cannot be assigned through Workshop configuration.',
+      );
+    }
+
     return WorkshopModelAssignment(
       role: role,
       modelId: modelId,
@@ -89,26 +109,23 @@ class WorkshopModelAssignment {
 
 /// Default model-role configuration for the Workshop.
 ///
-/// These are deliberately conservative defaults. The user will eventually
-/// be able to change them from the existing Model Management UI.
+/// The Assistant is intentionally NOT part of this list.
 ///
-/// Current intended topology:
+/// The two systems share model download/storage infrastructure, but their
+/// model selection is independent:
 ///
 /// Assistant:
-///   Hannibal -> Phi-3.5 Mini
+///   managed by the Assistant model-selection system.
 ///
 /// Workshop:
 ///   Orchestrator -> Qwen2.5 3B
 ///   Architect    -> Qwen2.5-Coder 7B
-///   Engineer     -> DeepSeek-Coder 6.7B
+///   Engineer     -> DeepSeek Coder 6.7B
 ///   Reviewer     -> StarCoder2 3B
+///
+/// This separation is important because changing the Assistant's selected
+/// model must never silently change the model used by the Workshop.
 abstract final class WorkshopModelAssignments {
-  static const WorkshopModelAssignment assistant =
-      WorkshopModelAssignment(
-    role: AppAiRole.assistantOrchestrator,
-    modelId: 'phi3_5_mini',
-  );
-
   static const WorkshopModelAssignment orchestrator =
       WorkshopModelAssignment(
     role: AppAiRole.workshopOrchestrator,
@@ -133,9 +150,11 @@ abstract final class WorkshopModelAssignments {
     modelId: 'starcoder2_3b',
   );
 
+  /// Default assignments belonging exclusively to the Workshop.
+  ///
+  /// Do NOT add AppAiRole.assistantOrchestrator here.
   static const List<WorkshopModelAssignment> defaults =
       <WorkshopModelAssignment>[
-    assistant,
     orchestrator,
     architect,
     engineer,
@@ -150,15 +169,23 @@ abstract final class WorkshopModelAssignments {
     AppAiRole role, {
     List<WorkshopModelAssignment> assignments = defaults,
   }) {
+    // Never resolve the Assistant through the Workshop configuration.
+    if (role == AppAiRole.assistantOrchestrator) {
+      return null;
+    }
+
     for (final assignment in assignments) {
       if (assignment.role == role) {
         return assignment.modelId;
       }
     }
+
     return null;
   }
 
   /// Replaces or creates the assignment for [role].
+  ///
+  /// The Assistant role cannot be configured through the Workshop.
   ///
   /// The returned list is immutable from the caller's perspective.
   static List<WorkshopModelAssignment> withAssignment(
@@ -166,6 +193,10 @@ abstract final class WorkshopModelAssignments {
     AppAiRole role,
     String modelId,
   ) {
+    if (role == AppAiRole.assistantOrchestrator) {
+      return List.unmodifiable(assignments);
+    }
+
     final result = <WorkshopModelAssignment>[];
     var replaced = false;
 
@@ -210,11 +241,14 @@ abstract final class WorkshopModelAssignments {
     );
   }
 
-  /// Validates assignments against the current model catalogue.
+  /// Validates assignments against the current Workshop model catalogue.
   ///
   /// This method does not touch the filesystem and does not download anything.
-  /// It only verifies that every assigned model exists in the catalogue and
-  /// explicitly supports the selected role.
+  /// It verifies:
+  ///   - no duplicate roles exist;
+  ///   - the Assistant is not assigned to the Workshop;
+  ///   - every assigned model exists;
+  ///   - every assigned model supports its selected role.
   static List<String> validate(
     List<WorkshopModelAssignment> assignments,
   ) {
@@ -222,6 +256,14 @@ abstract final class WorkshopModelAssignments {
     final seenRoles = <AppAiRole>{};
 
     for (final assignment in assignments) {
+      if (assignment.role == AppAiRole.assistantOrchestrator) {
+        errors.add(
+          'Assistant role cannot be assigned through Workshop '
+          'model configuration.',
+        );
+        continue;
+      }
+
       if (!seenRoles.add(assignment.role)) {
         errors.add(
           'Duplicate model assignment for role '
@@ -245,6 +287,24 @@ abstract final class WorkshopModelAssignments {
         errors.add(
           'Model "${assignment.modelId}" cannot serve role '
           '"${assignment.role.id}".',
+        );
+      }
+    }
+
+    // The four Workshop roles must have an assignment in the default
+    // configuration. This prevents a silently incomplete Workshop.
+    const requiredRoles = <AppAiRole>{
+      AppAiRole.workshopOrchestrator,
+      AppAiRole.architect,
+      AppAiRole.engineer,
+      AppAiRole.reviewer,
+    };
+
+    for (final role in requiredRoles) {
+      if (!seenRoles.contains(role)) {
+        errors.add(
+          'Missing Workshop model assignment for role '
+          '"${role.id}".',
         );
       }
     }
