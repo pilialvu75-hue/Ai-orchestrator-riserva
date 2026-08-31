@@ -38,37 +38,37 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
   // ---------------------------------------------------------------------------
   // STT validation thresholds
+  // ---------------------------------------------------------------------------
   //
-  // These are deliberately conservative lower bounds, not exact file sizes.
-  // They protect against accepting a partially written/truncated ONNX file
-  // while allowing small upstream model packaging changes.
+  // Nemotron 3.5 0.6B 560 ms INT8 documented package:
+  //
+  // encoder.int8.onnx  ~627 MB
+  // decoder.int8.onnx  ~14 MB
+  // joiner.int8.onnx   ~9.1 MB
+  // tokens.txt         ~128 KB
+  //
+  // These are deliberately lower bounds rather than exact sizes so that
+  // harmless upstream packaging changes do not invalidate a valid model.
+  // They are nevertheless high enough to reject the previous small
+  // Zipformer-English assets.
   // ---------------------------------------------------------------------------
 
-  static const int _minSttEncoderBytes = 50 * 1024 * 1024;
-  static const int _minSttDecoderBytes = 512 * 1024;
-  static const int _minSttJoinerBytes = 100 * 1024;
-  static const int _minSttTokensBytes = 1024;
+  static const int _minSttEncoderBytes = 600 * 1024 * 1024;
+  static const int _minSttDecoderBytes = 10 * 1024 * 1024;
+  static const int _minSttJoinerBytes = 8 * 1024 * 1024;
+  static const int _minSttTokensBytes = 64 * 1024;
 
-  // TTS is considerably smaller, but an almost-empty/truncated file must
-  // never be considered a valid runtime asset.
+  // TTS is considerably smaller, but a truncated model must never be accepted.
   static const int _minTtsModelBytes = 20 * 1024 * 1024;
   static const int _minTtsTokensBytes = 256;
 
-  // The selected streaming Zipformer configuration is:
-  //
-  // encoder: ...left-128.int8.onnx
-  // decoder: ...left-128.onnx
-  // joiner : ...left-128.int8.onnx
-  //
-  // This avoids accidentally installing the ~262 MB FP32 encoder.
-  static const String _sttEncoderMarker =
-      'encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx';
+  // ---------------------------------------------------------------------------
+  // Nemotron 3.5 internal archive names
+  // ---------------------------------------------------------------------------
 
-  static const String _sttDecoderMarker =
-      'decoder-epoch-99-avg-1-chunk-16-left-128.onnx';
-
-  static const String _sttJoinerMarker =
-      'joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx';
+  static const String _sttEncoderMarker = 'encoder.int8.onnx';
+  static const String _sttDecoderMarker = 'decoder.int8.onnx';
+  static const String _sttJoinerMarker = 'joiner.int8.onnx';
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
@@ -284,7 +284,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    // Server ignored Range and returned the complete file.
     if (status == HttpStatus.ok) {
       await _downloadFromZero(
         url: url,
@@ -526,7 +525,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     final tarPath = p.join(
       targetDir.path,
-      'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2',
+      'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2',
     );
 
     final partialPath = '$tarPath.part';
@@ -556,20 +555,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     ).create(recursive: true);
 
     try {
-      /*
-       * IMPORTANT:
-       *
-       * Never use:
-       *
-       *   File(tarPath).readAsBytes()
-       *   BZip2Decoder().decodeBytes(...)
-       *   TarDecoder().decodeBytes(...)
-       *
-       * here.
-       *
-       * extractFileToDisk() uses archive_io's file based path and avoids
-       * keeping the compressed archive and the decompressed TAR in RAM.
-       */
       await extractFileToDisk(
         tarPath,
         extractionDir.path,
@@ -609,14 +594,11 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           joinerSource == null ||
           tokensSource == null) {
         throw const VoiceAssetException(
-          'Archivio STT valido ma modello INT8 '
-          'left-128 non trovato.',
+          'Archivio STT valido ma modello Nemotron 3.5 INT8 '
+          'non trovato.',
         );
       }
 
-      /*
-       * Validate source files BEFORE touching the runtime files.
-       */
       await _requireMinimumSize(
         encoderSource,
         _minSttEncoderBytes,
@@ -626,7 +608,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       await _requireMinimumSize(
         decoderSource,
         _minSttDecoderBytes,
-        'STT decoder',
+        'STT decoder INT8',
       );
 
       await _requireMinimumSize(
@@ -641,15 +623,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         'STT tokens',
       );
 
-      /*
-       * Atomic replacement:
-       *
-       * 1. write/copy into .part
-       * 2. validate
-       * 3. rename to final file
-       *
-       * A half-written ONNX file is therefore never considered ready.
-       */
       await _installAtomically(
         source: encoderSource,
         destination: File(
@@ -700,12 +673,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         'Estrazione STT fallita: $error',
       );
     } finally {
-      /*
-       * The archive is deleted only after extraction has finished.
-       * If extraction/download fails, the .part download remains available
-       * for resume; the completed archive is intentionally cleaned here.
-       */
-      await _deleteIfExists(File(tarPath));
+      await _deleteIfExists(
+        File(tarPath),
+      );
 
       if (await extractionDir.exists()) {
         await extractionDir.delete(
@@ -725,7 +695,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[STT_READY] INT8 left-128 assets installed',
+      '[STT_READY] Nemotron 3.5 multilingual assets installed',
     );
   }
 
@@ -927,7 +897,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         'Estrazione TTS fallita: $error',
       );
     } finally {
-      await _deleteIfExists(File(tarPath));
+      await _deleteIfExists(
+        File(tarPath),
+      );
 
       if (await extractionDir.exists()) {
         await extractionDir.delete(
@@ -987,9 +959,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     List<File> files,
     String extension,
   ) {
-    /*
-     * Prefer a Piper ONNX model rather than a JSON metadata file.
-     */
     for (final file in files) {
       final name = p.basename(file.path);
 
@@ -1014,11 +983,6 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return direct;
     }
 
-    /*
-     * The archive normally contains the directory directly below the
-     * model root. We still search recursively so packaging changes don't
-     * break the downloader.
-     */
     final entities = root.listSync(
       recursive: true,
       followLinks: false,
@@ -1068,11 +1032,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       recursive: true,
     );
 
-    /*
-     * File.copy() is streamed by dart:io and does not load the entire
-     * ONNX file into the Dart heap.
-     */
-    await source.copy(temporary.path);
+    await source.copy(
+      temporary.path,
+    );
 
     final size = await temporary.length();
 
