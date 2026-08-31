@@ -30,43 +30,69 @@ class RuntimeModelFileSpec {
 class ModelRuntimeManifest {
   const ModelRuntimeManifest._();
 
-  static const List<ModelManagementSection> sectionOrder =
+  static const List<ModelManagementSection>
+      sectionOrder =
       <ModelManagementSection>[
     ModelManagementSection.voiceStt,
     ModelManagementSection.voiceTtsItalian,
   ];
 
-  static const Map<ModelManagementSection, String> sectionTitles =
+  static const Map<ModelManagementSection, String>
+      sectionTitles =
       <ModelManagementSection, String>{
     ModelManagementSection.voiceStt:
-        'STT — Zipformer2 Transducer (EN streaming)',
+        'STT — Nemotron 3.5 0.6B Multilingual (streaming)',
     ModelManagementSection.voiceTtsItalian:
         'TTS — Piper Italiano (Paola Medium)',
   };
 
-  static const List<RuntimeModelFileSpec> files = <RuntimeModelFileSpec>[
-    // ── STT — archivio unico tar.bz2 da GitHub Releases ───────────────────
-    // Tutti e 4 i file STT vengono estratti da un singolo archivio.
-    // La UI mostra un solo elemento per sezione STT.
+  static const List<RuntimeModelFileSpec>
+      files =
+      <RuntimeModelFileSpec>[
+    // ── STT ────────────────────────────────────────────────────────────────
+    //
+    // Singolo archivio tar.bz2 contenente:
+    //   encoder.int8.onnx
+    //   decoder.int8.onnx
+    //   joiner.int8.onnx
+    //   tokens.txt
+    //
     RuntimeModelFileSpec(
-      id: 'stt_zipformer_archive',
-      section: ModelManagementSection.voiceStt,
-      logicalName: 'Zipformer2 Transducer — Archivio completo',
-      fileName: AppConstants.sttEncoderFile,
-      downloadUrl: AppConstants.sttZipformerTarUrl,
-      expectedBytes: AppConstants.sttZipformerTarExpectedBytes,
-      estimatedSizeLabel: '~200 MB',
+      id: 'stt_nemotron_archive',
+      section:
+          ModelManagementSection.voiceStt,
+      logicalName:
+          'Nemotron 3.5 0.6B Multilingual — '
+          'Archivio completo',
+      fileName:
+          AppConstants.sttEncoderFile,
+      downloadUrl:
+          AppConstants.sttZipformerTarUrl,
+      expectedBytes:
+          AppConstants.sttZipformerTarExpectedBytes,
+      estimatedSizeLabel: '~1.3 GB',
     ),
-    // ── TTS — archivio unico tar.bz2 da GitHub Releases ───────────────────
-    // Contiene: it_IT-paola-medium.onnx + tts-tokens.txt + espeak-ng-data/
-    // Il download e l'estrazione avvengono tramite VoiceModelDownloader.
+
+    // ── TTS ────────────────────────────────────────────────────────────────
+    //
+    // Contiene:
+    //   it_IT-paola-medium.onnx
+    //   tts-tokens.txt
+    //   espeak-ng-data/
+    //
     RuntimeModelFileSpec(
       id: 'it_tts_archive',
-      section: ModelManagementSection.voiceTtsItalian,
-      logicalName: 'Piper TTS Italiano — Archivio Paola Medium',
-      fileName: AppConstants.ttsModelFile,
-      downloadUrl: AppConstants.ttsPaolaTarUrl,
-      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
+      section:
+          ModelManagementSection.voiceTtsItalian,
+      logicalName:
+          'Piper TTS Italiano — '
+          'Archivio Paola Medium',
+      fileName:
+          AppConstants.ttsModelFile,
+      downloadUrl:
+          AppConstants.ttsPaolaTarUrl,
+      expectedBytes:
+          AppConstants.ttsPaolaTarExpectedBytes,
       estimatedSizeLabel: '~63 MB',
     ),
   ];
