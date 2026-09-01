@@ -45,30 +45,17 @@ endif()
 set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 set(GGML_ARM_FMA          ON  CACHE BOOL "" FORCE)
 
-# L'NDK Android fornisce solo vulkan.h (C). I binding C++ vulkan.hpp
-# usati da ggml NON sono inclusi nell'NDK: li scarichiamo con FetchContent
-# in fase di configure. libvulkan.so, invece, è già presente nel sysroot
-# NDK da API 24 in su (minSdk di questo progetto è 24).
-if(AI_ANDROID_ENABLE_VULKAN)
-    include(FetchContent)
-    FetchContent_Declare(
-        VulkanHeaders
-        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-        GIT_TAG        v1.3.296
-    )
-    FetchContent_MakeAvailable(VulkanHeaders)
-endif()
-
+find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.hpp)
 find_library(VULKAN_LIB vulkan)
-if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_LIB)
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    include_directories("${vulkanheaders_SOURCE_DIR}/include")
-    message(STATUS "ggml Vulkan backend enabled with fetched Vulkan-Headers at ${vulkanheaders_SOURCE_DIR}/include")
+    include_directories("${VULKAN_INCLUDE_DIR}")
+    message(STATUS "ggml Vulkan backend enabled with Vulkan headers at ${VULKAN_INCLUDE_DIR}")
 else()
     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
     if(AI_ANDROID_ENABLE_VULKAN)
         message(WARNING
-            "AI_ANDROID_ENABLE_VULKAN is ON but libvulkan was not found in the NDK sysroot. "
+            "AI_ANDROID_ENABLE_VULKAN is ON but Vulkan headers or library were not found. "
             "Vulkan GPU backend unavailable, using CPU fallback.")
     endif()
 endif()
@@ -96,7 +83,7 @@ target_link_libraries(llama_bridge PRIVATE
     android   # Android NDK utils
 )
 
-if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_LIB)
+if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_INCLUDE_DIR AND VULKAN_LIB)
     target_link_libraries(llama_bridge PRIVATE ${VULKAN_LIB})
 endif()
 
