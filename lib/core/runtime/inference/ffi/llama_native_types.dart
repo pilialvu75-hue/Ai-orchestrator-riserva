@@ -34,10 +34,13 @@ typedef LlbSessionLastErrorNative = Pointer<Utf8> Function(Int64);
 typedef LlbSessionLastErrorDart = Pointer<Utf8> Function(int);
 
 abstract final class LlamaNativeDefaults {
-  // Conservative mobile runtime context for stable local generation.
-  static const int nCtx = 2048;
-  // Keep Android runtime thread usage bounded for thermals/stability while
-  // still scaling up on higher-core devices.
+  // Contesto aumentato da 2048 a 4096: il tuo S24 FE (8/12GB RAM) regge
+  // comodamente la KV cache aggiuntiva per modelli 7B in Q4_K_M, e un
+  // contesto maggiore è essenziale per un uso da assistente di codice
+  // (system prompt + contesto file + history nella stessa finestra).
+  // Se noti pressione di memoria con modelli 7B, riporta a 2048 o 3072.
+  static const int nCtx = 4096;
+
   static final int _nThreads = _calculateThreadCount();
 
   static int _calculateThreadCount() {
@@ -45,19 +48,15 @@ abstract final class LlamaNativeDefaults {
   }
 
   static int threadCountForCores(int cores) {
-    // Use 6 threads on octa-core devices to keep the decode loop responsive
-    // without fully saturating the big.LITTLE cluster.
+    // Snapdragon 8 Gen 3 (S24 FE) = 8 core: 1x Cortex-X4 + 5x Cortex-A720
+    // + 2x Cortex-A520. Usiamo 6 thread per restare sui core performance
+    // (X4+A720) senza saturare la cluster efficienza.
     if (cores >= 8) return 6;
-    // Use 4 threads on mid-range devices so generation scales above the
-    // previous hardcoded baseline while still leaving headroom for UI work.
     if (cores >= 6) return 4;
-    // Fall back to 2 threads on smaller devices to avoid thermal spikes.
     return 2;
   }
   static int get nThreads => _nThreads;
   static int get nThreadsBatch => _nThreads;
-  // Native prefill uses a fixed chunked batch to avoid CPU saturation during
-  // prompt prefill on large contexts.
   static const int nBatch = 512;
   static const double temperature = 0.7;
   static const int topK = 40;
@@ -66,11 +65,8 @@ abstract final class LlamaNativeDefaults {
   // Number of model layers to request for GPU offload when Vulkan is available.
   // 99 exceeds the layer count of most GGUF models in use; llama.cpp clamps
   // any value above the actual layer count to that count, so passing 99 is
-  // equivalent to "offload all layers". For future models with more than 99
-  // layers, INT_MAX (-1 is treated as 0 by the bridge) would fully offload;
-  // 99 is used here as a safe large-but-readable sentinel.
-  // The C++ bridge clamps this to 0 at compile time when GGML_VULKAN is not
-  // compiled in and logs a clear fallback message. If session creation with
-  // GPU layers fails at runtime, the Dart layer retries with nGpuLayers=0.
+  // equivalent to "offload all layers". The C++ bridge clamps this to 0 at
+  // compile time when GGML_VULKAN is not compiled in (vedi fix CMakeLists.txt
+  // per abilitare davvero il backend Vulkan) e logga un fallback chiaro.
   static const int nGpuLayers = 99;
 }
