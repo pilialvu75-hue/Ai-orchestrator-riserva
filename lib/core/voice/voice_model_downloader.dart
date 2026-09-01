@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
@@ -15,6 +16,20 @@ class VoiceAssetException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Runs archive extraction away from Flutter's UI isolate.
+///
+/// Nemotron is a large archive (~650 MB). Extracting it synchronously on the
+/// Flutter isolate can make Android report the application as unresponsive.
+Future<void> _extractArchiveInWorker(
+  String archivePath,
+  String destinationPath,
+) async {
+  await extractFileToDisk(
+    archivePath,
+    destinationPath,
+  );
 }
 
 class VoiceModelDownloader with RuntimeEventEmitter {
@@ -37,84 +52,106 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   static const String _tag = 'VOICE_DOWNLOAD';
 
   // ---------------------------------------------------------------------------
-  // STT validation thresholds
-  // ---------------------------------------------------------------------------
-  //
-  // Nemotron 3.5 0.6B 560 ms INT8 documented package:
-  //
-  // encoder.int8.onnx  ~627 MB
-  // decoder.int8.onnx  ~14 MB
-  // joiner.int8.onnx   ~9.1 MB
-  // tokens.txt         ~128 KB
-  //
-  // These are deliberately lower bounds rather than exact sizes so that
-  // harmless upstream packaging changes do not invalidate a valid model.
-  // They are nevertheless high enough to reject the previous small
-  // Zipformer-English assets.
+  // Nemotron 3.5 validation
   // ---------------------------------------------------------------------------
 
-  static const int _minSttEncoderBytes = 600 * 1024 * 1024;
-  static const int _minSttDecoderBytes = 10 * 1024 * 1024;
-  static const int _minSttJoinerBytes = 8 * 1024 * 1024;
-  static const int _minSttTokensBytes = 64 * 1024;
+  static const int _minSttEncoderBytes =
+      600 * 1024 * 1024;
 
-  // TTS is considerably smaller, but a truncated model must never be accepted.
-  static const int _minTtsModelBytes = 20 * 1024 * 1024;
+  static const int _minSttDecoderBytes =
+      10 * 1024 * 1024;
+
+  static const int _minSttJoinerBytes =
+      8 * 1024 * 1024;
+
+  static const int _minSttTokensBytes =
+      64 * 1024;
+
+  // ---------------------------------------------------------------------------
+  // TTS validation
+  // ---------------------------------------------------------------------------
+
+  static const int _minTtsModelBytes =
+      20 * 1024 * 1024;
+
   static const int _minTtsTokensBytes = 256;
 
   // ---------------------------------------------------------------------------
-  // Nemotron 3.5 internal archive names
+  // Nemotron archive file names
   // ---------------------------------------------------------------------------
 
-  static const String _sttEncoderMarker = 'encoder.int8.onnx';
-  static const String _sttDecoderMarker = 'decoder.int8.onnx';
-  static const String _sttJoinerMarker = 'joiner.int8.onnx';
+  static const String _sttEncoderMarker =
+      'encoder.int8.onnx';
+
+  static const String _sttDecoderMarker =
+      'decoder.int8.onnx';
+
+  static const String _sttJoinerMarker =
+      'joiner.int8.onnx';
 
   final Dio _dio;
   final RuntimeModelPathResolver _pathResolver;
 
+  // ---------------------------------------------------------------------------
+  // Permissions
+  // ---------------------------------------------------------------------------
+
   Future<bool> checkAndRequestPermissions() async {
-    logEvent(_tag, '[PERMISSION_REQUEST_BEGIN]');
+    logEvent(
+      _tag,
+      '[PERMISSION_REQUEST_BEGIN]',
+    );
 
     if (!Platform.isAndroid) {
       logEvent(
         _tag,
         '[PERMISSION_REQUEST_RESULT] not android',
       );
+
       return true;
     }
 
-    // Runtime voice assets are stored in app-private storage.
-    // No external-storage permission is required for this path.
+    // Runtime assets are stored in app-private storage.
+    // No external-storage permission is required.
     logEvent(
       _tag,
-      '[PERMISSION_REQUEST_RESULT] using app-private storage',
+      '[PERMISSION_REQUEST_RESULT] '
+      'using app-private storage',
     );
 
     return true;
   }
 
+  // ---------------------------------------------------------------------------
+  // Public download pipeline
+  // ---------------------------------------------------------------------------
+
   Future<void> downloadModels({
     required Function(double) onProgress,
   }) async {
-    final targetDir = await _ensureTargetDirectory();
+    final targetDir =
+        await _ensureTargetDirectory();
 
     onProgress(0.0);
 
+    // STT = first 50% of total operation.
     await _downloadAndExtractSttTar(
       targetDir: targetDir,
       onProgress: (value) {
         onProgress(
-          (value * 0.5).clamp(0.0, 0.5),
+          (value * 0.5)
+              .clamp(0.0, 0.5),
         );
       },
     );
 
+    // TTS = second 50%.
     await _downloadAndExtractTtsTar(
       targetDir: targetDir,
       onProgress: (value) {
         onProgress(
-          (0.5 + value * 0.5).clamp(0.0, 1.0),
+          (0.5 + value * 0.5)
+              .clamp(0.0, 1.0),
         );
       },
     );
@@ -125,7 +162,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[DOWNLOAD_COMPLETE] voice assets ready',
+      '[DOWNLOAD_COMPLETE] '
+      'voice assets ready',
     );
   }
 
@@ -141,17 +179,20 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Function(double) onProgress,
     required String assetName,
   }) async {
-    final partialFile = File(partialPath);
+    final partialFile =
+        File(partialPath);
 
     var existingBytes = 0;
 
     if (await partialFile.exists()) {
-      existingBytes = await partialFile.length();
+      existingBytes =
+          await partialFile.length();
 
       if (existingBytes > 0) {
         logEvent(
           _tag,
-          '[${assetName}_RESUME] partial=$existingBytes',
+          '[${assetName}_RESUME] '
+          'partial=$existingBytes',
         );
       }
     }
@@ -178,7 +219,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     } on DioException catch (error) {
       logEvent(
         _tag,
-        '[${assetName}_DOWNLOAD_INTERRUPTED] partial preserved',
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
+        'partial preserved',
       );
 
       throw VoiceAssetException(
@@ -194,34 +236,42 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       logEvent(
         _tag,
-        '[${assetName}_DOWNLOAD_INTERRUPTED] partial preserved',
+        '[${assetName}_DOWNLOAD_INTERRUPTED] '
+        'partial preserved',
       );
 
       throw VoiceAssetException(
-        'Download $assetName interrotto: $error. '
+        'Download $assetName interrotto: '
+        '$error. '
         'Il download riprenderà dal punto raggiunto.',
       );
     }
 
-    final completedBytes = await partialFile.length();
+    final completedBytes =
+        await partialFile.length();
 
     if (completedBytes <= 0) {
       throw VoiceAssetException(
-        'Download $assetName terminato con file vuoto.',
+        'Download $assetName terminato '
+        'con file vuoto.',
       );
     }
 
-    final destination = File(destinationPath);
+    final destination =
+        File(destinationPath);
 
     if (await destination.exists()) {
       await destination.delete();
     }
 
-    await partialFile.rename(destinationPath);
+    await partialFile.rename(
+      destinationPath,
+    );
 
     logEvent(
       _tag,
-      '[${assetName}_DOWNLOAD_COMPLETE] bytes=$completedBytes',
+      '[${assetName}_DOWNLOAD_COMPLETE] '
+      'bytes=$completedBytes',
     );
 
     onProgress(1.0);
@@ -235,26 +285,34 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Function(double) onProgress,
     required String assetName,
   }) async {
-    final response = await _dio.get<ResponseBody>(
+    final response =
+        await _dio.get<ResponseBody>(
       url,
       options: Options(
-        responseType: ResponseType.stream,
+        responseType:
+            ResponseType.stream,
         followRedirects: true,
         maxRedirects: 10,
         headers: {
-          HttpHeaders.rangeHeader: 'bytes=$existingBytes-',
+          HttpHeaders.rangeHeader:
+              'bytes=$existingBytes-',
         },
         validateStatus: (status) {
           return status == HttpStatus.ok ||
-              status == HttpStatus.partialContent ||
-              status == HttpStatus.requestedRangeNotSatisfiable;
+              status ==
+                  HttpStatus.partialContent ||
+              status ==
+                  HttpStatus
+                      .requestedRangeNotSatisfiable;
         },
       ),
     );
 
-    final status = response.statusCode;
+    final status =
+        response.statusCode;
 
-    if (status == HttpStatus.partialContent) {
+    if (status ==
+        HttpStatus.partialContent) {
       await _appendPartialResponse(
         response: response,
         partialFile: partialFile,
@@ -263,13 +321,20 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         onProgress: onProgress,
         assetName: assetName,
       );
+
       return;
     }
 
-    if (status == HttpStatus.requestedRangeNotSatisfiable) {
-      final total = _totalBytesFromContentRange(response);
+    if (status ==
+        HttpStatus
+            .requestedRangeNotSatisfiable) {
+      final total =
+          _totalBytesFromContentRange(
+        response,
+      );
 
-      if (total != null && existingBytes >= total) {
+      if (total != null &&
+          existingBytes >= total) {
         onProgress(1.0);
         return;
       }
@@ -281,6 +346,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         onProgress: onProgress,
         assetName: assetName,
       );
+
       return;
     }
 
@@ -292,11 +358,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         onProgress: onProgress,
         assetName: assetName,
       );
+
       return;
     }
 
     throw VoiceAssetException(
-      'Server HTTP inatteso durante resume $assetName: $status',
+      'Server HTTP inatteso durante '
+      'resume $assetName: $status',
     );
   }
 
@@ -316,28 +384,42 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
     }
 
-    final rangeTotal = _totalBytesFromContentRange(response);
-    final responseLength = _contentLength(response);
+    final rangeTotal =
+        _totalBytesFromContentRange(
+      response,
+    );
 
-    final totalBytes = rangeTotal ??
-        (responseLength != null
-            ? existingBytes + responseLength
-            : expectedBytes);
+    final responseLength =
+        _contentLength(response);
 
-    final sink = partialFile.openWrite(
+    final totalBytes =
+        rangeTotal ??
+            (responseLength != null
+                ? existingBytes +
+                    responseLength
+                : expectedBytes);
+
+    final sink =
+        partialFile.openWrite(
       mode: FileMode.append,
     );
 
-    var receivedBytes = existingBytes;
+    var receivedBytes =
+        existingBytes;
 
     try {
-      await for (final chunk in body.stream) {
+      await for (final chunk
+          in body.stream) {
         sink.add(chunk);
-        receivedBytes += chunk.length;
+
+        receivedBytes +=
+            chunk.length;
 
         if (totalBytes > 0) {
           onProgress(
-            (receivedBytes / totalBytes).clamp(0.0, 1.0),
+            (receivedBytes /
+                    totalBytes)
+                .clamp(0.0, 1.0),
           );
         }
       }
@@ -347,13 +429,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
 
     final declaredTotal =
-        _totalBytesFromContentRange(response);
+        _totalBytesFromContentRange(
+      response,
+    );
 
     if (declaredTotal != null &&
         receivedBytes < declaredTotal) {
       throw VoiceAssetException(
         'Download $assetName interrotto: '
-        '$receivedBytes / $declaredTotal bytes. '
+        '$receivedBytes / '
+        '$declaredTotal bytes. '
         'Il parziale è stato conservato.',
       );
     }
@@ -372,10 +457,12 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       await partialFile.delete();
     }
 
-    final response = await _dio.get<ResponseBody>(
+    final response =
+        await _dio.get<ResponseBody>(
       url,
       options: Options(
-        responseType: ResponseType.stream,
+        responseType:
+            ResponseType.stream,
         followRedirects: true,
         maxRedirects: 10,
       ),
@@ -385,29 +472,38 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     if (body == null) {
       throw const VoiceAssetException(
-        'Risposta HTTP senza corpo durante il download.',
+        'Risposta HTTP senza corpo '
+        'durante il download.',
       );
     }
 
-    final contentLength = _contentLength(response);
+    final contentLength =
+        _contentLength(response);
 
     final totalBytes =
-        contentLength != null && contentLength > 0
+        contentLength != null &&
+                contentLength > 0
             ? contentLength
             : expectedBytes;
 
-    final sink = partialFile.openWrite();
+    final sink =
+        partialFile.openWrite();
 
     var receivedBytes = 0;
 
     try {
-      await for (final chunk in body.stream) {
+      await for (final chunk
+          in body.stream) {
         sink.add(chunk);
-        receivedBytes += chunk.length;
+
+        receivedBytes +=
+            chunk.length;
 
         if (totalBytes > 0) {
           onProgress(
-            (receivedBytes / totalBytes).clamp(0.0, 1.0),
+            (receivedBytes /
+                    totalBytes)
+                .clamp(0.0, 1.0),
           );
         }
       }
@@ -418,17 +514,20 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     if (contentLength != null &&
         contentLength > 0 &&
-        receivedBytes < contentLength) {
+        receivedBytes <
+            contentLength) {
       throw VoiceAssetException(
         'Download $assetName interrotto: '
-        '$receivedBytes / $contentLength bytes. '
+        '$receivedBytes / '
+        '$contentLength bytes. '
         'Il parziale è stato conservato.',
       );
     }
 
     if (receivedBytes <= 0) {
       throw VoiceAssetException(
-        'Download $assetName ha prodotto un file vuoto.',
+        'Download $assetName ha prodotto '
+        'un file vuoto.',
       );
     }
 
@@ -438,17 +537,21 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   int? _contentLength(
     Response<ResponseBody> response,
   ) {
-    final value = response.headers.value(
+    final value =
+        response.headers.value(
       HttpHeaders.contentLengthHeader,
     );
 
-    return int.tryParse(value ?? '');
+    return int.tryParse(
+      value ?? '',
+    );
   }
 
   int? _totalBytesFromContentRange(
     Response<ResponseBody> response,
   ) {
-    final value = response.headers.value(
+    final value =
+        response.headers.value(
       HttpHeaders.contentRangeHeader,
     );
 
@@ -456,14 +559,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return null;
     }
 
-    final slashIndex = value.lastIndexOf('/');
+    final slashIndex =
+        value.lastIndexOf('/');
 
     if (slashIndex < 0) {
       return null;
     }
 
     final total =
-        value.substring(slashIndex + 1).trim();
+        value
+            .substring(
+              slashIndex + 1,
+            )
+            .trim();
 
     if (total == '*') {
       return null;
@@ -473,13 +581,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   }
 
   // ===========================================================================
-  // STT
+  // STT — NEMOTRON
   // ===========================================================================
 
   Future<bool> _sttAssetsComplete(
     Directory targetDir,
   ) async {
-    final requirements = <String, int>{
+    final requirements =
+        <String, int>{
       AppConstants.sttEncoderFile:
           _minSttEncoderBytes,
       AppConstants.sttDecoderFile:
@@ -490,16 +599,21 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           _minSttTokensBytes,
     };
 
-    for (final entry in requirements.entries) {
+    for (final entry
+        in requirements.entries) {
       final file = File(
-        p.join(targetDir.path, entry.key),
+        p.join(
+          targetDir.path,
+          entry.key,
+        ),
       );
 
       if (!await file.exists()) {
         return false;
       }
 
-      final length = await file.length();
+      final length =
+          await file.length();
 
       if (length < entry.value) {
         return false;
@@ -513,7 +627,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Directory targetDir,
     required Function(double) onProgress,
   }) async {
-    if (await _sttAssetsComplete(targetDir)) {
+    if (await _sttAssetsComplete(
+      targetDir,
+    )) {
       logEvent(
         _tag,
         '[STT_SKIP] assets already valid',
@@ -523,28 +639,39 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    final tarPath = p.join(
+    final archiveName =
+        'sherpa-onnx-nemotron-3.5-'
+        'asr-streaming-0.6b-560ms-'
+        'int8-2026-06-11.tar.bz2';
+
+    final tarPath =
+        p.join(
       targetDir.path,
-      'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2',
+      archiveName,
     );
 
-    final partialPath = '$tarPath.part';
+    final partialPath =
+        '$tarPath.part';
 
+    // IMPORTANT:
+    // This is Nemotron, never Zipformer.
     await _downloadResumable(
-      url: AppConstants.sttZipformerTarUrl,
+      url: AppConstants.sttNemotronTarUrl,
       destinationPath: tarPath,
       partialPath: partialPath,
       expectedBytes:
-          AppConstants.sttZipformerTarExpectedBytes,
-      assetName: 'STT',
+          AppConstants
+              .sttNemotronTarExpectedBytes,
+      assetName: 'STT_NEMOTRON',
       onProgress: (value) {
         onProgress(
-          (value * 0.75).clamp(0.0, 0.75),
+          (value * 0.70)
+              .clamp(0.0, 0.70),
         );
       },
     );
 
-    onProgress(0.80);
+    onProgress(0.72);
 
     final extractionDir =
         await Directory(
@@ -552,18 +679,34 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         targetDir.path,
         '.stt_extract_tmp',
       ),
-    ).create(recursive: true);
+    ).create(
+      recursive: true,
+    );
 
     try {
-      await extractFileToDisk(
-        tarPath,
-        extractionDir.path,
+      logEvent(
+        _tag,
+        '[STT_EXTRACT_BEGIN] '
+        'Nemotron extraction moved '
+        'to worker isolate',
       );
 
-      onProgress(0.90);
+      // CRITICAL:
+      // Never extract a ~650 MB Nemotron archive
+      // on Flutter's UI isolate.
+      await Isolate.run(
+        () => _extractArchiveInWorker(
+          tarPath,
+          extractionDir.path,
+        ),
+      );
+
+      onProgress(0.88);
 
       final files =
-          await _collectFiles(extractionDir);
+          await _collectFiles(
+        extractionDir,
+      );
 
       final encoderSource =
           _findByBasename(
@@ -594,33 +737,34 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           joinerSource == null ||
           tokensSource == null) {
         throw const VoiceAssetException(
-          'Archivio STT valido ma modello Nemotron 3.5 INT8 '
-          'non trovato.',
+          'Archivio Nemotron scaricato ma '
+          'uno o più file richiesti non sono '
+          'presenti.',
         );
       }
 
       await _requireMinimumSize(
         encoderSource,
         _minSttEncoderBytes,
-        'STT encoder INT8',
+        'STT Nemotron encoder INT8',
       );
 
       await _requireMinimumSize(
         decoderSource,
         _minSttDecoderBytes,
-        'STT decoder INT8',
+        'STT Nemotron decoder INT8',
       );
 
       await _requireMinimumSize(
         joinerSource,
         _minSttJoinerBytes,
-        'STT joiner INT8',
+        'STT Nemotron joiner INT8',
       );
 
       await _requireMinimumSize(
         tokensSource,
         _minSttTokensBytes,
-        'STT tokens',
+        'STT Nemotron tokens',
       );
 
       await _installAtomically(
@@ -670,7 +814,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
 
       throw VoiceAssetException(
-        'Estrazione STT fallita: $error',
+        'Estrazione STT Nemotron fallita: '
+        '$error',
       );
     } finally {
       await _deleteIfExists(
@@ -684,10 +829,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
     }
 
-    if (!await _sttAssetsComplete(targetDir)) {
+    if (!await _sttAssetsComplete(
+      targetDir,
+    )) {
       throw const VoiceAssetException(
-        'Verifica STT fallita: '
-        'uno o più asset sono assenti o troppo piccoli.',
+        'Verifica STT Nemotron fallita: '
+        'uno o più asset sono assenti o '
+        'troppo piccoli.',
       );
     }
 
@@ -695,7 +843,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     logEvent(
       _tag,
-      '[STT_READY] Nemotron 3.5 multilingual assets installed',
+      '[STT_READY] '
+      'Nemotron 3.5 multilingual assets installed',
     );
   }
 
@@ -728,12 +877,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     );
 
     if (!await model.exists() ||
-        await model.length() < _minTtsModelBytes) {
+        await model.length() <
+            _minTtsModelBytes) {
       return false;
     }
 
     if (!await tokens.exists() ||
-        await tokens.length() < _minTtsTokensBytes) {
+        await tokens.length() <
+            _minTtsTokensBytes) {
       return false;
     }
 
@@ -748,7 +899,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required Directory targetDir,
     required Function(double) onProgress,
   }) async {
-    if (await _ttsAssetsComplete(targetDir)) {
+    if (await _ttsAssetsComplete(
+      targetDir,
+    )) {
       logEvent(
         _tag,
         '[TTS_SKIP] assets already valid',
@@ -758,23 +911,27 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    final tarPath = p.join(
+    final tarPath =
+        p.join(
       targetDir.path,
       'vits-piper-it_IT-paola-medium.tar.bz2',
     );
 
-    final partialPath = '$tarPath.part';
+    final partialPath =
+        '$tarPath.part';
 
     await _downloadResumable(
       url: AppConstants.ttsPaolaTarUrl,
       destinationPath: tarPath,
       partialPath: partialPath,
       expectedBytes:
-          AppConstants.ttsPaolaTarExpectedBytes,
+          AppConstants
+              .ttsPaolaTarExpectedBytes,
       assetName: 'TTS',
       onProgress: (value) {
         onProgress(
-          (value * 0.75).clamp(0.0, 0.75),
+          (value * 0.75)
+              .clamp(0.0, 0.75),
         );
       },
     );
@@ -787,18 +944,24 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         targetDir.path,
         '.tts_extract_tmp',
       ),
-    ).create(recursive: true);
+    ).create(
+      recursive: true,
+    );
 
     try {
-      await extractFileToDisk(
-        tarPath,
-        extractionDir.path,
+      await Isolate.run(
+        () => _extractArchiveInWorker(
+          tarPath,
+          extractionDir.path,
+        ),
       );
 
       onProgress(0.90);
 
       final files =
-          await _collectFiles(extractionDir);
+          await _collectFiles(
+        extractionDir,
+      );
 
       final modelSource =
           _findByExtension(
@@ -820,19 +983,22 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
       if (modelSource == null) {
         throw const VoiceAssetException(
-          'Modello TTS ONNX non trovato nell\'archivio.',
+          'Modello TTS ONNX non trovato '
+          'nell\'archivio.',
         );
       }
 
       if (tokensSource == null) {
         throw const VoiceAssetException(
-          'tokens.txt TTS non trovato nell\'archivio.',
+          'tokens.txt TTS non trovato '
+          'nell\'archivio.',
         );
       }
 
       if (espeakSource == null) {
         throw const VoiceAssetException(
-          'espeak-ng-data non trovato nell\'archivio TTS.',
+          'espeak-ng-data non trovato '
+          'nell\'archivio TTS.',
         );
       }
 
@@ -876,7 +1042,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         ),
       );
 
-      if (await destinationEspeak.exists()) {
+      if (await destinationEspeak
+          .exists()) {
         await destinationEspeak.delete(
           recursive: true,
         );
@@ -908,7 +1075,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
     }
 
-    if (!await _ttsAssetsComplete(targetDir)) {
+    if (!await _ttsAssetsComplete(
+      targetDir,
+    )) {
       throw const VoiceAssetException(
         'Verifica TTS fallita: '
         'asset mancanti o troppo piccoli.',
@@ -932,8 +1101,10 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   ) async {
     final result = <File>[];
 
-    await for (final entity
-        in directory.list(recursive: true, followLinks: false)) {
+    await for (final entity in directory.list(
+      recursive: true,
+      followLinks: false,
+    )) {
       if (entity is File) {
         result.add(entity);
       }
@@ -947,7 +1118,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     String basename,
   ) {
     for (final file in files) {
-      if (p.basename(file.path) == basename) {
+      if (p.basename(file.path) ==
+          basename) {
         return file;
       }
     }
@@ -960,7 +1132,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     String extension,
   ) {
     for (final file in files) {
-      final name = p.basename(file.path);
+      final name =
+          p.basename(file.path);
 
       if (name.endsWith(extension) &&
           !name.endsWith('.onnx.json')) {
@@ -975,22 +1148,28 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     Directory root,
     String basename,
   ) {
-    final direct = Directory(
-      p.join(root.path, basename),
+    final direct =
+        Directory(
+      p.join(
+        root.path,
+        basename,
+      ),
     );
 
     if (direct.existsSync()) {
       return direct;
     }
 
-    final entities = root.listSync(
+    final entities =
+        root.listSync(
       recursive: true,
       followLinks: false,
     );
 
     for (final entity in entities) {
       if (entity is Directory &&
-          p.basename(entity.path) == basename) {
+          p.basename(entity.path) ==
+              basename) {
         return entity;
       }
     }
@@ -1009,12 +1188,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
     }
 
-    final length = await file.length();
+    final length =
+        await file.length();
 
     if (length < minimumBytes) {
       throw VoiceAssetException(
         '$description non valido: '
-        '$length bytes < minimo $minimumBytes bytes.',
+        '$length bytes < minimo '
+        '$minimumBytes bytes.',
       );
     }
   }
@@ -1024,9 +1205,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     required File destination,
   }) async {
     final temporary =
-        File('${destination.path}.part');
+        File(
+      '${destination.path}.part',
+    );
 
-    await _deleteIfExists(temporary);
+    await _deleteIfExists(
+      temporary,
+    );
 
     await temporary.parent.create(
       recursive: true,
@@ -1036,10 +1221,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       temporary.path,
     );
 
-    final size = await temporary.length();
+    final size =
+        await temporary.length();
 
     if (size <= 0) {
-      await _deleteIfExists(temporary);
+      await _deleteIfExists(
+        temporary,
+      );
 
       throw VoiceAssetException(
         'Installazione fallita: '
@@ -1047,7 +1235,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
     }
 
-    await _deleteIfExists(destination);
+    await _deleteIfExists(
+      destination,
+    );
 
     await temporary.rename(
       destination.path,
@@ -1063,14 +1253,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     );
 
     await for (final entity
-        in source.list(recursive: true, followLinks: false)) {
+        in source.list(
+      recursive: true,
+      followLinks: false,
+    )) {
       final relative = p.relative(
         entity.path,
         from: source.path,
       );
 
-      final target =
-          p.join(destination.path, relative);
+      final target = p.join(
+        destination.path,
+        relative,
+      );
 
       if (entity is Directory) {
         await Directory(target).create(
@@ -1080,6 +1275,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         await File(target).parent.create(
           recursive: true,
         );
+
         await entity.copy(target);
       }
     }
@@ -1090,7 +1286,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   ) async {
     if (await entity.exists()) {
       await entity.delete(
-        recursive: entity is Directory,
+        recursive:
+            entity is Directory,
       );
     }
   }
@@ -1101,11 +1298,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
   Future<void> validateDownloadedAssets() async {
     final targetDir =
-        await _pathResolver.privateModelsDirectory();
+        await _pathResolver
+            .privateModelsDirectory();
 
     final missing = <String>[];
 
-    final sttRequirements = <String, int>{
+    final sttRequirements =
+        <String, int>{
       AppConstants.sttEncoderFile:
           _minSttEncoderBytes,
       AppConstants.sttDecoderFile:
@@ -1116,9 +1315,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
           _minSttTokensBytes,
     };
 
-    for (final entry in sttRequirements.entries) {
+    for (final entry
+        in sttRequirements.entries) {
       final file = File(
-        p.join(targetDir.path, entry.key),
+        p.join(
+          targetDir.path,
+          entry.key,
+        ),
       );
 
       if (!await file.exists()) {
@@ -1126,11 +1329,13 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         continue;
       }
 
-      final length = await file.length();
+      final length =
+          await file.length();
 
       if (length < entry.value) {
         missing.add(
-          '${entry.key}(truncated:$length)',
+          '${entry.key}'
+          '(truncated:$length)',
         );
       }
     }
@@ -1157,14 +1362,16 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     );
 
     if (!await ttsModel.exists() ||
-        await ttsModel.length() < _minTtsModelBytes) {
+        await ttsModel.length() <
+            _minTtsModelBytes) {
       missing.add(
         AppConstants.ttsModelFile,
       );
     }
 
     if (!await ttsTokens.exists() ||
-        await ttsTokens.length() < _minTtsTokensBytes) {
+        await ttsTokens.length() <
+            _minTtsTokensBytes) {
       missing.add(
         AppConstants.ttsTokensFile,
       );
@@ -1184,9 +1391,11 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
   }
 
-  Future<Directory> _ensureTargetDirectory() async {
+  Future<Directory>
+      _ensureTargetDirectory() async {
     final targetDir =
-        await _pathResolver.privateModelsDirectory();
+        await _pathResolver
+            .privateModelsDirectory();
 
     if (!await targetDir.exists()) {
       await targetDir.create(
