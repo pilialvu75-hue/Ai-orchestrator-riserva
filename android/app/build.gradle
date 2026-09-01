@@ -103,7 +103,12 @@ android {
 
     defaultConfig {
         applicationId "com.aiorchestrator"
-        minSdk 24
+        // Alzato da 24 a 28: il backend Vulkan di ggml richiede funzioni
+        // Vulkan 1.1 (es. vkGetPhysicalDeviceFeatures2) che non esistono
+        // nello stub libvulkan.so dell'NDK per API < 28. Coerente con
+        // ANDROID_PLATFORM=android-28 usato nella build ufficiale Android
+        // di llama.cpp. Esclude Android 7.0-8.1 (API 24-27).
+        minSdk 28
         targetSdk = 36
         versionCode safeFlutterVersionCode
         versionName flutterVersionName
