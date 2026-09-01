@@ -66,6 +66,15 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache native build (CMake/Ninja objects + FetchContent)
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/.cxx
+            ~/.cache/ccache
+          key: native-${{ runner.os }}-${{ hashFiles('native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h') }}
+          restore-keys: |
+            native-${{ runner.os }}-
       - name: Install Android SDK cmdline-tools v12
         run: |
           set -euo pipefail
