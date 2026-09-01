@@ -39,7 +39,7 @@ class LocalPromptTemplates {
   //
   // Questo non modifica la memoria persistente: modifica solamente ciò che
   // viene inviato al modello per la singola inferenza.
-  static const int _maxContextChars = 5600;
+  static const int _maxContextChars = 11000;
   static const int _maxContextTurns = 12;
 
   static String compose({
