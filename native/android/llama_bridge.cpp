@@ -34,7 +34,7 @@
 namespace {
 
 constexpr size_t kRingCapacity = 256;
-constexpr int32_t kMaxGeneratedTokens = 256;
+constexpr int32_t kMaxGeneratedTokens = 2048;
 constexpr size_t kMinPromptLength = 2;
 constexpr size_t kForensicWindowSize = 512;
 constexpr int64_t kDecodeStallLogMillis = 5000;
@@ -709,6 +709,13 @@ void run_generation(
         return;
     }
 
+    // Penalizza le ripetizioni sugli ultimi 64 token: mitiga i loop di eco
+    // osservati sui modelli piccoli/distillati (es. DeepSeek-R1-Distill-1.5B).
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_penalties(
+        /* penalty_last_n */ 64,
+        /* penalty_repeat */ 1.1f,
+        /* penalty_freq   */ 0.0f,
+        /* penalty_present*/ 0.0f));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_p(0.9f, 1));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(temperature));
