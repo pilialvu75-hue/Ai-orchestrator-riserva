@@ -36,7 +36,7 @@ class AppConstants {
   static const String colLastCodeSnippet = 'last_code_snippet';
   static const String colTimestamp = 'timestamp';
 
-  // ── chat_history columns ────────────────────────────────────────────────────
+  // ── chat_history columns ─────────────────────────────────────────────────────
   static const String colSessionId = 'session_id';
   static const String colRole = 'role';
   static const String colContent = 'content';
@@ -85,7 +85,7 @@ class AppConstants {
   static const String copilotChatUrl =
       'https://api.githubcopilot.com/chat/completions';
 
-  // ── Android / Bixby Intent actions ──────────────────────────────────────────
+  // ── Android / Bixby Intent actions ─────────────────────────────────────────
   static const String intentActionShareContext =
       'com.aiorchestrator.SHARE_CONTEXT';
   static const String intentActionReceiveCode =
@@ -149,25 +149,36 @@ class AppConstants {
   static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
   static const Duration updateCheckInterval = Duration(hours: 12);
 
-  // ── STT runtime hints ──────────────────────────────────────────────────────
+  // ── STT runtime ─────────────────────────────────────────────────────────────
   //
-  // Nemotron è il runtime STT attuale.
-  // Manteniamo i nomi delle costanti legacy ancora consumati
-  // da componenti del repository, senza ripristinare il modello inglese.
+  // Nemotron 3.5 è il modello STT ufficiale del runtime Live.
+  // È multilingue e supporta direttamente italiano.
+  //
+  // Il valore vuoto di sttModelType è intenzionale:
+  // Sherpa-ONNX riceve un modello transducer esplicito e non deve
+  // essere forzato a Zipformer/Zipformer2.
+
   static const String sttDefaultLocaleId = 'it_IT';
+  static const String sttDefaultLanguage = 'it-IT';
   static const String sttModelType = '';
   static const int sttNumThreads = 2;
 
   // ── Sherpa-ONNX STT file names ──────────────────────────────────────────────
+  //
+  // Il pacchetto Nemotron ufficiale contiene:
+  //   encoder.int8.onnx
+  //   decoder.int8.onnx
+  //   joiner.int8.onnx
+  //   tokens.txt
+  //
+  // Il downloader li installa con questi nomi canonici.
+
   static const String sttEncoderFile = 'encoder.onnx';
   static const String sttDecoderFile = 'decoder.onnx';
   static const String sttJoinerFile = 'joiner.onnx';
   static const String sttTokensFile = 'tokens.txt';
 
-  // ── Sherpa-ONNX STT — Nemotron ──────────────────────────────────────────────
-  //
-  // Modello multilingue streaming Nemotron 3.5 ASR.
-  // Target principale: italiano (it-IT).
+  // ── Sherpa-ONNX STT — Nemotron 3.5 ─────────────────────────────────────────
   static const String sttNemotronRepository =
       'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11';
 
@@ -175,32 +186,12 @@ class AppConstants {
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
       'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2';
 
+  // Fallback utilizzato solo quando il server non fornisce Content-Length.
+  // Il pacchetto reale è circa 650 MB.
   static const int sttNemotronTarExpectedBytes =
-      1300 * 1024 * 1024;
-
-  // ── Legacy STT compatibility constants ─────────────────────────────────────
-  //
-  // Queste costanti NON selezionano il modello inglese.
-  // Restano disponibili perché alcuni componenti/transizioni del repository
-  // le referenziano ancora. Verranno rimosse solo dopo la migrazione completa
-  // dei consumer a Nemotron.
-  static const String sttZipformerEnRepository =
-      'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26';
-
-  static const String sttZipformerBaseUrl =
-      'https://huggingface.co/$sttZipformerEnRepository/resolve/main';
-
-  static const String sttZipformerTarUrl =
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
-      'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2';
-
-  static const int sttZipformerTarExpectedBytes =
-      200 * 1024 * 1024;
+      700 * 1024 * 1024;
 
   // ── Sherpa-ONNX TTS file names (Piper Paola) ────────────────────────────────
-  //
-  // Modello Piper italiano.
-  // Usa espeak-ng-data invece di lexicon.txt.
   static const String ttsModelFile = 'it_IT-paola-medium.onnx';
   static const String ttsTokensFile = 'tokens.txt';
   static const String ttsEspeakDataDir = 'espeak-ng-data';
@@ -217,10 +208,9 @@ class AppConstants {
       63 * 1024 * 1024;
 
   // ── Voice ───────────────────────────────────────────────────────────────────
-  static const String sttDefaultLanguage = 'it-IT';
   static const String ttsDefaultLanguage = 'it-IT';
 
-  // ── Canali Sherpa-ONNX ──────────────────────────────────────────────────────
+  // ── Sherpa-ONNX channels ────────────────────────────────────────────────────
   static const String sherpaVoiceMethodChannel =
       'com.aiorchestrator/sherpa_onnx_voice';
 
