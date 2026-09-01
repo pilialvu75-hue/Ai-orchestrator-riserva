@@ -30,15 +30,13 @@ class RuntimeModelFileSpec {
 class ModelRuntimeManifest {
   const ModelRuntimeManifest._();
 
-  static const List<ModelManagementSection>
-      sectionOrder =
+  static const List<ModelManagementSection> sectionOrder =
       <ModelManagementSection>[
     ModelManagementSection.voiceStt,
     ModelManagementSection.voiceTtsItalian,
   ];
 
-  static const Map<ModelManagementSection, String>
-      sectionTitles =
+  static const Map<ModelManagementSection, String> sectionTitles =
       <ModelManagementSection, String>{
     ModelManagementSection.voiceStt:
         'STT — Nemotron 3.5 0.6B Multilingual (streaming)',
@@ -46,12 +44,13 @@ class ModelRuntimeManifest {
         'TTS — Piper Italiano (Paola Medium)',
   };
 
-  static const List<RuntimeModelFileSpec>
-      files =
+  static const List<RuntimeModelFileSpec> files =
       <RuntimeModelFileSpec>[
     // ── STT ────────────────────────────────────────────────────────────────
     //
-    // Singolo archivio tar.bz2 contenente:
+    // Nemotron 3.5 ASR Streaming 0.6B — 560 ms — INT8.
+    //
+    // Archivio ufficiale Sherpa-ONNX:
     //   encoder.int8.onnx
     //   decoder.int8.onnx
     //   joiner.int8.onnx
@@ -59,40 +58,24 @@ class ModelRuntimeManifest {
     //
     RuntimeModelFileSpec(
       id: 'stt_nemotron_archive',
-      section:
-          ModelManagementSection.voiceStt,
+      section: ModelManagementSection.voiceStt,
       logicalName:
-          'Nemotron 3.5 0.6B Multilingual — '
-          'Archivio completo',
-      fileName:
-          AppConstants.sttEncoderFile,
-      downloadUrl:
-          AppConstants.sttZipformerTarUrl,
-      expectedBytes:
-          AppConstants.sttZipformerTarExpectedBytes,
-      estimatedSizeLabel: '~1.3 GB',
+          'Nemotron 3.5 0.6B Multilingual — Archivio completo',
+      fileName: AppConstants.sttEncoderFile,
+      downloadUrl: AppConstants.sttNemotronTarUrl,
+      expectedBytes: AppConstants.sttNemotronTarExpectedBytes,
+      estimatedSizeLabel: '~650 MB',
     ),
 
     // ── TTS ────────────────────────────────────────────────────────────────
-    //
-    // Contiene:
-    //   it_IT-paola-medium.onnx
-    //   tts-tokens.txt
-    //   espeak-ng-data/
-    //
     RuntimeModelFileSpec(
       id: 'it_tts_archive',
-      section:
-          ModelManagementSection.voiceTtsItalian,
+      section: ModelManagementSection.voiceTtsItalian,
       logicalName:
-          'Piper TTS Italiano — '
-          'Archivio Paola Medium',
-      fileName:
-          AppConstants.ttsModelFile,
-      downloadUrl:
-          AppConstants.ttsPaolaTarUrl,
-      expectedBytes:
-          AppConstants.ttsPaolaTarExpectedBytes,
+          'Piper TTS Italiano — Archivio Paola Medium',
+      fileName: AppConstants.ttsModelFile,
+      downloadUrl: AppConstants.ttsPaolaTarUrl,
+      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
       estimatedSizeLabel: '~63 MB',
     ),
   ];
