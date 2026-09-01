@@ -4,6 +4,18 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(llama_bridge VERSION 1.0.0 LANGUAGES C CXX)
 
+# Se ccache è installato (vedi CI: apt-get install ccache), usalo per la
+# cache dei singoli file oggetto basata su hash del contenuto, immune al
+# problema di invalidazione per mtime che affligge la cache raw di .cxx
+# dopo un restore da actions/cache.
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "" FORCE)
+    message(STATUS "ccache enabled at ${CCACHE_PROGRAM}")
+else()
+    message(STATUS "ccache not found, compiling without object cache")
+endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
