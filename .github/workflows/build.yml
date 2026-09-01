@@ -82,6 +82,13 @@ jobs:
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
 
+      - name: Install glslc (required to compile ggml Vulkan shaders)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y glslc
+          glslc --version
+
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
       - name: Initialize CodeQL (C++ & Android Native)
