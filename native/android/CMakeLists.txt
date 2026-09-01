@@ -57,13 +57,25 @@ if(AI_ANDROID_ENABLE_VULKAN)
         GIT_TAG        v1.3.296
     )
     FetchContent_MakeAvailable(VulkanHeaders)
+
+    # ggml-vulkan.cpp include anche <spirv/unified1/spirv.hpp>, che NON fa
+    # parte di Vulkan-Headers ma di un repository Khronos separato.
+    FetchContent_Declare(
+        SPIRVHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
+        GIT_TAG        vulkan-sdk-1.4.335.0
+    )
+    FetchContent_MakeAvailable(SPIRVHeaders)
 endif()
 
 find_library(VULKAN_LIB vulkan)
 if(AI_ANDROID_ENABLE_VULKAN AND VULKAN_LIB)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    include_directories("${vulkanheaders_SOURCE_DIR}/include")
-    message(STATUS "ggml Vulkan backend enabled with fetched Vulkan-Headers at ${vulkanheaders_SOURCE_DIR}/include")
+    include_directories(
+        "${vulkanheaders_SOURCE_DIR}/include"
+        "${spirvheaders_SOURCE_DIR}/include"
+    )
+    message(STATUS "ggml Vulkan backend enabled with fetched Vulkan-Headers at ${vulkanheaders_SOURCE_DIR}/include and SPIRV-Headers at ${spirvheaders_SOURCE_DIR}/include")
 else()
     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
     if(AI_ANDROID_ENABLE_VULKAN)
