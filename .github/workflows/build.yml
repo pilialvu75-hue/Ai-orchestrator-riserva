@@ -97,6 +97,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y glslc
           glslc --version
+          ccache --version 
 
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
