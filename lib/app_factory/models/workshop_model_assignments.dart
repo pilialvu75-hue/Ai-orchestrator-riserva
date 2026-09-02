@@ -1,24 +1,12 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'workshop_model_roles.dart';
 
-/// Persistent assignment of a model to a logical AI role.
+/// Persistent assignment of a model to a logical Workshop AI role.
 ///
-/// Workshop assignments are intentionally independent from the Assistant
-/// model selection. The Workshop owns its four technical roles:
-///
-///   Orchestrator -> Qwen2.5 3B
-///   Architect    -> Qwen2.5-Coder 7B
-///   Engineer     -> DeepSeek Coder 6.7B
-///   Reviewer     -> StarCoder2 3B
-///
-/// Model downloading, verification, storage and runtime loading remain
-/// responsibilities of the existing shared model-management infrastructure.
-///
-/// IMPORTANT:
-/// The shared infrastructure is allowed to share the physical GGUF files,
-/// but Workshop selection/configuration must never inherit the Assistant's
-/// selected model.
+/// The Assistant has a completely separate model-selection mechanism.
+/// Workshop assignments are stored under their own preference namespace.
 @immutable
 class WorkshopModelAssignment {
   const WorkshopModelAssignment({
@@ -59,14 +47,13 @@ class WorkshopModelAssignment {
     }
 
     final role = _roleFromId(roleId);
+
     if (role == null) {
       throw FormatException(
         'Unknown Workshop AI role: $roleId',
       );
     }
 
-    // The Assistant role is deliberately not accepted as a Workshop
-    // assignment. The Assistant and Workshop have independent configuration.
     if (role == AppAiRole.assistantOrchestrator) {
       throw const FormatException(
         'Assistant role cannot be assigned through Workshop configuration.',
@@ -85,6 +72,7 @@ class WorkshopModelAssignment {
         return role;
       }
     }
+
     return null;
   }
 
@@ -107,25 +95,15 @@ class WorkshopModelAssignment {
   }
 }
 
-/// Default model-role configuration for the Workshop.
+/// Workshop model configuration.
 ///
-/// The Assistant is intentionally NOT part of this list.
-///
-/// The two systems share model download/storage infrastructure, but their
-/// model selection is independent:
-///
-/// Assistant:
-///   managed by the Assistant model-selection system.
-///
-/// Workshop:
-///   Orchestrator -> Qwen2.5 3B
-///   Architect    -> Qwen2.5-Coder 7B
-///   Engineer     -> DeepSeek Coder 6.7B
-///   Reviewer     -> StarCoder2 3B
-///
-/// This separation is important because changing the Assistant's selected
-/// model must never silently change the model used by the Workshop.
+/// This class is intentionally independent from the Assistant model
+/// selection. Both systems may share the physical GGUF and downloader,
+/// but not the preference that identifies the active model.
 abstract final class WorkshopModelAssignments {
+  static const String _prefsKey =
+      'workshop.model.assignments.v1';
+
   static const WorkshopModelAssignment orchestrator =
       WorkshopModelAssignment(
     role: AppAiRole.workshopOrchestrator,
@@ -150,9 +128,6 @@ abstract final class WorkshopModelAssignments {
     modelId: 'starcoder2_3b',
   );
 
-  /// Default assignments belonging exclusively to the Workshop.
-  ///
-  /// Do NOT add AppAiRole.assistantOrchestrator here.
   static const List<WorkshopModelAssignment> defaults =
       <WorkshopModelAssignment>[
     orchestrator,
@@ -161,15 +136,87 @@ abstract final class WorkshopModelAssignments {
     reviewer,
   ];
 
-  /// Returns the configured model ID for [role].
+  /// Loads the persisted Workshop assignments.
   ///
-  /// Returns null if no assignment exists. This makes the configuration
-  /// forward-compatible with roles that may be added later.
+  /// Missing/corrupt configuration falls back safely to [defaults].
+  static Future<List<WorkshopModelAssignment>> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsKey);
+
+    if (raw == null || raw.trim().isEmpty) {
+      return defaults;
+    }
+
+    try {
+      final decoded = Uri.decodeComponent(raw);
+
+      final entries = decoded
+          .split('|')
+          .where((entry) => entry.trim().isNotEmpty)
+          .map((entry) {
+        final separator = entry.indexOf('=');
+
+        if (separator <= 0 ||
+            separator >= entry.length - 1) {
+          throw const FormatException(
+            'Invalid Workshop assignment entry.',
+          );
+        }
+
+        return WorkshopModelAssignment.fromJson(
+          <String, dynamic>{
+            'role': entry.substring(0, separator),
+            'modelId': entry.substring(separator + 1),
+          },
+        );
+      }).toList(growable: false);
+
+      final errors = validate(entries);
+
+      if (errors.isNotEmpty) {
+        return defaults;
+      }
+
+      return List.unmodifiable(entries);
+    } catch (_) {
+      return defaults;
+    }
+  }
+
+  /// Persists the complete Workshop configuration.
+  ///
+  /// The Assistant preference is never touched.
+  static Future<void> save(
+    List<WorkshopModelAssignment> assignments,
+  ) async {
+    if (!isValid(assignments)) {
+      throw ArgumentError(
+        'Invalid Workshop model assignments: '
+        '${validate(assignments).join('; ')}',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    final encoded = Uri.encodeComponent(
+      assignments
+          .map(
+            (assignment) =>
+                '${assignment.role.id}=${assignment.modelId}',
+          )
+          .join('|'),
+    );
+
+    await prefs.setString(
+      _prefsKey,
+      encoded,
+    );
+  }
+
   static String? modelIdFor(
     AppAiRole role, {
     List<WorkshopModelAssignment> assignments = defaults,
   }) {
-    // Never resolve the Assistant through the Workshop configuration.
     if (role == AppAiRole.assistantOrchestrator) {
       return null;
     }
@@ -183,17 +230,16 @@ abstract final class WorkshopModelAssignments {
     return null;
   }
 
-  /// Replaces or creates the assignment for [role].
-  ///
-  /// The Assistant role cannot be configured through the Workshop.
-  ///
-  /// The returned list is immutable from the caller's perspective.
   static List<WorkshopModelAssignment> withAssignment(
     List<WorkshopModelAssignment> assignments,
     AppAiRole role,
     String modelId,
   ) {
     if (role == AppAiRole.assistantOrchestrator) {
+      return List.unmodifiable(assignments);
+    }
+
+    if (WorkshopModelCatalogue.findById(modelId) == null) {
       return List.unmodifiable(assignments);
     }
 
@@ -226,10 +272,6 @@ abstract final class WorkshopModelAssignments {
     return List.unmodifiable(result);
   }
 
-  /// Removes an assignment for [role].
-  ///
-  /// This does not delete the model from storage. It only removes the role
-  /// association.
   static List<WorkshopModelAssignment> withoutRole(
     List<WorkshopModelAssignment> assignments,
     AppAiRole role,
@@ -241,14 +283,6 @@ abstract final class WorkshopModelAssignments {
     );
   }
 
-  /// Validates assignments against the current Workshop model catalogue.
-  ///
-  /// This method does not touch the filesystem and does not download anything.
-  /// It verifies:
-  ///   - no duplicate roles exist;
-  ///   - the Assistant is not assigned to the Workshop;
-  ///   - every assigned model exists;
-  ///   - every assigned model supports its selected role.
   static List<String> validate(
     List<WorkshopModelAssignment> assignments,
   ) {
@@ -256,7 +290,8 @@ abstract final class WorkshopModelAssignments {
     final seenRoles = <AppAiRole>{};
 
     for (final assignment in assignments) {
-      if (assignment.role == AppAiRole.assistantOrchestrator) {
+      if (assignment.role ==
+          AppAiRole.assistantOrchestrator) {
         errors.add(
           'Assistant role cannot be assigned through Workshop '
           'model configuration.',
@@ -283,6 +318,13 @@ abstract final class WorkshopModelAssignments {
         continue;
       }
 
+      if (!model.isWorkshopModel) {
+        errors.add(
+          'Model "${assignment.modelId}" is not a Workshop model.',
+        );
+        continue;
+      }
+
       if (!model.canServe(assignment.role)) {
         errors.add(
           'Model "${assignment.modelId}" cannot serve role '
@@ -291,8 +333,6 @@ abstract final class WorkshopModelAssignments {
       }
     }
 
-    // The four Workshop roles must have an assignment in the default
-    // configuration. This prevents a silently incomplete Workshop.
     const requiredRoles = <AppAiRole>{
       AppAiRole.workshopOrchestrator,
       AppAiRole.architect,
