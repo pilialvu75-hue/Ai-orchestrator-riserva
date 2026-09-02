@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 
@@ -52,11 +54,19 @@ class WorkshopDashboardPage extends StatefulWidget {
     super.key,
     WorkshopAppEmissionController? emissionController,
     WorkshopDashboardController? dashboardController,
+    List<WorkshopModelAssignment>? modelAssignments,
   })  : _emissionController = emissionController,
-        _dashboardController = dashboardController;
+        _dashboardController = dashboardController,
+        _modelAssignments =
+            modelAssignments ?? WorkshopModelAssignments.defaults;
 
   final WorkshopAppEmissionController? _emissionController;
   final WorkshopDashboardController? _dashboardController;
+
+  /// Configurazione esclusiva dei modelli del Cantiere.
+  ///
+  /// Non contiene e non modifica il modello dell'Assistente.
+  final List<WorkshopModelAssignment> _modelAssignments;
 
   @override
   State<WorkshopDashboardPage> createState() =>
@@ -104,17 +114,21 @@ class _WorkshopDashboardPageState
     /*
      * Il gateway viene creato attraverso il WorkshopFactory.
      *
-     * Questo NON crea un secondo runtime.
-     * Riutilizza l'InferenceService già registrato
-     * nell'application container.
+     * IMPORTANTE:
      *
-     * Il Cantiere quindi possiede una propria conversazione
-     * ma non dipende dalla Chat Assistente.
+     * il modello viene risolto dagli assignment del Cantiere,
+     * non dalla configurazione della Chat Assistente.
+     *
+     * L'InferenceService può essere condiviso come infrastruttura
+     * di basso livello, ma la selezione del modello rimane isolata.
      */
     _chatController =
         WorkshopChatController(
       inferenceGateway:
-          WorkshopFactory.createInferenceGateway(),
+          WorkshopFactory.createInferenceGateway(
+        assignments:
+            widget._modelAssignments,
+      ),
       sessionId:
           'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
     );
@@ -149,22 +163,9 @@ class _WorkshopDashboardPageState
     _messageController.dispose();
     _scrollController.dispose();
 
-    /*
-     * La chat è memoria temporanea.
-     *
-     * Quando la schermata viene chiusa, la conversazione viene
-     * eliminata insieme al controller.
-     *
-     * La Project Memory persistente verrà gestita separatamente.
-     */
     _chatController.clearConversation();
     _chatController.dispose();
 
-    /*
-     * Il DashboardController normalmente appartiene all'AppShell.
-     * Viene quindi disposto solo quando la pagina ne è realmente
-     * proprietaria.
-     */
     if (_ownsDashboardController) {
       _dashboardController?.dispose();
     }
@@ -217,10 +218,6 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    /*
-     * Se l'utente riprende la conversazione dopo una richiesta
-     * di conferma, il nuovo messaggio annulla la conferma precedente.
-     */
     _pendingConfirmation = false;
 
     _messageController.clear();
@@ -238,12 +235,6 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    /*
-     * Manteniamo la prima richiesta utile come istruzione da
-     * utilizzare successivamente quando l'utente dirà:
-     *
-     *   "Sì, procedi."
-     */
     if (_pendingInstruction == null) {
       _pendingInstruction =
           _firstUserInstruction();
@@ -254,13 +245,6 @@ class _WorkshopDashboardPageState
       _pendingInstruction,
     );
 
-    /*
-     * La prima versione presenta una conferma esplicita dopo
-     * una risposta dell'LLM.
-     *
-     * Il collegamento automatico tra conferma e ProjectPlan
-     * avverrà nel passo successivo della pipeline.
-     */
     _pendingConfirmation = true;
 
     setState(() {});
@@ -298,19 +282,6 @@ class _WorkshopDashboardPageState
     });
 
     try {
-      /*
-       * Primo collegamento reale:
-       *
-       *   conversazione
-       *       ↓
-       *   conferma utente
-       *       ↓
-       *   WorkshopRequest
-       *       ↓
-       *   ProjectPlan
-       *
-       * Non modifichiamo ancora direttamente il repository.
-       */
       controller.startProduction(
         title: title,
         instruction: instruction,
@@ -321,22 +292,9 @@ class _WorkshopDashboardPageState
         'Procedi con la preparazione della produzione.',
       );
 
-      /*
-       * Prepariamo il primo task solo dopo l'approvazione
-       * esplicita dell'utente.
-       *
-       * Il ProjectExecutor continuerà a rispettare
-       * WorkspaceSession e i relativi guardrail.
-       */
       try {
         await controller.prepareNextTask();
       } catch (error) {
-        /*
-         * La creazione del piano è già stata completata.
-         * Se il workspace/executor non è disponibile, riportiamo
-         * il problema nella conversazione senza dichiarare
-         * falsamente che la produzione sia iniziata.
-         */
         _chatController.addSystemMessage(
           'Il progetto è stato pianificato, ma il primo task '
           'non può ancora essere aperto nello spazio di lavoro: '
@@ -386,6 +344,7 @@ class _WorkshopDashboardPageState
               .requestFocus(
             _messageFocusNode,
           );
+
           _messageController.selection =
               TextSelection.fromPosition(
             TextPosition(
@@ -395,6 +354,35 @@ class _WorkshopDashboardPageState
           );
         }
       },
+    );
+  }
+
+  Future<void> _openModelSelection() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            const WorkshopModelSelectionPage(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    /*
+     * La configurazione viene salvata persistentemente dalla
+     * schermata di selezione.
+     *
+     * Il gateway della conversazione corrente è intenzionalmente
+     * immutabile per evitare di cambiare modello mentre un runtime
+     * può essere ancora in uso.
+     *
+     * La nuova configurazione verrà applicata alla prossima apertura
+     * del Cantiere.
+     */
+    _showMessage(
+      'Configurazione modelli salvata. '
+      'Riapri il Cantiere per applicarla alla nuova conversazione.',
     );
   }
 
@@ -536,11 +524,23 @@ class _WorkshopDashboardPageState
         actions: <Widget>[
           IconButton(
             tooltip:
+                'Modelli AI del Cantiere',
+            onPressed:
+                _openModelSelection,
+            icon:
+                const Icon(
+              Icons.psychology_outlined,
+            ),
+          ),
+          IconButton(
+            tooltip:
                 'Nuova conversazione',
             onPressed:
                 _startNewConversation,
             icon:
-                const Icon(Icons.add_comment_outlined),
+                const Icon(
+              Icons.add_comment_outlined,
+            ),
           ),
           IconButton(
             tooltip:
@@ -651,6 +651,23 @@ class _WorkshopDashboardPageState
               ListTile(
                 leading:
                     const Icon(
+                  Icons.psychology_outlined,
+                ),
+                title:
+                    const Text(
+                  'Modelli AI',
+                ),
+                onTap: () {
+                  Navigator.of(
+                    context,
+                  ).pop();
+
+                  _openModelSelection();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(
                   Icons.inventory_2_outlined,
                 ),
                 title:
@@ -662,6 +679,7 @@ class _WorkshopDashboardPageState
                   Navigator.of(
                     context,
                   ).pop();
+
                   _showMessage(
                     packages.isEmpty
                         ? 'Non ci sono ancora app emesse.'
@@ -682,6 +700,7 @@ class _WorkshopDashboardPageState
                   Navigator.of(
                     context,
                   ).pop();
+
                   _showDiagnostics(
                     emissionState,
                   );
@@ -701,6 +720,7 @@ class _WorkshopDashboardPageState
                   Navigator.of(
                     context,
                   ).pop();
+
                   _startNewConversation();
                 },
               ),
@@ -732,7 +752,8 @@ class _WorkshopDashboardPageState
               16,
               24,
             ),
-            child: SingleChildScrollView(
+            child:
+                SingleChildScrollView(
               child: Column(
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
@@ -934,7 +955,8 @@ class _WorkshopStageStrip
                           ? 0
                           : 3,
                 ),
-                child: DecoratedBox(
+                child:
+                    DecoratedBox(
                   decoration:
                       BoxDecoration(
                     color: active
