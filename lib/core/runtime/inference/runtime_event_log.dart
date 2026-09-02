@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'runtime_crash_log_sink.dart';
+
 /// Categorises a runtime log entry by the subsystem that produced it.
 enum RuntimeEventCategory {
   model,
@@ -40,14 +42,20 @@ class RuntimeEventEntry {
       '[${timestamp.toIso8601String()}] [$tag] $message';
 }
 
-/// Process-wide in-memory log buffer for all runtime inference events.
+/// Process-wide log buffer for all runtime inference events.
 ///
 /// Providers call [emit] for every significant pipeline event. UI layers
 /// listen to [stream] for live updates or read [entries] for the current
-/// snapshot.
+/// in-memory snapshot.
 ///
-/// The buffer is capped at [maxEntries] to avoid unbounded memory growth.
-/// When the cap is reached the oldest entry is discarded.
+/// The in-memory buffer is capped at [maxEntries] to avoid unbounded
+/// memory growth. When the cap is reached the oldest entry is discarded.
+///
+/// Every entry is also appended, synchronously and with an immediate
+/// flush, to a persistent on-disk file via [RuntimeCrashLogSink]. This
+/// is what lets a crash investigation see the last events even when a
+/// native crash kills the process before any Dart exception handler can
+/// run — the in-memory buffer alone does not survive that, the file does.
 class RuntimeEventLog {
   RuntimeEventLog._();
 
@@ -74,7 +82,17 @@ class RuntimeEventLog {
   /// Stream that fires whenever [clear] is called.
   Stream<void> get onClear => _clearController.stream;
 
-  /// Adds [message] to the log buffer and broadcasts it to all listeners.
+  /// Prepares on-disk persistence. Must be awaited exactly once, as
+  /// early as possible in `main()`, before any other runtime activity.
+  ///
+  /// Safe to skip: if never called, [emit] simply keeps working as an
+  /// in-memory-only log, exactly as before persistence was added.
+  Future<void> initPersistence() {
+    return RuntimeCrashLogSink.instance.init();
+  }
+
+  /// Adds [message] to the log buffer, broadcasts it to all listeners,
+  /// and persists it to disk.
   ///
   /// The category and tag are inferred automatically from the first
   /// `[TAG]` token in [message].
@@ -91,18 +109,38 @@ class RuntimeEventLog {
     if (_entries.length >= maxEntries) _entries.removeAt(0);
     _entries.add(entry);
 
+    // Persisted before the broadcast below: if a listener reacting to
+    // this event were to trigger a native call that crashes the
+    // process, the line must already be safely on disk.
+    RuntimeCrashLogSink.instance.append(entry.toString());
+
     if (!_controller.isClosed) {
       _controller.add(entry);
     }
   }
 
-  /// Removes all retained entries and notifies listeners via [onClear].
+  /// Removes all retained in-memory entries and notifies listeners via
+  /// [onClear]. Does NOT touch the persisted on-disk log — that history
+  /// is kept for crash forensics until [clearPersistedLog] is called
+  /// explicitly.
   void clear() {
     _entries.clear();
 
     if (!_clearController.isClosed) {
       _clearController.add(null);
     }
+  }
+
+  /// Reads the full persisted on-disk log as text, including entries
+  /// from previous app runs (e.g. before a crash).
+  Future<String> readPersistedLog() {
+    return RuntimeCrashLogSink.instance.readAsText();
+  }
+
+  /// Erases the persisted on-disk log. Use only when the user
+  /// explicitly asks to reset diagnostics.
+  Future<void> clearPersistedLog() {
+    return RuntimeCrashLogSink.instance.clear();
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
