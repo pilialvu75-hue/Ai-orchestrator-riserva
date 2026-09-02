@@ -47,6 +47,14 @@ void _emitForensicException(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ── Crash log persistence ──────────────────────────────────────────────────
+  // Must be awaited before anything else: every RuntimeEventLog.emit() call
+  // that follows persists its line to disk. If the process is later killed
+  // by a native crash (e.g. inside llama_bridge.cpp), the in-memory log is
+  // lost with it, but everything already flushed to disk survives and can
+  // be inspected on the next launch via Debug Lab → "Mostra log crash".
+  await RuntimeEventLog.instance.initPersistence();
+
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
   // Runtime Diagnostics shows [FORENSIC_UNCAUGHT_DART_EXCEPTION] entries
@@ -287,4 +295,3 @@ class AppRoot extends StatelessWidget {
     );
   }
 }
-
