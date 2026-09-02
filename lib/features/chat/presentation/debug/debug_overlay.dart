@@ -346,6 +346,59 @@ class _DebugOverlayState extends State<DebugOverlay> {
     );
   }
 
+  /// Shows the persisted on-disk crash log (survives a native crash that
+  /// kills the process, unlike the in-memory RuntimeEventLog buffer) in a
+  /// selectable, copy-to-clipboard dialog.
+  Future<void> _showPersistedLog() async {
+    final logText = await RuntimeEventLog.instance.readPersistedLog();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Log crash persistente',
+            style: TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                logText,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: logText));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Log copiato negli appunti'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: const Text('Copia negli appunti'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Color _statusColor(DebugLabRunStatus status) {
     switch (status) {
       case DebugLabRunStatus.idle:
@@ -438,6 +491,14 @@ class _DebugOverlayState extends State<DebugOverlay> {
             FilledButton(
               onPressed: _running ? null : widget.onClearChat,
               child: const Text('Clear Chat'),
+            ),
+            const SizedBox(height: 6),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF7C3AED),
+              ),
+              onPressed: _showPersistedLog,
+              child: const Text('Mostra log crash'),
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<AssistantMessageTextSize>(
