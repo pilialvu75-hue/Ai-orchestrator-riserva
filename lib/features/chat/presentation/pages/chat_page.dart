@@ -39,7 +39,6 @@ import 'package:ai_orchestrator/presentation/chat/view_models/chat_appearance_vi
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 const String _kDefaultSessionId = 'default';
-const int _kAssistantTtsRecencyThresholdSeconds = 10;
 
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
@@ -916,9 +915,6 @@ class _ChatBodyState
   late final ChatAppearanceViewModel
       _appearanceViewModel;
 
-  String?
-      _lastSpokenAssistantMessageId;
-
   // ------------------------------------------------------------
   // MESSAGE EDITING
   // ------------------------------------------------------------
@@ -1262,41 +1258,6 @@ class _ChatBodyState
                       : null,
             ),
           );
-        }
-
-        if (state is ChatLoaded &&
-            state.messages.isNotEmpty) {
-          final latest =
-              state.messages.last;
-
-          final isRecent =
-              DateTime.now()
-                      .difference(
-                        DateTime
-                            .fromMillisecondsSinceEpoch(
-                          latest.timestamp,
-                        ),
-                      )
-                      .inSeconds <
-                  _kAssistantTtsRecencyThresholdSeconds;
-
-          if (isRecent &&
-              latest.role ==
-                  'assistant' &&
-              latest.content
-                  .trim()
-                  .isNotEmpty &&
-              latest.id !=
-                  _lastSpokenAssistantMessageId) {
-            _lastSpokenAssistantMessageId =
-                latest.id;
-
-            unawaited(
-              _speakAssistantResponse(
-                latest.content,
-              ),
-            );
-          }
         }
       },
       builder:
