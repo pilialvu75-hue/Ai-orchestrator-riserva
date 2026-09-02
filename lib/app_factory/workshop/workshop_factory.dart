@@ -53,6 +53,16 @@ import 'workshop_project_executor.dart';
 final class WorkshopFactory {
   const WorkshopFactory._();
 
+  /// Carica la configurazione persistente dei modelli del Cantiere.
+  ///
+  /// Il namespace di persistenza appartiene esclusivamente al Workshop.
+  /// In assenza di configurazione valida vengono utilizzati i defaults
+  /// definiti da [WorkshopModelAssignments].
+  static Future<List<WorkshopModelAssignment>>
+      loadPersistedAssignments() {
+    return WorkshopModelAssignments.load();
+  }
+
   /// Crea il gateway locale del Workspace.
   static LocalGitWorkspaceGateway createWorkspaceGateway({
     required String workspaceRootPath,
@@ -136,6 +146,12 @@ final class WorkshopFactory {
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
   }) {
+    if (role == AppAiRole.assistantOrchestrator) {
+      throw StateError(
+        'The Assistant role cannot be resolved by WorkshopFactory.',
+      );
+    }
+
     final modelId = WorkshopModelAssignments.modelIdFor(
       role,
       assignments: assignments,
@@ -147,7 +163,31 @@ final class WorkshopFactory {
       );
     }
 
-    return modelId.trim();
+    final normalizedModelId = modelId.trim();
+    final model = WorkshopModelCatalogue.findById(
+      normalizedModelId,
+    );
+
+    if (model == null) {
+      throw StateError(
+        'Workshop model "$normalizedModelId" is not present '
+        'in the Workshop model catalogue.',
+      );
+    }
+
+    if (!model.isWorkshopModel) {
+      throw StateError(
+        'Model "$normalizedModelId" is not a Workshop model.',
+      );
+    }
+
+    if (!model.canServe(role)) {
+      throw StateError(
+        'Model "$normalizedModelId" cannot serve role "${role.id}".',
+      );
+    }
+
+    return normalizedModelId;
   }
 
   /// Crea il provider del Cantiere con configurazione modello/ruolo propria.
@@ -187,6 +227,29 @@ final class WorkshopFactory {
                 role: role,
                 assignments: assignments,
               );
+
+    final model = WorkshopModelCatalogue.findById(
+      resolvedModelId,
+    );
+
+    if (model == null) {
+      throw StateError(
+        'Workshop model "$resolvedModelId" is not present '
+        'in the Workshop model catalogue.',
+      );
+    }
+
+    if (!model.isWorkshopModel) {
+      throw StateError(
+        'Model "$resolvedModelId" is not a Workshop model.',
+      );
+    }
+
+    if (!model.canServe(role)) {
+      throw StateError(
+        'Model "$resolvedModelId" cannot serve role "${role.id}".',
+      );
+    }
 
     return WorkshopInferenceProviderAdapter(
       inferenceService: resolvedInferenceService,
@@ -243,11 +306,11 @@ final class WorkshopFactory {
   }) {
     final resolvedExecutor =
         projectExecutor ??
-        _createOptionalProjectExecutor(
-          workspaceRootPath: workspaceRootPath,
-          includeHiddenFiles: includeHiddenFiles,
-          maxFileSizeBytes: maxFileSizeBytes,
-        );
+            _createOptionalProjectExecutor(
+              workspaceRootPath: workspaceRootPath,
+              includeHiddenFiles: includeHiddenFiles,
+              maxFileSizeBytes: maxFileSizeBytes,
+            );
 
     final resolvedInferenceGateway =
         createInferenceGateway(
@@ -281,17 +344,17 @@ final class WorkshopFactory {
   }) {
     final resolvedEngine =
         engine ??
-        createEngine(
-          workspaceRootPath: workspaceRootPath,
-          projectExecutor: projectExecutor,
-          inferenceService: inferenceService,
-          inferenceGateway: inferenceGateway,
-          role: role,
-          assignments: assignments,
-          modelId: modelId,
-          includeHiddenFiles: includeHiddenFiles,
-          maxFileSizeBytes: maxFileSizeBytes,
-        );
+            createEngine(
+              workspaceRootPath: workspaceRootPath,
+              projectExecutor: projectExecutor,
+              inferenceService: inferenceService,
+              inferenceGateway: inferenceGateway,
+              role: role,
+              assignments: assignments,
+              modelId: modelId,
+              includeHiddenFiles: includeHiddenFiles,
+              maxFileSizeBytes: maxFileSizeBytes,
+            );
 
     return WorkshopDashboardController(
       engine: resolvedEngine,
@@ -299,6 +362,9 @@ final class WorkshopFactory {
   }
 
   /// Crea l'intero blocco applicativo del Cantiere.
+  ///
+  /// Il chiamante può fornire esplicitamente gli assignment oppure
+  /// utilizzare i defaults.
   static WorkshopDashboardController create({
     String? workspaceRootPath,
     WorkshopProjectExecutor? projectExecutor,
@@ -323,6 +389,42 @@ final class WorkshopFactory {
       projectExecutor: projectExecutor,
       inferenceService: inferenceService,
       inferenceGateway: inferenceGateway,
+      role: role,
+      assignments: assignments,
+      modelId: modelId,
+      includeHiddenFiles: includeHiddenFiles,
+      maxFileSizeBytes: maxFileSizeBytes,
+    );
+  }
+
+  /// Crea il blocco applicativo del Cantiere utilizzando la configurazione
+  /// persistente dei suoi modelli.
+  ///
+  /// Questo metodo è asincrono perché legge SharedPreferences prima
+  /// di costruire il provider di inferenza.
+  ///
+  /// L'Assistente non viene mai letto, modificato o sovrascritto.
+  static Future<WorkshopDashboardController>
+      createWithPersistedAssignments({
+    String? workspaceRootPath,
+    WorkshopProjectExecutor? projectExecutor,
+    InferenceService? inferenceService,
+    WorkshopInferenceGateway? inferenceGateway,
+    WorkshopEngine? engine,
+    AppAiRole role = AppAiRole.workshopOrchestrator,
+    String? modelId,
+    bool includeHiddenFiles = false,
+    int maxFileSizeBytes = 10 * 1024 * 1024,
+  }) async {
+    final assignments =
+        await loadPersistedAssignments();
+
+    return create(
+      workspaceRootPath: workspaceRootPath,
+      projectExecutor: projectExecutor,
+      inferenceService: inferenceService,
+      inferenceGateway: inferenceGateway,
+      engine: engine,
       role: role,
       assignments: assignments,
       modelId: modelId,
