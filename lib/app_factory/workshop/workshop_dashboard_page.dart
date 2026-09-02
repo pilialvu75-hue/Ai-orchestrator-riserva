@@ -7,7 +7,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_contr
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_model_selection_page.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 
