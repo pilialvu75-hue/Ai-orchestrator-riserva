@@ -218,7 +218,7 @@ class AppConstants {
   // Scaricato come archivio tar.bz2 da GitHub Releases.
   static const String ttsModelFile =
       'it_IT-paola-medium.onnx';
-  static const String ttsTokensFile = 'tokens.txt';
+  static const String ttsTokensFile = 'tts-tokens.txt';
   static const String ttsEspeakDataDir =
       'espeak-ng-data';
 
