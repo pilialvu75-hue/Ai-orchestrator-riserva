@@ -205,7 +205,7 @@ class _DebugOverlayState
         });
       }
     }
-
+  }
   Future<void> _runFakeVoiceToLlm() {
     return _runTest(
       testId: 'fake_voice_to_llm',
