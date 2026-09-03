@@ -486,39 +486,40 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       );
 
       final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
-        vits: sherpa_onnx.OfflineTtsVitsModelConfig(
-          model: ttsModelPath,
-          lexicon: '',
-          tokens: ttsTokensPath,
-          dataDir: ttsDataDir,
-        ),
-        numThreads: 2,
-        debug: false,
-        provider: 'cpu',
-      );
+  vits: sherpa_onnx.OfflineTtsVitsModelConfig(
+    model: ttsModelPath,
+    lexicon: '',
+    tokens: ttsTokensPath,
+    dataDir: ttsDataDir,
+  ),
+  numThreads: 1,
+  debug: true,
+  provider: 'cpu',
+);
 
-      final ttsConfig = sherpa_onnx.OfflineTtsConfig(
-        model: ttsModelConfig,
-      );
+final ttsConfig = sherpa_onnx.OfflineTtsConfig(
+  model: ttsModelConfig,
+  maxNumSenetences: 1,
+);
 
-      logEvent(
-        _tag,
-        '[TTS_CONFIG_READY] '
-        'family=vits '
-        'provider=cpu '
-        'numThreads=2 '
-        'debug=false '
-        'lexicon_empty=true '
-        'model_bytes=$modelBytes '
-        'tokens_bytes=$tokensBytes',
-      );
+logEvent(
+  _tag,
+  '[TTS_CONFIG_READY] '
+  'family=vits '
+  'provider=cpu '
+  'numThreads=1 '
+  'debug=true '
+  'lexicon_empty=true '
+  'model_bytes=$modelBytes '
+  'tokens_bytes=$tokensBytes',
+);
 
-      logEvent(
-        _tag,
-        '[TTS_NATIVE_CREATE_BEGIN] '
-        'lazy=true '
-        'family=vits',
-      );
+logEvent(
+  _tag,
+  '[TTS_NATIVE_CREATE_BEGIN] '
+  'lazy=true '
+  'family=vits',
+);
 
       // IMPORTANT:
       // Se il processo Android muore dopo TTS_NATIVE_CREATE_BEGIN e prima di
