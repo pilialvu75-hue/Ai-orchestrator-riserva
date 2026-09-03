@@ -68,5 +68,5 @@ abstract final class LlamaNativeDefaults {
   // equivalent to "offload all layers". The C++ bridge clamps this to 0 at
   // compile time when GGML_VULKAN is not compiled in (vedi fix CMakeLists.txt
   // per abilitare davvero il backend Vulkan) e logga un fallback chiaro.
-  static const int nGpuLayers = 99;
+  static const int nGpuLayers = 10;
 }
