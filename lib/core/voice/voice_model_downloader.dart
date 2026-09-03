@@ -20,7 +20,7 @@ class VoiceAssetException implements Exception {
 
 /// Runs archive extraction away from Flutter's UI isolate.
 ///
-/// Nemotron is a large archive (~650 MB). Extracting it synchronously on the
+/// Nemotron is a large archive. Extracting it synchronously on the
 /// Flutter isolate can make Android report the application as unresponsive.
 Future<void> _extractArchiveInWorker(
   String archivePath,
@@ -39,15 +39,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   })  : _dio = dio ??
             Dio(
               BaseOptions(
-                connectTimeout: const Duration(seconds: 30),
-                receiveTimeout: const Duration(hours: 2),
-                sendTimeout: const Duration(seconds: 30),
+                connectTimeout:
+                    const Duration(seconds: 30),
+                receiveTimeout:
+                    const Duration(hours: 2),
+                sendTimeout:
+                    const Duration(seconds: 30),
                 followRedirects: true,
                 maxRedirects: 10,
               ),
             ),
         _pathResolver =
-            pathResolver ?? const RuntimeModelPathResolver();
+            pathResolver ??
+                const RuntimeModelPathResolver();
 
   static const String _tag = 'VOICE_DOWNLOAD';
 
@@ -257,6 +261,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       );
     }
 
+    // expectedBytes is only a fallback when the HTTP server does not
+    // provide Content-Length/Content-Range. It must never be used as
+    // a fabricated hard requirement for the final archive.
+    //
+    // The authoritative validation happens after extraction, where
+    // the expected Nemotron encoder/decoder/joiner/tokens files are
+    // checked for existence and minimum valid size.
+
     final destination =
         File(destinationPath);
 
@@ -351,6 +363,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
 
     if (status == HttpStatus.ok) {
+      // The server ignored the Range request and returned the complete
+      // object. Never append a full 200 response to the existing .part,
+      // because that would corrupt the archive.
       await _downloadFromZero(
         url: url,
         partialFile: partialFile,
@@ -512,6 +527,9 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       await sink.close();
     }
 
+    // If the server explicitly declared a Content-Length, it is the
+    // authoritative size of this HTTP response. A short response means
+    // the download was interrupted and the .part must be preserved.
     if (contentLength != null &&
         contentLength > 0 &&
         receivedBytes <
@@ -646,168 +664,181 @@ class VoiceModelDownloader with RuntimeEventEmitter {
 
     final tarPath =
         p.join(
-      targetDir.path,
-      archiveName,
-    );
+          targetDir.path,
+          archiveName,
+        );
 
     final partialPath =
         '$tarPath.part';
 
-    // IMPORTANT:
-    // This is Nemotron, never Zipformer.
     await _downloadResumable(
-      url: AppConstants.sttNemotronTarUrl,
+      url:
+          AppConstants.sttNemotronTarUrl,
       destinationPath: tarPath,
       partialPath: partialPath,
       expectedBytes:
           AppConstants
               .sttNemotronTarExpectedBytes,
+      onProgress: onProgress,
       assetName: 'STT_NEMOTRON',
-      onProgress: (value) {
-        onProgress(
-          (value * 0.70)
-              .clamp(0.0, 0.70),
-        );
-      },
     );
 
-    onProgress(0.72);
-
-    final extractionDir =
-        await Directory(
+    final extractDir =
+        Directory(
       p.join(
         targetDir.path,
         '.stt_extract_tmp',
       ),
-    ).create(
+    );
+
+    if (await extractDir.exists()) {
+      await extractDir.delete(
+        recursive: true,
+      );
+    }
+
+    await extractDir.create(
       recursive: true,
     );
 
     try {
-      logEvent(
-        _tag,
-        '[STT_EXTRACT_BEGIN] '
-        'Nemotron extraction moved '
-        'to worker isolate',
-      );
-
-      // CRITICAL:
-      // Never extract a ~650 MB Nemotron archive
-      // on Flutter's UI isolate.
       await Isolate.run(
         () => _extractArchiveInWorker(
           tarPath,
-          extractionDir.path,
+          extractDir.path,
         ),
       );
 
-      onProgress(0.88);
-
       final files =
-          await _collectFiles(
-        extractionDir,
-      );
+          await extractDir
+              .list(
+                recursive: true,
+                followLinks: false,
+              )
+              .where(
+                (entity) =>
+                    entity is File,
+              )
+              .cast<File>()
+              .toList();
 
-      final encoderSource =
-          _findByBasename(
-        files,
-        _sttEncoderMarker,
-      );
+      File? encoder;
+      File? decoder;
+      File? joiner;
+      File? tokens;
 
-      final decoderSource =
-          _findByBasename(
-        files,
-        _sttDecoderMarker,
-      );
+      for (final file in files) {
+        final name =
+            p.basename(file.path);
 
-      final joinerSource =
-          _findByBasename(
-        files,
-        _sttJoinerMarker,
-      );
+        if (name ==
+            _sttEncoderMarker) {
+          encoder = file;
+        } else if (name ==
+            _sttDecoderMarker) {
+          decoder = file;
+        } else if (name ==
+            _sttJoinerMarker) {
+          joiner = file;
+        } else if (name ==
+            'tokens.txt') {
+          tokens = file;
+        }
+      }
 
-      final tokensSource =
-          _findByBasename(
-        files,
-        AppConstants.sttTokensFile,
-      );
-
-      if (encoderSource == null ||
-          decoderSource == null ||
-          joinerSource == null ||
-          tokensSource == null) {
+      if (encoder == null ||
+          decoder == null ||
+          joiner == null ||
+          tokens == null) {
         throw const VoiceAssetException(
-          'Archivio Nemotron scaricato ma '
-          'uno o più file richiesti non sono '
-          'presenti.',
+          'Archivio Nemotron estratto '
+          'ma contiene file STT incompleti '
+          'o con nomi inattesi.',
         );
       }
 
-      await _requireMinimumSize(
-        encoderSource,
-        _minSttEncoderBytes,
-        'STT Nemotron encoder INT8',
-      );
+      final encoderBytes =
+          await encoder.length();
+      final decoderBytes =
+          await decoder.length();
+      final joinerBytes =
+          await joiner.length();
+      final tokensBytes =
+          await tokens.length();
 
-      await _requireMinimumSize(
-        decoderSource,
-        _minSttDecoderBytes,
-        'STT Nemotron decoder INT8',
-      );
+      if (encoderBytes <
+              _minSttEncoderBytes ||
+          decoderBytes <
+              _minSttDecoderBytes ||
+          joinerBytes <
+              _minSttJoinerBytes ||
+          tokensBytes <
+              _minSttTokensBytes) {
+        throw const VoiceAssetException(
+          'Archivio Nemotron estratto '
+          'ma uno o più asset STT '
+          'sono troppo piccoli.',
+        );
+      }
 
-      await _requireMinimumSize(
-        joinerSource,
-        _minSttJoinerBytes,
-        'STT Nemotron joiner INT8',
-      );
-
-      await _requireMinimumSize(
-        tokensSource,
-        _minSttTokensBytes,
-        'STT Nemotron tokens',
-      );
-
-      await _installAtomically(
-        source: encoderSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.sttEncoderFile,
-          ),
+      final destinationEncoder =
+          File(
+        p.join(
+          targetDir.path,
+          AppConstants.sttEncoderFile,
         ),
       );
 
-      await _installAtomically(
-        source: decoderSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.sttDecoderFile,
-          ),
+      final destinationDecoder =
+          File(
+        p.join(
+          targetDir.path,
+          AppConstants.sttDecoderFile,
         ),
       );
 
-      await _installAtomically(
-        source: joinerSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.sttJoinerFile,
-          ),
+      final destinationJoiner =
+          File(
+        p.join(
+          targetDir.path,
+          AppConstants.sttJoinerFile,
         ),
       );
 
-      await _installAtomically(
-        source: tokensSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.sttTokensFile,
-          ),
+      final destinationTokens =
+          File(
+        p.join(
+          targetDir.path,
+          AppConstants.sttTokensFile,
         ),
       );
 
-      onProgress(0.97);
+      for (final destination in [
+        destinationEncoder,
+        destinationDecoder,
+        destinationJoiner,
+        destinationTokens,
+      ]) {
+        if (await destination.exists()) {
+          await destination.delete();
+        }
+      }
+
+      await encoder.copy(
+        destinationEncoder.path,
+      );
+
+      await decoder.copy(
+        destinationDecoder.path,
+      );
+
+      await joiner.copy(
+        destinationJoiner.path,
+      );
+
+      await tokens.copy(
+        destinationTokens.path,
+      );
     } catch (error) {
       if (error is VoiceAssetException) {
         rethrow;
@@ -818,12 +849,15 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         '$error',
       );
     } finally {
-      await _deleteIfExists(
-        File(tarPath),
-      );
+      final archiveFile =
+          File(tarPath);
 
-      if (await extractionDir.exists()) {
-        await extractionDir.delete(
+      if (await archiveFile.exists()) {
+        await archiveFile.delete();
+      }
+
+      if (await extractDir.exists()) {
+        await extractDir.delete(
           recursive: true,
         );
       }
@@ -833,75 +867,65 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       targetDir,
     )) {
       throw const VoiceAssetException(
-        'Verifica STT Nemotron fallita: '
-        'uno o più asset sono assenti o '
-        'troppo piccoli.',
+        'STT Nemotron non valido dopo '
+        'l’installazione degli asset.',
       );
     }
-
-    onProgress(1.0);
 
     logEvent(
       _tag,
       '[STT_READY] '
-      'Nemotron 3.5 multilingual assets installed',
+      'Nemotron assets installed',
     );
+
+    onProgress(1.0);
   }
 
   // ===========================================================================
-  // TTS
+  // TTS — existing pipeline
   // ===========================================================================
 
-  Future<bool> _ttsAssetsComplete(
-    Directory targetDir,
-  ) async {
-    final model = File(
+  Future<void> _downloadAndExtractTtsTar({
+    required Directory targetDir,
+    required Function(double) onProgress,
+  }) async {
+    final modelFile = File(
       p.join(
         targetDir.path,
         AppConstants.ttsModelFile,
       ),
     );
 
-    final tokens = File(
+    final tokensFile = File(
       p.join(
         targetDir.path,
         AppConstants.ttsTokensFile,
       ),
     );
 
-    final espeak = Directory(
+    final espeakDir = Directory(
       p.join(
         targetDir.path,
         AppConstants.ttsEspeakDataDir,
       ),
     );
 
-    if (!await model.exists() ||
-        await model.length() <
-            _minTtsModelBytes) {
-      return false;
-    }
+    final modelReady =
+        await modelFile.exists() &&
+            await modelFile.length() >=
+                _minTtsModelBytes;
 
-    if (!await tokens.exists() ||
-        await tokens.length() <
-            _minTtsTokensBytes) {
-      return false;
-    }
+    final tokensReady =
+        await tokensFile.exists() &&
+            await tokensFile.length() >=
+                _minTtsTokensBytes;
 
-    if (!await espeak.exists()) {
-      return false;
-    }
+    final espeakReady =
+        await espeakDir.exists();
 
-    return true;
-  }
-
-  Future<void> _downloadAndExtractTtsTar({
-    required Directory targetDir,
-    required Function(double) onProgress,
-  }) async {
-    if (await _ttsAssetsComplete(
-      targetDir,
-    )) {
+    if (modelReady &&
+        tokensReady &&
+        espeakReady) {
       logEvent(
         _tag,
         '[TTS_SKIP] assets already valid',
@@ -911,40 +935,44 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
+    final archiveName =
+        'vits-piper-it_IT-paola-medium.tar.bz2';
+
     final tarPath =
         p.join(
-      targetDir.path,
-      'vits-piper-it_IT-paola-medium.tar.bz2',
-    );
+          targetDir.path,
+          archiveName,
+        );
 
     final partialPath =
         '$tarPath.part';
 
     await _downloadResumable(
-      url: AppConstants.ttsPaolaTarUrl,
+      url:
+          AppConstants.ttsPaolaTarUrl,
       destinationPath: tarPath,
       partialPath: partialPath,
       expectedBytes:
-          AppConstants
-              .ttsPaolaTarExpectedBytes,
-      assetName: 'TTS',
-      onProgress: (value) {
-        onProgress(
-          (value * 0.75)
-              .clamp(0.0, 0.75),
-        );
-      },
+          AppConstants.ttsPaolaTarExpectedBytes,
+      onProgress: onProgress,
+      assetName: 'TTS_PAOLA',
     );
 
-    onProgress(0.80);
-
-    final extractionDir =
-        await Directory(
+    final extractDir =
+        Directory(
       p.join(
         targetDir.path,
         '.tts_extract_tmp',
       ),
-    ).create(
+    );
+
+    if (await extractDir.exists()) {
+      await extractDir.delete(
+        recursive: true,
+      );
+    }
+
+    await extractDir.create(
       recursive: true,
     );
 
@@ -952,392 +980,179 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       await Isolate.run(
         () => _extractArchiveInWorker(
           tarPath,
-          extractionDir.path,
+          extractDir.path,
         ),
       );
-
-      onProgress(0.90);
 
       final files =
-          await _collectFiles(
-        extractionDir,
-      );
+          await extractDir
+              .list(
+                recursive: true,
+                followLinks: false,
+              )
+              .where(
+                (entity) =>
+                    entity is File,
+              )
+              .cast<File>()
+              .toList();
 
-      final modelSource =
-          _findByExtension(
-        files,
-        '.onnx',
-      );
+      File? model;
+      File? tokens;
+      Directory? espeak;
 
-      final tokensSource =
-          _findByBasename(
-        files,
-        'tokens.txt',
-      );
+      for (final file in files) {
+        final name =
+            p.basename(file.path);
 
-      final espeakSource =
-          _findDirectory(
-        extractionDir,
-        AppConstants.ttsEspeakDataDir,
-      );
+        if (name ==
+            AppConstants.ttsModelFile) {
+          model = file;
+        } else if (name ==
+            AppConstants.ttsTokensFile) {
+          tokens = file;
+        }
+      }
 
-      if (modelSource == null) {
+      for (final entity
+          in await extractDir.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is Directory &&
+            p.basename(entity.path) ==
+                AppConstants
+                    .ttsEspeakDataDir) {
+          espeak = entity;
+          break;
+        }
+      }
+
+      if (model == null ||
+          tokens == null ||
+          espeak == null) {
         throw const VoiceAssetException(
-          'Modello TTS ONNX non trovato '
-          'nell\'archivio.',
+          'Archivio TTS Paola estratto '
+          'ma contiene asset incompleti.',
         );
       }
 
-      if (tokensSource == null) {
+      if (await model.length() <
+              _minTtsModelBytes ||
+          await tokens.length() <
+              _minTtsTokensBytes) {
         throw const VoiceAssetException(
-          'tokens.txt TTS non trovato '
-          'nell\'archivio.',
+          'Asset TTS Paola troppo piccoli.',
         );
       }
 
-      if (espeakSource == null) {
-        throw const VoiceAssetException(
-          'espeak-ng-data non trovato '
-          'nell\'archivio TTS.',
-        );
+      if (await modelFile.exists()) {
+        await modelFile.delete();
       }
 
-      await _requireMinimumSize(
-        modelSource,
-        _minTtsModelBytes,
-        'TTS model',
-      );
+      if (await tokensFile.exists()) {
+        await tokensFile.delete();
+      }
 
-      await _requireMinimumSize(
-        tokensSource,
-        _minTtsTokensBytes,
-        'TTS tokens',
-      );
-
-      await _installAtomically(
-        source: modelSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.ttsModelFile,
-          ),
-        ),
-      );
-
-      await _installAtomically(
-        source: tokensSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.ttsTokensFile,
-          ),
-        ),
-      );
-
-      final destinationEspeak =
-          Directory(
-        p.join(
-          targetDir.path,
-          AppConstants.ttsEspeakDataDir,
-        ),
-      );
-
-      if (await destinationEspeak
-          .exists()) {
-        await destinationEspeak.delete(
+      if (await espeakDir.exists()) {
+        await espeakDir.delete(
           recursive: true,
         );
       }
 
-      await _copyDirectory(
-        espeakSource,
-        destinationEspeak,
+      await model.copy(
+        modelFile.path,
       );
 
-      onProgress(0.97);
+      await tokens.copy(
+        tokensFile.path,
+      );
+
+      await _copyDirectory(
+        espeak,
+        espeakDir,
+      );
     } catch (error) {
       if (error is VoiceAssetException) {
         rethrow;
       }
 
       throw VoiceAssetException(
-        'Estrazione TTS fallita: $error',
+        'Estrazione TTS Paola fallita: '
+        '$error',
       );
     } finally {
-      await _deleteIfExists(
-        File(tarPath),
-      );
+      final archiveFile =
+          File(tarPath);
 
-      if (await extractionDir.exists()) {
-        await extractionDir.delete(
+      if (await archiveFile.exists()) {
+        await archiveFile.delete();
+      }
+
+      if (await extractDir.exists()) {
+        await extractDir.delete(
           recursive: true,
         );
       }
     }
 
-    if (!await _ttsAssetsComplete(
-      targetDir,
-    )) {
-      throw const VoiceAssetException(
-        'Verifica TTS fallita: '
-        'asset mancanti o troppo piccoli.',
-      );
-    }
-
     onProgress(1.0);
-
-    logEvent(
-      _tag,
-      '[TTS_READY] assets installed',
-    );
-  }
-
-  // ===========================================================================
-  // FILESYSTEM HELPERS
-  // ===========================================================================
-
-  Future<List<File>> _collectFiles(
-    Directory directory,
-  ) async {
-    final result = <File>[];
-
-    await for (final entity in directory.list(
-      recursive: true,
-      followLinks: false,
-    )) {
-      if (entity is File) {
-        result.add(entity);
-      }
-    }
-
-    return result;
-  }
-
-  File? _findByBasename(
-    List<File> files,
-    String basename,
-  ) {
-    for (final file in files) {
-      if (p.basename(file.path) ==
-          basename) {
-        return file;
-      }
-    }
-
-    return null;
-  }
-
-  File? _findByExtension(
-    List<File> files,
-    String extension,
-  ) {
-    for (final file in files) {
-      final name =
-          p.basename(file.path);
-
-      if (name.endsWith(extension) &&
-          !name.endsWith('.onnx.json')) {
-        return file;
-      }
-    }
-
-    return null;
-  }
-
-  Directory? _findDirectory(
-    Directory root,
-    String basename,
-  ) {
-    final direct =
-        Directory(
-      p.join(
-        root.path,
-        basename,
-      ),
-    );
-
-    if (direct.existsSync()) {
-      return direct;
-    }
-
-    final entities =
-        root.listSync(
-      recursive: true,
-      followLinks: false,
-    );
-
-    for (final entity in entities) {
-      if (entity is Directory &&
-          p.basename(entity.path) ==
-              basename) {
-        return entity;
-      }
-    }
-
-    return null;
-  }
-
-  Future<void> _requireMinimumSize(
-    File file,
-    int minimumBytes,
-    String description,
-  ) async {
-    if (!await file.exists()) {
-      throw VoiceAssetException(
-        '$description non trovato.',
-      );
-    }
-
-    final length =
-        await file.length();
-
-    if (length < minimumBytes) {
-      throw VoiceAssetException(
-        '$description non valido: '
-        '$length bytes < minimo '
-        '$minimumBytes bytes.',
-      );
-    }
-  }
-
-  Future<void> _installAtomically({
-    required File source,
-    required File destination,
-  }) async {
-    final temporary =
-        File(
-      '${destination.path}.part',
-    );
-
-    await _deleteIfExists(
-      temporary,
-    );
-
-    await temporary.parent.create(
-      recursive: true,
-    );
-
-    await source.copy(
-      temporary.path,
-    );
-
-    final size =
-        await temporary.length();
-
-    if (size <= 0) {
-      await _deleteIfExists(
-        temporary,
-      );
-
-      throw VoiceAssetException(
-        'Installazione fallita: '
-        '${destination.path} è vuoto.',
-      );
-    }
-
-    await _deleteIfExists(
-      destination,
-    );
-
-    await temporary.rename(
-      destination.path,
-    );
   }
 
   Future<void> _copyDirectory(
     Directory source,
     Directory destination,
   ) async {
+    if (await destination.exists()) {
+      await destination.delete(
+        recursive: true,
+      );
+    }
+
     await destination.create(
       recursive: true,
     );
 
     await for (final entity
         in source.list(
-      recursive: true,
+      recursive: false,
       followLinks: false,
     )) {
-      final relative = p.relative(
-        entity.path,
-        from: source.path,
-      );
+      final name =
+          p.basename(entity.path);
 
-      final target = p.join(
+      final target =
+          p.join(
         destination.path,
-        relative,
+        name,
       );
 
       if (entity is Directory) {
-        await Directory(target).create(
-          recursive: true,
+        await _copyDirectory(
+          entity,
+          Directory(target),
         );
       } else if (entity is File) {
-        await File(target).parent.create(
-          recursive: true,
-        );
-
         await entity.copy(target);
       }
     }
   }
 
-  Future<void> _deleteIfExists(
-    FileSystemEntity entity,
-  ) async {
-    if (await entity.exists()) {
-      await entity.delete(
-        recursive:
-            entity is Directory,
-      );
-    }
-  }
-
   // ===========================================================================
-  // VALIDATION
+  // FINAL VALIDATION
   // ===========================================================================
 
   Future<void> validateDownloadedAssets() async {
     final targetDir =
-        await _pathResolver
-            .privateModelsDirectory();
+        await _ensureTargetDirectory();
 
-    final missing = <String>[];
-
-    final sttRequirements =
-        <String, int>{
-      AppConstants.sttEncoderFile:
-          _minSttEncoderBytes,
-      AppConstants.sttDecoderFile:
-          _minSttDecoderBytes,
-      AppConstants.sttJoinerFile:
-          _minSttJoinerBytes,
-      AppConstants.sttTokensFile:
-          _minSttTokensBytes,
-    };
-
-    for (final entry
-        in sttRequirements.entries) {
-      final file = File(
-        p.join(
-          targetDir.path,
-          entry.key,
-        ),
+    if (!await _sttAssetsComplete(
+      targetDir,
+    )) {
+      throw const VoiceAssetException(
+        'Asset STT Nemotron mancanti '
+        'o non validi.',
       );
-
-      if (!await file.exists()) {
-        missing.add(entry.key);
-        continue;
-      }
-
-      final length =
-          await file.length();
-
-      if (length < entry.value) {
-        missing.add(
-          '${entry.key}'
-          '(truncated:$length)',
-        );
-      }
     }
 
     final ttsModel = File(
@@ -1354,7 +1169,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       ),
     );
 
-    final espeak = Directory(
+    final ttsEspeak = Directory(
       p.join(
         targetDir.path,
         AppConstants.ttsEspeakDataDir,
@@ -1364,45 +1179,42 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     if (!await ttsModel.exists() ||
         await ttsModel.length() <
             _minTtsModelBytes) {
-      missing.add(
-        AppConstants.ttsModelFile,
+      throw const VoiceAssetException(
+        'Modello TTS Paola mancante '
+        'o non valido.',
       );
     }
 
     if (!await ttsTokens.exists() ||
         await ttsTokens.length() <
             _minTtsTokensBytes) {
-      missing.add(
-        AppConstants.ttsTokensFile,
+      throw const VoiceAssetException(
+        'tokens.txt TTS mancante '
+        'o non valido.',
       );
     }
 
-    if (!await espeak.exists()) {
-      missing.add(
-        AppConstants.ttsEspeakDataDir,
-      );
-    }
-
-    if (missing.isNotEmpty) {
-      throw VoiceAssetException(
-        'Risorse vocali mancanti o non valide: '
-        '${missing.join(", ")}.',
+    if (!await ttsEspeak.exists()) {
+      throw const VoiceAssetException(
+        'espeak-ng-data TTS mancante.',
       );
     }
   }
 
-  Future<Directory>
-      _ensureTargetDirectory() async {
-    final targetDir =
-        await _pathResolver
-            .privateModelsDirectory();
+  // ===========================================================================
+  // STORAGE
+  // ===========================================================================
 
-    if (!await targetDir.exists()) {
-      await targetDir.create(
+  Future<Directory> _ensureTargetDirectory() async {
+    final directory =
+        await _pathResolver.voiceModelsDirectory();
+
+    if (!await directory.exists()) {
+      await directory.create(
         recursive: true,
       );
     }
 
-    return targetDir;
+    return directory;
   }
 }
