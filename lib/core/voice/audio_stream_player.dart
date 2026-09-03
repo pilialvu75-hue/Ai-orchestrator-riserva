@@ -9,28 +9,11 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// Low-latency PCM audio output powered by [mp_audio_stream].
 ///
 /// Serialises concurrent [push] calls into a sequential playback queue so
-/// sentence chunks received from the TTS engine play one after another
-/// without overlap.
+/// that sentence chunks received from the TTS engine play one after another
+/// without overlap. Barge-in is handled by [stop], which invalidates any
+/// in-progress or queued chunk and clears the queue.
 ///
-/// Barge-in is handled by [stop], which invalidates the current lifecycle
-/// generation and clears the logical playback queue.
-///
-/// IMPORTANT:
-/// [getAudioStream()] creates a new [AudioStream] instance on every call.
-/// The native FFI callbacks (_pushFfi, _uninitFfi, statistics callbacks) are
-/// initialized on the instance by [AudioStream.init].
-///
-/// Therefore this class owns exactly one [AudioStream] instance and uses
-/// that same instance for init(), push(), uninit(), resume(), and statistics.
-///
-/// The native mp_audio_stream implementation returns -1 from push() when
-/// its native playback buffer is full. TTS sentences can be several seconds
-/// long, while the native buffer is intentionally much smaller.
-///
-/// Therefore this class performs bounded PCM streaming with back-pressure
-/// instead of attempting to submit an entire TTS sentence in one native call.
-///
-/// Audio path:
+/// This class also exposes detailed runtime diagnostics for the audio path:
 ///
 ///   TTS
 ///    ↓
@@ -38,111 +21,71 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 ///    ↓
 ///   AudioStreamPlayer
 ///    ↓
-///   bounded PCM slices
-///    ↓
 ///   mp_audio_stream
 ///    ↓
 ///   Android audio output
 ///
-/// Usage:
+/// The diagnostics deliberately distinguish:
 ///
+///   - no samples;
+///   - silent PCM;
+///   - invalid PCM;
+///   - valid PCM successfully submitted to the native stream.
+///
+/// This allows the audio problem to be diagnosed before changing volume,
+/// speaker controls, UI controls, or the voice-session architecture.
+///
+/// Usage
+/// ──────
 /// ```dart
 /// final player = AudioStreamPlayer();
-/// player.push(samples, sampleRate);
-/// player.stop();
-/// player.dispose();
+/// player.push(samples, sampleRate);  // fire-and-forget
+/// // …
+/// player.stop();   // barge-in / session end
+/// player.dispose(); // widget / engine dispose
 /// ```
 class AudioStreamPlayer with RuntimeEventEmitter {
   static const String _tag = 'AUDIO_PLAYER';
 
-  /// Exactly one native AudioStream instance belongs to this player.
-  ///
-  /// It is critical that init(), push(), stat(), resume(), and uninit()
-  /// all operate on this same instance because the FFI callback fields
-  /// are initialized by AudioStream.init().
-  final AudioStream _audioStream = getAudioStream();
-
-  // ---------------------------------------------------------------------------
-  // Native lifecycle state
-  // ---------------------------------------------------------------------------
-
+  // Native hardware state.
   bool _initialized = false;
   int _initSampleRate = 0;
 
-  /// Prevents the active streaming loop from continuing after stop().
+  // Stop flag checked by the active play loop on every 50 ms tick.
   bool _stopRequested = false;
 
-  /// Monotonic lifecycle generation.
-  ///
-  /// Every stop()/dispose() invalidates all work belonging to the previous
-  /// generation. A queued Future may still physically complete later, but
-  /// it is never allowed to touch the native stream again.
+  // Monotonic lifecycle generation.
+  //
+  // Every stop/dispose invalidates all work belonging to the previous
+  // generation. This is required because replacing [_tail] does not cancel
+  // Futures that were already created.
   int _lifecycleGeneration = 0;
 
-  /// Number of complete TTS chunks queued or currently being streamed.
-  ///
-  /// This is a logical queue depth, not the native ring-buffer occupancy.
+  // Counts chunks that are in-flight (playing or queued) so that [isPlaying]
+  // reflects actual queue depth instead of a simple bool toggle.
   int _queueDepth = 0;
 
-  /// Serial playback tail.
-  ///
-  /// Each chunk waits for the previous chunk before touching the native
-  /// AudioStream.
+  // Serial playback queue implemented as a Future chain. Each [push] call
+  // appends a new link so that chunks execute one after the other.
   Future<void> _tail = Future<void>.value();
 
-  /// Diagnostic chunk counter.
+  // Monotonic counter used only for diagnostics.
   int _chunkSequence = 0;
 
-  /// Permanently disposed state.
+  // Whether this player has been permanently disposed.
   bool _disposed = false;
 
-  // ---------------------------------------------------------------------------
-  // Native audio configuration
-  // ---------------------------------------------------------------------------
-
-  /// Native ring-buffer duration.
-  ///
-  /// The player deliberately keeps this bounded because complete TTS
-  /// sentences are streamed progressively.
-  static const int _bufferMilliSec = 1000;
-
-  /// Native waiting buffer.
-  static const int _waitingBufferMilliSec = 100;
-
-  /// Maximum PCM slice submitted in one native push().
-  ///
-  /// 200 ms provides a good compromise between FFI-call overhead and
-  /// barge-in responsiveness.
-  static const int _pushSliceMilliSec = 200;
-
-  /// Delay after native push() reports a full buffer.
-  static const Duration _nativeRetryDelay =
-      Duration(milliseconds: 25);
-
-  /// Maximum consecutive retries for one slice.
-  ///
-  /// 100 retries × 25 ms = approximately 2.5 seconds.
-  static const int _maxPushRetries = 100;
-
-  // ---------------------------------------------------------------------------
-  // Public state
-  // ---------------------------------------------------------------------------
-
-  /// True while at least one TTS chunk is queued or being played.
+  /// `true` while audio is actively playing or queued to play.
   bool get isPlaying => _queueDepth > 0;
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
+  // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Enqueues [samples] (mono Float32 at [sampleRate]) for serial playback.
+  /// Enqueues [samples] (mono Float32 at [sampleRate] Hz) for serial playback.
   ///
-  /// The method returns immediately. Actual native submission occurs through
-  /// the serial Future queue.
-  void push(
-    Float32List samples,
-    int sampleRate,
-  ) {
+  /// The call returns immediately; actual playback begins once all previously
+  /// enqueued chunks have finished. Chunks invalidated by [stop] or [dispose]
+  /// are safely discarded before touching the native backend.
+  void push(Float32List samples, int sampleRate) {
     final chunkId = ++_chunkSequence;
     final generation = _lifecycleGeneration;
 
@@ -156,50 +99,7 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       return;
     }
 
-    if (samples.isEmpty) {
-      logEvent(
-        _tag,
-        '[PUSH_REJECTED] '
-        'chunk=$chunkId '
-        'reason=empty_pcm',
-      );
-      return;
-    }
-
-    if (sampleRate <= 0) {
-      logEvent(
-        _tag,
-        '[PUSH_REJECTED] '
-        'chunk=$chunkId '
-        'reason=invalid_sample_rate '
-        'sampleRate=$sampleRate',
-      );
-      return;
-    }
-
-    /*
-     * A valid new push belongs to the current generation.
-     *
-     * Do NOT use this push to invalidate a previous generation.
-     * Only stop()/dispose() are lifecycle invalidation points.
-     *
-     * The previous implementation reset _stopRequested here. That is
-     * dangerous because a queued chunk from the same logical queue could
-     * resurrect playback after a stop if its Future executes later.
-     *
-     * A new generation is created only by stop(). For normal sequential
-     * playback, _stopRequested is already false.
-     */
-    if (_stopRequested) {
-      logEvent(
-        _tag,
-        '[PUSH_REJECTED] '
-        'chunk=$chunkId '
-        'reason=stop_requested '
-        'generation=$generation',
-      );
-      return;
-    }
+    _stopRequested = false;
 
     logEvent(
       _tag,
@@ -217,22 +117,38 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       sampleRate: sampleRate,
     );
 
+    if (samples.isEmpty) {
+      logEvent(
+        _tag,
+        '[PUSH_REJECTED] chunk=$chunkId reason=empty_pcm',
+      );
+      return;
+    }
+
+    if (sampleRate <= 0) {
+      logEvent(
+        _tag,
+        '[PUSH_REJECTED] '
+        'chunk=$chunkId '
+        'reason=invalid_sample_rate '
+        'sampleRate=$sampleRate',
+      );
+      return;
+    }
+
     _queueDepth++;
 
-    final previous = _tail;
+    final prev = _tail;
 
-    final task = Future<void>(() async {
-      /*
-       * Wait for the previous TTS chunk.
-       *
-       * We intentionally do not cancel the previous Future: Dart Futures
-       * cannot be forcefully cancelled. Generation validation below makes
-       * stale work harmless.
-       */
-      await previous;
+    _tail = Future<void>(() async {
+      await prev;
 
       try {
-        if (!_isGenerationActive(generation)) {
+        // The player may have been stopped or disposed while this chunk was
+        // waiting behind earlier audio.
+        if (_disposed ||
+            generation != _lifecycleGeneration ||
+            _stopRequested) {
           logEvent(
             _tag,
             '[PLAY_SKIPPED] '
@@ -252,24 +168,9 @@ class AudioStreamPlayer with RuntimeEventEmitter {
           chunkId: chunkId,
           generation: generation,
         );
-      } catch (error) {
-        /*
-         * Keep the serial queue alive even if an unexpected Dart/native
-         * exception escapes from _doPlay().
-         */
-        logEvent(
-          _tag,
-          '[PLAY_UNEXPECTED_FAIL] '
-          'chunk=$chunkId '
-          'generation=$generation '
-          'error=$error',
-        );
       } finally {
-        /*
-         * A stop() invalidates the entire old queue and resets _queueDepth
-         * to zero. Do not decrement the new generation's queue depth from
-         * an old Future.
-         */
+        // A stopped/disposed generation must never decrement the queue depth
+        // of a newer generation.
         if (generation == _lifecycleGeneration) {
           if (_queueDepth > 0) {
             _queueDepth--;
@@ -294,14 +195,13 @@ class AudioStreamPlayer with RuntimeEventEmitter {
         }
       }
     });
-
-    _tail = task;
   }
 
-  /// Stops playback immediately and invalidates all queued/in-flight work.
+  /// Stops playback immediately, invalidates the current queue generation,
+  /// and releases the hardware audio buffer so that no residual audio remains
+  /// in the speaker pipeline.
   ///
-  /// Native resources are released synchronously after the lifecycle
-  /// generation is invalidated.
+  /// Call this on barge-in or when ending a voice session.
   void stop() {
     if (_disposed) {
       logEvent(
@@ -318,31 +218,19 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       'generation=$_lifecycleGeneration',
     );
 
-    /*
-     * Invalidate first.
-     *
-     * This is the most important ordering guarantee:
-     *
-     *   1. generation changes
-     *   2. stop flag becomes true
-     *   3. logical queue is cleared
-     *   4. native stream is torn down
-     *
-     * Any async continuation that wakes up after this point observes the
-     * new generation and cannot submit another PCM slice.
-     */
+    // Invalidate every queued Future belonging to the old generation.
     _lifecycleGeneration++;
+
     _stopRequested = true;
     _queueDepth = 0;
 
-    /*
-     * Detach the logical queue immediately.
-     *
-     * Existing Futures may still be waiting on their old predecessor,
-     * but generation invalidation makes them harmless.
-     */
+    // Reset the serial tail so future pushes start fresh.
+    //
+    // Existing Futures are not cancelled by this assignment, but their
+    // captured generation is now obsolete and they will exit safely.
     _tail = Future<void>.value();
 
+    // Tear down the hardware buffer to flush any queued audio instantly.
     _tearDownNative();
 
     logEvent(
@@ -352,7 +240,8 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     );
   }
 
-  /// Releases all native resources permanently.
+  /// Releases all native resources. Must be called once from the owning
+  /// engine's [dispose] method.
   void dispose() {
     if (_disposed) {
       logEvent(
@@ -367,9 +256,8 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       '[DISPOSE_BEGIN]',
     );
 
-    /*
-     * Invalidate the generation before touching native resources.
-     */
+    // Invalidate every queued/in-flight operation before touching native
+    // resources.
     _lifecycleGeneration++;
 
     _disposed = true;
@@ -386,9 +274,7 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Playback
-  // ---------------------------------------------------------------------------
+  // ── Playback ───────────────────────────────────────────────────────────────
 
   Future<void> _doPlay(
     Float32List samples,
@@ -396,7 +282,9 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     required int chunkId,
     required int generation,
   }) async {
-    if (!_isGenerationActive(generation)) {
+    if (_disposed ||
+        generation != _lifecycleGeneration ||
+        _stopRequested) {
       logEvent(
         _tag,
         '[PLAY_REJECTED_BEFORE_INIT] '
@@ -414,17 +302,19 @@ class AudioStreamPlayer with RuntimeEventEmitter {
         chunkId: chunkId,
         generation: generation,
       );
-    } catch (error) {
+    } catch (e) {
       logEvent(
         _tag,
         '[PLAY_INIT_FAIL] '
         'chunk=$chunkId '
-        'error=$error',
+        'error=$e',
       );
       return;
     }
 
-    if (!_isGenerationActive(generation)) {
+    if (_disposed ||
+        generation != _lifecycleGeneration ||
+        _stopRequested) {
       logEvent(
         _tag,
         '[PLAY_ABORTED_BEFORE_PUSH] '
@@ -451,25 +341,58 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       'generation=$generation',
     );
 
-    await _streamPcm(
-      samples,
-      sampleRate,
-      chunkId: chunkId,
-      generation: generation,
-    );
+    try {
+      // Push samples to the hardware ring-buffer.
+      final pushResult = getAudioStream().push(samples);
 
-    if (!_isGenerationActive(generation)) {
       logEvent(
         _tag,
-        '[PLAY_DONE] '
+        '[NATIVE_PUSH_RESULT] '
         'chunk=$chunkId '
-        'stopped=$_stopRequested '
-        'disposed=$_disposed '
-        'generation=$generation '
-        'currentGeneration=$_lifecycleGeneration '
-        'reason=lifecycle_invalidated',
+        'result=$pushResult '
+        'samples=${samples.length} '
+        'sampleRate=$sampleRate',
+      );
+
+      if (pushResult != 0) {
+        logEvent(
+          _tag,
+          '[NATIVE_PUSH_FAIL] '
+          'chunk=$chunkId '
+          'result=$pushResult',
+        );
+        return;
+      }
+
+      logEvent(
+        _tag,
+        '[NATIVE_PUSH_OK] '
+        'chunk=$chunkId '
+        'samples=${samples.length} '
+        'sampleRate=$sampleRate',
+      );
+    } catch (e) {
+      logEvent(
+        _tag,
+        '[NATIVE_PUSH_FAIL] '
+        'chunk=$chunkId '
+        'error=$e',
       );
       return;
+    }
+
+    // Wait for the approximate playback duration, waking every 50 ms so that
+    // a [stop] call is honoured within one polling tick (~50 ms latency).
+    var waited = 0;
+
+    while (waited < durationMs &&
+        !_stopRequested &&
+        !_disposed &&
+        generation == _lifecycleGeneration) {
+      await Future<void>.delayed(
+        const Duration(milliseconds: 50),
+      );
+      waited += 50;
     }
 
     logEvent(
@@ -480,261 +403,21 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       'disposed=$_disposed '
       'generation=$generation '
       'currentGeneration=$_lifecycleGeneration '
-      'streamed=${durationMs}ms '
+      'waited=${waited}ms '
       'expected=${durationMs}ms',
     );
   }
 
-  /// Streams one complete TTS PCM chunk through the native ring buffer.
-  ///
-  /// The complete sentence is never submitted in one native push().
-  ///
-  /// Instead:
-  ///
-  ///   Float32List sentence
-  ///          ↓
-  ///   200 ms slice
-  ///          ↓
-  ///   native push()
-  ///          ↓
-  ///   result == 0 → continue
-  ///   result == -1 → wait and retry
-  Future<void> _streamPcm(
-    Float32List samples,
-    int sampleRate, {
-    required int chunkId,
-    required int generation,
-  }) async {
-    final sliceSamples = math.max(
-      1,
-      (sampleRate * _pushSliceMilliSec / 1000).round(),
-    );
-
-    var offset = 0;
-    var sliceId = 0;
-
-    while (offset < samples.length) {
-      if (!_isGenerationActive(generation)) {
-        logEvent(
-          _tag,
-          '[STREAM_ABORTED] '
-          'chunk=$chunkId '
-          'offset=$offset '
-          'totalSamples=${samples.length} '
-          'generation=$generation '
-          'currentGeneration=$_lifecycleGeneration',
-        );
-        return;
-      }
-
-      final end = math.min(
-        offset + sliceSamples,
-        samples.length,
-      );
-
-      final slice = Float32List.sublistView(
-        samples,
-        offset,
-        end,
-      );
-
-      sliceId++;
-
-      final result = await _pushSliceWithBackpressure(
-        slice,
-        chunkId: chunkId,
-        sliceId: sliceId,
-        sampleRate: sampleRate,
-        generation: generation,
-      );
-
-      if (!result) {
-        logEvent(
-          _tag,
-          '[STREAM_ABORTED] '
-          'chunk=$chunkId '
-          'slice=$sliceId '
-          'offset=$offset '
-          'totalSamples=${samples.length} '
-          'generation=$generation',
-        );
-        return;
-      }
-
-      offset = end;
-    }
-
-    logEvent(
-      _tag,
-      '[STREAM_COMPLETE] '
-      'chunk=$chunkId '
-      'slices=$sliceId '
-      'samples=${samples.length} '
-      'sampleRate=$sampleRate',
-    );
-  }
-
-  /// Pushes one bounded PCM slice and applies back-pressure when native
-  /// reports that its ring buffer is full.
-  Future<bool> _pushSliceWithBackpressure(
-    Float32List slice, {
-    required int chunkId,
-    required int sliceId,
-    required int sampleRate,
-    required int generation,
-  }) async {
-    var retries = 0;
-
-    while (true) {
-      /*
-       * This check happens immediately before native push().
-       *
-       * Because push() itself is synchronous, stop() cannot interleave
-       * between this check and the native call on the same Dart isolate.
-       */
-      if (!_isGenerationActive(generation)) {
-        return false;
-      }
-
-      int result;
-
-      try {
-        /*
-         * IMPORTANT:
-         *
-         * This is the SAME AudioStream instance that was initialized by
-         * _ensureInit().
-         *
-         * Never replace this with getAudioStream() here.
-         */
-        result = _audioStream.push(slice);
-      } catch (error) {
-        logEvent(
-          _tag,
-          '[NATIVE_PUSH_EXCEPTION] '
-          'chunk=$chunkId '
-          'slice=$sliceId '
-          'attempt=${retries + 1} '
-          'samples=${slice.length} '
-          'sampleRate=$sampleRate '
-          'error=$error',
-        );
-
-        return false;
-      }
-
-      logEvent(
-        _tag,
-        '[NATIVE_PUSH_RESULT] '
-        'chunk=$chunkId '
-        'slice=$sliceId '
-        'attempt=${retries + 1} '
-        'result=$result '
-        'samples=${slice.length} '
-        'sampleRate=$sampleRate',
-      );
-
-      if (result == 0) {
-        logEvent(
-          _tag,
-          '[NATIVE_PUSH_OK] '
-          'chunk=$chunkId '
-          'slice=$sliceId '
-          'samples=${slice.length} '
-          'sampleRate=$sampleRate',
-        );
-
-        return true;
-      }
-
-      /*
-       * mp_audio_stream returns -1 when the native playback buffer is full.
-       */
-      if (result == -1) {
-        retries++;
-
-        if (retries > _maxPushRetries) {
-          AudioStreamStat? stat;
-
-          try {
-            stat = _audioStream.stat();
-          } catch (_) {
-            // Diagnostic only.
-          }
-
-          logEvent(
-            _tag,
-            '[NATIVE_PUSH_FAIL] '
-            'chunk=$chunkId '
-            'slice=$sliceId '
-            'result=$result '
-            'reason=buffer_full_timeout '
-            'retries=$retries '
-            'statFull=${stat?.full} '
-            'statExhaust=${stat?.exhaust}',
-          );
-
-          return false;
-        }
-
-        if (retries == 1 || retries % 10 == 0) {
-          AudioStreamStat? stat;
-
-          try {
-            stat = _audioStream.stat();
-          } catch (_) {
-            // Diagnostic only.
-          }
-
-          logEvent(
-            _tag,
-            '[NATIVE_PUSH_BACKPRESSURE] '
-            'chunk=$chunkId '
-            'slice=$sliceId '
-            'result=$result '
-            'retry=$retries '
-            'statFull=${stat?.full} '
-            'statExhaust=${stat?.exhaust}',
-          );
-        }
-
-        /*
-         * IMPORTANT:
-         *
-         * The delay yields to the Dart event loop. stop() can therefore
-         * occur here. The next loop iteration checks the generation before
-         * touching native again.
-         */
-        await Future<void>.delayed(
-          _nativeRetryDelay,
-        );
-
-        continue;
-      }
-
-      logEvent(
-        _tag,
-        '[NATIVE_PUSH_FAIL] '
-        'chunk=$chunkId '
-        'slice=$sliceId '
-        'result=$result '
-        'reason=unexpected_native_result',
-      );
-
-      return false;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Native lifecycle
-  // ---------------------------------------------------------------------------
+  // ── Native lifecycle ──────────────────────────────────────────────────────
 
   Future<void> _ensureInit(
     int sampleRate, {
     required int chunkId,
     required int generation,
   }) async {
-    if (!_isGenerationActive(generation)) {
+    if (_disposed ||
+        generation != _lifecycleGeneration ||
+        _stopRequested) {
       throw StateError(
         'Audio player lifecycle invalidated before init.',
       );
@@ -747,7 +430,6 @@ class AudioStreamPlayer with RuntimeEventEmitter {
         'sampleRate=$sampleRate '
         'generation=$generation',
       );
-
       return;
     }
 
@@ -761,23 +443,22 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       );
     }
 
-    /*
-     * Since playback is serialised, no other chunk is allowed to be using
-     * the native stream at this point.
-     */
     _tearDownNative();
 
-    if (!_isGenerationActive(generation)) {
+    if (_disposed ||
+        generation != _lifecycleGeneration ||
+        _stopRequested) {
       throw StateError(
         'Audio player lifecycle invalidated during reinit.',
       );
     }
 
-    final initResult = _audioStream.init(
+    // 1 000 ms ring-buffer: enough for a sentence chunk while still providing
+    // a sub-second response to barge-in after [stop] + [_tearDownNative].
+    final initResult = getAudioStream().init(
       sampleRate: sampleRate,
       channels: 1,
-      bufferMilliSec: _bufferMilliSec,
-      waitingBufferMilliSec: _waitingBufferMilliSec,
+      bufferMilliSec: 1000,
     );
 
     logEvent(
@@ -786,68 +467,19 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       'result=$initResult '
       'sampleRate=$sampleRate '
       'channels=1 '
-      'bufferMilliSec=$_bufferMilliSec '
-      'waitingBufferMilliSec=$_waitingBufferMilliSec',
+      'bufferMilliSec=1000',
     );
 
     if (initResult != 0) {
+      // IMPORTANT:
+      //
+      // Do not mark the Dart-side player as initialized when the native
+      // backend has explicitly reported failure.
       _initialized = false;
       _initSampleRate = 0;
 
       throw StateError(
         'mp_audio_stream.init failed with result=$initResult.',
-      );
-    }
-
-    try {
-      _audioStream.resetStat();
-    } catch (error) {
-      logEvent(
-        _tag,
-        '[AUDIO_STAT_RESET_WARN] '
-        'error=$error',
-      );
-    }
-
-    if (!_isGenerationActive(generation)) {
-      /*
-       * init() succeeded but stop()/dispose() happened before resume().
-       * Tear down immediately instead of resurrecting the native stream.
-       */
-      _tearDownNative();
-
-      throw StateError(
-        'Audio player lifecycle invalidated after init.',
-      );
-    }
-
-    try {
-      _audioStream.resume();
-
-      logEvent(
-        _tag,
-        '[AUDIO_RESUME_OK] '
-        'sampleRate=$sampleRate',
-      );
-    } catch (error) {
-      /*
-       * resume() is intentionally non-fatal here because the native stream
-       * may already be running depending on the platform implementation.
-       *
-       * push() remains the authoritative operation.
-       */
-      logEvent(
-        _tag,
-        '[AUDIO_RESUME_WARN] '
-        'error=$error',
-      );
-    }
-
-    if (!_isGenerationActive(generation)) {
-      _tearDownNative();
-
-      throw StateError(
-        'Audio player lifecycle invalidated after resume.',
       );
     }
 
@@ -859,15 +491,11 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       '[AUDIO_READY] '
       'sampleRate=$sampleRate '
       'channels=1 '
-      'bufferMilliSec=$_bufferMilliSec '
-      'waitingBufferMilliSec=$_waitingBufferMilliSec '
-      'pushSliceMilliSec=$_pushSliceMilliSec '
+      'bufferMilliSec=1000 '
       'generation=$generation',
     );
   }
 
-  /// Tears down the native stream using the SAME AudioStream instance that
-  /// performed init().
   void _tearDownNative() {
     if (!_initialized) {
       logEvent(
@@ -879,52 +507,61 @@ class AudioStreamPlayer with RuntimeEventEmitter {
 
     final sampleRate = _initSampleRate;
 
-    /*
-     * Mark the Dart-side native state invalid BEFORE calling uninit().
-     *
-     * This prevents re-entrant/error paths from believing that the native
-     * stream is still usable.
-     */
+    // Clear the Dart-side state before calling native cleanup. If uninit()
+    // reports an error, a second cleanup cannot accidentally be attempted
+    // through this lifecycle state.
     _initialized = false;
     _initSampleRate = 0;
 
     try {
-      _audioStream.uninit();
+      getAudioStream().uninit();
 
       logEvent(
         _tag,
         '[UNINIT_OK] '
         'sampleRate=$sampleRate',
       );
-    } catch (error) {
+    } catch (e) {
       logEvent(
         _tag,
         '[UNINIT_FAIL] '
-        'error=$error '
+        'error=$e '
         'sampleRate=$sampleRate',
       );
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Lifecycle helpers
-  // ---------------------------------------------------------------------------
+  // ── PCM diagnostics ───────────────────────────────────────────────────────
 
-  /// Returns true only when work belonging to [generation] is still allowed
-  /// to interact with the native audio layer.
-  bool _isGenerationActive(int generation) {
-    return !_disposed &&
-        !_stopRequested &&
-        generation == _lifecycleGeneration;
-  }
-
-  // ---------------------------------------------------------------------------
-  // PCM diagnostics
-  // ---------------------------------------------------------------------------
-
-  /// Analyses PCM before it reaches the native audio layer.
+  /// Analyses the PCM before it reaches the native audio layer.
   ///
-  /// Diagnostic only: samples are never modified.
+  /// This is intentionally diagnostic-only. It does not modify the samples.
+  ///
+  /// The most important values are:
+  ///
+  ///   peak
+  ///       Maximum absolute PCM amplitude.
+  ///
+  ///   rms
+  ///       Overall signal energy.
+  ///
+  ///   zeroPercent
+  ///       Percentage of exact-zero samples.
+  ///
+  ///   nonFinite
+  ///       NaN / Infinity samples.
+  ///
+  /// Interpretation:
+  ///
+  ///   peak == 0
+  ///       Definite digital silence.
+  ///
+  ///   very small peak / RMS
+  ///       Possible near-silence or extremely low TTS gain.
+  ///
+  ///   healthy non-zero PCM
+  ///       The problem is downstream of PCM generation and should not
+  ///       initially be treated as a simple TTS-volume problem.
   void _logPcmDiagnostics({
     required int chunkId,
     required Float32List samples,
@@ -985,7 +622,8 @@ class AudioStreamPlayer with RuntimeEventEmitter {
     final durationMs =
         (samples.length / sampleRate * 1000).round();
 
-    final classification = _classifyPcm(
+    final classification =
+        _classifyPcm(
       peak: peak,
       rms: rms,
       nonFiniteSamples: nonFiniteSamples,
@@ -1022,6 +660,8 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       return 'PCM_SILENCE';
     }
 
+    // Float PCM normally occupies approximately [-1, 1].
+    // This threshold is diagnostic only and deliberately conservative.
     if (peak < 0.001 && rms < 0.0003) {
       return 'PCM_NEAR_SILENCE';
     }
