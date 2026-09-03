@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 
@@ -13,6 +15,23 @@ class VoiceOutputService {
 
   VoiceEngineStatus? _lastStatus;
 
+  /// Serializza tutte le operazioni TTS.
+  ///
+  /// È importante soprattutto durante il primo utilizzo, quando Piper viene
+  /// inizializzato in modo lazy. Due tap ravvicinati non devono inizializzare
+  /// o pilotare contemporaneamente lo stesso runtime nativo.
+  Future<void> _operationQueue = Future<void>.value();
+
+  /// Testo attualmente associato alla riproduzione.
+  ///
+  /// Viene utilizzato per implementare il comportamento toggle:
+  ///
+  /// - primo tap sul messaggio -> play
+  /// - secondo tap sullo stesso messaggio -> stop
+  /// - tap su un altro messaggio -> interrompe il precedente e riproduce
+  ///   quello nuovo
+  String? _activeNormalizedText;
+
   VoiceEngineStatus? get lastStatus => _lastStatus;
 
   bool get isSpeaking => _engine.isSpeaking;
@@ -27,37 +46,138 @@ class VoiceOutputService {
     return _lastStatus?.initialized == true;
   }
 
-  Future<void> speak(String text) async {
-    final normalized = _normalizer.normalizeForTts(text);
+  /// Riproduce [text] usando il TTS.
+  ///
+  /// Questo metodo implementa deliberatamente una semantica "toggle":
+  ///
+  /// 1. se nulla sta parlando, avvia [text];
+  /// 2. se lo stesso testo sta parlando, lo ferma;
+  /// 3. se un altro testo sta parlando, lo ferma e avvia [text].
+  ///
+  /// Le operazioni vengono serializzate per evitare race condition durante
+  /// l'inizializzazione lazy di Sherpa/Piper e durante tap rapidi consecutivi.
+  Future<void> speak(String text) {
+    final normalized =
+        _normalizer.normalizeForTts(text);
 
     if (normalized.isEmpty) {
-      return;
+      return Future<void>.value();
     }
 
-    /*
-     * TTS is intentionally lazy.
-     *
-     * VoiceEngine.initialize() initializes the shared/native voice
-     * runtime and STT, but it deliberately does NOT initialize TTS.
-     *
-     * The concrete VoiceEngine implementation is responsible for
-     * creating the TTS engine when speak() is actually requested.
-     */
-    await _engine.speak(normalized);
+    return _enqueue(() async {
+      final currentlySpeaking =
+          _engine.isSpeaking;
 
-    /*
-     * Refresh the cached status after speak().
-     *
-     * This is important because a lazy TTS initialization may have
-     * changed speakerOutputReady/offlineTtsAvailable inside the engine.
-     */
+      final isSameText =
+          _activeNormalizedText ==
+              normalized;
+
+      // Secondo tap sullo stesso messaggio:
+      // comportamento STOP.
+      if (currentlySpeaking &&
+          isSameText) {
+        await _engine.stopSpeaking();
+
+        _activeNormalizedText = null;
+
+        await _refreshStatusSafely();
+
+        return;
+      }
+
+      // Se sta parlando un altro messaggio,
+      // interrompilo prima di iniziare il nuovo.
+      if (currentlySpeaking) {
+        await _engine.stopSpeaking();
+
+        _activeNormalizedText = null;
+      }
+
+      /*
+       * TTS intentionally remains lazy.
+       *
+       * SherpaOnnxVoiceEngine.speak() inizializza Piper soltanto quando
+       * l'utente richiede effettivamente la lettura.
+       *
+       * Non chiamiamo initialize() qui perché initialize() riguarda anche
+       * il percorso STT/microfono. L'altoparlante della chat deve poter
+       * funzionare indipendentemente dalla Live e dal riconoscimento vocale.
+       */
+      await _engine.speak(normalized);
+
+      // Impostiamo il testo attivo soltanto dopo che il comando speak è
+      // stato consegnato correttamente al motore.
+      _activeNormalizedText =
+          normalized;
+
+      /*
+       * Una lazy initialization del TTS può avere aggiornato:
+       *
+       * - speakerOutputReady
+       * - offlineTtsAvailable
+       *
+       * Il refresh dello stato non deve però trasformare un TTS riuscito
+       * in un errore applicativo.
+       */
+      await _refreshStatusSafely();
+    });
+  }
+
+  /// Interrompe sempre qualsiasi riproduzione TTS in corso.
+  Future<void> stopSpeaking() {
+    return _enqueue(() async {
+      await _engine.stopSpeaking();
+
+      _activeNormalizedText = null;
+
+      await _refreshStatusSafely();
+    });
+  }
+
+  Future<void> _refreshStatusSafely() async {
     try {
-      _lastStatus = await _engine.inspect();
+      _lastStatus =
+          await _engine.inspect();
     } catch (_) {
-      // The actual speech request has already been delegated to the engine.
-      // A status refresh must never make TTS fail.
+      // Lo stato diagnostico è best-effort.
+      // Non deve mai far fallire una richiesta TTS già eseguita.
     }
   }
 
-  Future<void> stopSpeaking() => _engine.stopSpeaking();
+  Future<void> _enqueue(
+    Future<void> Function() operation,
+  ) {
+    final completer =
+        Completer<void>();
+
+    _operationQueue =
+        _operationQueue.then<void>(
+      (_) async {
+        try {
+          await operation();
+          completer.complete();
+        } catch (error, stackTrace) {
+          completer.completeError(
+            error,
+            stackTrace,
+          );
+        }
+      },
+      onError: (_, __) async {
+        // Una precedente operazione fallita non deve bloccare
+        // permanentemente la coda TTS.
+        try {
+          await operation();
+          completer.complete();
+        } catch (error, stackTrace) {
+          completer.completeError(
+            error,
+            stackTrace,
+          );
+        }
+      },
+    );
+
+    return completer.future;
+  }
 }
