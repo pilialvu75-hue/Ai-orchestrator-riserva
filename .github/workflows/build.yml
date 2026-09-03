@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
@@ -51,7 +51,7 @@ jobs:
           fi
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -64,10 +64,10 @@ jobs:
           cache: true
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Cache native build (CMake/Ninja objects + FetchContent)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             android/app/.cxx
@@ -75,6 +75,7 @@ jobs:
           key: native-${{ runner.os }}-${{ hashFiles('native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h') }}
           restore-keys: |
             native-${{ runner.os }}-
+
       - name: Install Android SDK cmdline-tools v12
         run: |
           set -euo pipefail
@@ -97,12 +98,12 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y glslc ccache
           glslc --version
-          ccache --version 
+          ccache --version
 
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
       - name: Initialize CodeQL (C++ & Android Native)
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: 'cpp, java-kotlin'
           queries: security-and-quality
@@ -373,7 +374,7 @@ jobs:
       # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
       # A questo punto CodeQL ha catturato la compilazione di llama.cpp e dei servizi Java.
       - name: Perform CodeQL Final Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:multi"
 
@@ -462,7 +463,9 @@ jobs:
               LEGACY_EXPORTS="${LEGACY_EXPORTS}${MATCH}"$'\n'
             fi
           done
+
           printf '%s\n' "$LEGACY_EXPORTS" | tee runtime_bridge_exports_legacy.log >/dev/null
+
           if [ -n "$LEGACY_EXPORTS" ]; then
             echo "::error::legacy global bridge exports found in packaged APK"
             exit 1
@@ -473,7 +476,7 @@ jobs:
 
       - name: Upload release diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: android-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
@@ -491,7 +494,7 @@ jobs:
             runtime_bridge_nm_exports.log
 
       - name: Upload signed release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
           path: |
