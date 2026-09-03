@@ -1,241 +1,818 @@
-/// Application-wide constants used by multiple features.
-class AppConstants {
-AppConstants._();
+import 'dart:async';
+import 'dart:io';
 
-// ── Database ────────────────────────────────────────────────────────────────
-static const String databaseName = 'ai_orchestrator.db';
-static const int databaseVersion = 5;
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:record/record.dart';
+import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
-// ── Tables ──────────────────────────────────────────────────────────────────
-static const String tableProjectMemory = 'project_memory';
-static const String tableChatHistory = 'chat_history';
-static const String tableUserPreferences = 'user_preferences';
-static const String tableDocumentChunks = 'document_chunks';
-static const String tableSyncChanges = 'sync_changes';
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
+import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
+import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
-// ── sync_changes columns ────────────────────────────────────────────────────
-static const String colSyncId = 'sync_id';
-static const String colSyncCollection = 'collection';
-static const String colSyncKey = 'record_key';
-static const String colSyncValue = 'record_value';
-static const String colSyncHlc = 'hlc';
-static const String colSyncNodeId = 'node_id';
-static const String colSyncApplied = 'applied';
+class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
+  SherpaOnnxVoiceEngine({
+    VoiceModelPaths? modelPaths,
+  }) : _modelPaths = modelPaths ?? const VoiceModelPaths();
 
-// ── Sync / P2P constants ────────────────────────────────────────────────────
-static const int syncDefaultPort = 47847;
-static const int syncDiscoveryPort = 47848;
-static const String syncDiscoveryMulticast = '239.255.47.47';
-static const Duration syncDiscoveryInterval = Duration(seconds: 10);
-static const Duration syncConnectionTimeout = Duration(seconds: 5);
+  static const String _tag = 'VOICE_ENGINE';
 
-// ── project_memory columns ──────────────────────────────────────────────────
-static const String colId = 'id';
-static const String colMasterGoal = 'master_goal';
-static const String colCurrentContext = 'current_context';
-static const String colLastCodeSnippet = 'last_code_snippet';
-static const String colTimestamp = 'timestamp';
+  static const int _sampleRate = 16000;
+  static const int _channels = 1;
 
-// ── chat_history columns ────────────────────────────────────────────────────
-static const String colSessionId = 'session_id';
-static const String colRole = 'role';
-static const String colContent = 'content';
-static const String colProvider = 'provider';
-static const String colAttachments = 'attachments_json';
+  static const int _minSttEncoderBytes = 600 * 1024 * 1024;
+  static const int _minSttDecoderBytes = 10 * 1024 * 1024;
+  static const int _minSttJoinerBytes = 8 * 1024 * 1024;
+  static const int _minSttTokensBytes = 64 * 1024;
 
-// ── user_preferences columns ────────────────────────────────────────────────
-static const String colPrefKey = 'pref_key';
-static const String colPrefValue = 'pref_value';
+  final VoiceModelPaths _modelPaths;
 
-// ── document_chunks columns ─────────────────────────────────────────────────
-static const String colDocumentId = 'document_id';
-static const String colDocumentPath = 'document_path';
-static const String colDocumentTitle = 'document_title';
-static const String colChunkIndex = 'chunk_index';
-static const String colChunkText = 'chunk_text';
-static const String colVectorJson = 'vector_json';
+  final RuntimeModelPathResolver _pathResolver =
+      const RuntimeModelPathResolver();
 
-// ── Preference keys ─────────────────────────────────────────────────────────
-static const String prefActiveProvider = 'active_ai_provider';
-static const String prefThemeMode = 'theme_mode';
-static const String prefSelectedModel = 'selected_model';
-static const String prefOnboardingDone = 'onboarding_done';
-static const String prefUserName = 'user_name';
-static const String prefUserBirthDate = 'user_birth_date';
-static const String prefUserProfileData = 'user_profile_data';
-static const String prefDirectionalPrompt = 'directional_prompt';
-static const String prefLanguageOverride = 'language_override';
-static const String prefAiMode = 'ai_mode';
-static const String prefReleaseChannel = 'release_channel';
-static const String prefDeveloperMode = 'developer_mode';
-static const String prefMemoryWindowProfile = 'memory_window.profile';
-static const String prefMemoryWindowCustomTokenBudget =
-'memory_window.custom_token_budget';
-static const String prefMemoryWindowCustomLineBudget =
-'memory_window.custom_line_budget';
-static const String prefAssistantTextSize = 'chat.assistant_text_size';
-static const String prefLlmRoleBindingPrefix = 'llm.role.binding.';
+  final AudioRecorder _recorder = AudioRecorder();
 
-// ── AI providers ────────────────────────────────────────────────────────────
-static const String openAiBaseUrl = 'https://api.openai.com/v1';
-static const String geminiBaseUrl =
-'https://generativelanguage.googleapis.com/v1beta';
-static const String claudeBaseUrl = 'https://api.anthropic.com/v1';
-static const String grokBaseUrl = 'https://api.x.ai/v1';
-static const String copilotChatUrl =
-'https://api.githubcopilot.com/chat/completions';
+  final AudioStreamPlayer _audioPlayer = AudioStreamPlayer();
 
-// ── Android / Bixby Intent actions ─────────────────────────────────────────
-static const String intentActionShareContext =
-'com.aiorchestrator.SHARE_CONTEXT';
-static const String intentActionReceiveCode =
-'com.aiorchestrator.RECEIVE_CODE';
-static const String intentBixbyAlarm =
-'com.samsung.android.app.alarm.ADD_ALARM';
-static const String intentBixbyAirplaneMode =
-'android.settings.AIRPLANE_MODE_SETTINGS';
-static const String intentBixbyWifi = 'android.settings.WIFI_SETTINGS';
-static const String intentBixbyRoutine =
-'com.samsung.android.bixby.routines.ACTION_RUN_ROUTINE';
+  sherpa_onnx.OnlineRecognizer? _recognizer;
+  sherpa_onnx.OnlineStream? _asrStream;
+  sherpa_onnx.OfflineTts? _tts;
 
-// ── Cache management ────────────────────────────────────────────────────────
-static const int chatHistoryMaxAgeDays = 30;
-static const int chatHistoryMaxRows = 500;
+  StreamSubscription<Uint8List>? _micSubscription;
 
-// ── Local AI model definitions ─────────────────────────────────────────────
-static const String modelVersionManifestUrl =
-'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/models/manifest.json';
+  VoiceEngineStatus _status = VoiceEngineStatus.unsupported();
 
-static const String platformAndroid = 'android';
-static const String platformWindows = 'windows';
-static const String platformAll = 'all';
+  bool _isListening = false;
+  bool _initialized = false;
+  bool _initializing = false;
+  bool _disposed = false;
 
-static const List<Map<String, dynamic>> availableModels = [
-{
-'id': 'llama_1b',
-'displayName': 'TinyLlama 1.1B Chat',
-'fileName': 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
-'downloadUrl':
-'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf?download=true',
-'version': '1.0.0',
-'sizeBytes': 669000000,
-'description':
-'TinyLlama 1.1B Chat (Q4_K_M) – minimal verification model for Android local-runtime proof-of-life.',
-'platformTarget': 'android',
-'sizeCategory': '1B',
-},
-{
-'id': 'phi3_5_mini',
-'displayName': 'Phi-3.5 Mini Instruct',
-'fileName': 'Phi-3.5-mini-instruct-Q4_K_M.gguf',
-'downloadUrl':
-'https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf',
-'version': '1.0.0',
-'sizeBytes': 2390000000,
-'description':
-'Phi-3.5 Mini Instruct (Q4_K_M) – mobile-friendly 3.5B local model for concise reasoning and tool use.',
-'platformTarget': 'android',
-'sizeCategory': '4B',
-},
-];
+  Future<bool>? _bindingsInitFuture;
+  bool _bindingsReady = false;
 
-static const int contextWindowMaxMessages = 20;
-static const Duration modelDownloadTimeout = Duration(hours: 2);
+  Future<bool>? _ttsInitFuture;
 
-static const String updateManifestUrl =
-'https://raw.githubusercontent.com/pilialvu75-hue/Ai-orchestrator-riserva/main/update/version.json';
+  Float32List? _pendingTtsSamples;
+  int _pendingTtsSampleRate = 22050;
 
-static const String updateGitHubOwner = 'pilialvu75-hue';
-static const String updateGitHubRepo = 'Ai-orchestrator-riserva';
-static const Duration updateCheckInterval = Duration(hours: 12);
+  @override
+  bool get isListening => _isListening;
 
-// ── STT runtime hints ──────────────────────────────────────────────────────
-//
-// Nemotron is the current STT runtime.
-// The legacy Zipformer names below are retained only as compatibility
-// aliases for existing downloader/manifest code. They MUST NOT select the
-// old English Zipformer model.
-static const String sttDefaultLocaleId = 'it_IT';
-static const String sttModelType = 'nemotron';
-static const int sttNumThreads = 2;
+  @override
+  bool get isSpeaking => _audioPlayer.isPlaying;
 
-// ── Sherpa-ONNX STT file names ──────────────────────────────────────────────
-static const String sttEncoderFile = 'encoder.onnx';
-static const String sttDecoderFile = 'decoder.onnx';
-static const String sttJoinerFile = 'joiner.onnx';
-static const String sttTokensFile = 'tokens.txt';
+  Float32List? get pendingTtsSamples => _pendingTtsSamples;
 
-// ── Current Sherpa-ONNX STT: Nemotron ──────────────────────────────────────
-//
-// Multilingual streaming Nemotron 3.5 ASR.
-// Italian is supported and is the intended default language.
-static const String sttNemotronRepository =
-'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11';
+  int get pendingTtsSampleRate => _pendingTtsSampleRate;
 
-static const String sttNemotronTarUrl =
-'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
-'sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2';
+  // ---------------------------------------------------------------------------
+  // FILE HELPERS
+  // ---------------------------------------------------------------------------
 
-static const int sttNemotronTarExpectedBytes =
-1300 * 1024 * 1024;
+  static bool _isReadableAssetFileSync(String path) {
+    try {
+      final file = File(path);
+      return file.existsSync() && file.lengthSync() > 0;
+    } catch (_) {
+      return false;
+    }
+  }
 
-// ── STT compatibility aliases ──────────────────────────────────────────────
-//
-// Existing code still references these symbols. Keep them so the project
-// remains source-compatible while the actual model remains Nemotron.
-//
-// IMPORTANT:
-// These are aliases to Nemotron, NOT the old English Zipformer URL.
-static const String sttZipformerTarUrl = sttNemotronTarUrl;
-static const int sttZipformerTarExpectedBytes =
-sttNemotronTarExpectedBytes;
+  static bool _isValidSttAssetSync(String path, int minimumBytes) {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return false;
+      return file.lengthSync() >= minimumBytes;
+    } catch (_) {
+      return false;
+    }
+  }
 
-// ── Sherpa-ONNX TTS file names (Piper Paola) ────────────────────────────────
-// Modello Piper: usa espeak-ng-data invece di lexicon.txt.
-// Scaricato come archivio tar.bz2 da GitHub Releases.
-static const String ttsModelFile = 'it_IT-paola-medium.onnx';
-static const String ttsTokensFile = 'tokens.txt';
-static const String ttsEspeakDataDir = 'espeak-ng-data';
+  static bool _isReadableDirectorySync(String path) {
+    try {
+      return Directory(path).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
 
-// ── Sherpa-ONNX TTS download ────────────────────────────────────────────────
-static const String ttsPaolaRepository =
-'vits-piper-it_IT-paola-medium';
+  static String _preferredResolvedPath(RuntimeModelResolution resolution) {
+    if (_isReadableAssetFileSync(resolution.privateFile.path)) {
+      return resolution.privateFile.path;
+    }
+    if (_isReadableAssetFileSync(resolution.publicFile.path)) {
+      return resolution.publicFile.path;
+    }
+    return resolution.file.path;
+  }
 
-static const String ttsPaolaTarUrl =
-'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
-'vits-piper-it_IT-paola-medium.tar.bz2';
+  // ---------------------------------------------------------------------------
+  // STATUS
+  // ---------------------------------------------------------------------------
 
-static const int ttsPaolaTarExpectedBytes =
-63 * 1024 * 1024;
+  @override
+  Future<VoiceEngineStatus> inspect() async {
+    if (_disposed) {
+      return VoiceEngineStatus.unsupported(
+        details: 'Voice engine has been disposed.',
+      );
+    }
+    return _status;
+  }
 
-// ── Voice ───────────────────────────────────────────────────────────────────
-static const String sttDefaultLanguage = 'it-IT';
-static const String ttsDefaultLanguage = 'it-IT';
+  // ---------------------------------------------------------------------------
+  // SHERPA BINDINGS
+  // ---------------------------------------------------------------------------
 
-// ── Voice model storage ─────────────────────────────────────────────────────
-static const String voiceModelsDirectory = 'voice_models';
-static const String sttModelsDirectory = 'stt';
-static const String ttsModelsDirectory = 'tts';
+  Future<bool> _ensureNativeBindings() async {
+    if (_disposed) return false;
+    if (_bindingsReady) return true;
 
-// ── Voice model archive markers ─────────────────────────────────────────────
-static const String sttModelArchiveMarker =
-'stt_nemotron_multilingual';
-static const String ttsModelArchiveMarker =
-'tts_paola_italian';
+    final inFlight = _bindingsInitFuture;
+    if (inFlight != null) return inFlight;
 
-// ── Audio ──────────────────────────────────────────────────────────────────
-static const int voiceSampleRate = 16000;
-static const int voiceChannels = 1;
+    final future = _initializeNativeBindings();
+    _bindingsInitFuture = future;
 
-// ── Voice endpointing ──────────────────────────────────────────────────────
-static const double sttRule1MinTrailingSilence = 2.4;
-static const double sttRule2MinTrailingSilence = 1.4;
-static const double sttRule3MinUtteranceLength = 20.0;
+    try {
+      final ready = await future;
+      if (_disposed) return false;
+      _bindingsReady = ready;
+      return ready;
+    } finally {
+      if (identical(_bindingsInitFuture, future)) {
+        _bindingsInitFuture = null;
+      }
+    }
+  }
 
-// ── Sherpa-ONNX platform channels ──────────────────────────────────────────
-static const String sherpaVoiceMethodChannel =
-'com.aiorchestrator/sherpa_onnx_voice';
+  Future<bool> _initializeNativeBindings() async {
+    if (_disposed) return false;
 
-static const String sherpaAsrEventChannel =
-'com.aiorchestrator/sherpa_onnx_asr_events';
+    final supported = !kIsWeb &&
+        (Platform.isAndroid ||
+            Platform.isWindows ||
+            Platform.isLinux ||
+            Platform.isMacOS);
+
+    if (!supported) {
+      const message =
+          'Sherpa-ONNX voice engine is not supported on this platform.';
+      logEvent(_tag, '[VOICE_UNSUPPORTED] $message');
+      _status = VoiceEngineStatus.unsupported(details: message);
+      return false;
+    }
+
+    // ── FIX: on Object cattura sia Exception che Error nativi ──
+    try {
+      sherpa_onnx.initBindings();
+      logEvent(_tag, '[ONNX_BIND_OK]');
+      return true;
+    } on Object catch (error) {
+      final message = 'Failed to load Sherpa-ONNX native libraries: $error';
+      logEvent(_tag, '[ONNX_BIND_FAIL] $message');
+      _status = VoiceEngineStatus.unsupported(details: message);
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // STT
+  // ---------------------------------------------------------------------------
+
+  Future<bool> _initializeStt() async {
+    if (_disposed) return false;
+
+    // ── FIX: on Object cattura sia Exception che Error nativi ──
+    try {
+      final bindingsReady = await _ensureNativeBindings();
+      if (!bindingsReady || _disposed) {
+        logEvent(_tag, '[STT_BLOCKED] native bindings unavailable');
+        return false;
+      }
+
+      final sttEncoderResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttEncoderFile,
+        privateAbsolutePathHint: _modelPaths.sttEncoder,
+      );
+      final sttDecoderResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttDecoderFile,
+        privateAbsolutePathHint: _modelPaths.sttDecoder,
+      );
+      final sttJoinerResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttJoinerFile,
+        privateAbsolutePathHint: _modelPaths.sttJoiner,
+      );
+      final sttTokensResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.sttTokensFile,
+        privateAbsolutePathHint: _modelPaths.sttTokens,
+      );
+
+      final sttEncoderPath = _modelPaths.sttEncoder ??
+          _preferredResolvedPath(sttEncoderResolution);
+      final sttDecoderPath = _modelPaths.sttDecoder ??
+          _preferredResolvedPath(sttDecoderResolution);
+      final sttJoinerPath = _modelPaths.sttJoiner ??
+          _preferredResolvedPath(sttJoinerResolution);
+      final sttTokensPath = _modelPaths.sttTokens ??
+          _preferredResolvedPath(sttTokensResolution);
+
+      final invalid = <String>[];
+
+      if (!_isValidSttAssetSync(sttEncoderPath, _minSttEncoderBytes)) {
+        invalid.add(
+            '${AppConstants.sttEncoderFile}($sttEncoderPath, min=$_minSttEncoderBytes)');
+      }
+      if (!_isValidSttAssetSync(sttDecoderPath, _minSttDecoderBytes)) {
+        invalid.add(
+            '${AppConstants.sttDecoderFile}($sttDecoderPath, min=$_minSttDecoderBytes)');
+      }
+      if (!_isValidSttAssetSync(sttJoinerPath, _minSttJoinerBytes)) {
+        invalid.add(
+            '${AppConstants.sttJoinerFile}($sttJoinerPath, min=$_minSttJoinerBytes)');
+      }
+      if (!_isValidSttAssetSync(sttTokensPath, _minSttTokensBytes)) {
+        invalid.add(
+            '${AppConstants.sttTokensFile}($sttTokensPath, min=$_minSttTokensBytes)');
+      }
+
+      if (invalid.isNotEmpty) {
+        logEvent(_tag, '[STT_ASSETS_INVALID] ${invalid.join(", ")}');
+        return false;
+      }
+
+      logEvent(
+        _tag,
+        '[STT_ASSETS_VALIDATED] '
+        'encoder=${File(sttEncoderPath).lengthSync()} '
+        'decoder=${File(sttDecoderPath).lengthSync()} '
+        'joiner=${File(sttJoinerPath).lengthSync()} '
+        'tokens=${File(sttTokensPath).lengthSync()}',
+      );
+
+      final modelConfig = sherpa_onnx.OnlineModelConfig(
+        transducer: sherpa_onnx.OnlineTransducerModelConfig(
+          encoder: sttEncoderPath,
+          decoder: sttDecoderPath,
+          joiner: sttJoinerPath,
+        ),
+        tokens: sttTokensPath,
+        numThreads: AppConstants.sttNumThreads,
+        provider: 'cpu',
+        debug: false,
+        modelType: AppConstants.sttModelType,
+      );
+
+      final recognizerConfig = sherpa_onnx.OnlineRecognizerConfig(
+        model: modelConfig,
+        enableEndpoint: true,
+        rule1MinTrailingSilence: AppConstants.sttRule1MinTrailingSilence,
+        rule2MinTrailingSilence: AppConstants.sttRule2MinTrailingSilence,
+        rule3MinUtteranceLength: AppConstants.sttRule3MinUtteranceLength,
+      );
+
+      logEvent(
+          _tag, '[STT_BEFORE_RECOGNIZER_CREATE] model=nemotron-3.5 provider=cpu');
+
+      final recognizer = sherpa_onnx.OnlineRecognizer(recognizerConfig);
+
+      if (_disposed) {
+        try {
+          recognizer.free();
+        } catch (_) {}
+        return false;
+      }
+
+      _recognizer = recognizer;
+      logEvent(_tag, '[STT_READY] OnlineRecognizer ready');
+      return true;
+    } on Object catch (error) {
+      final message = 'STT recognizer init failed: $error';
+      logEvent(_tag, '[STT_INIT_FAIL] $message');
+      _recognizer = null;
+      return false;
+    }
+  }
+
+  static String _normalizeSttLanguage(String localeId) {
+    final normalized = localeId.trim().replaceAll('_', '-');
+    if (normalized.isEmpty) return AppConstants.sttDefaultLanguage;
+    return normalized;
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTS
+  // ---------------------------------------------------------------------------
+
+  Future<bool> _initializeTts() async {
+    if (_disposed) return false;
+
+    // ── FIX: on Object cattura sia Exception che Error nativi ──
+    try {
+      final bindingsReady = await _ensureNativeBindings();
+      if (!bindingsReady || _disposed) {
+        logEvent(_tag, '[TTS_INIT_FAIL] Native bindings unavailable');
+        return false;
+      }
+
+      logEvent(_tag, '[TTS_BINDINGS_READY]');
+
+      final ttsModelResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.ttsModelFile,
+        privateAbsolutePathHint: _modelPaths.ttsModel,
+      );
+      final ttsTokensResolution = await _pathResolver.resolveForRead(
+        fileName: AppConstants.ttsTokensFile,
+        privateAbsolutePathHint: _modelPaths.ttsTokens,
+      );
+
+      final ttsModelPath =
+          _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
+      final ttsTokensPath =
+          _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
+
+      final privateDir = await _pathResolver.privateModelsDirectory();
+
+      final ttsDataDir = (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
+          ? _modelPaths.ttsDataDir!
+          : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
+
+      final missing = <String>[];
+
+      if (!_isReadableAssetFileSync(ttsModelPath)) {
+        missing.add('${AppConstants.ttsModelFile}($ttsModelPath)');
+      }
+      if (!_isReadableAssetFileSync(ttsTokensPath)) {
+        missing.add('${AppConstants.ttsTokensFile}($ttsTokensPath)');
+      }
+      if (!_isReadableDirectorySync(ttsDataDir)) {
+        missing.add('${AppConstants.ttsEspeakDataDir}($ttsDataDir)');
+      }
+
+      if (missing.isNotEmpty) {
+        logEvent(
+            _tag, '[TTS_INIT_FAIL] Missing TTS assets: ${missing.join(", ")}');
+        return false;
+      }
+
+      final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
+        vits: sherpa_onnx.OfflineTtsVitsModelConfig(
+          model: ttsModelPath,
+          lexicon: '',
+          tokens: ttsTokensPath,
+          dataDir: ttsDataDir,
+        ),
+        numThreads: 2,
+        debug: false,
+        provider: 'cpu',
+      );
+
+      final ttsConfig = sherpa_onnx.OfflineTtsConfig(model: ttsModelConfig);
+
+      logEvent(_tag, '[TTS_BEFORE_INIT] lazy=true');
+
+      final tts = sherpa_onnx.OfflineTts(ttsConfig);
+
+      if (_disposed) {
+        try {
+          tts.free();
+        } catch (_) {}
+        return false;
+      }
+
+      _tts = tts;
+      logEvent(_tag, '[TTS_READY] OfflineTts ready');
+      return true;
+    } on Object catch (error) {
+      final message = 'TTS engine init failed: $error';
+      logEvent(_tag, '[TTS_INIT_FAIL] $message');
+      _tts = null;
+      return false;
+    }
+  }
+
+  Future<bool> _ensureTtsInitialized() async {
+    if (_disposed) return false;
+    if (_tts != null) return true;
+
+    final inFlight = _ttsInitFuture;
+    if (inFlight != null) return inFlight;
+
+    logEvent(_tag, '[TTS_LAZY_INIT]');
+
+    final future = _initializeTts();
+    _ttsInitFuture = future;
+
+    try {
+      final ready = await future;
+      if (_disposed) return false;
+
+      if (ready) {
+        _status = _status.copyWith(
+          speakerOutputReady: true,
+          offlineTtsAvailable: true,
+        );
+        logEvent(_tag, '[TTS_LAZY_READY]');
+      } else {
+        logEvent(_tag, '[TTS_LAZY_FAIL]');
+      }
+
+      return ready;
+    } finally {
+      if (identical(_ttsInitFuture, future)) {
+        _ttsInitFuture = null;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // MICROPHONE
+  // ---------------------------------------------------------------------------
+
+  Future<bool> _initializeMic() async {
+    if (_disposed) return false;
+
+    try {
+      final hasPermission = await _recorder.hasPermission();
+      if (_disposed) return false;
+      logEvent(_tag, '[MIC_STATUS] permission=$hasPermission');
+      return hasPermission;
+    } on Object catch (error) {
+      logEvent(_tag, '[MIC_STATUS_FAIL] $error');
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ENGINE INITIALIZATION
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<VoiceEngineStatus> initialize() async {
+    if (_disposed) {
+      return VoiceEngineStatus.unsupported(
+        details: 'Voice engine has been disposed.',
+      );
+    }
+
+    if (_initialized) return _status;
+    if (_initializing) return _status;
+
+    _initializing = true;
+
+    try {
+      final nativeReady = await _ensureNativeBindings();
+      if (!nativeReady || _disposed) return _status;
+
+      final sttReady = await _initializeStt();
+      if (_disposed) return _status;
+
+      final micReady = await _initializeMic();
+      if (_disposed) return _status;
+
+      final initOk = sttReady;
+      _initialized = initOk;
+
+      _status = VoiceEngineStatus(
+        engineId: sherpaOnnxEngineId,
+        supportedPlatform: true,
+        nativeLibrariesLoaded: true,
+        microphonePermissionGranted: micReady,
+        audioSessionReady: micReady,
+        speakerOutputReady: false,
+        initialized: initOk,
+        offlineAsrAvailable: sttReady,
+        offlineTtsAvailable: false,
+        isVoiceDownloaded: sttReady,
+        details:
+            initOk ? null : 'Risorse vocali STT non disponibili.',
+      );
+
+      logEvent(
+        _tag,
+        '[INIT_COMPLETE] stt=$sttReady tts=false mic=$micReady ttsDeferred=true',
+      );
+
+      return _status;
+    } on Object catch (error) {
+      logEvent(_tag, '[INIT_FAIL] Voice initialization failed: $error');
+      _initialized = false;
+      _status = VoiceEngineStatus.unsupported(
+        details: 'Voice initialization failed.',
+      );
+      return _status;
+    } finally {
+      _initializing = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // LISTENING / ASR
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> startListening({
+    required VoiceRecognitionResultCallback onResult,
+    String localeId = AppConstants.sttDefaultLocaleId,
+  }) async {
+    if (_disposed) return;
+    if (_isListening) return;
+
+    final recognizer = _recognizer;
+    if (recognizer == null) {
+      logEvent(_tag, '[ASR_BLOCKED] recognizer unavailable');
+      return;
+    }
+
+    try {
+      await _closeMicSafely();
+      await _closeAsrStreamSafely();
+
+      if (_disposed) return;
+
+      final hasPermission = await _recorder.hasPermission();
+      if (!hasPermission || _disposed) {
+        logEvent(_tag, '[ASR_BLOCKED] microphone unavailable');
+        return;
+      }
+
+      final activeStream = recognizer.createStream();
+      final language = _normalizeSttLanguage(localeId);
+
+      try {
+        activeStream.setOption(key: 'language', value: language);
+        logEvent(
+            _tag, '[ASR_LANGUAGE_SET] locale=$localeId language=$language');
+      } on Object catch (error) {
+        try {
+          activeStream.free();
+        } catch (_) {}
+        logEvent(
+            _tag, '[ASR_LANGUAGE_SET_FAIL] language=$language error=$error');
+        return;
+      }
+
+      if (_disposed) {
+        try {
+          activeStream.free();
+        } catch (_) {}
+        return;
+      }
+
+      _asrStream = activeStream;
+
+      logEvent(_tag, '[ASR_BEFORE_START_STREAM]');
+
+      final audioStream = await _recorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _sampleRate,
+          numChannels: _channels,
+        ),
+      );
+
+      if (_disposed) {
+        try {
+          await _recorder.stop();
+        } catch (_) {}
+        await _closeAsrStreamSafely();
+        return;
+      }
+
+      _isListening = true;
+
+      logEvent(
+          _tag, '[ASR_STARTED] sampleRate=$_sampleRate language=$language');
+
+      _micSubscription = audioStream.listen(
+        (Uint8List bytes) {
+          if (_disposed || !_isListening) return;
+
+          try {
+            if (bytes.length < 2) return;
+
+            final stream = _asrStream;
+            if (stream == null) return;
+
+            final samples = _pcm16BytesToFloat32(bytes);
+            if (samples.isEmpty) return;
+
+            stream.acceptWaveform(samples: samples, sampleRate: _sampleRate);
+
+            while (recognizer.isReady(stream)) {
+              recognizer.decode(stream);
+            }
+
+            if (recognizer.isEndpoint(stream)) {
+              final result = recognizer.getResult(stream);
+              final text = result.text.trim();
+
+              if (text.isNotEmpty) {
+                logEvent(_tag, '[ASR_FINAL] chars=${text.length}');
+                onResult(text, true);
+              }
+
+              recognizer.reset(stream);
+            } else {
+              final result = recognizer.getResult(stream);
+              final partialText = result.text.trim();
+
+              if (partialText.isNotEmpty) {
+                onResult(partialText, false);
+              }
+            }
+          } on Object catch (error) {
+            logEvent(_tag, '[ASR_FRAME_FAIL] $error');
+          }
+        },
+        onError: (Object error) {
+          if (_disposed) return;
+          logEvent(_tag, '[MIC_STREAM_ERROR] $error');
+          _isListening = false;
+        },
+        onDone: () {
+          if (_disposed) return;
+          _isListening = false;
+          logEvent(_tag, '[MIC_STREAM_DONE]');
+        },
+        cancelOnError: false,
+      );
+    } on Object catch (error) {
+      logEvent(_tag, '[ASR_START_FAIL] $error');
+      _isListening = false;
+      await _closeMicSafely();
+      await _closeAsrStreamSafely();
+    }
+  }
+
+  @override
+  Future<void> stopListening() async {
+    if (_disposed && !_isListening) return;
+    _isListening = false;
+    await _closeMicSafely();
+    await _closeAsrStreamSafely();
+  }
+
+  Future<void> _closeMicSafely() async {
+    final subscription = _micSubscription;
+    _micSubscription = null;
+
+    if (subscription != null) {
+      try {
+        await subscription.cancel();
+      } on Object catch (error) {
+        logEvent(_tag, '[MIC_CANCEL_WARN] $error');
+      }
+    }
+
+    try {
+      await _recorder.stop();
+    } on Object catch (error) {
+      logEvent(_tag, '[MIC_STOP_WARN] $error');
+    }
+  }
+
+  Future<void> _closeAsrStreamSafely() async {
+    final stream = _asrStream;
+    _asrStream = null;
+
+    if (stream == null) return;
+
+    try {
+      stream.free();
+    } on Object catch (error) {
+      logEvent(_tag, '[ASR_STREAM_FREE_WARN] $error');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTS
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> speak(String text) async {
+    if (_disposed) return;
+
+    final sanitized = text.trim();
+    if (sanitized.isEmpty) return;
+
+    final ttsReady = await _ensureTtsInitialized();
+
+    if (!ttsReady || _disposed) {
+      logEvent(_tag, '[TTS_BLOCKED] engine unavailable');
+      return;
+    }
+
+    final tts = _tts;
+    if (tts == null) {
+      logEvent(_tag, '[TTS_BLOCKED] engine unavailable');
+      return;
+    }
+
+    try {
+      final audio = tts.generate(
+        text: sanitized,
+        sid: 0,
+        speed: _status.speechRate,
+      );
+
+      if (_disposed) return;
+
+      _pendingTtsSamples = audio.samples;
+      _pendingTtsSampleRate = audio.sampleRate;
+
+      logEvent(
+        _tag,
+        '[TTS_AUDIO_READY] samples=${audio.samples.length} sampleRate=${audio.sampleRate}',
+      );
+
+      _audioPlayer.push(audio.samples, audio.sampleRate);
+    } on Object catch (error) {
+      logEvent(_tag, '[TTS_FAIL] $error');
+    }
+  }
+
+  @override
+  Future<void> stopSpeaking() async {
+    if (_disposed && !_audioPlayer.isPlaying) return;
+
+    try {
+      _audioPlayer.stop();
+    } on Object catch (error) {
+      logEvent(_tag, '[TTS_STOP_WARN] $error');
+    }
+
+    _pendingTtsSamples = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // DISPOSE
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) return;
+
+    _disposed = true;
+    _isListening = false;
+    _initialized = false;
+    _ttsInitFuture = null;
+    _bindingsInitFuture = null;
+    _bindingsReady = false;
+
+    await _closeMicSafely();
+    await _closeAsrStreamSafely();
+
+    try {
+      _recognizer?.free();
+    } on Object catch (error) {
+      logEvent(_tag, '[RECOGNIZER_FREE_WARN] $error');
+    }
+
+    _recognizer = null;
+
+    try {
+      _tts?.free();
+    } on Object catch (error) {
+      logEvent(_tag, '[TTS_FREE_WARN] $error');
+    }
+
+    _tts = null;
+
+    try {
+      await _recorder.dispose();
+    } on Object catch (error) {
+      logEvent(_tag, '[RECORDER_DISPOSE_WARN] $error');
+    }
+
+    try {
+      _audioPlayer.dispose();
+    } on Object catch (error) {
+      logEvent(_tag, '[AUDIO_PLAYER_DISPOSE_WARN] $error');
+    }
+
+    _pendingTtsSamples = null;
+
+    _status = VoiceEngineStatus.unsupported(details: 'Engine disposed.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // PCM CONVERSION
+  // ---------------------------------------------------------------------------
+
+  static Float32List _pcm16BytesToFloat32(Uint8List bytes) {
+    final numSamples = bytes.length ~/ 2;
+    if (numSamples <= 0) return Float32List(0);
+
+    final samples = Float32List(numSamples);
+    final byteData = ByteData.sublistView(bytes);
+
+    for (var i = 0; i < numSamples; i++) {
+      samples[i] = byteData.getInt16(i * 2, Endian.little) / 32768.0;
+    }
+
+    return samples;
+  }
 }
