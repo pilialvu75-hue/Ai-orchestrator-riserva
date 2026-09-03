@@ -98,6 +98,72 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     }
   }
 
+  static int _safeFileLengthSync(String path) {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return -1;
+      return file.lengthSync();
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  static String _directorySnapshotSync(
+    String path, {
+    int maxEntries = 40,
+  }) {
+    try {
+      final directory = Directory(path);
+
+      if (!directory.existsSync()) {
+        return 'missing';
+      }
+
+      final entities = directory.listSync(followLinks: false)
+        ..sort(
+          (a, b) => p.basename(a.path).compareTo(
+                p.basename(b.path),
+              ),
+        );
+
+      if (entities.isEmpty) {
+        return 'empty';
+      }
+
+      final items = <String>[];
+
+      for (final entity in entities.take(maxEntries)) {
+        final name = p.basename(entity.path);
+
+        if (entity is File) {
+          var size = -1;
+
+          try {
+            size = entity.lengthSync();
+          } catch (_) {}
+
+          items.add('file:$name:$size');
+        } else if (entity is Directory) {
+          items.add('dir:$name');
+        } else if (entity is Link) {
+          items.add('link:$name');
+        } else {
+          items.add('other:$name');
+        }
+      }
+
+      if (entities.length > maxEntries) {
+        items.add(
+          '...+${entities.length - maxEntries}_more',
+        );
+      }
+
+      return items.join(',');
+    } catch (error) {
+      return 'snapshot_error:$error';
+    }
+  }
+
   static String _preferredResolvedPath(RuntimeModelResolution resolution) {
     if (_isReadableAssetFileSync(resolution.privateFile.path)) {
       return resolution.privateFile.path;
@@ -223,23 +289,34 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       if (!_isValidSttAssetSync(sttEncoderPath, _minSttEncoderBytes)) {
         invalid.add(
-            '${AppConstants.sttEncoderFile}($sttEncoderPath, min=$_minSttEncoderBytes)');
+          '${AppConstants.sttEncoderFile}'
+          '($sttEncoderPath, min=$_minSttEncoderBytes)',
+        );
       }
       if (!_isValidSttAssetSync(sttDecoderPath, _minSttDecoderBytes)) {
         invalid.add(
-            '${AppConstants.sttDecoderFile}($sttDecoderPath, min=$_minSttDecoderBytes)');
+          '${AppConstants.sttDecoderFile}'
+          '($sttDecoderPath, min=$_minSttDecoderBytes)',
+        );
       }
       if (!_isValidSttAssetSync(sttJoinerPath, _minSttJoinerBytes)) {
         invalid.add(
-            '${AppConstants.sttJoinerFile}($sttJoinerPath, min=$_minSttJoinerBytes)');
+          '${AppConstants.sttJoinerFile}'
+          '($sttJoinerPath, min=$_minSttJoinerBytes)',
+        );
       }
       if (!_isValidSttAssetSync(sttTokensPath, _minSttTokensBytes)) {
         invalid.add(
-            '${AppConstants.sttTokensFile}($sttTokensPath, min=$_minSttTokensBytes)');
+          '${AppConstants.sttTokensFile}'
+          '($sttTokensPath, min=$_minSttTokensBytes)',
+        );
       }
 
       if (invalid.isNotEmpty) {
-        logEvent(_tag, '[STT_ASSETS_INVALID] ${invalid.join(", ")}');
+        logEvent(
+          _tag,
+          '[STT_ASSETS_INVALID] ${invalid.join(", ")}',
+        );
         return false;
       }
 
@@ -274,7 +351,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       );
 
       logEvent(
-          _tag, '[STT_BEFORE_RECOGNIZER_CREATE] model=nemotron-3.5 provider=cpu');
+        _tag,
+        '[STT_BEFORE_RECOGNIZER_CREATE] '
+        'model=nemotron-3.5 provider=cpu',
+      );
 
       final recognizer = sherpa_onnx.OnlineRecognizer(recognizerConfig);
 
@@ -309,11 +389,14 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   Future<bool> _initializeTts() async {
     if (_disposed) return false;
 
-    // ── FIX: on Object cattura sia Exception che Error nativi ──
     try {
       final bindingsReady = await _ensureNativeBindings();
+
       if (!bindingsReady || _disposed) {
-        logEvent(_tag, '[TTS_INIT_FAIL] Native bindings unavailable');
+        logEvent(
+          _tag,
+          '[TTS_INIT_FAIL] Native bindings unavailable',
+        );
         return false;
       }
 
@@ -323,6 +406,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         fileName: AppConstants.ttsModelFile,
         privateAbsolutePathHint: _modelPaths.ttsModel,
       );
+
       final ttsTokensResolution = await _pathResolver.resolveForRead(
         fileName: AppConstants.ttsTokensFile,
         privateAbsolutePathHint: _modelPaths.ttsTokens,
@@ -330,6 +414,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       final ttsModelPath =
           _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
+
       final ttsTokensPath =
           _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
 
@@ -337,25 +422,68 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       final ttsDataDir = (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
           ? _modelPaths.ttsDataDir!
-          : p.join(privateDir.path, AppConstants.ttsEspeakDataDir);
+          : p.join(
+              privateDir.path,
+              AppConstants.ttsEspeakDataDir,
+            );
+
+      logEvent(
+        _tag,
+        '[TTS_ASSET_PATHS] '
+        'model=$ttsModelPath '
+        'tokens=$ttsTokensPath '
+        'dataDir=$ttsDataDir',
+      );
 
       final missing = <String>[];
 
       if (!_isReadableAssetFileSync(ttsModelPath)) {
-        missing.add('${AppConstants.ttsModelFile}($ttsModelPath)');
+        missing.add(
+          '${AppConstants.ttsModelFile}($ttsModelPath)',
+        );
       }
+
       if (!_isReadableAssetFileSync(ttsTokensPath)) {
-        missing.add('${AppConstants.ttsTokensFile}($ttsTokensPath)');
+        missing.add(
+          '${AppConstants.ttsTokensFile}($ttsTokensPath)',
+        );
       }
+
       if (!_isReadableDirectorySync(ttsDataDir)) {
-        missing.add('${AppConstants.ttsEspeakDataDir}($ttsDataDir)');
+        missing.add(
+          '${AppConstants.ttsEspeakDataDir}($ttsDataDir)',
+        );
       }
 
       if (missing.isNotEmpty) {
         logEvent(
-            _tag, '[TTS_INIT_FAIL] Missing TTS assets: ${missing.join(", ")}');
+          _tag,
+          '[TTS_INIT_FAIL] '
+          'Missing TTS assets: ${missing.join(", ")}',
+        );
         return false;
       }
+
+      final modelBytes = _safeFileLengthSync(ttsModelPath);
+      final tokensBytes = _safeFileLengthSync(ttsTokensPath);
+
+      logEvent(
+        _tag,
+        '[TTS_ASSET_SIZES] '
+        'model_bytes=$modelBytes '
+        'tokens_bytes=$tokensBytes',
+      );
+
+      final dataDirSnapshot = _directorySnapshotSync(
+        ttsDataDir,
+      );
+
+      logEvent(
+        _tag,
+        '[TTS_DATA_DIR_SNAPSHOT] '
+        'path=$ttsDataDir '
+        'entries=$dataDirSnapshot',
+      );
 
       final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
         vits: sherpa_onnx.OfflineTtsVitsModelConfig(
@@ -369,11 +497,42 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         provider: 'cpu',
       );
 
-      final ttsConfig = sherpa_onnx.OfflineTtsConfig(model: ttsModelConfig);
+      final ttsConfig = sherpa_onnx.OfflineTtsConfig(
+        model: ttsModelConfig,
+      );
 
-      logEvent(_tag, '[TTS_BEFORE_INIT] lazy=true');
+      logEvent(
+        _tag,
+        '[TTS_CONFIG_READY] '
+        'family=vits '
+        'provider=cpu '
+        'numThreads=2 '
+        'debug=false '
+        'lexicon_empty=true '
+        'model_bytes=$modelBytes '
+        'tokens_bytes=$tokensBytes',
+      );
 
+      logEvent(
+        _tag,
+        '[TTS_NATIVE_CREATE_BEGIN] '
+        'lazy=true '
+        'family=vits',
+      );
+
+      // IMPORTANT:
+      // Se il processo Android muore dopo TTS_NATIVE_CREATE_BEGIN e prima di
+      // TTS_NATIVE_CREATE_RETURNED, il crash avviene nel codice nativo
+      // sherpa-onnx/ONNX Runtime durante la creazione di OfflineTts.
+      //
+      // Un SIGSEGV/SIGABRT nativo non può essere catturato dal try/catch Dart.
       final tts = sherpa_onnx.OfflineTts(ttsConfig);
+
+      logEvent(
+        _tag,
+        '[TTS_NATIVE_CREATE_RETURNED] '
+        'family=vits',
+      );
 
       if (_disposed) {
         try {
@@ -383,11 +542,23 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       }
 
       _tts = tts;
-      logEvent(_tag, '[TTS_READY] OfflineTts ready');
+
+      logEvent(
+        _tag,
+        '[TTS_READY] OfflineTts ready',
+      );
+
       return true;
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
       final message = 'TTS engine init failed: $error';
-      logEvent(_tag, '[TTS_INIT_FAIL] $message');
+
+      logEvent(
+        _tag,
+        '[TTS_INIT_FAIL] '
+        '$message '
+        'stack=$stackTrace',
+      );
+
       _tts = null;
       return false;
     }
@@ -492,16 +663,26 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       logEvent(
         _tag,
-        '[INIT_COMPLETE] stt=$sttReady tts=false mic=$micReady ttsDeferred=true',
+        '[INIT_COMPLETE] '
+        'stt=$sttReady '
+        'tts=false '
+        'mic=$micReady '
+        'ttsDeferred=true',
       );
 
       return _status;
     } on Object catch (error) {
-      logEvent(_tag, '[INIT_FAIL] Voice initialization failed: $error');
+      logEvent(
+        _tag,
+        '[INIT_FAIL] Voice initialization failed: $error',
+      );
+
       _initialized = false;
+
       _status = VoiceEngineStatus.unsupported(
         details: 'Voice initialization failed.',
       );
+
       return _status;
     } finally {
       _initializing = false;
@@ -521,8 +702,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     if (_isListening) return;
 
     final recognizer = _recognizer;
+
     if (recognizer == null) {
-      logEvent(_tag, '[ASR_BLOCKED] recognizer unavailable');
+      logEvent(
+        _tag,
+        '[ASR_BLOCKED] recognizer unavailable',
+      );
       return;
     }
 
@@ -533,8 +718,12 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       if (_disposed) return;
 
       final hasPermission = await _recorder.hasPermission();
+
       if (!hasPermission || _disposed) {
-        logEvent(_tag, '[ASR_BLOCKED] microphone unavailable');
+        logEvent(
+          _tag,
+          '[ASR_BLOCKED] microphone unavailable',
+        );
         return;
       }
 
@@ -542,15 +731,29 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       final language = _normalizeSttLanguage(localeId);
 
       try {
-        activeStream.setOption(key: 'language', value: language);
+        activeStream.setOption(
+          key: 'language',
+          value: language,
+        );
+
         logEvent(
-            _tag, '[ASR_LANGUAGE_SET] locale=$localeId language=$language');
+          _tag,
+          '[ASR_LANGUAGE_SET] '
+          'locale=$localeId '
+          'language=$language',
+        );
       } on Object catch (error) {
         try {
           activeStream.free();
         } catch (_) {}
+
         logEvent(
-            _tag, '[ASR_LANGUAGE_SET_FAIL] language=$language error=$error');
+          _tag,
+          '[ASR_LANGUAGE_SET_FAIL] '
+          'language=$language '
+          'error=$error',
+        );
+
         return;
       }
 
@@ -563,7 +766,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       _asrStream = activeStream;
 
-      logEvent(_tag, '[ASR_BEFORE_START_STREAM]');
+      logEvent(
+        _tag,
+        '[ASR_BEFORE_START_STREAM]',
+      );
 
       final audioStream = await _recorder.startStream(
         const RecordConfig(
@@ -577,6 +783,7 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
         try {
           await _recorder.stop();
         } catch (_) {}
+
         await _closeAsrStreamSafely();
         return;
       }
@@ -584,7 +791,11 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       _isListening = true;
 
       logEvent(
-          _tag, '[ASR_STARTED] sampleRate=$_sampleRate language=$language');
+        _tag,
+        '[ASR_STARTED] '
+        'sampleRate=$_sampleRate '
+        'language=$language',
+      );
 
       _micSubscription = audioStream.listen(
         (Uint8List bytes) {
@@ -599,7 +810,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
             final samples = _pcm16BytesToFloat32(bytes);
             if (samples.isEmpty) return;
 
-            stream.acceptWaveform(samples: samples, sampleRate: _sampleRate);
+            stream.acceptWaveform(
+              samples: samples,
+              sampleRate: _sampleRate,
+            );
 
             while (recognizer.isReady(stream)) {
               recognizer.decode(stream);
@@ -610,7 +824,11 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
               final text = result.text.trim();
 
               if (text.isNotEmpty) {
-                logEvent(_tag, '[ASR_FINAL] chars=${text.length}');
+                logEvent(
+                  _tag,
+                  '[ASR_FINAL] chars=${text.length}',
+                );
+
                 onResult(text, true);
               }
 
@@ -624,24 +842,42 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
               }
             }
           } on Object catch (error) {
-            logEvent(_tag, '[ASR_FRAME_FAIL] $error');
+            logEvent(
+              _tag,
+              '[ASR_FRAME_FAIL] $error',
+            );
           }
         },
         onError: (Object error) {
           if (_disposed) return;
-          logEvent(_tag, '[MIC_STREAM_ERROR] $error');
+
+          logEvent(
+            _tag,
+            '[MIC_STREAM_ERROR] $error',
+          );
+
           _isListening = false;
         },
         onDone: () {
           if (_disposed) return;
+
           _isListening = false;
-          logEvent(_tag, '[MIC_STREAM_DONE]');
+
+          logEvent(
+            _tag,
+            '[MIC_STREAM_DONE]',
+          );
         },
         cancelOnError: false,
       );
     } on Object catch (error) {
-      logEvent(_tag, '[ASR_START_FAIL] $error');
+      logEvent(
+        _tag,
+        '[ASR_START_FAIL] $error',
+      );
+
       _isListening = false;
+
       await _closeMicSafely();
       await _closeAsrStreamSafely();
     }
@@ -650,7 +886,9 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   @override
   Future<void> stopListening() async {
     if (_disposed && !_isListening) return;
+
     _isListening = false;
+
     await _closeMicSafely();
     await _closeAsrStreamSafely();
   }
@@ -663,14 +901,20 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
       try {
         await subscription.cancel();
       } on Object catch (error) {
-        logEvent(_tag, '[MIC_CANCEL_WARN] $error');
+        logEvent(
+          _tag,
+          '[MIC_CANCEL_WARN] $error',
+        );
       }
     }
 
     try {
       await _recorder.stop();
     } on Object catch (error) {
-      logEvent(_tag, '[MIC_STOP_WARN] $error');
+      logEvent(
+        _tag,
+        '[MIC_STOP_WARN] $error',
+      );
     }
   }
 
@@ -683,7 +927,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       stream.free();
     } on Object catch (error) {
-      logEvent(_tag, '[ASR_STREAM_FREE_WARN] $error');
+      logEvent(
+        _tag,
+        '[ASR_STREAM_FREE_WARN] $error',
+      );
     }
   }
 
@@ -701,13 +948,20 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     final ttsReady = await _ensureTtsInitialized();
 
     if (!ttsReady || _disposed) {
-      logEvent(_tag, '[TTS_BLOCKED] engine unavailable');
+      logEvent(
+        _tag,
+        '[TTS_BLOCKED] engine unavailable',
+      );
       return;
     }
 
     final tts = _tts;
+
     if (tts == null) {
-      logEvent(_tag, '[TTS_BLOCKED] engine unavailable');
+      logEvent(
+        _tag,
+        '[TTS_BLOCKED] engine unavailable',
+      );
       return;
     }
 
@@ -725,12 +979,20 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
       logEvent(
         _tag,
-        '[TTS_AUDIO_READY] samples=${audio.samples.length} sampleRate=${audio.sampleRate}',
+        '[TTS_AUDIO_READY] '
+        'samples=${audio.samples.length} '
+        'sampleRate=${audio.sampleRate}',
       );
 
-      _audioPlayer.push(audio.samples, audio.sampleRate);
+      _audioPlayer.push(
+        audio.samples,
+        audio.sampleRate,
+      );
     } on Object catch (error) {
-      logEvent(_tag, '[TTS_FAIL] $error');
+      logEvent(
+        _tag,
+        '[TTS_FAIL] $error',
+      );
     }
   }
 
@@ -741,7 +1003,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       _audioPlayer.stop();
     } on Object catch (error) {
-      logEvent(_tag, '[TTS_STOP_WARN] $error');
+      logEvent(
+        _tag,
+        '[TTS_STOP_WARN] $error',
+      );
     }
 
     _pendingTtsSamples = null;
@@ -768,7 +1033,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       _recognizer?.free();
     } on Object catch (error) {
-      logEvent(_tag, '[RECOGNIZER_FREE_WARN] $error');
+      logEvent(
+        _tag,
+        '[RECOGNIZER_FREE_WARN] $error',
+      );
     }
 
     _recognizer = null;
@@ -776,7 +1044,10 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       _tts?.free();
     } on Object catch (error) {
-      logEvent(_tag, '[TTS_FREE_WARN] $error');
+      logEvent(
+        _tag,
+        '[TTS_FREE_WARN] $error',
+      );
     }
 
     _tts = null;
@@ -784,18 +1055,26 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
     try {
       await _recorder.dispose();
     } on Object catch (error) {
-      logEvent(_tag, '[RECORDER_DISPOSE_WARN] $error');
+      logEvent(
+        _tag,
+        '[RECORDER_DISPOSE_WARN] $error',
+      );
     }
 
     try {
       _audioPlayer.dispose();
     } on Object catch (error) {
-      logEvent(_tag, '[AUDIO_PLAYER_DISPOSE_WARN] $error');
+      logEvent(
+        _tag,
+        '[AUDIO_PLAYER_DISPOSE_WARN] $error',
+      );
     }
 
     _pendingTtsSamples = null;
 
-    _status = VoiceEngineStatus.unsupported(details: 'Engine disposed.');
+    _status = VoiceEngineStatus.unsupported(
+      details: 'Engine disposed.',
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -804,13 +1083,17 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
 
   static Float32List _pcm16BytesToFloat32(Uint8List bytes) {
     final numSamples = bytes.length ~/ 2;
-    if (numSamples <= 0) return Float32List(0);
+
+    if (numSamples <= 0) {
+      return Float32List(0);
+    }
 
     final samples = Float32List(numSamples);
     final byteData = ByteData.sublistView(bytes);
 
     for (var i = 0; i < numSamples; i++) {
-      samples[i] = byteData.getInt16(i * 2, Endian.little) / 32768.0;
+      samples[i] =
+          byteData.getInt16(i * 2, Endian.little) / 32768.0;
     }
 
     return samples;
