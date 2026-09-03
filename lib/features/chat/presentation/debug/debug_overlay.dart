@@ -130,7 +130,7 @@ class _DebugOverlayState
       '[DEBUG_LAB_BEGIN] test=$testId',
     );
 
-    try {
+        try {
       await action().timeout(timeout);
 
       RuntimeEventLog.instance.emit(
@@ -146,10 +146,7 @@ class _DebugOverlayState
             DebugLabRunStatus.success;
         _statusMessage = 'SUCCESS';
       });
-    } on TimeoutException catch (
-      error,
-      stackTrace,
-    ) {
+    } on TimeoutException catch (error, stackTrace) {
       RuntimeEventLog.instance.emit(
         '[DEBUG_LAB_TIMEOUT] '
         'test=$testId '
@@ -172,10 +169,7 @@ class _DebugOverlayState
             DebugLabRunStatus.timeout;
         _statusMessage = 'TIMEOUT';
       });
-    } catch (
-      error,
-      stackTrace,
-    ) {
+    } catch (error, stackTrace) {
       RuntimeEventLog.instance.emit(
         '[DEBUG_LAB_FAILED] '
         'test=$testId '
@@ -211,7 +205,6 @@ class _DebugOverlayState
         });
       }
     }
-  }
 
   Future<void> _runFakeVoiceToLlm() {
     return _runTest(
