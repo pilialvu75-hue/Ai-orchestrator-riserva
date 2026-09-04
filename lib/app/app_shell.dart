@@ -12,10 +12,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
-import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
-import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
@@ -176,26 +174,6 @@ class _AppShellState extends State<AppShell> {
         });
       }
     }
-  }
-
-  String _resolveActiveModel(
-    BuildContext context,
-    ModelDownloadState state,
-  ) {
-    final l10n = context.l10n;
-
-    if (state is! ModelsLoaded ||
-        state.selectedModelId == null) {
-      return l10n.t('no_local_model');
-    }
-
-    for (final model in state.models) {
-      if (model.id == state.selectedModelId) {
-        return model.displayName;
-      }
-    }
-
-    return l10n.t('no_local_model');
   }
 
   Future<void> _showUpdateDialog(
