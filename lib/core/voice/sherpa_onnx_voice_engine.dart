@@ -1,4 +1,4 @@
-import 'dart:async';
+,import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -728,36 +728,45 @@ logEvent(
         return;
       }
 
-      final activeStream = recognizer.createStream();
-      final language = _normalizeSttLanguage(localeId);
+     // final activeStream = recognizer.createStream();
+    //  final language = _normalizeSttLanguage(localeId);
 
-      try {
-        activeStream.setOption(
-          key: 'language',
-          value: language,
-        );
+  //    try {
+   //     activeStream.setOption(
+  //        key: 'language',
+   //       value: language,
+//        );
 
-        logEvent(
-          _tag,
-          '[ASR_LANGUAGE_SET] '
-          'locale=$localeId '
-          'language=$language',
-        );
-      } on Object catch (error) {
-        try {
-          activeStream.free();
-        } catch (_) {}
+ //       logEvent(
+   //       _tag,
+  //        '[ASR_LANGUAGE_SET] '
+   //       'locale=$localeId '
+   //       'language=$language',
+   //     );
+   //   } on Object catch (error) {
+  //      try {
+  //        activeStream.free();
+   //     } catch (_) {}
 
-        logEvent(
-          _tag,
-          '[ASR_LANGUAGE_SET_FAIL] '
-          'language=$language '
-          'error=$error',
-        );
+   //     logEvent(
+   //       _tag,
+   //       '[ASR_LANGUAGE_SET_FAIL] '
+    //      'language=$language '
+    //      'error=$error',
+     //   );
 
-        return;
-      }
+      //  return;
+   //   }
+final activeStream = recognizer.createStream();
+final language = _normalizeSttLanguage(localeId);
 
+logEvent(
+  _tag,
+  '[ASR_LANGUAGE_SET_SKIPPED] '
+  'locale=$localeId '
+  'language=$language '
+  'reason=sherpa_onnx_1.10.2_compatibility_test',
+);
       if (_disposed) {
         try {
           activeStream.free();
