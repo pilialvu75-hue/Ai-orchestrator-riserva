@@ -1,0 +1,111 @@
+name: Analyzer Info Cleanup Experiment
+
+on:
+  push:
+    branches:
+      - codex/flutter-analyze-info-cleanup
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: analyzer-info-cleanup-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[analyzer-cleanup]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout cleanup branch
+        uses: actions/checkout@v6
+        with:
+          ref: codex/flutter-analyze-info-cleanup
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Apply only requested analyzer info fixes
+        run: |
+          set -euo pipefail
+
+          # Limit dart fix to the INFO diagnostics currently reported by
+          # flutter analyze. Warnings such as unused_element are deliberately
+          # left untouched in this experiment.
+          codes=(
+            always_use_package_imports
+            prefer_const_constructors
+            prefer_conditional_assignment
+            prefer_initializing_formals
+            prefer_const_declarations
+            use_super_parameters
+            no_leading_underscores_for_local_identifiers
+            constant_identifier_names
+            deprecated_member_use
+            unnecessary_const
+          )
+
+          for code in "${codes[@]}"; do
+            echo "== dart fix: $code =="
+            dart fix --apply --code="$code"
+          done
+
+      - name: Show code diff
+        run: git diff --check && git diff --stat && git diff
+
+      - name: Verify Flutter analyzer
+        run: |
+          set -o pipefail
+          flutter analyze --no-fatal-warnings --no-fatal-infos 2>&1 | tee /tmp/flutter-analyze.txt
+
+          if grep -Eq '^[[:space:]]*info[[:space:]]+•' /tmp/flutter-analyze.txt; then
+            echo '::warning::Analyzer INFO diagnostics remain after automated safe fixes.'
+          else
+            echo 'No analyzer INFO diagnostics remain.'
+          fi
+
+      - name: Run regression tests
+        run: flutter test
+
+      - name: Commit verified cleanup
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Commit only source/test changes produced by dart fix. The workflow
+          # itself was committed separately so this cannot accidentally absorb
+          # unrelated generated files.
+          git add lib test
+
+          if git diff --cached --quiet; then
+            echo 'No lib/test changes to commit.'
+            exit 0
+          fi
+
+          git commit -m 'chore: apply analyzer info quick-fixes [analyzer-cleanup]'
+          git push origin HEAD:codex/flutter-analyze-info-cleanup
