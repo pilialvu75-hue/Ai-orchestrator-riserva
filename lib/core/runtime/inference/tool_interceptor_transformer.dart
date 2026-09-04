@@ -329,7 +329,7 @@ class ToolInterceptorTransformer
       return 0;
     }
 
-    final maxPrefixLength =
+    const maxPrefixLength =
         _searchTagStart.length - 1;
 
     final maximumCheckLength =

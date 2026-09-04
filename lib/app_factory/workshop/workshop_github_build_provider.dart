@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 
 /// Configurazione di un builder GitHub Actions.
 ///

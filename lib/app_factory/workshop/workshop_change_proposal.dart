@@ -1,4 +1,4 @@
-import '../workspace/workspace_diff.dart';
+import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 
 /// Describes the result proposed by the Workshop coding model.
 ///

@@ -1,4 +1,4 @@
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 /// Politica con cui il Cantiere decide quale risorsa privilegiare
 /// quando più risorse sono disponibili.

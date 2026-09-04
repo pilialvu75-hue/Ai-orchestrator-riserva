@@ -235,10 +235,7 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    if (_pendingInstruction == null) {
-      _pendingInstruction =
-          _firstUserInstruction();
-    }
+    _pendingInstruction ??= _firstUserInstruction();
 
     _pendingTitle ??=
         _deriveProjectTitle(

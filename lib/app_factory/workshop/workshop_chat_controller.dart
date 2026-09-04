@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
-import 'workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 
 /// Controller della conversazione del Cantiere.
 ///

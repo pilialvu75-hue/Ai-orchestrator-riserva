@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 
 /// Stato osservato di un workflow GitHub Actions.
 enum WorkshopGitHubRunStatus {

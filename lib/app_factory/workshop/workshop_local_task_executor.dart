@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'workshop_task_contract.dart';
-import 'workshop_task_execution_guard.dart';
-import 'workshop_task_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_execution_guard.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_executor.dart';
 
 /// Executor locale del Cantiere.
 ///

@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'workshop_contract.dart';
-import 'workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 //import 'workshop_project_plan.dart';
 
 /// Stati persistibili del lavoro in background del Cantiere.

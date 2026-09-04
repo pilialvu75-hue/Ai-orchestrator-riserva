@@ -1,16 +1,16 @@
 import 'package:get_it/get_it.dart';
 
-import '../workspace/local_git_workspace_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workspace/local_git_workspace_gateway.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
-import 'workshop_dashboard_controller.dart';
-import 'workshop_engine.dart';
-import 'workshop_inference_gateway.dart';
-import 'workshop_inference_provider_adapter.dart';
-import 'workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider_adapter.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 
 /// Composition root del Cantiere.
 ///

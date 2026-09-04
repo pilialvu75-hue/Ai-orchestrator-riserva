@@ -44,7 +44,7 @@ void main() {
     });
 
     test('Scenario B: File vuoto accidentalmente (ROLLBACK)', () async {
-      final oldContent = 'void main() { print("Keep me"); }';
+      const oldContent = 'void main() { print("Keep me"); }';
       workspace.initializeSandbox({'lib/main.dart': oldContent});
 
       final result = await orchestrator.processPatches([

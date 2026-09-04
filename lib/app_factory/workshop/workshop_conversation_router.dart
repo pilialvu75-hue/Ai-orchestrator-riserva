@@ -1,4 +1,4 @@
-import 'workshop_conversation_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_contract.dart';
 
 /// Routes a natural-language Workshop conversation into a structured
 /// conversational decision.

@@ -1,5 +1,5 @@
-import '../workspace/virtual_workspace.dart';
-import 'workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workspace/virtual_workspace.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 
 /// Controls the Workshop's interaction with its workspace.
 ///

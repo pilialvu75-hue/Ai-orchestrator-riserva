@@ -1,4 +1,4 @@
-import 'collaboration_bus.dart';
+import 'package:ai_orchestrator/app_factory/collaboration/collaboration_bus.dart';
 
 /// Destinazione logica di una richiesta proveniente dall'Assistente
 /// o dal Cantiere.

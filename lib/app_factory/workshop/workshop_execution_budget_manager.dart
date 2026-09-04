@@ -1,4 +1,4 @@
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 /// Stato del budget disponibile per una risorsa.
 ///

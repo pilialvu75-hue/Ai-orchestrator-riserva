@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 
-import 'workshop_model_roles.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 
 /// Describes the physical state of a Workshop model.
 ///

@@ -70,7 +70,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
   children: <Widget>[
     const Row(
       children: <Widget>[
-        const Expanded(
+        Expanded(
           child: Text(
             'RUNTIME METRICS',
             style: TextStyle(

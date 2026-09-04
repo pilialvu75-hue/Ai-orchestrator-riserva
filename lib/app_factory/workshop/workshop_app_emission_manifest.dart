@@ -1,4 +1,4 @@
-import 'workshop_app_emission_package.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 
 /// Manifesto della prima applicazione prodotta dal Cantiere.
 ///

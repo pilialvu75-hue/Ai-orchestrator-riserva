@@ -1,4 +1,4 @@
-import 'git_workspace_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 
 /// Workspace virtuale utilizzato dal cantiere AI.
 ///

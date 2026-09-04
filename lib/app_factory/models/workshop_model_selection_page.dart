@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'workshop_model_assignments.dart';
-import 'workshop_model_roles.dart';
-import 'workshop_model_storage.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_storage.dart';
 
 /// Dedicated Workshop model configuration page.
 ///
@@ -314,7 +314,7 @@ class _WorkshopModelSelectionPageState
                   32,
                 ),
                 children: [
-                  _IntroCard(),
+                  const _IntroCard(),
                   const SizedBox(
                     height: 16,
                   ),
