@@ -40,16 +40,23 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Resolve dependencies
-        run: flutter pub get
+      - name: Resolve dependencies without keeping SDK housekeeping changes
+        run: |
+          set -euo pipefail
+          flutter pub get
+          # Flutter 3.47 may rewrite analysis_options.yaml as SDK housekeeping.
+          # That is unrelated to this lint-only experiment, so keep the branch
+          # configuration byte-for-byte unchanged.
+          git restore --worktree analysis_options.yaml
 
-      - name: Apply only requested analyzer info fixes
+      - name: Apply only behavior-preserving analyzer info quick-fixes
         run: |
           set -euo pipefail
 
-          # Limit dart fix to the INFO diagnostics currently reported by
-          # flutter analyze. Warnings such as unused_element are deliberately
-          # left untouched in this experiment.
+          # Only codes whose current Dart quick-fixes were verified not to
+          # introduce analyzer errors in the first experiment are included.
+          # deprecated_member_use is intentionally excluded: its generated
+          # ListView migration produced an undefined ScrollCacheExtent symbol.
           codes=(
             always_use_package_imports
             prefer_const_constructors
@@ -58,8 +65,6 @@ jobs:
             prefer_const_declarations
             use_super_parameters
             no_leading_underscores_for_local_identifiers
-            constant_identifier_names
-            deprecated_member_use
             unnecessary_const
           )
 
@@ -77,7 +82,7 @@ jobs:
           flutter analyze --no-fatal-warnings --no-fatal-infos 2>&1 | tee /tmp/flutter-analyze.txt
 
           if grep -Eq '^[[:space:]]*info[[:space:]]+•' /tmp/flutter-analyze.txt; then
-            echo '::warning::Analyzer INFO diagnostics remain after automated safe fixes.'
+            echo '::warning::Analyzer INFO diagnostics remain for manual review.'
           else
             echo 'No analyzer INFO diagnostics remain.'
           fi
@@ -89,17 +94,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if git diff --quiet; then
-            echo 'No source changes to commit.'
+          # Never absorb dependency/configuration housekeeping into this patch.
+          git restore --worktree analysis_options.yaml pubspec.lock || true
+
+          if git diff --quiet -- lib test; then
+            echo 'No source/test changes to commit.'
             exit 0
           fi
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-          # Commit only source/test changes produced by dart fix. The workflow
-          # itself was committed separately so this cannot accidentally absorb
-          # unrelated generated files.
           git add lib test
 
           if git diff --cached --quiet; then
@@ -107,5 +111,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m 'chore: apply analyzer info quick-fixes [analyzer-cleanup]'
+          git commit -m 'chore: apply safe analyzer info fixes [analyzer-cleanup]'
           git push origin HEAD:codex/flutter-analyze-info-cleanup
