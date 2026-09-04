@@ -132,16 +132,34 @@ class WorkshopModelAssignments {
     return null;
   }
 
+  /// Mantiene intenzionalmente la firma posizionale già usata
+  /// dal resto del Cantiere:
+  ///
+  /// WorkshopModelAssignments.withAssignment(
+  ///   assignments,
+  ///   role,
+  ///   modelId,
+  /// );
   static List<WorkshopModelAssignment> withAssignment(
-    List<WorkshopModelAssignment> assignments, {
-    required AppAiRole role,
-    required String modelId,
-  }) {
+    List<WorkshopModelAssignment> assignments,
+    AppAiRole role,
+    String modelId,
+  ) {
     if (role == AppAiRole.assistantOrchestrator) {
       throw ArgumentError.value(
         role,
         'role',
         'Assistant role cannot be assigned inside Workshop.',
+      );
+    }
+
+    final normalizedModelId = modelId.trim();
+
+    if (normalizedModelId.isEmpty) {
+      throw ArgumentError.value(
+        modelId,
+        'modelId',
+        'Workshop model id cannot be empty.',
       );
     }
 
@@ -153,7 +171,7 @@ class WorkshopModelAssignments {
         updated.add(
           WorkshopModelAssignment(
             role: role,
-            modelId: modelId,
+            modelId: normalizedModelId,
           ),
         );
         replaced = true;
@@ -166,7 +184,7 @@ class WorkshopModelAssignments {
       updated.add(
         WorkshopModelAssignment(
           role: role,
-          modelId: modelId,
+          modelId: normalizedModelId,
         ),
       );
     }
@@ -226,8 +244,7 @@ class WorkshopModelAssignments {
         continue;
       }
 
-      final model =
-          WorkshopModelCatalogue.findById(
+      final model = WorkshopModelCatalogue.findById(
         assignment.modelId,
       );
 
@@ -256,7 +273,9 @@ class WorkshopModelAssignments {
       }
     }
 
-    return List<String>.unmodifiable(errors);
+    return List<String>.unmodifiable(
+      errors,
+    );
   }
 
   static bool isValid(
@@ -269,8 +288,9 @@ class WorkshopModelAssignments {
     final preferences =
         await SharedPreferences.getInstance();
 
-    final raw =
-        preferences.getString(_preferencesKey);
+    final raw = preferences.getString(
+      _preferencesKey,
+    );
 
     if (raw == null || raw.trim().isEmpty) {
       return defaults;
@@ -283,8 +303,7 @@ class WorkshopModelAssignments {
         return defaults;
       }
 
-      final loaded =
-          <WorkshopModelAssignment>[];
+      final loaded = <WorkshopModelAssignment>[];
 
       for (final item in decoded) {
         if (item is! Map) {
