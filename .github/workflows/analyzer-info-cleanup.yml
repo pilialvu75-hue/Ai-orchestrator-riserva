@@ -113,3 +113,5 @@ jobs:
 
           git commit -m 'chore: apply safe analyzer info fixes [analyzer-cleanup]'
           git push origin HEAD:codex/flutter-analyze-info-cleanup
+
+# rerun analyzer after safe-fix commit
