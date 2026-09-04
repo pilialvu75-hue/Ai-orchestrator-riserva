@@ -44,7 +44,8 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
-          git restore --worktree analysis_options.yaml pubspec.lock || true
+          git restore --worktree analysis_options.yaml || true
+          git restore --worktree pubspec.lock 2>/dev/null || true
 
       - name: Remove only proven-unused declarations
         run: |
@@ -63,45 +64,24 @@ jobs:
                   raise SystemExit(f'Expected import not found: {line.strip()}')
               text = text.replace(line, '', 1)
 
-          method = """  String _resolveActiveModel(
-            BuildContext context,
-            ModelDownloadState state,
-          ) {
-            final l10n = context.l10n;
-
-            if (state is! ModelsLoaded ||
-                state.selectedModelId == null) {
-              return l10n.t('no_local_model');
-            }
-
-            for (final model in state.models) {
-              if (model.id == state.selectedModelId) {
-                return model.displayName;
-              }
-            }
-
-            return l10n.t('no_local_model');
-          }
-
-          """
-          if method not in text:
-              raise SystemExit('Expected _resolveActiveModel block not found')
-          text = text.replace(method, '', 1)
+          start = text.find('  String _resolveActiveModel(\n')
+          if start < 0:
+              raise SystemExit('Expected _resolveActiveModel start not found')
+          end = text.find('  Future<void> _showUpdateDialog(\n', start)
+          if end < 0:
+              raise SystemExit('Expected _showUpdateDialog boundary not found')
+          text = text[:start] + text[end:]
           app.write_text(text)
 
           svc = Path('lib/features/local_ai/data/services/model_download_service.dart')
           text = svc.read_text()
-          log_method = """  static void _log(
-            String message,
-          ) {
-            stderr.writeln(
-              '[MODEL_MGMT] $message',
-            );
-          }
-          """
-          if log_method not in text:
-              raise SystemExit('Expected _log block not found')
-          text = text.replace(log_method, '', 1)
+          start = text.find('  static void _log(\n')
+          if start < 0:
+              raise SystemExit('Expected _log start not found')
+          end = text.find('}\n\nclass _DownloadResult', start)
+          if end < 0:
+              raise SystemExit('Expected ModelDownloadService closing boundary not found')
+          text = text[:start] + text[end:]
           svc.write_text(text)
           PY
 
@@ -136,7 +116,8 @@ jobs:
       - name: Commit verified cleanup
         run: |
           set -euo pipefail
-          git restore --worktree analysis_options.yaml pubspec.lock || true
+          git restore --worktree analysis_options.yaml || true
+          git restore --worktree pubspec.lock 2>/dev/null || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add lib/app/app_shell.dart lib/features/local_ai/data/services/model_download_service.dart
