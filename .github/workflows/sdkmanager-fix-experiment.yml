@@ -101,17 +101,28 @@ jobs:
           fi
           git diff -- .github/workflows/build.yml
 
-      - name: Verify pinned sdkmanager on runner
+      - name: Validate pinned sdkmanager and NDK
         run: |
           set -euo pipefail
           : "${ANDROID_SDK_ROOT:?ANDROID_SDK_ROOT is not configured by the runner}"
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            echo "::error::Pinned sdkmanager missing at $SDKMANAGER"
-            exit 1
-          fi
+
+          ANDROID_CUSTOM_CMDLINE="$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest" /tmp/cmdline-extract
+          mkdir -p "$ANDROID_CUSTOM_CMDLINE"
+          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
+          mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_CUSTOM_CMDLINE/latest"
+          rm -rf /tmp/tools.zip /tmp/cmdline-extract
+
+          SDKMANAGER="$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
           VERSION="$("$SDKMANAGER" --version | tr -d '\r' | tail -n 1)"
+          echo "sdkmanager_version=$VERSION"
           test "$VERSION" = "16.0"
+
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "ndk;28.2.13676358"
+          test -d "$ANDROID_SDK_ROOT/ndk/28.2.13676358"
 
       - name: Commit verified workflow fix
         run: |
