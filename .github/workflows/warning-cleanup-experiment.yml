@@ -1,0 +1,145 @@
+name: Warning Cleanup Experiment
+
+on:
+  push:
+    branches:
+      - codex/flutter-analyze-warning-cleanup
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: warning-cleanup-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[warning-cleanup]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout warning-cleanup branch
+        uses: actions/checkout@v6
+        with:
+          ref: codex/flutter-analyze-warning-cleanup
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies without keeping SDK housekeeping changes
+        run: |
+          set -euo pipefail
+          flutter pub get
+          git restore --worktree analysis_options.yaml pubspec.lock || true
+
+      - name: Remove only proven-unused declarations
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          app = Path('lib/app/app_shell.dart')
+          text = app.read_text()
+
+          for line in (
+              "import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';\n",
+              "import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';\n",
+          ):
+              if line not in text:
+                  raise SystemExit(f'Expected import not found: {line.strip()}')
+              text = text.replace(line, '', 1)
+
+          method = """  String _resolveActiveModel(
+            BuildContext context,
+            ModelDownloadState state,
+          ) {
+            final l10n = context.l10n;
+
+            if (state is! ModelsLoaded ||
+                state.selectedModelId == null) {
+              return l10n.t('no_local_model');
+            }
+
+            for (final model in state.models) {
+              if (model.id == state.selectedModelId) {
+                return model.displayName;
+              }
+            }
+
+            return l10n.t('no_local_model');
+          }
+
+          """
+          if method not in text:
+              raise SystemExit('Expected _resolveActiveModel block not found')
+          text = text.replace(method, '', 1)
+          app.write_text(text)
+
+          svc = Path('lib/features/local_ai/data/services/model_download_service.dart')
+          text = svc.read_text()
+          log_method = """  static void _log(
+            String message,
+          ) {
+            stderr.writeln(
+              '[MODEL_MGMT] $message',
+            );
+          }
+          """
+          if log_method not in text:
+              raise SystemExit('Expected _log block not found')
+          text = text.replace(log_method, '', 1)
+          svc.write_text(text)
+          PY
+
+      - name: Verify diff contains only intended cleanup
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --stat
+          git diff -- lib/app/app_shell.dart lib/features/local_ai/data/services/model_download_service.dart
+
+          changed="$(git diff --name-only -- lib test)"
+          expected=$'lib/app/app_shell.dart\nlib/features/local_ai/data/services/model_download_service.dart'
+          if [[ "$changed" != "$expected" ]]; then
+            echo "Unexpected lib/test changes:"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+
+      - name: Require clean Flutter analyzer
+        run: |
+          set -euo pipefail
+          flutter analyze 2>&1 | tee /tmp/flutter-analyze.txt
+          if grep -Eq '^[[:space:]]*(error|warning|info)[[:space:]]+•' /tmp/flutter-analyze.txt; then
+            echo '::error::Analyzer diagnostics remain.'
+            exit 1
+          fi
+          grep -Fq 'No issues found!' /tmp/flutter-analyze.txt
+
+      - name: Run regression tests
+        run: flutter test
+
+      - name: Commit verified cleanup
+        run: |
+          set -euo pipefail
+          git restore --worktree analysis_options.yaml pubspec.lock || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/app/app_shell.dart lib/features/local_ai/data/services/model_download_service.dart
+          git diff --cached --check
+          git commit -m 'chore: remove remaining analyzer warnings [warning-cleanup]'
+          git push origin HEAD:codex/flutter-analyze-warning-cleanup
