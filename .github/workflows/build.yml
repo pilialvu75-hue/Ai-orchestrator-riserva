@@ -331,12 +331,10 @@ jobs:
             --output BUILD_README_IT.md \
             --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
 
-      - name: Force clean Android native rebuild
+      - name: Clean transient Android build outputs (preserve native cache)
         run: |
           set -euo pipefail
 
-          flutter clean
-          rm -rf android/.cxx
           rm -rf android/build
           rm -rf build
           rm -rf android/app/build/intermediates
