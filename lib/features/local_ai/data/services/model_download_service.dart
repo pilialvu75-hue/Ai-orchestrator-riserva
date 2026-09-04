@@ -1967,13 +1967,6 @@ class ModelDownloadService {
     return dir;
   }
 
-  static void _log(
-    String message,
-  ) {
-    stderr.writeln(
-      '[MODEL_MGMT] $message',
-    );
-  }
 }
 
 class _DownloadResult {
