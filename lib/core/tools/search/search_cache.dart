@@ -1,4 +1,4 @@
-import 'search_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 
 abstract class SearchCache {
   List<SearchResult>? get(String query);

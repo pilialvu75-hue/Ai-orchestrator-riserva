@@ -34,7 +34,7 @@ class _FakeSearchProvider implements SearchProvider {
   Duration get timeout => const Duration(seconds: 5);
 
   @override
-  Future<List<SearchResult>> search(String _query, {int limit = 5}) async {
+  Future<List<SearchResult>> search(String query, {int limit = 5}) async {
     calls++;
     return _results.take(limit).toList(growable: false);
   }

@@ -1,9 +1,9 @@
-import 'workshop_resource_execution_bridge.dart';
-import 'workshop_task_contract.dart';
-import 'workshop_task_dispatcher.dart';
-import 'workshop_task_execution_guard.dart';
-import 'workshop_task_executor.dart';
-import 'workshop_task_resource_allocator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resource_execution_bridge.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_dispatcher.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_execution_guard.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_resource_allocator.dart';
 
 /// Pipeline operativa del Cantiere.
 ///

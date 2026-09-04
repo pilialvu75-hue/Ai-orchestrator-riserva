@@ -1,5 +1,5 @@
-import 'workshop_app_emission_package.dart';
-import 'workshop_app_emission_registry.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_registry.dart';
 
 /// Stato osservabile dell'emissione del Cantiere.
 ///

@@ -1,6 +1,6 @@
-import 'workshop_budget_controller.dart';
-import 'workshop_task_contract.dart';
-import 'workshop_task_resource_allocator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_budget_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_resource_allocator.dart';
 
 /// Risultato finale del tentativo di allocazione.
 ///

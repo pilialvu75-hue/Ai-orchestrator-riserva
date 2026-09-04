@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-import '../workspace/workspace_diff.dart';
-import 'workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 
 /// Parses a structured response produced by the Workshop coding model
 /// into a [WorkshopChangeProposal].

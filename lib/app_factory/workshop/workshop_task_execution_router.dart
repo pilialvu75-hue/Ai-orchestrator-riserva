@@ -1,6 +1,6 @@
-import 'workshop_task_contract.dart';
-import 'workshop_task_resource_allocator.dart';
-import 'workshop_resource_registry.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_resource_allocator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resource_registry.dart';
 
 /// Contesto minimo passato all'esecuzione di una task.
 ///

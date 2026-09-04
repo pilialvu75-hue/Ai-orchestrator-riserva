@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
-import 'search_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 
 class DuckDuckGoProvider implements SearchProvider {
   DuckDuckGoProvider({

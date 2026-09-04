@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'git_workspace_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 
 /// Gateway locale per il Workspace del Cantiere.
 ///

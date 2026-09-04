@@ -8,29 +8,29 @@ abstract class RoleContract {
 }
 
 final class OrchestratorRole extends RoleContract {
-  const OrchestratorRole({this.label = 'Orchestrator', bool enabled = true})
-      : super(OrchestratorRoleKind.orchestrator, enabled: enabled);
+  const OrchestratorRole({this.label = 'Orchestrator', super.enabled = true})
+      : super(OrchestratorRoleKind.orchestrator);
 
   final String label;
 }
 
 final class EngineerRole extends RoleContract {
-  const EngineerRole({this.label = 'Engineer', bool enabled = true})
-      : super(OrchestratorRoleKind.engineer, enabled: enabled);
+  const EngineerRole({this.label = 'Engineer', super.enabled = true})
+      : super(OrchestratorRoleKind.engineer);
 
   final String label;
 }
 
 final class ArchitectRole extends RoleContract {
-  const ArchitectRole({this.label = 'Architect', bool enabled = true})
-      : super(OrchestratorRoleKind.architect, enabled: enabled);
+  const ArchitectRole({this.label = 'Architect', super.enabled = true})
+      : super(OrchestratorRoleKind.architect);
 
   final String label;
 }
 
 final class CloudRole extends RoleContract {
-  const CloudRole({this.label = 'Cloud', bool enabled = false})
-      : super(OrchestratorRoleKind.cloud, enabled: enabled);
+  const CloudRole({this.label = 'Cloud', super.enabled = false})
+      : super(OrchestratorRoleKind.cloud);
 
   final String label;
 }

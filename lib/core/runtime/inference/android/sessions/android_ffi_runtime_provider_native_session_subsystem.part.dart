@@ -392,7 +392,7 @@ class _AndroidFfiNativeSessionSubsystem {
     int sessionId, {
     required String reason,
   }) async {
-    final timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
+    const timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
     final stopwatch = Stopwatch()..start();
     var backoffMs = 1;
     while (bindings.sessionIsActive(sessionId) == _sessionActiveState) {

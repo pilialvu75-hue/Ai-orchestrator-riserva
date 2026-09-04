@@ -1,4 +1,4 @@
-import 'search_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 
 class SearchContextBuilder {
   /// Trasforma una lista di risultati web in un blocco di contesto ottimizzato per i prompt locali.

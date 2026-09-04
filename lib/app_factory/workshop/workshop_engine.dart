@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import '../collaboration/collaboration_bus.dart';
-import '../workspace/workspace_session.dart';
-import 'workshop_contract.dart';
-import 'workshop_inference_gateway.dart';
-import 'workshop_project_executor.dart';
-import 'workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/collaboration/collaboration_bus.dart';
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 /// Motore centrale del Cantiere.
 ///

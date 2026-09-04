@@ -1,6 +1,6 @@
-import 'workshop_execution_budget_manager.dart';
-import 'workshop_resource_budget_policy.dart';
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_execution_budget_manager.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resource_budget_policy.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 /// Punto centrale di coordinamento tra:
 ///

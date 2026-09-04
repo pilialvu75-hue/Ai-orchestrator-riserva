@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 
 /// Configurazione del detector della toolchain locale.
 ///

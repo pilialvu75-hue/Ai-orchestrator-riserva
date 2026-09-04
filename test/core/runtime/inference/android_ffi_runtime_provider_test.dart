@@ -106,7 +106,7 @@ void main() {
         runtimeStateMachine: stateMachine,
         developerModeProvider: () => false,
       );
-      final modelPath = 'test-fixtures/runtime-model-ready.gguf';
+      const modelPath = 'test-fixtures/runtime-model-ready.gguf';
 
       provider.recordVerificationSuccess(
         modelPath: modelPath,

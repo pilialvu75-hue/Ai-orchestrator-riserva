@@ -1,4 +1,4 @@
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 /// Capacità che una risorsa può offrire al Cantiere.
 enum WorkshopResourceCapability {

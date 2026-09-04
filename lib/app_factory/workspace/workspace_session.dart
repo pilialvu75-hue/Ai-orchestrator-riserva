@@ -1,6 +1,6 @@
-import 'git_workspace_gateway.dart';
-import '../workshop/workshop_contract.dart';
-import 'virtual_workspace.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workspace/virtual_workspace.dart';
 
 /// Stato operativo di una sessione del Workspace.
 ///

@@ -1,7 +1,7 @@
-import 'workshop_build_lab.dart';
-import 'workshop_execution_mode_router.dart';
-import 'workshop_task_contract.dart';
-import 'workshop_task_resource_allocator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_execution_mode_router.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_resource_allocator.dart';
 
 /// Adatta la decisione del Execution Mode Router al contratto
 /// utilizzato dal Resource Allocator / Execution Guard.

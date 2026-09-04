@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'runtime_crash_log_sink.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_crash_log_sink.dart';
 
 /// Categorises a runtime log entry by the subsystem that produced it.
 enum RuntimeEventCategory {

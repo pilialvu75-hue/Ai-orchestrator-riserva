@@ -639,7 +639,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       return;
     }
 
-    final archiveName =
+    const archiveName =
         'sherpa-onnx-nemotron-3.5-'
         'asr-streaming-0.6b-560ms-'
         'int8-2026-06-11.tar.bz2';

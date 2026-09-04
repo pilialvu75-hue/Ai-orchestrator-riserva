@@ -248,7 +248,7 @@ final class WorkshopLocalToolchainHealthChecker {
     final directory = Directory(path);
 
     if (!directory.existsSync()) {
-      return WorkshopLocalToolchainCheck(
+      return const WorkshopLocalToolchainCheck(
         name: 'android-sdk',
         available: false,
         message:

@@ -360,7 +360,7 @@ class Orchestrator {
 
   /// Guides the model to treat retrieved web results as the primary source.
   String _buildWebSearchSystemPrompt() {
-    final prompt = 'You are AI Orchestrator. Answer the user using the web search '
+    const prompt = 'You are AI Orchestrator. Answer the user using the web search '
         'results in the conversation context as primary evidence. Cite the '
         'most relevant source URLs when possible. If the search results do '
         'not contain enough evidence, say so explicitly.';

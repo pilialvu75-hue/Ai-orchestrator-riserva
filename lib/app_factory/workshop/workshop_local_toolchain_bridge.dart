@@ -147,9 +147,9 @@ final class WorkshopLocalToolchainConfig {
 /// appartiene al livello superiore del Workshop.
 final class WorkshopLocalToolchainBridge {
   WorkshopLocalToolchainBridge({
-    WorkshopLocalToolchainConfig config =
+    this.config =
         const WorkshopLocalToolchainConfig(),
-  }) : config = config;
+  });
 
   final WorkshopLocalToolchainConfig config;
 

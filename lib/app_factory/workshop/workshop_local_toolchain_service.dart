@@ -1,5 +1,5 @@
-import 'workshop_build_lab.dart';
-import 'workshop_local_toolchain_detector.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_detector.dart';
 
 /// Servizio unificato per la toolchain locale.
 ///

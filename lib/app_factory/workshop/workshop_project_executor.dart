@@ -1,7 +1,7 @@
-import '../workspace/git_workspace_gateway.dart';
-import '../workspace/workspace_session.dart';
-import 'workshop_contract.dart';
-import 'workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 /// Esecutore del piano di progetto del Cantiere.
 ///

@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 
-import 'workshop_model_assignments.dart';
-import 'workshop_model_roles.dart';
-import 'workshop_model_storage.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_storage.dart';
 
 /// Result of resolving a Workshop role to a concrete local model.
 @immutable

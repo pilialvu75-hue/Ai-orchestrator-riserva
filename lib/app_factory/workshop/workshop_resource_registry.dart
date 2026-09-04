@@ -1,5 +1,5 @@
-import 'workshop_task_contract.dart';
-import 'workshop_task_resource_allocator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_resource_allocator.dart';
 
 /// Registro centralizzato delle risorse disponibili al Cantiere.
 ///

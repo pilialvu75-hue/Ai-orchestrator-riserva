@@ -1,4 +1,4 @@
-import 'workshop_local_toolchain_manager.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_manager.dart';
 
 /// Piattaforme per le quali il Cantiere può utilizzare una toolchain locale.
 ///
