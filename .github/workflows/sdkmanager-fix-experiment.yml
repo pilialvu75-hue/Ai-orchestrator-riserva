@@ -70,13 +70,15 @@ jobs:
               "          rm -rf /tmp/tools.zip /tmp/cmdline-extract\n"
               "\n"
               "          SDKMANAGER=\"$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager\"\n"
+              "          SOURCE_PROPERTIES=\"$ANDROID_CUSTOM_CMDLINE/latest/source.properties\"\n"
               "          test -x \"$SDKMANAGER\"\n"
-              "          SDKMANAGER_VERSION=\"$(\"$SDKMANAGER\" --version | tr -d '\\r' | tail -n 1)\"\n"
-              "          if [ \"$SDKMANAGER_VERSION\" != \"16.0\" ]; then\n"
-              "            echo \"::error::Expected sdkmanager 16.0, got '$SDKMANAGER_VERSION'\"\n"
+              "          test -f \"$SOURCE_PROPERTIES\"\n"
+              "          if ! grep -Eq '^Pkg\\.Revision[[:space:]]*=[[:space:]]*16\\.0([[:space:]]*)$' \"$SOURCE_PROPERTIES\"; then\n"
+              "            echo \"::error::Expected Android command-line tools 16.0\"\n"
+              "            cat \"$SOURCE_PROPERTIES\"\n"
               "            exit 1\n"
               "          fi\n"
-              "          echo \"sdkmanager_version=$SDKMANAGER_VERSION\"\n"
+              "          echo \"sdkmanager_package_revision=16.0\"\n"
               "\n"
               "      - name: Install Android NDK\n"
           )
@@ -115,10 +117,11 @@ jobs:
           rm -rf /tmp/tools.zip /tmp/cmdline-extract
 
           SDKMANAGER="$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager"
+          SOURCE_PROPERTIES="$ANDROID_CUSTOM_CMDLINE/latest/source.properties"
           test -x "$SDKMANAGER"
-          VERSION="$("$SDKMANAGER" --version | tr -d '\r' | tail -n 1)"
-          echo "sdkmanager_version=$VERSION"
-          test "$VERSION" = "16.0"
+          test -f "$SOURCE_PROPERTIES"
+          grep -E '^Pkg\.Revision' "$SOURCE_PROPERTIES"
+          grep -Eq '^Pkg\.Revision[[:space:]]*=[[:space:]]*16\.0([[:space:]]*)$' "$SOURCE_PROPERTIES"
 
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "ndk;28.2.13676358"
