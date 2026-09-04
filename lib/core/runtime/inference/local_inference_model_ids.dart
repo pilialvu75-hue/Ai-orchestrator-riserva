@@ -17,6 +17,7 @@ class LocalInferenceModelIds {
   static const String phi35Mini = 'phi3_5_mini';
 
   @Deprecated('Usa phi35Mini')
+  // ignore: constant_identifier_names, legacy public alias kept for compatibility
   static const String phi3_5_mini = phi35Mini;
 
   // ===========================================================================
@@ -48,7 +49,7 @@ class LocalInferenceModelIds {
   // ===========================================================================
 
   static const String templateDeepSeek = 'deepseek';
-  static const String templateQwen = 'qwen';
+  static const String templateQwen = 'qwen3';
   static const String templateLlama = 'llama3';
   static const String templateGemma = 'gemma';
   static const String templatePhi = 'phi3';
