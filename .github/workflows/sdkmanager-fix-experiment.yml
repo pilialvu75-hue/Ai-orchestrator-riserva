@@ -42,53 +42,50 @@ jobs:
           path = Path('.github/workflows/build.yml')
           text = path.read_text()
 
-          old_setup = """      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-"""
+          old_setup = (
+              "      - name: Setup Android SDK\n"
+              "        uses: android-actions/setup-android@v4\n"
+              "\n"
+          )
           if text.count(old_setup) != 1:
-              raise SystemExit(f'Expected exactly one setup-android block, found {text.count(old_setup)}')
+              raise SystemExit(
+                  f'Expected exactly one setup-android block, found {text.count(old_setup)}'
+              )
           text = text.replace(old_setup, '', 1)
 
-          old_step = """      - name: Install Android SDK cmdline-tools v12
-        run: |
-          set -euo pipefail
-          export ANDROID_CUSTOM_CMDLINE=\"${ANDROID_SDK_ROOT}/cmdline-tools\"
-          curl -sS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
-          mkdir -p \"$ANDROID_CUSTOM_CMDLINE\"
-          rm -rf \"$ANDROID_CUSTOM_CMDLINE/latest\"
-          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
-          mv /tmp/cmdline-extract/cmdline-tools \"$ANDROID_CUSTOM_CMDLINE/latest\"
-          rm -rf /tmp/tools.zip /tmp/cmdline-extract
-"""
+          old_name = "      - name: Install Android SDK cmdline-tools v12\n"
+          new_name = "      - name: Install Android SDK cmdline-tools 16.0\n"
+          if text.count(old_name) != 1:
+              raise SystemExit(
+                  f'Expected exactly one cmdline-tools v12 label, found {text.count(old_name)}'
+              )
+          text = text.replace(old_name, new_name, 1)
 
-          new_step = """      - name: Install Android SDK cmdline-tools 16.0
-        run: |
-          set -euo pipefail
-          : \"${ANDROID_SDK_ROOT:?ANDROID_SDK_ROOT is not configured by the runner}\"
-          test -d \"$ANDROID_SDK_ROOT\"
+          old_tail = (
+              "          rm -rf /tmp/tools.zip /tmp/cmdline-extract\n"
+              "\n"
+              "      - name: Install Android NDK\n"
+          )
+          new_tail = (
+              "          rm -rf /tmp/tools.zip /tmp/cmdline-extract\n"
+              "\n"
+              "          SDKMANAGER=\"$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager\"\n"
+              "          test -x \"$SDKMANAGER\"\n"
+              "          SDKMANAGER_VERSION=\"$(\"$SDKMANAGER\" --version | tr -d '\\r' | tail -n 1)\"\n"
+              "          if [ \"$SDKMANAGER_VERSION\" != \"16.0\" ]; then\n"
+              "            echo \"::error::Expected sdkmanager 16.0, got '$SDKMANAGER_VERSION'\"\n"
+              "            exit 1\n"
+              "          fi\n"
+              "          echo \"sdkmanager_version=$SDKMANAGER_VERSION\"\n"
+              "\n"
+              "      - name: Install Android NDK\n"
+          )
+          if text.count(old_tail) != 1:
+              raise SystemExit(
+                  f'Expected exactly one cmdline-tools tail, found {text.count(old_tail)}'
+              )
+          text = text.replace(old_tail, new_tail, 1)
 
-          export ANDROID_CUSTOM_CMDLINE=\"${ANDROID_SDK_ROOT}/cmdline-tools\"
-          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
-          mkdir -p \"$ANDROID_CUSTOM_CMDLINE\"
-          rm -rf \"$ANDROID_CUSTOM_CMDLINE/latest\" /tmp/cmdline-extract
-          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
-          mv /tmp/cmdline-extract/cmdline-tools \"$ANDROID_CUSTOM_CMDLINE/latest\"
-          rm -rf /tmp/tools.zip /tmp/cmdline-extract
-
-          SDKMANAGER=\"$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager\"
-          test -x \"$SDKMANAGER\"
-          SDKMANAGER_VERSION=\"$(\"$SDKMANAGER\" --version | tr -d '\\r' | tail -n 1)\"
-          if [ \"$SDKMANAGER_VERSION\" != \"16.0\" ]; then
-            echo \"::error::Expected sdkmanager 16.0, got '$SDKMANAGER_VERSION'\"
-            exit 1
-          fi
-          echo \"sdkmanager_version=$SDKMANAGER_VERSION\"
-"""
-
-          if text.count(old_step) != 1:
-              raise SystemExit(f'Expected exactly one pinned cmdline-tools step, found {text.count(old_step)}')
-          text = text.replace(old_step, new_step, 1)
           path.write_text(text)
           PY
 
@@ -115,8 +112,6 @@ jobs:
           fi
           VERSION="$("$SDKMANAGER" --version | tr -d '\r' | tail -n 1)"
           test "$VERSION" = "16.0"
-          "$SDKMANAGER" --list_installed >/tmp/sdkmanager-installed.txt
-          grep -F "ndk;28.2.13676358" /tmp/sdkmanager-installed.txt >/dev/null || true
 
       - name: Commit verified workflow fix
         run: |
