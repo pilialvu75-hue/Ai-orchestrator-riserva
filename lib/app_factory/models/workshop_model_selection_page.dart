@@ -155,12 +155,11 @@ class _WorkshopModelSelectionPageState
       return;
     }
 
-    final next =
-        WorkshopModelAssignments.withAssignment(
-      _assignments,
-      role,
-      selected.id,
-    );
+    final updated = WorkshopModelAssignments.withAssignment(
+  _assignments,
+  role: role,
+  modelId: model.id,
+);
 
     if (!WorkshopModelAssignments.isValid(next)) {
       _showMessage(
