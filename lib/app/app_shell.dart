@@ -133,8 +133,12 @@ class _AppShellState extends State<AppShell> {
         recursive: true,
       );
 
+      final workshopAssignments =
+          await WorkshopFactory.loadPersistedAssignments();
+
       workshopController = WorkshopFactory.create(
         workspaceRootPath: workspaceDirectory.path,
+        assignments: workshopAssignments,
       );
 
       if (!mounted) {
@@ -147,6 +151,7 @@ class _AppShellState extends State<AppShell> {
         MaterialPageRoute<void>(
           builder: (_) => WorkshopDashboardPage(
             dashboardController: workshopController!,
+            modelAssignments: workshopAssignments,
           ),
         ),
       );
