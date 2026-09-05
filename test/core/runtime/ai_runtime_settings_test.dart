@@ -49,6 +49,42 @@ void main() {
       expect(service.normalizeProvider(null), 'openAi');
     });
 
+    test('uses catalog model by default and persists provider override', () async {
+      final service = await createService();
+
+      expect(service.cloudModelFor('openAi'), 'gpt-5.6-terra');
+      await service.setCloudModel('openAi', 'custom-openai-model');
+      expect(service.cloudModelFor('openAi'), 'custom-openai-model');
+
+      await service.setCloudModel('openAi', '');
+      expect(service.cloudModelFor('openAi'), 'gpt-5.6-terra');
+    });
+
+    test('paid automatic Cloud use is opt-in', () async {
+      final service = await createService();
+
+      expect(
+        service.cloudSpendingMode,
+        CloudSpendingMode.confirmBeforeSpending,
+      );
+      expect(service.automaticCloudSpendingAllowed, isFalse);
+
+      await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
+      expect(service.automaticCloudSpendingAllowed, isTrue);
+    });
+
+    test('persists and clears Cloud budget limit', () async {
+      final service = await createService();
+
+      await service.setCloudSpendingMode(CloudSpendingMode.budgetLimit);
+      await service.setCloudBudgetLimit(12.5);
+      expect(service.cloudSpendingMode, CloudSpendingMode.budgetLimit);
+      expect(service.cloudBudgetLimit, 12.5);
+
+      await service.setCloudBudgetLimit(null);
+      expect(service.cloudBudgetLimit, isNull);
+    });
+
     test('persists memory window presets and custom values', () async {
       final service = await createService();
 

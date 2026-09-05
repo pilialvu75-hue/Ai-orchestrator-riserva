@@ -5,45 +5,165 @@ import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
+enum CloudProviderOperationalState {
+  ready,
+  authRequired,
+  policyBlocked,
+  rateLimited,
+  quotaExhausted,
+  temporarilyUnavailable,
+  error,
+}
+
+class CloudProviderStatusSnapshot {
+  const CloudProviderStatusSnapshot({
+    required this.providerId,
+    required this.state,
+    required this.modelId,
+    required this.totalRequests,
+    required this.failedRequests,
+    this.lastError,
+    this.retryAt,
+    this.averageLatencyMs,
+  });
+
+  final String providerId;
+  final CloudProviderOperationalState state;
+  final String modelId;
+  final int totalRequests;
+  final int failedRequests;
+  final String? lastError;
+  final DateTime? retryAt;
+  final double? averageLatencyMs;
+
+  double get successRate {
+    if (totalRequests <= 0) return 1.0;
+    return ((totalRequests - failedRequests) / totalRequests)
+        .clamp(0.0, 1.0)
+        .toDouble();
+  }
+}
+
 class CloudRuntimeProvider implements RuntimeInferenceProvider {
-  static const int _maxContextLines = 8;
+  static const int _maxContextTurns = 24;
   static const int _maxCacheEntries = 40;
-  static const int _summarySourceLines = 4;
-  static const int _summaryWordsPerLine = 12;
   static const Duration _rateLimitBackoff = Duration(minutes: 2);
+  static const Duration _quotaBackoff = Duration(minutes: 15);
+  static const Duration _temporaryFailureBackoff = Duration(seconds: 20);
 
   CloudRuntimeProvider({
-    required Future<AiResponse> Function(String provider, AiRequest request) sendQuery,
+    required Future<AiResponse> Function(String provider, AiRequest request)
+        sendQuery,
     required List<String> Function() supportedProviders,
     required bool Function(String provider) isProviderAvailable,
     required String Function([String? providerName]) providerDisplayName,
+    String? Function(String provider)? modelForProvider,
+    String? Function()? preferredProvider,
+    bool Function(String provider)? automaticUseAllowed,
   })  : _sendQuery = sendQuery,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
-        _providerDisplayName = providerDisplayName;
+        _providerDisplayName = providerDisplayName,
+        _modelForProvider = modelForProvider ??
+            CloudRuntimePreferences.instance.modelForProvider,
+        _preferredProvider = preferredProvider ??
+            (() => CloudRuntimePreferences.instance.preferredProvider),
+        _automaticUseAllowed = automaticUseAllowed ??
+            CloudRuntimePreferences.instance.automaticUseAllowed;
 
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
 
-  final Future<AiResponse> Function(String provider, AiRequest request) _sendQuery;
+  final Future<AiResponse> Function(String provider, AiRequest request)
+      _sendQuery;
   final List<String> Function() _supportedProviders;
   final bool Function(String provider) _isProviderAvailable;
   final String Function([String? providerName]) _providerDisplayName;
+  final String? Function(String provider) _modelForProvider;
+  final String? Function() _preferredProvider;
+  final bool Function(String provider) _automaticUseAllowed;
 
   final Map<String, _ProviderHealth> _providerHealth = <String, _ProviderHealth>{};
-  final LinkedHashMap<String, AiResponse> _responseCache = LinkedHashMap<String, AiResponse>();
+  final LinkedHashMap<String, _CachedCloudResponse> _responseCache =
+      LinkedHashMap<String, _CachedCloudResponse>();
   bool _pendingLocalFallbackNotice = false;
 
-  bool get canInfer => _supportedProviders().any(_isProviderReady);
+  /// Automatic Cloud availability used by Hybrid routing.
+  ///
+  /// It intentionally honours the automatic-spending policy. Explicit Cloud
+  /// mode uses [canInferFor] because the user has directly selected Cloud.
+  bool get canInfer => _supportedProviders().any(
+        (provider) => _isProviderReady(
+          provider,
+          enforceAutomaticPolicy: true,
+        ),
+      );
 
-  bool get areAllProvidersUnavailable =>
-      _supportedProviders().every((provider) => !_isProviderReady(provider));
+  bool get areAllProvidersUnavailable => _supportedProviders().every(
+        (provider) => !_isProviderReady(
+          provider,
+          enforceAutomaticPolicy: true,
+        ),
+      );
+
+  List<CloudProviderStatusSnapshot> get providerStatuses =>
+      _supportedProviders().map(_statusFor).toList(growable: false);
+
+  /// Request-specific availability.
+  ///
+  /// Direct Cloud mode is an explicit user choice and therefore does not use
+  /// the automatic-spending gate. Authentication, quota, rate-limit and health
+  /// gates still apply.
+  bool canInferFor(InferenceRequest request) {
+    final explicitCloud = _isExplicitCloudRequest(request);
+    final signal = _taskSignal(request);
+    final order = _providerOrder(
+      signal,
+      pinnedProvider: request.cloudProviderId,
+      allowFailover: request.allowCloudProviderFailover,
+      enforceAutomaticPolicy: !explicitCloud,
+    );
+    return order.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: !explicitCloud,
+      ),
+    );
+  }
+
+  /// Recommendation API used by Hybrid orchestration.
+  ///
+  /// This does not execute anything. Hannibal can ask for the current best
+  /// candidate and then bind that provider into [InferenceRequest].
+  String? recommendProviderFor(
+    InferenceRequest request, {
+    bool enforceAutomaticPolicy = true,
+  }) {
+    final signal = _taskSignal(request);
+    final order = _providerOrder(
+      signal,
+      pinnedProvider: request.cloudProviderId,
+      allowFailover: true,
+      enforceAutomaticPolicy: enforceAutomaticPolicy,
+    );
+
+    for (final provider in order) {
+      if (_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        return provider;
+      }
+    }
+    return null;
+  }
 
   String? consumeRuntimeNotice() {
     if (!_pendingLocalFallbackNotice) return null;
@@ -80,130 +200,211 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       return;
     }
 
-    if (!canInfer) {
+    final optimized = _optimizeRequest(request);
+    final signal = _taskSignal(optimized);
+    final explicitCloud = _isExplicitCloudRequest(optimized);
+    final enforceAutomaticPolicy = !explicitCloud;
+    final providerOrder = _providerOrder(
+      signal,
+      pinnedProvider: optimized.cloudProviderId,
+      allowFailover: optimized.allowCloudProviderFailover,
+      enforceAutomaticPolicy: enforceAutomaticPolicy,
+    );
+
+    final hasReadyProvider = providerOrder.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      ),
+    );
+
+    if (!hasReadyProvider) {
       _pendingLocalFallbackNotice = true;
       yield InferenceResponse.error(
         fullyLocalNotice,
         state: InferenceTerminalState.modelUnavailable,
+        providerId: optimized.cloudProviderId,
       );
       return;
     }
 
-    final optimized = _optimizeRequest(request);
-    final providerOrder = _providerOrder(optimized);
-    final cacheKey = _cacheKey(providerOrder, optimized);
+    final cacheKey = _cacheKey(providerOrder, optimized, signal);
     final cached = _responseCache[cacheKey];
     if (cached != null) {
       yield InferenceResponse.finalChunk(
-        text: cached.text,
-        tokensGenerated: cached.tokensUsed,
-        model: cached.model,
+        text: cached.response.text,
+        tokensGenerated: cached.response.tokensUsed,
+        model: cached.response.model,
+        providerId: cached.providerId,
       );
       return;
     }
 
     String? lastError;
+    String? lastProvider;
+
     for (final provider in providerOrder) {
-      if (!_isProviderReady(provider)) continue;
+      if (!_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        continue;
+      }
+
+      lastProvider = provider;
+
       if (cancellationToken.isCancelled) {
         yield InferenceResponse.error(
           'Inference cancelled.',
           state: InferenceTerminalState.cancelled,
+          providerId: provider,
         );
         return;
       }
+
+      // The provider notice arrives before the request so the UI can display
+      // the active Cloud executor while the response is being generated.
+      yield InferenceResponse.notice(
+        'cloud_provider:$provider',
+        providerId: provider,
+      );
+
+      final stopwatch = Stopwatch()..start();
       try {
+        final selectedModel = _selectedModel(provider);
         final response = await _sendQuery(
           provider,
           AiRequest(
-            prompt: optimized.prompt,
+            prompt: optimized.prompt.trim(),
             systemPrompt: optimized.systemPrompt,
+            messages: _toAiMessages(optimized.context),
             maxTokens: optimized.maxTokens,
             temperature: optimized.temperature,
+            modelId: selectedModel,
+            providerId: provider,
+            taskType: signal.name,
+            metadata: <String, dynamic>{
+              'sessionId': optimized.sessionId,
+              if (optimized.requestId != null)
+                'requestId': optimized.requestId,
+              if (optimized.projectId != null)
+                'projectId': optimized.projectId,
+              if (optimized.taskId != null)
+                'taskId': optimized.taskId,
+              if (optimized.executionId != null)
+                'executionId': optimized.executionId,
+              if (optimized.checkpointId != null)
+                'checkpointId': optimized.checkpointId,
+            },
           ),
         );
+        stopwatch.stop();
+
         if (cancellationToken.isCancelled) {
           yield InferenceResponse.error(
             'Inference cancelled.',
             state: InferenceTerminalState.cancelled,
+            providerId: provider,
           );
           return;
         }
-        _markSuccess(provider);
-        _putCache(cacheKey, response);
+
+        _markSuccess(provider, stopwatch.elapsedMilliseconds);
+        _putCache(
+          cacheKey,
+          _CachedCloudResponse(
+            response: response,
+            providerId: provider,
+          ),
+        );
         yield InferenceResponse.finalChunk(
           text: response.text,
           tokensGenerated: response.tokensUsed,
           model: response.model,
+          providerId: provider,
         );
         return;
       } catch (error) {
+        stopwatch.stop();
         final mapped = _mapError(error, provider);
-        _markFailure(provider, mapped);
+        _markFailure(provider, mapped, stopwatch.elapsedMilliseconds);
         lastError = mapped;
+
+        if (!optimized.allowCloudProviderFailover) {
+          break;
+        }
       }
     }
 
-    if (areAllProvidersUnavailable) {
+    final anyReadyAfterFailure = providerOrder.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      ),
+    );
+
+    if (!anyReadyAfterFailure) {
       _pendingLocalFallbackNotice = true;
       yield InferenceResponse.error(
         fullyLocalNotice,
         state: InferenceTerminalState.modelUnavailable,
+        providerId: lastProvider,
       );
       return;
     }
-    yield InferenceResponse.error(lastError ?? 'Cloud AI request failed.');
-  }
 
-  InferenceRequest _optimizeRequest(InferenceRequest request) {
-    final deduped = <ChatTurn>[];
-    final seen = <String>{};
-    for (final item in request.context) {
-      final normalized = ChatTurn(
-        role: item.role,
-        content: item.content.trim(),
-      );
-      if (normalized.content.isEmpty) continue;
-      final key = '${normalized.role.name}:${normalized.content.toLowerCase()}';
-      if (seen.add(key)) deduped.add(normalized);
-    }
-
-    final recent = deduped.length > _maxContextLines
-        ? deduped.sublist(deduped.length - _maxContextLines)
-        : deduped;
-    final older = deduped.length > _maxContextLines
-        ? deduped.sublist(0, deduped.length - _maxContextLines)
-        : const <ChatTurn>[];
-
-    final summary = older.isEmpty ? '' : _summarizeContext(older);
-    final compressedPrompt = StringBuffer();
-    if (summary.isNotEmpty) {
-      compressedPrompt.writeln('Context summary: $summary');
-      compressedPrompt.writeln();
-    }
-    if (recent.isNotEmpty) {
-      compressedPrompt.writeln('Recent context:');
-      for (final turn in recent) {
-        compressedPrompt.writeln('- ${turn.role.name}: ${turn.content}');
-      }
-      compressedPrompt.writeln();
-    }
-    compressedPrompt.write(request.prompt.trim());
-    return request.copyWith(
-      prompt: compressedPrompt.toString(),
-      context: const <ChatTurn>[],
+    yield InferenceResponse.error(
+      lastError ?? 'Cloud AI request failed.',
+      providerId: lastProvider,
     );
   }
 
-  String _summarizeContext(List<ChatTurn> turns) {
-    final snippets = <String>[];
-    for (final turn in turns.take(_summarySourceLines)) {
-      final line = '${turn.role.name}: ${turn.content}';
-      final words = line.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-      if (words.isEmpty) continue;
-      snippets.add(words.take(_summaryWordsPerLine).join(' '));
+  /// Cloud optimization is deliberately loss-minimizing. It removes empty,
+  /// excluded and exact duplicate turns and bounds only very old history. It
+  /// never serializes conversation history into the current user prompt.
+  InferenceRequest _optimizeRequest(InferenceRequest request) {
+    final deduped = <ChatTurn>[];
+    final seen = <String>{};
+
+    for (final item in request.context) {
+      if (item.excludeFromContext) continue;
+      final content = item.content.trim();
+      if (content.isEmpty) continue;
+
+      final key = '${item.role.name}:${content.toLowerCase()}';
+      if (!seen.add(key)) continue;
+
+      deduped.add(
+        ChatTurn(
+          role: item.role,
+          content: content,
+        ),
+      );
     }
-    return snippets.join(' | ');
+
+    final bounded = deduped.length > _maxContextTurns
+        ? deduped.sublist(deduped.length - _maxContextTurns)
+        : deduped;
+
+    return request.copyWith(
+      prompt: request.prompt.trim(),
+      context: List<ChatTurn>.unmodifiable(bounded),
+    );
+  }
+
+  List<AiMessage> _toAiMessages(List<ChatTurn> turns) {
+    return turns
+        .map(
+          (turn) => AiMessage(
+            role: switch (turn.role) {
+              ChatRole.system => AiMessageRole.system,
+              ChatRole.assistant => AiMessageRole.assistant,
+              ChatRole.user => AiMessageRole.user,
+            },
+            content: turn.content,
+          ),
+        )
+        .toList(growable: false);
   }
 
   _TaskSignal _taskSignal(InferenceRequest request) {
@@ -217,76 +418,262 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return _TaskSignal.general;
   }
 
-  List<String> _providerOrder(InferenceRequest request) {
-    final available = _supportedProviders();
-    final ordered = <String>[];
-    switch (_taskSignal(request)) {
-      case _TaskSignal.coding:
-        ordered.addAll(CloudProviderCatalog.codingPriority);
-        break;
-      case _TaskSignal.reasoning:
-        ordered.addAll(CloudProviderCatalog.reasoningPriority);
-        break;
-      case _TaskSignal.general:
-        ordered.addAll(CloudProviderCatalog.generalPriority);
-        break;
+  List<String> _providerOrder(
+    _TaskSignal signal, {
+    String? pinnedProvider,
+    required bool allowFailover,
+    required bool enforceAutomaticPolicy,
+  }) {
+    final available = _supportedProviders().toList(growable: false);
+    final normalizedPinned = pinnedProvider?.trim();
+
+    if (normalizedPinned != null &&
+        normalizedPinned.isNotEmpty &&
+        available.contains(normalizedPinned) &&
+        !allowFailover) {
+      return <String>[normalizedPinned];
     }
-    ordered.addAll(available);
-    final deduped = <String>[];
-    for (final provider in ordered) {
-      if (!deduped.contains(provider) && available.contains(provider)) {
-        deduped.add(provider);
+
+    final preferred = _preferredProvider();
+    final indexed = <_ProviderCandidate>[];
+
+    for (var index = 0; index < available.length; index++) {
+      final provider = available[index];
+      final capability = switch (signal) {
+        _TaskSignal.coding => CloudProviderCapability.coding,
+        _TaskSignal.reasoning => CloudProviderCapability.reasoning,
+        _TaskSignal.general => CloudProviderCapability.general,
+      };
+
+      var score = 0.0;
+      if (CloudProviderCatalog.supports(provider, capability)) score += 100;
+      if (CloudProviderCatalog.supports(
+        provider,
+        CloudProviderCapability.general,
+      )) {
+        score += 10;
       }
+      if (preferred != null && preferred == provider) score += 25;
+      if (normalizedPinned != null && normalizedPinned == provider) score += 1000;
+
+      final health = _providerHealth[provider];
+      if (health != null) {
+        score += health.successRate * 20;
+        if (health.averageLatencyMs != null) {
+          score -= (health.averageLatencyMs! / 1000)
+              .clamp(0.0, 15.0)
+              .toDouble();
+        }
+        score -= health.consecutiveFailures * 12;
+      } else {
+        score += 20;
+      }
+
+      if (!_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        score -= 10000;
+      }
+
+      indexed.add(
+        _ProviderCandidate(
+          providerId: provider,
+          score: score,
+          originalIndex: index,
+        ),
+      );
     }
-    return deduped;
+
+    indexed.sort((a, b) {
+      final score = b.score.compareTo(a.score);
+      return score != 0 ? score : a.originalIndex.compareTo(b.originalIndex);
+    });
+
+    return indexed.map((candidate) => candidate.providerId).toList(growable: false);
   }
 
-  bool _isProviderReady(String provider) {
+  bool _isExplicitCloudRequest(InferenceRequest request) {
+    return request.routeDirective == InferenceRouteDirective.cloudOnly &&
+        (request.cloudProviderId == null || request.cloudProviderId!.trim().isEmpty);
+  }
+
+  String _selectedModel(String provider) {
+    final override = _modelForProvider(provider)?.trim();
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+    return CloudProviderCatalog.defaultModelFor(provider);
+  }
+
+  bool _isProviderReady(
+    String provider, {
+    required bool enforceAutomaticPolicy,
+  }) {
     if (!_isProviderAvailable(provider)) return false;
-    final state = _providerHealth.putIfAbsent(provider, () => _ProviderHealth());
-    if (state.quotaExhausted) return false;
-    if (state.rateLimitedUntil != null &&
-        state.rateLimitedUntil!.isAfter(DateTime.now())) {
+    if (enforceAutomaticPolicy && !_automaticUseAllowed(provider)) return false;
+
+    final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
+    final now = DateTime.now();
+
+    if (state.rateLimitedUntil != null && state.rateLimitedUntil!.isAfter(now)) {
       return false;
     }
+    if (state.quotaBlockedUntil != null && state.quotaBlockedUntil!.isAfter(now)) {
+      return false;
+    }
+    if (state.unavailableUntil != null && state.unavailableUntil!.isAfter(now)) {
+      return false;
+    }
+
     return true;
   }
 
-  void _markSuccess(String provider) {
-    final state = _providerHealth.putIfAbsent(provider, () => _ProviderHealth());
+  void _markSuccess(String provider, int latencyMs) {
+    final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     state.totalRequests++;
-    state.failedRequests = 0;
+    state.successfulRequests++;
+    state.consecutiveFailures = 0;
     state.lastError = null;
     state.rateLimitedUntil = null;
+    state.quotaBlockedUntil = null;
+    state.unavailableUntil = null;
+    state.recordLatency(latencyMs);
   }
 
-  void _markFailure(String provider, String message) {
+  void _markFailure(String provider, String message, int latencyMs) {
     final normalized = message.toLowerCase();
-    final state = _providerHealth.putIfAbsent(provider, () => _ProviderHealth());
+    final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     state.totalRequests++;
     state.failedRequests++;
+    state.consecutiveFailures++;
     state.lastError = message;
+    state.recordLatency(latencyMs);
+
+    final now = DateTime.now();
     if (normalized.contains('rate limit') || normalized.contains('429')) {
-      state.rateLimitedUntil = DateTime.now().add(_rateLimitBackoff);
+      state.rateLimitedUntil = now.add(_rateLimitBackoff);
+      return;
     }
     if (normalized.contains('quota') ||
         normalized.contains('credit') ||
         normalized.contains('insufficient')) {
-      state.quotaExhausted = true;
+      state.quotaBlockedUntil = now.add(_quotaBackoff);
+      return;
+    }
+    if (normalized.contains('network') ||
+        normalized.contains('connection') ||
+        normalized.contains('unavailable')) {
+      state.unavailableUntil = now.add(_temporaryFailureBackoff);
     }
   }
 
-  String _cacheKey(List<String> providerOrder, InferenceRequest request) {
+  CloudProviderStatusSnapshot _statusFor(String provider) {
+    final health = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
+    final now = DateTime.now();
+    final configured = _isProviderAvailable(provider);
+
+    if (!configured) {
+      return CloudProviderStatusSnapshot(
+        providerId: provider,
+        state: CloudProviderOperationalState.authRequired,
+        modelId: _selectedModel(provider),
+        totalRequests: health.totalRequests,
+        failedRequests: health.failedRequests,
+        lastError: health.lastError,
+        averageLatencyMs: health.averageLatencyMs,
+      );
+    }
+
+    if (!_automaticUseAllowed(provider)) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.policyBlocked,
+      );
+    }
+
+    if (health.rateLimitedUntil?.isAfter(now) ?? false) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.rateLimited,
+        retryAt: health.rateLimitedUntil,
+      );
+    }
+    if (health.quotaBlockedUntil?.isAfter(now) ?? false) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.quotaExhausted,
+        retryAt: health.quotaBlockedUntil,
+      );
+    }
+    if (health.unavailableUntil?.isAfter(now) ?? false) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.temporarilyUnavailable,
+        retryAt: health.unavailableUntil,
+      );
+    }
+    if (health.lastError != null && health.consecutiveFailures > 0) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.error,
+      );
+    }
+
+    return _snapshot(provider, health, CloudProviderOperationalState.ready);
+  }
+
+  CloudProviderStatusSnapshot _snapshot(
+    String provider,
+    _ProviderHealth health,
+    CloudProviderOperationalState state, {
+    DateTime? retryAt,
+  }) {
+    return CloudProviderStatusSnapshot(
+      providerId: provider,
+      state: state,
+      modelId: _selectedModel(provider),
+      totalRequests: health.totalRequests,
+      failedRequests: health.failedRequests,
+      lastError: health.lastError,
+      retryAt: retryAt,
+      averageLatencyMs: health.averageLatencyMs,
+    );
+  }
+
+  String _cacheKey(
+    List<String> providerOrder,
+    InferenceRequest request,
+    _TaskSignal signal,
+  ) {
+    final contextHash = Object.hashAll(
+      request.context.map(
+        (turn) => Object.hash(turn.role.name, turn.content),
+      ),
+    );
+    final modelsHash = Object.hashAll(
+      providerOrder.map((provider) => _selectedModel(provider)),
+    );
     final contentHash = Object.hash(
       request.systemPrompt ?? '',
       request.prompt,
+      contextHash,
+      modelsHash,
+      signal.name,
       request.maxTokens,
       request.temperature,
+      request.cloudProviderId ?? '',
+      request.allowCloudProviderFailover,
     );
     return '${providerOrder.join(">")}::$contentHash';
   }
 
-  void _putCache(String key, AiResponse value) {
+  void _putCache(String key, _CachedCloudResponse value) {
     _responseCache[key] = value;
     while (_responseCache.length > _maxCacheEntries) {
       _responseCache.remove(_responseCache.keys.first);
@@ -368,12 +755,52 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   };
 }
 
+class _ProviderCandidate {
+  const _ProviderCandidate({
+    required this.providerId,
+    required this.score,
+    required this.originalIndex,
+  });
+
+  final String providerId;
+  final double score;
+  final int originalIndex;
+}
+
+class _CachedCloudResponse {
+  const _CachedCloudResponse({
+    required this.response,
+    required this.providerId,
+  });
+
+  final AiResponse response;
+  final String providerId;
+}
+
 class _ProviderHealth {
   int totalRequests = 0;
+  int successfulRequests = 0;
   int failedRequests = 0;
-  bool quotaExhausted = false;
+  int consecutiveFailures = 0;
   String? lastError;
   DateTime? rateLimitedUntil;
+  DateTime? quotaBlockedUntil;
+  DateTime? unavailableUntil;
+  double? averageLatencyMs;
+
+  double get successRate {
+    if (totalRequests <= 0) return 1.0;
+    return (successfulRequests / totalRequests)
+        .clamp(0.0, 1.0)
+        .toDouble();
+  }
+
+  void recordLatency(int latencyMs) {
+    if (latencyMs < 0) return;
+    averageLatencyMs = averageLatencyMs == null
+        ? latencyMs.toDouble()
+        : (averageLatencyMs! * 0.7) + (latencyMs * 0.3);
+  }
 }
 
 enum _TaskSignal { general, coding, reasoning }

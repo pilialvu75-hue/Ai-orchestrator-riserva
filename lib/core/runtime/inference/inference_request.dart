@@ -1,5 +1,17 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
+/// Optional caller directive for the runtime boundary.
+///
+/// [runtimeDefault] preserves the persisted Local/Cloud/Hybrid setting.
+/// [localOnly] and [cloudOnly] are explicit decisions made by a higher layer.
+/// In Hybrid mode the Orchestrator can therefore make the decision itself,
+/// while explicit Cloud chat can bypass the Orchestrator entirely.
+enum InferenceRouteDirective {
+  runtimeDefault,
+  localOnly,
+  cloudOnly,
+}
+
 class InferenceRequest {
   static bool _hasModelSize(String id, String size) =>
       RegExp('(?:^|[^0-9.])${RegExp.escape(size)}' r'(?:$|[^0-9a-z])')
@@ -20,6 +32,14 @@ class InferenceRequest {
     this.repeatPenalty = 1.1,
     this.modelId,
     this.modelPath,
+    this.requestId,
+    this.projectId,
+    this.taskId,
+    this.executionId,
+    this.checkpointId,
+    this.routeDirective = InferenceRouteDirective.runtimeDefault,
+    this.cloudProviderId,
+    this.allowCloudProviderFailover = true,
   });
 
   final String sessionId;
@@ -34,28 +54,36 @@ class InferenceRequest {
   final String? modelId;
   final String? modelPath;
 
-  /// Restituisce il limite di token predefinito in base alla taglia
-  /// del modello.
+  /// Optional cross-layer identities used by the Workshop/Cantiere.
   ///
-  /// IMPORTANTE:
+  /// Request, project, task, session, execution and checkpoint are distinct
+  /// concepts. Local runtime may ignore these fields; Cloud orchestration can
+  /// use them for tracing and deterministic resume without polluting prompts.
+  final String? requestId;
+  final String? projectId;
+  final String? taskId;
+  final String? executionId;
+  final String? checkpointId;
+
+  /// Explicit routing decision from the caller.
+  final InferenceRouteDirective routeDirective;
+
+  /// Concrete Cloud provider selected by the higher-level Orchestrator.
   ///
-  /// La taglia del modello NON determina:
-  /// - la famiglia LLM;
-  /// - il chat template;
-  /// - la piattaforma supportata;
-  /// - il ruolo dell'agente.
+  /// Null means the independent Cloud router is allowed to select the best
+  /// provider for the task. A non-null value is an explicit provider binding,
+  /// typically produced by Hybrid orchestration.
+  final String? cloudProviderId;
+
+  /// Whether the Cloud runtime may switch provider inside the same request.
   ///
-  /// Queste responsabilità appartengono ai rispettivi livelli
-  /// dell'architettura.
-  ///
-  /// La funzione serve solamente a evitare fallback troppo bassi
-  /// quando introduciamo modelli più grandi in futuro.
+  /// Explicit Cloud chat keeps this true so quota/rate-limit failover is
+  /// automatic. Hybrid orchestration normally sets it false because Hannibal
+  /// owns provider replacement and checkpoint/resume decisions.
+  final bool allowCloudProviderFailover;
+
   static int maxTokensForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
-
-    // -------------------------------------------------------------------------
-    // Modelli molto grandi
-    // -------------------------------------------------------------------------
 
     if (_hasModelSize(id, '70b') ||
         _hasModelSize(id, '72b') ||
@@ -70,10 +98,6 @@ class InferenceRequest {
       return 3072;
     }
 
-    // -------------------------------------------------------------------------
-    // Modelli medio-grandi
-    // -------------------------------------------------------------------------
-
     if (_hasModelSize(id, '14b') ||
         _hasModelSize(id, '13b') ||
         _hasModelSize(id, '12b')) {
@@ -85,10 +109,6 @@ class InferenceRequest {
         _hasModelSize(id, '7b')) {
       return 1024;
     }
-
-    // -------------------------------------------------------------------------
-    // Modelli piccoli / mobile
-    // -------------------------------------------------------------------------
 
     if (id.contains('phi3_5') ||
         id.contains('phi-3.5') ||
@@ -113,11 +133,6 @@ class InferenceRequest {
     return defaultMaxTokens;
   }
 
-  /// Temperatura base associata alla taglia/famiglia del modello.
-  ///
-  /// Manteniamo volutamente valori conservativi.
-  /// Il runtime può sovrascrivere questi valori tramite le proprie
-  /// impostazioni di sampling.
   static double temperatureForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
 
@@ -164,6 +179,14 @@ class InferenceRequest {
     double? repeatPenalty,
     String? modelId,
     String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? checkpointId,
+    InferenceRouteDirective? routeDirective,
+    String? cloudProviderId,
+    bool? allowCloudProviderFailover,
   }) {
     return InferenceRequest(
       sessionId: sessionId ?? this.sessionId,
@@ -177,10 +200,18 @@ class InferenceRequest {
       repeatPenalty: repeatPenalty ?? this.repeatPenalty,
       modelId: modelId ?? this.modelId,
       modelPath: modelPath ?? this.modelPath,
+      requestId: requestId ?? this.requestId,
+      projectId: projectId ?? this.projectId,
+      taskId: taskId ?? this.taskId,
+      executionId: executionId ?? this.executionId,
+      checkpointId: checkpointId ?? this.checkpointId,
+      routeDirective: routeDirective ?? this.routeDirective,
+      cloudProviderId: cloudProviderId ?? this.cloudProviderId,
+      allowCloudProviderFailover:
+          allowCloudProviderFailover ?? this.allowCloudProviderFailover,
     );
   }
 
-  /// Mappa la richiesta in formato JSON o lista di messaggi per l'engine LLM.
   List<Map<String, String>> toMessageList() {
     final List<Map<String, String>> messages = [];
 

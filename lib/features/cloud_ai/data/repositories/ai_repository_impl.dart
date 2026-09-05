@@ -1,16 +1,16 @@
-import 'package:dartz/dartz.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
-import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_request.dart';
-import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_response.dart';
-import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
-import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
-import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_request.dart';
+import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_response.dart';
+import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
+import 'package:dartz/dartz.dart';
 
 enum ActiveAiProvider { openAi, gemini, claude, grok, copilot }
 
@@ -40,23 +40,17 @@ class AiRepositoryImpl implements AiRepository {
 
   @override
   void setProvider(String providerName) {
-    activeAiProvider = _providerFromName(providerName) ?? ActiveAiProvider.openAi;
+    activeAiProvider =
+        _providerFromName(providerName) ?? ActiveAiProvider.openAi;
   }
 
   @override
   String providerDisplayName([String? providerName]) {
-    switch (_providerFromName(providerName) ?? activeAiProvider) {
-      case ActiveAiProvider.openAi:
-        return 'OpenAI';
-      case ActiveAiProvider.gemini:
-        return 'Gemini';
-      case ActiveAiProvider.claude:
-        return 'Claude';
-      case ActiveAiProvider.grok:
-        return 'Grok';
-      case ActiveAiProvider.copilot:
-        return 'GitHub Copilot';
-    }
+    final requested = providerName == null
+        ? activeAiProvider.name
+        : providerName;
+    return CloudProviderCatalog.definitionFor(requested)?.displayName ??
+        requested;
   }
 
   @override
@@ -97,9 +91,13 @@ class AiRepositoryImpl implements AiRepository {
           ),
         );
       }
-      activeAiProvider = provider;
+
+      // IMPORTANT: an explicit routed request must not mutate the global user
+      // preference. Multiple Cantiere executions may call different providers
+      // concurrently; their routing decisions must remain isolated.
       final model = AiRequestModel.fromEntity(request);
       final AiResponse response;
+
       switch (provider) {
         case ActiveAiProvider.openAi:
           response = await openAiDataSource.complete(model);
@@ -112,17 +110,22 @@ class AiRepositoryImpl implements AiRepository {
           break;
         case ActiveAiProvider.grok:
           if (grokDataSource == null) {
-            return const Left(ServerFailure('Grok API key not configured'));
+            return const Left(
+              ServerFailure('Grok API key not configured'),
+            );
           }
           response = await grokDataSource!.complete(model);
           break;
         case ActiveAiProvider.copilot:
           if (copilotDataSource == null) {
-            return const Left(ServerFailure('Copilot API key not configured'));
+            return const Left(
+              ServerFailure('Copilot API key not configured'),
+            );
           }
           response = await copilotDataSource!.complete(model);
           break;
       }
+
       return Right(response);
     } on NetworkException catch (e) {
       return Left(NetworkFailure(e.message));
