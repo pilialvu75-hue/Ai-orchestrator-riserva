@@ -10,7 +10,7 @@ class ClaudeDataSource {
   ClaudeDataSource({
     required this.apiKey,
     http.Client? httpClient,
-    this.model = 'claude-3-5-sonnet-latest',
+    this.model = 'claude-sonnet-5',
   }) : _client = httpClient ?? http.Client();
 
   final String apiKey;
@@ -20,6 +20,7 @@ class ClaudeDataSource {
   bool get isConfigured => apiKey.trim().isNotEmpty;
 
   Future<AiResponseModel> complete(AiRequestModel request) async {
+    final resolvedModel = _modelFor(request);
     final uri = Uri.parse('${AppConstants.claudeBaseUrl}/messages');
     final response = await _client.post(
       uri,
@@ -29,17 +30,12 @@ class ClaudeDataSource {
         'anthropic-version': '2023-06-01',
       },
       body: jsonEncode(<String, dynamic>{
-        'model': model,
+        'model': resolvedModel,
         'max_tokens': request.maxTokens,
         'temperature': request.temperature,
-        if (request.systemPrompt != null && request.systemPrompt!.isNotEmpty)
-          'system': request.systemPrompt,
-        'messages': <Map<String, String>>[
-          <String, String>{
-            'role': 'user',
-            'content': request.prompt,
-          },
-        ],
+        if (request.combinedSystemPrompt case final system?)
+          'system': system,
+        'messages': request.toClaudeMessages(),
       }),
     );
 
@@ -50,20 +46,28 @@ class ClaudeDataSource {
           .whereType<Map<String, dynamic>>()
           .where((entry) => entry['type'] == 'text')
           .map((entry) => entry['text'] as String? ?? '')
+          .where((value) => value.isNotEmpty)
           .join('\n')
           .trim();
-      final usage = json['usage'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+      final usage =
+          json['usage'] as Map<String, dynamic>? ?? const <String, dynamic>{};
       final inputTokens = usage['input_tokens'] as int? ?? 0;
       final outputTokens = usage['output_tokens'] as int? ?? 0;
       return AiResponseModel(
         text: text,
-        model: json['model'] as String? ?? model,
+        model: json['model'] as String? ?? resolvedModel,
         tokensUsed: inputTokens + outputTokens,
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
     }
+
     throw ServerException(
       'Claude API error ${response.statusCode}: ${response.body}',
     );
+  }
+
+  String _modelFor(AiRequestModel request) {
+    final requested = request.modelId?.trim();
+    return requested != null && requested.isNotEmpty ? requested : model;
   }
 }
