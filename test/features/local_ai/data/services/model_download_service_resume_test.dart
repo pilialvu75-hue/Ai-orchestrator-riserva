@@ -4,10 +4,16 @@ import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 const _gguf = <int>[0x47, 0x47, 0x55, 0x46];
+
+// Downloads do not use the file picker; inject it so these unit tests do not
+// depend on native plugin registration.
+class _MockFilePicker extends Mock implements FilePicker {}
 
 class _TestPathProviderPlatform extends PathProviderPlatform
     with MockPlatformInterfaceMixin {
@@ -24,14 +30,19 @@ void main() {
 
   late Directory tempDir;
   late PathProviderPlatform originalPathProvider;
+  late HttpOverrides? originalHttpOverrides;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('model-download-resume-');
+    originalHttpOverrides = HttpOverrides.current;
+    // These tests exercise real HTTP against a loopback server.
+    HttpOverrides.global = null;
     originalPathProvider = PathProviderPlatform.instance;
     PathProviderPlatform.instance = _TestPathProviderPlatform(tempDir.path);
   });
 
   tearDown(() async {
+    HttpOverrides.global = originalHttpOverrides;
     PathProviderPlatform.instance = originalPathProvider;
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
@@ -68,7 +79,7 @@ void main() {
       await request.response.close();
     }();
 
-    final downloaded = await ModelDownloadService().downloadModel(model);
+    final downloaded = await ModelDownloadService(filePicker: _MockFilePicker()).downloadModel(model);
     await serverFuture;
 
     expect(observedRange, 'bytes=4-');
@@ -113,7 +124,7 @@ void main() {
       await request.response.close();
     }();
 
-    final downloaded = await ModelDownloadService().downloadModel(model);
+    final downloaded = await ModelDownloadService(filePicker: _MockFilePicker()).downloadModel(model);
     await serverFuture;
     final bytes = await File(downloaded.localPath!).readAsBytes();
 
@@ -137,7 +148,7 @@ void main() {
     final part = File('${modelsDir.path}/${model.fileName}.part');
     await part.writeAsBytes(_gguf);
 
-    final service = ModelDownloadService();
+    final service = ModelDownloadService(filePicker: _MockFilePicker());
     var cancelled = false;
 
     final future = service.downloadModel(
