@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/ai/model_manager.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
+import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
+import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class ModelsPage extends StatefulWidget {
   const ModelsPage({super.key});
@@ -19,6 +22,37 @@ class _ModelsPageState extends State<ModelsPage> {
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
+  bool _exporting = false;
+  double _exportProgress = 0;
+  String? _exportMessage;
+
+  Future<void> _exportAllModels() async {
+    if (_exporting) return;
+    setState(() {
+      _exporting = true;
+      _exportProgress = 0;
+      _exportMessage = null;
+    });
+    try {
+      final count = await di.sl<ModelDownloadService>()
+          .exportAllDownloadedModelsToPublicStorage(onProgress: (progress) {
+        if (!mounted) return;
+        setState(() => _exportProgress = progress.clamp(0.0, 1.0).toDouble());
+      });
+      if (!mounted) return;
+      setState(() {
+        _exportMessage = count == 0
+            ? 'Nessun modello GGUF scaricato da esportare.'
+            : 'Esportazione completata: $count modelli disponibili nella cartella '
+                'esterna. Dopo la reinstallazione puoi usare Importa locale.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _exportMessage = 'Esportazione non completata: $error');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
 
   // Track whether we have already shown the update dialog for the current
   // batch of available updates, to avoid re-showing it on every rebuild.
@@ -413,6 +447,30 @@ class _ModelsPageState extends State<ModelsPage> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
               children: [
+                FilledButton.icon(
+                  onPressed: _exporting ? null : _exportAllModels,
+                  icon: const Icon(Icons.save_alt),
+                  label: Text(_exporting
+                      ? 'Esportazione e verifica in corso...'
+                      : 'Esporta tutti i modelli'),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Copia i modelli GGUF scaricati nella cartella esterna, '
+                  'conservandoli dopo la disinstallazione. Gli originali restano nell’app.\n'
+                  '${RuntimeModelPathResolver.publicModelsDirectoryPath}',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                if (_exporting) ...[
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: _exportProgress),
+                ],
+                if (_exportMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_exportMessage!,
+                      style: const TextStyle(color: Colors.white70)),
+                ],
+                const SizedBox(height: 20),
                 const _ModelSectionHeader(
                   title: 'Mobile models (Android / iOS)',
                   subtitle:

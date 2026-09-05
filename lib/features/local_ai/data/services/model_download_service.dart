@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
@@ -877,6 +878,22 @@ class ModelDownloadService {
   Future<int> exportAllDownloadedModelsToPublicStorage({
     void Function(double progress)? onProgress,
   }) async {
+    if (_exportInProgress) {
+      throw const DownloadException('Un’esportazione è già in corso.');
+    }
+    _exportInProgress = true;
+    try {
+      return await _exportDownloadedModels(onProgress: onProgress);
+    } finally {
+      _exportInProgress = false;
+    }
+  }
+
+  bool _exportInProgress = false;
+
+  Future<int> _exportDownloadedModels({
+    void Function(double progress)? onProgress,
+  }) async {
     if (!Platform.isAndroid) {
       throw const DownloadException(
         'Esportazione modelli disponibile solo su Android.',
@@ -904,6 +921,13 @@ class ModelDownloadService {
     for (final model in models) {
       if (!model.isDownloaded) {
         continue;
+      }
+
+      if (model.validationStatus == ModelValidationStatus.invalidModel) {
+        throw DownloadException(
+          'Il modello ${model.displayName} non supera la validazione. '
+          'Ripara il download prima di esportarlo.',
+        );
       }
 
       final localPath =
@@ -1114,10 +1138,18 @@ class ModelDownloadService {
       await sink.close();
     }
 
-    if (await destination.exists()) {
-      await destination.delete();
+    // Verify before replacing an existing backup. Stream the hashes rather
+    // than loading multi-gigabyte models into memory.
+    final sourceDigest = await sha256.bind(source.openRead()).first;
+    final copyDigest = await sha256.bind(tempDestination.openRead()).first;
+    if (await tempDestination.length() != totalBytes ||
+        sourceDigest != copyDigest) {
+      await tempDestination.delete();
+      throw const DownloadException('Verifica della copia esportata fallita.');
     }
 
+    // Android replaces an existing file on rename, preserving the old backup
+    // until the new copy has been completely written and verified.
     await tempDestination.rename(
       destination.path,
     );
