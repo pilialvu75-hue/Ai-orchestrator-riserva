@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_routing_bootstrap.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -48,6 +49,8 @@ class RuntimeBootstrap {
       copilotApiKey: copilotApiKey,
       appVersion: appVersion,
     );
+
+    await CloudRoutingBootstrap.configure(di.sl);
 
     await _runWarmupChecks();
     debugPrint('[BOOT] init complete');
@@ -127,7 +130,7 @@ class RuntimeBootstrap {
     // Intentionally resolve singleton once to force lazy service construction.
     di.sl<PreferencesService>();
     await _guarded('orchestrator_boot', () async {
-      // Intentionally resolve singleton once to warm orchestration graph.
+      // A failed Hannibal warmup must not make explicit Cloud chat unavailable.
       di.sl<Orchestrator>();
     });
 
