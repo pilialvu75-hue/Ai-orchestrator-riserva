@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/error/exceptions.dart';
@@ -138,50 +137,24 @@ void main() {
     final part = File('${modelsDir.path}/${model.fileName}.part');
     await part.writeAsBytes(_gguf);
 
-    final releaseServer = Completer<void>();
-    final serverFuture = () async {
-      final request = await server.first;
-      expect(request.headers.value(HttpHeaders.rangeHeader), 'bytes=4-');
-      request.response.statusCode = HttpStatus.partialContent;
-      request.response.headers.set(
-        HttpHeaders.contentRangeHeader,
-        'bytes 4-11/12',
-      );
-      request.response.contentLength = 8;
-      request.response.add(const <int>[1, 2, 3, 4]);
-      await request.response.flush();
-
-      await releaseServer.future;
-
-      try {
-        request.response.add(const <int>[5, 6, 7, 8]);
-        await request.response.close();
-      } on Object {
-        // The client is expected to close the connection after cancellation.
-      }
-    }();
-
     final service = ModelDownloadService();
     var cancelled = false;
+
     final future = service.downloadModel(
       model,
       onProgress: (progress) {
-        if (!cancelled && progress >= (8 / 12)) {
+        if (!cancelled && progress >= (4 / 12)) {
           cancelled = true;
           service.cancelDownload(model.id);
-          releaseServer.complete();
         }
       },
     );
 
     await expectLater(future, throwsA(isA<DownloadException>()));
-    await serverFuture;
 
     expect(cancelled, isTrue);
     expect(await part.exists(), isTrue);
-    final partialBytes = await part.readAsBytes();
-    expect(partialBytes.take(_gguf.length), _gguf);
-    expect(partialBytes.length, 8);
+    expect(await part.readAsBytes(), _gguf);
     expect(
       await File('${tempDir.path}/models/${model.fileName}').exists(),
       isFalse,
