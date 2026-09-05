@@ -59,47 +59,7 @@ class KokoroAssets {
         onProgress((received / archiveBytes * 0.8).clamp(0.0, 0.8).toDouble());
       });
       final payload = p.join(staging.path, 'payload');
-      await Isolate.run(() async {
-        if (await archive.length() != archiveBytes ||
-            (await sha256.bind(archive.openRead()).first).toString() != archiveSha256) {
-          throw const FormatException('Archivio Kokoro incompleto o corrotto. Riprovare il download.');
-        }
-        await extractFileToDisk(archive.path, payload);
-        final files = Directory(payload).listSync(recursive: true, followLinks: false)
-            .whereType<File>().toList();
-        File unique(String name) {
-          final matches = files.where((f) => p.basename(f.path) == name).toList();
-          if (matches.length != 1) throw FormatException('Risorsa Kokoro mancante o ambigua: $name');
-          return matches.single;
-        }
-        final models = files.where((f) => f.path.endsWith('.onnx')).toList();
-        if (models.length != 1) throw const FormatException('Modello Kokoro mancante o ambiguo.');
-        final model = models.single;
-        final voices = unique('voices.bin');
-        final tokens = unique('tokens.txt');
-        final phontab = unique('phontab');
-        final data = phontab.parent;
-        for (final name in ['phondata', 'phonindex', 'intonations']) {
-          if (!File(p.join(data.path, name)).existsSync()) {
-            throw FormatException('Dati pronuncia Kokoro incompleti: $name');
-          }
-        }
-        final hashes = <String, String>{};
-        for (final file in files) {
-          hashes[p.relative(file.path, from: payload)] =
-              (await sha256.bind(file.openRead()).first).toString();
-        }
-        await File(p.join(payload, 'verified.json')).writeAsString(jsonEncode({
-          'archiveSha256': archiveSha256,
-          'files': hashes,
-          'paths': {
-            'model': p.relative(model.path, from: payload),
-            'voices': p.relative(voices.path, from: payload),
-            'tokens': p.relative(tokens.path, from: payload),
-            'data': p.relative(data.path, from: payload),
-          },
-        }), flush: true);
-      });
+      await _extractInBackground(archive.path, payload);
       onProgress(0.95);
       // Preserve the previous package until a complete replacement is ready.
       final backup = Directory(p.join(staging.path, 'previous'));
@@ -115,6 +75,54 @@ class KokoroAssets {
       dio.close();
       if (await staging.exists()) await staging.delete(recursive: true);
     }
+  }
+
+  // Keep the isolate closure outside the scope holding Dio and UI callbacks.
+  static Future<void> _extractInBackground(String archivePath, String payload) {
+    return Isolate.run(() => _extractVerifiedArchive(archivePath, payload));
+  }
+
+  static Future<void> _extractVerifiedArchive(String archivePath, String payload) async {
+    final archive = File(archivePath);
+    if (await archive.length() != archiveBytes ||
+        (await sha256.bind(archive.openRead()).first).toString() != archiveSha256) {
+      throw const FormatException('Archivio Kokoro incompleto o corrotto. Riprovare il download.');
+    }
+    await extractFileToDisk(archive.path, payload);
+    final files = Directory(payload).listSync(recursive: true, followLinks: false)
+        .whereType<File>().toList();
+    File unique(String name) {
+      final matches = files.where((f) => p.basename(f.path) == name).toList();
+      if (matches.length != 1) throw FormatException('Risorsa Kokoro mancante o ambigua: $name');
+      return matches.single;
+    }
+    final models = files.where((f) => f.path.endsWith('.onnx')).toList();
+    if (models.length != 1) throw const FormatException('Modello Kokoro mancante o ambiguo.');
+    final model = models.single;
+    final voices = unique('voices.bin');
+    final tokens = unique('tokens.txt');
+    final phontab = unique('phontab');
+    final data = phontab.parent;
+    for (final name in ['phondata', 'phonindex', 'intonations']) {
+      if (!File(p.join(data.path, name)).existsSync()) {
+        throw FormatException('Dati pronuncia Kokoro incompleti: $name');
+      }
+    }
+    final hashes = <String, String>{};
+    for (final file in files) {
+      hashes[p.relative(file.path, from: payload)] =
+          (await sha256.bind(file.openRead()).first).toString();
+    }
+    await File(p.join(payload, 'verified.json')).writeAsString(jsonEncode({
+      'archiveSha256': archiveSha256,
+      'files': hashes,
+      'paths': {
+        'model': p.relative(model.path, from: payload),
+        'voices': p.relative(voices.path, from: payload),
+        'tokens': p.relative(tokens.path, from: payload),
+        'data': p.relative(data.path, from: payload),
+      },
+    }), flush: true);
   }
 
   static Future<Map<String, String>?> verifyDirectory(String root) async {
