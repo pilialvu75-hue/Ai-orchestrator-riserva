@@ -8,18 +8,26 @@ import 'package:http/http.dart' as http;
 
 class GrokDataSource {
   GrokDataSource({
-    required this.apiKey,
+    String apiKey = '',
+    String Function()? apiKeyProvider,
     http.Client? httpClient,
     this.model = 'grok-4.6',
-  }) : _client = httpClient ?? http.Client();
+  })  : _apiKeyProvider = apiKeyProvider ?? (() => apiKey),
+        _client = httpClient ?? http.Client();
 
-  final String apiKey;
+  final String Function() _apiKeyProvider;
   final String model;
   final http.Client _client;
 
-  bool get isConfigured => apiKey.trim().isNotEmpty;
+  String get apiKey => _apiKeyProvider().trim();
+  bool get isConfigured => apiKey.isNotEmpty;
 
   Future<AiResponseModel> complete(AiRequestModel request) async {
+    final credential = apiKey;
+    if (credential.isEmpty) {
+      throw const ServerException('Grok API key not configured');
+    }
+
     final resolvedModel = _modelFor(request);
     final uri = Uri.parse('${AppConstants.grokBaseUrl}/chat/completions');
     final body = jsonEncode(
@@ -30,7 +38,7 @@ class GrokDataSource {
       uri,
       headers: <String, String>{
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
+        'Authorization': 'Bearer $credential',
       },
       body: body,
     );
