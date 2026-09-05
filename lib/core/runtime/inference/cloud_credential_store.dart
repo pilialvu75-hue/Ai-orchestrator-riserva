@@ -65,6 +65,10 @@ final class CloudCredentialStore {
   CloudCredentialStore({CloudSecretStorage? storage})
       : _storage = storage ?? FlutterSecureCloudSecretStorage();
 
+  /// Process-wide credential source used by the Cloud runtime and Settings.
+  /// Tests can still construct isolated stores with an in-memory backend.
+  static final CloudCredentialStore instance = CloudCredentialStore();
+
   static const String _keyPrefix = 'ai_orchestrator.cloud.credential.v1.';
 
   final CloudSecretStorage _storage;
@@ -135,14 +139,13 @@ final class CloudCredentialStore {
       );
     }
 
+    final hasFallback =
+        _environmentFallbacks[providerId]?.trim().isNotEmpty ?? false;
     return CloudCredentialSnapshot(
       providerId: providerId,
-      configured: _environmentFallbacks[providerId]?.trim().isNotEmpty ?? false,
-      kind: _environmentFallbacks[providerId]?.trim().isNotEmpty ?? false
-          ? CloudCredentialKind.apiKey
-          : null,
-      fromEnvironmentFallback:
-          _environmentFallbacks[providerId]?.trim().isNotEmpty ?? false,
+      configured: hasFallback,
+      kind: hasFallback ? CloudCredentialKind.apiKey : null,
+      fromEnvironmentFallback: hasFallback,
     );
   }
 
