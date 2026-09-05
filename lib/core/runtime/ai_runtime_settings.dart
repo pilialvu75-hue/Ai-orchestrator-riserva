@@ -36,7 +36,22 @@ enum AiRuntimeMode {
   }
 }
 
-/// 🔥 NEW: internet is ALWAYS available, mode does NOT control connectivity
+enum CloudSpendingMode {
+  freeOnly,
+  prepaidOnly,
+  budgetLimit,
+  confirmBeforeSpending,
+  unrestricted;
+
+  static CloudSpendingMode fromStoredValue(String? value) {
+    for (final mode in CloudSpendingMode.values) {
+      if (mode.name == value) return mode;
+    }
+    return CloudSpendingMode.confirmBeforeSpending;
+  }
+}
+
+/// Internet availability is independent from Local/Cloud/Hybrid routing.
 enum InternetPolicy {
   always,
 }
@@ -48,6 +63,10 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   static const List<String> supportedProviders =
       CloudProviderCatalog.supportedProviders;
+
+  static const String _cloudModelPrefix = 'cloud.provider.model.';
+  static const String _cloudSpendingModeKey = 'cloud.spending.mode';
+  static const String _cloudBudgetLimitKey = 'cloud.spending.budget_limit';
 
   final ConfigRepository _configRepository;
 
@@ -75,6 +94,56 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  String cloudModelFor(String provider) {
+    final normalized = normalizeProvider(provider);
+    final stored = _configRepository.getString('$_cloudModelPrefix$normalized')?.trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+    return CloudProviderCatalog.defaultModelFor(normalized);
+  }
+
+  Future<void> setCloudModel(
+    String provider,
+    String modelId,
+  ) async {
+    final normalized = normalizeProvider(provider);
+    final model = modelId.trim();
+    if (model.isEmpty) {
+      await _configRepository.remove('$_cloudModelPrefix$normalized');
+    } else {
+      await _configRepository.setString('$_cloudModelPrefix$normalized', model);
+    }
+    notifyListeners();
+  }
+
+  CloudSpendingMode get cloudSpendingMode =>
+      CloudSpendingMode.fromStoredValue(
+        _configRepository.getString(_cloudSpendingModeKey),
+      );
+
+  Future<void> setCloudSpendingMode(CloudSpendingMode mode) async {
+    await _configRepository.setString(_cloudSpendingModeKey, mode.name);
+    notifyListeners();
+  }
+
+  double? get cloudBudgetLimit {
+    final value = double.tryParse(
+      (_configRepository.getString(_cloudBudgetLimitKey) ?? '').trim(),
+    );
+    return value != null && value > 0 ? value : null;
+  }
+
+  Future<void> setCloudBudgetLimit(double? value) async {
+    if (value == null || value <= 0) {
+      await _configRepository.remove(_cloudBudgetLimitKey);
+    } else {
+      await _configRepository.setString(
+        _cloudBudgetLimitKey,
+        value.toStringAsFixed(4),
+      );
+    }
+    notifyListeners();
+  }
+
   bool get developerMode =>
       _configRepository.getBool(AppConstants.prefDeveloperMode) ?? false;
 
@@ -95,10 +164,6 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   String? get selectedModelId =>
       _configRepository.getString(AppConstants.prefSelectedModel);
-
-  // ================================
-  // MEMORY WINDOW CONFIG
-  // ================================
 
   MemoryWindowProfile get memoryWindowProfile =>
       MemoryWindowProfile.fromStoredValue(
@@ -156,8 +221,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  MemoryWindowConfig get memoryWindowConfig =>
-      resolveMemoryWindowConfig();
+  MemoryWindowConfig get memoryWindowConfig => resolveMemoryWindowConfig();
 
   MemoryWindowConfig resolveMemoryWindowConfig({
     String? modelId,
@@ -188,9 +252,6 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     }
   }
 
-  /// ================================
-  /// 🔥 NEW: INTERNET IS ALWAYS AVAILABLE
-  /// ================================
   InternetPolicy get internetPolicy => InternetPolicy.always;
 
   int _readInt(String key, {required int fallback}) {
