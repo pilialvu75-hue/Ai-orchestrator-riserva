@@ -47,14 +47,18 @@ void main() {
     });
 
     test('removed upstream Q4 filenames are not present anymore', () {
-      final rawManifest = jsonEncode(manifest);
+      final fileNames = manifest.values
+          .whereType<Map<String, dynamic>>()
+          .map((entry) => entry['fileName'])
+          .whereType<String>()
+          .toList();
 
-      expect(rawManifest, isNot(contains('Qwen3-8B-Q4_K_M.gguf')));
+      expect(fileNames, isNot(contains('Qwen3-8B-Q4_K_M.gguf')));
       expect(
-        rawManifest,
+        fileNames,
         isNot(contains('deepseek-coder-6.7b-instruct-Q4_K_M.gguf')),
       );
-      expect(rawManifest, isNot(contains('starcoder2-3b-Q4_K_M.gguf')));
+      expect(fileNames, isNot(contains('starcoder2-3b-Q4_K_M.gguf')));
     });
   });
 }
