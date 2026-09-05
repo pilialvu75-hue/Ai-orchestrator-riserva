@@ -1,6 +1,10 @@
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 class InferenceRequest {
+  static bool _hasModelSize(String id, String size) =>
+      RegExp('(?:^|[^0-9.])${RegExp.escape(size)}' r'(?:$|[^0-9a-z])')
+          .hasMatch(id);
+
   static const int defaultMaxTokens = 512;
   static const double defaultTemperature = 0.45;
 
@@ -53,16 +57,16 @@ class InferenceRequest {
     // Modelli molto grandi
     // -------------------------------------------------------------------------
 
-    if (id.contains('70b') ||
-        id.contains('72b') ||
-        id.contains('65b')) {
+    if (_hasModelSize(id, '70b') ||
+        _hasModelSize(id, '72b') ||
+        _hasModelSize(id, '65b')) {
       return 4096;
     }
 
-    if (id.contains('32b') ||
-        id.contains('30b') ||
-        id.contains('34b') ||
-        id.contains('27b')) {
+    if (_hasModelSize(id, '32b') ||
+        _hasModelSize(id, '30b') ||
+        _hasModelSize(id, '34b') ||
+        _hasModelSize(id, '27b')) {
       return 3072;
     }
 
@@ -70,15 +74,15 @@ class InferenceRequest {
     // Modelli medio-grandi
     // -------------------------------------------------------------------------
 
-    if (id.contains('14b') ||
-        id.contains('13b') ||
-        id.contains('12b')) {
+    if (_hasModelSize(id, '14b') ||
+        _hasModelSize(id, '13b') ||
+        _hasModelSize(id, '12b')) {
       return 2048;
     }
 
-    if (id.contains('9b') ||
-        id.contains('8b') ||
-        id.contains('7b')) {
+    if (_hasModelSize(id, '9b') ||
+        _hasModelSize(id, '8b') ||
+        _hasModelSize(id, '7b')) {
       return 1024;
     }
 
@@ -92,17 +96,17 @@ class InferenceRequest {
       return 1024;
     }
 
-    if (id.contains('4b') ||
-        id.contains('3.8b') ||
-        id.contains('3b')) {
+    if (_hasModelSize(id, '4b') ||
+        _hasModelSize(id, '3.8b') ||
+        _hasModelSize(id, '3b')) {
       return 768;
     }
 
-    if (id.contains('2b') ||
-        id.contains('1.8b') ||
-        id.contains('1.7b') ||
-        id.contains('1.5b') ||
-        id.contains('1b')) {
+    if (_hasModelSize(id, '2b') ||
+        _hasModelSize(id, '1.8b') ||
+        _hasModelSize(id, '1.7b') ||
+        _hasModelSize(id, '1.5b') ||
+        _hasModelSize(id, '1b')) {
       return 512;
     }
 
@@ -117,19 +121,19 @@ class InferenceRequest {
   static double temperatureForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
 
-    if (id.contains('70b') ||
-        id.contains('72b') ||
-        id.contains('65b') ||
-        id.contains('32b') ||
-        id.contains('30b') ||
-        id.contains('34b') ||
-        id.contains('27b') ||
-        id.contains('14b') ||
-        id.contains('13b') ||
-        id.contains('12b') ||
-        id.contains('9b') ||
-        id.contains('8b') ||
-        id.contains('7b')) {
+    if (_hasModelSize(id, '70b') ||
+        _hasModelSize(id, '72b') ||
+        _hasModelSize(id, '65b') ||
+        _hasModelSize(id, '32b') ||
+        _hasModelSize(id, '30b') ||
+        _hasModelSize(id, '34b') ||
+        _hasModelSize(id, '27b') ||
+        _hasModelSize(id, '14b') ||
+        _hasModelSize(id, '13b') ||
+        _hasModelSize(id, '12b') ||
+        _hasModelSize(id, '9b') ||
+        _hasModelSize(id, '8b') ||
+        _hasModelSize(id, '7b')) {
       return 0.6;
     }
 
@@ -139,9 +143,9 @@ class InferenceRequest {
       return 0.5;
     }
 
-    if (id.contains('4b') ||
-        id.contains('3.8b') ||
-        id.contains('3b')) {
+    if (_hasModelSize(id, '4b') ||
+        _hasModelSize(id, '3.8b') ||
+        _hasModelSize(id, '3b')) {
       return 0.5;
     }
 
