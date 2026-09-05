@@ -596,7 +596,16 @@ void run_generation(
 
     LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
 
-    if (n_tokens <= 1) {
+    if (n_tokens < 0) {
+        // llama_tokenize returns the negative required capacity when the
+        // prompt does not fit. Never replace the user's conversation with a
+        // canned fallback prompt: report the actual capacity failure.
+        session->set_error("Prompt exceeds native context capacity");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "prompt_context_exceeded");
+        return;
+    }
+
+    if (n_tokens == 0) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
              " reason=short_or_empty_prompt original_chars=%zu fallback=%s",
              session->id,
