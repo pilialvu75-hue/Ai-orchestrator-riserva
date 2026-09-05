@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -23,17 +24,58 @@ class RuntimeBootstrap {
     RuntimeEventLog.instance.emit('[FORENSIC_DIAGNOSTICS_PIPELINE_VERIFIED]');
     final appVersion = await _resolveAppVersion();
 
+    const openAiApiKey = String.fromEnvironment('OPENAI_API_KEY');
+    const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+    const claudeApiKey = String.fromEnvironment('CLAUDE_API_KEY');
+    const grokApiKey = String.fromEnvironment('GROK_API_KEY');
+    const copilotApiKey = String.fromEnvironment('COPILOT_API_KEY');
+
+    await _initializeCloudCredentials(
+      <String, String>{
+        'openAi': openAiApiKey,
+        'gemini': geminiApiKey,
+        'claude': claudeApiKey,
+        'grok': grokApiKey,
+        'copilot': copilotApiKey,
+      },
+    );
+
     await di.initDependencies(
-      openAiApiKey: const String.fromEnvironment('OPENAI_API_KEY'),
-      geminiApiKey: const String.fromEnvironment('GEMINI_API_KEY'),
-      claudeApiKey: const String.fromEnvironment('CLAUDE_API_KEY'),
-      grokApiKey: const String.fromEnvironment('GROK_API_KEY'),
-      copilotApiKey: const String.fromEnvironment('COPILOT_API_KEY'),
+      openAiApiKey: openAiApiKey,
+      geminiApiKey: geminiApiKey,
+      claudeApiKey: claudeApiKey,
+      grokApiKey: grokApiKey,
+      copilotApiKey: copilotApiKey,
       appVersion: appVersion,
     );
 
     await _runWarmupChecks();
     debugPrint('[BOOT] init complete');
+  }
+
+  Future<void> _initializeCloudCredentials(
+    Map<String, String> environmentFallbacks,
+  ) async {
+    try {
+      await CloudCredentialStore.instance.initialize(
+        environmentFallbacks: environmentFallbacks,
+      );
+      final configured = CloudCredentialStore.instance.snapshots
+          .where((snapshot) => snapshot.configured)
+          .length;
+      debugPrint(
+        '[CLOUD_CREDENTIALS] secure credential store ready; '
+        'configuredProviders=$configured',
+      );
+    } catch (error) {
+      // Cloud credential storage must never make Local mode unavailable.
+      // Datasources still receive build-time values through DI as a dev/CI
+      // fallback, without persisting those values or printing any secret.
+      debugPrint(
+        '[CLOUD_CREDENTIALS] secure storage unavailable; using '
+        'non-persistent environment fallback when configured: $error',
+      );
+    }
   }
 
   Future<String> _resolveAppVersion() async {
