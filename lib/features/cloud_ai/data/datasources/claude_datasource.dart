@@ -8,25 +8,33 @@ import 'package:http/http.dart' as http;
 
 class ClaudeDataSource {
   ClaudeDataSource({
-    required this.apiKey,
+    String apiKey = '',
+    String Function()? apiKeyProvider,
     http.Client? httpClient,
     this.model = 'claude-sonnet-5',
-  }) : _client = httpClient ?? http.Client();
+  })  : _apiKeyProvider = apiKeyProvider ?? (() => apiKey),
+        _client = httpClient ?? http.Client();
 
-  final String apiKey;
+  final String Function() _apiKeyProvider;
   final String model;
   final http.Client _client;
 
-  bool get isConfigured => apiKey.trim().isNotEmpty;
+  String get apiKey => _apiKeyProvider().trim();
+  bool get isConfigured => apiKey.isNotEmpty;
 
   Future<AiResponseModel> complete(AiRequestModel request) async {
+    final credential = apiKey;
+    if (credential.isEmpty) {
+      throw const ServerException('Claude API key not configured');
+    }
+
     final resolvedModel = _modelFor(request);
     final uri = Uri.parse('${AppConstants.claudeBaseUrl}/messages');
     final response = await _client.post(
       uri,
       headers: <String, String>{
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': credential,
         'anthropic-version': '2023-06-01',
       },
       body: jsonEncode(<String, dynamic>{
