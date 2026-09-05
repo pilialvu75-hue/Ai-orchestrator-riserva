@@ -42,8 +42,10 @@ class CloudProviderStatusSnapshot {
   final double? averageLatencyMs;
 
   double get successRate {
-    if (totalRequests <= 0) return 1;
-    return ((totalRequests - failedRequests) / totalRequests).clamp(0, 1);
+    if (totalRequests <= 0) return 1.0;
+    return ((totalRequests - failedRequests) / totalRequests)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 }
 
@@ -139,7 +141,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
     final optimized = _optimizeRequest(request);
     final signal = _taskSignal(optimized);
-    final providerOrder = _providerOrder(optimized, signal);
+    final providerOrder = _providerOrder(signal);
     final cacheKey = _cacheKey(providerOrder, optimized, signal);
     final cached = _responseCache[cacheKey];
     if (cached != null) {
@@ -278,10 +280,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return _TaskSignal.general;
   }
 
-  List<String> _providerOrder(
-    InferenceRequest request,
-    _TaskSignal signal,
-  ) {
+  List<String> _providerOrder(_TaskSignal signal) {
     final available = _supportedProviders().toList(growable: false);
     final preferred = _preferredProvider?.call();
     final indexed = <_ProviderCandidate>[];
@@ -308,7 +307,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       if (health != null) {
         score += health.successRate * 20;
         if (health.averageLatencyMs != null) {
-          score -= (health.averageLatencyMs! / 1000).clamp(0, 15);
+          score -= (health.averageLatencyMs! / 1000)
+              .clamp(0.0, 15.0)
+              .toDouble();
         }
         score -= health.consecutiveFailures * 12;
       } else {
@@ -600,8 +601,10 @@ class _ProviderHealth {
   double? averageLatencyMs;
 
   double get successRate {
-    if (totalRequests <= 0) return 1;
-    return (successfulRequests / totalRequests).clamp(0, 1);
+    if (totalRequests <= 0) return 1.0;
+    return (successfulRequests / totalRequests)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 
   void recordLatency(int latencyMs) {
