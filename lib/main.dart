@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 
+import 'package:ai_orchestrator/core/runtime/inference/android_process_exit_diagnostics.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -54,6 +56,7 @@ Future<void> main() async {
   // lost with it, but everything already flushed to disk survives and can
   // be inspected on the next launch via Debug Lab → "Mostra log crash".
   await RuntimeEventLog.instance.initPersistence();
+  unawaited(recordAndroidProcessExitHistory());
 
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
