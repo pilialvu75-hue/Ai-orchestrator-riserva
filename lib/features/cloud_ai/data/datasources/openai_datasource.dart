@@ -9,18 +9,26 @@ import 'package:http/http.dart' as http;
 /// Remote data source for the OpenAI Chat Completions API.
 class OpenAiDataSource {
   OpenAiDataSource({
-    required this.apiKey,
+    String apiKey = '',
+    String Function()? apiKeyProvider,
     http.Client? httpClient,
     this.model = 'gpt-5.6-terra',
-  }) : _client = httpClient ?? http.Client();
+  })  : _apiKeyProvider = apiKeyProvider ?? (() => apiKey),
+        _client = httpClient ?? http.Client();
 
-  final String apiKey;
+  final String Function() _apiKeyProvider;
   final String model;
   final http.Client _client;
 
-  bool get isConfigured => apiKey.trim().isNotEmpty;
+  String get apiKey => _apiKeyProvider().trim();
+  bool get isConfigured => apiKey.isNotEmpty;
 
   Future<AiResponseModel> complete(AiRequestModel request) async {
+    final credential = apiKey;
+    if (credential.isEmpty) {
+      throw const ServerException('OpenAI API key not configured');
+    }
+
     final resolvedModel = _modelFor(request);
     final uri = Uri.parse('${AppConstants.openAiBaseUrl}/chat/completions');
     final body = jsonEncode(request.toOpenAiJson(model: resolvedModel));
@@ -29,7 +37,7 @@ class OpenAiDataSource {
       uri,
       headers: <String, String>{
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
+        'Authorization': 'Bearer $credential',
       },
       body: body,
     );
