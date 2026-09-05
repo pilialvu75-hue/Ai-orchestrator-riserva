@@ -67,8 +67,11 @@ class _AppShellState extends State<AppShell> {
       return;
     }
 
-    if (currentState.status ==
-            UpdateStatus.updateAvailable &&
+    final canOfferUpdate =
+        currentState.status == UpdateStatus.updateAvailable ||
+        currentState.status == UpdateStatus.readyToInstall;
+
+    if (canOfferUpdate &&
         _shownUpdateVersion != latest.version) {
       _shownUpdateVersion = latest.version;
 
@@ -181,6 +184,38 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _startUpdateFromDialog() async {
+    final state = _updateManager.state.value;
+    final readyToInstall =
+        state.status == UpdateStatus.readyToInstall;
+    final ok = readyToInstall
+        ? true
+        : await _updateManager.downloadLatestApk();
+
+    if (!ok || !mounted) {
+      if (mounted) {
+        final message = _updateManager.state.value.errorMessage ??
+            context.l10n.t('force_update_failed');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+      return;
+    }
+
+    final installerStarted =
+        await _updateManager.prepareInstallIntent();
+    unawaited(_updateManager.refreshDiagnostics());
+
+    if (!installerStarted && mounted) {
+      final message = _updateManager.state.value.errorMessage ??
+          context.l10n.t('force_update_failed');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
   Future<void> _showUpdateDialog(
     UpdateManifest manifest,
   ) async {
@@ -230,7 +265,16 @@ class _AppShellState extends State<AppShell> {
                 Navigator.of(dialogContext).pop();
               },
               child: Text(
-                l10n.t('close'),
+                l10n.t('later'),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(_startUpdateFromDialog());
+              },
+              child: Text(
+                l10n.t('update'),
               ),
             ),
           ],

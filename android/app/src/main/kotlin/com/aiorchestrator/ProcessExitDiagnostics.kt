@@ -1,0 +1,69 @@
+package com.aiorchestrator
+
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
+import android.content.Context
+import android.os.Build
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
+
+/** Own-process history only. Does not intercept signals or restart the app. */
+object ProcessExitDiagnostics {
+    @android.annotation.TargetApi(31)
+    private fun readAbortMessage(info: ApplicationExitInfo): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            info.reason != ApplicationExitInfo.REASON_CRASH_NATIVE) return null
+        return try {
+            info.traceInputStream?.use { TombstoneAbortMessage.read(it) }
+        } catch (error: Exception) {
+            "unavailable: ${error.javaClass.simpleName}"
+        }
+    }
+
+    fun register(context: Context, engine: FlutterEngine) {
+        val app = context.applicationContext
+        val messenger = engine.dartExecutor.binaryMessenger
+        MethodChannel(
+            messenger,
+            "com.aiorchestrator/process_exit",
+            StandardMethodCodec.INSTANCE,
+            messenger.makeBackgroundTaskQueue()
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "readHistory") {
+                result.notImplemented()
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                result.success(emptyList<Any>())
+            } else {
+                try {
+                    val manager = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val records = manager.getHistoricalProcessExitReasons(app.packageName, 0, 3)
+                    result.success(records.map { info ->
+                        mapOf(
+                            "timestamp_ms" to info.timestamp,
+                            "process" to info.processName,
+                            "reason_code" to info.reason,
+                            "reason" to when (info.reason) {
+                                ApplicationExitInfo.REASON_CRASH_NATIVE -> "native_crash"
+                                ApplicationExitInfo.REASON_CRASH -> "managed_crash"
+                                ApplicationExitInfo.REASON_LOW_MEMORY -> "low_memory"
+                                ApplicationExitInfo.REASON_ANR -> "anr"
+                                ApplicationExitInfo.REASON_SIGNALED -> "signal"
+                                ApplicationExitInfo.REASON_EXIT_SELF -> "exit_self"
+                                ApplicationExitInfo.REASON_USER_REQUESTED -> "user_requested"
+                                else -> "other_or_unknown"
+                            },
+                            "status" to info.status,
+                            "description" to info.description?.take(1024),
+                            "abort_message" to readAbortMessage(info),
+                            "pss_kb" to info.pss,
+                            "rss_kb" to info.rss
+                        )
+                    })
+                } catch (error: Exception) {
+                    result.error("EXIT_HISTORY_UNAVAILABLE", error.toString(), null)
+                }
+            }
+        }
+    }
+}

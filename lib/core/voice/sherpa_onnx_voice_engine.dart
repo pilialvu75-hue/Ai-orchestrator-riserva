@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -15,7 +16,11 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   SherpaOnnxVoiceEngine({
     VoiceModelPaths? modelPaths,
-  }) : _modelPaths = modelPaths ?? const VoiceModelPaths();
+    String Function()? languageCode,
+  }) : _modelPaths = modelPaths ?? const VoiceModelPaths(),
+       _languageCode = languageCode ?? (() => 'it');
+
+  final String Function() _languageCode;
 
   static const String _tag = 'VOICE_ENGINE';
 
@@ -387,180 +392,35 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   // ---------------------------------------------------------------------------
 
   Future<bool> _initializeTts() async {
+    if (_disposed || !await _ensureNativeBindings()) return false;
+    final assets = await KokoroAssets.verifiedPaths();
     if (_disposed) return false;
-
+    if (assets == null) {
+      logEvent(_tag, '[TTS_ASSETS_INVALID] Scarica o ripara Kokoro dal menu modelli vocali.');
+      return false;
+    }
     try {
-      final bindingsReady = await _ensureNativeBindings();
-
-      if (!bindingsReady || _disposed) {
-        logEvent(
-          _tag,
-          '[TTS_INIT_FAIL] Native bindings unavailable',
-        );
-        return false;
-      }
-
-      logEvent(_tag, '[TTS_BINDINGS_READY]');
-
-      final ttsModelResolution = await _pathResolver.resolveForRead(
-        fileName: AppConstants.ttsModelFile,
-        privateAbsolutePathHint: _modelPaths.ttsModel,
+      final config = sherpa_onnx.OfflineTtsConfig(
+        model: sherpa_onnx.OfflineTtsModelConfig(
+          kokoro: sherpa_onnx.OfflineTtsKokoroModelConfig(
+            model: assets['model']!,
+            voices: assets['voices']!,
+            tokens: assets['tokens']!,
+            dataDir: assets['data']!,
+            lang: 'it',
+          ),
+          numThreads: 1,
+          debug: false,
+          provider: 'cpu',
+        ),
+        maxNumSenetences: 1,
       );
-
-      final ttsTokensResolution = await _pathResolver.resolveForRead(
-        fileName: AppConstants.ttsTokensFile,
-        privateAbsolutePathHint: _modelPaths.ttsTokens,
-      );
-
-      final ttsModelPath =
-          _modelPaths.ttsModel ?? _preferredResolvedPath(ttsModelResolution);
-
-      final ttsTokensPath =
-          _modelPaths.ttsTokens ?? _preferredResolvedPath(ttsTokensResolution);
-
-      final privateDir = await _pathResolver.privateModelsDirectory();
-
-      final ttsDataDir = (_modelPaths.ttsDataDir?.isNotEmpty ?? false)
-          ? _modelPaths.ttsDataDir!
-          : p.join(
-              privateDir.path,
-              AppConstants.ttsEspeakDataDir,
-            );
-
-      logEvent(
-        _tag,
-        '[TTS_ASSET_PATHS] '
-        'model=$ttsModelPath '
-        'tokens=$ttsTokensPath '
-        'dataDir=$ttsDataDir',
-      );
-
-      final missing = <String>[];
-
-      if (!_isReadableAssetFileSync(ttsModelPath)) {
-        missing.add(
-          '${AppConstants.ttsModelFile}($ttsModelPath)',
-        );
-      }
-
-      if (!_isReadableAssetFileSync(ttsTokensPath)) {
-        missing.add(
-          '${AppConstants.ttsTokensFile}($ttsTokensPath)',
-        );
-      }
-
-      if (!_isReadableDirectorySync(ttsDataDir)) {
-        missing.add(
-          '${AppConstants.ttsEspeakDataDir}($ttsDataDir)',
-        );
-      }
-
-      if (missing.isNotEmpty) {
-        logEvent(
-          _tag,
-          '[TTS_INIT_FAIL] '
-          'Missing TTS assets: ${missing.join(", ")}',
-        );
-        return false;
-      }
-
-      final modelBytes = _safeFileLengthSync(ttsModelPath);
-      final tokensBytes = _safeFileLengthSync(ttsTokensPath);
-
-      logEvent(
-        _tag,
-        '[TTS_ASSET_SIZES] '
-        'model_bytes=$modelBytes '
-        'tokens_bytes=$tokensBytes',
-      );
-
-      final dataDirSnapshot = _directorySnapshotSync(
-        ttsDataDir,
-      );
-
-      logEvent(
-        _tag,
-        '[TTS_DATA_DIR_SNAPSHOT] '
-        'path=$ttsDataDir '
-        'entries=$dataDirSnapshot',
-      );
-
-      final ttsModelConfig = sherpa_onnx.OfflineTtsModelConfig(
-  vits: sherpa_onnx.OfflineTtsVitsModelConfig(
-    model: ttsModelPath,
-    lexicon: '',
-    tokens: ttsTokensPath,
-    dataDir: ttsDataDir,
-  ),
-  numThreads: 1,
-  debug: true,
-  provider: 'cpu',
-);
-
-final ttsConfig = sherpa_onnx.OfflineTtsConfig(
-  model: ttsModelConfig,
-  maxNumSenetences: 1,
-);
-
-logEvent(
-  _tag,
-  '[TTS_CONFIG_READY] '
-  'family=vits '
-  'provider=cpu '
-  'numThreads=1 '
-  'debug=true '
-  'lexicon_empty=true '
-  'model_bytes=$modelBytes '
-  'tokens_bytes=$tokensBytes',
-);
-
-logEvent(
-  _tag,
-  '[TTS_NATIVE_CREATE_BEGIN] '
-  'lazy=true '
-  'family=vits',
-);
-
-      // IMPORTANT:
-      // Se il processo Android muore dopo TTS_NATIVE_CREATE_BEGIN e prima di
-      // TTS_NATIVE_CREATE_RETURNED, il crash avviene nel codice nativo
-      // sherpa-onnx/ONNX Runtime durante la creazione di OfflineTts.
-      //
-      // Un SIGSEGV/SIGABRT nativo non può essere catturato dal try/catch Dart.
-      final tts = sherpa_onnx.OfflineTts(ttsConfig);
-
-      logEvent(
-        _tag,
-        '[TTS_NATIVE_CREATE_RETURNED] '
-        'family=vits',
-      );
-
-      if (_disposed) {
-        try {
-          tts.free();
-        } catch (_) {}
-        return false;
-      }
-
-      _tts = tts;
-
-      logEvent(
-        _tag,
-        '[TTS_READY] OfflineTts ready',
-      );
-
+      logEvent(_tag, '[TTS_NATIVE_CREATE_BEGIN] family=kokoro archive_verified=true');
+      _tts = sherpa_onnx.OfflineTts(config);
+      logEvent(_tag, '[TTS_NATIVE_CREATE_RETURNED] family=kokoro');
       return true;
-    } on Object catch (error, stackTrace) {
-      final message = 'TTS engine init failed: $error';
-
-      logEvent(
-        _tag,
-        '[TTS_INIT_FAIL] '
-        '$message '
-        'stack=$stackTrace',
-      );
-
-      _tts = null;
+    } on Object catch (error) {
+      logEvent(_tag, '[TTS_INIT_FAIL] $error');
       return false;
     }
   }
@@ -976,10 +836,17 @@ logEvent(
     }
 
     try {
-      final audio = tts.generate(
+      final language = _languageCode().split(RegExp('[-_]')).first;
+      final lang = const ['it', 'fr', 'en'].contains(language) ? language : 'en';
+      // IDs belong to the pinned official v1.0 bundle: Sara, Siwis, Heart.
+      final sid = lang == 'it' ? 35 : (lang == 'fr' ? 30 : 3);
+      final audio = tts.generateWithConfig(
         text: sanitized,
-        sid: 0,
-        speed: _status.speechRate,
+        config: sherpa_onnx.OfflineTtsGenerationConfig(
+          sid: sid,
+          speed: _status.speechRate,
+          extra: {'lang': lang},
+        ),
       );
 
       if (_disposed) return;

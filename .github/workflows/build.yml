@@ -63,29 +63,35 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
       - name: Cache native build (CMake/Ninja objects + FetchContent)
         uses: actions/cache@v5
         with:
           path: |
             android/app/.cxx
             ~/.cache/ccache
-          key: native-${{ runner.os }}-${{ hashFiles('native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h') }}
-          restore-keys: |
-            native-${{ runner.os }}-
+          key: native-${{ runner.os }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
 
-      - name: Install Android SDK cmdline-tools v12
+      - name: Install Android SDK cmdline-tools 16.0
         run: |
           set -euo pipefail
           export ANDROID_CUSTOM_CMDLINE="${ANDROID_SDK_ROOT}/cmdline-tools"
-          curl -sS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
           mkdir -p "$ANDROID_CUSTOM_CMDLINE"
-          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest"
+          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest" /tmp/cmdline-extract
           unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
           mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_CUSTOM_CMDLINE/latest"
           rm -rf /tmp/tools.zip /tmp/cmdline-extract
+
+          SDKMANAGER="$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager"
+          SOURCE_PROPERTIES="$ANDROID_CUSTOM_CMDLINE/latest/source.properties"
+          test -x "$SDKMANAGER"
+          test -f "$SOURCE_PROPERTIES"
+          if ! grep -Eq '^Pkg\.Revision[[:space:]]*=[[:space:]]*16\.0([[:space:]]*)$' "$SOURCE_PROPERTIES"; then
+            echo "::error::Expected Android command-line tools 16.0"
+            cat "$SOURCE_PROPERTIES"
+            exit 1
+          fi
+          echo "sdkmanager_package_revision=16.0"
 
       - name: Install Android NDK
         run: |
@@ -331,12 +337,10 @@ jobs:
             --output BUILD_README_IT.md \
             --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
 
-      - name: Force clean Android native rebuild
+      - name: Clean transient Android build outputs (preserve validated native cache)
         run: |
           set -euo pipefail
 
-          flutter clean
-          rm -rf android/.cxx
           rm -rf android/build
           rm -rf build
           rm -rf android/app/build/intermediates
