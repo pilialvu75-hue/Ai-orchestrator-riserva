@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_response_model.dart';
 import 'package:http/http.dart' as http;
@@ -12,7 +13,8 @@ class ClaudeDataSource {
     String Function()? apiKeyProvider,
     http.Client? httpClient,
     this.model = 'claude-sonnet-5',
-  })  : _apiKeyProvider = apiKeyProvider ?? (() => apiKey),
+  })  : _apiKeyProvider = apiKeyProvider ??
+            (() => CloudCredentialStore.instance.secretFor('claude') ?? apiKey),
         _client = httpClient ?? http.Client();
 
   final String Function() _apiKeyProvider;
