@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/download_integrity.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 
 /// Magic bytes that every valid GGUF file starts with: ASCII "GGUF".
@@ -121,7 +123,10 @@ class ModelDownloadService {
           final ModelValidationStatus status;
 
           if (downloaded) {
-            status = await _validateModelFile(effectiveFile);
+            status = isClearlyTruncatedModel(
+                    await effectiveFile.length(), m['sizeBytes'] as int)
+                ? ModelValidationStatus.invalidModel
+                : await _validateModelFile(effectiveFile);
           } else {
             status = ModelValidationStatus.notDownloaded;
           }
@@ -140,7 +145,7 @@ class ModelDownloadService {
                   runtimeModelId: m['id'] as String,
                 ),
             description: m['description'] as String,
-            isDownloaded: downloaded,
+            isDownloaded: status == ModelValidationStatus.validatedOk,
             localPath: downloaded ? effectiveFile.path : null,
             platformTarget: m['platformTarget'] as String?,
             validationStatus: status,
@@ -304,13 +309,18 @@ class ModelDownloadService {
               );
 
               if (validation.status ==
-                  ModelValidationStatus.validatedOk) {
+                      ModelValidationStatus.validatedOk &&
+                  !isClearlyTruncatedModel(existingLength, expectedBytes)) {
                 return _DownloadResult(
                   path: finalFile.path,
                   sizeBytes: existingLength,
                   status: validation.status,
                 );
               }
+            }
+            // Recover an old prematurely published file as resumable bytes.
+            if (!await partFile.exists()) {
+              await finalFile.rename(partFile.path);
             }
           }
 
@@ -319,34 +329,8 @@ class ModelDownloadService {
           if (await partFile.exists()) {
             existingBytes = await partFile.length();
 
-            if (existingBytes > 0) {
-              final partialValidation = await _validateModelFileDetailed(
-                partFile,
-                treatMissingAsMissing: false,
-              );
-
-              if (partialValidation.status ==
-                      ModelValidationStatus.validatedOk &&
-                  (expectedBytes <= 0 ||
-                      existingBytes >=
-                          (expectedBytes * 0.70).toInt())) {
-                if (await finalFile.exists()) {
-                  await finalFile.delete();
-                }
-
-                await partFile.rename(finalFile.path);
-
-                final finalLength = await finalFile.length();
-
-                onProgress?.call(1.0);
-
-                return _DownloadResult(
-                  path: finalFile.path,
-                  sizeBytes: finalLength,
-                  status: partialValidation.status,
-                );
-              }
-            }
+            // A valid magic header and a percentage cannot prove completion.
+            // Ask the server to resume, even if the partial file looks large.
           }
 
           if (existingBytes > 0) {
@@ -360,6 +344,7 @@ class ModelDownloadService {
 
           final headers = <String, dynamic>{
             'Accept': '*/*',
+            'Accept-Encoding': 'identity',
           };
 
           if (existingBytes > 0) {
@@ -386,13 +371,18 @@ class ModelDownloadService {
           // A 416 can mean the .part already contains the complete object.
           // Validate it before promoting it.
           if (statusCode == 416 && existingBytes > 0) {
+            final remoteSize = int.tryParse(RegExp(r'^bytes\s+\*/(\d+)$',
+                    caseSensitive: false)
+                .firstMatch(response.headers.value('content-range') ?? '')
+                ?.group(1) ?? '');
             final validation = await _validateModelFileDetailed(
               partFile,
               treatMissingAsMissing: false,
             );
 
             if (validation.status ==
-                ModelValidationStatus.validatedOk) {
+                    ModelValidationStatus.validatedOk &&
+                remoteSize != null && remoteSize == existingBytes) {
               if (await finalFile.exists()) {
                 await finalFile.delete();
               }
@@ -445,11 +435,10 @@ class ModelDownloadService {
 
           // If the server returned 206 but starts at a different offset,
           // refuse to append potentially duplicated/corrupt bytes.
-          if (append &&
-              rangeStart != null &&
-              rangeStart != existingBytes) {
-            append = false;
-            existingBytes = 0;
+          if (statusCode == 206 &&
+              (rangeStart == null || rangeStart != existingBytes ||
+                  rangeTotal == null)) {
+            throw DownloadException('Invalid resume range for $modelId.');
           }
 
           final totalBytes = rangeTotal ??
@@ -507,18 +496,17 @@ class ModelDownloadService {
             );
           }
 
-          // For known catalog entries, reject a clearly truncated transfer.
-          if (expectedBytes > 0) {
-            final minimumBytes =
-                (expectedBytes * 0.70).toInt();
-
-            if (savedLength < minimumBytes) {
-              throw DownloadException(
-                'Download incomplete for $modelId: '
-                '$savedLength bytes received; '
-                'at least $minimumBytes expected.',
-              );
-            }
+          final exactTotal = rangeTotal ?? contentLength;
+          if (!hasCompleteDownload(
+            savedBytes: savedLength,
+            receivedBytes: receivedBytes,
+            remoteTotal: exactTotal,
+            responseLength: contentLength,
+          )) {
+            throw DownloadException(
+              'Download incomplete for $modelId: $savedLength bytes saved; '
+              'remote total: $exactTotal. Retry to resume.',
+            );
           }
 
           final validation = await _validateModelFileDetailed(
@@ -877,6 +865,22 @@ class ModelDownloadService {
   Future<int> exportAllDownloadedModelsToPublicStorage({
     void Function(double progress)? onProgress,
   }) async {
+    if (_exportInProgress) {
+      throw const DownloadException('Un’esportazione è già in corso.');
+    }
+    _exportInProgress = true;
+    try {
+      return await _exportDownloadedModels(onProgress: onProgress);
+    } finally {
+      _exportInProgress = false;
+    }
+  }
+
+  bool _exportInProgress = false;
+
+  Future<int> _exportDownloadedModels({
+    void Function(double progress)? onProgress,
+  }) async {
     if (!Platform.isAndroid) {
       throw const DownloadException(
         'Esportazione modelli disponibile solo su Android.',
@@ -904,6 +908,13 @@ class ModelDownloadService {
     for (final model in models) {
       if (!model.isDownloaded) {
         continue;
+      }
+
+      if (model.validationStatus == ModelValidationStatus.invalidModel) {
+        throw DownloadException(
+          'Il modello ${model.displayName} non supera la validazione. '
+          'Ripara il download prima di esportarlo.',
+        );
       }
 
       final localPath =
@@ -1114,10 +1125,18 @@ class ModelDownloadService {
       await sink.close();
     }
 
-    if (await destination.exists()) {
-      await destination.delete();
+    // Verify before replacing an existing backup. Stream the hashes rather
+    // than loading multi-gigabyte models into memory.
+    final sourceDigest = await sha256.bind(source.openRead()).first;
+    final copyDigest = await sha256.bind(tempDestination.openRead()).first;
+    if (await tempDestination.length() != totalBytes ||
+        sourceDigest != copyDigest) {
+      await tempDestination.delete();
+      throw const DownloadException('Verifica della copia esportata fallita.');
     }
 
+    // Android replaces an existing file on rename, preserving the old backup
+    // until the new copy has been completely written and verified.
     await tempDestination.rename(
       destination.path,
     );
