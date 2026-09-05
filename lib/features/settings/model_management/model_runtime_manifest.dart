@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 enum ModelManagementSection {
   voiceStt,
@@ -41,7 +42,7 @@ class ModelRuntimeManifest {
     ModelManagementSection.voiceStt:
         'STT — Nemotron 3.5 0.6B Multilingual (streaming)',
     ModelManagementSection.voiceTtsItalian:
-        'TTS — Piper Italiano (Paola Medium)',
+        'TTS — Kokoro (Italiano, Français, English)',
   };
 
   static const List<RuntimeModelFileSpec> files =
@@ -72,11 +73,11 @@ class ModelRuntimeManifest {
       id: 'it_tts_archive',
       section: ModelManagementSection.voiceTtsItalian,
       logicalName:
-          'Piper TTS Italiano — Archivio Paola Medium',
-      fileName: AppConstants.ttsModelFile,
-      downloadUrl: AppConstants.ttsPaolaTarUrl,
-      expectedBytes: AppConstants.ttsPaolaTarExpectedBytes,
-      estimatedSizeLabel: '~63 MB',
+          'Kokoro — Italiano, Français, English',
+      fileName: 'kokoro-v1_0-int8/verified.json',
+      downloadUrl: KokoroAssets.archiveUrl,
+      expectedBytes: KokoroAssets.archiveBytes,
+      estimatedSizeLabel: '~132 MB download',
     ),
   ];
 }

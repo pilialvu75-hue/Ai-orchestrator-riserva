@@ -325,7 +325,9 @@ Future<void> initDependencies({
   // che lo implementa. In questo modo le dipendenze si risolvono sempre 
   // verso la stessa instanza Singleton (nessun duplicato STT/TTS).
   sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
-    () => SherpaOnnxVoiceEngine(),
+    () => SherpaOnnxVoiceEngine(
+      languageCode: () => sl<LanguageService>().currentLocale.languageCode,
+    ),
   );
   
   sl.registerLazySingleton<VoiceTextNormalizer>(

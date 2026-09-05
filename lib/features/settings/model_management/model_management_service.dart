@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
@@ -83,6 +84,16 @@ class ModelManagementService {
   }
 
   Future<ModelFileInspection> inspect(RuntimeModelFileSpec spec) async {
+    if (spec.section == ModelManagementSection.voiceTtsItalian) {
+      final paths = await KokoroAssets.verifiedPaths();
+      return ModelFileInspection(
+        spec: spec,
+        status: paths == null ? ModelFileIntegrityStatus.missing
+            : ModelFileIntegrityStatus.presentInternalStorage,
+        path: paths?['model'] ?? (await KokoroAssets.directory()).path,
+        message: paths == null ? 'Scarica o ripara il pacchetto Kokoro.' : 'Pacchetto Kokoro verificato.',
+      );
+    }
     final resolution = await _resolveFile(spec);
     final file = resolution.file;
     final fullPath = file.path;
@@ -139,6 +150,10 @@ class ModelManagementService {
     RuntimeModelFileSpec spec, {
     required void Function(double progress) onProgress,
   }) async {
+    if (spec.section == ModelManagementSection.voiceTtsItalian) {
+      await KokoroAssets.install(onProgress);
+      return inspect(spec);
+    }
     final destination = await _resolvePrivateFile(spec);
     final destinationDir = destination.parent;
     if (!await destinationDir.exists()) {
@@ -273,6 +288,20 @@ class ModelManagementService {
     final seenDestinations = <String>{};
 
     for (final spec in ModelRuntimeManifest.files) {
+      if (spec.section == ModelManagementSection.voiceTtsItalian) {
+        final kokoro = await KokoroAssets.directory();
+        if (await kokoro.exists()) {
+          await for (final file in kokoro.list(recursive: true, followLinks: false)) {
+            if (file is! File) continue;
+            final destination = File(p.join(publicDir.path, KokoroAssets.directoryName,
+                p.relative(file.path, from: kokoro.path)));
+            if (seenDestinations.add(destination.path)) {
+              copyJobs.add(_ExportCopyJob(source: file, destination: destination));
+            }
+          }
+        }
+        continue;
+      }
       final source = await _resolvePrivateFile(spec);
       if (!await source.exists()) continue;
       final destination = File(p.join(publicDir.path, spec.fileName));
