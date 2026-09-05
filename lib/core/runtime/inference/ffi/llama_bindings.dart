@@ -39,6 +39,10 @@ class LlamaBridgeBindings {
             lib.lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
           'llb_session_is_active',
         ),
+        _sessionIsGenerating =
+            lib.lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
+          'llb_session_is_generating',
+        ),
         _sessionLastError = lib.lookupFunction<
             LlbSessionLastErrorNative,
             LlbSessionLastErrorDart>('llb_session_last_error');
@@ -52,6 +56,7 @@ class LlamaBridgeBindings {
   final LlbSessionCancelDart _sessionCancel;
   final LlbReleaseSessionDart _releaseSession;
   final LlbSessionIsActiveDart _sessionIsActive;
+  final LlbSessionIsActiveDart _sessionIsGenerating;
   final LlbSessionLastErrorDart _sessionLastError;
 
   void initBackend() => _initBackend();
@@ -133,6 +138,8 @@ class LlamaBridgeBindings {
   void releaseSession(int sessionId) => _releaseSession(sessionId);
 
   int sessionIsActive(int sessionId) => _sessionIsActive(sessionId);
+
+  int sessionIsGenerating(int sessionId) => _sessionIsGenerating(sessionId);
 
   String sessionLastError(int sessionId) =>
       _sessionLastError(sessionId).toDartString();

@@ -128,7 +128,7 @@ class RuntimeMetricsWidget extends StatelessWidget {
               ),
             ),
             Text(
-              'llama.cpp backend: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
+              'Backend compilato: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
               style: TextStyle(
                 color: hardwareSnapshot.gpuAccelerationActive
                     ? const Color(0xFF4ADE80)
