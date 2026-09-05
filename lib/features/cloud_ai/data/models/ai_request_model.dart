@@ -74,7 +74,15 @@ class AiRequestModel extends AiRequest {
   }
 
   /// Converts this request to the Google Gemini generateContent payload.
-  Map<String, dynamic> toGeminiJson() {
+  ///
+  /// Gemini 3.x and later reject legacy sampling parameters such as
+  /// temperature. Older explicitly selected Gemini models retain the legacy
+  /// temperature field for backward compatibility.
+  Map<String, dynamic> toGeminiJson({String? model}) {
+    final resolvedModel = _resolveModel(model, fallback: 'gemini-3.8-flash');
+    final isGemini3OrLater = RegExp(r'^gemini-(?:[3-9]|[1-9][0-9])(?:\.|-)')
+        .hasMatch(resolvedModel.toLowerCase());
+
     return <String, dynamic>{
       'contents': <Map<String, dynamic>>[
         ...messages
@@ -88,8 +96,8 @@ class AiRequestModel extends AiRequest {
         },
       ],
       'generationConfig': <String, dynamic>{
-        'temperature': temperature,
         'maxOutputTokens': maxTokens,
+        if (!isGemini3OrLater) 'temperature': temperature,
       },
       if (tools.isNotEmpty)
         'tools': <Map<String, dynamic>>[
