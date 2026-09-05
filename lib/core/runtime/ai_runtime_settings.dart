@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 
 enum AiRuntimeMode {
@@ -59,7 +60,13 @@ enum InternetPolicy {
 /// Persists runtime settings and notifies listeners when a setting changes.
 class AiRuntimeSettingsService extends ChangeNotifier {
   AiRuntimeSettingsService({required ConfigRepository configRepository})
-      : _configRepository = configRepository;
+      : _configRepository = configRepository {
+    CloudRuntimePreferences.instance.bind(
+      preferredProvider: () => activeProvider,
+      modelForProvider: cloudModelFor,
+      automaticUseAllowed: (_) => automaticCloudSpendingAllowed,
+    );
+  }
 
   static const List<String> supportedProviders =
       CloudProviderCatalog.supportedProviders;
@@ -96,7 +103,8 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   String cloudModelFor(String provider) {
     final normalized = normalizeProvider(provider);
-    final stored = _configRepository.getString('$_cloudModelPrefix$normalized')?.trim();
+    final stored =
+        _configRepository.getString('$_cloudModelPrefix$normalized')?.trim();
     if (stored != null && stored.isNotEmpty) return stored;
     return CloudProviderCatalog.defaultModelFor(normalized);
   }
@@ -119,6 +127,12 @@ class AiRuntimeSettingsService extends ChangeNotifier {
       CloudSpendingMode.fromStoredValue(
         _configRepository.getString(_cloudSpendingModeKey),
       );
+
+  /// Automatic paid Cloud calls are deliberately opt-in. Modes that require
+  /// quota/cost verification remain blocked until a provider-specific billing
+  /// adapter can prove the request satisfies that policy.
+  bool get automaticCloudSpendingAllowed =>
+      cloudSpendingMode == CloudSpendingMode.unrestricted;
 
   Future<void> setCloudSpendingMode(CloudSpendingMode mode) async {
     await _configRepository.setString(_cloudSpendingModeKey, mode.name);
