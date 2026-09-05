@@ -20,6 +20,11 @@ class InferenceRequest {
     this.repeatPenalty = 1.1,
     this.modelId,
     this.modelPath,
+    this.requestId,
+    this.projectId,
+    this.taskId,
+    this.executionId,
+    this.checkpointId,
   });
 
   final String sessionId;
@@ -33,6 +38,17 @@ class InferenceRequest {
   final double repeatPenalty;
   final String? modelId;
   final String? modelPath;
+
+  /// Optional cross-layer identities used by the Workshop/Cantiere.
+  ///
+  /// Request, project, task, session, execution and checkpoint are distinct
+  /// concepts. Local runtime may ignore these fields; Cloud orchestration can
+  /// use them for tracing and deterministic resume without polluting prompts.
+  final String? requestId;
+  final String? projectId;
+  final String? taskId;
+  final String? executionId;
+  final String? checkpointId;
 
   /// Restituisce il limite di token predefinito in base alla taglia
   /// del modello.
@@ -164,6 +180,11 @@ class InferenceRequest {
     double? repeatPenalty,
     String? modelId,
     String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? checkpointId,
   }) {
     return InferenceRequest(
       sessionId: sessionId ?? this.sessionId,
@@ -177,6 +198,11 @@ class InferenceRequest {
       repeatPenalty: repeatPenalty ?? this.repeatPenalty,
       modelId: modelId ?? this.modelId,
       modelPath: modelPath ?? this.modelPath,
+      requestId: requestId ?? this.requestId,
+      projectId: projectId ?? this.projectId,
+      taskId: taskId ?? this.taskId,
+      executionId: executionId ?? this.executionId,
+      checkpointId: checkpointId ?? this.checkpointId,
     );
   }
 
