@@ -291,6 +291,37 @@ class HighPerformanceChatList extends StatelessWidget {
           ),
         );
 
+        if (isUser) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              bubble,
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Copia messaggio',
+                      icon: const Icon(Icons.copy_rounded,
+                          size: 20, color: Colors.white70),
+                      onPressed: () => _copyToClipboard(context,
+                          message.content, 'Messaggio copiato negli appunti!'),
+                    ),
+                    if (onEditUserMessage != null)
+                      IconButton(
+                        tooltip: 'Modifica messaggio',
+                        icon: const Icon(Icons.edit_rounded,
+                            size: 20, color: Colors.white70),
+                        onPressed: () => onEditUserMessage!(message),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }
+
         if (!isAssistant) {
           return bubble;
         }
