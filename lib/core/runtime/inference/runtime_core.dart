@@ -15,6 +15,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/serial_inference_task.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/native_session_worker.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_ffi_loader.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';

@@ -68,7 +68,7 @@ abstract final class LlamaFfiLoader {
         ' symbols=[llb_init_backend,llb_gpu_backend_name,llb_gpu_backend_reason,'
         'llb_create_session,llb_session_start_gen,llb_session_poll_token,'
         'llb_session_cancel,llb_release_session,llb_session_last_error,'
-        'llb_session_is_active]',
+        'llb_session_is_active,llb_session_is_generating]',
       );
     } catch (error, stackTrace) {
       log?.call(

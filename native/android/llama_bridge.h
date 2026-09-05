@@ -39,6 +39,9 @@ void llb_release_session(int64_t session_id);
 
 int32_t llb_session_is_active(int64_t session_id);
 
+// Unlike is_active (loaded resources), this reports a scheduled/running worker.
+int32_t llb_session_is_generating(int64_t session_id);
+
 const char* llb_session_last_error(int64_t session_id);
 
 #ifdef __cplusplus
