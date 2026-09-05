@@ -10,6 +10,17 @@ import io.flutter.plugin.common.StandardMethodCodec
 
 /** Own-process history only. Does not intercept signals or restart the app. */
 object ProcessExitDiagnostics {
+    @android.annotation.TargetApi(31)
+    private fun readAbortMessage(info: ApplicationExitInfo): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            info.reason != ApplicationExitInfo.REASON_CRASH_NATIVE) return null
+        return try {
+            info.traceInputStream?.use { TombstoneAbortMessage.read(it) }
+        } catch (error: Exception) {
+            "unavailable: ${error.javaClass.simpleName}"
+        }
+    }
+
     fun register(context: Context, engine: FlutterEngine) {
         val app = context.applicationContext
         val messenger = engine.dartExecutor.binaryMessenger
@@ -44,6 +55,7 @@ object ProcessExitDiagnostics {
                             },
                             "status" to info.status,
                             "description" to info.description?.take(1024),
+                            "abort_message" to readAbortMessage(info),
                             "pss_kb" to info.pss,
                             "rss_kb" to info.rss
                         )
