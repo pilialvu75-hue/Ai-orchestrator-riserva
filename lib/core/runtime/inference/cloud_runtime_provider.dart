@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
@@ -14,6 +15,7 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 enum CloudProviderOperationalState {
   ready,
   authRequired,
+  policyBlocked,
   rateLimited,
   quotaExhausted,
   temporarilyUnavailable,
@@ -64,12 +66,17 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     required String Function([String? providerName]) providerDisplayName,
     String? Function(String provider)? modelForProvider,
     String? Function()? preferredProvider,
+    bool Function(String provider)? automaticUseAllowed,
   })  : _sendQuery = sendQuery,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
         _providerDisplayName = providerDisplayName,
-        _modelForProvider = modelForProvider,
-        _preferredProvider = preferredProvider;
+        _modelForProvider = modelForProvider ??
+            CloudRuntimePreferences.instance.modelForProvider,
+        _preferredProvider = preferredProvider ??
+            (() => CloudRuntimePreferences.instance.preferredProvider),
+        _automaticUseAllowed = automaticUseAllowed ??
+            CloudRuntimePreferences.instance.automaticUseAllowed;
 
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
@@ -79,8 +86,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   final List<String> Function() _supportedProviders;
   final bool Function(String provider) _isProviderAvailable;
   final String Function([String? providerName]) _providerDisplayName;
-  final String? Function(String provider)? _modelForProvider;
-  final String? Function()? _preferredProvider;
+  final String? Function(String provider) _modelForProvider;
+  final String? Function() _preferredProvider;
+  final bool Function(String provider) _automaticUseAllowed;
 
   final Map<String, _ProviderHealth> _providerHealth = <String, _ProviderHealth>{};
   final LinkedHashMap<String, AiResponse> _responseCache =
@@ -282,7 +290,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   List<String> _providerOrder(_TaskSignal signal) {
     final available = _supportedProviders().toList(growable: false);
-    final preferred = _preferredProvider?.call();
+    final preferred = _preferredProvider();
     final indexed = <_ProviderCandidate>[];
 
     for (var index = 0; index < available.length; index++) {
@@ -336,7 +344,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String _selectedModel(String provider) {
-    final override = _modelForProvider?.call(provider)?.trim();
+    final override = _modelForProvider(provider)?.trim();
     if (override != null && override.isNotEmpty) {
       return override;
     }
@@ -345,6 +353,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   bool _isProviderReady(String provider) {
     if (!_isProviderAvailable(provider)) return false;
+    if (!_automaticUseAllowed(provider)) return false;
+
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     final now = DateTime.now();
 
@@ -414,6 +424,14 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         failedRequests: health.failedRequests,
         lastError: health.lastError,
         averageLatencyMs: health.averageLatencyMs,
+      );
+    }
+
+    if (!_automaticUseAllowed(provider)) {
+      return _snapshot(
+        provider,
+        health,
+        CloudProviderOperationalState.policyBlocked,
       );
     }
 
