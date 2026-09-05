@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
@@ -852,249 +853,19 @@ class VoiceModelDownloader with RuntimeEventEmitter {
   // TTS
   // ===========================================================================
 
-  Future<bool> _ttsAssetsComplete(
-    Directory targetDir,
-  ) async {
-    final model = File(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsModelFile,
-      ),
-    );
-
-    final tokens = File(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsTokensFile,
-      ),
-    );
-
-    final espeak = Directory(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsEspeakDataDir,
-      ),
-    );
-
-    if (!await model.exists() ||
-        await model.length() <
-            _minTtsModelBytes) {
-      return false;
-    }
-
-    if (!await tokens.exists() ||
-        await tokens.length() <
-            _minTtsTokensBytes) {
-      return false;
-    }
-
-    if (!await espeak.exists()) {
-      return false;
-    }
-
-    return true;
-  }
+  Future<bool> _ttsAssetsComplete(Directory targetDir) async =>
+      await KokoroAssets.verifiedPaths() != null;
 
   Future<void> _downloadAndExtractTtsTar({
     required Directory targetDir,
     required Function(double) onProgress,
   }) async {
-    if (await _ttsAssetsComplete(
-      targetDir,
-    )) {
-      logEvent(
-        _tag,
-        '[TTS_SKIP] assets already valid',
-      );
-
-      onProgress(1.0);
+    if (await _ttsAssetsComplete(targetDir)) {
+      onProgress(1);
       return;
     }
-
-    final tarPath =
-        p.join(
-      targetDir.path,
-      'vits-piper-it_IT-paola-medium.tar.bz2',
-    );
-
-    final partialPath =
-        '$tarPath.part';
-
-    await _downloadResumable(
-      url: AppConstants.ttsPaolaTarUrl,
-      destinationPath: tarPath,
-      partialPath: partialPath,
-      expectedBytes:
-          AppConstants
-              .ttsPaolaTarExpectedBytes,
-      assetName: 'TTS',
-      onProgress: (value) {
-        onProgress(
-          (value * 0.75)
-              .clamp(0.0, 0.75),
-        );
-      },
-    );
-
-    onProgress(0.80);
-
-    final extractionDir =
-        await Directory(
-      p.join(
-        targetDir.path,
-        '.tts_extract_tmp',
-      ),
-    ).create(
-      recursive: true,
-    );
-
-    try {
-      await Isolate.run(
-        () => _extractArchiveInWorker(
-          tarPath,
-          extractionDir.path,
-        ),
-      );
-
-      onProgress(0.90);
-
-      final files =
-          await _collectFiles(
-        extractionDir,
-      );
-
-      final modelSource =
-          _findByExtension(
-        files,
-        '.onnx',
-      );
-
-      final tokensSource =
-          _findByBasename(
-        files,
-        'tokens.txt',
-      );
-
-      final espeakSource =
-          _findDirectory(
-        extractionDir,
-        AppConstants.ttsEspeakDataDir,
-      );
-
-      if (modelSource == null) {
-        throw const VoiceAssetException(
-          'Modello TTS ONNX non trovato '
-          'nell\'archivio.',
-        );
-      }
-
-      if (tokensSource == null) {
-        throw const VoiceAssetException(
-          'tokens.txt TTS non trovato '
-          'nell\'archivio.',
-        );
-      }
-
-      if (espeakSource == null) {
-        throw const VoiceAssetException(
-          'espeak-ng-data non trovato '
-          'nell\'archivio TTS.',
-        );
-      }
-
-      await _requireMinimumSize(
-        modelSource,
-        _minTtsModelBytes,
-        'TTS model',
-      );
-
-      await _requireMinimumSize(
-        tokensSource,
-        _minTtsTokensBytes,
-        'TTS tokens',
-      );
-
-      await _installAtomically(
-        source: modelSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.ttsModelFile,
-          ),
-        ),
-      );
-
-      await _installAtomically(
-        source: tokensSource,
-        destination: File(
-          p.join(
-            targetDir.path,
-            AppConstants.ttsTokensFile,
-          ),
-        ),
-      );
-
-      final destinationEspeak =
-          Directory(
-        p.join(
-          targetDir.path,
-          AppConstants.ttsEspeakDataDir,
-        ),
-      );
-
-      if (await destinationEspeak
-          .exists()) {
-        await destinationEspeak.delete(
-          recursive: true,
-        );
-      }
-
-      await _copyDirectory(
-        espeakSource,
-        destinationEspeak,
-      );
-
-      onProgress(0.97);
-    } catch (error) {
-      if (error is VoiceAssetException) {
-        rethrow;
-      }
-
-      throw VoiceAssetException(
-        'Estrazione TTS fallita: $error',
-      );
-    } finally {
-      await _deleteIfExists(
-        File(tarPath),
-      );
-
-      if (await extractionDir.exists()) {
-        await extractionDir.delete(
-          recursive: true,
-        );
-      }
-    }
-
-    if (!await _ttsAssetsComplete(
-      targetDir,
-    )) {
-      throw const VoiceAssetException(
-        'Verifica TTS fallita: '
-        'asset mancanti o troppo piccoli.',
-      );
-    }
-
-    onProgress(1.0);
-
-    logEvent(
-      _tag,
-      '[TTS_READY] assets installed',
-    );
+    await KokoroAssets.install(onProgress);
   }
-
-  // ===========================================================================
-  // FILESYSTEM HELPERS
-  // ===========================================================================
 
   Future<List<File>> _collectFiles(
     Directory directory,
@@ -1340,47 +1111,8 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       }
     }
 
-    final ttsModel = File(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsModelFile,
-      ),
-    );
-
-    final ttsTokens = File(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsTokensFile,
-      ),
-    );
-
-    final espeak = Directory(
-      p.join(
-        targetDir.path,
-        AppConstants.ttsEspeakDataDir,
-      ),
-    );
-
-    if (!await ttsModel.exists() ||
-        await ttsModel.length() <
-            _minTtsModelBytes) {
-      missing.add(
-        AppConstants.ttsModelFile,
-      );
-    }
-
-    if (!await ttsTokens.exists() ||
-        await ttsTokens.length() <
-            _minTtsTokensBytes) {
-      missing.add(
-        AppConstants.ttsTokensFile,
-      );
-    }
-
-    if (!await espeak.exists()) {
-      missing.add(
-        AppConstants.ttsEspeakDataDir,
-      );
+    if (await KokoroAssets.verifiedPaths() == null) {
+      missing.add('Kokoro — pacchetto assente o non integro');
     }
 
     if (missing.isNotEmpty) {
