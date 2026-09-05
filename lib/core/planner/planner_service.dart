@@ -8,20 +8,7 @@ import 'package:uuid/uuid.dart';
 ///
 /// [PlannerService] uses the configured [InferenceService] to decompose a
 /// high-level user goal into an ordered sequence of [PlanStep]s, forming a
-/// [Plan].  All inference is performed via the local-first [InferenceService],
-/// honouring the offline-first mandate.
-///
-/// **Step decomposition flow:**
-/// 1. Build a structured system prompt that instructs the LLM to emit a
-///    numbered list.
-/// 2. Infer with a short `maxTokens` budget to keep latency low.
-/// 3. Parse the LLM response with [_parseSteps]; fall back to a single-step
-///    plan if parsing fails.
-/// 4. Return a [Plan] with [PlanStatus.created] ready for execution.
-///
-/// Dependency rule:
-///   core/planner/ → core/runtime/  (within-core allowed)
-///   core/planner/ → native/        (forbidden)
+/// [Plan].
 class PlannerService {
   static const _logTag = 'PLANNER';
   static const _plannerSessionId = 'planner_session';
@@ -34,14 +21,16 @@ class PlannerService {
 
   /// Decomposes [goal] into a [Plan].
   ///
-  /// The returned plan is in [PlanStatus.created] state; the caller is
-  /// responsible for executing the steps (e.g. via [SequentialPlanningStrategy]).
-  ///
-  /// [isOffline] is forwarded to [InferenceService] so the local runtime is
-  /// always preferred when the device has no network.
+  /// Runtime/provider routing is supplied by the Orchestrator when it owns the
+  /// decision (Hybrid). Callers that omit the routing arguments preserve the
+  /// existing persisted runtime behaviour.
   Future<Plan> decompose(
     String goal, {
     bool isOffline = false,
+    InferenceRouteDirective routeDirective =
+        InferenceRouteDirective.runtimeDefault,
+    String? cloudProviderId,
+    bool allowCloudProviderFailover = true,
   }) async {
     _log('decompose: goal="${_truncate(goal)}"');
 
@@ -53,6 +42,9 @@ class PlannerService {
         isOffline: isOffline,
         maxTokens: 512,
         temperature: 0.2,
+        routeDirective: routeDirective,
+        cloudProviderId: cloudProviderId,
+        allowCloudProviderFailover: allowCloudProviderFailover,
       ),
     );
 
@@ -75,8 +67,6 @@ class PlannerService {
     );
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
-
   String _buildSystemPrompt() => '''
 You are a planning assistant embedded in an offline-first AI orchestrator.
 Your sole task is to decompose the user's goal into an ordered list of discrete, actionable steps.
@@ -91,10 +81,6 @@ Rules:
 - For analysis tasks, steps should include: gather context, identify issues, propose fixes.
 ''';
 
-  /// Parses a numbered list of steps from [text].
-  ///
-  /// Accepts lines matching `^\d+[.)]\s+(.+)$` (both period and parenthesis
-  /// separators are handled for robustness).
   List<PlanStep> _parseSteps(String text) {
     final lines = text.split(RegExp(r'\r?\n'));
     final steps = <PlanStep>[];
@@ -112,7 +98,6 @@ Rules:
     return steps;
   }
 
-  /// Returns a single-step fallback [Plan] when LLM decomposition fails.
   Plan _fallbackPlan(String goal) => Plan(
         id: _uuid.v4(),
         goal: goal,
