@@ -57,6 +57,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        ProcessExitDiagnostics.register(this, flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
