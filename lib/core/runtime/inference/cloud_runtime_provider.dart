@@ -91,17 +91,79 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   final bool Function(String provider) _automaticUseAllowed;
 
   final Map<String, _ProviderHealth> _providerHealth = <String, _ProviderHealth>{};
-  final LinkedHashMap<String, AiResponse> _responseCache =
-      LinkedHashMap<String, AiResponse>();
+  final LinkedHashMap<String, _CachedCloudResponse> _responseCache =
+      LinkedHashMap<String, _CachedCloudResponse>();
   bool _pendingLocalFallbackNotice = false;
 
-  bool get canInfer => _supportedProviders().any(_isProviderReady);
+  /// Automatic Cloud availability used by Hybrid routing.
+  ///
+  /// It intentionally honours the automatic-spending policy. Explicit Cloud
+  /// mode uses [canInferFor] because the user has directly selected Cloud.
+  bool get canInfer => _supportedProviders().any(
+        (provider) => _isProviderReady(
+          provider,
+          enforceAutomaticPolicy: true,
+        ),
+      );
 
-  bool get areAllProvidersUnavailable =>
-      _supportedProviders().every((provider) => !_isProviderReady(provider));
+  bool get areAllProvidersUnavailable => _supportedProviders().every(
+        (provider) => !_isProviderReady(
+          provider,
+          enforceAutomaticPolicy: true,
+        ),
+      );
 
   List<CloudProviderStatusSnapshot> get providerStatuses =>
       _supportedProviders().map(_statusFor).toList(growable: false);
+
+  /// Request-specific availability.
+  ///
+  /// Direct Cloud mode is an explicit user choice and therefore does not use
+  /// the automatic-spending gate. Authentication, quota, rate-limit and health
+  /// gates still apply.
+  bool canInferFor(InferenceRequest request) {
+    final explicitCloud = _isExplicitCloudRequest(request);
+    final signal = _taskSignal(request);
+    final order = _providerOrder(
+      signal,
+      pinnedProvider: request.cloudProviderId,
+      allowFailover: request.allowCloudProviderFailover,
+      enforceAutomaticPolicy: !explicitCloud,
+    );
+    return order.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: !explicitCloud,
+      ),
+    );
+  }
+
+  /// Recommendation API used by Hybrid orchestration.
+  ///
+  /// This does not execute anything. Hannibal can ask for the current best
+  /// candidate and then bind that provider into [InferenceRequest].
+  String? recommendProviderFor(
+    InferenceRequest request, {
+    bool enforceAutomaticPolicy = true,
+  }) {
+    final signal = _taskSignal(request);
+    final order = _providerOrder(
+      signal,
+      pinnedProvider: request.cloudProviderId,
+      allowFailover: true,
+      enforceAutomaticPolicy: enforceAutomaticPolicy,
+    );
+
+    for (final provider in order) {
+      if (_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        return provider;
+      }
+    }
+    return null;
+  }
 
   String? consumeRuntimeNotice() {
     if (!_pendingLocalFallbackNotice) return null;
@@ -138,39 +200,74 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       return;
     }
 
-    if (!canInfer) {
+    final optimized = _optimizeRequest(request);
+    final signal = _taskSignal(optimized);
+    final explicitCloud = _isExplicitCloudRequest(optimized);
+    final enforceAutomaticPolicy = !explicitCloud;
+    final providerOrder = _providerOrder(
+      signal,
+      pinnedProvider: optimized.cloudProviderId,
+      allowFailover: optimized.allowCloudProviderFailover,
+      enforceAutomaticPolicy: enforceAutomaticPolicy,
+    );
+
+    final hasReadyProvider = providerOrder.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      ),
+    );
+
+    if (!hasReadyProvider) {
       _pendingLocalFallbackNotice = true;
       yield InferenceResponse.error(
         fullyLocalNotice,
         state: InferenceTerminalState.modelUnavailable,
+        providerId: optimized.cloudProviderId,
       );
       return;
     }
 
-    final optimized = _optimizeRequest(request);
-    final signal = _taskSignal(optimized);
-    final providerOrder = _providerOrder(signal);
     final cacheKey = _cacheKey(providerOrder, optimized, signal);
     final cached = _responseCache[cacheKey];
     if (cached != null) {
       yield InferenceResponse.finalChunk(
-        text: cached.text,
-        tokensGenerated: cached.tokensUsed,
-        model: cached.model,
+        text: cached.response.text,
+        tokensGenerated: cached.response.tokensUsed,
+        model: cached.response.model,
+        providerId: cached.providerId,
       );
       return;
     }
 
     String? lastError;
+    String? lastProvider;
+
     for (final provider in providerOrder) {
-      if (!_isProviderReady(provider)) continue;
+      if (!_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        continue;
+      }
+
+      lastProvider = provider;
+
       if (cancellationToken.isCancelled) {
         yield InferenceResponse.error(
           'Inference cancelled.',
           state: InferenceTerminalState.cancelled,
+          providerId: provider,
         );
         return;
       }
+
+      // The provider notice arrives before the request so the UI can display
+      // the active Cloud executor while the response is being generated.
+      yield InferenceResponse.notice(
+        'cloud_provider:$provider',
+        providerId: provider,
+      );
 
       final stopwatch = Stopwatch()..start();
       try {
@@ -188,6 +285,16 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
             taskType: signal.name,
             metadata: <String, dynamic>{
               'sessionId': optimized.sessionId,
+              if (optimized.requestId != null)
+                'requestId': optimized.requestId,
+              if (optimized.projectId != null)
+                'projectId': optimized.projectId,
+              if (optimized.taskId != null)
+                'taskId': optimized.taskId,
+              if (optimized.executionId != null)
+                'executionId': optimized.executionId,
+              if (optimized.checkpointId != null)
+                'checkpointId': optimized.checkpointId,
             },
           ),
         );
@@ -197,16 +304,24 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           yield InferenceResponse.error(
             'Inference cancelled.',
             state: InferenceTerminalState.cancelled,
+            providerId: provider,
           );
           return;
         }
 
         _markSuccess(provider, stopwatch.elapsedMilliseconds);
-        _putCache(cacheKey, response);
+        _putCache(
+          cacheKey,
+          _CachedCloudResponse(
+            response: response,
+            providerId: provider,
+          ),
+        );
         yield InferenceResponse.finalChunk(
           text: response.text,
           tokensGenerated: response.tokensUsed,
           model: response.model,
+          providerId: provider,
         );
         return;
       } catch (error) {
@@ -214,19 +329,34 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         final mapped = _mapError(error, provider);
         _markFailure(provider, mapped, stopwatch.elapsedMilliseconds);
         lastError = mapped;
+
+        if (!optimized.allowCloudProviderFailover) {
+          break;
+        }
       }
     }
 
-    if (areAllProvidersUnavailable) {
+    final anyReadyAfterFailure = providerOrder.any(
+      (provider) => _isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      ),
+    );
+
+    if (!anyReadyAfterFailure) {
       _pendingLocalFallbackNotice = true;
       yield InferenceResponse.error(
         fullyLocalNotice,
         state: InferenceTerminalState.modelUnavailable,
+        providerId: lastProvider,
       );
       return;
     }
 
-    yield InferenceResponse.error(lastError ?? 'Cloud AI request failed.');
+    yield InferenceResponse.error(
+      lastError ?? 'Cloud AI request failed.',
+      providerId: lastProvider,
+    );
   }
 
   /// Cloud optimization is deliberately loss-minimizing. It removes empty,
@@ -288,8 +418,22 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return _TaskSignal.general;
   }
 
-  List<String> _providerOrder(_TaskSignal signal) {
+  List<String> _providerOrder(
+    _TaskSignal signal, {
+    String? pinnedProvider,
+    required bool allowFailover,
+    required bool enforceAutomaticPolicy,
+  }) {
     final available = _supportedProviders().toList(growable: false);
+    final normalizedPinned = pinnedProvider?.trim();
+
+    if (normalizedPinned != null &&
+        normalizedPinned.isNotEmpty &&
+        available.contains(normalizedPinned) &&
+        !allowFailover) {
+      return <String>[normalizedPinned];
+    }
+
     final preferred = _preferredProvider();
     final indexed = <_ProviderCandidate>[];
 
@@ -310,6 +454,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         score += 10;
       }
       if (preferred != null && preferred == provider) score += 25;
+      if (normalizedPinned != null && normalizedPinned == provider) score += 1000;
 
       final health = _providerHealth[provider];
       if (health != null) {
@@ -324,7 +469,12 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         score += 20;
       }
 
-      if (!_isProviderReady(provider)) score -= 10000;
+      if (!_isProviderReady(
+        provider,
+        enforceAutomaticPolicy: enforceAutomaticPolicy,
+      )) {
+        score -= 10000;
+      }
 
       indexed.add(
         _ProviderCandidate(
@@ -343,6 +493,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return indexed.map((candidate) => candidate.providerId).toList(growable: false);
   }
 
+  bool _isExplicitCloudRequest(InferenceRequest request) {
+    return request.routeDirective == InferenceRouteDirective.cloudOnly &&
+        (request.cloudProviderId == null || request.cloudProviderId!.trim().isEmpty);
+  }
+
   String _selectedModel(String provider) {
     final override = _modelForProvider(provider)?.trim();
     if (override != null && override.isNotEmpty) {
@@ -351,9 +506,12 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return CloudProviderCatalog.defaultModelFor(provider);
   }
 
-  bool _isProviderReady(String provider) {
+  bool _isProviderReady(
+    String provider, {
+    required bool enforceAutomaticPolicy,
+  }) {
     if (!_isProviderAvailable(provider)) return false;
-    if (!_automaticUseAllowed(provider)) return false;
+    if (enforceAutomaticPolicy && !_automaticUseAllowed(provider)) return false;
 
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     final now = DateTime.now();
@@ -509,11 +667,13 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       signal.name,
       request.maxTokens,
       request.temperature,
+      request.cloudProviderId ?? '',
+      request.allowCloudProviderFailover,
     );
     return '${providerOrder.join(">")}::$contentHash';
   }
 
-  void _putCache(String key, AiResponse value) {
+  void _putCache(String key, _CachedCloudResponse value) {
     _responseCache[key] = value;
     while (_responseCache.length > _maxCacheEntries) {
       _responseCache.remove(_responseCache.keys.first);
@@ -605,6 +765,16 @@ class _ProviderCandidate {
   final String providerId;
   final double score;
   final int originalIndex;
+}
+
+class _CachedCloudResponse {
+  const _CachedCloudResponse({
+    required this.response,
+    required this.providerId,
+  });
+
+  final AiResponse response;
+  final String providerId;
 }
 
 class _ProviderHealth {
