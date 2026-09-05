@@ -300,7 +300,7 @@ class _AndroidFfiNativeSessionSubsystem {
     final cachedSessionId = _owner._nativeSessionsByModel[effectiveModelPath];
     try {
       _log('[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason');
-      bindings.releaseSession(sessionId);
+      await releaseNativeSessionOffUi(sessionId);
     } catch (error) {
       _log(
         '[FFI_RELEASE] session=$sessionId path=$effectiveModelPath reason=$reason failed: $error',
@@ -354,7 +354,7 @@ class _AndroidFfiNativeSessionSubsystem {
         _log(
           '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason',
         );
-        bindings.releaseSession(entry.value);
+        await releaseNativeSessionOffUi(entry.value);
       } catch (error) {
         _log(
           '[FFI_RELEASE] session=${entry.value} path=${entry.key} reason=$reason failed: $error',
@@ -395,7 +395,7 @@ class _AndroidFfiNativeSessionSubsystem {
     const timeout = AndroidFfiRuntimeProvider._sessionShutdownTimeout;
     final stopwatch = Stopwatch()..start();
     var backoffMs = 1;
-    while (bindings.sessionIsActive(sessionId) == _sessionActiveState) {
+    while (bindings.sessionIsGenerating(sessionId) == _sessionActiveState) {
       if (stopwatch.elapsed >= timeout) {
         _log(
           '[NATIVE_SESSION_SHUTDOWN_TIMEOUT] session=$sessionId reason=$reason'

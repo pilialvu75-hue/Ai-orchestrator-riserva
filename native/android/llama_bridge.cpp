@@ -446,7 +446,6 @@ void run_generation(
     auto last_token_emitted_at = generation_started_at;
     int32_t initial_sample_retry_count = 0;
 
-    session->worker_running.store(true, std::memory_order_release);
     session->first_token_emitted.store(false, std::memory_order_release);
 
     struct ThreadGuard {
@@ -596,7 +595,16 @@ void run_generation(
 
     LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
 
-    if (n_tokens <= 1) {
+    if (n_tokens < 0) {
+        // llama_tokenize returns the negative required capacity when the
+        // prompt does not fit. Never replace the user's conversation with a
+        // canned fallback prompt: report the actual capacity failure.
+        session->set_error("Prompt exceeds native context capacity");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "prompt_context_exceeded");
+        return;
+    }
+
+    if (n_tokens == 0) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " epoch=%" PRIu64
              " reason=short_or_empty_prompt original_chars=%zu fallback=%s",
              session->id,
@@ -1189,6 +1197,9 @@ int32_t llb_session_start_gen(
         LOGI("[FORENSIC] [RUN_GENERATION_SPAWN] before session=%" PRId64 " epoch=%" PRIu64,
              session_id,
              owner_epoch);
+        // Publish before spawning: cancellation/shutdown must also see the
+        // interval before the new thread reaches run_generation.
+        session->worker_running.store(true, std::memory_order_release);
         session->gen_thread = std::thread(
             run_generation,
             session,
@@ -1201,6 +1212,7 @@ int32_t llb_session_start_gen(
              session_id,
              owner_epoch);
     } catch (const std::exception& error) {
+        session->worker_running.store(false, std::memory_order_release);
         session->set_error(error.what());
         session->gen_state.store(kStateFailed, std::memory_order_release);
         // CORRETTO: Cambiato da %ld a %" PRId64 " per impedire la corruzione dei caratteri iniziali nello stack
@@ -1372,6 +1384,12 @@ int32_t llb_session_is_active(int64_t session_id) {
         return 0;
     }
     return session->has_native_resources() ? 1 : 0;
+}
+
+int32_t llb_session_is_generating(int64_t session_id) {
+    auto session = find_session(session_id);
+    return session != nullptr &&
+        session->worker_running.load(std::memory_order_acquire) ? 1 : 0;
 }
 
 const char* llb_session_last_error(int64_t session_id) {

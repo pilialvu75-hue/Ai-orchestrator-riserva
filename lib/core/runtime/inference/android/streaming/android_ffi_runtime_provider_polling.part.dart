@@ -136,9 +136,13 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 2: Timeout di Generazione Globale
+        // WATCHDOG 2: Absolute deadline before the first token.
+        // Once streaming starts, WATCHDOG 4 detects lack of progress. A slow
+        // but productive device must not lose its answer after 90 seconds.
+        // The native output-token limit still bounds productive generation.
         // ---------------------------------------------------------------------
-        if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
+        if (attemptState.firstTokenAt == null &&
+            elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,

@@ -167,7 +167,8 @@ class LocalPromptTemplates {
           userPrompt: userPrompt,
         );
 
-      case 'qwen':
+      case LocalInferenceModelIds.templateQwen:
+      case 'qwen': // Historical alias.
         return _buildQwenChatPrompt(
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
