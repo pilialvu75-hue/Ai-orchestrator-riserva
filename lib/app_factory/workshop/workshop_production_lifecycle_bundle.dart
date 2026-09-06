@@ -30,6 +30,7 @@ final class WorkshopProductionLifecycleBundle {
     required this.preflight,
     required this.taskLifecycle,
     required this.projectExecutor,
+    this.workspaceRootPath,
   });
 
   final WorkshopDashboardController dashboardController;
@@ -44,6 +45,15 @@ final class WorkshopProductionLifecycleBundle {
   /// explicit approval/apply. Exposed only so a UI boundary can recover the
   /// exact prepared WorkspaceSession instead of constructing a second one.
   final WorkshopProjectExecutor projectExecutor;
+
+  /// Real local Cantiere workspace used by this production bundle, when the
+  /// bundle was composed through [WorkshopProductionLifecycleBundleFactory.createForWorkspace].
+  ///
+  /// Keeping this path on the existing production composition lets later
+  /// verification/build steps target the exact workspace that was approved and
+  /// applied, without creating a second workspace or consulting Assistant
+  /// state. Generic/test compositions may leave it null.
+  final String? workspaceRootPath;
 }
 
 /// Composes the existing Workshop production pieces around one shared project
@@ -61,6 +71,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? roleGateways,
+    String? workspaceRootPath,
   }) {
     final orchestratorGateway =
         roleGateways?[AppAiRole.workshopOrchestrator];
@@ -104,6 +115,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       preflight: preflight,
       taskLifecycle: lifecycle,
       projectExecutor: projectExecutor,
+      workspaceRootPath: workspaceRootPath,
     );
   }
 
@@ -117,8 +129,10 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
+    final normalizedWorkspaceRootPath = workspaceRootPath.trim();
+
     final executor = WorkshopFactory.createProjectExecutor(
-      workspaceRootPath: workspaceRootPath,
+      workspaceRootPath: normalizedWorkspaceRootPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
@@ -127,6 +141,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       projectExecutor: executor,
       inferenceService: inferenceService,
       assignments: assignments,
+      workspaceRootPath: normalizedWorkspaceRootPath,
     );
   }
 }
