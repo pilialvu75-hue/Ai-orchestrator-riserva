@@ -23,30 +23,30 @@ void main() {
       expect(entry['sizeBytes'], 5030000000);
     });
 
-    test('DeepSeek Coder uses a quantization still published upstream', () {
+    test('DeepSeek Coder points to the recommended Q4_K_M object', () {
       final entry =
           manifest['deepseek_coder_6_7b_instruct'] as Map<String, dynamic>;
 
-      expect(entry['fileName'], 'deepseek-coder-6.7b-instruct-Q3_K_M.gguf');
+      expect(entry['fileName'], 'deepseek-coder-6.7b-instruct-Q4_K_M.gguf');
       expect(
         entry['downloadUrl'],
-        'https://huggingface.co/tensorblock/deepseek-coder-6.7b-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q3_K_M.gguf',
+        'https://huggingface.co/tensorblock/deepseek-coder-6.7b-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
       );
-      expect(entry['sizeBytes'], 3300000000);
+      expect(entry['sizeBytes'], 3802000000);
     });
 
-    test('StarCoder2 uses a quantization still published upstream', () {
+    test('StarCoder2 points to the recommended Q4_K_M object', () {
       final entry = manifest['starcoder2_3b'] as Map<String, dynamic>;
 
-      expect(entry['fileName'], 'starcoder2-3b-Q3_K_M.gguf');
+      expect(entry['fileName'], 'starcoder2-3b-Q4_K_M.gguf');
       expect(
         entry['downloadUrl'],
-        'https://huggingface.co/tensorblock/starcoder2-3b-GGUF/resolve/main/starcoder2-3b-Q3_K_M.gguf',
+        'https://huggingface.co/tensorblock/starcoder2-3b-GGUF/resolve/main/starcoder2-3b-Q4_K_M.gguf',
       );
-      expect(entry['sizeBytes'], 1560000000);
+      expect(entry['sizeBytes'], 1758000000);
     });
 
-    test('removed upstream Q4 filenames are not present anymore', () {
+    test('legacy workshop Q3 filenames are no longer selected', () {
       final fileNames = manifest.values
           .whereType<Map<String, dynamic>>()
           .map((entry) => entry['fileName'])
@@ -56,9 +56,9 @@ void main() {
       expect(fileNames, isNot(contains('Qwen3-8B-Q4_K_M.gguf')));
       expect(
         fileNames,
-        isNot(contains('deepseek-coder-6.7b-instruct-Q4_K_M.gguf')),
+        isNot(contains('deepseek-coder-6.7b-instruct-Q3_K_M.gguf')),
       );
-      expect(fileNames, isNot(contains('starcoder2-3b-Q4_K_M.gguf')));
+      expect(fileNames, isNot(contains('starcoder2-3b-Q3_K_M.gguf')));
     });
   });
 }
