@@ -152,9 +152,10 @@ final class _RecordingProvider implements RuntimeInferenceProvider {
     lastRequest = request;
     return Stream<InferenceResponse>.fromIterable(
       const <InferenceResponse>[
-        InferenceResponse(text: 'ok'),
+        InferenceResponse(text: 'ok', timestamp: 1),
         InferenceResponse(
           text: '',
+          timestamp: 2,
           isFinal: true,
           terminalState: InferenceTerminalState.success,
         ),
