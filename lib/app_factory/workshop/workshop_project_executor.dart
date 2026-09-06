@@ -183,6 +183,39 @@ final class WorkshopProjectExecutor {
     return session;
   }
 
+  /// Applica il workspace di un task soltanto dopo l'approvazione esplicita.
+  ///
+  /// Il metodo non duplica i guardrail: [WorkspaceSession.apply] rimane
+  /// l'unico punto che verifica stato approved + autorizzazione e che
+  /// materializza il VirtualWorkspace sul gateway reale.
+  ///
+  /// Non esegue commit, push o Pull Request.
+  Future<WorkspaceSession> applyApprovedTask(
+    String taskId,
+  ) async {
+    final normalizedTaskId = taskId.trim();
+
+    if (normalizedTaskId.isEmpty) {
+      throw ArgumentError.value(
+        taskId,
+        'taskId',
+        'Task id cannot be empty.',
+      );
+    }
+
+    final session = _sessions[normalizedTaskId];
+
+    if (session == null) {
+      throw StateError(
+        'No WorkspaceSession exists for task "$normalizedTaskId".',
+      );
+    }
+
+    await session.apply();
+
+    return session;
+  }
+
   /// Segna un task come completato dopo che la relativa WorkspaceSession
   /// ha terminato correttamente il proprio ciclo.
   ///
