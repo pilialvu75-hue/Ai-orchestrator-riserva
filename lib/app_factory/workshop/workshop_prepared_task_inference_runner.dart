@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -6,8 +7,9 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 /// has already been prepared by [WorkshopProjectExecutor].
 ///
 /// This is the project-lifecycle bridge between a task id and its authoritative
-/// workspace session. It never creates a second workspace, never approves or
-/// applies changes, and never reads Assistant configuration, models, memory or
+/// workspace session. It can forward a completed Cantiere preflight to the
+/// Engineer, never creates a second workspace, never approves or applies
+/// changes, and never reads Assistant configuration, models, memory or
 /// conversation state.
 final class WorkshopPreparedTaskInferenceRunner {
   const WorkshopPreparedTaskInferenceRunner({
@@ -21,6 +23,7 @@ final class WorkshopPreparedTaskInferenceRunner {
 
   Future<WorkshopTaskInferenceResult> run({
     required String taskId,
+    WorkshopPreflightInferenceResult? preflight,
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
@@ -44,6 +47,7 @@ final class WorkshopPreparedTaskInferenceRunner {
 
     return _pipeline.run(
       session: session,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
