@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 /// Bridges the explicit owner approval decision to the existing project
 /// executor without collapsing approval and apply into one operation.
@@ -42,6 +43,23 @@ final class WorkshopTaskApprovalController {
   Future<WorkspaceSession> applyApproved(String taskId) {
     final normalizedTaskId = _normalizeTaskId(taskId);
     return _executor.applyApprovedTask(normalizedTaskId);
+  }
+
+  /// Applies one explicitly approved task and advances its project plan only
+  /// after the real workspace mutation completes successfully.
+  ///
+  /// This keeps project progress aligned with the guarded WorkspaceSession:
+  /// a failed or rejected apply can never mark the task as completed.
+  Future<WorkspaceSession> applyApprovedAndComplete({
+    required WorkshopProjectPlan plan,
+    required String taskId,
+  }) async {
+    final normalizedTaskId = _normalizeTaskId(taskId);
+    final session = await _executor.applyApprovedTask(normalizedTaskId);
+
+    _executor.completeTask(plan, normalizedTaskId);
+
+    return session;
   }
 
   WorkspaceSession _requireSession(String taskId) {
