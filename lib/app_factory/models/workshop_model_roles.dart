@@ -163,10 +163,10 @@ abstract final class WorkshopModelCatalogue {
       WorkshopModelDescriptor(
     id: 'deepseek_coder_6_7b_instruct',
     displayName: 'DeepSeek Coder 6.7B Instruct',
-    repository: 'tensorblock/deepseek-coder-6.7b-instruct-GGUF',
+    repository: 'second-state/Deepseek-Coder-6.7B-Instruct-GGUF',
     filename: 'deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
     quantization: 'Q4_K_M',
-    sizeBytes: 3802000000,
+    sizeBytes: 4080000000,
     source: AiModelSource.local,
     roles: <AppAiRole>{
       AppAiRole.workshopOrchestrator,
@@ -175,17 +175,17 @@ abstract final class WorkshopModelCatalogue {
       AppAiRole.reviewer,
     },
     downloadUrl:
-        'https://huggingface.co/tensorblock/deepseek-coder-6.7b-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
+        'https://huggingface.co/second-state/Deepseek-Coder-6.7B-Instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
   );
 
   static const WorkshopModelDescriptor reviewer =
       WorkshopModelDescriptor(
     id: 'starcoder2_3b',
     displayName: 'StarCoder2 3B',
-    repository: 'tensorblock/starcoder2-3b-GGUF',
+    repository: 'second-state/StarCoder2-3B-GGUF',
     filename: 'starcoder2-3b-Q4_K_M.gguf',
     quantization: 'Q4_K_M',
-    sizeBytes: 1758000000,
+    sizeBytes: 1850000000,
     source: AiModelSource.local,
     roles: <AppAiRole>{
       AppAiRole.workshopOrchestrator,
@@ -194,7 +194,7 @@ abstract final class WorkshopModelCatalogue {
       AppAiRole.reviewer,
     },
     downloadUrl:
-        'https://huggingface.co/tensorblock/starcoder2-3b-GGUF/resolve/main/starcoder2-3b-Q4_K_M.gguf',
+        'https://huggingface.co/second-state/StarCoder2-3B-GGUF/resolve/main/starcoder2-3b-Q4_K_M.gguf',
   );
 
   static const WorkshopModelDescriptor deepSeekV2Engineer =
