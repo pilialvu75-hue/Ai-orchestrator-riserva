@@ -7,7 +7,8 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 
 void main() {
   group('WorkshopProposalWorkspaceStager', () {
-    test('decodes Engineer output into VirtualWorkspace without remote writes',
+    test(
+        'decodes Engineer output into VirtualWorkspace and enters review without remote writes',
         () async {
       final gateway = _RecordingGateway(
         files: <String, String>{
@@ -40,7 +41,8 @@ void main() {
       );
 
       expect(proposal.requestId, 'request-1');
-      expect(session.status, WorkspaceSessionStatus.working);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
       expect(session.workspace.read('lib/existing.dart'), 'new');
       expect(session.workspace.read('lib/new.dart'), 'created');
       expect(session.workspace.contains('lib/remove.dart'), isFalse);
@@ -53,7 +55,7 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
-    test('does not materialize malformed output', () async {
+    test('does not enter review or materialize malformed output', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/existing.dart': 'old'},
       );
@@ -79,6 +81,7 @@ void main() {
 
       expect(session.hasChanges, isFalse);
       expect(session.status, WorkspaceSessionStatus.ready);
+      expect(session.isApplyApproved, isFalse);
       expect(gateway.writeCalls, 0);
       expect(gateway.deleteCalls, 0);
     });
