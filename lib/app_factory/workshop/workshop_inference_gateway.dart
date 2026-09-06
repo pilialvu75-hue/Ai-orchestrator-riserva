@@ -39,6 +39,12 @@ class WorkshopInferenceGateway {
     double repeatPenalty = 1.1,
     String? modelId,
     String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
     CancellationToken? cancellationToken,
   }) {
     final normalizedPrompt = prompt.trim();
@@ -67,6 +73,12 @@ class WorkshopInferenceGateway {
       repeatPenalty: repeatPenalty,
       modelId: modelId,
       modelPath: modelPath,
+      requestId: requestId,
+      projectId: projectId,
+      taskId: taskId,
+      executionId: executionId,
+      attemptId: attemptId,
+      checkpointId: checkpointId,
     );
 
     return _provider.streamInference(
@@ -91,6 +103,12 @@ class WorkshopInferenceGateway {
     double repeatPenalty = 1.1,
     String? modelId,
     String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
     CancellationToken? cancellationToken,
   }) async {
     final buffer = StringBuffer();
@@ -112,6 +130,12 @@ class WorkshopInferenceGateway {
       repeatPenalty: repeatPenalty,
       modelId: modelId,
       modelPath: modelPath,
+      requestId: requestId,
+      projectId: projectId,
+      taskId: taskId,
+      executionId: executionId,
+      attemptId: attemptId,
+      checkpointId: checkpointId,
       cancellationToken: cancellationToken,
     )) {
       if (response.model != null &&
