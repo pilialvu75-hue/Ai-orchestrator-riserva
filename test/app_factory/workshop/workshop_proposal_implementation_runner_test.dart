@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_implementation_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
@@ -34,10 +35,23 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(workspaceGateway);
+      final preflight = WorkshopPreflightInferenceResult(
+        analysis: const WorkshopInferenceResult(
+          text: 'scope analysis from Orchestrator',
+          terminalState: InferenceTerminalState.success,
+        ),
+        architecture: const WorkshopInferenceResult(
+          text: 'bounded implementation plan from Architect',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
 
       final proposal = await WorkshopProposalImplementationRunner(
         inference: _stageInference(gateways),
-      ).run(session: session);
+      ).run(
+        session: session,
+        preflight: preflight,
+      );
 
       expect(proposal.changes, hasLength(1));
       expect(session.workspace.read('lib/app.dart'), 'new');
@@ -45,6 +59,14 @@ void main() {
       expect(session.isApplyApproved, isFalse);
       expect(engineer.calls, 1);
       expect(engineer.lastPrompt, contains('"lib/app.dart":"old"'));
+      expect(
+        engineer.lastPrompt,
+        contains('scope analysis from Orchestrator'),
+      );
+      expect(
+        engineer.lastPrompt,
+        contains('bounded implementation plan from Architect'),
+      );
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
       expect(gateways[AppAiRole.architect]!.calls, 0);
       expect(gateways[AppAiRole.reviewer]!.calls, 0);
@@ -53,6 +75,41 @@ void main() {
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);
+    });
+
+    test('rejects incomplete preflight before Engineer inference', () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+      final incompletePreflight = WorkshopPreflightInferenceResult(
+        analysis: const WorkshopInferenceResult(
+          text: 'analysis only',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      await expectLater(
+        WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+          session: session,
+          preflight: incompletePreflight,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(engineer.calls, 0);
+      expect(session.status, WorkspaceSessionStatus.ready);
+      expect(session.hasChanges, isFalse);
+      expect(workspaceGateway.writeCalls, 0);
+      expect(workspaceGateway.deleteCalls, 0);
     });
 
     test('failed Engineer inference leaves workspace ready and unchanged',
