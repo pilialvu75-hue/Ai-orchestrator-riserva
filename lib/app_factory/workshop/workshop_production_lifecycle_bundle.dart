@@ -13,10 +13,13 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 /// Production-facing Cantiere composition returned to the UI layer.
 ///
 /// The dashboard, read-only Orchestrator/Architect preflight and prepared-task
-/// lifecycle share the same authoritative project executor and role-aware
-/// inference stack. A task prepared by the dashboard is therefore the exact
-/// same WorkspaceSession consumed by the Engineer -> Reviewer -> Reviewer
-/// pipeline and by the explicit approval/apply boundary.
+/// lifecycle share the same authoritative project executor. The preflight and
+/// prepared-task lifecycle additionally share one role-aware inference stack;
+/// the dashboard engine keeps its existing Orchestrator gateway while reusing
+/// the same underlying inference service/model assignments when supplied.
+/// A task prepared by the dashboard is therefore the exact same
+/// WorkspaceSession consumed by the Engineer -> Reviewer -> Reviewer pipeline
+/// and by the explicit approval/apply boundary.
 ///
 /// The bundle owns no second runtime, downloader, model store, workspace or
 /// memory subsystem. The Assistant role is never accepted by the multi-role
@@ -44,7 +47,7 @@ final class WorkshopProductionLifecycleBundle {
 }
 
 /// Composes the existing Workshop production pieces around one shared project
-/// executor and one shared role-aware inference stack.
+/// executor and one shared role-aware inference stack for preflight/task work.
 ///
 /// This class deliberately delegates all lower-level construction to the
 /// existing Workshop factories. It exists only to keep the UI from creating a
