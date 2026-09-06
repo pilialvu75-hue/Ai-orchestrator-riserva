@@ -68,6 +68,38 @@ void main() {
     expect(workspaceGateway.pushCalls, 0);
     expect(workspaceGateway.pullRequestCalls, 0);
   });
+
+  test('coordinator recovers the exact task already prepared by dashboard',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: _gateways(<AppAiRole>[]),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Dashboard prepared task',
+      instruction: 'Prepare through the existing dashboard flow.',
+    );
+    final session = await bundle.dashboardController.prepareNextTask();
+
+    expect(session, isNotNull);
+
+    final handle = coordinator.preparedHandle();
+
+    expect(identical(handle.plan, plan), isTrue);
+    expect(handle.taskId, 'task:initial-implementation');
+    expect(identical(handle.session, session), isTrue);
+    expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
+    expect(workspaceGateway.writeCalls, 0);
+    expect(workspaceGateway.commitCalls, 0);
+    expect(workspaceGateway.pushCalls, 0);
+    expect(workspaceGateway.pullRequestCalls, 0);
+  });
 }
 
 const String _proposalJson =
