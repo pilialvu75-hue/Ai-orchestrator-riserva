@@ -36,6 +36,7 @@ class InferenceRequest {
     this.projectId,
     this.taskId,
     this.executionId,
+    this.attemptId,
     this.checkpointId,
     this.routeDirective = InferenceRouteDirective.runtimeDefault,
     this.cloudProviderId,
@@ -56,13 +57,15 @@ class InferenceRequest {
 
   /// Optional cross-layer identities used by the Workshop/Cantiere.
   ///
-  /// Request, project, task, session, execution and checkpoint are distinct
-  /// concepts. Local runtime may ignore these fields; Cloud orchestration can
-  /// use them for tracing and deterministic resume without polluting prompts.
+  /// Request, project, task, session, execution, execution attempt and
+  /// checkpoint are distinct concepts. Local runtime may ignore these fields;
+  /// Cloud orchestration can use them for tracing and deterministic resume
+  /// without polluting prompts.
   final String? requestId;
   final String? projectId;
   final String? taskId;
   final String? executionId;
+  final String? attemptId;
   final String? checkpointId;
 
   /// Explicit routing decision from the caller.
@@ -183,6 +186,7 @@ class InferenceRequest {
     String? projectId,
     String? taskId,
     String? executionId,
+    String? attemptId,
     String? checkpointId,
     InferenceRouteDirective? routeDirective,
     String? cloudProviderId,
@@ -204,6 +208,7 @@ class InferenceRequest {
       projectId: projectId ?? this.projectId,
       taskId: taskId ?? this.taskId,
       executionId: executionId ?? this.executionId,
+      attemptId: attemptId ?? this.attemptId,
       checkpointId: checkpointId ?? this.checkpointId,
       routeDirective: routeDirective ?? this.routeDirective,
       cloudProviderId: cloudProviderId ?? this.cloudProviderId,
