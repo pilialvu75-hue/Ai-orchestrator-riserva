@@ -126,6 +126,7 @@ final class WorkshopProductionTaskCoordinator {
   }) async {
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
+      isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
 
