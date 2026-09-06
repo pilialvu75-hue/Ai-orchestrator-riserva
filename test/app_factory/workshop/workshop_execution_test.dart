@@ -9,10 +9,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('WorkshopExecution', () {
-    test('serializes independent project/task/session/execution identities', () {
+    test('serializes distinct execution and attempt identities', () {
       final now = DateTime.utc(2026, 9, 5, 16, 30);
       final execution = WorkshopExecution(
         executionId: 'execution-1',
+        attemptId: 'attempt-1',
         projectId: 'project-1',
         taskId: 'task-1',
         sessionId: 'session-1',
@@ -35,6 +36,7 @@ void main() {
       final restored = WorkshopExecution.fromJson(execution.toJson());
 
       expect(restored.executionId, 'execution-1');
+      expect(restored.attemptId, 'attempt-1');
       expect(restored.projectId, 'project-1');
       expect(restored.taskId, 'task-1');
       expect(restored.sessionId, 'session-1');
@@ -46,7 +48,26 @@ void main() {
       expect(restored.isTerminal, isFalse);
     });
 
-    test('store persists executions and finds latest resumable task attempt', () async {
+    test('legacy records recover with execution id as initial attempt id', () {
+      final now = DateTime.utc(2026, 9, 5, 16, 30);
+      final restored = WorkshopExecution.fromJson(<String, dynamic>{
+        'executionId': 'legacy-execution',
+        'projectId': 'project-1',
+        'taskId': 'task-1',
+        'sessionId': 'session-1',
+        'resource': 'cloud',
+        'status': 'checkpointed',
+        'startedAt': now.toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+        'checkpointId': 'checkpoint-1',
+      });
+
+      expect(restored.executionId, 'legacy-execution');
+      expect(restored.attemptId, 'legacy-execution');
+      expect(restored.checkpointId, 'checkpoint-1');
+    });
+
+    test('store persists executions and finds latest resumable execution', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       final preferences = PreferencesService(
         await SharedPreferences.getInstance(),
@@ -62,6 +83,10 @@ void main() {
         modelId: 'claude-model',
       );
 
+      expect(created.executionId, isNotEmpty);
+      expect(created.attemptId, isNotEmpty);
+      expect(created.attemptId, isNot(created.executionId));
+
       final checkpointed = created.copyWith(
         status: WorkshopExecutionStatus.checkpointed,
         checkpointId: 'checkpoint-1',
@@ -73,9 +98,74 @@ void main() {
 
       expect(recovered, isNotNull);
       expect(recovered!.executionId, created.executionId);
+      expect(recovered.attemptId, created.attemptId);
       expect(recovered.projectId, 'project-1');
       expect(recovered.checkpointId, 'checkpoint-1');
       expect(recovered.resumePhase, 'review');
+    });
+
+    test('provider failover starts a new attempt of the same execution', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final store = WorkshopExecutionStore(preferences: preferences);
+
+      final created = await store.create(
+        projectId: 'project-1',
+        taskId: 'task-1',
+        sessionId: 'session-1',
+        resource: WorkshopTaskResource.cloud,
+        allocationId: 'allocation-a',
+        executorId: 'executor-a',
+        providerId: 'openAi',
+        modelId: 'model-a',
+        accountId: 'account-a',
+      );
+      final checkpointed = created.copyWith(
+        status: WorkshopExecutionStatus.checkpointed,
+        checkpointId: 'checkpoint-7',
+        resumePhase: 'implementation',
+        inputTokens: 120,
+        outputTokens: 30,
+        estimatedCredits: 4,
+        actualCost: 0.12,
+      );
+      await store.save(checkpointed);
+
+      final resumed = await store.beginNextAttempt(
+        execution: checkpointed,
+        allocationId: 'allocation-b',
+        executorId: 'executor-b',
+        providerId: 'gemini',
+        modelId: 'model-b',
+        accountId: 'account-b',
+      );
+
+      expect(resumed.executionId, checkpointed.executionId);
+      expect(resumed.attemptId, isNot(checkpointed.attemptId));
+      expect(resumed.projectId, checkpointed.projectId);
+      expect(resumed.taskId, checkpointed.taskId);
+      expect(resumed.sessionId, checkpointed.sessionId);
+      expect(resumed.checkpointId, 'checkpoint-7');
+      expect(resumed.resumePhase, 'implementation');
+      expect(resumed.providerId, 'gemini');
+      expect(resumed.modelId, 'model-b');
+      expect(resumed.accountId, 'account-b');
+      expect(resumed.executorId, 'executor-b');
+      expect(resumed.allocationId, 'allocation-b');
+      expect(resumed.status, WorkshopExecutionStatus.created);
+      expect(resumed.inputTokens, 120);
+      expect(resumed.outputTokens, 30);
+      expect(resumed.estimatedCredits, 4);
+      expect(resumed.actualCost, 0.12);
+      expect(resumed.startedAt, checkpointed.startedAt);
+
+      final stored = await store.load(checkpointed.executionId);
+      expect(stored, isNotNull);
+      expect(stored!.attemptId, resumed.attemptId);
+      expect(stored.providerId, 'gemini');
+      expect(stored.checkpointId, 'checkpoint-7');
     });
   });
 

@@ -4,11 +4,11 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:uuid/uuid.dart';
 
-/// Lifecycle of one concrete attempt to execute a Workshop task.
+/// Lifecycle of one stable Workshop execution across one or more attempts.
 ///
-/// A task may have multiple executions over time (retry, provider failover,
-/// model replacement). The task remains the work contract; this object records
-/// who actually executed it and where it can be resumed.
+/// Provider failover, model replacement and retry must not create a new
+/// execution identity. They create a new [attemptId] while preserving the
+/// execution, project, task, session and checkpoint identities.
 enum WorkshopExecutionStatus {
   created,
   running,
@@ -19,14 +19,18 @@ enum WorkshopExecutionStatus {
   cancelled,
 }
 
-/// Persistent identity of one concrete Workshop execution.
+/// Persistent identity and resumable operational state of one Workshop
+/// execution.
 ///
-/// This record deliberately contains only operational identifiers and usage
-/// metadata. Prompts, source-code contents and credentials must never be stored
-/// here.
+/// [executionId] identifies the work being continued. [attemptId] identifies
+/// the concrete executor/provider/model attempt currently carrying that work.
+/// The Workshop task/checkpoint contracts remain the owners of workflow state;
+/// this record only carries execution identity, runtime binding and usage data.
+/// Prompts, source-code contents and credentials must never be stored here.
 final class WorkshopExecution {
   const WorkshopExecution({
     required this.executionId,
+    required this.attemptId,
     required this.projectId,
     required this.taskId,
     required this.sessionId,
@@ -49,6 +53,7 @@ final class WorkshopExecution {
   });
 
   final String executionId;
+  final String attemptId;
   final String projectId;
   final String taskId;
   final String sessionId;
@@ -77,6 +82,7 @@ final class WorkshopExecution {
   int get totalTokens => inputTokens + outputTokens;
 
   WorkshopExecution copyWith({
+    String? attemptId,
     String? allocationId,
     String? executorId,
     WorkshopTaskResource? resource,
@@ -95,6 +101,7 @@ final class WorkshopExecution {
   }) {
     return WorkshopExecution(
       executionId: executionId,
+      attemptId: attemptId ?? this.attemptId,
       projectId: projectId,
       taskId: taskId,
       sessionId: sessionId,
@@ -121,6 +128,7 @@ final class WorkshopExecution {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'executionId': executionId,
+        'attemptId': attemptId,
         'projectId': projectId,
         'taskId': taskId,
         'sessionId': sessionId,
@@ -144,12 +152,14 @@ final class WorkshopExecution {
 
   factory WorkshopExecution.fromJson(Map<String, dynamic> json) {
     final executionId = _requiredString(json, 'executionId');
+    final attemptId = _optionalString(json['attemptId']) ?? executionId;
     final projectId = _requiredString(json, 'projectId');
     final taskId = _requiredString(json, 'taskId');
     final sessionId = _requiredString(json, 'sessionId');
 
     return WorkshopExecution(
       executionId: executionId,
+      attemptId: attemptId,
       projectId: projectId,
       taskId: taskId,
       sessionId: sessionId,
@@ -224,11 +234,12 @@ final class WorkshopExecution {
       value is num ? value.toDouble() : 0;
 }
 
-/// Versioned persistent store for Workshop execution identities.
+/// Versioned index for stable Workshop execution identities and their current
+/// runtime binding.
 ///
-/// The store uses the existing PreferencesService so it does not introduce a
-/// second persistence stack. It is intentionally separate from
-/// WorkspaceSession and from background job checkpoints.
+/// Workflow/project state remains owned by the Workshop task and checkpoint
+/// contracts. This store only persists the execution identity needed to resume
+/// that state across executor, provider, model or account replacement.
 final class WorkshopExecutionStore {
   WorkshopExecutionStore({
     required PreferencesService preferences,
@@ -258,6 +269,7 @@ final class WorkshopExecutionStore {
     final now = DateTime.now().toUtc();
     final execution = WorkshopExecution(
       executionId: _uuid.v4(),
+      attemptId: _uuid.v4(),
       projectId: _requireIdentity(projectId, 'projectId'),
       taskId: _requireIdentity(taskId, 'taskId'),
       sessionId: _requireIdentity(sessionId, 'sessionId'),
@@ -275,6 +287,47 @@ final class WorkshopExecutionStore {
     );
     await save(execution);
     return execution;
+  }
+
+  /// Starts another concrete attempt of the same execution.
+  ///
+  /// This is the continuity boundary used for provider/model failover. Stable
+  /// execution and checkpoint identities are preserved, while [attemptId] and
+  /// the concrete runtime binding may change.
+  Future<WorkshopExecution> beginNextAttempt({
+    required WorkshopExecution execution,
+    WorkshopTaskResource? resource,
+    String? allocationId,
+    String? executorId,
+    String? providerId,
+    String? modelId,
+    String? accountId,
+  }) async {
+    final next = WorkshopExecution(
+      executionId: execution.executionId,
+      attemptId: _uuid.v4(),
+      projectId: execution.projectId,
+      taskId: execution.taskId,
+      sessionId: execution.sessionId,
+      allocationId: _normalized(allocationId) ?? execution.allocationId,
+      executorId: _normalized(executorId) ?? execution.executorId,
+      resource: resource ?? execution.resource,
+      providerId: _normalized(providerId) ?? execution.providerId,
+      modelId: _normalized(modelId) ?? execution.modelId,
+      accountId: _normalized(accountId) ?? execution.accountId,
+      status: WorkshopExecutionStatus.created,
+      startedAt: execution.startedAt,
+      updatedAt: DateTime.now().toUtc(),
+      checkpointId: execution.checkpointId,
+      resumePhase: execution.resumePhase,
+      inputTokens: execution.inputTokens,
+      outputTokens: execution.outputTokens,
+      estimatedCredits: execution.estimatedCredits,
+      actualCost: execution.actualCost,
+      metadata: execution.metadata,
+    );
+    await save(next);
+    return next;
   }
 
   Future<void> save(WorkshopExecution execution) async {
