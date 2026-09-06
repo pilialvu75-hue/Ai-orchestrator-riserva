@@ -145,12 +145,33 @@ final class WorkshopProductionTaskCoordinator {
 
   /// Applies only an explicitly approved task and advances its authoritative
   /// project plan after the real workspace mutation succeeds.
+  ///
+  /// Once apply + plan completion have succeeded through the existing guarded
+  /// lifecycle, the Dashboard completes the same already-active task again only
+  /// at the project bookkeeping boundary. [WorkshopProjectExecutor.completeTask]
+  /// is intentionally idempotent for a completed session, so this performs no
+  /// second workspace write: it synchronizes WorkshopEngine stage/result and
+  /// the observable Dashboard progress with the authoritative completed plan.
   Future<WorkspaceSession> applyApproved({
     required WorkshopProductionTaskHandle handle,
-  }) {
-    return _bundle.taskLifecycle.applyApprovedAndComplete(
+  }) async {
+    final session = await _bundle.taskLifecycle.applyApprovedAndComplete(
       plan: handle.plan,
       taskId: handle.taskId,
     );
+
+    final activeTaskId =
+        _bundle.dashboardController.state.activeTaskId?.trim();
+
+    if (activeTaskId != handle.taskId) {
+      throw StateError(
+        'Workshop dashboard active task changed while applying '
+        '"${handle.taskId}".',
+      );
+    }
+
+    _bundle.dashboardController.completeActiveTask();
+
+    return session;
   }
 }
