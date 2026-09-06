@@ -13,7 +13,6 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inferen
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
-import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -41,7 +40,10 @@ void main() {
       ).run(taskId: ' task:implementation ');
 
       expect(result.readyForApproval, isTrue);
-      expect(identical(executor.sessionForTask('task:implementation'), session), isTrue);
+      expect(
+        identical(executor.sessionForTask('task:implementation'), session),
+        isTrue,
+      );
       expect(session.status, WorkspaceSessionStatus.validation);
       expect(session.isApplyApproved, isFalse);
       expect(session.workspace.read('lib/app.dart'), 'new');
