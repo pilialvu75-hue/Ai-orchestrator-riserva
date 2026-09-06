@@ -24,10 +24,16 @@ final class WorkshopProductionLifecycleBundle {
   const WorkshopProductionLifecycleBundle({
     required this.dashboardController,
     required this.taskLifecycle,
+    required this.projectExecutor,
   });
 
   final WorkshopDashboardController dashboardController;
   final WorkshopPreparedTaskLifecycle taskLifecycle;
+
+  /// Authoritative executor shared by dashboard preparation, inference and
+  /// explicit approval/apply. Exposed only so a UI boundary can recover the
+  /// exact prepared WorkspaceSession instead of constructing a second one.
+  final WorkshopProjectExecutor projectExecutor;
 }
 
 /// Composes the existing Workshop production pieces around one shared project
@@ -76,6 +82,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         engine: engine,
       ),
       taskLifecycle: lifecycle,
+      projectExecutor: projectExecutor,
     );
   }
 

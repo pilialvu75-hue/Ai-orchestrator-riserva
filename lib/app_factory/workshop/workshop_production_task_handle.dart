@@ -71,6 +71,51 @@ final class WorkshopProductionTaskCoordinator {
     );
   }
 
+  /// Recovers the stable handle for the task already prepared by the dashboard.
+  ///
+  /// This is the UI bridge used when the existing conversational page performs
+  /// startProduction() and prepareNextTask() first. It only looks up the plan
+  /// and WorkspaceSession already owned by the shared production bundle; it
+  /// never creates a second session or mutates the real workspace.
+  WorkshopProductionTaskHandle preparedHandle() {
+    final state = _bundle.dashboardController.state;
+    final requestId = state.requestId?.trim();
+    final taskId = state.activeTaskId?.trim();
+
+    if (requestId == null || requestId.isEmpty) {
+      throw StateError(
+        'Workshop has no active production request for a prepared task.',
+      );
+    }
+
+    if (taskId == null || taskId.isEmpty) {
+      throw StateError(
+        'Workshop has no prepared task to expose to the production UI.',
+      );
+    }
+
+    final plan = _bundle.dashboardController.engine.planOf(requestId);
+    final session = _bundle.projectExecutor.sessionForTask(taskId);
+
+    if (plan == null) {
+      throw StateError(
+        'Workshop has no project plan for active request "$requestId".',
+      );
+    }
+
+    if (session == null) {
+      throw StateError(
+        'Workshop has no WorkspaceSession for prepared task "$taskId".',
+      );
+    }
+
+    return WorkshopProductionTaskHandle(
+      plan: plan,
+      taskId: taskId,
+      session: session,
+    );
+  }
+
   /// Runs Engineer -> Reviewer review -> Reviewer validation for the exact task
   /// represented by [handle]. No approval or real apply happens here.
   Future<WorkshopTaskInferenceResult> runPrepared({
