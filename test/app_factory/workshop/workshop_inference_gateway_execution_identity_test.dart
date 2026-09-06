@@ -12,7 +12,7 @@ void main() {
     final gateway = WorkshopInferenceGateway(provider: provider);
 
     await gateway
-        .stream(
+        .streamWithIdentity(
           prompt: ' build the next step ',
           sessionId: 'session-1',
           requestId: 'request-1',
@@ -46,6 +46,6 @@ final class _CapturingProvider implements RuntimeInferenceProvider {
     required CancellationToken cancellationToken,
   }) {
     captured = request;
-    return Stream<InferenceResponse>.empty();
+    return const Stream<InferenceResponse>.empty();
   }
 }
