@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -46,9 +47,23 @@ void main() {
           )
           .toList();
 
-      expect(responses, hasLength(1));
-      expect(responses.single.isError, isFalse);
-      expect(responses.single.text, 'ok');
+      expect(responses, hasLength(2));
+      final notice = responses.first;
+      expect(notice.runtimeNotice, 'cloud_provider:openAi');
+      expect(notice.providerId, 'openAi');
+      expect(notice.text, isEmpty);
+      expect(notice.isFinal, isFalse);
+      expect(notice.isError, isFalse);
+      expect(notice.terminalState, isNull);
+
+      final result = responses.where((response) => response.isFinal).single;
+      expect(result, same(responses.last));
+      expect(result.isError, isFalse);
+      expect(result.terminalState, InferenceTerminalState.success);
+      expect(result.providerId, 'openAi');
+      expect(result.runtimeNotice, isNull);
+      expect(result.text, 'ok');
+      expect(result.tokensGenerated, 12);
       expect(captured, isNotNull);
       expect(captured!.prompt, 'Current question');
       expect(captured!.systemPrompt, 'System rules');
@@ -130,8 +145,31 @@ void main() {
           .toList();
 
       expect(calls, <String>['openAi', 'gemini']);
-      expect(responses.single.text, 'fallback ok');
-      expect(responses.single.isError, isFalse);
+      expect(responses, hasLength(3));
+      final notices = responses.take(2).toList();
+      expect(
+        notices.map((notice) => notice.runtimeNotice),
+        <String>['cloud_provider:openAi', 'cloud_provider:gemini'],
+      );
+      expect(
+        notices.map((notice) => notice.providerId),
+        <String>['openAi', 'gemini'],
+      );
+      for (final notice in notices) {
+        expect(notice.text, isEmpty);
+        expect(notice.isFinal, isFalse);
+        expect(notice.isError, isFalse);
+        expect(notice.terminalState, isNull);
+      }
+
+      final result = responses.where((response) => response.isFinal).single;
+      expect(result, same(responses.last));
+      expect(result.text, 'fallback ok');
+      expect(result.isError, isFalse);
+      expect(result.terminalState, InferenceTerminalState.success);
+      expect(result.providerId, 'gemini');
+      expect(result.runtimeNotice, isNull);
+      expect(result.tokensGenerated, 8);
 
       final openAi = provider.providerStatuses.singleWhere(
         (status) => status.providerId == 'openAi',
