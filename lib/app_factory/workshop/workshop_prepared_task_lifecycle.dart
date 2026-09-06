@@ -22,7 +22,8 @@ final class WorkshopPreparedTaskLifecycle {
   final WorkshopPreparedTaskInferenceRunner _inferenceRunner;
   final WorkshopTaskApprovalController _approvalController;
 
-  /// Runs the already-prepared task through Engineer -> Reviewer -> validation.
+  /// Runs the already-prepared task through Engineer -> Reviewer review ->
+  /// Reviewer validation.
   ///
   /// A successful result is ready for an explicit owner decision but performs
   /// no real workspace mutation.
