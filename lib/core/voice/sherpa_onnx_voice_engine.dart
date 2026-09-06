@@ -1,3 +1,4 @@
+import 'pcm_validation.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
@@ -840,17 +841,27 @@ logEvent(
       final lang = const ['it', 'fr', 'en'].contains(language) ? language : 'en';
       // IDs belong to the pinned official v1.0 bundle: Sara, Siwis, Heart.
       final sid = lang == 'it' ? 35 : (lang == 'fr' ? 30 : 3);
+      final speed = _status.speechRate;
+      if (!speed.isFinite || speed <= 0) {
+        throw StateError('Invalid TTS speech rate: $speed');
+      }
+      logEvent(
+        _tag,
+        '[TTS_GENERATE_BEGIN] family=kokoro lang=$lang sid=$sid '
+        'speed=$speed chars=${sanitized.length}',
+      );
       final audio = tts.generateWithConfig(
         text: sanitized,
         config: sherpa_onnx.OfflineTtsGenerationConfig(
           sid: sid,
-          speed: _status.speechRate,
+          speed: speed,
           extra: {'lang': lang},
         ),
       );
 
       if (_disposed) return;
 
+      validatePcm(audio.samples, audio.sampleRate);
       _pendingTtsSamples = audio.samples;
       _pendingTtsSampleRate = audio.sampleRate;
 
@@ -870,6 +881,8 @@ logEvent(
         _tag,
         '[TTS_FAIL] $error',
       );
+      _pendingTtsSamples = null;
+      rethrow;
     }
   }
 
