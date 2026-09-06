@@ -142,9 +142,9 @@
   "deepseek_coder_6_7b_instruct": {
     "displayName": "DeepSeek Coder 6.7B Instruct",
     "fileName": "deepseek-coder-6.7b-instruct-Q4_K_M.gguf",
-    "downloadUrl": "https://huggingface.co/tensorblock/deepseek-coder-6.7b-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf",
-    "version": "1.0.2",
-    "sizeBytes": 3802000000,
+    "downloadUrl": "https://huggingface.co/second-state/Deepseek-Coder-6.7B-Instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf",
+    "version": "1.0.3",
+    "sizeBytes": 4080000000,
     "description": "DeepSeek Coder 6.7B Instruct Q4_K_M. Modello tecnico indipendente dedicato all'Ingegnere del Cantiere.",
     "platformTarget": "windows",
     "sizeCategory": "6.7B"
@@ -152,9 +152,9 @@
   "starcoder2_3b": {
     "displayName": "StarCoder2 3B",
     "fileName": "starcoder2-3b-Q4_K_M.gguf",
-    "downloadUrl": "https://huggingface.co/tensorblock/starcoder2-3b-GGUF/resolve/main/starcoder2-3b-Q4_K_M.gguf",
-    "version": "1.0.2",
-    "sizeBytes": 1758000000,
+    "downloadUrl": "https://huggingface.co/second-state/StarCoder2-3B-GGUF/resolve/main/starcoder2-3b-Q4_K_M.gguf",
+    "version": "1.0.3",
+    "sizeBytes": 1850000000,
     "description": "StarCoder2 3B Q4_K_M. Modello tecnico indipendente dedicato alla revisione del Cantiere.",
     "platformTarget": "android",
     "sizeCategory": "3B"
