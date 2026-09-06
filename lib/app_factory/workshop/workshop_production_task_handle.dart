@@ -116,15 +116,22 @@ final class WorkshopProductionTaskCoordinator {
     );
   }
 
-  /// Runs Engineer -> Reviewer review -> Reviewer validation for the exact task
-  /// represented by [handle]. No approval or real apply happens here.
+  /// Runs the complete Cantiere model chain for the exact task represented by
+  /// [handle]: Orchestrator -> Architect -> Engineer -> Reviewer review ->
+  /// Reviewer validation. No approval or real apply happens here.
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     bool isOffline = true,
     CancellationToken? cancellationToken,
-  }) {
+  }) async {
+    final preflight = await _bundle.preflight.run(
+      request: handle.session.context.request,
+      cancellationToken: cancellationToken,
+    );
+
     return _bundle.taskLifecycle.runPrepared(
       taskId: handle.taskId,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
