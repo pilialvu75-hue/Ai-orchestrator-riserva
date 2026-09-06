@@ -83,4 +83,58 @@ final class WorkshopStageRoleInference {
       cancellationToken: cancellationToken,
     );
   }
+
+  /// Executes one Workshop stage while preserving Cantiere-owned execution
+  /// continuity identity through the role-aware inference boundary.
+  ///
+  /// The historical [complete] method remains unchanged for compatibility.
+  /// This method forwards only identity explicitly supplied by the authoritative
+  /// Cantiere lifecycle; it never invents execution, attempt or checkpoint IDs.
+  Future<WorkshopInferenceResult> completeWithIdentity({
+    required WorkshopStage stage,
+    required String prompt,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = true,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
+    CancellationToken? cancellationToken,
+  }) {
+    final role = WorkshopStageRoleResolver.roleFor(stage);
+
+    if (role == AppAiRole.assistantOrchestrator) {
+      throw StateError(
+        'Assistant role cannot be used by Workshop stage inference.',
+      );
+    }
+
+    return _executor.completeWithIdentity(
+      role: role,
+      prompt: prompt,
+      systemPrompt: systemPrompt,
+      context: context,
+      sessionId: sessionId,
+      isOffline: isOffline,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      topP: topP,
+      repeatPenalty: repeatPenalty,
+      requestId: requestId,
+      projectId: projectId,
+      taskId: taskId,
+      executionId: executionId,
+      attemptId: attemptId,
+      checkpointId: checkpointId,
+      cancellationToken: cancellationToken,
+    );
+  }
 }
