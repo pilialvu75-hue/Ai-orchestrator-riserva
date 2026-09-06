@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controll
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
@@ -11,11 +12,11 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
 /// Production-facing Cantiere composition returned to the UI layer.
 ///
-/// The dashboard and the prepared-task lifecycle share the same authoritative
-/// [WorkshopProjectExecutor]. This is important: a task prepared by the
-/// dashboard is therefore the exact same WorkspaceSession consumed by the
-/// Engineer -> Reviewer -> Reviewer pipeline and by the explicit approval/apply
-/// boundary.
+/// The dashboard, read-only Orchestrator/Architect preflight and prepared-task
+/// lifecycle share the same authoritative project executor and role-aware
+/// inference stack. A task prepared by the dashboard is therefore the exact
+/// same WorkspaceSession consumed by the Engineer -> Reviewer -> Reviewer
+/// pipeline and by the explicit approval/apply boundary.
 ///
 /// The bundle owns no second runtime, downloader, model store, workspace or
 /// memory subsystem. The Assistant role is never accepted by the multi-role
@@ -23,11 +24,17 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 final class WorkshopProductionLifecycleBundle {
   const WorkshopProductionLifecycleBundle({
     required this.dashboardController,
+    required this.preflight,
     required this.taskLifecycle,
     required this.projectExecutor,
   });
 
   final WorkshopDashboardController dashboardController;
+
+  /// Read-only Orchestrator -> Architect reasoning boundary composed from the
+  /// same role-aware inference stack used by the prepared task lifecycle.
+  final WorkshopPreflightInferencePipeline preflight;
+
   final WorkshopPreparedTaskLifecycle taskLifecycle;
 
   /// Authoritative executor shared by dashboard preparation, inference and
@@ -37,12 +44,13 @@ final class WorkshopProductionLifecycleBundle {
 }
 
 /// Composes the existing Workshop production pieces around one shared project
-/// executor.
+/// executor and one shared role-aware inference stack.
 ///
 /// This class deliberately delegates all lower-level construction to the
 /// existing Workshop factories. It exists only to keep the UI from creating a
-/// second ProjectExecutor or accidentally running inference against a different
-/// WorkspaceSession from the one prepared by the dashboard.
+/// second ProjectExecutor, a second inference router, or accidentally running
+/// inference against a different WorkspaceSession from the one prepared by the
+/// dashboard.
 abstract final class WorkshopProductionLifecycleBundleFactory {
   static WorkshopProductionLifecycleBundle create({
     required WorkshopProjectExecutor projectExecutor,
@@ -62,12 +70,21 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       assignments: assignments,
     );
 
-    final inferenceRunner =
-        WorkshopMultiRolePipelineFactory.createPreparedTaskRunner(
-      executor: projectExecutor,
+    final stageInference =
+        WorkshopMultiRolePipelineFactory.createStageInference(
       inferenceService: inferenceService,
       assignments: assignments,
       gateways: roleGateways,
+    );
+
+    final preflight = WorkshopPreflightInferencePipeline(
+      inference: stageInference,
+    );
+
+    final inferenceRunner =
+        WorkshopMultiRolePipelineFactory.createPreparedTaskRunner(
+      executor: projectExecutor,
+      stageInference: stageInference,
     );
 
     final lifecycle = WorkshopPreparedTaskLifecycle(
@@ -81,6 +98,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       dashboardController: WorkshopDashboardController(
         engine: engine,
       ),
+      preflight: preflight,
       taskLifecycle: lifecycle,
       projectExecutor: projectExecutor,
     );
