@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_implementation_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_runner.dart';
@@ -33,10 +34,12 @@ final class WorkshopTaskInferenceResult {
 ///
 /// Engineer -> VirtualWorkspace -> Reviewer review -> Reviewer validation.
 ///
-/// The same [WorkshopStageRoleInference] boundary is reused for every stage,
-/// preserving the current role/model assignments and shared runtime. No
-/// Assistant configuration, model selection, memory or conversation state is
-/// read or used as fallback.
+/// A completed Orchestrator/Architect preflight can be supplied to the
+/// Engineer as bounded Workshop-only implementation guidance. The same
+/// [WorkshopStageRoleInference] boundary is reused for every stage, preserving
+/// the current role/model assignments and shared runtime. No Assistant
+/// configuration, model selection, memory or conversation state is read or
+/// used as fallback.
 ///
 /// This pipeline deliberately stops before owner approval and apply. It never
 /// writes to the real workspace, commits, pushes or creates a Pull Request.
@@ -59,11 +62,13 @@ final class WorkshopTaskInferencePipeline {
 
   Future<WorkshopTaskInferenceResult> run({
     required WorkspaceSession session,
+    WorkshopPreflightInferenceResult? preflight,
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
     final proposal = await _implementationRunner.run(
       session: session,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
