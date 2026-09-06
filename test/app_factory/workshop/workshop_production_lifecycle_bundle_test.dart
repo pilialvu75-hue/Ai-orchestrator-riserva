@@ -38,12 +38,12 @@ void main() {
           await bundle.dashboardController.prepareNextTask();
       final activeTaskId = bundle.dashboardController.state.activeTaskId;
 
-      expect(preparedSession, isNotNull);
-      expect(activeTaskId, 'task:initial-implementation');
+      final WorkspaceSession session = preparedSession ??
+          (throw StateError('Dashboard did not prepare a task session.'));
+      final String taskId = activeTaskId ??
+          (throw StateError('Dashboard did not expose an active task id.'));
 
-      final session = preparedSession!;
-      final taskId = activeTaskId!;
-
+      expect(taskId, 'task:initial-implementation');
       expect(identical(executor.sessionForTask(taskId), session), isTrue);
 
       final inference = await bundle.taskLifecycle.runPrepared(
