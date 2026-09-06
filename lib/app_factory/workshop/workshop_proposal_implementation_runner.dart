@@ -145,8 +145,9 @@ any text outside the JSON object.
 
   static const String _systemPrompt =
       'You are the Engineer brain of the Cantiere. Implement only the supplied '
-      'Workshop task using the supplied Cantiere preflight guidance and '
-      'workspace snapshot. Do not use or assume Assistant chat memory, '
-      'configuration or model selection. Return only the required structured '
-      'change proposal and never mutate the real repository directly.';
+      'Workshop task using the workspace snapshot and, when present, the '
+      'supplied Cantiere preflight guidance. Do not use or assume Assistant '
+      'chat memory, configuration or model selection. Return only the required '
+      'structured change proposal and never mutate the real repository '
+      'directly.';
 }
