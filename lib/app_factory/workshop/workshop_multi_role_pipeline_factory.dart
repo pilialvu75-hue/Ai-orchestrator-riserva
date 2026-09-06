@@ -1,52 +1,39 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_inference_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_composer.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference_composer.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
-/// Composes the role-aware Cantiere inference path from the existing shared
-/// runtime infrastructure.
+/// Adds prepared-task composition on top of the existing role-aware Cantiere
+/// inference composers.
 ///
-/// The four Workshop roles receive independent gateways/model assignments but
-/// reuse the same [InferenceService]. No Assistant role, model selection,
-/// configuration or memory is read or used as fallback.
+/// The authoritative [WorkshopRoleInferenceComposer] and
+/// [WorkshopStageRoleInferenceComposer] remain responsible for building the
+/// four Workshop brains over the shared [InferenceService]. This helper only
+/// joins that existing stack to the prepared-task pipeline; it does not create
+/// a parallel runtime, downloader, storage or Assistant dependency.
 final class WorkshopMultiRolePipelineFactory {
   const WorkshopMultiRolePipelineFactory._();
 
-  /// Builds the authoritative router for all four Workshop roles.
-  ///
-  /// Explicit [gateways] are accepted for tests/integration boundaries. When
-  /// omitted, one shared [InferenceService] is resolved once and each role gets
-  /// its own Workshop gateway using the Cantiere assignments.
+  /// Exposes the authoritative Workshop router while preserving an explicit
+  /// gateway injection seam for focused tests.
   static WorkshopRoleInferenceRouter createRouter({
     InferenceService? inferenceService,
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? gateways,
   }) {
-    if (gateways != null) {
-      return WorkshopRoleInferenceRouter(gateways: gateways);
-    }
-
-    final sharedInferenceService = WorkshopFactory.resolveInferenceService(
+    return WorkshopRoleInferenceComposer.compose(
       inferenceService: inferenceService,
-    );
-
-    return WorkshopRoleInferenceRouter(
-      gateways: <AppAiRole, WorkshopInferenceGateway>{
-        for (final role in WorkshopRoleInferenceRouter.workshopRoles)
-          role: WorkshopFactory.createInferenceGateway(
-            inferenceService: sharedInferenceService,
-            role: role,
-            assignments: assignments,
-          ),
-      },
+      assignments: assignments,
+      gatewayFactory: _gatewayFactory(gateways),
     );
   }
 
@@ -57,17 +44,25 @@ final class WorkshopMultiRolePipelineFactory {
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? gateways,
   }) {
-    final resolvedRouter = router ??
-        createRouter(
-          inferenceService: inferenceService,
-          assignments: assignments,
-          gateways: gateways,
+    if (router != null) {
+      if (gateways != null) {
+        throw ArgumentError(
+          'Provide either an existing Workshop router or explicit gateways, '
+          'not both.',
         );
+      }
 
-    return WorkshopStageRoleInference(
-      executor: WorkshopRoleInferenceExecutor(
-        router: resolvedRouter,
-      ),
+      return WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: router,
+        ),
+      );
+    }
+
+    return WorkshopStageRoleInferenceComposer.compose(
+      inferenceService: inferenceService,
+      assignments: assignments,
+      gatewayFactory: _gatewayFactory(gateways),
     );
   }
 
@@ -117,5 +112,29 @@ final class WorkshopMultiRolePipelineFactory {
       executor: executor,
       pipeline: resolvedPipeline,
     );
+  }
+
+  static WorkshopRoleGatewayFactory? _gatewayFactory(
+    Map<AppAiRole, WorkshopInferenceGateway>? gateways,
+  ) {
+    if (gateways == null) {
+      return null;
+    }
+
+    if (gateways.containsKey(AppAiRole.assistantOrchestrator)) {
+      throw ArgumentError(
+        'Workshop pipeline gateways must not contain the Assistant role.',
+      );
+    }
+
+    return (AppAiRole role) {
+      final gateway = gateways[role];
+      if (gateway == null) {
+        throw ArgumentError(
+          'Missing Workshop inference gateway for role "${role.id}".',
+        );
+      }
+      return gateway;
+    };
   }
 }
