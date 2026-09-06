@@ -32,9 +32,8 @@ class RollingContextBuilder {
     String? excludedMessageId,
     List<ChatTurn> recalledContext = const [],
   }) {
-    // Solo storia cronologica — nessun recall semantico prepended.
-    // Il recall fuori ordine causa risposte incoerenti su modelli 1B.
     final turns = <ChatTurn>[];
+    final historySignatures = <String>{};
 
     for (final message in messages) {
       if (excludedMessageId != null && message.id == excludedMessageId) {
@@ -46,7 +45,22 @@ class RollingContextBuilder {
       );
       if (turn == null) continue;
       turns.add(turn);
+      historySignatures.add(_turnSignature(turn));
     }
+
+    final normalizedRecalledTurns = recalledContext
+        .map(_normalizeContextTurn)
+        .whereType<ChatTurn>()
+        .toList(growable: false);
+    final recalledSignatures = <String>{};
+    final filteredRecalledTurns = <ChatTurn>[];
+    for (final turn in normalizedRecalledTurns) {
+      final signature = _turnSignature(turn);
+      if (historySignatures.contains(signature)) continue;
+      if (!recalledSignatures.add(signature)) continue;
+      filteredRecalledTurns.add(turn);
+    }
+    turns.addAll(filteredRecalledTurns);
 
     final result = _windowManager.trimToWindow(
       systemPrompt: systemPrompt,
@@ -66,12 +80,35 @@ class RollingContextBuilder {
     required ChatRole role,
     required String content,
   }) {
-    final normalized = _normalizer.normalize(
-      ChatTurn(role: role, content: content),
-    );
-    if (normalized.content.isEmpty || normalized.role == ChatRole.system) {
+    final normalizedContent = _normalizeContent(content);
+    if (normalizedContent == null || role == ChatRole.system) {
       return null;
     }
-    return normalized;
+    return ChatTurn(role: role, content: normalizedContent);
+  }
+
+  ChatTurn? _normalizeContextTurn(ChatTurn turn) {
+    final normalizedContent = _normalizeContent(turn.content);
+    if (normalizedContent == null) return null;
+    return normalizedContent == turn.content
+        ? turn
+        : turn.copyWith(content: normalizedContent);
+  }
+
+  String _turnSignature(ChatTurn turn) {
+    final buffer = StringBuffer()
+      ..write(turn.role.index)
+      ..write(':')
+      ..write(turn.excludeFromContext ? 1 : 0)
+      ..write(':')
+      ..write(turn.content.length)
+      ..write(':')
+      ..write(turn.content);
+    return buffer.toString();
+  }
+
+  String? _normalizeContent(String content) {
+    final normalized = content.trim();
+    return normalized.isEmpty ? null : normalized;
   }
 }
