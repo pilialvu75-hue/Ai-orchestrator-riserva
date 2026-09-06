@@ -1174,12 +1174,18 @@ class _ChatBodyState
     String text,
   ) async {
     try {
-      await di
-          .sl<VoiceOutputService>()
-          .speak(text);
-    } catch (error) {
-      debugPrint(
-        'TTS playback failed: $error',
+      RuntimeEventLog.instance.emit('[VOICE_CHAT_REQUEST] chars=${text.length}');
+      final output = di.sl<VoiceOutputService>();
+      RuntimeEventLog.instance.emit('[VOICE_CHAT_SERVICE_READY]');
+      await output.speak(text);
+      RuntimeEventLog.instance.emit('[VOICE_CHAT_REQUEST_RETURNED]');
+    } catch (error, stackTrace) {
+      RuntimeEventLog.instance.emit('[VOICE_CHAT_ERROR] $error\n$stackTrace');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lettura vocale non riuscita. Dettagli disponibili nei log diagnostici.'),
+        ),
       );
     }
   }
