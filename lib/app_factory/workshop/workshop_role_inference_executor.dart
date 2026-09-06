@@ -50,4 +50,50 @@ final class WorkshopRoleInferenceExecutor {
       cancellationToken: cancellationToken,
     );
   }
+
+  /// Executes one role while preserving Cantiere-owned execution identity.
+  ///
+  /// The historical [complete] contract intentionally remains unchanged so
+  /// existing Workshop gateway fakes and implementations keep their virtual
+  /// API. Identity is only forwarded when the caller explicitly owns it.
+  Future<WorkshopInferenceResult> completeWithIdentity({
+    required AppAiRole role,
+    required String prompt,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = true,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
+    CancellationToken? cancellationToken,
+  }) {
+    final gateway = _router.gatewayFor(role);
+
+    return gateway.completeWithIdentity(
+      prompt: prompt,
+      systemPrompt: systemPrompt,
+      context: context,
+      sessionId: sessionId,
+      isOffline: isOffline,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      topP: topP,
+      repeatPenalty: repeatPenalty,
+      requestId: requestId,
+      projectId: projectId,
+      taskId: taskId,
+      executionId: executionId,
+      attemptId: attemptId,
+      checkpointId: checkpointId,
+      cancellationToken: cancellationToken,
+    );
+  }
 }
