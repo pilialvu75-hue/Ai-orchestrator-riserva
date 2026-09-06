@@ -6,7 +6,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 /// has already been prepared by [WorkshopProjectExecutor].
 ///
 /// This is the project-lifecycle bridge between a task id and its authoritative
-/// [WorkspaceSession]. It never creates a second workspace, never approves or
+/// workspace session. It never creates a second workspace, never approves or
 /// applies changes, and never reads Assistant configuration, models, memory or
 /// conversation state.
 final class WorkshopPreparedTaskInferenceRunner {
@@ -23,7 +23,7 @@ final class WorkshopPreparedTaskInferenceRunner {
     required String taskId,
     bool isOffline = true,
     CancellationToken? cancellationToken,
-  }) {
+  }) async {
     final normalizedTaskId = taskId.trim();
 
     if (normalizedTaskId.isEmpty) {
