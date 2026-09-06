@@ -43,6 +43,75 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+    test('approved apply advances the project only after workspace completion',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final controller = WorkshopTaskApprovalController(executor: executor);
+      final plan = _plan();
+      final session = await _validatedSession(executor, plan: plan);
+
+      controller.decide(
+        taskId: 'task:apply',
+        decision: WorkshopApplyDecision.approve,
+      );
+
+      expect(plan.taskById('task:apply')!.completed, isFalse);
+      expect(plan.status, WorkshopProjectStatus.planned);
+      expect(gateway.files['lib/app.dart'], 'old');
+
+      final applied = await controller.applyApprovedAndComplete(
+        plan: plan,
+        taskId: 'task:apply',
+      );
+
+      expect(identical(applied, session), isTrue);
+      expect(session.status, WorkspaceSessionStatus.completed);
+      expect(plan.taskById('task:apply')!.completed, isTrue);
+      expect(
+        plan.phaseById('phase:implementation')!.status,
+        WorkshopProjectPhaseStatus.completed,
+      );
+      expect(plan.status, WorkshopProjectStatus.completed);
+      expect(gateway.files['lib/app.dart'], 'new');
+      expect(gateway.writeCalls, 1);
+      expect(gateway.commitCalls, 0);
+      expect(gateway.pushCalls, 0);
+      expect(gateway.pullRequestCalls, 0);
+    });
+
+    test('failed apply never marks the project task complete', () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final controller = WorkshopTaskApprovalController(executor: executor);
+      final plan = _plan();
+      final session = await _validatedSession(executor, plan: plan);
+
+      controller.decide(
+        taskId: 'task:apply',
+        decision: WorkshopApplyDecision.reject,
+        rejectionReason: 'Owner rejected generated changes.',
+      );
+
+      await expectLater(
+        controller.applyApprovedAndComplete(
+          plan: plan,
+          taskId: 'task:apply',
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(plan.taskById('task:apply')!.completed, isFalse);
+      expect(plan.status, WorkshopProjectStatus.planned);
+      expect(gateway.files['lib/app.dart'], 'old');
+      expect(gateway.writeCalls, 0);
+    });
+
     test('rejection blocks without applying staged changes', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -99,9 +168,10 @@ void main() {
 }
 
 Future<WorkspaceSession> _validatedSession(
-  WorkshopProjectExecutor executor,
-) async {
-  final session = await executor.prepareTask(_plan(), 'task:apply');
+  WorkshopProjectExecutor executor, {
+  WorkshopProjectPlan? plan,
+}) async {
+  final session = await executor.prepareTask(plan ?? _plan(), 'task:apply');
   session.workspace.write(path: 'lib/app.dart', content: 'new');
   session.beginReview();
   session.beginValidation();
