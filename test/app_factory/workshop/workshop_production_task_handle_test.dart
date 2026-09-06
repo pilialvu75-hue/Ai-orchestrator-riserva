@@ -50,6 +50,8 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
         AppAiRole.engineer,
         AppAiRole.reviewer,
         AppAiRole.reviewer,
