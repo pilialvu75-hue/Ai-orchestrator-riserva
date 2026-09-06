@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace_stager.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -12,9 +13,9 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 ///
 /// This bridge reuses [WorkshopStageRoleInference], so implementation is
 /// routed to the existing Engineer role/model assignment and shared runtime.
-/// It reads only the active Workshop request and workspace snapshot; Assistant
-/// configuration, model selection, memory and conversation state are never
-/// consulted.
+/// It reads only the active Workshop request, workspace snapshot and optional
+/// Cantiere preflight output; Assistant configuration, model selection, memory
+/// and conversation state are never consulted.
 ///
 /// A successful Engineer response is decoded and staged through
 /// [WorkshopProposalWorkspaceStager]. Real repository writes, approval, commit,
@@ -32,6 +33,7 @@ final class WorkshopProposalImplementationRunner {
 
   Future<WorkshopChangeProposal> run({
     required WorkspaceSession session,
+    WorkshopPreflightInferenceResult? preflight,
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
@@ -49,9 +51,16 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
+    if (preflight != null && !preflight.readyForImplementation) {
+      throw StateError(
+        'Workshop Engineer cannot run from an incomplete Orchestrator/Architect '
+        'preflight.',
+      );
+    }
+
     final result = await _inference.complete(
       stage: WorkshopStage.implementation,
-      prompt: _buildPrompt(session),
+      prompt: _buildPrompt(session, preflight: preflight),
       systemPrompt: _systemPrompt,
       sessionId: 'workshop:implementation:${session.context.request.id}',
       isOffline: isOffline,
@@ -77,7 +86,10 @@ final class WorkshopProposalImplementationRunner {
     );
   }
 
-  String _buildPrompt(WorkspaceSession session) {
+  String _buildPrompt(
+    WorkspaceSession session, {
+    WorkshopPreflightInferenceResult? preflight,
+  }) {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
 
@@ -89,15 +101,22 @@ final class WorkshopProposalImplementationRunner {
       'targetFiles': request.targetFiles,
       'constraints': request.constraints,
       'context': request.context,
+      if (preflight != null)
+        'preflight': <String, String>{
+          'orchestratorAnalysis': preflight.analysis.text.trim(),
+          'architectPlan': preflight.architecture!.text.trim(),
+        },
       'workspaceFiles': <String, String>{
         for (final path in snapshot.keys.toList()..sort()) path: snapshot[path]!,
       },
     };
 
     return '''
-Implement the Workshop task using only the supplied request and workspace
-snapshot. Return a structured change proposal; do not claim that files were
-already written and do not perform review, validation or approval.
+Implement the Workshop task using only the supplied request, Cantiere preflight
+when present, and workspace snapshot. Treat the Architect plan as bounded
+implementation guidance and preserve all supplied constraints. Return a
+structured change proposal; do not claim that files were already written and
+do not perform review, validation or approval.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
@@ -126,8 +145,9 @@ any text outside the JSON object.
 
   static const String _systemPrompt =
       'You are the Engineer brain of the Cantiere. Implement only the supplied '
-      'Workshop task using the supplied workspace snapshot. Do not use or '
-      'assume Assistant chat memory, configuration or model selection. Return '
-      'only the required structured change proposal and never mutate the real '
-      'repository directly.';
+      'Workshop task using the workspace snapshot and, when present, the '
+      'supplied Cantiere preflight guidance. Do not use or assume Assistant '
+      'chat memory, configuration or model selection. Return only the required '
+      'structured change proposal and never mutate the real repository '
+      'directly.';
 }

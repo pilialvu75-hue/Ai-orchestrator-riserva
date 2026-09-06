@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_inference_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
@@ -23,17 +24,20 @@ final class WorkshopPreparedTaskLifecycle {
   final WorkshopTaskApprovalController _approvalController;
 
   /// Runs the already-prepared task through Engineer -> Reviewer review ->
-  /// Reviewer validation.
+  /// Reviewer validation, optionally handing a completed Cantiere preflight to
+  /// the Engineer.
   ///
   /// A successful result is ready for an explicit owner decision but performs
   /// no real workspace mutation.
   Future<WorkshopTaskInferenceResult> runPrepared({
     required String taskId,
+    WorkshopPreflightInferenceResult? preflight,
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) {
     return _inferenceRunner.run(
       taskId: taskId,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
