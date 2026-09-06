@@ -1,3 +1,4 @@
+import 'pcm_validation.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -217,6 +218,8 @@ class AudioStreamPlayer with RuntimeEventEmitter {
       sampleRate: sampleRate,
     );
 
+    // Never pass NaN/Infinity to the native output, even from another producer.
+    validatePcm(samples, sampleRate);
     _queueDepth++;
 
     final previous = _tail;
