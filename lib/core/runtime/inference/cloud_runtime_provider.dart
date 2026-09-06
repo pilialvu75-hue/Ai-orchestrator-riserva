@@ -293,6 +293,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
                 'taskId': optimized.taskId,
               if (optimized.executionId != null)
                 'executionId': optimized.executionId,
+              if (optimized.attemptId != null)
+                'attemptId': optimized.attemptId,
               if (optimized.checkpointId != null)
                 'checkpointId': optimized.checkpointId,
             },

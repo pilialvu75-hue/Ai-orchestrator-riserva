@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('CloudRuntimeProvider', () {
-    test('preserves structured history and keeps current prompt separate', () async {
+    test('preserves structured history and execution identity metadata', () async {
       AiRequest? captured;
       final provider = CloudRuntimeProvider(
         sendQuery: (providerId, request) async {
@@ -31,6 +31,12 @@ void main() {
           .streamInference(
             request: const InferenceRequest(
               sessionId: 'session-1',
+              requestId: 'request-1',
+              projectId: 'project-1',
+              taskId: 'task-1',
+              executionId: 'execution-1',
+              attemptId: 'attempt-2',
+              checkpointId: 'checkpoint-7',
               prompt: '  Current question  ',
               systemPrompt: 'System rules',
               context: <ChatTurn>[
@@ -79,7 +85,13 @@ void main() {
       ]);
       expect(captured!.modelId, 'gpt-5.6-terra');
       expect(captured!.providerId, 'openAi');
-      expect(captured!.metadata['sessionId'], 'session-1');
+      expect(captured!.metadata, containsPair('sessionId', 'session-1'));
+      expect(captured!.metadata, containsPair('requestId', 'request-1'));
+      expect(captured!.metadata, containsPair('projectId', 'project-1'));
+      expect(captured!.metadata, containsPair('taskId', 'task-1'));
+      expect(captured!.metadata, containsPair('executionId', 'execution-1'));
+      expect(captured!.metadata, containsPair('attemptId', 'attempt-2'));
+      expect(captured!.metadata, containsPair('checkpointId', 'checkpoint-7'));
     });
 
     test('provider model callback overrides catalog default', () async {
