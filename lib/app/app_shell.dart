@@ -15,9 +15,9 @@ import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
@@ -118,7 +118,7 @@ class _AppShellState extends State<AppShell> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    WorkshopDashboardController? workshopController;
+    WorkshopProductionLifecycleBundle? workshopBundle;
 
     try {
       final applicationDirectory =
@@ -139,28 +139,29 @@ class _AppShellState extends State<AppShell> {
       final workshopAssignments =
           await WorkshopFactory.loadPersistedAssignments();
 
-      workshopController = WorkshopFactory.create(
+      workshopBundle =
+          WorkshopProductionLifecycleBundleFactory.createForWorkspace(
         workspaceRootPath: workspaceDirectory.path,
         assignments: workshopAssignments,
       );
 
       if (!mounted) {
-        workshopController.dispose();
-        workshopController = null;
+        workshopBundle.dashboardController.dispose();
+        workshopBundle = null;
         return;
       }
 
       await navigator.push(
         MaterialPageRoute<void>(
-          builder: (_) => WorkshopDashboardPage(
-            dashboardController: workshopController!,
+          builder: (_) => WorkshopProductionDashboardPage(
+            bundle: workshopBundle!,
             modelAssignments: workshopAssignments,
           ),
         ),
       );
     } catch (error) {
       if (!mounted) {
-        workshopController?.dispose();
+        workshopBundle?.dashboardController.dispose();
         return;
       }
 
@@ -174,7 +175,7 @@ class _AppShellState extends State<AppShell> {
           ),
         );
     } finally {
-      workshopController?.dispose();
+      workshopBundle?.dashboardController.dispose();
 
       if (mounted) {
         setState(() {
