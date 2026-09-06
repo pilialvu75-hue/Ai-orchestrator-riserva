@@ -18,6 +18,7 @@ final class WorkshopPreflightInferencePipeline {
 
   Future<WorkshopPreflightInferenceResult> run({
     required WorkshopRequest request,
+    bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
     final analysis = await _inference.complete(
@@ -28,6 +29,7 @@ final class WorkshopPreflightInferencePipeline {
           'Workshop request, its explicit context and constraints. Do not '
           'use Assistant state and do not propose repository mutations.',
       sessionId: 'workshop:${request.id}:preflight:analysis',
+      isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
 
@@ -48,6 +50,7 @@ final class WorkshopPreflightInferencePipeline {
           'plan from the supplied Workshop request and Orchestrator analysis. '
           'Do not write files, approve/apply changes, or use Assistant state.',
       sessionId: 'workshop:${request.id}:preflight:planning',
+      isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
 
