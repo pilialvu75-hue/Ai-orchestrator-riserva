@@ -34,19 +34,24 @@ void main() {
         title: 'Production bundle',
         instruction: 'Update the application safely.',
       );
-      final session = await bundle.dashboardController.prepareNextTask();
-      final taskId = bundle.dashboardController.state.activeTaskId;
+      final preparedSession =
+          await bundle.dashboardController.prepareNextTask();
+      final activeTaskId = bundle.dashboardController.state.activeTaskId;
 
-      expect(session, isNotNull);
-      expect(taskId, 'task:initial-implementation');
-      expect(identical(executor.sessionForTask(taskId!), session), isTrue);
+      expect(preparedSession, isNotNull);
+      expect(activeTaskId, 'task:initial-implementation');
+
+      final session = preparedSession!;
+      final taskId = activeTaskId!;
+
+      expect(identical(executor.sessionForTask(taskId), session), isTrue);
 
       final inference = await bundle.taskLifecycle.runPrepared(
         taskId: taskId,
       );
 
       expect(inference.readyForApproval, isTrue);
-      expect(session!.status, WorkspaceSessionStatus.validation);
+      expect(session.status, WorkspaceSessionStatus.validation);
       expect(session.workspace.read('lib/app.dart'), 'new');
       expect(workspaceGateway.files['lib/app.dart'], 'old');
       expect(workspaceGateway.writeCalls, 0);
