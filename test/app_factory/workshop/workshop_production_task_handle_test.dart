@@ -3,10 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -33,6 +35,9 @@ void main() {
       instruction: 'Update the application safely.',
     );
 
+    final requestId = bundle.dashboardController.state.requestId;
+
+    expect(requestId, isNotNull);
     expect(handle.taskId, 'task:initial-implementation');
     expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
     expect(workspaceGateway.writeCalls, 0);
@@ -67,6 +72,18 @@ void main() {
     expect(workspaceGateway.commitCalls, 0);
     expect(workspaceGateway.pushCalls, 0);
     expect(workspaceGateway.pullRequestCalls, 0);
+
+    final dashboardState = bundle.dashboardController.state;
+
+    expect(dashboardState.projectStatus, WorkshopProjectStatus.completed);
+    expect(dashboardState.progress, 1.0);
+    expect(dashboardState.completedTasks, 1);
+    expect(dashboardState.totalTasks, 1);
+    expect(dashboardState.activeTaskId, isNull);
+    expect(
+      bundle.dashboardController.engine.stageOf(requestId!),
+      WorkshopStage.completed,
+    );
   });
 
   test('coordinator recovers the exact task already prepared by dashboard',
