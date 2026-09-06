@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
@@ -17,7 +18,7 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   test(
-    'production bundle reuses dashboard session through approval and apply',
+    'production bundle shares preflight and prepared task role stack',
     () async {
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -29,6 +30,27 @@ void main() {
       final bundle = WorkshopProductionLifecycleBundleFactory.create(
         projectExecutor: executor,
         roleGateways: _gateways(callOrder),
+      );
+
+      final preflight = await bundle.preflight.run(
+        request: const WorkshopRequest(
+          id: 'production-preflight',
+          title: 'Production bundle',
+          instruction: 'Update the application safely.',
+          operation: WorkshopOperation.modify,
+          projectPath: '/workspace',
+          constraints: <String>['No Assistant fallback'],
+        ),
+      );
+
+      expect(preflight.readyForImplementation, isTrue);
+      expect(workspaceGateway.writeCalls, 0);
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.architect,
+        ],
       );
 
       final plan = bundle.dashboardController.startProduction(
@@ -59,6 +81,8 @@ void main() {
       expect(
         callOrder,
         <AppAiRole>[
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.architect,
           AppAiRole.engineer,
           AppAiRole.reviewer,
           AppAiRole.reviewer,
@@ -110,12 +134,12 @@ Map<AppAiRole, WorkshopInferenceGateway> _gateways(
       AppAiRole.workshopOrchestrator: _QueueGateway(
         role: AppAiRole.workshopOrchestrator,
         callOrder: callOrder,
-        results: <WorkshopInferenceResult>[_success('{}')],
+        results: <WorkshopInferenceResult>[_success('scope analysis')],
       ),
       AppAiRole.architect: _QueueGateway(
         role: AppAiRole.architect,
         callOrder: callOrder,
-        results: <WorkshopInferenceResult>[_success('{}')],
+        results: <WorkshopInferenceResult>[_success('implementation plan')],
       ),
       AppAiRole.engineer: _QueueGateway(
         role: AppAiRole.engineer,
