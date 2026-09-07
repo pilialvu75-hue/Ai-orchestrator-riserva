@@ -20,7 +20,7 @@ void main() {
         entry['downloadUrl'],
         'https://huggingface.co/bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_K_M.gguf',
       );
-      expect(entry['sizeBytes'], 5030000000);
+      expect(entry['sizeBytes'], 5027784224);
     });
 
     test('DeepSeek Coder points to a live Q4_K_M mirror', () {
