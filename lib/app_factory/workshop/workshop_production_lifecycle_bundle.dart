@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
@@ -71,6 +72,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? roleGateways,
+    WorkshopBuildLab? buildLab,
     String? workspaceRootPath,
   }) {
     final orchestratorGateway =
@@ -111,6 +113,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     return WorkshopProductionLifecycleBundle(
       dashboardController: WorkshopDashboardController(
         engine: engine,
+        buildLab: buildLab,
       ),
       preflight: preflight,
       taskLifecycle: lifecycle,
@@ -126,6 +129,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     InferenceService? inferenceService,
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
+    WorkshopBuildLab? buildLab,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -141,6 +145,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       projectExecutor: executor,
       inferenceService: inferenceService,
       assignments: assignments,
+      buildLab: buildLab,
       workspaceRootPath: normalizedWorkspaceRootPath,
     );
   }
