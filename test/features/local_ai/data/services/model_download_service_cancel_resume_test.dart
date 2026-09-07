@@ -84,9 +84,14 @@ void main() {
           firstChunkFlushed.complete();
           await releaseFirstResponse.future;
           try {
+            // Send one more valid chunk after cancellation. The concrete
+            // downloader checks its CancelToken before writing each streamed
+            // chunk, so this makes the cancellation boundary deterministic
+            // without simulating a truncated network response that may retry.
+            request.response.add(const <int>[5, 6, 7, 8]);
             await request.response.close();
           } catch (_) {
-            // The client is expected to have cancelled this response.
+            // Dio may close the socket immediately when the token is cancelled.
           }
           continue;
         }
