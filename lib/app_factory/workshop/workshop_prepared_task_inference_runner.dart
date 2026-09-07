@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
@@ -65,7 +66,7 @@ final class WorkshopPreparedTaskInferenceRunner {
     );
   }
 
-  dynamic _preparedSession(String taskId) {
+  WorkspaceSession _preparedSession(String taskId) {
     final normalizedTaskId = taskId.trim();
 
     if (normalizedTaskId.isEmpty) {
