@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_rou
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -97,6 +98,42 @@ void main() {
       expect(gateways[AppAiRole.engineer]!.calls, 1);
       expect(gateways[AppAiRole.reviewer]!.calls, 1);
     });
+
+    test('forwards Cantiere execution identity through stage routing', () async {
+      final provider = _RecordingProvider();
+      final gateways = <AppAiRole, WorkshopInferenceGateway>{
+        for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+          role: WorkshopInferenceGateway(provider: provider),
+      };
+
+      final coordinator = WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      );
+
+      final result = await coordinator.completeWithIdentity(
+        stage: WorkshopStage.implementation,
+        prompt: 'implement prepared task',
+        sessionId: 'session-1',
+        requestId: 'request-2',
+        projectId: 'project-1',
+        taskId: 'task-7',
+        executionId: 'execution-stable',
+        attemptId: 'attempt-4',
+        checkpointId: 'checkpoint-3',
+      );
+
+      expect(result.text, 'ok');
+      expect(provider.lastRequest, isNotNull);
+      expect(provider.lastRequest!.sessionId, 'session-1');
+      expect(provider.lastRequest!.requestId, 'request-2');
+      expect(provider.lastRequest!.projectId, 'project-1');
+      expect(provider.lastRequest!.taskId, 'task-7');
+      expect(provider.lastRequest!.executionId, 'execution-stable');
+      expect(provider.lastRequest!.attemptId, 'attempt-4');
+      expect(provider.lastRequest!.checkpointId, 'checkpoint-3');
+    });
   });
 }
 
@@ -126,6 +163,29 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
     calls += 1;
     callOrder.add(role);
     return WorkshopInferenceResult(text: '${role.id}:$prompt');
+  }
+}
+
+final class _RecordingProvider implements RuntimeInferenceProvider {
+  InferenceRequest? lastRequest;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    lastRequest = request;
+    return Stream<InferenceResponse>.fromIterable(
+      const <InferenceResponse>[
+        InferenceResponse(text: 'ok', timestamp: 1),
+        InferenceResponse(
+          text: '',
+          timestamp: 2,
+          isFinal: true,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ],
+    );
   }
 }
 

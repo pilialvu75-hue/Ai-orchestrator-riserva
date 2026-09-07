@@ -273,7 +273,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           );
 
           String? runtimeNotice;
-
+          var pendingAssistantProvider = 'assistant';
           var latestPartialContent = '';
 
           void emitTransientSendingState() {
@@ -295,6 +295,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                           .copyWith(
                         content:
                             latestPartialContent,
+                        provider:
+                            pendingAssistantProvider,
                       ),
                   ],
                 ),
@@ -355,6 +357,21 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               },
               onRuntimeNotice: (notice) {
                 runtimeNotice = notice;
+
+                const cloudProviderPrefix =
+                    'Cloud provider:';
+                final normalizedNotice = notice.trim();
+                if (normalizedNotice.startsWith(
+                  cloudProviderPrefix,
+                )) {
+                  final cloudProvider = normalizedNotice
+                      .substring(cloudProviderPrefix.length)
+                      .trim();
+                  if (cloudProvider.isNotEmpty) {
+                    pendingAssistantProvider =
+                        cloudProvider;
+                  }
+                }
 
                 if (emit.isDone) {
                   return;
