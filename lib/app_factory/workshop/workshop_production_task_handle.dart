@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
@@ -182,5 +183,40 @@ final class WorkshopProductionTaskCoordinator {
     _bundle.dashboardController.completeActiveTask();
 
     return session;
+  }
+
+  /// Runs the existing Build Lab against the exact real workspace bound to
+  /// this production bundle.
+  ///
+  /// This method does not discover another project path and never consults
+  /// Assistant state. It is only the production bridge from the authoritative
+  /// Cantiere workspace into the already-existing build/test/validation layer.
+  Future<WorkshopBuildResult> buildWorkspace({
+    required WorkshopBuildTarget target,
+    WorkshopBuildExecutionMode mode = WorkshopBuildExecutionMode.automatic,
+    bool runTests = true,
+    bool runAnalyzer = true,
+    bool runFormatter = true,
+    bool cleanBuild = false,
+    List<String> arguments = const <String>[],
+  }) {
+    final workspaceRootPath = _bundle.workspaceRootPath?.trim();
+
+    if (workspaceRootPath == null || workspaceRootPath.isEmpty) {
+      throw StateError(
+        'Workshop production bundle has no authoritative workspace path.',
+      );
+    }
+
+    return _bundle.dashboardController.buildProject(
+      projectPath: workspaceRootPath,
+      target: target,
+      mode: mode,
+      runTests: runTests,
+      runAnalyzer: runAnalyzer,
+      runFormatter: runFormatter,
+      cleanBuild: cleanBuild,
+      arguments: arguments,
+    );
   }
 }
