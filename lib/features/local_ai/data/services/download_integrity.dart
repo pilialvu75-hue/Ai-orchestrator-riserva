@@ -22,16 +22,9 @@ enum DownloadResumeAction {
   reject,
 }
 
-/// Decides how an HTTP response must interact with an existing `.part` file.
-///
-/// This keeps the resumable-transfer rules independently testable:
-/// - 206 may append only when Content-Range starts exactly at the local size
-///   and exposes a positive total object length.
-/// - 200 after a Range request means the server ignored Range, so the local
-///   partial must be overwritten rather than appended.
-/// - 416 promotes only a valid partial whose byte count exactly matches the
-///   server's `bytes */total`; otherwise the stale/corrupt partial is restarted
-///   from zero on the next request.
+/// Resolves how a resumable HTTP response may interact with an existing
+/// `.part` file. Keeping this policy pure makes Range handling independently
+/// testable without creating another downloader.
 DownloadResumeAction resolveDownloadResumeAction({
   required int statusCode,
   required int existingBytes,
@@ -60,9 +53,7 @@ DownloadResumeAction resolveDownloadResumeAction({
   }
 
   if (statusCode == 200) {
-    return existingBytes > 0
-        ? DownloadResumeAction.restartFromZero
-        : DownloadResumeAction.restartFromZero;
+    return DownloadResumeAction.restartFromZero;
   }
 
   return DownloadResumeAction.reject;
