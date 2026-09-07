@@ -94,7 +94,7 @@
     "fileName": "Qwen_Qwen3-8B-Q4_K_M.gguf",
     "downloadUrl": "https://huggingface.co/bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_K_M.gguf",
     "version": "1.0.1",
-    "sizeBytes": 5030000000,
+    "sizeBytes": 5027784224,
     "description": "Qwen3 8B Q4_K_M. Modello reasoning desktop-class.",
     "platformTarget": "windows",
     "sizeCategory": "8B"
