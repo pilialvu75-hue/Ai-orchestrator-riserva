@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -96,6 +97,16 @@ final class _CapturingBuildProvider implements WorkshopBuildProvider {
   Future<void> cancel(String requestId) async {}
 }
 
+void _markPlanCompleted(WorkshopProjectPlan plan) {
+  for (final task in plan.tasks) {
+    task.completed = true;
+  }
+  for (final phase in plan.phases) {
+    phase.status = WorkshopProjectPhaseStatus.completed;
+  }
+  plan.status = WorkshopProjectStatus.completed;
+}
+
 void main() {
   test('production build targets the exact authoritative Cantiere workspace',
       () async {
@@ -122,6 +133,11 @@ void main() {
     addTearDown(bundle.dashboardController.dispose);
 
     final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Final build test',
+      instruction: 'Prepare a completed Cantiere project for build.',
+    );
+    _markPlanCompleted(plan);
 
     final result = await coordinator.buildWorkspace(
       target: WorkshopBuildTarget.android,
@@ -132,6 +148,34 @@ void main() {
     expect(provider.request, isNotNull);
     expect(provider.request!.projectPath, workspace.path);
     expect(bundle.workspaceRootPath, workspace.path);
+  });
+
+  test('production build refuses an incomplete Cantiere project', () {
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: Directory.systemTemp.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    bundle.dashboardController.startProduction(
+      title: 'Incomplete build test',
+      instruction: 'Do not build until the project is complete.',
+    );
+
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    expect(
+      () => coordinator.buildWorkspace(target: WorkshopBuildTarget.android),
+      throwsA(isA<StateError>()),
+    );
+    expect(provider.request, isNull);
   });
 
   test('generic production bundle cannot invent a build workspace', () {
@@ -161,5 +205,6 @@ void main() {
       () => coordinator.buildWorkspace(target: WorkshopBuildTarget.android),
       throwsA(isA<StateError>()),
     );
+    expect(provider.request, isNull);
   });
 }
