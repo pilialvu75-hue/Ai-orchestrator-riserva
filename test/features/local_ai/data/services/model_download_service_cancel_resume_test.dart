@@ -82,8 +82,10 @@ void main() {
           await request.response.flush();
           firstChunkFlushed.complete();
           await releaseFirstResponse.future;
-          if (!request.response.done.isCompleted) {
+          try {
             await request.response.close();
+          } catch (_) {
+            // The client is expected to have cancelled this response.
           }
           continue;
         }
