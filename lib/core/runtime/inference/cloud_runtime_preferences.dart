@@ -27,9 +27,11 @@ final class CloudRuntimePreferences {
 
   String? modelForProvider(String provider) => _modelForProvider?.call(provider);
 
-  /// Conservative default: before settings are bound, Cloud is allowed only
-  /// by the existing provider-availability checks. Once bound, spending policy
-  /// becomes authoritative.
+  /// Fail closed until runtime settings bind the spending policy.
+  ///
+  /// Hybrid/automatic Cloud routing must never treat an unknown spending state
+  /// as authorization. Once settings are bound, their current policy becomes
+  /// authoritative for every provider request.
   bool automaticUseAllowed(String provider) =>
-      _automaticUseAllowed?.call(provider) ?? true;
+      _automaticUseAllowed?.call(provider) ?? false;
 }
