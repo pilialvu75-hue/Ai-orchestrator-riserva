@@ -186,11 +186,13 @@ final class WorkshopProductionTaskCoordinator {
   }
 
   /// Runs the existing Build Lab against the exact real workspace bound to
-  /// this production bundle.
+  /// this production bundle, but only after the authoritative Cantiere project
+  /// has completed and no prepared task remains active.
   ///
   /// This method does not discover another project path and never consults
-  /// Assistant state. It is only the production bridge from the authoritative
-  /// Cantiere workspace into the already-existing build/test/validation layer.
+  /// Assistant state. It is only the guarded production bridge from the
+  /// authoritative Cantiere workspace into the already-existing
+  /// build/test/validation layer.
   Future<WorkshopBuildResult> buildWorkspace({
     required WorkshopBuildTarget target,
     WorkshopBuildExecutionMode mode = WorkshopBuildExecutionMode.automatic,
@@ -205,6 +207,35 @@ final class WorkshopProductionTaskCoordinator {
     if (workspaceRootPath == null || workspaceRootPath.isEmpty) {
       throw StateError(
         'Workshop production bundle has no authoritative workspace path.',
+      );
+    }
+
+    final dashboardState = _bundle.dashboardController.state;
+    final requestId = dashboardState.requestId?.trim();
+
+    if (requestId == null || requestId.isEmpty) {
+      throw StateError(
+        'Workshop final build requires an active production project.',
+      );
+    }
+
+    final plan = _bundle.dashboardController.engine.planOf(requestId);
+
+    if (plan == null) {
+      throw StateError(
+        'Workshop has no authoritative project plan for "$requestId".',
+      );
+    }
+
+    final activeTaskId = dashboardState.activeTaskId?.trim();
+    final allTasksCompleted = plan.tasks.every((task) => task.completed);
+
+    if (!plan.isComplete ||
+        !allTasksCompleted ||
+        (activeTaskId != null && activeTaskId.isNotEmpty)) {
+      throw StateError(
+        'Workshop final build is allowed only after every project task has '
+        'completed and no active task remains.',
       );
     }
 
