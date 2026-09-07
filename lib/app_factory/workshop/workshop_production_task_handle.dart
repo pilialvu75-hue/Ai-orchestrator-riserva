@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gat
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -132,6 +133,51 @@ final class WorkshopProductionTaskCoordinator {
 
     return _bundle.taskLifecycle.runPrepared(
       taskId: handle.taskId,
+      preflight: preflight,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  /// Resumes the complete prepared-task model chain for the exact production
+  /// handle from Cantiere-owned semantic state.
+  ///
+  /// The handle remains the authoritative plan/task/session bridge. The resume
+  /// context is forwarded to the existing prepared-task lifecycle and does not
+  /// create or own a second task, workspace, checkpoint, execution or provider
+  /// state. A bounded preflight is still regenerated from the same request so
+  /// Orchestrator/Architect guidance stays aligned with the prepared session.
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopResumeContext resumeContext,
+    bool isOffline = true,
+    CancellationToken? cancellationToken,
+  }) async {
+    if (resumeContext.taskId.trim() != handle.taskId.trim()) {
+      throw StateError(
+        'Workshop resume context belongs to task "${resumeContext.taskId}", '
+        'not production handle task "${handle.taskId}".',
+      );
+    }
+
+    final authoritativeSession =
+        _bundle.projectExecutor.sessionForTask(handle.taskId);
+    if (!identical(authoritativeSession, handle.session)) {
+      throw StateError(
+        'Workshop production handle no longer references the authoritative '
+        'WorkspaceSession for task "${handle.taskId}".',
+      );
+    }
+
+    final preflight = await _bundle.preflight.run(
+      request: handle.session.context.request,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+
+    return _bundle.taskLifecycle.runPreparedWithResumeContext(
+      taskId: handle.taskId,
+      resumeContext: resumeContext,
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
