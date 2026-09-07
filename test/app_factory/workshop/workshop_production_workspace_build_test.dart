@@ -84,10 +84,17 @@ void main() {
   });
 
   test('generic production bundle cannot invent a build workspace', () {
-    final workspace = Directory.systemTemp;
-    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
-      workspaceRootPath: workspace.path,
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
     );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: Directory.systemTemp.path,
+      buildLab: buildLab,
+    );
+    addTearDown(bundle.dashboardController.dispose);
 
     final generic = WorkshopProductionLifecycleBundle(
       dashboardController: bundle.dashboardController,
@@ -102,7 +109,5 @@ void main() {
       () => coordinator.buildWorkspace(target: WorkshopBuildTarget.android),
       throwsA(isA<StateError>()),
     );
-
-    bundle.dashboardController.dispose();
   });
 }
