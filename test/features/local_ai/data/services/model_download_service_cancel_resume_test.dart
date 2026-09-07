@@ -66,6 +66,7 @@ void main() {
 
     final service = ModelDownloadService(filePicker: _MockFilePicker());
     final firstChunkFlushed = Completer<void>();
+    final firstChunkObservedByClient = Completer<void>();
     final releaseFirstResponse = Completer<void>();
     String? resumedRange;
     var requestNumber = 0;
@@ -103,12 +104,17 @@ void main() {
       }
     }();
 
-    final firstDownload = service.downloadModel(model);
+    final firstDownload = service.downloadModel(
+      model,
+      onProgress: (progress) {
+        if (progress >= 8 / 12 && !firstChunkObservedByClient.isCompleted) {
+          firstChunkObservedByClient.complete();
+        }
+      },
+    );
     await firstChunkFlushed.future;
+    await firstChunkObservedByClient.future;
 
-    // Give the client stream a chance to persist the flushed chunk before
-    // cancellation. The assertion below proves persistence rather than timing.
-    await Future<void>.delayed(const Duration(milliseconds: 50));
     service.cancelDownload(model.id);
     releaseFirstResponse.complete();
 
