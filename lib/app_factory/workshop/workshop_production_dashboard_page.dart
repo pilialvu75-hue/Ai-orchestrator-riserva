@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
@@ -17,7 +18,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pip
 /// 1. run Engineer -> Reviewer -> Reviewer against VirtualWorkspace;
 /// 2. inspect the staged diff and explicit Reviewer verdicts;
 /// 3. explicitly approve or reject the staged changes;
-/// 4. explicitly apply an already-approved task.
+/// 4. explicitly apply an already-approved task;
+/// 5. build the authoritative Android workspace only after the project ends.
 ///
 /// No action is automatic and no Assistant configuration, model selection,
 /// memory or conversation state is consulted.
@@ -42,6 +44,7 @@ class _WorkshopProductionDashboardPageState
 
   WorkshopProductionTaskHandle? _handle;
   WorkshopTaskInferenceResult? _inferenceResult;
+  WorkshopBuildResult? _buildResult;
   bool _busy = false;
   String? _error;
 
@@ -249,8 +252,74 @@ class _WorkshopProductionDashboardPageState
     }
   }
 
+  Future<void> _buildCompletedProject() async {
+    if (_busy || !_projectReadyForBuild) {
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+      _buildResult = null;
+    });
+
+    try {
+      final result = await _coordinator.buildWorkspace(
+        target: WorkshopBuildTarget.android,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _buildResult = result;
+
+        if (!result.succeeded) {
+          _error =
+              'Build finale non riuscita: ${result.message ?? result.status.name}';
+        } else if (!result.hasArtifact) {
+          _error = 'Build completata senza un artifact verificabile.';
+        }
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _error = 'Build finale del progetto non riuscita: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
   String? get _activeTaskId =>
       widget.bundle.dashboardController.state.activeTaskId?.trim();
+
+  bool get _projectReadyForBuild {
+    final state = widget.bundle.dashboardController.state;
+    final requestId = state.requestId?.trim();
+    final activeTaskId = state.activeTaskId?.trim();
+
+    if (requestId == null ||
+        requestId.isEmpty ||
+        (activeTaskId != null && activeTaskId.isNotEmpty)) {
+      return false;
+    }
+
+    final plan = widget.bundle.dashboardController.engine.planOf(requestId);
+
+    return plan != null &&
+        plan.isComplete &&
+        plan.tasks.isNotEmpty &&
+        plan.tasks.every((task) => task.completed);
+  }
 
   WorkshopProductionTaskHandle? get _currentHandle {
     final handle = _handle;
@@ -290,8 +359,10 @@ class _WorkshopProductionDashboardPageState
 
   Widget _buildProductionControls(BuildContext context) {
     final activeTaskId = _activeTaskId;
+    final hasPreparedTask = activeTaskId != null && activeTaskId.isNotEmpty;
+    final projectReadyForBuild = _projectReadyForBuild;
 
-    if (activeTaskId == null || activeTaskId.isEmpty) {
+    if (!hasPreparedTask && !projectReadyForBuild) {
       return const SizedBox.shrink();
     }
 
@@ -300,10 +371,11 @@ class _WorkshopProductionDashboardPageState
     final status = handle?.session.status;
 
     final actionState = WorkshopProductionActionState.resolve(
-      hasPreparedTask: true,
+      hasPreparedTask: hasPreparedTask,
       hasBoundHandle: handle != null,
       inferenceReadyForApproval: result?.readyForApproval ?? false,
       sessionStatus: status,
+      projectReadyForBuild: projectReadyForBuild,
       isBusy: _busy,
     );
 
@@ -326,8 +398,20 @@ class _WorkshopProductionDashboardPageState
                 ),
                 const SizedBox(height: 8),
               ],
+              if (_buildResult?.succeeded == true &&
+                  _buildResult?.hasArtifact == true) ...<Widget>[
+                Text(
+                  'Artifact: ${_buildResult!.artifactPath}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+              ],
               Text(
-                'Task: $activeTaskId',
+                hasPreparedTask
+                    ? 'Task: $activeTaskId'
+                    : 'Progetto completato — build finale',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.labelMedium,
@@ -339,6 +423,7 @@ class _WorkshopProductionDashboardPageState
                         WorkshopProductionUiAction.run => _runPreparedTask,
                         WorkshopProductionUiAction.review => _reviewChanges,
                         WorkshopProductionUiAction.apply => _applyApprovedTask,
+                        WorkshopProductionUiAction.build => _buildCompletedProject,
                         WorkshopProductionUiAction.none => null,
                       }
                     : null,
@@ -362,6 +447,7 @@ enum WorkshopProductionUiAction {
   run,
   review,
   apply,
+  build,
   none,
 }
 
@@ -385,6 +471,7 @@ final class WorkshopProductionActionState {
     required bool hasBoundHandle,
     required bool inferenceReadyForApproval,
     required WorkspaceSessionStatus? sessionStatus,
+    required bool projectReadyForBuild,
     required bool isBusy,
   }) {
     if (isBusy) {
@@ -393,6 +480,15 @@ final class WorkshopProductionActionState {
         label: 'Cantiere in esecuzione…',
         icon: Icons.hourglass_top,
         enabled: false,
+      );
+    }
+
+    if (!hasPreparedTask && projectReadyForBuild) {
+      return const WorkshopProductionActionState(
+        action: WorkshopProductionUiAction.build,
+        label: 'Genera APK finale',
+        icon: Icons.android,
+        enabled: true,
       );
     }
 
