@@ -66,7 +66,15 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                     RuntimeVerificationPhase.loading,
                     message: 'Creating isolated verification session.',
                   );
-                  final verificationSessionId = bindings.createSession(modelPath);
+                  // Verification deliberately owns a separate native session,
+                  // but the synchronous GGUF load must still stay off the
+                  // caller isolate. Do not route this through the production
+                  // cache: this session is released in the verification
+                  // finally block below.
+                  final verificationSessionId = await createNativeSessionOffUi(
+                    modelPath,
+                    nGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                  );
                   if (verificationSessionId <= 0) {
                     final err = AndroidFfiRuntimeProvider._safeLastError(bindings, verificationSessionId);
                     AndroidFfiRuntimeProvider._finishWithRuntimeError(
