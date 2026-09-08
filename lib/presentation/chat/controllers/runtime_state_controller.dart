@@ -73,9 +73,19 @@ class RuntimeStateController extends ValueNotifier<ChatRuntimeSnapshot> {
     }
   }
 
-  bool isInferencing() {
-    final status = value.state.status;
-    return status == LocalRuntimeStatus.inferencing || status == LocalRuntimeStatus.streaming;
+  /// Legacy name kept for the ChatPage guard contract.
+  ///
+  /// The UI must consider loading and tokenizing active work too: both can
+  /// legitimately take longer than the old 15-second UI breaker before the
+  /// runtime reaches inferencing/streaming.
+  bool isInferencing() => isRuntimeActiveStatus(value.state.status);
+
+  @visibleForTesting
+  static bool isRuntimeActiveStatus(LocalRuntimeStatus status) {
+    return status == LocalRuntimeStatus.loading ||
+        status == LocalRuntimeStatus.tokenizing ||
+        status == LocalRuntimeStatus.inferencing ||
+        status == LocalRuntimeStatus.streaming;
   }
 
   @override

@@ -2,12 +2,25 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 class ChatDeadlockController {
+  /// Last-resort UI recovery must not pre-empt the runtime/orchestrator
+  /// watchdogs that own inference cancellation and terminal state handling.
+  ///
+  /// ChatPage historically passed 15 seconds here, which is shorter than
+  /// legitimate local model loading/tokenization/first-token work. Clamp that
+  /// legacy value so the UI guard can only act after the authoritative
+  /// runtime layers had time to finish or fail first.
+  static const Duration minimumSafeTimeout = Duration(minutes: 3);
+
   final Duration timeout;
   Timer? _uiDeadlockTimer;
   DateTime? _uiSendBeganAt;
   bool _uiStreamStarted = false;
 
-  ChatDeadlockController({this.timeout = const Duration(seconds: 15)});
+  ChatDeadlockController({
+    Duration timeout = minimumSafeTimeout,
+  }) : timeout = timeout.compareTo(minimumSafeTimeout) < 0
+            ? minimumSafeTimeout
+            : timeout;
 
   bool get hasPendingSend => _uiSendBeganAt != null;
   bool get isStreamStarted => _uiStreamStarted;
@@ -29,8 +42,9 @@ class ChatDeadlockController {
   /// I controlli di stato sono forniti come callback così ogni tick del timer
   /// legge lo stato UI/runtime più recente invece di un'istantanea obsoleta.
   /// `isSending` deve restituire se la pipeline chat è ancora in attesa di una
-  /// risposta, mentre `isInferencing` deve indicare se il runtime sta già
-  /// producendo token.
+  /// risposta, mentre `isInferencing` deve essere `true` per ogni fase runtime
+  /// attiva che può legittimamente precedere il primo token (caricamento,
+  /// tokenizzazione, inferenza o streaming).
   void startGuard({
     required bool Function() isSending,
     required bool Function() isInferencing,
