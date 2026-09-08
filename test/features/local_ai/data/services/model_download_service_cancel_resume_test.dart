@@ -65,9 +65,7 @@ void main() {
     );
 
     final service = ModelDownloadService(filePicker: _MockFilePicker());
-    final firstChunkFlushed = Completer<void>();
-    final firstChunkObservedByClient = Completer<void>();
-    final releaseFirstResponse = Completer<void>();
+    final cancellationIssued = Completer<void>();
     String? resumedRange;
     var requestNumber = 0;
 
@@ -78,22 +76,17 @@ void main() {
         if (requestNumber == 1) {
           expect(request.headers.value(HttpHeaders.rangeHeader), isNull);
           request.response.statusCode = HttpStatus.ok;
-          // Do not declare a Content-Length for the first response. The
-          // loopback server will stream the flushed bytes immediately, which
-          // lets the concrete downloader persist them before cancellation.
+          request.response.contentLength = 12;
           request.response.add(<int>[..._gguf, 1, 2, 3, 4]);
           await request.response.flush();
-          firstChunkFlushed.complete();
-          await releaseFirstResponse.future;
+
+          // The client cancels from onProgress, which fires only after these
+          // eight bytes have been received and queued for the .part sink.
+          await cancellationIssued.future;
           try {
-            // Send one more valid chunk after cancellation. The concrete
-            // downloader checks its CancelToken before writing each streamed
-            // chunk, so this makes the cancellation boundary deterministic
-            // without simulating a truncated network response that may retry.
-            request.response.add(const <int>[5, 6, 7, 8]);
             await request.response.close();
           } catch (_) {
-            // Dio may close the socket immediately when the token is cancelled.
+            // Dio may close the socket immediately when cancellation is issued.
           }
           continue;
         }
@@ -114,16 +107,12 @@ void main() {
     final firstDownload = service.downloadModel(
       model,
       onProgress: (progress) {
-        if (progress >= 8 / 12 && !firstChunkObservedByClient.isCompleted) {
-          firstChunkObservedByClient.complete();
+        if (progress >= 8 / 12 && !cancellationIssued.isCompleted) {
+          service.cancelDownload(model.id);
+          cancellationIssued.complete();
         }
       },
     );
-    await firstChunkFlushed.future;
-    await firstChunkObservedByClient.future;
-
-    service.cancelDownload(model.id);
-    releaseFirstResponse.complete();
 
     await expectLater(firstDownload, throwsA(isA<DownloadException>()));
 
