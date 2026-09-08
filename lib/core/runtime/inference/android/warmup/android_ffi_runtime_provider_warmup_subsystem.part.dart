@@ -99,13 +99,17 @@ class _AndroidFfiWarmupSubsystem {
       message: 'Runtime warmup inference running.',
     );
     _log('[WARMUP] resolving shared native session path=$modelPath');
-    final warmupSessionId = _owner._ensureNativeSession(bindings, modelPath);
+    final warmupSessionId = await _owner._ensureNativeSessionOffUi(
+      bindings,
+      modelPath,
+      modelId: 'warmup',
+    );
     if (bindings.sessionIsActive(warmupSessionId) != 1) {
       throw StateError(
         'Warmup session inactive: ${AndroidFfiRuntimeProvider._safeLastError(bindings, warmupSessionId)}',
       );
     }
-    _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId');
+    _log('[FFI_CREATE_SESSION_OK] warmup session=$warmupSessionId create_off_ui=true');
     final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
     final tokenBuf = tokenBufRaw.cast<Utf8>();
     var firstTokenSeen = false;

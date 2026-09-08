@@ -38,7 +38,101 @@ class _GenerationStartupState {
   final Pointer<Utf8> promptNativePtr;
   final void Function() freePromptNativePtr;
 }
+
 extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvider {
+  /// Resolve the process-wide native session without blocking the calling
+  /// isolate on GGUF model loading. Cache hits remain synchronous and cheap;
+  /// only `llb_create_session` runs in the worker isolate.
+  ///
+  /// Do not wrap this future in `Future.timeout`: Dart cannot interrupt an FFI
+  /// model load once it entered native code. Returning early would abandon the
+  /// eventual native session id and leak ownership. The caller therefore waits
+  /// for the worker to finish and keeps authoritative ownership of the result.
+  Future<int> _ensureNativeSessionOffUi(
+    LlamaBridgeBindings bindings,
+    String modelPath, {
+    String? modelId,
+  }) async {
+    final existingSessionId = _nativeSessionsByModel[modelPath];
+    if (existingSessionId != null &&
+        bindings.sessionIsActive(existingSessionId) == 1) {
+      _nativeSessionSubsystem.markSessionAsMostRecentlyUsed(modelPath);
+      _nativeSessionId = existingSessionId;
+      AndroidFfiRuntimeProvider._log(
+        '[NATIVE_SESSION_CACHE_HIT] modelId=${modelId ?? 'unknown'}'
+        ' model_path=$modelPath nativeSessionId=$existingSessionId'
+        ' create_off_ui=false',
+      );
+      return existingSessionId;
+    }
+
+    if (existingSessionId != null) {
+      _nativeSessionSubsystem.releaseNativeSessionByModelPath(
+        bindings,
+        modelPath,
+        reason: 'inactive_existing_session_before_off_ui_create',
+      );
+    }
+
+    _nativeSessionSubsystem.evictLeastRecentlyUsedSessionIfNeeded(bindings);
+
+    const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+    AndroidFfiRuntimeProvider._log(
+      '[NATIVE_SESSION_CREATE_OFF_UI_BEGIN] modelId=${modelId ?? 'unknown'}'
+      ' path=$modelPath requested_gpu_layers=$desiredGpuLayers',
+    );
+    var created = await createNativeSessionOffUi(
+      modelPath,
+      nGpuLayers: desiredGpuLayers,
+    );
+    var effectiveGpuLayers = desiredGpuLayers;
+
+    if (created <= 0 && desiredGpuLayers > 0) {
+      AndroidFfiRuntimeProvider._log(
+        '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers'
+        ' failed=$created reason=session_create_error retrying_with_cpu',
+      );
+      created = await createNativeSessionOffUi(
+        modelPath,
+        nGpuLayers: 0,
+      );
+      effectiveGpuLayers = 0;
+    }
+
+    if (created <= 0) {
+      final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
+      AndroidFfiRuntimeProvider._log(
+        '[NATIVE_SESSION_CREATE_OFF_UI_FAIL] path=$modelPath session=$created'
+        ' error=$err',
+      );
+      throw StateError('Native session creation failed: $err');
+    }
+
+    final activeAfterCreate = bindings.sessionIsActive(created);
+    if (activeAfterCreate != 1) {
+      final err = AndroidFfiRuntimeProvider._safeLastError(bindings, created);
+      try {
+        await releaseNativeSessionOffUi(created);
+      } catch (releaseError) {
+        AndroidFfiRuntimeProvider._log(
+          '[NATIVE_SESSION_CREATE_OFF_UI_CLEANUP_FAIL] session=$created'
+          ' error=$releaseError',
+        );
+      }
+      throw StateError('Native session inactive after create: $err');
+    }
+
+    _nativeSessionId = created;
+    _nativeSessionsByModel[modelPath] = created;
+    _nativeSessionSubsystem.markSessionAsMostRecentlyUsed(modelPath);
+    AndroidFfiRuntimeProvider._log(
+      '[NATIVE_SESSION_CREATE_OFF_UI_END] modelId=${modelId ?? 'unknown'}'
+      ' path=$modelPath nativeSessionId=$created'
+      ' effective_gpu_layers=$effectiveGpuLayers session_active=1',
+    );
+    return created;
+  }
+
   Future<_GenerationStartupState?> _prepareGenerationStartup({
     required StreamController<InferenceResponse> controller,
     required InferenceRequest request,
@@ -232,19 +326,23 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log( '[FORENSIC_BEFORE_CREATE_SESSION] sessionId=$sessionId modelId=$modelId modelPath=$resolvedModelPath', );
       AndroidFfiRuntimeProvider._log( '[FIRST_TOKEN_SESSION_CREATE_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}' ' sessionId=$sessionId modelId=$modelId', );
       flowState.firstFfiInvocationAttempted = true;
-      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION] path=$resolvedModelPath');
-      nativeSessionId = await _runNativeCallWithTimeout<int>( stage: 'session_create', timeout: AndroidFfiRuntimeProvider._modelLoadTimeout, call: () => _ensureNativeSession( bindings, resolvedModelPath, modelId: modelId, ), );
+      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION] path=$resolvedModelPath create_off_ui=true');
+      nativeSessionId = await _ensureNativeSessionOffUi(
+        bindings,
+        resolvedModelPath,
+        modelId: modelId,
+      );
       AndroidFfiRuntimeProvider._log( '[FORENSIC_AFTER_CREATE_SESSION] nativeSessionId=$nativeSessionId', );
       AndroidFfiRuntimeProvider._log( '[FIRST_TOKEN_SESSION_CREATE_END] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}' ' sessionId=$sessionId nativeSessionId=$nativeSessionId', );
       flowState.firstFfiInvocationCompleted = true;
       AndroidFfiRuntimeProvider._log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
     } catch (error) {
-      _classifyFirstTokenTermination( flowState: flowState, reason: error is TimeoutException ? 'session_create_timeout' : 'session_create_exception', boundary: 'session_create', exception: true, );
+      _classifyFirstTokenTermination( flowState: flowState, reason: 'session_create_exception', boundary: 'session_create', exception: true, );
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=session_create error=$error');
       AndroidFfiRuntimeProvider._log('[SESSION_CREATE_FAIL] path=$resolvedModelPath exception=$error');
       AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=failed reason=session_create_exception');
       _setPhase(RuntimePhase.failed);
-      _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Session create timed out.' : 'Session create failed: $error', );
+      _updateRuntimeStatus( LocalRuntimeStatus.failed, message: 'Session create failed: $error', );
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'session_create', message: 'Session create failed.', details: error.toString(), );
       return null;
     }
