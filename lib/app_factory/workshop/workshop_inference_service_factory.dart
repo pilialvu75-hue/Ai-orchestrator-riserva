@@ -75,7 +75,7 @@ abstract final class WorkshopInferenceServiceFactory {
             debugPrint(
               '[WORKSHOP_MODEL_RESOLVE] model=$normalizedModelId '
               'status=found downloaded=${model.isDownloaded} '
-              'path=${model.localPath ?? 'none'}',
+              "path=${model.localPath ?? 'none'}",
             );
             return model;
           }
