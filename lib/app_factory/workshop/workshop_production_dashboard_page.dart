@@ -272,9 +272,14 @@ class _WorkshopProductionDashboardPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: WorkshopDashboardPage(
-        dashboardController: widget.bundle.dashboardController,
-        modelAssignments: widget.modelAssignments,
+      body: SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        child: WorkshopDashboardPage(
+          dashboardController: widget.bundle.dashboardController,
+          modelAssignments: widget.modelAssignments,
+        ),
       ),
       bottomNavigationBar: AnimatedBuilder(
         animation: widget.bundle.dashboardController,
