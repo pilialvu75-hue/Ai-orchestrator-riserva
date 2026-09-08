@@ -78,11 +78,9 @@ void main() {
         if (requestNumber == 1) {
           expect(request.headers.value(HttpHeaders.rangeHeader), isNull);
           request.response.statusCode = HttpStatus.ok;
-          // Keep the first response chunked instead of declaring a larger
-          // Content-Length. This guarantees the loopback client observes and
-          // persists the first 8 bytes before we trigger cancellation, rather
-          // than allowing an HTTP implementation to wait for the full body.
-          request.response.chunkedTransferEncoding = true;
+          // Do not declare a Content-Length for the first response. The
+          // loopback server will stream the flushed bytes immediately, which
+          // lets the concrete downloader persist them before cancellation.
           request.response.add(<int>[..._gguf, 1, 2, 3, 4]);
           await request.response.flush();
           firstChunkFlushed.complete();
