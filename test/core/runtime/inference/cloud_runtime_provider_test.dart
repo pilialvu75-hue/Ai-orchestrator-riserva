@@ -25,6 +25,7 @@ void main() {
         supportedProviders: () => const <String>['openAi'],
         isProviderAvailable: (_) => true,
         providerDisplayName: ([name]) => name ?? 'OpenAI',
+        automaticUseAllowed: (_) => true,
       );
 
       final responses = await provider
@@ -110,6 +111,7 @@ void main() {
         isProviderAvailable: (_) => true,
         providerDisplayName: ([name]) => name ?? 'Gemini',
         modelForProvider: (_) => 'gemini-custom-model',
+        automaticUseAllowed: (_) => true,
       );
 
       await provider
@@ -144,6 +146,7 @@ void main() {
         isProviderAvailable: (_) => true,
         providerDisplayName: ([name]) => name ?? 'provider',
         preferredProvider: () => 'openAi',
+        automaticUseAllowed: (_) => true,
       );
 
       final responses = await provider
@@ -196,12 +199,84 @@ void main() {
       expect(gemini.state, CloudProviderOperationalState.ready);
     });
 
+    test('automatic routing fails closed when spending policy blocks it',
+        () async {
+      var calls = 0;
+      final provider = CloudRuntimeProvider(
+        sendQuery: (_, __) async {
+          calls += 1;
+          throw AssertionError('blocked automatic Cloud request must not run');
+        },
+        supportedProviders: () => const <String>['openAi'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'OpenAI',
+        automaticUseAllowed: (_) => false,
+      );
+
+      final responses = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'policy-blocked',
+              prompt: 'hello',
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+
+      expect(calls, 0);
+      expect(responses, hasLength(1));
+      expect(responses.single.isError, isTrue);
+      expect(responses.single.errorMessage, CloudRuntimeProvider.fullyLocalNotice);
+      expect(
+        provider.providerStatuses.single.state,
+        CloudProviderOperationalState.policyBlocked,
+      );
+    });
+
+    test('explicit Cloud route bypasses automatic spending policy', () async {
+      var calls = 0;
+      final provider = CloudRuntimeProvider(
+        sendQuery: (providerId, request) async {
+          calls += 1;
+          return AiResponse(
+            text: 'explicit ok',
+            model: request.modelId ?? 'unknown',
+            tokensUsed: 2,
+            timestamp: DateTime.now().millisecondsSinceEpoch,
+          );
+        },
+        supportedProviders: () => const <String>['openAi'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'OpenAI',
+        automaticUseAllowed: (_) => false,
+      );
+
+      final responses = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'explicit-cloud',
+              prompt: 'hello',
+              routeDirective: InferenceRouteDirective.cloudOnly,
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+
+      expect(calls, 1);
+      expect(responses, hasLength(2));
+      expect(responses.first.runtimeNotice, 'cloud_provider:openAi');
+      expect(responses.last.isError, isFalse);
+      expect(responses.last.text, 'explicit ok');
+      expect(responses.last.providerId, 'openAi');
+    });
+
     test('unconfigured provider reports authRequired without exposing secrets', () {
       final provider = CloudRuntimeProvider(
         sendQuery: (_, __) async => throw StateError('not called'),
         supportedProviders: () => const <String>['claude'],
         isProviderAvailable: (_) => false,
         providerDisplayName: ([name]) => name ?? 'Claude',
+        automaticUseAllowed: (_) => true,
       );
 
       final status = provider.providerStatuses.single;
