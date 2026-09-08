@@ -97,13 +97,14 @@ final class WorkshopChatController extends ChangeNotifier {
   ///        ↓
   ///   assistant response
   ///
-  /// Questa prima versione utilizza [complete] del gateway, mantenendo
-  /// comunque il contratto di streaming già disponibile sotto.
+  /// Per default il Cantiere non forza l'offline: Local / Cloud / Hybrid
+  /// restano decisioni del runtime. [isOffline] rimane disponibile solo per
+  /// chiamanti che vogliono esplicitamente impedire l'uso della rete.
   Future<ChatTurn?> send(
     String message, {
     String? modelId,
     String? modelPath,
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
