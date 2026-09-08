@@ -503,6 +503,7 @@ void run_generation(
     }
     const ChatTemplateControlTokenIds chat_template_control_tokens =
         resolve_chat_template_control_token_ids(vocab);
+#ifndef NDEBUG
     const llama_token bos_id = llama_vocab_bos(vocab);
     const llama_token eos_id = llama_vocab_eos(vocab);
     const llama_token eot_id = llama_vocab_eot(vocab);
@@ -537,6 +538,7 @@ void run_generation(
              ct.resolved && decoded_len >= 0 ? piece_check : "",
              decoded_len);
     }
+#endif
 
     const int n_ctx = llama_n_ctx(ctx);
     if (n_ctx <= 0) {
@@ -564,13 +566,16 @@ void run_generation(
         return token_count;
     };
 
+#ifndef NDEBUG
     LOGI("[PROMPT_DEBUG] Caratteri totali ricevuti da Dart: %zu", prompt.size());
     LOGI("[PROMPT_DEBUG] --- INIZIO PROMPT REALE ---");
     LOGI("%s", prompt.c_str());
     LOGI("[PROMPT_DEBUG] --- FINE PROMPT REALE ---");
+#endif
 
     std::vector<llama_token> tokens;
     int n_tokens = tokenize_prompt(prompt, &tokens);
+#ifndef NDEBUG
     for (size_t i = 0; i < tokens.size(); ++i) {
         char tok_piece[128] = {0};
         int tok_len = decode_token_piece(
@@ -592,8 +597,12 @@ void run_generation(
              tok_len >= 0 ? tok_piece : "",
              is_eog ? "true" : "false");
     }
-
-    LOGI("[PROMPT_DEBUG] Token generati dopo tokenizzazione: %d", n_tokens);
+#endif
+    LOGI("[TOKENIZE] session=%" PRId64 " epoch=%" PRIu64 " prompt_chars=%zu token_count=%d",
+         session->id,
+         owner_epoch,
+         prompt.size(),
+         n_tokens);
 
     if (n_tokens < 0) {
         // llama_tokenize returns the negative required capacity when the
