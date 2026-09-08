@@ -64,6 +64,11 @@ void main() {
       description: 'test model',
     );
 
+    final modelsDir = Directory('${tempDir.path}/models');
+    await modelsDir.create(recursive: true);
+    final part = File('${modelsDir.path}/${model.fileName}.part');
+    await part.writeAsBytes(_gguf, flush: true);
+
     final service = ModelDownloadService(filePicker: _MockFilePicker());
     final cancellationIssued = Completer<void>();
     String? resumedRange;
@@ -74,14 +79,19 @@ void main() {
         requestNumber++;
 
         if (requestNumber == 1) {
-          expect(request.headers.value(HttpHeaders.rangeHeader), isNull);
-          request.response.statusCode = HttpStatus.ok;
-          request.response.contentLength = 12;
-          request.response.add(<int>[..._gguf, 1, 2, 3, 4]);
+          expect(request.headers.value(HttpHeaders.rangeHeader), 'bytes=4-');
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 4-11/12',
+          );
+          request.response.contentLength = 8;
+          request.response.add(const <int>[1, 2, 3, 4]);
           await request.response.flush();
 
-          // The client cancels from onProgress, which fires only after these
-          // eight bytes have been received and queued for the .part sink.
+          // The service starts with four persisted GGUF bytes. These four
+          // streamed bytes move progress to 8/12; cancellation is issued from
+          // that observed boundary, after the chunk has been queued to .part.
           await cancellationIssued.future;
           try {
             await request.response.close();
@@ -116,7 +126,6 @@ void main() {
 
     await expectLater(firstDownload, throwsA(isA<DownloadException>()));
 
-    final part = File('${tempDir.path}/models/${model.fileName}.part');
     expect(await part.exists(), isTrue);
     expect(await part.length(), 8);
     expect(await part.readAsBytes(), <int>[..._gguf, 1, 2, 3, 4]);
