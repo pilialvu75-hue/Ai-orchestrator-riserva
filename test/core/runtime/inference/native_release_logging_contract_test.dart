@@ -11,54 +11,103 @@ void main() {
     return file.readAsStringSync();
   }
 
-  bool isInsideDebugGuard(String source, String marker) {
-    final markerIndex = source.indexOf(marker);
-    expect(markerIndex, greaterThanOrEqualTo(0), reason: 'Missing $marker');
+  bool allOccurrencesMatchDebugGuard(
+    String source,
+    String marker, {
+    required bool expectedInsideDebugGuard,
+  }) {
+    final preprocessorStack = <bool>[];
+    var occurrences = 0;
 
-    final prefix = source.substring(0, markerIndex);
-    final lastDebugGuard = prefix.lastIndexOf('#ifndef NDEBUG');
-    final lastGuardEnd = prefix.lastIndexOf('#endif');
-    return lastDebugGuard > lastGuardEnd;
+    for (final line in source.split('\n')) {
+      final trimmed = line.trimLeft();
+
+      if (trimmed.startsWith('#ifndef NDEBUG')) {
+        preprocessorStack.add(true);
+        continue;
+      }
+      if (trimmed.startsWith('#if ') ||
+          trimmed.startsWith('#ifdef ') ||
+          trimmed.startsWith('#ifndef ')) {
+        preprocessorStack.add(false);
+        continue;
+      }
+      if (trimmed.startsWith('#endif')) {
+        if (preprocessorStack.isNotEmpty) {
+          preprocessorStack.removeLast();
+        }
+        continue;
+      }
+
+      var searchFrom = 0;
+      while (true) {
+        final markerIndex = line.indexOf(marker, searchFrom);
+        if (markerIndex < 0) {
+          break;
+        }
+        occurrences++;
+        final insideDebugGuard = preprocessorStack.contains(true);
+        if (insideDebugGuard != expectedInsideDebugGuard) {
+          return false;
+        }
+        searchFrom = markerIndex + marker.length;
+      }
+    }
+
+    expect(occurrences, greaterThan(0), reason: 'Missing $marker');
+    return true;
   }
 
   group('native release logging contract', () {
-    test('raw prompt dump is debug-only', () {
+    test('every raw prompt dump marker is debug-only', () {
       final source = loadBridge();
 
       expect(
-        isInsideDebugGuard(
+        allOccurrencesMatchDebugGuard(
           source,
-          '[PROMPT_DEBUG] --- INIZIO PROMPT REALE ---',
+          '[PROMPT_DEBUG]',
+          expectedInsideDebugGuard: true,
         ),
         isTrue,
       );
     });
 
-    test('per-prompt-token forensics is debug-only', () {
+    test('every per-prompt-token forensic marker is debug-only', () {
       final source = loadBridge();
 
       expect(
-        isInsideDebugGuard(source, '[FORENSIC_PROMPT_TOKEN]'),
+        allOccurrencesMatchDebugGuard(
+          source,
+          '[FORENSIC_PROMPT_TOKEN]',
+          expectedInsideDebugGuard: true,
+        ),
         isTrue,
       );
     });
 
-    test('control-token piece diagnostics is debug-only', () {
+    test('every control-token diagnostic marker is debug-only', () {
       final source = loadBridge();
 
       expect(
-        isInsideDebugGuard(source, '[FORENSIC_CONTROL_TOKEN]'),
+        allOccurrencesMatchDebugGuard(
+          source,
+          '[FORENSIC_CONTROL_TOKEN]',
+          expectedInsideDebugGuard: true,
+        ),
         isTrue,
       );
     });
 
-    test('release keeps compact tokenization telemetry', () {
+    test('every compact tokenization marker remains release-visible', () {
       final source = loadBridge();
 
-      expect(source, contains('[TOKENIZE] session='));
       expect(
-        isInsideDebugGuard(source, '[TOKENIZE] session='),
-        isFalse,
+        allOccurrencesMatchDebugGuard(
+          source,
+          '[TOKENIZE] session=',
+          expectedInsideDebugGuard: false,
+        ),
+        isTrue,
       );
     });
   });
