@@ -9,11 +9,11 @@ class _AndroidFfiNativeSessionSubsystem {
   static const int _sessionActiveState = 1;
   static const int _sessionInactiveState = 0;
 
-  int ensureNativeSession(
+  Future<int> ensureNativeSession(
     LlamaBridgeBindings bindings,
     String modelPath, {
     String? modelId,
-  }) {
+  }) async {
     try {
       final isolateHash = AndroidFfiRuntimeProvider._currentThreadId();
       final cacheSizeBeforeLookup = _owner._nativeSessionsByModel.length;
@@ -108,7 +108,7 @@ class _AndroidFfiNativeSessionSubsystem {
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
 
-      _log('[FFI_CREATE_SESSION] entering createSession path=$modelPath');
+      _log('[FFI_CREATE_SESSION] entering off-ui createSession path=$modelPath');
       _log(
         '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
         ' nativeSessionId=0 pointer_hex=0x0 pointer_address=0'
@@ -116,14 +116,16 @@ class _AndroidFfiNativeSessionSubsystem {
         ' thread_id=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}',
       );
       _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1978 | Function: _ensureNativeSession() | BEFORE bindings.createSession()',
+        '[NATIVE_SESSION_LOAD_OFF_UI_BEGIN] modelId=${modelId ?? 'unknown'} model_path=$modelPath',
       );
       const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
-      int created =
-          bindings.createSession(modelPath, nGpuLayers: desiredGpuLayers);
+      int created = await createNativeSessionOffUi(
+        modelPath,
+        nGpuLayers: desiredGpuLayers,
+      );
       _log(
-        '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1982 | Function: _ensureNativeSession() | AFTER bindings.createSession()',
+        '[NATIVE_SESSION_LOAD_OFF_UI_END] modelId=${modelId ?? 'unknown'} model_path=$modelPath session=$created gpu_layers=$desiredGpuLayers',
       );
       final createdPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
       final createdPointerAddress =
@@ -151,7 +153,10 @@ class _AndroidFfiNativeSessionSubsystem {
           ' thread_id=$isolateHash session_cache_size=${_owner._nativeSessionsByModel.length}'
           ' fallback=cpu',
         );
-        created = bindings.createSession(modelPath, nGpuLayers: 0);
+        created = await createNativeSessionOffUi(
+          modelPath,
+          nGpuLayers: 0,
+        );
         final fallbackPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
         final fallbackPointerAddress =
             created > 0 ? Pointer<Void>.fromAddress(created).address : 0;

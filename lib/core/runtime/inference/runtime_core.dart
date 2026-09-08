@@ -106,7 +106,6 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const Duration _verificationFirstTokenTimeout = Duration(seconds: 5);
   static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
   static const Duration _startGenerationTimeout = Duration(seconds: 60);
-  static const Duration _modelLoadTimeout = Duration(seconds: 60);
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
   static const String _warmupPrompt = 'Reply with the single word: OK';
@@ -596,7 +595,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   // ── Private helpers ───────────────────────────────────────────────────────────
 
-  int _ensureNativeSession(
+  Future<int> _ensureNativeSession(
     LlamaBridgeBindings bindings,
     String modelPath, {
     String? modelId,

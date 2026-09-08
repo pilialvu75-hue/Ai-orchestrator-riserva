@@ -68,10 +68,18 @@ class PruneHistoryEvent extends ChatEvent {
 class RecoverFromStuckUiEvent extends ChatEvent {
   const RecoverFromStuckUiEvent({
     required this.sessionId,
-    required this.runtimeMessage,
-  });
+    required String runtimeMessage,
+  }) : runtimeMessage =
+            runtimeMessage ==
+                    'Local runtime stalled before first token. Request cancelled and UI recovered.'
+                ? 'Local runtime wait guard expired before first token. UI recovered; request cancellation was not confirmed.'
+                : runtimeMessage;
 
   final String sessionId;
+
+  /// UI recovery does not own the runtime cancellation token. Keep legacy
+  /// callers source-compatible, but never surface the old message as proof
+  /// that a request was cancelled when only the UI state was unlocked.
   final String runtimeMessage;
 
   @override
