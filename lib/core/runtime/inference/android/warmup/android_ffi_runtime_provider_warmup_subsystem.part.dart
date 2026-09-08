@@ -99,7 +99,8 @@ class _AndroidFfiWarmupSubsystem {
       message: 'Runtime warmup inference running.',
     );
     _log('[WARMUP] resolving shared native session path=$modelPath');
-    final warmupSessionId = _owner._ensureNativeSession(bindings, modelPath);
+    final warmupSessionId =
+        await _owner._ensureNativeSession(bindings, modelPath);
     if (bindings.sessionIsActive(warmupSessionId) != 1) {
       throw StateError(
         'Warmup session inactive: ${AndroidFfiRuntimeProvider._safeLastError(bindings, warmupSessionId)}',

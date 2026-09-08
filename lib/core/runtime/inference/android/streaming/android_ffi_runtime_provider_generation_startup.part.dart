@@ -232,20 +232,42 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       AndroidFfiRuntimeProvider._log( '[FORENSIC_BEFORE_CREATE_SESSION] sessionId=$sessionId modelId=$modelId modelPath=$resolvedModelPath', );
       AndroidFfiRuntimeProvider._log( '[FIRST_TOKEN_SESSION_CREATE_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}' ' sessionId=$sessionId modelId=$modelId', );
       flowState.firstFfiInvocationAttempted = true;
-      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION] path=$resolvedModelPath');
-      nativeSessionId = await _runNativeCallWithTimeout<int>( stage: 'session_create', timeout: AndroidFfiRuntimeProvider._modelLoadTimeout, call: () => _ensureNativeSession( bindings, resolvedModelPath, modelId: modelId, ), );
+      AndroidFfiRuntimeProvider._log('[FFI_CREATE_SESSION] path=$resolvedModelPath execution=worker_isolate');
+      nativeSessionId = await _ensureNativeSession(
+        bindings,
+        resolvedModelPath,
+        modelId: modelId,
+      );
+      flowState.firstFfiInvocationCompleted = true;
       AndroidFfiRuntimeProvider._log( '[FORENSIC_AFTER_CREATE_SESSION] nativeSessionId=$nativeSessionId', );
       AndroidFfiRuntimeProvider._log( '[FIRST_TOKEN_SESSION_CREATE_END] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}' ' sessionId=$sessionId nativeSessionId=$nativeSessionId', );
-      flowState.firstFfiInvocationCompleted = true;
       AndroidFfiRuntimeProvider._log('[FFI_POST_CREATE_SESSION] session=$sessionId native_session=$nativeSessionId');
     } catch (error) {
-      _classifyFirstTokenTermination( flowState: flowState, reason: error is TimeoutException ? 'session_create_timeout' : 'session_create_exception', boundary: 'session_create', exception: true, );
+      _classifyFirstTokenTermination( flowState: flowState, reason: 'session_create_exception', boundary: 'session_create', exception: true, );
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=session_create error=$error');
       AndroidFfiRuntimeProvider._log('[SESSION_CREATE_FAIL] path=$resolvedModelPath exception=$error');
       AndroidFfiRuntimeProvider._log('[TERMINAL_STATE] state=failed reason=session_create_exception');
       _setPhase(RuntimePhase.failed);
-      _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Session create timed out.' : 'Session create failed: $error', );
+      _updateRuntimeStatus( LocalRuntimeStatus.failed, message: 'Session create failed: $error', );
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'session_create', message: 'Session create failed.', details: error.toString(), );
+      return null;
+    }
+    if (cancellationToken.isCancelled) {
+      _classifyFirstTokenTermination(
+        flowState: flowState,
+        reason: 'cancelled_after_session_create',
+        boundary: 'session_create',
+      );
+      AndroidFfiRuntimeProvider._log(
+        '[FFI_BRANCH] session=$sessionId name=cancelled_after_session_create native_session=$nativeSessionId',
+      );
+      _updateRuntimeStatus(
+        LocalRuntimeStatus.ready,
+        message: 'Model loaded; request cancelled before generation.',
+      );
+      if (!controller.isClosed) {
+        await controller.close();
+      }
       return null;
     }
     AndroidFfiRuntimeProvider._log('[SESSION_CREATE_OK] session=$nativeSessionId path=$resolvedModelPath');
