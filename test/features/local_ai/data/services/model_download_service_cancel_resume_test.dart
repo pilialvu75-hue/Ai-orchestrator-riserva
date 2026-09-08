@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/error/exceptions.dart';
@@ -70,7 +69,6 @@ void main() {
     await part.writeAsBytes(_gguf, flush: true);
 
     final service = ModelDownloadService(filePicker: _MockFilePicker());
-    final cancellationIssued = Completer<void>();
     String? resumedRange;
     var requestNumber = 0;
 
@@ -83,21 +81,16 @@ void main() {
           request.response.statusCode = HttpStatus.partialContent;
           request.response.headers.set(
             HttpHeaders.contentRangeHeader,
-            'bytes 4-11/12',
+            'bytes 4-7/12',
           );
-          request.response.contentLength = 8;
+          request.response.contentLength = 4;
           request.response.add(const <int>[1, 2, 3, 4]);
-          await request.response.flush();
-
-          // The service starts with four persisted GGUF bytes. These four
-          // streamed bytes move progress to 8/12; cancellation is issued from
-          // that observed boundary, after the chunk has been queued to .part.
-          await cancellationIssued.future;
-          try {
-            await request.response.close();
-          } catch (_) {
-            // Dio may close the socket immediately when cancellation is issued.
-          }
+          // Close the finite response immediately. Waiting for cancellation on
+          // the server side can deadlock dart:io/Dio in CI because a streamed
+          // HttpClient response is not required to surface a partial body
+          // before the response completes. Cancellation is still issued by
+          // the client progress callback after these bytes are consumed.
+          await request.response.close();
           continue;
         }
 
@@ -114,18 +107,20 @@ void main() {
       }
     }();
 
+    var cancellationIssued = false;
     final firstDownload = service.downloadModel(
       model,
       onProgress: (progress) {
-        if (progress >= 8 / 12 && !cancellationIssued.isCompleted) {
+        if (progress >= 8 / 12 && !cancellationIssued) {
+          cancellationIssued = true;
           service.cancelDownload(model.id);
-          cancellationIssued.complete();
         }
       },
     );
 
     await expectLater(firstDownload, throwsA(isA<DownloadException>()));
 
+    expect(cancellationIssued, isTrue);
     expect(await part.exists(), isTrue);
     expect(await part.length(), 8);
     expect(await part.readAsBytes(), <int>[..._gguf, 1, 2, 3, 4]);
