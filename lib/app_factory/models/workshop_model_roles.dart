@@ -166,7 +166,7 @@ abstract final class WorkshopModelCatalogue {
     repository: 'second-state/Deepseek-Coder-6.7B-Instruct-GGUF',
     filename: 'deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
     quantization: 'Q4_K_M',
-    sizeBytes: 4080000000,
+    sizeBytes: 4083016640,
     source: AiModelSource.local,
     roles: <AppAiRole>{
       AppAiRole.workshopOrchestrator,
@@ -185,7 +185,7 @@ abstract final class WorkshopModelCatalogue {
     repository: 'second-state/StarCoder2-3B-GGUF',
     filename: 'starcoder2-3b-Q4_K_M.gguf',
     quantization: 'Q4_K_M',
-    sizeBytes: 1850000000,
+    sizeBytes: 1848976448,
     source: AiModelSource.local,
     roles: <AppAiRole>{
       AppAiRole.workshopOrchestrator,
