@@ -11,11 +11,11 @@ class _AndroidFfiRuntimeLoggingService {
   /// the event log.
   static const int _ffiPollSampleInterval = 64;
 
-  /// Runtime loop telemetry is already throttled at the producer, but each
-  /// retained sample is still timestamped, appended to the crash log, flushed,
-  /// stored in memory and broadcast to listeners. Sample it again in release
-  /// so first-token diagnostics remain available without paying that I/O cost
-  /// four times per second for long local generations.
+  /// Immediate runtime telemetry contains a mix of per-token events and
+  /// time-throttled loop/watchdog events. Every retained event is timestamped,
+  /// appended to the crash log, flushed, stored in memory, and broadcast to
+  /// listeners. In release, keep generation-boundary diagnostics plus the
+  /// first event and one event every N events within each generation.
   static const int _runtimeTelemetrySampleInterval = 16;
 
   static int _ffiPollSampleCounter = 0;
@@ -63,10 +63,25 @@ class _AndroidFfiRuntimeLoggingService {
     if (_AndroidFfiRuntimePollingController.isImmediateRuntimeTelemetry(
       message,
     )) {
+      // A TOKEN_LOOP start is emitted once per generation. Treat it as a hard
+      // sampling boundary so every generation retains its own early diagnostic
+      // events instead of inheriting the previous generation's counter state.
+      if (message.startsWith('[TOKEN_LOOP] phase=start')) {
+        _runtimeTelemetrySampleCounter = 0;
+        _ffiPollSampleCounter = 0;
+        return false;
+      }
+
       _runtimeTelemetrySampleCounter++;
-      return _runtimeTelemetrySampleCounter != 1 &&
-          _runtimeTelemetrySampleCounter % _runtimeTelemetrySampleInterval !=
-              0;
+      if (_runtimeTelemetrySampleCounter == 1) {
+        return false;
+      }
+
+      // After retaining event #1, retain #17, #33, ...: exactly one event for
+      // each complete sampling interval that follows the first retained event.
+      return (_runtimeTelemetrySampleCounter - 1) %
+              _runtimeTelemetrySampleInterval !=
+          0;
     }
 
     final isPollEnter = message.startsWith('[FFI_CALLBACK_ENTER]');
