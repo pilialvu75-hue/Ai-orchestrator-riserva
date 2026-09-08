@@ -121,9 +121,13 @@ final class WorkshopProductionTaskCoordinator {
   /// Runs the complete Cantiere model chain for the exact task represented by
   /// [handle]: Orchestrator -> Architect -> Engineer -> Reviewer review ->
   /// Reviewer validation. No approval or real apply happens here.
+  ///
+  /// The production UI follows the configured Local / Cloud / Hybrid runtime
+  /// by default. Offline execution remains available only when a caller
+  /// explicitly requests it.
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     final preflight = await _bundle.preflight.run(
@@ -151,7 +155,7 @@ final class WorkshopProductionTaskCoordinator {
   Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
     required WorkshopProductionTaskHandle handle,
     required WorkshopResumeContext resumeContext,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     if (resumeContext.taskId.trim() != handle.taskId.trim()) {
