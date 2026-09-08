@@ -11,10 +11,18 @@ class _AndroidFfiRuntimeLoggingService {
   /// the event log.
   static const int _ffiPollSampleInterval = 64;
 
+  /// Runtime loop telemetry is already throttled at the producer, but each
+  /// retained sample is still timestamped, appended to the crash log, flushed,
+  /// stored in memory and broadcast to listeners. Sample it again in release
+  /// so first-token diagnostics remain available without paying that I/O cost
+  /// four times per second for long local generations.
+  static const int _runtimeTelemetrySampleInterval = 16;
+
   static int _ffiPollSampleCounter = 0;
+  static int _runtimeTelemetrySampleCounter = 0;
 
   static void log(String message) {
-    if (_shouldDropHighFrequencyFfiEvent(message)) {
+    if (_shouldDropHighFrequencyEvent(message)) {
       return;
     }
 
@@ -46,10 +54,19 @@ class _AndroidFfiRuntimeLoggingService {
     }
   }
 
-  static bool _shouldDropHighFrequencyFfiEvent(String message) {
+  static bool _shouldDropHighFrequencyEvent(String message) {
     // During development keep the complete forensic stream available.
     if (kDebugMode) {
       return false;
+    }
+
+    if (_AndroidFfiRuntimePollingController.isImmediateRuntimeTelemetry(
+      message,
+    )) {
+      _runtimeTelemetrySampleCounter++;
+      return _runtimeTelemetrySampleCounter != 1 &&
+          _runtimeTelemetrySampleCounter % _runtimeTelemetrySampleInterval !=
+              0;
     }
 
     final isPollEnter = message.startsWith('[FFI_CALLBACK_ENTER]');
