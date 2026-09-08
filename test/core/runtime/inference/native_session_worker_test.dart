@@ -10,15 +10,21 @@ void main() {
     final dir = await Directory.systemTemp.createTemp('session-release-test-');
     final path = '${dir.path}/release_fixture.so';
     final build = await Process.run('cc', [
-      '-shared', '-fPIC', '-std=gnu11',
-      'test/fixtures/blocking_session_release.c', '-o', path,
+      '-shared',
+      '-fPIC',
+      '-std=gnu11',
+      'test/fixtures/blocking_session_release.c',
+      '-o',
+      path,
     ]);
     expect(build.exitCode, 0, reason: '${build.stderr}');
     final lib = DynamicLibrary.open(path);
     final phase = lib.lookupFunction<Int32 Function(), int Function()>(
-        'release_phase');
+      'release_phase',
+    );
     final allow = lib.lookupFunction<Void Function(), void Function()>(
-        'allow_release');
+      'allow_release',
+    );
     final release = releaseNativeSessionOffUi(42, libraryPath: path);
     try {
       final deadline = DateTime.now().add(const Duration(seconds: 5));
@@ -34,4 +40,71 @@ void main() {
     }
     expect(phase(), 2);
   }, skip: !Platform.isLinux);
+
+  test(
+    'native create loads off caller isolate and performs GPU fallback there',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('session-create-test-');
+      final path = '${dir.path}/create_fixture.so';
+      final build = await Process.run('cc', [
+        '-shared',
+        '-fPIC',
+        '-std=gnu11',
+        'test/fixtures/blocking_session_create.c',
+        '-o',
+        path,
+      ]);
+      expect(build.exitCode, 0, reason: '${build.stderr}');
+
+      final lib = DynamicLibrary.open(path);
+      final phase = lib.lookupFunction<Int32 Function(), int Function()>(
+        'create_phase',
+      );
+      final allow = lib.lookupFunction<Void Function(), void Function()>(
+        'allow_create',
+      );
+      final callCount = lib.lookupFunction<Int32 Function(), int Function()>(
+        'create_call_count',
+      );
+      final lastGpuLayers =
+          lib.lookupFunction<Int32 Function(), int Function()>(
+        'create_last_gpu_layers',
+      );
+
+      final create = createNativeSessionOffUi(
+        '/tmp/test-model.gguf',
+        nGpuLayers: 10,
+        libraryPath: path,
+      );
+
+      NativeSessionCreateResult result;
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (phase() == 0 && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+
+        // If llb_create_session ran on this isolate, this poll could not run
+        // until the fixture's blocking first attempt returned.
+        expect(phase(), 1);
+        expect(callCount(), 1);
+
+        allow();
+        result = await create;
+      } finally {
+        allow();
+        await dir.delete(recursive: true);
+      }
+
+      expect(result.firstAttemptResult, -3);
+      expect(result.sessionId, 84);
+      expect(result.requestedGpuLayers, 10);
+      expect(result.effectiveGpuLayers, 0);
+      expect(result.usedCpuFallback, isTrue);
+      expect(callCount(), 2);
+      expect(lastGpuLayers(), 0);
+      expect(phase(), 2);
+    },
+    skip: !Platform.isLinux,
+  );
 }
