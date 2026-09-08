@@ -48,10 +48,14 @@ void main() {
   /// Builds a [CloudRuntimeProvider] suitable for testing.
   ///
   /// [configured] controls whether the provider reports itself as available.
-  /// When [false] the cloud provider appears unconfigured and
+  /// [automaticUseAllowed] is explicit so routing tests do not depend on the
+  /// process-wide spending preference singleton. Tests that exercise the
+  /// fail-closed policy can set it to [false].
+  /// When [configured] is false the cloud provider appears unconfigured and
   /// [InferenceService] falls back to local mode or reports an error.
   CloudRuntimeProvider buildCloudProvider({
     bool configured = true,
+    bool automaticUseAllowed = true,
     Future<AiResponse> Function(String provider, AiRequest request)? sendQuery,
   }) {
     return CloudRuntimeProvider(
@@ -65,6 +69,7 @@ void main() {
       supportedProviders: () => <String>['openAi'],
       isProviderAvailable: (_) => configured,
       providerDisplayName: ([providerName]) => 'OpenAI',
+      automaticUseAllowed: (_) => automaticUseAllowed,
     );
   }
 
@@ -276,6 +281,39 @@ void main() {
       expect(response.isError, false);
       expect(response.text, 'Cloud response');
       expect(response.model, 'gpt-4o');
+    });
+
+    test('hybrid mode does not auto-spend when Cloud policy blocks it',
+        () async {
+      var cloudCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.hybrid,
+        selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          responses: <InferenceResponse>[
+            InferenceResponse.error('Missing local model path.'),
+          ],
+        ),
+        cloudRuntimeProvider: buildCloudProvider(
+          automaticUseAllowed: false,
+          sendQuery: (_, __) async {
+            cloudCalls += 1;
+            return AiResponse(
+              text: 'should not run',
+              model: 'gpt-4o',
+              tokensUsed: 1,
+              timestamp: DateTime.now().millisecondsSinceEpoch,
+            );
+          },
+        ),
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(sessionId: 's4-policy', prompt: 'hello'),
+      );
+
+      expect(response.isError, true);
+      expect(cloudCalls, 0);
     });
 
     test('local search continuation uses a fresh cancellation token', () async {
