@@ -11,6 +11,7 @@ void main() {
         hasBoundHandle: false,
         inferenceReadyForApproval: false,
         sessionStatus: null,
+        projectReadyForBuild: false,
         isBusy: false,
       );
 
@@ -22,6 +23,7 @@ void main() {
         hasBoundHandle: false,
         inferenceReadyForApproval: false,
         sessionStatus: null,
+        projectReadyForBuild: false,
         isBusy: false,
       );
 
@@ -35,6 +37,7 @@ void main() {
         hasBoundHandle: true,
         inferenceReadyForApproval: false,
         sessionStatus: WorkspaceSessionStatus.validation,
+        projectReadyForBuild: false,
         isBusy: false,
       );
 
@@ -48,6 +51,7 @@ void main() {
         hasBoundHandle: true,
         inferenceReadyForApproval: true,
         sessionStatus: WorkspaceSessionStatus.validation,
+        projectReadyForBuild: false,
         isBusy: false,
       );
 
@@ -62,12 +66,40 @@ void main() {
         hasBoundHandle: true,
         inferenceReadyForApproval: true,
         sessionStatus: WorkspaceSessionStatus.approved,
+        projectReadyForBuild: false,
         isBusy: false,
       );
 
       expect(state.action, WorkshopProductionUiAction.apply);
       expect(state.enabled, isTrue);
       expect(state.label, contains('Applica'));
+    });
+
+    test('final build is exposed only after the project has no active task', () {
+      final build = WorkshopProductionActionState.resolve(
+        hasPreparedTask: false,
+        hasBoundHandle: false,
+        inferenceReadyForApproval: false,
+        sessionStatus: null,
+        projectReadyForBuild: true,
+        isBusy: false,
+      );
+
+      expect(build.action, WorkshopProductionUiAction.build);
+      expect(build.enabled, isTrue);
+      expect(build.label, contains('APK'));
+
+      final stillWorking = WorkshopProductionActionState.resolve(
+        hasPreparedTask: true,
+        hasBoundHandle: true,
+        inferenceReadyForApproval: true,
+        sessionStatus: WorkspaceSessionStatus.approved,
+        projectReadyForBuild: true,
+        isBusy: false,
+      );
+
+      expect(stillWorking.action, WorkshopProductionUiAction.apply);
+      expect(stillWorking.enabled, isTrue);
     });
 
     test('blocked, completed and busy sessions expose no mutation action', () {
@@ -81,6 +113,7 @@ void main() {
           hasBoundHandle: true,
           inferenceReadyForApproval: true,
           sessionStatus: status,
+          projectReadyForBuild: false,
           isBusy: false,
         );
 
@@ -89,10 +122,11 @@ void main() {
       }
 
       final busy = WorkshopProductionActionState.resolve(
-        hasPreparedTask: true,
-        hasBoundHandle: true,
-        inferenceReadyForApproval: true,
-        sessionStatus: WorkspaceSessionStatus.approved,
+        hasPreparedTask: false,
+        hasBoundHandle: false,
+        inferenceReadyForApproval: false,
+        sessionStatus: null,
+        projectReadyForBuild: true,
         isBusy: true,
       );
 
