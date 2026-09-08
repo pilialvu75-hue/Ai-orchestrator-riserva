@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controll
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider_adapter.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_service_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 
 /// Composition root del Cantiere.
@@ -47,8 +48,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.d
 ///
 /// Il Cantiere NON dipende dalla Chat Assistente.
 ///
-/// L'infrastruttura di inferenza può essere condivisa, ma il modello,
-/// il ruolo e la configurazione del Workshop vengono risolti
+/// L'infrastruttura runtime di basso livello può essere condivisa, ma il
+/// modello, il ruolo e la configurazione del Workshop vengono risolti
 /// indipendentemente dall'Assistente.
 final class WorkshopFactory {
   const WorkshopFactory._();
@@ -113,11 +114,9 @@ final class WorkshopFactory {
 
   /// Risolve l'InferenceService già registrato nell'application container.
   ///
-  /// Il Cantiere riutilizza l'infrastruttura runtime esistente, ma non
-  /// dovrebbe ereditare la selezione logica del modello dell'Assistente.
-  ///
-  /// L'isolamento del modello Workshop viene applicato dal relativo
-  /// WorkshopInferenceProviderAdapter.
+  /// Questo percorso rimane disponibile per test/iniezioni esplicite. La
+  /// composizione Workshop di produzione usa invece un servizio leggero
+  /// model-aware creato dopo avere risolto il ruolo/modello del Cantiere.
   static InferenceService resolveInferenceService({
     InferenceService? inferenceService,
   }) {
@@ -204,9 +203,10 @@ final class WorkshopFactory {
   ///      ↓
   ///   propria configurazione
   ///
-  /// I due sistemi possono condividere l'InferenceService come infrastruttura
-  /// di basso livello, ma il modello del Workshop viene scelto esplicitamente
-  /// dalla configurazione Workshop.
+  /// In produzione ogni ruolo Workshop ottiene un InferenceService leggero
+  /// che risolve il proprio modello dall'archivio condiviso dei modelli
+  /// installati. LocalRuntimeProvider, CloudRuntimeProvider e session manager
+  /// restano condivisi: non viene creato un secondo runtime nativo.
   static WorkshopInferenceProviderAdapter
       createInferenceProviderAdapter({
     InferenceService? inferenceService,
@@ -215,11 +215,6 @@ final class WorkshopFactory {
         WorkshopModelAssignments.defaults,
     String? modelId,
   }) {
-    final resolvedInferenceService =
-        resolveInferenceService(
-      inferenceService: inferenceService,
-    );
-
     final resolvedModelId =
         modelId?.trim().isNotEmpty == true
             ? modelId!.trim()
@@ -250,6 +245,12 @@ final class WorkshopFactory {
         'Model "$resolvedModelId" cannot serve role "${role.id}".',
       );
     }
+
+    final resolvedInferenceService =
+        inferenceService ??
+            WorkshopInferenceServiceFactory.create(
+              modelId: resolvedModelId,
+            );
 
     return WorkshopInferenceProviderAdapter(
       inferenceService: resolvedInferenceService,
