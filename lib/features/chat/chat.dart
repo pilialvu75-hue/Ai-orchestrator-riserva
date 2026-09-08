@@ -6,7 +6,6 @@ export 'domain/repositories/chat_repository.dart';
 export 'domain/usecases/load_chat_messages.dart';
 export 'domain/usecases/prune_chat_history.dart';
 export 'domain/usecases/send_chat_message.dart';
-export 'presentation/bloc/chat_bloc.dart';
 export 'presentation/bloc/chat_event.dart';
 export 'presentation/bloc/chat_state.dart';
 export 'presentation/pages/chat_page.dart';
