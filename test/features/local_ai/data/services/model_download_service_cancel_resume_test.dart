@@ -78,7 +78,11 @@ void main() {
         if (requestNumber == 1) {
           expect(request.headers.value(HttpHeaders.rangeHeader), isNull);
           request.response.statusCode = HttpStatus.ok;
-          request.response.contentLength = 12;
+          // Keep the first response chunked instead of declaring a larger
+          // Content-Length. This guarantees the loopback client observes and
+          // persists the first 8 bytes before we trigger cancellation, rather
+          // than allowing an HTTP implementation to wait for the full body.
+          request.response.chunkedTransferEncoding = true;
           request.response.add(<int>[..._gguf, 1, 2, 3, 4]);
           await request.response.flush();
           firstChunkFlushed.complete();
