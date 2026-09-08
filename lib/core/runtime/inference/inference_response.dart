@@ -25,6 +25,7 @@ class InferenceResponse {
     required this.text,
     required this.timestamp,
     this.model,
+    this.providerId,
     this.tokensGenerated = 0,
     this.isFinal = false,
     this.isError = false,
@@ -35,6 +36,13 @@ class InferenceResponse {
 
   final String text;
   final String? model;
+
+  /// Concrete runtime/provider that produced this response.
+  ///
+  /// Cloud responses populate values such as `openAi`, `gemini`, `claude`,
+  /// `grok` or `copilot`. Local runtimes may leave it null.
+  final String? providerId;
+
   final int tokensGenerated;
   final int timestamp;
   final bool isFinal;
@@ -50,10 +58,12 @@ class InferenceResponse {
   factory InferenceResponse.token({
     required String text,
     String? model,
+    String? providerId,
   }) {
     return InferenceResponse(
       text: text,
       model: model,
+      providerId: providerId,
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
   }
@@ -62,10 +72,12 @@ class InferenceResponse {
     required String text,
     required int tokensGenerated,
     String? model,
+    String? providerId,
   }) {
     return InferenceResponse(
       text: text,
       model: model,
+      providerId: providerId,
       tokensGenerated: tokensGenerated,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isFinal: true,
@@ -81,9 +93,11 @@ class InferenceResponse {
   factory InferenceResponse.error(
     String message, {
     InferenceTerminalState state = InferenceTerminalState.failed,
+    String? providerId,
   }) {
     return InferenceResponse(
       text: '',
+      providerId: providerId,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isFinal: true,
       isError: true,
@@ -92,9 +106,13 @@ class InferenceResponse {
     );
   }
 
-  factory InferenceResponse.notice(String message) {
+  factory InferenceResponse.notice(
+    String message, {
+    String? providerId,
+  }) {
     return InferenceResponse(
       text: '',
+      providerId: providerId,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isFinal: false,
       runtimeNotice: message,

@@ -2,6 +2,8 @@ import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/task_type.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -12,12 +14,11 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:flutter/foundation.dart';
 
-/// Central routing layer for all AI calls.
+/// Central routing layer for Assistant/Hybrid AI calls.
 ///
-/// Classifica l'intent utente con [IntentAnalyzer], delega i comandi
-/// device a [ExecutionEngine], instrada planning/coding a [PlannerService],
-/// esegue ricerche web tramite [WebSearchTool] e passa i risultati al
-/// modello locale, e invia le query chat a [InferenceService].
+/// Explicit Cloud chat does not depend on this class: it enters the inference
+/// runtime directly through ChatRepository. In Hybrid mode this class owns the
+/// Local/Cloud decision and binds the concrete Cloud provider before execution.
 class Orchestrator {
   static const int _maxWebSearchResults = 5;
 
@@ -27,17 +28,23 @@ class Orchestrator {
     required InferenceService inferenceService,
     PlannerService? plannerService,
     WebSearchTool? webSearchTool,
+    AiRuntimeSettingsService? runtimeSettingsService,
+    CloudRuntimeProvider? cloudRuntimeProvider,
   })  : _analyzer = intentAnalyzer,
         _executor = executor,
         _inferenceService = inferenceService,
         _plannerService = plannerService,
-        _webSearchTool = webSearchTool;
+        _webSearchTool = webSearchTool,
+        _runtimeSettingsService = runtimeSettingsService,
+        _cloudRuntimeProvider = cloudRuntimeProvider;
 
   final IntentAnalyzer _analyzer;
   final ExecutionEngine _executor;
   final InferenceService _inferenceService;
   final PlannerService? _plannerService;
   final WebSearchTool? _webSearchTool;
+  final AiRuntimeSettingsService? _runtimeSettingsService;
+  final CloudRuntimeProvider? _cloudRuntimeProvider;
 
   Future<InferenceResponse> handle(
     String input, {
@@ -56,9 +63,7 @@ class Orchestrator {
       case TaskType.coding:
         return _executePlan(input, isOffline: isOffline);
       case TaskType.webSearch:
-        _logForensic(
-          '[WEBSEARCH_TASK_SELECTED] session=default',
-        );
+        _logForensic('[WEBSEARCH_TASK_SELECTED] session=default');
         return _handleWebSearch(
           input,
           systemPrompt: systemPrompt,
@@ -66,7 +71,7 @@ class Orchestrator {
         );
       case TaskType.chat:
       case TaskType.system:
-        return _inferenceService.infer(
+        final request = _routeRequest(
           InferenceRequest(
             sessionId: 'default',
             prompt: input,
@@ -74,6 +79,7 @@ class Orchestrator {
             isOffline: isOffline,
           ),
         );
+        return _inferenceService.infer(request);
     }
   }
 
@@ -129,9 +135,7 @@ class Orchestrator {
         ' boundary=orchestrator.intent_route'
         ' reason=task_type_webSearch',
       );
-      _logForensic(
-        '[WEBSEARCH_TASK_SELECTED] session=$sessionId',
-      );
+      _logForensic('[WEBSEARCH_TASK_SELECTED] session=$sessionId');
       return _handleWebSearchStream(
         input: input,
         sessionId: sessionId,
@@ -143,13 +147,7 @@ class Orchestrator {
       );
     }
 
-    _logForensic(
-      '[PRE_STREAM_FORWARD] session=$sessionId'
-      ' boundary=orchestrator.intent_route'
-      ' target=inference_service.stream task_type=${type.name}',
-    );
-
-    return _inferenceService.stream(
+    final request = _routeRequest(
       InferenceRequest(
         sessionId: sessionId,
         prompt: input,
@@ -160,6 +158,85 @@ class Orchestrator {
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
     );
+
+    _logForensic(
+      '[PRE_STREAM_FORWARD] session=$sessionId'
+      ' boundary=orchestrator.intent_route'
+      ' target=inference_service.stream task_type=${type.name}'
+      ' directive=${request.routeDirective.name}'
+      ' cloud_provider=${request.cloudProviderId ?? 'none'}',
+    );
+
+    return _inferenceService.stream(request);
+  }
+
+  /// Converts persisted runtime mode into an explicit execution decision.
+  ///
+  /// In Hybrid, CloudRuntimeProvider is used only as a health/capability
+  /// adviser. The Orchestrator owns the final Local/Cloud decision and writes
+  /// the provider binding into the request. The runtime is then forbidden from
+  /// silently switching provider inside that request.
+  InferenceRequest _routeRequest(InferenceRequest request) {
+    final settings = _runtimeSettingsService;
+    if (settings == null) return request;
+
+    switch (settings.runtimeMode) {
+      case AiRuntimeMode.local:
+        _logRoutingDecision(request, 'local', null);
+        return request.copyWith(
+          routeDirective: InferenceRouteDirective.localOnly,
+          allowCloudProviderFailover: false,
+        );
+
+      case AiRuntimeMode.cloud:
+        // Normally explicit Cloud chat bypasses the Orchestrator completely.
+        // This branch keeps other Orchestrator callers safe and deterministic.
+        _logRoutingDecision(request, 'cloud-direct', null);
+        return request.copyWith(
+          routeDirective: InferenceRouteDirective.cloudOnly,
+          allowCloudProviderFailover: true,
+        );
+
+      case AiRuntimeMode.hybrid:
+        final cloud = _cloudRuntimeProvider;
+        if (cloud != null &&
+            !request.isOffline &&
+            cloud.shouldPreferCloudFor(request)) {
+          final provider = cloud.recommendProviderFor(
+            request,
+            enforceAutomaticPolicy: true,
+          );
+
+          if (provider != null) {
+            _logRoutingDecision(request, 'hybrid-cloud', provider);
+            return request.copyWith(
+              routeDirective: InferenceRouteDirective.cloudOnly,
+              cloudProviderId: provider,
+              allowCloudProviderFailover: false,
+            );
+          }
+        }
+
+        _logRoutingDecision(request, 'hybrid-local', null);
+        return request.copyWith(
+          routeDirective: InferenceRouteDirective.localOnly,
+          allowCloudProviderFailover: false,
+        );
+    }
+  }
+
+  void _logRoutingDecision(
+    InferenceRequest request,
+    String decision,
+    String? provider,
+  ) {
+    _logForensic(
+      '[HYBRID_ROUTING_DECISION]'
+      ' session=${request.sessionId}'
+      ' decision=$decision'
+      ' provider=${provider ?? 'none'}'
+      ' prompt_chars=${request.prompt.length}',
+    );
   }
 
   Future<InferenceResponse> _handleWebSearch(
@@ -167,14 +244,16 @@ class Orchestrator {
     required String? systemPrompt,
     required bool isOffline,
   }) async {
-    final request = await _buildWebSearchRequest(
-      input: input,
-      sessionId: 'default',
-      context: const [],
-      systemPrompt: systemPrompt,
-      isOffline: isOffline,
-      maxTokens: InferenceRequest.defaultMaxTokens,
-      temperature: InferenceRequest.defaultTemperature,
+    final request = _routeRequest(
+      await _buildWebSearchRequest(
+        input: input,
+        sessionId: 'default',
+        context: const [],
+        systemPrompt: systemPrompt,
+        isOffline: isOffline,
+        maxTokens: InferenceRequest.defaultMaxTokens,
+        temperature: InferenceRequest.defaultTemperature,
+      ),
     );
 
     final response = await _inferenceService.infer(request);
@@ -196,14 +275,16 @@ class Orchestrator {
     required int? maxTokens,
     required double? temperature,
   }) async* {
-    final request = await _buildWebSearchRequest(
-      input: input,
-      sessionId: sessionId,
-      context: context,
-      systemPrompt: systemPrompt,
-      isOffline: isOffline,
-      maxTokens: maxTokens,
-      temperature: temperature,
+    final request = _routeRequest(
+      await _buildWebSearchRequest(
+        input: input,
+        sessionId: sessionId,
+        context: context,
+        systemPrompt: systemPrompt,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+      ),
     );
 
     yield* _inferenceService.stream(request);
@@ -253,11 +334,11 @@ class Orchestrator {
     required double? temperature,
   }) async {
     final webSearchTool = _webSearchTool;
-    
+
     _logForensic(
       '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
     );
-    
+
     if (webSearchTool == null) {
       _logForensic(
         '[WEBSEARCH_EXIT] session=$sessionId success=false reason=tool_missing',
@@ -358,7 +439,6 @@ class Orchestrator {
     return sections.join('\n\n');
   }
 
-  /// Guides the model to treat retrieved web results as the primary source.
   String _buildWebSearchSystemPrompt() {
     const prompt = 'You are AI Orchestrator. Answer the user using the web search '
         'results in the conversation context as primary evidence. Cite the '
@@ -386,18 +466,25 @@ class Orchestrator {
     String input, {
     bool isOffline = false,
   }) async {
+    final baseRequest = InferenceRequest(
+      sessionId: 'planner_session',
+      prompt: input,
+      isOffline: isOffline,
+    );
+    final routed = _routeRequest(baseRequest);
+
     final planner = _plannerService;
     if (planner == null) {
-      return _inferenceService.infer(
-        InferenceRequest(
-          sessionId: 'default',
-          prompt: input,
-          isOffline: isOffline,
-        ),
-      );
+      return _inferenceService.infer(routed);
     }
 
-    final plan = await planner.decompose(input, isOffline: isOffline);
+    final plan = await planner.decompose(
+      input,
+      isOffline: isOffline,
+      routeDirective: routed.routeDirective,
+      cloudProviderId: routed.cloudProviderId,
+      allowCloudProviderFailover: routed.allowCloudProviderFailover,
+    );
 
     return InferenceResponse.finalChunk(
       text: plan.toDisplayString(),

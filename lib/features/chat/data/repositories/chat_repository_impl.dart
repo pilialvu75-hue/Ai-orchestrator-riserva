@@ -7,8 +7,11 @@ import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
@@ -23,13 +26,26 @@ class ChatRepositoryImpl implements ChatRepository {
 
   ChatRepositoryImpl({
     required this.localDataSource,
-    required this.orchestrator,
     required this.conversationMemoryService,
-  });
+    Orchestrator? orchestrator,
+    Orchestrator Function()? orchestratorProvider,
+    this.inferenceService,
+    this.runtimeSettingsService,
+  })  : _orchestrator = orchestrator,
+        _orchestratorProvider = orchestratorProvider;
 
   final ChatLocalDataSource localDataSource;
-  final Orchestrator orchestrator;
   final ConversationMemoryService conversationMemoryService;
+
+  /// Optional eager Orchestrator kept for compatibility with existing tests
+  /// and callers. Production DI uses [_orchestratorProvider] so explicit Cloud
+  /// chat does not instantiate Hannibal at all.
+  final Orchestrator? _orchestrator;
+  final Orchestrator Function()? _orchestratorProvider;
+
+  /// Direct inference dependencies used only by explicit Cloud mode.
+  final InferenceService? inferenceService;
+  final AiRuntimeSettingsService? runtimeSettingsService;
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
@@ -105,7 +121,7 @@ class ChatRepositoryImpl implements ChatRepository {
 
             if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
               final forensicMessage =
-                  '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=orchestrator_not_invoked attachments=${attachments.length}';
+                  '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=inference_not_invoked attachments=${attachments.length}';
               _log(forensicMessage);
               RuntimeEventLog.instance.emit(forensicMessage);
               return userMsg;
@@ -127,12 +143,6 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamedResponse = StringBuffer();
             String responseProvider = 'local';
 
-            _log(
-              '[ORCHESTRATOR_SEND] session=$sessionId scope=chat_repository.handleStream',
-            );
-            _log(
-              '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
-            );
             final previousSubscription =
                 _activeInferenceSubscriptions[sessionId];
             if (previousSubscription != null) {
@@ -142,12 +152,13 @@ class ChatRepositoryImpl implements ChatRepository {
               await previousSubscription.cancel();
               _activeInferenceSubscriptions.remove(sessionId);
             }
+
             final contextSnapshot = List<ChatTurn>.unmodifiable(context);
-            final stream = orchestrator.handleStream(
-              normalizedPrompt,
+            final stream = _buildInferenceStream(
               sessionId: sessionId,
-              context: contextSnapshot,
+              prompt: normalizedPrompt,
               systemPrompt: systemPrompt,
+              context: contextSnapshot,
             );
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
@@ -161,12 +172,31 @@ class ChatRepositoryImpl implements ChatRepository {
               final subscription = stream.listen(
                 (chunk) {
                   try {
+                    final providerId = chunk.providerId?.trim();
+                    if (providerId != null && providerId.isNotEmpty) {
+                      responseProvider = providerId;
+                    }
+
                     if (chunk.runtimeNotice != null &&
                         chunk.runtimeNotice!.trim().isNotEmpty) {
+                      final notice = chunk.runtimeNotice!.trim();
                       _log(
-                        '[TOKEN_STREAM] session=$sessionId runtime_notice="${chunk.runtimeNotice}"',
+                        '[TOKEN_STREAM] session=$sessionId runtime_notice="$notice" provider=$responseProvider',
                       );
-                      onRuntimeNotice?.call(chunk.runtimeNotice!);
+
+                      if (notice.startsWith('cloud_provider:')) {
+                        final activeProvider = notice
+                            .substring('cloud_provider:'.length)
+                            .trim();
+                        if (activeProvider.isNotEmpty) {
+                          responseProvider = activeProvider;
+                          onRuntimeNotice?.call(
+                            'Cloud provider: ${_providerDisplayName(activeProvider)}',
+                          );
+                        }
+                      } else {
+                        onRuntimeNotice?.call(notice);
+                      }
                       return;
                     }
                     if (chunk.isError) {
@@ -186,7 +216,8 @@ class ChatRepositoryImpl implements ChatRepository {
                         streamedResponse.clear();
                         streamedResponse.write(merged);
                       }
-                      if (chunk.model != null &&
+                      if ((providerId == null || providerId.isEmpty) &&
+                          chunk.model != null &&
                           chunk.model!.trim().isNotEmpty) {
                         responseProvider = chunk.model!;
                       }
@@ -196,7 +227,7 @@ class ChatRepositoryImpl implements ChatRepository {
                     } else {
                       streamedResponse.write(chunk.text);
                       _log(
-                        '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length}',
+                        '[TOKEN_STREAM] session=$sessionId partial_chars=${streamedResponse.length} provider=$responseProvider',
                       );
                       onPartialResponse?.call(streamedResponse.toString());
                     }
@@ -268,7 +299,7 @@ class ChatRepositoryImpl implements ChatRepository {
               timestamp: assistantMsg.timestamp,
             );
             _log(
-              '[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id}',
+              '[FINAL_RESPONSE] persistence session=$sessionId role=assistant id=${assistantMsg.id} provider=$responseProvider',
             );
             return assistantMsg;
           } finally {
@@ -290,6 +321,66 @@ class ChatRepositoryImpl implements ChatRepository {
     } catch (e) {
       throw ServerFailure(e.toString());
     }
+  }
+
+  Stream<InferenceResponse> _buildInferenceStream({
+    required String sessionId,
+    required String prompt,
+    required String? systemPrompt,
+    required List<ChatTurn> context,
+  }) {
+    final settings = runtimeSettingsService;
+    final directInference = inferenceService;
+
+    if (settings?.runtimeMode == AiRuntimeMode.cloud && directInference != null) {
+      _log(
+        '[CLOUD_DIRECT_ROUTE] session=$sessionId orchestrator_bypassed=true provider_authority=cloud_router',
+      );
+      _log(
+        '[STREAM_SUBSCRIBE] session=$sessionId stream=inference_service.direct_cloud hash=${hashCode.toRadixString(16)}',
+      );
+
+      return directInference.stream(
+        InferenceRequest(
+          sessionId: sessionId,
+          requestId: _uuid.v4(),
+          prompt: prompt,
+          systemPrompt: systemPrompt,
+          context: context,
+          isOffline: false,
+          routeDirective: InferenceRouteDirective.cloudOnly,
+          allowCloudProviderFailover: true,
+        ),
+      );
+    }
+
+    final resolvedOrchestrator = _resolveOrchestrator();
+    _log(
+      '[ORCHESTRATOR_SEND] session=$sessionId scope=chat_repository.handleStream mode=${settings?.runtimeMode.name ?? 'unknown'}',
+    );
+    _log(
+      '[STREAM_SUBSCRIBE] session=$sessionId stream=orchestrator.handleStream hash=${hashCode.toRadixString(16)}',
+    );
+
+    return resolvedOrchestrator.handleStream(
+      prompt,
+      sessionId: sessionId,
+      context: context,
+      systemPrompt: systemPrompt,
+    );
+  }
+
+  Orchestrator _resolveOrchestrator() {
+    final eager = _orchestrator;
+    if (eager != null) return eager;
+
+    final provider = _orchestratorProvider;
+    if (provider != null) return provider();
+
+    throw StateError(
+      'Orchestrator is unavailable for Local/Hybrid chat. '
+      'Explicit Cloud chat remains independent when direct inference is configured.',
+    );
   }
 
   @override
@@ -406,6 +497,23 @@ class ChatRepositoryImpl implements ChatRepository {
     }
 
     return buffer.toString();
+  }
+
+  static String _providerDisplayName(String providerId) {
+    switch (providerId) {
+      case 'openAi':
+        return 'OpenAI';
+      case 'gemini':
+        return 'Gemini';
+      case 'claude':
+        return 'Claude';
+      case 'grok':
+        return 'Grok';
+      case 'copilot':
+        return 'GitHub Copilot';
+      default:
+        return providerId;
+    }
   }
 
   static void _log(String message) {

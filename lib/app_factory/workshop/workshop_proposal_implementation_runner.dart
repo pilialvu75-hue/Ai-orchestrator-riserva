@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace_stager.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -37,6 +39,68 @@ final class WorkshopProposalImplementationRunner {
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
+    _validateSession(session, preflight: preflight);
+
+    final result = await _inference.complete(
+      stage: WorkshopStage.implementation,
+      prompt: _buildPrompt(session, preflight: preflight),
+      systemPrompt: _systemPrompt,
+      sessionId: 'workshop:implementation:${session.context.request.id}',
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+
+    return _stageResult(session: session, result: result);
+  }
+
+  /// Runs the Engineer from an authoritative Cantiere semantic checkpoint.
+  ///
+  /// This is deliberately separate from [run] so historical call sites keep
+  /// their exact behavior. The resume context is provider-neutral and the
+  /// execution identity is forwarded to the runtime without inventing any ID.
+  Future<WorkshopChangeProposal> runWithResumeContext({
+    required WorkspaceSession session,
+    required WorkshopResumeContext resumeContext,
+    WorkshopPreflightInferenceResult? preflight,
+    bool isOffline = true,
+    CancellationToken? cancellationToken,
+  }) async {
+    _validateSession(session, preflight: preflight);
+
+    if (resumeContext.taskId.trim().isEmpty ||
+        resumeContext.executionId.trim().isEmpty ||
+        resumeContext.attemptId.trim().isEmpty) {
+      throw StateError(
+        'Workshop resume context must contain task, execution and attempt IDs.',
+      );
+    }
+
+    final result = await _inference.completeWithIdentity(
+      stage: WorkshopStage.implementation,
+      prompt: _buildPrompt(
+        session,
+        preflight: preflight,
+        resumeContext: resumeContext,
+      ),
+      systemPrompt: _systemPrompt,
+      sessionId: resumeContext.sessionId,
+      isOffline: isOffline,
+      requestId: session.context.request.id,
+      projectId: resumeContext.projectId,
+      taskId: resumeContext.taskId,
+      executionId: resumeContext.executionId,
+      attemptId: resumeContext.attemptId,
+      checkpointId: resumeContext.checkpointId,
+      cancellationToken: cancellationToken,
+    );
+
+    return _stageResult(session: session, result: result);
+  }
+
+  void _validateSession(
+    WorkspaceSession session, {
+    WorkshopPreflightInferenceResult? preflight,
+  }) {
     if (!session.workspace.isInitialized) {
       throw StateError(
         'Workshop Engineer requires an initialized workspace session.',
@@ -57,16 +121,12 @@ final class WorkshopProposalImplementationRunner {
         'preflight.',
       );
     }
+  }
 
-    final result = await _inference.complete(
-      stage: WorkshopStage.implementation,
-      prompt: _buildPrompt(session, preflight: preflight),
-      systemPrompt: _systemPrompt,
-      sessionId: 'workshop:implementation:${session.context.request.id}',
-      isOffline: isOffline,
-      cancellationToken: cancellationToken,
-    );
-
+  WorkshopChangeProposal _stageResult({
+    required WorkspaceSession session,
+    required WorkshopInferenceResult result,
+  }) {
     if (!result.isSuccessful) {
       final detail = result.errorMessage?.trim();
       throw StateError(
@@ -89,6 +149,7 @@ final class WorkshopProposalImplementationRunner {
   String _buildPrompt(
     WorkspaceSession session, {
     WorkshopPreflightInferenceResult? preflight,
+    WorkshopResumeContext? resumeContext,
   }) {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
@@ -106,6 +167,7 @@ final class WorkshopProposalImplementationRunner {
           'orchestratorAnalysis': preflight.analysis.text.trim(),
           'architectPlan': preflight.architecture!.text.trim(),
         },
+      if (resumeContext != null) 'resume': resumeContext.toMetadata(),
       'workspaceFiles': <String, String>{
         for (final path in snapshot.keys.toList()..sort()) path: snapshot[path]!,
       },
@@ -113,10 +175,12 @@ final class WorkshopProposalImplementationRunner {
 
     return '''
 Implement the Workshop task using only the supplied request, Cantiere preflight
-when present, and workspace snapshot. Treat the Architect plan as bounded
-implementation guidance and preserve all supplied constraints. Return a
-structured change proposal; do not claim that files were already written and
-do not perform review, validation or approval.
+when present, authoritative Cantiere resume state when present, and workspace
+snapshot. Treat the Architect plan as bounded implementation guidance. When a
+resume state is supplied, continue from its completed steps, decisions,
+verification state and next step instead of restarting the task. Preserve all
+supplied constraints. Return a structured change proposal; do not claim that
+files were already written and do not perform review, validation or approval.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
@@ -146,8 +210,9 @@ any text outside the JSON object.
   static const String _systemPrompt =
       'You are the Engineer brain of the Cantiere. Implement only the supplied '
       'Workshop task using the workspace snapshot and, when present, the '
-      'supplied Cantiere preflight guidance. Do not use or assume Assistant '
-      'chat memory, configuration or model selection. Return only the required '
-      'structured change proposal and never mutate the real repository '
-      'directly.';
+      'supplied Cantiere preflight guidance and authoritative semantic resume '
+      'state. Continue from verified prior work instead of restarting it. Do '
+      'not use or assume Assistant chat memory, configuration or model '
+      'selection. Return only the required structured change proposal and '
+      'never mutate the real repository directly.';
 }

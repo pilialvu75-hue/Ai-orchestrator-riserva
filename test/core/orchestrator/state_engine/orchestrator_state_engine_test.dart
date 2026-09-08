@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('OrchestratorStateEngine', () {
     test(
-      'keeps partial assistant content on runtime notice for attachments-only sends',
+      'keeps partial assistant content and Cloud provider across generic runtime notices',
       () async {
         final repository = _FakeChatRepository(
           onSendMessage: ({
@@ -22,6 +22,7 @@ void main() {
             void Function(String notice)? onRuntimeNotice,
           }) async {
             onPartialResponse?.call('partial vision response');
+            onRuntimeNotice?.call('Cloud provider: Gemini');
             onRuntimeNotice?.call('runtime still processing');
             return ChatMessage(
               id: 'assistant-final',
@@ -29,7 +30,7 @@ void main() {
               role: 'assistant',
               content: 'final response',
               timestamp: 3,
-              provider: 'local',
+              provider: 'gemini',
             );
           },
           onGetMessages: (sessionId) async {
@@ -47,7 +48,7 @@ void main() {
                 role: 'assistant',
                 content: 'final response',
                 timestamp: 3,
-                provider: 'local',
+                provider: 'gemini',
               ),
             ];
           },
@@ -81,24 +82,35 @@ void main() {
         final sendingStates =
             emittedStates.whereType<ChatSending>().toList();
 
-        final sendingStateWithNotice =
+        final cloudProviderState =
+            sendingStates.lastWhere(
+          (state) =>
+              state.runtimeMessage == 'Cloud provider: Gemini',
+        );
+        final cloudProviderAssistant =
+            cloudProviderState.messages.singleWhere(
+          (message) => message.role == 'assistant',
+        );
+        expect(
+          cloudProviderAssistant.content,
+          'partial vision response',
+        );
+        expect(cloudProviderAssistant.provider, 'Gemini');
+
+        final genericNoticeState =
             sendingStates.lastWhere(
           (state) =>
               state.runtimeMessage == 'runtime still processing',
         );
-
-        final assistantMessages =
-            sendingStateWithNotice.messages
-                .where(
-                  (message) => message.role == 'assistant',
-                )
-                .toList();
-
-        expect(assistantMessages, hasLength(1));
+        final genericNoticeAssistant =
+            genericNoticeState.messages.singleWhere(
+          (message) => message.role == 'assistant',
+        );
         expect(
-          assistantMessages.single.content,
+          genericNoticeAssistant.content,
           'partial vision response',
         );
+        expect(genericNoticeAssistant.provider, 'Gemini');
 
         await subscription.cancel();
         await engine.close();

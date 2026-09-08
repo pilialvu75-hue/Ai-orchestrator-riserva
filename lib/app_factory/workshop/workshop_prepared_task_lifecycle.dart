@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gat
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_inference_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -37,6 +38,28 @@ final class WorkshopPreparedTaskLifecycle {
   }) {
     return _inferenceRunner.run(
       taskId: taskId,
+      preflight: preflight,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  /// Resumes the same prepared task from Cantiere-owned semantic state.
+  ///
+  /// This is additive to [runPrepared] so existing callers keep their stable
+  /// lifecycle contract. The resume context is only forwarded to the existing
+  /// prepared-task runner; this lifecycle does not create or own checkpoint,
+  /// execution, attempt, workspace or provider state.
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required String taskId,
+    required WorkshopResumeContext resumeContext,
+    WorkshopPreflightInferenceResult? preflight,
+    bool isOffline = true,
+    CancellationToken? cancellationToken,
+  }) {
+    return _inferenceRunner.runWithResumeContext(
+      taskId: taskId,
+      resumeContext: resumeContext,
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,

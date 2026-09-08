@@ -1,5 +1,7 @@
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -27,6 +29,44 @@ final class WorkshopPreparedTaskInferenceRunner {
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) async {
+    final session = _preparedSession(taskId);
+
+    return _pipeline.run(
+      session: session,
+      preflight: preflight,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  /// Continues the exact prepared WorkspaceSession from an authoritative
+  /// Cantiere semantic checkpoint. No second session or task state is created.
+  Future<WorkshopTaskInferenceResult> runWithResumeContext({
+    required String taskId,
+    required WorkshopResumeContext resumeContext,
+    WorkshopPreflightInferenceResult? preflight,
+    bool isOffline = true,
+    CancellationToken? cancellationToken,
+  }) async {
+    final session = _preparedSession(taskId);
+
+    if (resumeContext.taskId.trim() != taskId.trim()) {
+      throw StateError(
+        'Workshop resume context belongs to task "${resumeContext.taskId}", '
+        'not prepared task "${taskId.trim()}".',
+      );
+    }
+
+    return _pipeline.runWithResumeContext(
+      session: session,
+      resumeContext: resumeContext,
+      preflight: preflight,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  WorkspaceSession _preparedSession(String taskId) {
     final normalizedTaskId = taskId.trim();
 
     if (normalizedTaskId.isEmpty) {
@@ -45,11 +85,6 @@ final class WorkshopPreparedTaskInferenceRunner {
       );
     }
 
-    return _pipeline.run(
-      session: session,
-      preflight: preflight,
-      isOffline: isOffline,
-      cancellationToken: cancellationToken,
-    );
+    return session;
   }
 }

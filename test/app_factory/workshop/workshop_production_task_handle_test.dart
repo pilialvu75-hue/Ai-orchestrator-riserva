@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecyc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -119,6 +120,98 @@ void main() {
     expect(workspaceGateway.pushCalls, 0);
     expect(workspaceGateway.pullRequestCalls, 0);
   });
+
+  test('production coordinator resumes same task and forwards stable identity',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final engineer = _QueueGateway(
+      role: AppAiRole.engineer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[_success(_proposalJson)],
+    );
+    final reviewer = _QueueGateway(
+      role: AppAiRole.reviewer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_approvedReviewJson),
+        _success(_validValidationJson),
+      ],
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: <AppAiRole, WorkshopInferenceGateway>{
+        AppAiRole.workshopOrchestrator: _QueueGateway(
+          role: AppAiRole.workshopOrchestrator,
+          calls: calls,
+          results: <WorkshopInferenceResult>[_success('{}')],
+        ),
+        AppAiRole.architect: _QueueGateway(
+          role: AppAiRole.architect,
+          calls: calls,
+          results: <WorkshopInferenceResult>[_success('{}')],
+        ),
+        AppAiRole.engineer: engineer,
+        AppAiRole.reviewer: reviewer,
+      },
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final handle = await coordinator.startAndPrepare(
+      title: 'Resume handle test',
+      instruction: 'Continue the application change safely.',
+    );
+
+    const resume = WorkshopResumeContext(
+      executionId: 'execution-stable',
+      attemptId: 'attempt-2',
+      projectId: 'project-1',
+      taskId: 'task:initial-implementation',
+      sessionId: 'workshop-session-1',
+      objective: 'Continue implementation safely',
+      phase: 'implementation',
+      checkpointId: 'checkpoint-4',
+      completedSteps: <String>['analysis complete'],
+      changedFiles: <String>['lib/app.dart'],
+      decisions: <String>['preserve public API'],
+      verified: <String>['baseline tests passed'],
+      remainingWork: <String>['finish implementation'],
+      nextStep: 'update lib/app.dart',
+    );
+
+    final result = await coordinator.runPreparedWithResumeContext(
+      handle: handle,
+      resumeContext: resume,
+    );
+
+    expect(result.readyForApproval, isTrue);
+    expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
+    expect(workspaceGateway.files['lib/app.dart'], 'old');
+    expect(workspaceGateway.writeCalls, 0);
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ],
+    );
+    expect(engineer.lastIdentity, isNotNull);
+    expect(engineer.lastIdentity!['executionId'], 'execution-stable');
+    expect(engineer.lastIdentity!['attemptId'], 'attempt-2');
+    expect(engineer.lastIdentity!['taskId'], 'task:initial-implementation');
+    expect(engineer.lastIdentity!['projectId'], 'project-1');
+    expect(engineer.lastIdentity!['checkpointId'], 'checkpoint-4');
+    expect(engineer.lastIdentity!['sessionId'], 'workshop-session-1');
+    expect(engineer.lastPrompt, contains('analysis complete'));
+    expect(engineer.lastPrompt, contains('preserve public API'));
+    expect(engineer.lastPrompt, contains('baseline tests passed'));
+    expect(engineer.lastPrompt, contains('update lib/app.dart'));
+  });
 }
 
 const String _proposalJson =
@@ -174,6 +267,17 @@ final class _QueueGateway extends WorkshopInferenceGateway {
   final AppAiRole role;
   final List<AppAiRole> calls;
   final List<WorkshopInferenceResult> _results;
+  Map<String, String?>? lastIdentity;
+  String? lastPrompt;
+
+  WorkshopInferenceResult _nextResult(String prompt) {
+    calls.add(role);
+    lastPrompt = prompt;
+    if (_results.isEmpty) {
+      throw StateError('No queued result for ${role.id}.');
+    }
+    return _results.removeAt(0);
+  }
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -189,12 +293,40 @@ final class _QueueGateway extends WorkshopInferenceGateway {
     String? modelId,
     String? modelPath,
     CancellationToken? cancellationToken,
+  }) async =>
+      _nextResult(prompt);
+
+  @override
+  Future<WorkshopInferenceResult> completeWithIdentity({
+    required String prompt,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = true,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? modelId,
+    String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
+    CancellationToken? cancellationToken,
   }) async {
-    calls.add(role);
-    if (_results.isEmpty) {
-      throw StateError('No queued result for ${role.id}.');
-    }
-    return _results.removeAt(0);
+    lastIdentity = <String, String?>{
+      'requestId': requestId,
+      'projectId': projectId,
+      'taskId': taskId,
+      'executionId': executionId,
+      'attemptId': attemptId,
+      'checkpointId': checkpointId,
+      'sessionId': sessionId,
+    };
+    return _nextResult(prompt);
   }
 }
 

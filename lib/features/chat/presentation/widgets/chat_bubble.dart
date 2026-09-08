@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +22,9 @@ class ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cloudProviderLabel =
+        _isUser ? null : _cloudProviderDisplayName(message.provider);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
       child: Row(
@@ -66,6 +70,18 @@ class ChatBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (cloudProviderLabel != null) ...[
+                        Text(
+                          cloudProviderLabel,
+                          style: const TextStyle(
+                            color: Color(0xFF8AB4F8),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       if (message.attachments.isNotEmpty) ...[
                         Column(
                           children: message.attachments
@@ -121,6 +137,28 @@ class ChatBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _cloudProviderDisplayName(String? provider) {
+  final value = provider?.trim();
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+
+  final directMatch = CloudProviderCatalog.definitionFor(value);
+  if (directMatch != null) {
+    return directMatch.displayName;
+  }
+
+  final normalizedValue = value.toLowerCase();
+  for (final definition in CloudProviderCatalog.definitions.values) {
+    if (definition.id.toLowerCase() == normalizedValue ||
+        definition.displayName.toLowerCase() == normalizedValue) {
+      return definition.displayName;
+    }
+  }
+
+  return null;
 }
 
 class _AttachmentBubbleCard extends StatelessWidget {

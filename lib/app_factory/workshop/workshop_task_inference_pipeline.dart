@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_ga
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_runner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -73,6 +74,50 @@ final class WorkshopTaskInferencePipeline {
       cancellationToken: cancellationToken,
     );
 
+    return _reviewAndValidate(
+      session: session,
+      proposal: proposal,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  /// Continues an already prepared task from the authoritative semantic state
+  /// supplied by the Cantiere.
+  ///
+  /// Only the Engineer stage consumes the resume context and execution
+  /// identity. Review and validation keep their existing contracts and inspect
+  /// the proposal staged into the same WorkspaceSession. No second workspace,
+  /// task state or provider-owned conversation is created here.
+  Future<WorkshopTaskInferenceResult> runWithResumeContext({
+    required WorkspaceSession session,
+    required WorkshopResumeContext resumeContext,
+    WorkshopPreflightInferenceResult? preflight,
+    bool isOffline = true,
+    CancellationToken? cancellationToken,
+  }) async {
+    final proposal = await _implementationRunner.runWithResumeContext(
+      session: session,
+      resumeContext: resumeContext,
+      preflight: preflight,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+
+    return _reviewAndValidate(
+      session: session,
+      proposal: proposal,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  Future<WorkshopTaskInferenceResult> _reviewAndValidate({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) async {
     final review = await _reviewRunner.run(
       session: session,
       isOffline: isOffline,

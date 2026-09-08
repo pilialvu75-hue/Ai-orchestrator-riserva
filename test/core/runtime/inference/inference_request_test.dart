@@ -54,6 +54,32 @@ void main() {
         throwsUnsupportedError,
       );
     });
+
+    test('preserves execution while replacing only the attempt identity', () {
+      const request = InferenceRequest(
+        sessionId: 'session-1',
+        prompt: 'hello',
+        requestId: 'request-1',
+        projectId: 'project-1',
+        taskId: 'task-1',
+        executionId: 'execution-1',
+        attemptId: 'attempt-1',
+        checkpointId: 'checkpoint-1',
+      );
+
+      final next = request.copyWith(
+        attemptId: 'attempt-2',
+        checkpointId: 'checkpoint-2',
+      );
+
+      expect(next.sessionId, 'session-1');
+      expect(next.requestId, 'request-1');
+      expect(next.projectId, 'project-1');
+      expect(next.taskId, 'task-1');
+      expect(next.executionId, 'execution-1');
+      expect(next.attemptId, 'attempt-2');
+      expect(next.checkpointId, 'checkpoint-2');
+    });
   });
 
   group('InferenceRequest model defaults', () {
