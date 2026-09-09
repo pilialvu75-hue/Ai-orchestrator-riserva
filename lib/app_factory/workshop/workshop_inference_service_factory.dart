@@ -36,7 +36,12 @@ abstract final class WorkshopInferenceServiceFactory {
         modelId: normalizedModelId,
         repository: sl<LocalAiRepository>(),
       ),
-      loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
+      // Cantiere owns its runtime decision. The Assistant's persisted
+      // Local/Cloud/Hybrid preference must never leak into Workshop inference.
+      // Current Workshop model assignments are local GGUF models, so this
+      // boundary is deliberately local-only until a Cantiere-owned route
+      // explicitly selects a remote/cloud inference provider.
+      loadRuntimeMode: () async => AiRuntimeMode.local,
       runtimeProvider: sl<LocalRuntimeProvider>(),
       cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
       sessionManager: sl<RuntimeSessionManager>(),
