@@ -101,6 +101,12 @@ jobs:
       - name: Install glslc (required to compile ggml Vulkan shaders)
         run: |
           set -euo pipefail
+          # The hosted runner ships a Chrome apt source that is unrelated to
+          # this build. If that external index is mid-publish, apt can fail
+          # with Hash Sum mismatch before reaching Ubuntu's glslc/ccache.
+          sudo rm -f \
+            /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update -y
           sudo apt-get install -y glslc ccache
           glslc --version
