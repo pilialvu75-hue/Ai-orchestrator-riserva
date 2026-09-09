@@ -102,4 +102,14 @@ void main() {
     expect(success, isNot(contains('session')));
     expect(failure, isNot(contains('private-session')));
   });
+
+  test('does not mislabel an intermediate response chunk as success', () {
+    expect(
+      publicLogProjection(
+        '$time [FINAL_RESPONSE] [FINAL_RESPONSE] session=default attempt=1 '
+        'isFinal=false isError=false text_len=12',
+      ),
+      isNull,
+    );
+  });
 }
