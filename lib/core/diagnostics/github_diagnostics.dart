@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/diagnostics/diagnostics_release_body.dart';
+
 import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
@@ -241,6 +243,12 @@ class GitHubDiagnostics extends ChangeNotifier {
           'https://uploads.github.com/repos/$repository/releases/$id/assets?name=latest.txt',
           body: bytes.sublist(newline), binary: true);
         assets.add(Map<String, dynamic>.from(latest as Map));
+        // Commit the readable summary before acknowledging the local batch.
+        // A failed PATCH keeps the batch queued; retries reuse its archive asset.
+        await _request(client, token, 'PATCH', '$_root/releases/$id', body: {
+          'name': 'Diagnostica $deviceName',
+          'body': diagnosticsReleaseBody(utf8.decode(bytes)),
+        });
         await file.delete();
       }
       _failures = 0;
