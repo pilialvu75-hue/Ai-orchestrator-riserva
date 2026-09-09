@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
@@ -124,12 +125,19 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
 
   /// Creates the production bundle for a real local workspace while reusing
   /// the existing LocalGitWorkspaceGateway and shared inference service.
+  ///
+  /// When concrete build providers are supplied, production composition applies
+  /// the shared Remote Preferred / Local Fallback ordering before exposing the
+  /// Build Lab to the dashboard. Supplying an explicit [buildLab] still wins so
+  /// tests or specialized hosts can provide a fully composed lab directly.
   static WorkshopProductionLifecycleBundle createForWorkspace({
     required String workspaceRootPath,
     InferenceService? inferenceService,
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     WorkshopBuildLab? buildLab,
+    Iterable<WorkshopBuildProvider> buildProviders =
+        const <WorkshopBuildProvider>[],
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -141,11 +149,20 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       maxFileSizeBytes: maxFileSizeBytes,
     );
 
+    final resolvedBuildLab = buildLab ??
+        (buildProviders.isEmpty
+            ? null
+            : WorkshopBuildLab(
+                providers: WorkshopBuildProviderPolicy.remotePreferred(
+                  buildProviders,
+                ),
+              ));
+
     return create(
       projectExecutor: executor,
       inferenceService: inferenceService,
       assignments: assignments,
-      buildLab: buildLab,
+      buildLab: resolvedBuildLab,
       workspaceRootPath: normalizedWorkspaceRootPath,
     );
   }
