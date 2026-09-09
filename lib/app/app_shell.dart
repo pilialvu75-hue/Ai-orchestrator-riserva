@@ -153,9 +153,16 @@ class _AppShellState extends State<AppShell> {
 
       await navigator.push(
         MaterialPageRoute<void>(
-          builder: (_) => WorkshopProductionDashboardPage(
-            bundle: workshopBundle!,
-            modelAssignments: workshopAssignments,
+          builder: (_) => SafeArea(
+            top: false,
+            left: false,
+            right: false,
+            maintainBottomViewPadding: true,
+            minimum: const EdgeInsets.only(bottom: 12),
+            child: WorkshopProductionDashboardPage(
+              bundle: workshopBundle!,
+              modelAssignments: workshopAssignments,
+            ),
           ),
         ),
       );
