@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/diagnostics/github_diagnostics.dart';
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
@@ -57,6 +58,7 @@ Future<void> main() async {
   // be inspected on the next launch via Debug Lab → "Mostra log crash".
   await RuntimeEventLog.instance.initPersistence();
   unawaited(recordAndroidProcessExitHistory());
+  unawaited(GitHubDiagnostics.instance.initialize());
 
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
