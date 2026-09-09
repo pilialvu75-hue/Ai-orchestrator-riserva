@@ -10,24 +10,29 @@ class GitHubDiagnosticsPage extends StatefulWidget {
 
 class _GitHubDiagnosticsPageState extends State<GitHubDiagnosticsPage> {
   final _token = TextEditingController();
+  final _name = TextEditingController();
   final _service = GitHubDiagnostics.instance;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _service.initialize();
+    _service.initialize().then((_) {
+      if (mounted) setState(() => _name.text = _service.deviceName);
+    });
   }
 
   @override
   void dispose() {
     _token.dispose();
+    _name.dispose();
     super.dispose();
   }
 
   Future<void> _configure(bool enabled) async {
     setState(() => _saving = true);
     try {
+      await _service.renameDevice(_name.text);
       await _service.configure(_token.text, enabled);
       _token.clear();
     } catch (_) {
@@ -43,18 +48,25 @@ class _GitHubDiagnosticsPageState extends State<GitHubDiagnosticsPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Log su GitHub')),
+    appBar: AppBar(title: const Text('Diagnostica e dispositivi')),
     body: ListenableBuilder(
       listenable: _service,
       builder: (context, _) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const Text(GitHubDiagnostics.repository),
+          TextField(controller: _name, maxLength: 40, decoration: const InputDecoration(
+            labelText: 'Nome pubblico del dispositivo',
+            helperText: 'Lettere, numeri, spazi e trattini. Evita dati personali.',
+          )),
+          SelectableText('Installazione: ${_service.installationId}'),
+          Text('In attesa: ${_service.queuedFiles} file — ${(_service.queuedBytes / (1024 * 1024)).toStringAsFixed(2)} / 20 MiB'),
+          Text('Ultimo invio riuscito: ${_service.lastUpload?.toLocal() ?? "mai"}'),
           const SizedBox(height: 12),
           const Text('Invia automaticamente eventi tecnici filtrati da Runtime Diagnostics e dal log crash su disco. '
             'I dati pubblicati sono pubblici. Testi delle chat, percorsi, token e messaggi liberi delle eccezioni restano sul telefono.'),
           const SizedBox(height: 12),
-          const Text('File fino a 1 MiB, archivio fino a 20 MiB. latest.txt contiene fino a 250 KiB. '
+          const Text('File fino a 1 MiB, archivio fino a 20 MiB per dispositivo. latest.txt contiene fino a 250 KiB. '
             'Invio ogni minuto mentre l’app è attiva; dopo un crash riprende al riavvio. '
             'Quando la coda è piena, i file più vecchi vengono eliminati.'),
           const SizedBox(height: 16),
@@ -81,8 +93,8 @@ class _GitHubDiagnosticsPageState extends State<GitHubDiagnosticsPage> {
           ),
           Text(_service.status),
           TextButton(
-            onPressed: () => Clipboard.setData(const ClipboardData(
-              text: 'https://github.com/${GitHubDiagnostics.repository}/releases/tag/${GitHubDiagnostics.tag}',
+            onPressed: () => Clipboard.setData(ClipboardData(
+              text: _service.releaseUrl,
             )),
             child: const Text('Copia link ai log'),
           ),

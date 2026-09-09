@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -18,7 +19,25 @@ class GitHubDiagnostics extends ChangeNotifier {
   GitHubDiagnostics._();
   static final instance = GitHubDiagnostics._();
   static const repository = 'pilialvu75-hue/Ai-orchestrator-diagnostics';
-  static const tag = 'diagnostics-v1';
+  String get tag => 'diagnostics-v1-$installationId';
+  String installationId = '';
+  String deviceName = '';
+  final String sessionId = const Uuid().v4();
+  DateTime? lastUpload;
+  int get queuedFiles => _directory == null ? 0 : _files().length;
+  int get queuedBytes => _directory == null ? 0 : _files().fold<int>(0, (n, f) => n + f.lengthSync());
+  String get releaseUrl => 'https://github.com/$repository/releases/tag/$tag';
+
+  Future<void> renameDevice(String name) async {
+    await initialize();
+    final value = name.trim();
+    if (!RegExp(r'^[a-zA-Z0-9 _-]{1,40}$').hasMatch(value)) {
+      throw ArgumentError('Usa da 1 a 40 lettere, numeri, spazi o trattini');
+    }
+    await _prefs!.setString('diagnostics.deviceName', value);
+    deviceName = value;
+    notifyListeners();
+  }
   static const maxBytes = 20 * 1024 * 1024;
   static const chunkBytes = 1024 * 1024;
   static const _key = 'github.diagnostics.token.v1';
@@ -42,6 +61,10 @@ class GitHubDiagnostics extends ChangeNotifier {
     try {
       _prefs = await SharedPreferences.getInstance();
       enabled = _prefs!.getBool('diagnostics.enabled') ?? false;
+      installationId = _prefs!.getString('diagnostics.installationId') ?? const Uuid().v4();
+      await _prefs!.setString('diagnostics.installationId', installationId);
+      deviceName = _prefs!.getString('diagnostics.deviceName') ?? '${defaultTargetPlatform.name}-${installationId.substring(0, 8)}';
+      lastUpload = DateTime.tryParse(_prefs!.getString('diagnostics.lastUpload') ?? '');
       final dir = await getApplicationSupportDirectory();
       _directory = await Directory('${dir.path}/public-diagnostics-v1').create(recursive: true);
       final info = await PackageInfo.fromPlatform();
@@ -102,7 +125,7 @@ class GitHubDiagnostics extends ChangeNotifier {
 
   void _seal() {
     if (_pending.isEmpty || _directory == null) return;
-    final text = 'schema=1 build=$_build sources=runtime+android-disk\n${_pending.join('\n')}\n';
+    final text = 'schema=1 build=$_build device=$installationId name=$deviceName platform=${defaultTargetPlatform.name} capture_session=$sessionId sources=runtime+android-disk\n${_pending.join('\n')}\n';
     final bytes = utf8.encode(text);
     final hash = sha256.convert(bytes).toString();
     final crash = text.contains('ANDROID_PROCESS_EXIT_HISTORY') || text.contains('FORENSIC_UNCAUGHT_DART_EXCEPTION');
@@ -166,7 +189,7 @@ class GitHubDiagnostics extends ChangeNotifier {
       var release = await _request(client, token, 'GET', '$_root/releases/tags/$tag', missingOk: true);
       if (release == null) {
         release = await _request(client, token, 'POST', '$_root/releases', body: {
-          'tag_name': tag, 'name': 'Diagnostica applicazione',
+          'tag_name': tag, 'name': 'Diagnostica $deviceName',
           'body': 'Log tecnici filtrati. latest.txt: ultima porzione. diag-*.txt: archivio ruotato (20 MiB). Nessun testo di conversazione.',
         });
       }
@@ -221,6 +244,8 @@ class GitHubDiagnostics extends ChangeNotifier {
         await file.delete();
       }
       _failures = 0;
+      lastUpload = DateTime.now();
+      await _prefs!.setString('diagnostics.lastUpload', lastUpload!.toIso8601String());
       status = 'Caricamento riuscito: ${DateTime.now().toLocal()}';
     } catch (_) {
       _failures++;
