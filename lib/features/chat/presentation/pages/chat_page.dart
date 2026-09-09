@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
@@ -905,6 +906,8 @@ class _ChatBody
 
 class _ChatBodyState
     extends State<_ChatBody> {
+  static const String _automaticCloudProviderMenuValue = '__automatic__';
+
   final DebugLabController
       _debugLabController =
       DebugLabController.instance;
@@ -914,6 +917,11 @@ class _ChatBodyState
 
   late final ChatAppearanceViewModel
       _appearanceViewModel;
+
+  late final AiRuntimeSettingsService
+      _runtimeSettingsService;
+
+  String? _manualCloudProvider;
 
   // ------------------------------------------------------------
   // MESSAGE EDITING
@@ -936,12 +944,21 @@ class _ChatBodyState
     _appearanceViewModel =
         ChatAppearanceViewModel();
 
+    _runtimeSettingsService =
+        di.sl<AiRuntimeSettingsService>();
+    _manualCloudProvider =
+        _runtimeSettingsService.manualCloudProvider;
+
     _debugLabController.addListener(
       _handleDebugLabVisibilityChanged,
     );
 
     _appearanceViewModel.addListener(
       _handlePresentationStateChanged,
+    );
+
+    _runtimeSettingsService.addListener(
+      _handleRuntimeSettingsChanged,
     );
 
     _loadAssistantTextSize();
@@ -959,6 +976,11 @@ class _ChatBodyState
       _handlePresentationStateChanged,
     );
 
+    _runtimeSettingsService
+        .removeListener(
+      _handleRuntimeSettingsChanged,
+    );
+
     _appearanceViewModel.dispose();
 
     super.dispose();
@@ -972,6 +994,206 @@ class _ChatBodyState
   void _handlePresentationStateChanged() {
     if (!mounted) return;
     setState(() {});
+  }
+
+  void _handleRuntimeSettingsChanged() {
+    if (!mounted) return;
+    setState(() {
+      _manualCloudProvider =
+          _runtimeSettingsService.manualCloudProvider;
+    });
+  }
+
+  Future<void> _setCloudProviderSelection(String selection) async {
+    final provider = selection == _automaticCloudProviderMenuValue
+        ? null
+        : selection;
+
+    try {
+      await _runtimeSettingsService.setManualCloudProvider(provider);
+      _uiDebugLog(
+        action: 'cloud_provider_selection_changed',
+        sessionId: _kDefaultSessionId,
+        details: 'mode=${provider == null ? 'automatic' : 'manual'} '
+            'provider=${provider ?? 'auto'}',
+      );
+    } catch (error) {
+      _uiDebugLog(
+        action: 'cloud_provider_selection_failed',
+        sessionId: _kDefaultSessionId,
+        details: 'provider=${provider ?? 'auto'} error=$error',
+      );
+    }
+  }
+
+  String _cloudProviderChipLabel(String? provider) {
+    if (provider == null) return 'AUTO';
+    return switch (provider) {
+      'openAi' => 'OPENAI',
+      'gemini' => 'GEMINI',
+      'claude' => 'CLAUDE',
+      'grok' => 'GROK',
+      'copilot' => 'COPILOT',
+      _ => provider.toUpperCase(),
+    };
+  }
+
+  Widget _buildRuntimeModePill(Color surfaceColor) {
+    return GestureDetector(
+      onTap:
+          _appearanceViewModel
+              .handleSecretPatternClick,
+      child: Container(
+        padding:
+            const EdgeInsets
+                .symmetric(
+          horizontal: 14,
+          vertical: 6,
+        ),
+        decoration:
+            BoxDecoration(
+          color:
+              surfaceColor,
+          borderRadius:
+              BorderRadius.circular(
+            20,
+          ),
+          border:
+              Border.all(
+            color:
+                Colors.white12,
+          ),
+        ),
+        child: Row(
+          mainAxisSize:
+              MainAxisSize.min,
+          children: [
+            Text(
+              widget
+                  .runtimeModeName
+                  .toUpperCase(),
+              style:
+                  const TextStyle(
+                color:
+                    Colors.white70,
+                fontSize: 13,
+                fontWeight:
+                    FontWeight.w600,
+              ),
+            ),
+            const SizedBox(
+              width: 4,
+            ),
+            const Icon(
+              Icons
+                  .arrow_drop_down,
+              color:
+                  Colors.white38,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCloudProviderSelector(Color surfaceColor) {
+    final selectedProvider = _manualCloudProvider;
+    final automatic = selectedProvider == null;
+
+    return PopupMenuButton<String>(
+      tooltip: automatic
+          ? 'Provider Cloud: Automatico'
+          : 'Provider Cloud: ${CloudProviderCatalog.definitionFor(selectedProvider)?.displayName ?? selectedProvider}',
+      color: surfaceColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      onSelected: (selection) {
+        unawaited(_setCloudProviderSelection(selection));
+      },
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: _automaticCloudProviderMenuValue,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 24,
+                child: automatic
+                    ? const Icon(
+                        Icons.check,
+                        color: Color(0xFF4ADE80),
+                        size: 18,
+                      )
+                    : null,
+              ),
+              const Text('Automatico'),
+            ],
+          ),
+        ),
+        ...CloudProviderCatalog.supportedProviders.map(
+          (provider) => PopupMenuItem<String>(
+            value: provider,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  child: selectedProvider == provider
+                      ? const Icon(
+                          Icons.check,
+                          color: Color(0xFF4ADE80),
+                          size: 18,
+                        )
+                      : null,
+                ),
+                Text(
+                  CloudProviderCatalog.definitionFor(provider)?.displayName ??
+                      provider,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 6,
+        ),
+        decoration: BoxDecoration(
+          color: surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: automatic
+                ? Colors.white12
+                : const Color(0xFF4ADE80).withValues(alpha: 0.45),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _cloudProviderChipLabel(selectedProvider),
+              style: TextStyle(
+                color: automatic
+                    ? Colors.white60
+                    : const Color(0xFF4ADE80),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              color: automatic
+                  ? Colors.white38
+                  : const Color(0xFF4ADE80),
+              size: 15,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _loadAssistantTextSize() {
@@ -1500,62 +1722,15 @@ class _ChatBodyState
 
             centerTitle: true,
 
-            title:
-                GestureDetector(
-              onTap:
-                  _appearanceViewModel
-                      .handleSecretPatternClick,
-              child: Container(
-                padding:
-                    const EdgeInsets
-                        .symmetric(
-                  horizontal: 14,
-                  vertical: 6,
-                ),
-                decoration:
-                    BoxDecoration(
-                  color:
-                      surfaceColor,
-                  borderRadius:
-                      BorderRadius.circular(
-                    20,
-                  ),
-                  border:
-                      Border.all(
-                    color:
-                        Colors.white12,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize:
-                      MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget
-                          .runtimeModeName
-                          .toUpperCase(),
-                      style:
-                          const TextStyle(
-                        color:
-                            Colors.white70,
-                        fontSize: 13,
-                        fontWeight:
-                            FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(
-                      width: 4,
-                    ),
-                    const Icon(
-                      Icons
-                          .arrow_drop_down,
-                      color:
-                          Colors.white38,
-                      size: 16,
-                    ),
-                  ],
-                ),
-              ),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildRuntimeModePill(surfaceColor),
+                if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.cloud) ...[
+                  const SizedBox(width: 6),
+                  _buildCloudProviderSelector(surfaceColor),
+                ],
+              ],
             ),
 
             actions: [
