@@ -224,7 +224,7 @@ class GitHubDiagnostics extends ChangeNotifier {
       status = 'Caricamento riuscito: ${DateTime.now().toLocal()}';
     } catch (_) {
       _failures++;
-        final minutes = (1 << _failures.clamp(0, 6)).clamp(1, 60);
+        final minutes = (1 << _failures.clamp(0, 6).toInt()).clamp(1, 60).toInt();
       _nextAttempt = DateTime.now().add(Duration(minutes: minutes));
       status = 'Invio non riuscito: verifica rete, repository e token. Nuovo tentativo tra $minutes minuti.';
     } finally {
