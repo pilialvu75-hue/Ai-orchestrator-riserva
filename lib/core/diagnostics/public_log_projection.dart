@@ -78,19 +78,21 @@ String? publicLogProjection(String line) {
     });
   }
 
-  // FINAL_RESPONSE exposes only terminal outcome and response length. Session
-  // identifiers and response contents are deliberately discarded.
+  // FINAL_RESPONSE is exported only for a terminal chunk. Intermediate chunks
+  // are deliberately discarded so diagnostics cannot mislabel progress as a
+  // successful completed request. Session identifiers and response contents
+  // are never exported.
   if (event == 'FINAL_RESPONSE') {
     final finalResponse = RegExp(
       r'^session=[A-Za-z0-9._:-]{1,80} attempt=\d{1,9} '
       r'isFinal=(true|false) isError=(true|false) text_len=(\d{1,9})$',
     ).firstMatch(rest);
-    if (finalResponse == null) return null;
+    if (finalResponse == null || finalResponse[1] != 'true') return null;
     final isError = finalResponse[2] == 'true';
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': isError ? 'FINAL_RESPONSE_ERROR' : 'FINAL_RESPONSE_SUCCESS',
-      'is_final': finalResponse[1] == 'true',
+      'is_final': true,
       'text_len': int.parse(finalResponse[3]!),
     });
   }
