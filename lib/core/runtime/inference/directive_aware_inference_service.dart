@@ -16,7 +16,8 @@ import 'package:ai_orchestrator/core/tools/tool.dart';
 ///
 /// - default: follows persisted Local / Cloud / Hybrid mode;
 /// - local-only: always enters the existing Local branch;
-/// - cloud-only: always enters the existing Cloud branch.
+/// - cloud-only: always enters the existing Cloud branch and never constructs
+///   a local fallback request.
 ///
 /// This keeps native/FFI behaviour untouched while allowing the caller to own
 /// the routing decision. In particular:
@@ -40,7 +41,11 @@ final class DirectiveAwareInferenceService extends InferenceService {
           webSearchTool: webSearchTool,
         ),
         _cloudOnlyService = InferenceService(
-          loadSelectedModel: loadSelectedModel,
+          // An explicit cloudOnly directive must be a hard routing boundary.
+          // Returning null here prevents InferenceService from constructing a
+          // localRequest, so a Cloud authentication/network/provider failure
+          // is surfaced to the caller instead of silently answering locally.
+          loadSelectedModel: () async => null,
           loadRuntimeMode: () async => AiRuntimeMode.cloud,
           runtimeProvider: runtimeProvider,
           cloudRuntimeProvider: cloudRuntimeProvider,
