@@ -245,9 +245,11 @@ class GitHubDiagnostics extends ChangeNotifier {
         assets.add(Map<String, dynamic>.from(latest as Map));
         // Commit the readable summary before acknowledging the local batch.
         // A failed PATCH keeps the batch queued; retries reuse its archive asset.
-        await _request(client, token, 'PATCH', '$_root/releases/$id', body: {
+        final summary = diagnosticsReleaseBody(utf8.decode(bytes),
+          previousBody: release['body'] as String? ?? '');
+        release = await _request(client, token, 'PATCH', '$_root/releases/$id', body: {
           'name': 'Diagnostica $deviceName',
-          'body': diagnosticsReleaseBody(utf8.decode(bytes)),
+          'body': summary,
         });
         await file.delete();
       }
