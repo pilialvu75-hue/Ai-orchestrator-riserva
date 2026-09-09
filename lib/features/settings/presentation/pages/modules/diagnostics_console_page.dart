@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/diagnostics/github_diagnostics_page.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -117,6 +118,13 @@ class _DiagnosticsConsolePageState extends State<DiagnosticsConsolePage> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Log su GitHub',
+            icon: const Icon(Icons.cloud_upload_outlined),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => const GitHubDiagnosticsPage(),
+            )),
+          ),
           // Auto-scroll toggle
           IconButton(
             tooltip: _autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF',

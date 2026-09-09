@@ -333,8 +333,13 @@ class ChatRepositoryImpl implements ChatRepository {
     final directInference = inferenceService;
 
     if (settings?.runtimeMode == AiRuntimeMode.cloud && directInference != null) {
+      final manualProvider = settings!.manualCloudProvider;
+      final automaticProviderSelection = manualProvider == null;
       _log(
-        '[CLOUD_DIRECT_ROUTE] session=$sessionId orchestrator_bypassed=true provider_authority=cloud_router',
+        '[CLOUD_DIRECT_ROUTE] session=$sessionId orchestrator_bypassed=true '
+        'provider_authority=${automaticProviderSelection ? 'cloud_router' : 'manual'} '
+        'provider=${manualProvider ?? 'auto'} '
+        'failover=$automaticProviderSelection',
       );
       _log(
         '[STREAM_SUBSCRIBE] session=$sessionId stream=inference_service.direct_cloud hash=${hashCode.toRadixString(16)}',
@@ -349,7 +354,8 @@ class ChatRepositoryImpl implements ChatRepository {
           context: context,
           isOffline: false,
           routeDirective: InferenceRouteDirective.cloudOnly,
-          allowCloudProviderFailover: true,
+          cloudProviderId: manualProvider,
+          allowCloudProviderFailover: automaticProviderSelection,
         ),
       );
     }
@@ -389,8 +395,7 @@ class ChatRepositoryImpl implements ChatRepository {
     int maxRows = AppConstants.chatHistoryMaxRows,
   }) async {
     try {
-      final cutoff =
-          DateTime.now().subtract(Duration(days: maxAgeDays));
+      final cutoff = DateTime.now().subtract(Duration(days: maxAgeDays));
       int deleted = await localDataSource.deleteOldMessages(cutoff);
       final remaining = await localDataSource.countMessages();
       if (remaining > maxRows) {

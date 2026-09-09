@@ -42,7 +42,8 @@ class ClaudeDataSource {
       body: jsonEncode(<String, dynamic>{
         'model': resolvedModel,
         'max_tokens': request.maxTokens,
-        'temperature': request.temperature,
+        if (_supportsTemperature(resolvedModel))
+          'temperature': request.temperature,
         if (request.combinedSystemPrompt case final system?)
           'system': system,
         'messages': request.toClaudeMessages(),
@@ -80,4 +81,7 @@ class ClaudeDataSource {
     final requested = request.modelId?.trim();
     return requested != null && requested.isNotEmpty ? requested : model;
   }
+
+  bool _supportsTemperature(String modelId) =>
+      modelId.trim().toLowerCase() != 'claude-sonnet-5';
 }
