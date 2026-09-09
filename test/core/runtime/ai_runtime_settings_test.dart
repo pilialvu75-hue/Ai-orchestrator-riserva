@@ -40,6 +40,32 @@ void main() {
       expect(service.activeProvider, 'gemini');
     });
 
+    test('persists manual Cloud provider and clears back to automatic',
+        () async {
+      final service = await createService();
+
+      expect(service.manualCloudProvider, isNull);
+      expect(service.isCloudProviderAutomatic, isTrue);
+
+      await service.setManualCloudProvider('claude');
+      expect(service.manualCloudProvider, 'claude');
+      expect(service.isCloudProviderAutomatic, isFalse);
+
+      await service.setManualCloudProvider(null);
+      expect(service.manualCloudProvider, isNull);
+      expect(service.isCloudProviderAutomatic, isTrue);
+    });
+
+    test('manual Cloud provider rejects unsupported provider IDs', () async {
+      final service = await createService();
+
+      await expectLater(
+        service.setManualCloudProvider('unsupported'),
+        throwsArgumentError,
+      );
+      expect(service.manualCloudProvider, isNull);
+    });
+
     test('falls back to OpenAI for unsupported providers', () async {
       final service = await createService(
         <String, Object>{AppConstants.prefActiveProvider: 'unsupported'},
