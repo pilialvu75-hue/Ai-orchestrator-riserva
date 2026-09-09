@@ -93,7 +93,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   final Map<String, _ProviderHealth> _providerHealth = <String, _ProviderHealth>{};
   final LinkedHashMap<String, _CachedCloudResponse> _responseCache =
       LinkedHashMap<String, _CachedCloudResponse>();
-  bool _pendingLocalFallbackNotice = false;
+  String? _pendingLocalFallbackNotice;
 
   /// Automatic Cloud availability used by Hybrid routing.
   ///
@@ -166,9 +166,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String? consumeRuntimeNotice() {
-    if (!_pendingLocalFallbackNotice) return null;
-    _pendingLocalFallbackNotice = false;
-    return fullyLocalNotice;
+    final notice = _pendingLocalFallbackNotice;
+    _pendingLocalFallbackNotice = null;
+    return notice;
   }
 
   bool shouldFallBackToLocal(String? message) {
@@ -219,9 +219,13 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     );
 
     if (!hasReadyProvider) {
-      _pendingLocalFallbackNotice = true;
+      final message = _noReadyProviderMessage(
+        providerOrder,
+        explicitCloud: explicitCloud,
+      );
+      _pendingLocalFallbackNotice = message;
       yield InferenceResponse.error(
-        fullyLocalNotice,
+        message,
         state: InferenceTerminalState.modelUnavailable,
         providerId: optimized.cloudProviderId,
       );
@@ -346,17 +350,20 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     );
 
     if (!anyReadyAfterFailure) {
-      _pendingLocalFallbackNotice = true;
+      final message = lastError ?? fullyLocalNotice;
+      _pendingLocalFallbackNotice = message;
       yield InferenceResponse.error(
-        fullyLocalNotice,
+        message,
         state: InferenceTerminalState.modelUnavailable,
         providerId: lastProvider,
       );
       return;
     }
 
+    final message = lastError ?? 'Cloud AI request failed.';
+    _pendingLocalFallbackNotice = message;
     yield InferenceResponse.error(
-      lastError ?? 'Cloud AI request failed.',
+      message,
       providerId: lastProvider,
     );
   }
@@ -498,6 +505,56 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   bool _isExplicitCloudRequest(InferenceRequest request) {
     return request.routeDirective == InferenceRouteDirective.cloudOnly &&
         (request.cloudProviderId == null || request.cloudProviderId!.trim().isEmpty);
+  }
+
+  String _noReadyProviderMessage(
+    List<String> providerOrder, {
+    required bool explicitCloud,
+  }) {
+    if (!explicitCloud) {
+      return fullyLocalNotice;
+    }
+
+    final candidates = providerOrder.isEmpty
+        ? _supportedProviders().toList(growable: false)
+        : providerOrder;
+
+    if (candidates.isEmpty) {
+      return 'No Cloud AI provider is configured. '
+          'Configure a provider in Settings > AI mode.';
+    }
+
+    final configured = candidates.where(_isProviderAvailable).toList();
+    if (configured.isEmpty) {
+      final preferred = _preferredProvider()?.trim();
+      final provider = preferred != null &&
+              preferred.isNotEmpty &&
+              candidates.contains(preferred)
+          ? preferred
+          : candidates.first;
+      return '${_providerDisplayName(provider)} not configured. '
+          'Add an API key in Settings > AI mode.';
+    }
+
+    final now = DateTime.now();
+    for (final provider in configured) {
+      final health = _providerHealth[provider];
+      if (health?.rateLimitedUntil?.isAfter(now) ?? false) {
+        return '${_providerDisplayName(provider)} rate limit reached. '
+            'Retry later or choose another provider in Settings > AI mode.';
+      }
+      if (health?.quotaBlockedUntil?.isAfter(now) ?? false) {
+        return '${_providerDisplayName(provider)} quota unavailable. '
+            'Check the provider account or choose another provider in Settings > AI mode.';
+      }
+      if (health?.unavailableUntil?.isAfter(now) ?? false) {
+        return '${_providerDisplayName(provider)} network unavailable. '
+            'Check the connection or choose another provider in Settings > AI mode.';
+      }
+    }
+
+    return 'Cloud AI providers are temporarily unavailable. '
+        'Check provider status in Settings > AI mode.';
   }
 
   String _selectedModel(String provider) {
