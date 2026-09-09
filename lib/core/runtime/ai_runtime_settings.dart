@@ -74,6 +74,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   static const String _cloudModelPrefix = 'cloud.provider.model.';
   static const String _cloudSpendingModeKey = 'cloud.spending.mode';
   static const String _cloudBudgetLimitKey = 'cloud.spending.budget_limit';
+  static const String _manualCloudProviderKey = 'cloud.manual_provider';
 
   final ConfigRepository _configRepository;
 
@@ -82,6 +83,17 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   String get activeProvider =>
       normalizeProvider(_configRepository.getString(AppConstants.prefActiveProvider));
+
+  /// Null means that direct Cloud chat is in Automatic mode and the Cloud
+  /// router is free to select and fail over between configured providers.
+  /// A concrete provider pins direct Cloud chat to that provider only.
+  String? get manualCloudProvider {
+    final stored = _configRepository.getString(_manualCloudProviderKey)?.trim();
+    if (stored == null || stored.isEmpty) return null;
+    return supportedProviders.contains(stored) ? stored : null;
+  }
+
+  bool get isCloudProviderAutomatic => manualCloudProvider == null;
 
   Future<AiRuntimeMode> loadRuntimeMode() async => runtimeMode;
 
@@ -98,6 +110,31 @@ class AiRuntimeSettingsService extends ChangeNotifier {
       AppConstants.prefActiveProvider,
       normalizeProvider(provider),
     );
+    notifyListeners();
+  }
+
+  /// Selects a provider exclusively for direct Cloud chat.
+  ///
+  /// Passing null returns to Automatic mode. Unsupported provider IDs are
+  /// rejected instead of silently falling back to OpenAI, because a manual
+  /// selection must always mean exactly the provider chosen by the user.
+  Future<void> setManualCloudProvider(String? provider) async {
+    final normalized = provider?.trim();
+    if (normalized == null || normalized.isEmpty) {
+      await _configRepository.remove(_manualCloudProviderKey);
+      notifyListeners();
+      return;
+    }
+
+    if (!supportedProviders.contains(normalized)) {
+      throw ArgumentError.value(
+        provider,
+        'provider',
+        'Unsupported Cloud provider.',
+      );
+    }
+
+    await _configRepository.setString(_manualCloudProviderKey, normalized);
     notifyListeners();
   }
 
