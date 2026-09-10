@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
+import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -44,8 +45,8 @@ class PromptResolvingChatRepository implements ChatRepository {
 
   @override
   Future<int> pruneHistory({
-    int maxAgeDays = 30,
-    int maxRows = 1000,
+    int maxAgeDays = AppConstants.chatHistoryMaxAgeDays,
+    int maxRows = AppConstants.chatHistoryMaxRows,
   }) {
     return _delegate.pruneHistory(
       maxAgeDays: maxAgeDays,
