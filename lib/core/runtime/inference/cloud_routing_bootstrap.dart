@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
+import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
+import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
@@ -14,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
@@ -29,6 +32,17 @@ abstract final class CloudRoutingBootstrap {
     await _unregisterIfPresent<Orchestrator>(sl);
     await _unregisterIfPresent<PlannerService>(sl);
     await _unregisterIfPresent<InferenceService>(sl);
+
+    final assistantSystemPromptService = AssistantSystemPromptService(
+      configRepository: sl<ConfigRepository>(),
+    );
+    final migratedLegacyPrompt =
+        await assistantSystemPromptService.migrateLegacyDefaultIfNeeded();
+    if (migratedLegacyPrompt) {
+      debugPrint(
+        '[ASSISTANT_PROMPT] migrated legacy bundled prompt to conversational core',
+      );
+    }
 
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(
@@ -71,14 +85,17 @@ abstract final class CloudRoutingBootstrap {
     );
 
     sl.registerLazySingleton<ChatRepository>(
-      () => ChatRepositoryImpl(
-        localDataSource: sl<ChatLocalDataSource>(),
-        conversationMemoryService: sl<ConversationMemoryService>(),
-        inferenceService: sl<InferenceService>(),
-        runtimeSettingsService: sl<AiRuntimeSettingsService>(),
-        // Important: do not resolve Orchestrator here. Explicit Cloud chat must
-        // remain constructible and usable even if Hannibal is unavailable.
-        orchestratorProvider: () => sl<Orchestrator>(),
+      () => PromptResolvingChatRepository(
+        systemPromptService: assistantSystemPromptService,
+        delegate: ChatRepositoryImpl(
+          localDataSource: sl<ChatLocalDataSource>(),
+          conversationMemoryService: sl<ConversationMemoryService>(),
+          inferenceService: sl<InferenceService>(),
+          runtimeSettingsService: sl<AiRuntimeSettingsService>(),
+          // Important: do not resolve Orchestrator here. Explicit Cloud chat
+          // must remain constructible and usable even if Hannibal is unavailable.
+          orchestratorProvider: () => sl<Orchestrator>(),
+        ),
       ),
     );
 
