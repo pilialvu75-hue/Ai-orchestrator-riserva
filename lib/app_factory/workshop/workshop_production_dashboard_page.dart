@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.da
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
@@ -345,9 +346,11 @@ class _WorkshopProductionDashboardPageState
         top: false,
         left: false,
         right: false,
-        child: WorkshopDashboardPage(
-          dashboardController: widget.bundle.dashboardController,
-          modelAssignments: widget.modelAssignments,
+        child: WorkshopConversationSelection(
+          child: WorkshopDashboardPage(
+            dashboardController: widget.bundle.dashboardController,
+            modelAssignments: widget.modelAssignments,
+          ),
         ),
       ),
       bottomNavigationBar: AnimatedBuilder(
