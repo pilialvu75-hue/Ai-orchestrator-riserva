@@ -1,3 +1,5 @@
+import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_store.dart';
+
 enum CloudProviderCapability {
   general,
   reasoning,
@@ -22,6 +24,7 @@ class CloudProviderDefinition {
     required this.costClass,
     this.supportsApiKey = true,
     this.supportsOAuth = false,
+    this.isCustom = false,
   });
 
   final String id;
@@ -31,6 +34,7 @@ class CloudProviderDefinition {
   final CloudProviderCostClass costClass;
   final bool supportsApiKey;
   final bool supportsOAuth;
+  final bool isCustom;
 
   bool supports(CloudProviderCapability capability) =>
       capabilities.contains(capability);
@@ -38,13 +42,14 @@ class CloudProviderDefinition {
 
 /// Canonical Cloud provider registry.
 ///
-/// The catalog contains provider metadata and capabilities only. It does not
-/// decide which provider must execute a task; routing belongs to the runtime
-/// router and can additionally consider health, quota, budget and user policy.
+/// Built-in providers remain compile-time definitions. User-created provider
+/// profiles are projected into the same read-only contract at runtime, so
+/// routing/settings do not need new code whenever a compatible provider is
+/// added later.
 class CloudProviderCatalog {
   CloudProviderCatalog._();
 
-  static const Map<String, CloudProviderDefinition> definitions =
+  static const Map<String, CloudProviderDefinition> _builtInDefinitions =
       <String, CloudProviderDefinition>{
     'openAi': CloudProviderDefinition(
       id: 'openAi',
@@ -119,28 +124,63 @@ class CloudProviderCatalog {
     ),
   };
 
-  static const List<String> supportedProviders = <String>[
-    'openAi',
-    'gemini',
-    'claude',
-    'grok',
-    'copilot',
-  ];
+  static Map<String, CloudProviderDefinition> get definitions {
+    final result = <String, CloudProviderDefinition>{
+      ..._builtInDefinitions,
+    };
+    for (final profile in CustomCloudProviderStore.instance.profiles) {
+      result[profile.id] = _fromCustom(profile);
+    }
+    return Map<String, CloudProviderDefinition>.unmodifiable(result);
+  }
 
-  static CloudProviderDefinition? definitionFor(String providerId) =>
-      definitions[providerId];
+  static List<String> get supportedProviders =>
+      List<String>.unmodifiable(definitions.keys);
+
+  static bool isBuiltIn(String providerId) =>
+      _builtInDefinitions.containsKey(providerId);
+
+  static bool isCustom(String providerId) =>
+      CustomCloudProviderStore.instance.contains(providerId);
+
+  static CloudProviderDefinition? definitionFor(String providerId) {
+    final builtIn = _builtInDefinitions[providerId];
+    if (builtIn != null) return builtIn;
+    final custom = CustomCloudProviderStore.instance.profileFor(providerId);
+    return custom == null ? null : _fromCustom(custom);
+  }
 
   static String defaultModelFor(String providerId) =>
-      definitions[providerId]?.defaultModel ?? '';
+      definitionFor(providerId)?.defaultModel ?? '';
 
   static CloudProviderCostClass costClassFor(String providerId) =>
-      definitions[providerId]?.costClass ?? CloudProviderCostClass.unknown;
+      definitionFor(providerId)?.costClass ?? CloudProviderCostClass.unknown;
 
   static bool supports(
     String providerId,
     CloudProviderCapability capability,
   ) =>
-      definitions[providerId]?.supports(capability) ?? false;
+      definitionFor(providerId)?.supports(capability) ?? false;
+
+  static CloudProviderDefinition _fromCustom(
+    CustomCloudProviderProfile profile,
+  ) {
+    return CloudProviderDefinition(
+      id: profile.id,
+      displayName: profile.displayName,
+      defaultModel: profile.defaultModel,
+      costClass: profile.billing == CustomCloudProviderBilling.free
+          ? CloudProviderCostClass.freeTier
+          : CloudProviderCostClass.paid,
+      isCustom: true,
+      capabilities: const <CloudProviderCapability>{
+        CloudProviderCapability.general,
+        CloudProviderCapability.reasoning,
+        CloudProviderCapability.coding,
+        CloudProviderCapability.longContext,
+      },
+    );
+  }
 
   /// Compatibility ordering for older callers. New routing code must score
   /// concrete executor state instead of treating these lists as fixed policy.
