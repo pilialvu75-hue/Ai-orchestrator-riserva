@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
@@ -67,6 +68,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     String? Function(String provider)? modelForProvider,
     String? Function()? preferredProvider,
     bool Function(String provider)? automaticUseAllowed,
+    bool Function(String provider, CloudTaskClass task)? automaticUseAllowedForTask,
   })  : _sendQuery = sendQuery,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
@@ -76,7 +78,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         _preferredProvider = preferredProvider ??
             (() => CloudRuntimePreferences.instance.preferredProvider),
         _automaticUseAllowed = automaticUseAllowed ??
-            CloudRuntimePreferences.instance.automaticUseAllowed;
+            CloudRuntimePreferences.instance.automaticUseAllowed,
+        _automaticUseAllowedForTask = automaticUseAllowedForTask ??
+            (automaticUseAllowed != null
+                ? ((provider, _) => automaticUseAllowed(provider))
+                : CloudRuntimePreferences.instance.automaticUseAllowedForTask);
 
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
@@ -93,30 +99,29 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   final String? Function(String provider) _modelForProvider;
   final String? Function() _preferredProvider;
   final bool Function(String provider) _automaticUseAllowed;
+  final bool Function(String provider, CloudTaskClass task)
+      _automaticUseAllowedForTask;
 
   final Map<String, _ProviderHealth> _providerHealth = <String, _ProviderHealth>{};
   final LinkedHashMap<String, _CachedCloudResponse> _responseCache =
       LinkedHashMap<String, _CachedCloudResponse>();
   String? _pendingLocalFallbackNotice;
 
-  /// Automatic Cloud availability used by Hybrid routing.
+  /// Aggregate automatic Cloud availability used by legacy callers.
   ///
-  /// It intentionally honours the automatic-spending policy. Direct Cloud
-  /// requests that pin a provider manually are treated separately by
-  /// [canInferFor].
+  /// A provider counts as available when at least one task class may use it
+  /// automatically. Request-specific decisions must use [canInferFor].
   bool get canInfer => _supportedProviders().any(
-        (provider) => _isProviderReady(
-          provider,
-          enforceAutomaticPolicy: true,
+        (provider) => CloudTaskClass.values.any(
+          (task) => _isProviderReady(
+            provider,
+            task: task,
+            enforceAutomaticPolicy: true,
+          ),
         ),
       );
 
-  bool get areAllProvidersUnavailable => _supportedProviders().every(
-        (provider) => !_isProviderReady(
-          provider,
-          enforceAutomaticPolicy: true,
-        ),
-      );
+  bool get areAllProvidersUnavailable => !canInfer;
 
   List<CloudProviderStatusSnapshot> get providerStatuses =>
       _supportedProviders().map(_statusFor).toList(growable: false);
@@ -125,8 +130,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   ///
   /// A manually pinned direct-Cloud provider is an explicit user choice and
   /// therefore bypasses the *automatic* spending gate. Direct Cloud AUTO and
-  /// Hybrid routing remain governed by that gate. Authentication, quota,
-  /// rate-limit and health gates always apply.
+  /// Hybrid routing remain governed by the task-aware gate. Authentication,
+  /// quota, rate-limit and health gates always apply.
   bool canInferFor(InferenceRequest request) {
     final manualCloud = _isManualCloudRequest(request);
     final signal = _taskSignal(request);
@@ -139,6 +144,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return order.any(
       (provider) => _isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: !manualCloud,
       ),
     );
@@ -163,6 +169,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     for (final provider in order) {
       if (_isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: enforceAutomaticPolicy,
       )) {
         return provider;
@@ -190,7 +197,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   bool shouldPreferCloudFor(InferenceRequest request) {
     final signal = _taskSignal(request);
-    return signal == _TaskSignal.coding || signal == _TaskSignal.reasoning;
+    return signal == CloudTaskClass.coding ||
+        signal == CloudTaskClass.reasoning;
   }
 
   @override
@@ -221,6 +229,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     final hasReadyProvider = providerOrder.any(
       (provider) => _isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: enforceAutomaticPolicy,
       ),
     );
@@ -228,6 +237,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     if (!hasReadyProvider) {
       final message = _noReadyProviderMessage(
         providerOrder,
+        task: signal,
         directCloud: directCloud,
         manualCloud: manualCloud,
       );
@@ -258,6 +268,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     for (final provider in providerOrder) {
       if (!_isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: enforceAutomaticPolicy,
       )) {
         continue;
@@ -353,6 +364,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     final anyReadyAfterFailure = providerOrder.any(
       (provider) => _isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: enforceAutomaticPolicy,
       ),
     );
@@ -428,7 +440,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         .toList(growable: false);
   }
 
-  _TaskSignal _taskSignal(InferenceRequest request) {
+  CloudTaskClass _taskSignal(InferenceRequest request) {
     final userContextText = request.context
         .where((turn) => turn.role == ChatRole.user)
         .map((turn) => turn.content)
@@ -440,13 +452,13 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     // "continue" keeps the relevant task type without model text causing an
     // unnecessary Cloud escalation.
     final text = '$userContextText\n${request.prompt}'.toLowerCase();
-    if (_containsAny(text, _codingKeywords)) return _TaskSignal.coding;
-    if (_containsAny(text, _reasoningKeywords)) return _TaskSignal.reasoning;
-    return _TaskSignal.general;
+    if (_containsAny(text, _codingKeywords)) return CloudTaskClass.coding;
+    if (_containsAny(text, _reasoningKeywords)) return CloudTaskClass.reasoning;
+    return CloudTaskClass.general;
   }
 
   List<String> _providerOrder(
-    _TaskSignal signal, {
+    CloudTaskClass signal, {
     String? pinnedProvider,
     required bool allowFailover,
     required bool enforceAutomaticPolicy,
@@ -467,9 +479,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     for (var index = 0; index < available.length; index++) {
       final provider = available[index];
       final capability = switch (signal) {
-        _TaskSignal.coding => CloudProviderCapability.coding,
-        _TaskSignal.reasoning => CloudProviderCapability.reasoning,
-        _TaskSignal.general => CloudProviderCapability.general,
+        CloudTaskClass.coding => CloudProviderCapability.coding,
+        CloudTaskClass.reasoning => CloudProviderCapability.reasoning,
+        CloudTaskClass.general => CloudProviderCapability.general,
       };
 
       var score = 0.0;
@@ -480,6 +492,23 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       )) {
         score += 10;
       }
+
+      // Automatic routing is strictly free-first. Paid Cloud can participate
+      // only after every usable free-tier route has been filtered out by
+      // capability, configuration, health/quota or spending policy.
+      if (enforceAutomaticPolicy) {
+        switch (CloudProviderCatalog.costClassFor(provider)) {
+          case CloudProviderCostClass.freeTier:
+            score += 1000;
+            break;
+          case CloudProviderCostClass.paid:
+            break;
+          case CloudProviderCostClass.unknown:
+            score -= 500;
+            break;
+        }
+      }
+
       if (preferred != null && preferred == provider) score += 25;
       if (normalizedPinned != null && normalizedPinned == provider) score += 1000;
 
@@ -498,6 +527,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
       if (!_isProviderReady(
         provider,
+        task: signal,
         enforceAutomaticPolicy: enforceAutomaticPolicy,
       )) {
         score -= 10000;
@@ -533,6 +563,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   String _noReadyProviderMessage(
     List<String> providerOrder, {
+    required CloudTaskClass task,
     required bool directCloud,
     required bool manualCloud,
   }) {
@@ -561,7 +592,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           'Add an API key in Settings > AI mode.';
     }
 
-    if (!manualCloud && configured.every((provider) => !_automaticUseAllowed(provider))) {
+    if (!manualCloud &&
+        configured.every(
+          (provider) => !_automaticUseAllowedForTask(provider, task),
+        )) {
       return automaticPolicyBlockedNotice;
     }
 
@@ -596,10 +630,14 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   bool _isProviderReady(
     String provider, {
+    required CloudTaskClass task,
     required bool enforceAutomaticPolicy,
   }) {
     if (!_isProviderAvailable(provider)) return false;
-    if (enforceAutomaticPolicy && !_automaticUseAllowed(provider)) return false;
+    if (enforceAutomaticPolicy &&
+        !_automaticUseAllowedForTask(provider, task)) {
+      return false;
+    }
 
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     final now = DateTime.now();
@@ -615,6 +653,13 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     return true;
+  }
+
+  bool _automaticUseAllowedForAnyTask(String provider) {
+    if (_automaticUseAllowed(provider)) return true;
+    return CloudTaskClass.values.any(
+      (task) => _automaticUseAllowedForTask(provider, task),
+    );
   }
 
   void _markSuccess(String provider, int latencyMs) {
@@ -673,7 +718,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
-    if (!_automaticUseAllowed(provider)) {
+    if (!_automaticUseAllowedForAnyTask(provider)) {
       return _snapshot(
         provider,
         health,
@@ -737,7 +782,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   String _cacheKey(
     List<String> providerOrder,
     InferenceRequest request,
-    _TaskSignal signal,
+    CloudTaskClass signal,
   ) {
     final contextHash = Object.hashAll(
       request.context.map(
@@ -813,12 +858,15 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const Set<String> _codingKeywords = <String>{
     'code',
     'coding',
+    'codice',
     'bug',
     'debug',
     'refactor',
     'algorithm',
     'function',
+    'funzione',
     'class',
+    'classe',
     'typescript',
     'flutter',
     'dart',
@@ -826,6 +874,12 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     'java',
     'rust',
     'stack trace',
+    'stacktrace',
+    'repository',
+    'github',
+    'build',
+    'compilazione',
+    'compilare',
   };
 
   static const Set<String> _reasoningKeywords = <String>{
@@ -833,13 +887,22 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     'reasoning',
     'analyze',
     'analysis',
+    'analizza',
+    'analisi',
     'compare',
+    'confronta',
+    'confronto',
     'tradeoff',
     'proof',
     'explain why',
     'decision',
+    'decisione',
     'strategy',
+    'strategia',
     'plan',
+    'pianifica',
+    'pianificazione',
+    'architettura',
   };
 }
 
@@ -890,5 +953,3 @@ class _ProviderHealth {
         : (averageLatencyMs! * 0.7) + (latencyMs * 0.3);
   }
 }
-
-enum _TaskSignal { general, coding, reasoning }
