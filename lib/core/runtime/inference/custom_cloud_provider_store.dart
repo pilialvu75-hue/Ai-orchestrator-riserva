@@ -66,12 +66,13 @@ class CustomCloudProviderProfile {
   }
 }
 
-/// User-managed Cloud provider profiles.
+/// User-managed Cloud provider profiles plus a small immutable system registry
+/// for provider-neutral, OpenAI-compatible Free Intelligence Pool routes.
 ///
-/// Only non-secret metadata is stored here. API keys remain in
+/// Only user-created metadata is persisted here. API keys remain in
 /// [CloudCredentialStore] and therefore use encrypted device storage.
-/// A profile lets future OpenAI/Anthropic/Gemini-compatible providers be added
-/// from Settings without shipping a new app build.
+/// System profiles are not exposed through [profiles], so the Settings editor
+/// cannot delete or mutate the built-in compatible routes.
 final class CustomCloudProviderStore extends ChangeNotifier {
   CustomCloudProviderStore._();
 
@@ -80,17 +81,61 @@ final class CustomCloudProviderStore extends ChangeNotifier {
   static const String _storageKey = 'cloud.custom.providers.v1';
   static const int _maxProfiles = 24;
 
+  /// These providers deliberately use the same generic OpenAI-compatible
+  /// executor as user-created profiles. That keeps transport wiring
+  /// provider-neutral while CloudProviderCatalog remains the source of truth
+  /// for access/cost classification and routing policy.
+  static const Map<String, CustomCloudProviderProfile> _systemProfiles =
+      <String, CustomCloudProviderProfile>{
+    'groq': CustomCloudProviderProfile(
+      id: 'groq',
+      displayName: 'Groq',
+      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      defaultModel: 'qwen/qwen3.8-27b',
+      protocol: CustomCloudProviderProtocol.openAiCompatible,
+      billing: CustomCloudProviderBilling.free,
+    ),
+    'nvidiaNim': CustomCloudProviderProfile(
+      id: 'nvidiaNim',
+      displayName: 'NVIDIA NIM',
+      endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      defaultModel: 'meta/llama-3.1-8b-instruct',
+      protocol: CustomCloudProviderProtocol.openAiCompatible,
+      billing: CustomCloudProviderBilling.free,
+    ),
+    'mistral': CustomCloudProviderProfile(
+      id: 'mistral',
+      displayName: 'Mistral',
+      endpoint: 'https://api.mistral.ai/v1/chat/completions',
+      defaultModel: 'mistral-small-latest',
+      protocol: CustomCloudProviderProtocol.openAiCompatible,
+      billing: CustomCloudProviderBilling.free,
+    ),
+    'openRouter': CustomCloudProviderProfile(
+      id: 'openRouter',
+      displayName: 'OpenRouter Free Pool',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      defaultModel: 'openrouter/free',
+      protocol: CustomCloudProviderProtocol.openAiCompatible,
+      billing: CustomCloudProviderBilling.free,
+    ),
+  };
+
   SharedPreferences? _preferences;
   final List<CustomCloudProviderProfile> _profiles =
       <CustomCloudProviderProfile>[];
 
   bool get isInitialized => _preferences != null;
 
+  /// User-created profiles only. System profiles are intentionally excluded so
+  /// the custom-provider management UI cannot delete or edit them.
   List<CustomCloudProviderProfile> get profiles =>
       List<CustomCloudProviderProfile>.unmodifiable(_profiles);
 
-  List<String> get providerIds =>
-      _profiles.map((profile) => profile.id).toList(growable: false);
+  List<String> get providerIds => <String>[
+        ..._systemProfiles.keys,
+        ..._profiles.map((profile) => profile.id),
+      ];
 
   Future<void> initialize({SharedPreferences? preferences}) async {
     _preferences = preferences ?? await SharedPreferences.getInstance();
@@ -101,6 +146,8 @@ final class CustomCloudProviderStore extends ChangeNotifier {
 
   CustomCloudProviderProfile? profileFor(String providerId) {
     final normalized = providerId.trim();
+    final system = _systemProfiles[normalized];
+    if (system != null) return system;
     for (final profile in _profiles) {
       if (profile.id == normalized) return profile;
     }
@@ -108,6 +155,9 @@ final class CustomCloudProviderStore extends ChangeNotifier {
   }
 
   bool contains(String providerId) => profileFor(providerId) != null;
+
+  bool isSystemProfile(String providerId) =>
+      _systemProfiles.containsKey(providerId.trim());
 
   Future<CustomCloudProviderProfile> create({
     required String displayName,
@@ -154,6 +204,13 @@ final class CustomCloudProviderStore extends ChangeNotifier {
 
   Future<void> update(CustomCloudProviderProfile profile) async {
     _ensureInitialized();
+    if (isSystemProfile(profile.id)) {
+      throw ArgumentError.value(
+        profile.id,
+        'id',
+        'System Cloud providers cannot be edited.',
+      );
+    }
     final index = _profiles.indexWhere((item) => item.id == profile.id);
     if (index < 0) {
       throw ArgumentError.value(profile.id, 'id', 'Unknown custom provider.');
@@ -178,6 +235,13 @@ final class CustomCloudProviderStore extends ChangeNotifier {
 
   Future<void> remove(String providerId) async {
     _ensureInitialized();
+    if (isSystemProfile(providerId)) {
+      throw ArgumentError.value(
+        providerId,
+        'providerId',
+        'System Cloud providers cannot be removed.',
+      );
+    }
     _profiles.removeWhere((profile) => profile.id == providerId);
     await _persist();
     notifyListeners();
