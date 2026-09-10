@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/diagnostics/cloud_routing_diagnostics.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
@@ -93,8 +94,13 @@ class AiRepositoryImpl implements AiRepository {
     String providerName,
     AiRequest request,
   ) async {
+    final requested = providerName.trim();
+    CloudRoutingDiagnostics.attempt(
+      providerId: requested,
+      taskType: request.taskType,
+    );
+
     try {
-      final requested = providerName.trim();
       final model = AiRequestModel.fromEntity(request);
 
       if (CloudProviderCatalog.isCustom(requested)) {
@@ -102,16 +108,24 @@ class AiRepositoryImpl implements AiRepository {
           requested,
           model,
         );
+        CloudRoutingDiagnostics.success(
+          providerId: requested,
+          taskType: request.taskType,
+        );
         return Right(response);
       }
 
       final provider = _builtInProviderFromName(requested);
       if (provider == null) {
-        return const Left(
-          ServerFailure(
-            'Selected cloud AI provider is not supported. Please choose another provider in Settings.',
-          ),
+        const failure = ServerFailure(
+          'Selected cloud AI provider is not supported. Please choose another provider in Settings.',
         );
+        CloudRoutingDiagnostics.failure(
+          providerId: requested,
+          taskType: request.taskType,
+          failure: failure,
+        );
+        return const Left(failure);
       }
 
       // IMPORTANT: an explicit routed request must not mutate the global user
@@ -131,29 +145,59 @@ class AiRepositoryImpl implements AiRepository {
           break;
         case ActiveAiProvider.grok:
           if (grokDataSource == null) {
-            return const Left(
-              ServerFailure('Grok API key not configured'),
+            const failure = ServerFailure('Grok API key not configured');
+            CloudRoutingDiagnostics.failure(
+              providerId: requested,
+              taskType: request.taskType,
+              failure: failure,
             );
+            return const Left(failure);
           }
           response = await grokDataSource!.complete(model);
           break;
         case ActiveAiProvider.copilot:
           if (copilotDataSource == null) {
-            return const Left(
-              ServerFailure('Copilot API key not configured'),
+            const failure = ServerFailure('Copilot API key not configured');
+            CloudRoutingDiagnostics.failure(
+              providerId: requested,
+              taskType: request.taskType,
+              failure: failure,
             );
+            return const Left(failure);
           }
           response = await copilotDataSource!.complete(model);
           break;
       }
 
+      CloudRoutingDiagnostics.success(
+        providerId: requested,
+        taskType: request.taskType,
+      );
       return Right(response);
     } on NetworkException catch (e) {
-      return Left(NetworkFailure(e.message));
+      final failure = NetworkFailure(e.message);
+      CloudRoutingDiagnostics.failure(
+        providerId: requested,
+        taskType: request.taskType,
+        failure: failure,
+      );
+      return Left(failure);
     } on ServerException catch (e) {
-      return Left(ServerFailure(e.message));
+      final failure = ServerFailure(e.message);
+      CloudRoutingDiagnostics.failure(
+        providerId: requested,
+        taskType: request.taskType,
+        failure: failure,
+      );
+      return Left(failure);
     } catch (e) {
-      return Left(ServerFailure(e.toString()));
+      final failure = ServerFailure(e.toString());
+      CloudRoutingDiagnostics.failure(
+        providerId: requested,
+        taskType: request.taskType,
+        failure: failure,
+      );
+      return Left(failure);
     }
   }
 
