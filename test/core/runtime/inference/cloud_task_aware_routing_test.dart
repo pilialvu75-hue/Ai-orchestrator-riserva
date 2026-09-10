@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
@@ -143,6 +144,82 @@ void main() {
       expect(
         responses.single.errorMessage,
         CloudRuntimeProvider.automaticPolicyBlockedNotice,
+      );
+    });
+
+    test('legacy canInfer stays conservative while canInferFor is task-aware',
+        () {
+      final provider = createProvider(
+        available: (providerId) => providerId == 'openAi',
+        send: (providerId) async => ok(providerId),
+      );
+
+      expect(provider.canInfer, isFalse);
+      expect(
+        provider.canInferFor(
+          const InferenceRequest(
+            sessionId: 'general-availability',
+            prompt: 'Ciao.',
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        provider.canInferFor(
+          const InferenceRequest(
+            sessionId: 'coding-availability',
+            prompt: 'Debug this Dart code.',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('explicit continuation inherits recent user technical intent', () {
+      final provider = createProvider(send: (providerId) async => ok(providerId));
+
+      expect(
+        provider.shouldPreferCloudFor(
+          const InferenceRequest(
+            sessionId: 'continuation',
+            prompt: 'Continua.',
+            context: <ChatTurn>[
+              ChatTurn(
+                role: ChatRole.user,
+                content: 'Correggi questo codice Flutter.',
+              ),
+              ChatTurn(
+                role: ChatRole.assistant,
+                content: 'Ho individuato il primo problema.',
+              ),
+            ],
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('unrelated later message does not inherit stale coding intent', () {
+      final provider = createProvider(send: (providerId) async => ok(providerId));
+
+      expect(
+        provider.shouldPreferCloudFor(
+          const InferenceRequest(
+            sessionId: 'new-general-turn',
+            prompt: 'Grazie.',
+            context: <ChatTurn>[
+              ChatTurn(
+                role: ChatRole.user,
+                content: 'Correggi questo codice Flutter.',
+              ),
+              ChatTurn(
+                role: ChatRole.assistant,
+                content: 'Correzione completata.',
+              ),
+            ],
+          ),
+        ),
+        isFalse,
       );
     });
 
