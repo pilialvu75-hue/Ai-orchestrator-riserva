@@ -69,6 +69,16 @@
     "platformTarget": "android",
     "sizeCategory": "4B"
   },
+  "nemotron3_nano_4b": {
+    "displayName": "NVIDIA Nemotron 3 Nano 4B",
+    "fileName": "NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
+    "downloadUrl": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF/resolve/main/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
+    "version": "1.0.0",
+    "sizeBytes": 2840000000,
+    "description": "NVIDIA Nemotron 3 Nano 4B Q4_K_M. Modello reasoning locale ufficiale NVIDIA compatibile con llama.cpp, candidato per Android e dispositivi edge.",
+    "platformTarget": "android",
+    "sizeCategory": "4B"
+  },
   "phi3_5_mini": {
     "displayName": "Phi-3.5 Mini Instruct",
     "fileName": "Phi-3.5-mini-instruct-Q4_K_M.gguf",
