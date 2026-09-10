@@ -34,8 +34,11 @@ class InteractionProfile {
 
   bool get isVoice => mode != InteractionMode.text;
 
-  bool get canRelyOnScreen =>
-      mode == InteractionMode.text || mode == InteractionMode.voiceWithScreen;
+  bool get canRelyOnScreen {
+    if (context == InteractionContext.driving) return false;
+    return mode == InteractionMode.text ||
+        mode == InteractionMode.voiceWithScreen;
+  }
 }
 
 /// Produces a small presentation-only system overlay from an explicit runtime
