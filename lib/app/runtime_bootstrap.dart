@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_routing_bootstrap.dart';
+import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -30,6 +31,11 @@ class RuntimeBootstrap {
     const claudeApiKey = String.fromEnvironment('CLAUDE_API_KEY');
     const grokApiKey = String.fromEnvironment('GROK_API_KEY');
     const copilotApiKey = String.fromEnvironment('COPILOT_API_KEY');
+
+    // Custom provider metadata must be available before credential loading so
+    // their encrypted API-key records are discovered by the same secure store
+    // as built-in providers.
+    await CustomCloudProviderStore.instance.initialize();
 
     await _initializeCloudCredentials(
       <String, String>{
