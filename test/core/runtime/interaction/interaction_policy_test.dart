@@ -80,6 +80,7 @@ void main() {
       expect(overlay, contains('key point first'));
       expect(overlay, contains('Never require reading, typing, tapping'));
       expect(overlay, contains('defer that part until it can be done safely'));
+      expect(profile.canRelyOnScreen, isFalse);
     });
 
     test('empty base still yields only the requested presentation overlay', () {
