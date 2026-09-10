@@ -86,7 +86,8 @@ void main() {
       expect(service.cloudModelFor('openAi'), 'gpt-5.6-terra');
     });
 
-    test('paid automatic Cloud use is opt-in', () async {
+    test('free-tier automatic Cloud remains available while paid stays opt-in',
+        () async {
       final service = await createService();
 
       expect(
@@ -94,9 +95,29 @@ void main() {
         CloudSpendingMode.confirmBeforeSpending,
       );
       expect(service.automaticCloudSpendingAllowed, isFalse);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+      expect(service.automaticCloudUseAllowed('openAi'), isFalse);
+      expect(service.automaticCloudUseAllowed('copilot'), isFalse);
+
+      await service.setCloudSpendingMode(CloudSpendingMode.freeOnly);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+
+      await service.setCloudSpendingMode(CloudSpendingMode.prepaidOnly);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+
+      await service.setCloudSpendingMode(CloudSpendingMode.budgetLimit);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('claude'), isFalse);
 
       await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
       expect(service.automaticCloudSpendingAllowed, isTrue);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('claude'), isTrue);
+      expect(service.automaticCloudUseAllowed('openAi'), isTrue);
+      expect(service.automaticCloudUseAllowed('copilot'), isTrue);
     });
 
     test('persists and clears Cloud budget limit', () async {
