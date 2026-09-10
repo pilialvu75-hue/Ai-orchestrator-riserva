@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 
 void main() {
@@ -86,38 +87,95 @@ void main() {
       expect(service.cloudModelFor('openAi'), 'gpt-5.6-terra');
     });
 
-    test('free-tier automatic Cloud remains available while paid stays opt-in',
-        () async {
+    test('complex-task spending is the spend-safe default', () async {
       final service = await createService();
 
-      expect(
-        service.cloudSpendingMode,
-        CloudSpendingMode.confirmBeforeSpending,
-      );
+      expect(service.cloudSpendingMode, CloudSpendingMode.complexTasksOnly);
       expect(service.automaticCloudSpendingAllowed, isFalse);
+
+      // General/legacy routing remains free-only.
       expect(service.automaticCloudUseAllowed('gemini'), isTrue);
       expect(service.automaticCloudUseAllowed('claude'), isFalse);
       expect(service.automaticCloudUseAllowed('openAi'), isFalse);
       expect(service.automaticCloudUseAllowed('copilot'), isFalse);
 
-      await service.setCloudSpendingMode(CloudSpendingMode.freeOnly);
-      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
-      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+      // Paid Cloud is authorized only when the task itself justifies it.
+      expect(
+        service.automaticCloudUseAllowedForTask(
+          'claude',
+          CloudTaskClass.coding,
+        ),
+        isTrue,
+      );
+      expect(
+        service.automaticCloudUseAllowedForTask(
+          'openAi',
+          CloudTaskClass.reasoning,
+        ),
+        isTrue,
+      );
+      expect(
+        service.automaticCloudUseAllowedForTask(
+          'claude',
+          CloudTaskClass.general,
+        ),
+        isFalse,
+      );
+      expect(
+        service.automaticCloudUseAllowedForTask(
+          'copilot',
+          CloudTaskClass.coding,
+        ),
+        isFalse,
+      );
+    });
 
-      await service.setCloudSpendingMode(CloudSpendingMode.prepaidOnly);
-      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
-      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+    test('explicit spend-safe modes keep paid automatic use blocked', () async {
+      final service = await createService();
 
-      await service.setCloudSpendingMode(CloudSpendingMode.budgetLimit);
-      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
-      expect(service.automaticCloudUseAllowed('claude'), isFalse);
+      for (final mode in <CloudSpendingMode>[
+        CloudSpendingMode.freeOnly,
+        CloudSpendingMode.prepaidOnly,
+        CloudSpendingMode.budgetLimit,
+        CloudSpendingMode.confirmBeforeSpending,
+      ]) {
+        await service.setCloudSpendingMode(mode);
+        expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+        expect(
+          service.automaticCloudUseAllowedForTask(
+            'claude',
+            CloudTaskClass.coding,
+          ),
+          isFalse,
+        );
+      }
+    });
+
+    test('unrestricted remains explicit authorization for all cost classes',
+        () async {
+      final service = await createService();
 
       await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
+
       expect(service.automaticCloudSpendingAllowed, isTrue);
       expect(service.automaticCloudUseAllowed('gemini'), isTrue);
       expect(service.automaticCloudUseAllowed('claude'), isTrue);
       expect(service.automaticCloudUseAllowed('openAi'), isTrue);
       expect(service.automaticCloudUseAllowed('copilot'), isTrue);
+      expect(
+        service.automaticCloudUseAllowedForTask(
+          'copilot',
+          CloudTaskClass.general,
+        ),
+        isTrue,
+      );
+    });
+
+    test('persists complex-task spending mode', () async {
+      final service = await createService();
+
+      await service.setCloudSpendingMode(CloudSpendingMode.complexTasksOnly);
+      expect(service.cloudSpendingMode, CloudSpendingMode.complexTasksOnly);
     });
 
     test('persists and clears Cloud budget limit', () async {
