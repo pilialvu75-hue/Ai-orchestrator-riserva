@@ -25,7 +25,7 @@ class _AiModePageState extends State<AiModePage> {
   final TextEditingController _budgetController = TextEditingController();
 
   AiRuntimeMode _runtimeMode = AiRuntimeMode.hybrid;
-  CloudSpendingMode _spendingMode = CloudSpendingMode.confirmBeforeSpending;
+  CloudSpendingMode _spendingMode = CloudSpendingMode.complexTasksOnly;
   String _provider = 'openAi';
   bool _loading = true;
   bool _saving = false;
@@ -152,8 +152,28 @@ class _AiModePageState extends State<AiModePage> {
         return 'Budget limit';
       case CloudSpendingMode.confirmBeforeSpending:
         return 'Confirm before spending';
+      case CloudSpendingMode.complexTasksOnly:
+        return 'Paid only for complex work';
       case CloudSpendingMode.unrestricted:
         return 'Allow automatic paid requests';
+    }
+  }
+
+  String _spendingDescription() {
+    switch (_spendingMode) {
+      case CloudSpendingMode.complexTasksOnly:
+        return 'Automatic routing is free-first. Paid providers may be used only '
+            'for coding, debugging, architecture or other complex reasoning '
+            'when no usable free route can serve the request.';
+      case CloudSpendingMode.unrestricted:
+        return 'Automatic Cloud requests are enabled. Provider charges can '
+            'apply according to your provider account.';
+      case CloudSpendingMode.freeOnly:
+      case CloudSpendingMode.prepaidOnly:
+      case CloudSpendingMode.budgetLimit:
+      case CloudSpendingMode.confirmBeforeSpending:
+        return 'Automatic paid Cloud requests stay blocked until the selected '
+            'policy can be verified. Free Cloud and Local fallback remain available.';
     }
   }
 
@@ -372,11 +392,7 @@ class _AiModePageState extends State<AiModePage> {
                 ],
                 const SizedBox(height: 10),
                 Text(
-                  _spendingMode == CloudSpendingMode.unrestricted
-                      ? 'Automatic Cloud requests are enabled. Provider charges '
-                          'can apply according to your provider account.'
-                      : 'Automatic paid Cloud requests stay blocked until the '
-                          'selected policy can be verified. Local fallback remains available.',
+                  _spendingDescription(),
                   style: TextStyle(
                     color: _spendingMode == CloudSpendingMode.unrestricted
                         ? Colors.orangeAccent

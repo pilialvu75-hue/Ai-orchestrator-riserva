@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,12 +33,20 @@ void main() {
     final service = await createService();
 
     expect(service.automaticCloudUseAllowed(profile.id), isTrue);
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.coding,
+      ),
+      isTrue,
+    );
     await service.setManualCloudProvider(profile.id);
     expect(service.manualCloudProvider, profile.id);
     expect(service.cloudModelFor(profile.id), 'free-1');
   });
 
-  test('custom Paid route remains blocked from AUTO until unrestricted', () async {
+  test('custom Paid route is general-blocked but complex-eligible by default',
+      () async {
     final profile = await CustomCloudProviderStore.instance.create(
       displayName: 'Future Paid',
       endpoint: 'https://paid.example.test/v1/chat/completions',
@@ -47,7 +56,38 @@ void main() {
     );
     final service = await createService();
 
+    expect(service.cloudSpendingMode, CloudSpendingMode.complexTasksOnly);
     expect(service.automaticCloudUseAllowed(profile.id), isFalse);
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.general,
+      ),
+      isFalse,
+    );
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.coding,
+      ),
+      isTrue,
+    );
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.reasoning,
+      ),
+      isTrue,
+    );
+
+    await service.setCloudSpendingMode(CloudSpendingMode.freeOnly);
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.coding,
+      ),
+      isFalse,
+    );
 
     await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
     expect(service.automaticCloudUseAllowed(profile.id), isTrue);

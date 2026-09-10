@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
 
 enum AiRuntimeMode {
@@ -42,13 +43,14 @@ enum CloudSpendingMode {
   prepaidOnly,
   budgetLimit,
   confirmBeforeSpending,
+  complexTasksOnly,
   unrestricted;
 
   static CloudSpendingMode fromStoredValue(String? value) {
     for (final mode in CloudSpendingMode.values) {
       if (mode.name == value) return mode;
     }
-    return CloudSpendingMode.confirmBeforeSpending;
+    return CloudSpendingMode.complexTasksOnly;
   }
 }
 
@@ -64,7 +66,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     CloudRuntimePreferences.instance.bind(
       preferredProvider: () => activeProvider,
       modelForProvider: cloudModelFor,
-      automaticUseAllowed: automaticCloudUseAllowed,
+      automaticUseAllowedForTask: automaticCloudUseAllowedForTask,
     );
   }
 
@@ -170,17 +172,41 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   bool get automaticCloudSpendingAllowed =>
       cloudSpendingMode == CloudSpendingMode.unrestricted;
 
-  /// Provider-specific automatic authorization used by the Cloud router.
+  /// Compatibility authorization for callers without task intent.
   ///
-  /// Free-tier routes stay available in every spend-safe mode. Paid and
-  /// unknown-cost routes fail closed unless automatic spending is explicitly
-  /// unrestricted. Prepaid/budget modes deliberately remain closed for paid
-  /// providers until billing/quota adapters can prove that a request is covered.
-  bool automaticCloudUseAllowed(String provider) {
-    if (cloudSpendingMode == CloudSpendingMode.unrestricted) return true;
+  /// It is evaluated as a general conversation. This means
+  /// [CloudSpendingMode.complexTasksOnly] never authorizes paid Cloud through a
+  /// legacy provider-only call.
+  bool automaticCloudUseAllowed(String provider) =>
+      automaticCloudUseAllowedForTask(provider, CloudTaskClass.general);
 
-    return CloudProviderCatalog.costClassFor(provider) ==
-        CloudProviderCostClass.freeTier;
+  /// Task-aware automatic Cloud authorization.
+  ///
+  /// Free-tier routes stay available in every spend-safe mode. Paid routes are
+  /// allowed automatically only when the user explicitly selected unrestricted
+  /// spending, or when the default complex-work policy is active and the task
+  /// is coding/reasoning. Unknown-cost routes fail closed unless unrestricted.
+  /// Prepaid/budget modes deliberately remain closed for paid providers until
+  /// billing/quota adapters can prove that a request is covered.
+  bool automaticCloudUseAllowedForTask(
+    String provider,
+    CloudTaskClass task,
+  ) {
+    final costClass = CloudProviderCatalog.costClassFor(provider);
+    if (costClass == CloudProviderCostClass.freeTier) return true;
+
+    switch (cloudSpendingMode) {
+      case CloudSpendingMode.unrestricted:
+        return true;
+      case CloudSpendingMode.complexTasksOnly:
+        return costClass == CloudProviderCostClass.paid &&
+            task != CloudTaskClass.general;
+      case CloudSpendingMode.freeOnly:
+      case CloudSpendingMode.prepaidOnly:
+      case CloudSpendingMode.budgetLimit:
+      case CloudSpendingMode.confirmBeforeSpending:
+        return false;
+    }
   }
 
   Future<void> setCloudSpendingMode(CloudSpendingMode mode) async {

@@ -127,12 +127,13 @@ void main() {
       expect(captured!.modelId, 'gemini-custom-model');
     });
 
-    test('rate-limited preferred provider falls back and exposes retry state', () async {
+    test('rate-limited free provider falls back to paid for complex work',
+        () async {
       final calls = <String>[];
       final provider = CloudRuntimeProvider(
         sendQuery: (providerId, request) async {
           calls.add(providerId);
-          if (providerId == 'openAi') {
+          if (providerId == 'gemini') {
             throw const ServerFailure('429 rate limit');
           }
           return AiResponse(
@@ -146,29 +147,29 @@ void main() {
         isProviderAvailable: (_) => true,
         providerDisplayName: ([name]) => name ?? 'provider',
         preferredProvider: () => 'openAi',
-        automaticUseAllowed: (_) => true,
+        automaticUseAllowedForTask: (_, __) => true,
       );
 
       final responses = await provider
           .streamInference(
             request: const InferenceRequest(
               sessionId: 's',
-              prompt: 'general conversation',
+              prompt: 'Debug this Flutter code.',
             ),
             cancellationToken: CancellationToken(),
           )
           .toList();
 
-      expect(calls, <String>['openAi', 'gemini']);
+      expect(calls, <String>['gemini', 'openAi']);
       expect(responses, hasLength(3));
       final notices = responses.take(2).toList();
       expect(
         notices.map((notice) => notice.runtimeNotice),
-        <String>['cloud_provider:openAi', 'cloud_provider:gemini'],
+        <String>['cloud_provider:gemini', 'cloud_provider:openAi'],
       );
       expect(
         notices.map((notice) => notice.providerId),
-        <String>['openAi', 'gemini'],
+        <String>['gemini', 'openAi'],
       );
       for (final notice in notices) {
         expect(notice.text, isEmpty);
@@ -182,7 +183,7 @@ void main() {
       expect(result.text, 'fallback ok');
       expect(result.isError, isFalse);
       expect(result.terminalState, InferenceTerminalState.success);
-      expect(result.providerId, 'gemini');
+      expect(result.providerId, 'openAi');
       expect(result.runtimeNotice, isNull);
       expect(result.tokensGenerated, 8);
 
@@ -193,10 +194,10 @@ void main() {
         (status) => status.providerId == 'gemini',
       );
 
-      expect(openAi.state, CloudProviderOperationalState.rateLimited);
-      expect(openAi.retryAt, isNotNull);
-      expect(openAi.failedRequests, 1);
-      expect(gemini.state, CloudProviderOperationalState.ready);
+      expect(gemini.state, CloudProviderOperationalState.rateLimited);
+      expect(gemini.retryAt, isNotNull);
+      expect(gemini.failedRequests, 1);
+      expect(openAi.state, CloudProviderOperationalState.ready);
     });
 
     test('automatic routing fails closed when spending policy blocks it',
