@@ -14,16 +14,18 @@ class CustomCloudProviderDataSource {
   CustomCloudProviderDataSource({
     http.Client? httpClient,
     CustomCloudProviderStore? store,
+    String? Function(String providerId)? apiKeyProvider,
   })  : _client = httpClient ?? http.Client(),
-        _store = store ?? CustomCloudProviderStore.instance;
+        _store = store ?? CustomCloudProviderStore.instance,
+        _apiKeyProvider = apiKeyProvider ?? CloudCredentialStore.instance.secretFor;
 
   final http.Client _client;
   final CustomCloudProviderStore _store;
+  final String? Function(String providerId) _apiKeyProvider;
 
   bool isConfigured(String providerId) =>
       _store.contains(providerId) &&
-      (CloudCredentialStore.instance.secretFor(providerId)?.trim().isNotEmpty ??
-          false);
+      (_apiKeyProvider(providerId)?.trim().isNotEmpty ?? false);
 
   Future<AiResponseModel> complete(
     String providerId,
@@ -34,8 +36,7 @@ class CustomCloudProviderDataSource {
       throw ServerException('Custom Cloud provider "$providerId" is not configured');
     }
 
-    final credential =
-        CloudCredentialStore.instance.secretFor(providerId)?.trim() ?? '';
+    final credential = _apiKeyProvider(providerId)?.trim() ?? '';
     if (credential.isEmpty) {
       throw ServerException('${profile.displayName} API key not configured');
     }
