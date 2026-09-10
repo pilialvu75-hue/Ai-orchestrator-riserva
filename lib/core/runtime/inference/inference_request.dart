@@ -1,4 +1,4 @@
-import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
 /// Optional caller directive for the runtime boundary.
 ///
