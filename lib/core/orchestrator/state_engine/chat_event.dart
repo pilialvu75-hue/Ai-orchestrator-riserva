@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 
 /// Events dispatched to [OrchestratorStateEngine].
@@ -23,7 +24,7 @@ class SendMessageEvent extends ChatEvent {
   const SendMessageEvent({
     required this.sessionId,
     required this.userPrompt,
-    this.systemPrompt,
+    this.systemPrompt = SystemPromptConfig.defaultPrompt,
     this.attachments = const <ChatAttachment>[],
   });
 
