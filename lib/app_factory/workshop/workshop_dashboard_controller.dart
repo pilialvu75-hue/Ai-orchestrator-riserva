@@ -195,6 +195,136 @@ final class WorkshopDashboardController extends ChangeNotifier {
 
   WorkshopBuildLab get buildLab => _buildLab;
 
+  /// Rebuilds a durable Cantiere production without restoring any ephemeral
+  /// in-memory diff or approval flag.
+  ///
+  /// The project/request identity and plan progress are retained. If a task was
+  /// active when the process stopped, a fresh WorkspaceSession is opened on the
+  /// same real workspace and the task returns to implementation so the guarded
+  /// inference/review/approval cycle must run again.
+  Future<WorkshopProjectPlan> restoreProduction({
+    required WorkshopRequest request,
+    required WorkshopProjectPlan plan,
+    String? activeTaskId,
+  }) async {
+    _ensureNotDisposed();
+
+    if (_state.requestId != null) {
+      throw StateError(
+        'Cannot restore a Workshop production while another production is active.',
+      );
+    }
+
+    final requestId = request.id.trim();
+
+    if (requestId.isEmpty) {
+      throw ArgumentError.value(
+        request.id,
+        'request.id',
+        'Recovered Workshop request id cannot be empty.',
+      );
+    }
+
+    if (plan.id != 'project:$requestId') {
+      throw StateError(
+        'Recovered Workshop project "${plan.id}" does not match request "$requestId".',
+      );
+    }
+
+    if (plan.assumptions.isNotEmpty || plan.risks.isNotEmpty) {
+      throw StateError(
+        'The current Workshop engine cannot safely restore non-empty assumptions or risks.',
+      );
+    }
+
+    _engine.createProjectPlan(
+      request,
+      domain: plan.domain,
+      requirements: plan.requirements,
+      constraints: plan.constraints,
+      technologies: plan.technologies,
+      hardware: plan.hardware,
+      deliverables: plan.deliverables,
+      validationCriteria: plan.validationCriteria,
+      phases: plan.phases
+          .map((phase) => phase.copyWith())
+          .toList(growable: false),
+      tasks: plan.tasks
+          .map((task) => task.copyWith())
+          .toList(growable: false),
+    );
+
+    final restoredPlan = _engine.planOf(requestId);
+
+    if (restoredPlan == null) {
+      throw StateError(
+        'WorkshopEngine did not restore project "$requestId".',
+      );
+    }
+
+    restoredPlan.status = plan.status;
+    restoredPlan.updatedAt = plan.updatedAt;
+
+    String? restoredActiveTaskId;
+    String? restoredActiveTaskTitle;
+
+    final normalizedActiveTaskId = activeTaskId?.trim();
+
+    if (normalizedActiveTaskId != null &&
+        normalizedActiveTaskId.isNotEmpty &&
+        plan.status != WorkshopProjectStatus.completed &&
+        plan.status != WorkshopProjectStatus.cancelled) {
+      final task = restoredPlan.taskById(normalizedActiveTaskId);
+
+      if (task == null) {
+        throw StateError(
+          'Recovered Workshop task "$normalizedActiveTaskId" does not exist.',
+        );
+      }
+
+      if (!task.completed) {
+        await _engine.prepareProjectTask(
+          requestId,
+          normalizedActiveTaskId,
+        );
+        restoredActiveTaskId = normalizedActiveTaskId;
+        restoredActiveTaskTitle = task.title;
+      }
+    }
+
+    final restoredStage = restoredActiveTaskId != null
+        ? WorkshopStage.implementation
+        : switch (restoredPlan.status) {
+            WorkshopProjectStatus.completed => WorkshopStage.completed,
+            WorkshopProjectStatus.cancelled => WorkshopStage.cancelled,
+            WorkshopProjectStatus.blocked => WorkshopStage.blocked,
+            WorkshopProjectStatus.review => WorkshopStage.review,
+            WorkshopProjectStatus.validation => WorkshopStage.validation,
+            _ => WorkshopStage.planning,
+          };
+
+    _updateState(
+      WorkshopDashboardControllerState(
+        requestId: requestId,
+        projectId: restoredPlan.id,
+        projectTitle: restoredPlan.title,
+        stage: restoredStage,
+        projectStatus: restoredPlan.status,
+        progress: restoredPlan.progress,
+        completedTasks: restoredPlan.completedTasks,
+        totalTasks: restoredPlan.totalTasks,
+        activeTaskId: restoredActiveTaskId,
+        activeTaskTitle: restoredActiveTaskTitle,
+        lastMessage: restoredActiveTaskId == null
+            ? 'Produzione del Cantiere recuperata dal checkpoint.'
+            : 'Produzione recuperata: il task attivo è pronto per essere rieseguito in sicurezza.',
+        isBusy: false,
+      ),
+    );
+
+    return restoredPlan;
+  }
+
   /// Avvia una nuova produzione creando:
   ///
   ///   richiesta
