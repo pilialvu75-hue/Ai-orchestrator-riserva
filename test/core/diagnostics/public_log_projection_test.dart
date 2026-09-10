@@ -55,6 +55,15 @@ void main() {
     expect(line, isNot(contains('session')));
   });
 
+  test('exports current built-in Cloud provider attempts', () {
+    final line = publicLogProjection(
+      '$time [TOKEN_STREAM] [TOKEN_STREAM] notice session=default '
+      'notice="cloud_provider:nvidiaNim"',
+    );
+
+    expect(jsonDecode(line!)['provider'], 'nvidiaNim');
+  });
+
   test('never exports token stream text or unknown provider names', () {
     expect(
       publicLogProjection(
@@ -66,6 +75,60 @@ void main() {
       publicLogProjection(
         '$time [TOKEN_STREAM] [TOKEN_STREAM] notice session=default '
         'notice="cloud_provider:private-provider"',
+      ),
+      isNull,
+    );
+  });
+
+  test('exports closed Cloud routing fields without conversation data', () {
+    final line = publicLogProjection(
+      '$time [CLOUD_ROUTING] task=coding cost=paid provider=openAi '
+      'decision=attempt reason=dispatch',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'CLOUD_ROUTING',
+        'task': 'coding',
+        'cost': 'paid',
+        'provider': 'openAi',
+        'decision': 'attempt',
+        'reason': 'dispatch',
+      },
+    );
+  });
+
+  test('exports only the generic label for custom Cloud providers', () {
+    final line = publicLogProjection(
+      '$time [CLOUD_ROUTING] task=reasoning cost=freeTier provider=custom '
+      'decision=success reason=completed',
+    );
+
+    expect(jsonDecode(line!)['provider'], 'custom');
+    expect(line, isNot(contains('private-provider')));
+  });
+
+  test('rejects malformed or extended Cloud routing events', () {
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_ROUTING] task=coding cost=paid '
+        'provider=private-provider decision=attempt reason=dispatch',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_ROUTING] task=coding cost=paid provider=openAi '
+        'decision=failure reason=secret-error',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_ROUTING] task=coding cost=paid provider=openAi '
+        'decision=attempt reason=dispatch prompt=private',
       ),
       isNull,
     );
