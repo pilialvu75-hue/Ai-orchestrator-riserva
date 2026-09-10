@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/custom_cloud_providers_page.dart';
 
 class AiModePage extends StatefulWidget {
   const AiModePage({
@@ -67,6 +68,21 @@ class _AiModePageState extends State<AiModePage> {
       _modelController.text = _settingsService.cloudModelFor(provider);
       _obscureSecret = true;
     });
+  }
+
+  Future<void> _manageCustomProviders() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomCloudProvidersPage(),
+      ),
+    );
+    if (!mounted) return;
+
+    final providers = CloudProviderCatalog.supportedProviders;
+    final next = providers.contains(_provider)
+        ? _provider
+        : _settingsService.activeProvider;
+    _selectProvider(providers.contains(next) ? next : 'openAi');
   }
 
   Future<void> _save() async {
@@ -233,6 +249,21 @@ class _AiModePageState extends State<AiModePage> {
                       : (value) {
                           if (value != null) _selectProvider(value);
                         },
+                ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _saving ? null : _manageCustomProviders,
+                    icon: const Icon(Icons.add_link),
+                    label: const Text('Add / manage custom providers'),
+                  ),
+                ),
+                const Text(
+                  'Compatible providers can be added without an app update. '
+                  'Choose Free or Paid when creating the profile; AUTO will '
+                  'apply the same spend-safe policy.',
+                  style: TextStyle(color: Colors.white54, height: 1.35),
                 ),
                 const SizedBox(height: 12),
                 _StatusRow(
