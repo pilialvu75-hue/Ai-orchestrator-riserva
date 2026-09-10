@@ -233,41 +233,123 @@ void main() {
       );
     });
 
-    test('explicit Cloud route bypasses automatic spending policy', () async {
+    test('direct Cloud AUTO obeys automatic spending policy', () async {
       var calls = 0;
       final provider = CloudRuntimeProvider(
-        sendQuery: (providerId, request) async {
+        sendQuery: (_, __) async {
           calls += 1;
-          return AiResponse(
-            text: 'explicit ok',
-            model: request.modelId ?? 'unknown',
-            tokensUsed: 2,
-            timestamp: DateTime.now().millisecondsSinceEpoch,
-          );
+          throw AssertionError('blocked direct Cloud AUTO request must not run');
         },
-        supportedProviders: () => const <String>['openAi'],
+        supportedProviders: () => const <String>['gemini', 'claude'],
         isProviderAvailable: (_) => true,
-        providerDisplayName: ([name]) => name ?? 'OpenAI',
+        providerDisplayName: ([name]) => name ?? 'provider',
         automaticUseAllowed: (_) => false,
       );
 
       final responses = await provider
           .streamInference(
             request: const InferenceRequest(
-              sessionId: 'explicit-cloud',
+              sessionId: 'direct-auto-policy-blocked',
               prompt: 'hello',
               routeDirective: InferenceRouteDirective.cloudOnly,
+              allowCloudProviderFailover: true,
             ),
             cancellationToken: CancellationToken(),
           )
           .toList();
 
-      expect(calls, 1);
+      expect(calls, 0);
+      expect(responses, hasLength(1));
+      expect(responses.single.isError, isTrue);
+      expect(
+        responses.single.errorMessage,
+        CloudRuntimeProvider.automaticPolicyBlockedNotice,
+      );
+      expect(
+        responses.single.errorMessage,
+        isNot(CloudRuntimeProvider.fullyLocalNotice),
+      );
+    });
+
+    test('manual pinned Cloud route bypasses automatic spending policy', () async {
+      final calls = <String>[];
+      final provider = CloudRuntimeProvider(
+        sendQuery: (providerId, request) async {
+          calls.add(providerId);
+          return AiResponse(
+            text: 'manual ok',
+            model: request.modelId ?? 'unknown',
+            tokensUsed: 2,
+            timestamp: DateTime.now().millisecondsSinceEpoch,
+          );
+        },
+        supportedProviders: () => const <String>['gemini', 'claude'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'provider',
+        automaticUseAllowed: (_) => false,
+      );
+
+      final responses = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'manual-gemini',
+              prompt: 'hello',
+              routeDirective: InferenceRouteDirective.cloudOnly,
+              cloudProviderId: 'gemini',
+              allowCloudProviderFailover: false,
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+
+      expect(calls, <String>['gemini']);
       expect(responses, hasLength(2));
-      expect(responses.first.runtimeNotice, 'cloud_provider:openAi');
+      expect(responses.first.runtimeNotice, 'cloud_provider:gemini');
+      expect(responses.first.providerId, 'gemini');
       expect(responses.last.isError, isFalse);
-      expect(responses.last.text, 'explicit ok');
-      expect(responses.last.providerId, 'openAi');
+      expect(responses.last.text, 'manual ok');
+      expect(responses.last.providerId, 'gemini');
+    });
+
+    test('manual pinned Cloud provider never fails over', () async {
+      final calls = <String>[];
+      final provider = CloudRuntimeProvider(
+        sendQuery: (providerId, request) async {
+          calls.add(providerId);
+          if (providerId == 'gemini') {
+            throw const ServerFailure('429 rate limit');
+          }
+          return AiResponse(
+            text: 'must not be used',
+            model: request.modelId ?? 'unknown',
+            tokensUsed: 1,
+            timestamp: DateTime.now().millisecondsSinceEpoch,
+          );
+        },
+        supportedProviders: () => const <String>['gemini', 'claude'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'provider',
+        automaticUseAllowed: (_) => false,
+      );
+
+      final responses = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'manual-gemini-no-failover',
+              prompt: 'hello',
+              routeDirective: InferenceRouteDirective.cloudOnly,
+              cloudProviderId: 'gemini',
+              allowCloudProviderFailover: false,
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+
+      expect(calls, <String>['gemini']);
+      expect(responses.first.runtimeNotice, 'cloud_provider:gemini');
+      expect(responses.last.isError, isTrue);
+      expect(responses.last.providerId, 'gemini');
+      expect(responses.last.errorMessage, contains('rate limit'));
     });
 
     test('unconfigured provider reports authRequired without exposing secrets', () {
