@@ -3,7 +3,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
-import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
+import 'package:ai_orchestrator/core/runtime/inference/memory_window_config.dart';
 
 enum AiRuntimeMode {
   local,
