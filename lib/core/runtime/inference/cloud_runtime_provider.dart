@@ -81,6 +81,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
 
+  static const String automaticPolicyBlockedNotice =
+      'Automatic Cloud selection is blocked by the spending policy. '
+      'Choose a provider manually or change Cloud spending in Settings > AI mode.';
+
   final Future<AiResponse> Function(String provider, AiRequest request)
       _sendQuery;
   final List<String> Function() _supportedProviders;
@@ -97,8 +101,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   /// Automatic Cloud availability used by Hybrid routing.
   ///
-  /// It intentionally honours the automatic-spending policy. Explicit Cloud
-  /// mode uses [canInferFor] because the user has directly selected Cloud.
+  /// It intentionally honours the automatic-spending policy. Direct Cloud
+  /// requests that pin a provider manually are treated separately by
+  /// [canInferFor].
   bool get canInfer => _supportedProviders().any(
         (provider) => _isProviderReady(
           provider,
@@ -118,22 +123,23 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   /// Request-specific availability.
   ///
-  /// Direct Cloud mode is an explicit user choice and therefore does not use
-  /// the automatic-spending gate. Authentication, quota, rate-limit and health
-  /// gates still apply.
+  /// A manually pinned direct-Cloud provider is an explicit user choice and
+  /// therefore bypasses the *automatic* spending gate. Direct Cloud AUTO and
+  /// Hybrid routing remain governed by that gate. Authentication, quota,
+  /// rate-limit and health gates always apply.
   bool canInferFor(InferenceRequest request) {
-    final explicitCloud = _isExplicitCloudRequest(request);
+    final manualCloud = _isManualCloudRequest(request);
     final signal = _taskSignal(request);
     final order = _providerOrder(
       signal,
       pinnedProvider: request.cloudProviderId,
       allowFailover: request.allowCloudProviderFailover,
-      enforceAutomaticPolicy: !explicitCloud,
+      enforceAutomaticPolicy: !manualCloud,
     );
     return order.any(
       (provider) => _isProviderReady(
         provider,
-        enforceAutomaticPolicy: !explicitCloud,
+        enforceAutomaticPolicy: !manualCloud,
       ),
     );
   }
@@ -202,8 +208,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
     final optimized = _optimizeRequest(request);
     final signal = _taskSignal(optimized);
-    final explicitCloud = _isExplicitCloudRequest(optimized);
-    final enforceAutomaticPolicy = !explicitCloud;
+    final directCloud = _isDirectCloudRequest(optimized);
+    final manualCloud = _isManualCloudRequest(optimized);
+    final enforceAutomaticPolicy = !manualCloud;
     final providerOrder = _providerOrder(
       signal,
       pinnedProvider: optimized.cloudProviderId,
@@ -221,7 +228,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     if (!hasReadyProvider) {
       final message = _noReadyProviderMessage(
         providerOrder,
-        explicitCloud: explicitCloud,
+        directCloud: directCloud,
+        manualCloud: manualCloud,
       );
       _pendingLocalFallbackNotice = message;
       yield InferenceResponse.error(
@@ -350,7 +358,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     );
 
     if (!anyReadyAfterFailure) {
-      final message = lastError ?? fullyLocalNotice;
+      final message = lastError ??
+          (directCloud
+              ? 'Cloud AI providers are unavailable. '
+                  'Check provider status in Settings > AI mode.'
+              : fullyLocalNotice);
       _pendingLocalFallbackNotice = message;
       yield InferenceResponse.error(
         message,
@@ -502,16 +514,23 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     return indexed.map((candidate) => candidate.providerId).toList(growable: false);
   }
 
-  bool _isExplicitCloudRequest(InferenceRequest request) {
-    return request.routeDirective == InferenceRouteDirective.cloudOnly &&
-        (request.cloudProviderId == null || request.cloudProviderId!.trim().isEmpty);
+  bool _isDirectCloudRequest(InferenceRequest request) {
+    return request.routeDirective == InferenceRouteDirective.cloudOnly;
+  }
+
+  bool _isManualCloudRequest(InferenceRequest request) {
+    final provider = request.cloudProviderId?.trim();
+    return _isDirectCloudRequest(request) &&
+        provider != null &&
+        provider.isNotEmpty;
   }
 
   String _noReadyProviderMessage(
     List<String> providerOrder, {
-    required bool explicitCloud,
+    required bool directCloud,
+    required bool manualCloud,
   }) {
-    if (!explicitCloud) {
+    if (!directCloud) {
       return fullyLocalNotice;
     }
 
@@ -534,6 +553,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           : candidates.first;
       return '${_providerDisplayName(provider)} not configured. '
           'Add an API key in Settings > AI mode.';
+    }
+
+    if (!manualCloud && configured.every((provider) => !_automaticUseAllowed(provider))) {
+      return automaticPolicyBlockedNotice;
     }
 
     final now = DateTime.now();
