@@ -432,8 +432,12 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     final contextText = request.context
         .map((turn) => '${turn.role.name}: ${turn.content}')
         .join('\n');
-    final text = '${request.systemPrompt ?? ''}\n$contextText\n${request.prompt}'
-        .toLowerCase();
+
+    // System instructions describe assistant behavior/capabilities and must not
+    // change task routing. Otherwise words such as "reasoning" or "code" in a
+    // global/custom system prompt can turn every ordinary chat into a Cloud-
+    // preferred request.
+    final text = '$contextText\n${request.prompt}'.toLowerCase();
     if (_containsAny(text, _codingKeywords)) return _TaskSignal.coding;
     if (_containsAny(text, _reasoningKeywords)) return _TaskSignal.reasoning;
     return _TaskSignal.general;
@@ -752,7 +756,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       request.cloudProviderId ?? '',
       request.allowCloudProviderFailover,
     );
-    return '${providerOrder.join(">")}::$contentHash';
+    return '${providerOrder.join(">") }::$contentHash';
   }
 
   void _putCache(String key, _CachedCloudResponse value) {
