@@ -56,12 +56,14 @@ abstract final class InteractionPolicy {
           'Respond for spoken delivery using short, natural sentences.',
           'Avoid dense formatting, large tables, and long nested lists.',
         ]);
+        break;
       case InteractionMode.voiceWithScreen:
         rules.addAll(const <String>[
           'Respond for spoken delivery using short, natural sentences.',
           'The screen may support the answer, but the spoken answer must contain the essential information.',
           'Avoid dense formatting unless the visual detail is genuinely useful.',
         ]);
+        break;
       case InteractionMode.voiceOnly:
         rules.addAll(const <String>[
           'Respond for spoken delivery using short, natural sentences.',
@@ -69,6 +71,7 @@ abstract final class InteractionPolicy {
           'Do not rely on visual references such as "above", "below", buttons, colors, or on-screen layout.',
           'Avoid dense formatting, tables, and long nested lists.',
         ]);
+        break;
     }
 
     switch (profile.context) {
@@ -79,12 +82,14 @@ abstract final class InteractionPolicy {
           'Prefer simple hands-free wording and brief confirmations.',
           'For a straightforward completed action, confirm the important result without unnecessary explanation.',
         ]);
+        break;
       case InteractionContext.driving:
         rules.addAll(const <String>[
           'Minimize distraction: give the key point first and keep the response very short.',
           'Never require reading, typing, tapping, inspecting the screen, or other manual interaction while driving.',
           'If a request requires visual or manual interaction, defer that part until it can be done safely.',
         ]);
+        break;
     }
 
     if (rules.isEmpty) return '';
