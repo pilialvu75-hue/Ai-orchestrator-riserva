@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_routing_bootstrap.dart';
+import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
@@ -31,6 +32,12 @@ class RuntimeBootstrap {
     const grokApiKey = String.fromEnvironment('GROK_API_KEY');
     const copilotApiKey = String.fromEnvironment('COPILOT_API_KEY');
 
+    // Custom provider metadata must be available before credential loading so
+    // their encrypted API-key records are discovered by the same secure store
+    // as built-in providers. A failure here is deliberately non-critical:
+    // Local AI and built-in Cloud providers must remain usable.
+    await _initializeCustomCloudProviders();
+
     await _initializeCloudCredentials(
       <String, String>{
         'openAi': openAiApiKey,
@@ -54,6 +61,21 @@ class RuntimeBootstrap {
 
     await _runWarmupChecks();
     debugPrint('[BOOT] init complete');
+  }
+
+  Future<void> _initializeCustomCloudProviders() async {
+    try {
+      await CustomCloudProviderStore.instance.initialize();
+      debugPrint(
+        '[CLOUD_CUSTOM_PROVIDERS] metadata store ready; '
+        'profiles=${CustomCloudProviderStore.instance.profiles.length}',
+      );
+    } catch (error) {
+      debugPrint(
+        '[CLOUD_CUSTOM_PROVIDERS] metadata unavailable; '
+        'continuing without custom providers: $error',
+      );
+    }
   }
 
   Future<void> _initializeCloudCredentials(

@@ -68,7 +68,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     );
   }
 
-  static const List<String> supportedProviders =
+  static List<String> get supportedProviders =>
       CloudProviderCatalog.supportedProviders;
 
   static const String _cloudModelPrefix = 'cloud.provider.model.';
