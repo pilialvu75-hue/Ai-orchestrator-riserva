@@ -34,9 +34,9 @@ class AssistantSystemPromptService {
   /// Applies the configured Assistant prompt only to ordinary Assistant chat.
   ///
   /// [SystemPromptConfig.defaultPrompt] is the marker currently carried by
-  /// normal [SendMessageEvent] instances. Null/blank and the previous bundled
-  /// default are also treated as ordinary Assistant requests. Any other prompt
-  /// is considered an explicit specialization and is preserved unchanged.
+  /// normal assistant send events. Null/blank and the previous bundled default
+  /// are also treated as ordinary Assistant requests. Any other prompt is
+  /// considered an explicit specialization and is preserved unchanged.
   String resolveForIncoming(String? incomingPrompt) {
     final incoming = incomingPrompt?.trim();
 
