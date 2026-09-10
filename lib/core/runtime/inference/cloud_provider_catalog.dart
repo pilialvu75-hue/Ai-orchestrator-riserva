@@ -15,6 +15,21 @@ enum CloudProviderCostClass {
   unknown,
 }
 
+/// Describes why a provider can currently participate in a free-first route.
+///
+/// This is intentionally separate from [CloudProviderCostClass]. The router
+/// only needs to know whether automatic use is spend-safe, while Settings and
+/// diagnostics need to distinguish durable free tiers from development grants,
+/// account-dependent access and temporary promotional credit.
+enum CloudProviderAccessClass {
+  recurringFreeTier,
+  developmentPrototypeFreeAccess,
+  accountDependentFreeAccess,
+  promoCredit,
+  paid,
+  unknown,
+}
+
 class CloudProviderDefinition {
   const CloudProviderDefinition({
     required this.id,
@@ -22,6 +37,7 @@ class CloudProviderDefinition {
     required this.defaultModel,
     required this.capabilities,
     required this.costClass,
+    required this.accessClass,
     this.supportsApiKey = true,
     this.supportsOAuth = false,
     this.isCustom = false,
@@ -32,6 +48,7 @@ class CloudProviderDefinition {
   final String defaultModel;
   final Set<CloudProviderCapability> capabilities;
   final CloudProviderCostClass costClass;
+  final CloudProviderAccessClass accessClass;
   final bool supportsApiKey;
   final bool supportsOAuth;
   final bool isCustom;
@@ -56,6 +73,7 @@ class CloudProviderCatalog {
       displayName: 'OpenAI',
       defaultModel: 'gpt-5.6-terra',
       costClass: CloudProviderCostClass.paid,
+      accessClass: CloudProviderAccessClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -70,6 +88,7 @@ class CloudProviderCatalog {
       displayName: 'Gemini',
       defaultModel: 'gemini-3.8-flash',
       costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.recurringFreeTier,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -85,6 +104,7 @@ class CloudProviderCatalog {
       displayName: 'Claude',
       defaultModel: 'claude-sonnet-5',
       costClass: CloudProviderCostClass.paid,
+      accessClass: CloudProviderAccessClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -99,6 +119,7 @@ class CloudProviderCatalog {
       displayName: 'Grok',
       defaultModel: 'grok-4.6',
       costClass: CloudProviderCostClass.paid,
+      accessClass: CloudProviderAccessClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -113,6 +134,7 @@ class CloudProviderCatalog {
       displayName: 'GitHub Copilot',
       defaultModel: 'gpt-5.6-terra',
       costClass: CloudProviderCostClass.unknown,
+      accessClass: CloudProviderAccessClass.unknown,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -121,6 +143,61 @@ class CloudProviderCatalog {
         CloudProviderCapability.longContext,
       },
       supportsOAuth: true,
+    ),
+    'groq': CloudProviderDefinition(
+      id: 'groq',
+      displayName: 'Groq',
+      defaultModel: 'qwen/qwen3.8-27b',
+      costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.recurringFreeTier,
+      capabilities: <CloudProviderCapability>{
+        CloudProviderCapability.general,
+        CloudProviderCapability.reasoning,
+        CloudProviderCapability.coding,
+        CloudProviderCapability.tools,
+        CloudProviderCapability.longContext,
+      },
+    ),
+    'nvidiaNim': CloudProviderDefinition(
+      id: 'nvidiaNim',
+      displayName: 'NVIDIA NIM',
+      defaultModel: 'meta/llama-3.1-8b-instruct',
+      costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.developmentPrototypeFreeAccess,
+      capabilities: <CloudProviderCapability>{
+        CloudProviderCapability.general,
+        CloudProviderCapability.reasoning,
+        CloudProviderCapability.coding,
+        CloudProviderCapability.longContext,
+      },
+    ),
+    'mistral': CloudProviderDefinition(
+      id: 'mistral',
+      displayName: 'Mistral',
+      defaultModel: 'mistral-small-latest',
+      costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
+      capabilities: <CloudProviderCapability>{
+        CloudProviderCapability.general,
+        CloudProviderCapability.reasoning,
+        CloudProviderCapability.coding,
+        CloudProviderCapability.tools,
+        CloudProviderCapability.longContext,
+      },
+    ),
+    'openRouter': CloudProviderDefinition(
+      id: 'openRouter',
+      displayName: 'OpenRouter Free Pool',
+      defaultModel: 'openrouter/free',
+      costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
+      capabilities: <CloudProviderCapability>{
+        CloudProviderCapability.general,
+        CloudProviderCapability.reasoning,
+        CloudProviderCapability.coding,
+        CloudProviderCapability.tools,
+        CloudProviderCapability.longContext,
+      },
     ),
   };
 
@@ -156,6 +233,9 @@ class CloudProviderCatalog {
   static CloudProviderCostClass costClassFor(String providerId) =>
       definitionFor(providerId)?.costClass ?? CloudProviderCostClass.unknown;
 
+  static CloudProviderAccessClass accessClassFor(String providerId) =>
+      definitionFor(providerId)?.accessClass ?? CloudProviderAccessClass.unknown;
+
   static bool supports(
     String providerId,
     CloudProviderCapability capability,
@@ -165,13 +245,16 @@ class CloudProviderCatalog {
   static CloudProviderDefinition _fromCustom(
     CustomCloudProviderProfile profile,
   ) {
+    final free = profile.billing == CustomCloudProviderBilling.free;
     return CloudProviderDefinition(
       id: profile.id,
       displayName: profile.displayName,
       defaultModel: profile.defaultModel,
-      costClass: profile.billing == CustomCloudProviderBilling.free
-          ? CloudProviderCostClass.freeTier
-          : CloudProviderCostClass.paid,
+      costClass:
+          free ? CloudProviderCostClass.freeTier : CloudProviderCostClass.paid,
+      accessClass: free
+          ? CloudProviderAccessClass.recurringFreeTier
+          : CloudProviderAccessClass.paid,
       isCustom: true,
       capabilities: const <CloudProviderCapability>{
         CloudProviderCapability.general,
@@ -185,8 +268,12 @@ class CloudProviderCatalog {
   /// Compatibility ordering for older callers. New routing code must score
   /// concrete executor state instead of treating these lists as fixed policy.
   static const List<String> codingPriority = <String>[
-    'claude',
+    'groq',
     'gemini',
+    'nvidiaNim',
+    'mistral',
+    'openRouter',
+    'claude',
     'openAi',
     'grok',
     'copilot',
@@ -194,6 +281,10 @@ class CloudProviderCatalog {
 
   static const List<String> reasoningPriority = <String>[
     'gemini',
+    'groq',
+    'nvidiaNim',
+    'mistral',
+    'openRouter',
     'claude',
     'openAi',
     'grok',
@@ -201,8 +292,12 @@ class CloudProviderCatalog {
   ];
 
   static const List<String> generalPriority = <String>[
-    'openAi',
     'gemini',
+    'groq',
+    'mistral',
+    'openRouter',
+    'nvidiaNim',
+    'openAi',
     'claude',
     'grok',
     'copilot',
