@@ -429,15 +429,17 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   _TaskSignal _taskSignal(InferenceRequest request) {
-    final contextText = request.context
-        .map((turn) => '${turn.role.name}: ${turn.content}')
+    final userContextText = request.context
+        .where((turn) => turn.role == ChatRole.user)
+        .map((turn) => turn.content)
         .join('\n');
 
-    // System instructions describe assistant behavior/capabilities and must not
-    // change task routing. Otherwise words such as "reasoning" or "code" in a
-    // global/custom system prompt can turn every ordinary chat into a Cloud-
-    // preferred request.
-    final text = '$contextText\n${request.prompt}'.toLowerCase();
+    // Runtime/system instructions and model-generated assistant text describe
+    // behavior or prior output, not user intent. Classify only from the current
+    // user prompt plus prior user turns so a short continuation such as
+    // "continue" keeps the relevant task type without model text causing an
+    // unnecessary Cloud escalation.
+    final text = '$userContextText\n${request.prompt}'.toLowerCase();
     if (_containsAny(text, _codingKeywords)) return _TaskSignal.coding;
     if (_containsAny(text, _reasoningKeywords)) return _TaskSignal.reasoning;
     return _TaskSignal.general;
