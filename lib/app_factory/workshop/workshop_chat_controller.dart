@@ -136,9 +136,19 @@ final class WorkshopChatController extends ChangeNotifier {
     _setBusy(true);
 
     try {
+      // The current user turn is carried by InferenceRequest.prompt.
+      // Keep only prior Workshop turns in context, otherwise prompt composers
+      // render the same user text once from context and once as the current
+      // prompt. Besides causing visible repetition, that duplicate also makes
+      // local prefill unnecessarily larger and increases stall risk.
       final context =
           List<ChatTurn>.unmodifiable(
-        _messages,
+        _messages.length <= 1
+            ? const <ChatTurn>[]
+            : _messages.sublist(
+                0,
+                _messages.length - 1,
+              ),
       );
 
       final result =
@@ -304,5 +314,5 @@ final class WorkshopChatController extends ChangeNotifier {
     _messages.clear();
 
     super.dispose();
-   }
   }
+}
