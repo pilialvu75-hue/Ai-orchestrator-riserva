@@ -40,6 +40,7 @@ String? publicLogProjection(String line) {
     'TERMINAL_STATE',
     'TOKEN_STREAM',
     'FINAL_RESPONSE',
+    'CLOUD_ROUTING',
     'ANDROID_PROCESS_EXIT_HISTORY',
     'FORENSIC_UNCAUGHT_DART_EXCEPTION',
     'FORENSIC_GLOBAL_EXCEPTION_HANDLERS_INSTALLED',
@@ -63,12 +64,35 @@ String? publicLogProjection(String line) {
   }
   if (event == null) return null;
 
+  // CLOUD_ROUTING has a fully closed grammar. Never accept free-form values:
+  // custom-provider identifiers are reduced to the literal "custom" before
+  // they reach this boundary, and any extra field makes the event invalid.
+  if (event == 'CLOUD_ROUTING') {
+    final routing = RegExp(
+      r'^task=(general|reasoning|coding) '
+      r'cost=(freeTier|paid|unknown) '
+      r'provider=(openAi|gemini|claude|grok|copilot|groq|nvidiaNim|mistral|openRouter|custom) '
+      r'decision=(attempt|success|failure) '
+      r'reason=(dispatch|completed|rate_limit|quota|authentication|timeout|network|unsupported|unavailable|other)$',
+    ).firstMatch(rest);
+    if (routing == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': 'CLOUD_ROUTING',
+      'task': routing[1]!,
+      'cost': routing[2]!,
+      'provider': routing[3]!,
+      'decision': routing[4]!,
+      'reason': routing[5]!,
+    });
+  }
+
   // TOKEN_STREAM is exported only for the exact Cloud-provider notice. Token
   // text and arbitrary stream payloads must never leave the device.
   if (event == 'TOKEN_STREAM') {
     final providerNotice = RegExp(
       r'^notice session=[A-Za-z0-9._:-]{1,80} '
-      r'notice="cloud_provider:(openAi|gemini|claude|grok|copilot)"$',
+      r'notice="cloud_provider:(openAi|gemini|claude|grok|copilot|groq|nvidiaNim|mistral|openRouter)"$',
     ).firstMatch(rest);
     if (providerNotice == null) return null;
     return jsonEncode(<String, Object>{
