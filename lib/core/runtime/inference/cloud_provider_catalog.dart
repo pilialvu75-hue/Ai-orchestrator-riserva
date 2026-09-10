@@ -161,7 +161,7 @@ class CloudProviderCatalog {
     'nvidiaNim': CloudProviderDefinition(
       id: 'nvidiaNim',
       displayName: 'NVIDIA NIM',
-      defaultModel: 'meta/llama-3.1-8b-instruct',
+      defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
       costClass: CloudProviderCostClass.freeTier,
       accessClass: CloudProviderAccessClass.developmentPrototypeFreeAccess,
       capabilities: <CloudProviderCapability>{
