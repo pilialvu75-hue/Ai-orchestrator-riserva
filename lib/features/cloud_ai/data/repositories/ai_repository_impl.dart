@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/custom_cloud_provider_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
@@ -21,18 +22,23 @@ class AiRepositoryImpl implements AiRepository {
     required this.claudeDataSource,
     this.grokDataSource,
     this.copilotDataSource,
-    this.activeAiProvider = ActiveAiProvider.openAi,
-  });
+    CustomCloudProviderDataSource? customCloudProviderDataSource,
+    ActiveAiProvider activeAiProvider = ActiveAiProvider.openAi,
+  })  : _customCloudProviderDataSource =
+            customCloudProviderDataSource ?? CustomCloudProviderDataSource(),
+        _activeProviderId = activeAiProvider.name;
 
   final OpenAiDataSource openAiDataSource;
   final GeminiDataSource geminiDataSource;
   final ClaudeDataSource claudeDataSource;
   final GrokDataSource? grokDataSource;
   final CopilotDataSource? copilotDataSource;
-  ActiveAiProvider activeAiProvider;
+  final CustomCloudProviderDataSource _customCloudProviderDataSource;
+
+  String _activeProviderId;
 
   @override
-  String get activeProvider => activeAiProvider.name;
+  String get activeProvider => _activeProviderId;
 
   @override
   List<String> get supportedProviders =>
@@ -40,26 +46,26 @@ class AiRepositoryImpl implements AiRepository {
 
   @override
   void setProvider(String providerName) {
-    activeAiProvider =
-        _providerFromName(providerName) ?? ActiveAiProvider.openAi;
+    final normalized = providerName.trim();
+    _activeProviderId = CloudProviderCatalog.definitionFor(normalized) != null
+        ? normalized
+        : ActiveAiProvider.openAi.name;
   }
 
   @override
   String providerDisplayName([String? providerName]) {
-    final requested = providerName == null
-        ? activeAiProvider.name
-        : providerName;
+    final requested = providerName == null ? _activeProviderId : providerName;
     return CloudProviderCatalog.definitionFor(requested)?.displayName ??
         requested;
   }
 
   @override
   String? validateProviderConfiguration([String? providerName]) {
-    final provider = _providerFromName(providerName);
-    if (provider == null) {
+    final requested = (providerName ?? _activeProviderId).trim();
+    if (CloudProviderCatalog.definitionFor(requested) == null) {
       return 'Selected cloud AI provider is not supported. Please choose another provider in Settings.';
     }
-    if (_isConfigured(provider)) {
+    if (isProviderAvailable(requested)) {
       return null;
     }
     return 'Cloud AI provider not configured. Please add an API key or switch to Local AI mode.';
@@ -67,14 +73,19 @@ class AiRepositoryImpl implements AiRepository {
 
   @override
   bool isProviderAvailable(String providerName) {
-    final provider = _providerFromName(providerName);
+    final requested = providerName.trim();
+    if (CloudProviderCatalog.isCustom(requested)) {
+      return _customCloudProviderDataSource.isConfigured(requested);
+    }
+
+    final provider = _builtInProviderFromName(requested);
     if (provider == null) return false;
     return _isConfigured(provider);
   }
 
   @override
   Future<Either<Failure, AiResponse>> sendQuery(AiRequest request) async {
-    return sendQueryWithProvider(activeAiProvider.name, request);
+    return sendQueryWithProvider(_activeProviderId, request);
   }
 
   @override
@@ -83,7 +94,18 @@ class AiRepositoryImpl implements AiRepository {
     AiRequest request,
   ) async {
     try {
-      final provider = _providerFromName(providerName);
+      final requested = providerName.trim();
+      final model = AiRequestModel.fromEntity(request);
+
+      if (CloudProviderCatalog.isCustom(requested)) {
+        final response = await _customCloudProviderDataSource.complete(
+          requested,
+          model,
+        );
+        return Right(response);
+      }
+
+      final provider = _builtInProviderFromName(requested);
       if (provider == null) {
         return const Left(
           ServerFailure(
@@ -93,9 +115,8 @@ class AiRepositoryImpl implements AiRepository {
       }
 
       // IMPORTANT: an explicit routed request must not mutate the global user
-      // preference. Multiple Cantiere executions may call different providers
+      // preference. Multiple executions may call different providers
       // concurrently; their routing decisions must remain isolated.
-      final model = AiRequestModel.fromEntity(request);
       final AiResponse response;
 
       switch (provider) {
@@ -136,8 +157,8 @@ class AiRepositoryImpl implements AiRepository {
     }
   }
 
-  ActiveAiProvider? _providerFromName(String? providerName) {
-    if (providerName == null) return activeAiProvider;
+  ActiveAiProvider? _builtInProviderFromName(String? providerName) {
+    if (providerName == null) return null;
     for (final provider in ActiveAiProvider.values) {
       if (provider.name == providerName) {
         return provider;
