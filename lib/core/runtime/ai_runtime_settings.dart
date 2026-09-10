@@ -64,7 +64,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     CloudRuntimePreferences.instance.bind(
       preferredProvider: () => activeProvider,
       modelForProvider: cloudModelFor,
-      automaticUseAllowed: (_) => automaticCloudSpendingAllowed,
+      automaticUseAllowed: automaticCloudUseAllowed,
     );
   }
 
@@ -165,11 +165,23 @@ class AiRuntimeSettingsService extends ChangeNotifier {
         _configRepository.getString(_cloudSpendingModeKey),
       );
 
-  /// Automatic paid Cloud calls are deliberately opt-in. Modes that require
-  /// quota/cost verification remain blocked until a provider-specific billing
-  /// adapter can prove the request satisfies that policy.
+  /// Legacy aggregate signal retained for callers that only need to know
+  /// whether unrestricted automatic paid Cloud usage is enabled.
   bool get automaticCloudSpendingAllowed =>
       cloudSpendingMode == CloudSpendingMode.unrestricted;
+
+  /// Provider-specific automatic authorization used by the Cloud router.
+  ///
+  /// Free-tier routes stay available in every spend-safe mode. Paid and
+  /// unknown-cost routes fail closed unless automatic spending is explicitly
+  /// unrestricted. Prepaid/budget modes deliberately remain closed for paid
+  /// providers until billing/quota adapters can prove that a request is covered.
+  bool automaticCloudUseAllowed(String provider) {
+    if (cloudSpendingMode == CloudSpendingMode.unrestricted) return true;
+
+    return CloudProviderCatalog.costClassFor(provider) ==
+        CloudProviderCostClass.freeTier;
+  }
 
   Future<void> setCloudSpendingMode(CloudSpendingMode mode) async {
     await _configRepository.setString(_cloudSpendingModeKey, mode.name);

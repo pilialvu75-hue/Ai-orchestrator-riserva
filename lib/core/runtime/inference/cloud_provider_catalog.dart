@@ -7,12 +7,19 @@ enum CloudProviderCapability {
   longContext,
 }
 
+enum CloudProviderCostClass {
+  freeTier,
+  paid,
+  unknown,
+}
+
 class CloudProviderDefinition {
   const CloudProviderDefinition({
     required this.id,
     required this.displayName,
     required this.defaultModel,
     required this.capabilities,
+    required this.costClass,
     this.supportsApiKey = true,
     this.supportsOAuth = false,
   });
@@ -21,6 +28,7 @@ class CloudProviderDefinition {
   final String displayName;
   final String defaultModel;
   final Set<CloudProviderCapability> capabilities;
+  final CloudProviderCostClass costClass;
   final bool supportsApiKey;
   final bool supportsOAuth;
 
@@ -42,6 +50,7 @@ class CloudProviderCatalog {
       id: 'openAi',
       displayName: 'OpenAI',
       defaultModel: 'gpt-5.6-terra',
+      costClass: CloudProviderCostClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -55,6 +64,7 @@ class CloudProviderCatalog {
       id: 'gemini',
       displayName: 'Gemini',
       defaultModel: 'gemini-3.8-flash',
+      costClass: CloudProviderCostClass.freeTier,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -69,6 +79,7 @@ class CloudProviderCatalog {
       id: 'claude',
       displayName: 'Claude',
       defaultModel: 'claude-sonnet-5',
+      costClass: CloudProviderCostClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -82,6 +93,7 @@ class CloudProviderCatalog {
       id: 'grok',
       displayName: 'Grok',
       defaultModel: 'grok-4.6',
+      costClass: CloudProviderCostClass.paid,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -95,6 +107,7 @@ class CloudProviderCatalog {
       id: 'copilot',
       displayName: 'GitHub Copilot',
       defaultModel: 'gpt-5.6-terra',
+      costClass: CloudProviderCostClass.unknown,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
@@ -119,6 +132,9 @@ class CloudProviderCatalog {
 
   static String defaultModelFor(String providerId) =>
       definitions[providerId]?.defaultModel ?? '';
+
+  static CloudProviderCostClass costClassFor(String providerId) =>
+      definitions[providerId]?.costClass ?? CloudProviderCostClass.unknown;
 
   static bool supports(
     String providerId,
