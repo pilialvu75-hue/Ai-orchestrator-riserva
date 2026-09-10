@@ -34,8 +34,9 @@ class RuntimeBootstrap {
 
     // Custom provider metadata must be available before credential loading so
     // their encrypted API-key records are discovered by the same secure store
-    // as built-in providers.
-    await CustomCloudProviderStore.instance.initialize();
+    // as built-in providers. A failure here is deliberately non-critical:
+    // Local AI and built-in Cloud providers must remain usable.
+    await _initializeCustomCloudProviders();
 
     await _initializeCloudCredentials(
       <String, String>{
@@ -60,6 +61,21 @@ class RuntimeBootstrap {
 
     await _runWarmupChecks();
     debugPrint('[BOOT] init complete');
+  }
+
+  Future<void> _initializeCustomCloudProviders() async {
+    try {
+      await CustomCloudProviderStore.instance.initialize();
+      debugPrint(
+        '[CLOUD_CUSTOM_PROVIDERS] metadata store ready; '
+        'profiles=${CustomCloudProviderStore.instance.profiles.length}',
+      );
+    } catch (error) {
+      debugPrint(
+        '[CLOUD_CUSTOM_PROVIDERS] metadata unavailable; '
+        'continuing without custom providers: $error',
+      );
+    }
   }
 
   Future<void> _initializeCloudCredentials(
