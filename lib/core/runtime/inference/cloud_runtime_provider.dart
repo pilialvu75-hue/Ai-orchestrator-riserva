@@ -107,17 +107,16 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       LinkedHashMap<String, _CachedCloudResponse>();
   String? _pendingLocalFallbackNotice;
 
-  /// Aggregate automatic Cloud availability used by legacy callers.
+  /// Conservative automatic Cloud availability for legacy/local-first callers.
   ///
-  /// A provider counts as available when at least one task class may use it
-  /// automatically. Request-specific decisions must use [canInferFor].
+  /// Callers without a concrete request must never infer that a provider which
+  /// is authorized only for coding/reasoning can also serve ordinary chat.
+  /// Request-specific routing must use [canInferFor].
   bool get canInfer => _supportedProviders().any(
-        (provider) => CloudTaskClass.values.any(
-          (task) => _isProviderReady(
-            provider,
-            task: task,
-            enforceAutomaticPolicy: true,
-          ),
+        (provider) => _isProviderReady(
+          provider,
+          task: CloudTaskClass.general,
+          enforceAutomaticPolicy: true,
         ),
       );
 
@@ -441,17 +440,28 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   CloudTaskClass _taskSignal(InferenceRequest request) {
-    final userContextText = request.context
-        .where((turn) => turn.role == ChatRole.user)
-        .map((turn) => turn.content)
-        .join('\n');
+    final currentText = request.prompt.trim().toLowerCase();
+    final currentSignal = _classifyTaskText(currentText);
+    if (currentSignal != CloudTaskClass.general) return currentSignal;
 
-    // Runtime/system instructions and model-generated assistant text describe
-    // behavior or prior output, not user intent. Classify only from the current
-    // user prompt plus prior user turns so a short continuation such as
-    // "continue" keeps the relevant task type without model text causing an
-    // unnecessary Cloud escalation.
-    final text = '$userContextText\n${request.prompt}'.toLowerCase();
+    // Prior user turns are consulted only for an explicit continuation. This
+    // preserves "continua" / "go on" inside technical work without letting an
+    // old coding topic classify unrelated later messages such as "grazie".
+    if (!_containsAny(currentText, _continuationKeywords)) {
+      return CloudTaskClass.general;
+    }
+
+    final recentUserContext = request.context.reversed
+        .where((turn) => turn.role == ChatRole.user)
+        .take(3)
+        .map((turn) => turn.content)
+        .join('\n')
+        .toLowerCase();
+
+    return _classifyTaskText(recentUserContext);
+  }
+
+  CloudTaskClass _classifyTaskText(String text) {
     if (_containsAny(text, _codingKeywords)) return CloudTaskClass.coding;
     if (_containsAny(text, _reasoningKeywords)) return CloudTaskClass.reasoning;
     return CloudTaskClass.general;
@@ -854,6 +864,21 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     }
     return false;
   }
+
+  static const Set<String> _continuationKeywords = <String>{
+    'continua',
+    'continuare',
+    'continue',
+    'go on',
+    'proceed',
+    'prosegui',
+    'proseguiamo',
+    'vai avanti',
+    'avanti',
+    'riprendi',
+    'stesso lavoro',
+    'come prima',
+  };
 
   static const Set<String> _codingKeywords = <String>{
     'code',
