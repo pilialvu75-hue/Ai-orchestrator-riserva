@@ -162,7 +162,7 @@ class CloudProviderCatalog {
       id: 'nvidiaNim',
       displayName: 'NVIDIA NIM',
       defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
-      costClass: CloudProviderCostClass.freeTier,
+      costClass: CloudProviderCostClass.unknown,
       accessClass: CloudProviderAccessClass.developmentPrototypeFreeAccess,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
@@ -175,7 +175,7 @@ class CloudProviderCatalog {
       id: 'mistral',
       displayName: 'Mistral',
       defaultModel: 'mistral-small-latest',
-      costClass: CloudProviderCostClass.freeTier,
+      costClass: CloudProviderCostClass.unknown,
       accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
@@ -189,7 +189,7 @@ class CloudProviderCatalog {
       id: 'openRouter',
       displayName: 'OpenRouter Free Pool',
       defaultModel: 'openrouter/free',
-      costClass: CloudProviderCostClass.freeTier,
+      costClass: CloudProviderCostClass.unknown,
       accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
