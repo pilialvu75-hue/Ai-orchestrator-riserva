@@ -7,6 +7,7 @@ class AndroidFfiRuntimeModelIds {
     LocalInferenceModelIds.gemma2_2bIt,
     LocalInferenceModelIds.deepSeekR1_1_5b,
     LocalInferenceModelIds.qwen3_1_7b,
+    LocalInferenceModelIds.nemotron3Nano4b,
     LocalInferenceModelIds.phi3_5_mini,
   };
 }
