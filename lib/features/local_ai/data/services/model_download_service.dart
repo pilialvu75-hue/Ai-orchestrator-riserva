@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -283,7 +284,25 @@ class ModelDownloadService {
 
   // ── Resumable transfer implementation ─────────────────────────────────────
 
+  final Map<String, Future<_DownloadResult>> _backgroundOperations = {};
+
   Future<_DownloadResult> _downloadResumable({
+    required String modelId,
+    required String url,
+    required String filePath,
+    required int expectedBytes,
+    void Function(double progress)? onProgress,
+  }) {
+    final existing = _backgroundOperations[filePath];
+    if (existing != null) return existing;
+    final operation = _runDownloadResumable(modelId: modelId, url: url,
+        filePath: filePath, expectedBytes: expectedBytes, onProgress: onProgress)
+        .whenComplete(() { _backgroundOperations.remove(filePath); });
+    _backgroundOperations[filePath] = operation;
+    return operation;
+  }
+
+  Future<_DownloadResult> _runDownloadResumable({
     required String modelId,
     required String url,
     required String filePath,
@@ -322,6 +341,39 @@ class ModelDownloadService {
             if (!await partFile.exists()) {
               await finalFile.rename(partFile.path);
             }
+          }
+
+          if (Platform.isAndroid) {
+            try {
+            await BackgroundDownload.transfer(
+              url: url,
+              title: 'Modello $modelId',
+              destination: partFile,
+              cancelToken: cancelToken,
+              onProgress: (received, total) => onProgress?.call(
+                total > 0 ? (received / total).clamp(0.0, 1.0).toDouble() : 0.0,
+              ),
+            );
+            } on StateError catch (error) {
+              // A system cancellation/failure requires another explicit tap.
+              throw DownloadException(error.message.toString());
+            }
+            final length = await partFile.length();
+            final validation = await _validateModelFileDetailed(
+              partFile, treatMissingAsMissing: false,
+            );
+            if (validation.status != ModelValidationStatus.validatedOk ||
+                isClearlyTruncatedModel(length, expectedBytes)) {
+              await BackgroundDownload.release(url);
+              throw DownloadException('Downloaded model failed validation.');
+            }
+            if (cancelToken.isCancelled) throw cancelToken.cancelError!;
+            if (await finalFile.exists()) await finalFile.delete();
+            await partFile.rename(finalFile.path);
+            await BackgroundDownload.release(url);
+            onProgress?.call(1.0);
+            return _DownloadResult(path: finalFile.path, sizeBytes: length,
+                status: validation.status);
           }
 
           var existingBytes = 0;
@@ -2009,3 +2061,4 @@ class _ExportCopyJob {
   final File source;
   final File destination;
 }
+

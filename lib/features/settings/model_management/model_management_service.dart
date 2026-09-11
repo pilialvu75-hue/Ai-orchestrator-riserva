@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 import 'package:dio/dio.dart';
@@ -146,7 +147,21 @@ class ModelManagementService {
     }
   }
 
+  final Map<String, Future<ModelFileInspection>> _downloads = {};
+
   Future<ModelFileInspection> forceDownload(
+    RuntimeModelFileSpec spec, {
+    required void Function(double progress) onProgress,
+  }) {
+    final existing = _downloads[spec.id];
+    if (existing != null) return existing;
+    final operation = _forceDownload(spec, onProgress: onProgress)
+        .whenComplete(() { _downloads.remove(spec.id); });
+    _downloads[spec.id] = operation;
+    return operation;
+  }
+
+  Future<ModelFileInspection> _forceDownload(
     RuntimeModelFileSpec spec, {
     required void Function(double progress) onProgress,
   }) async {
@@ -176,6 +191,17 @@ class ModelManagementService {
     try {
       int? serverContentLength;
 
+      if (Platform.isAndroid) {
+        await BackgroundDownload.transfer(
+          url: spec.downloadUrl, title: spec.fileName, destination: tempFile,
+          onProgress: (received, total) {
+            if (total > 0) serverContentLength = total;
+            final denominator = total > 0 ? total : spec.expectedBytes;
+            onProgress(denominator > 0
+                ? (received / denominator).clamp(0.0, 1.0).toDouble() : 0.0);
+          },
+        );
+      } else {
       await _dio.download(
         spec.downloadUrl,
         tempFile.path,
@@ -198,6 +224,8 @@ class ModelManagementService {
           onProgress(progress);
         },
       );
+
+      }
 
       final length = await tempFile.length();
       _log(
@@ -231,6 +259,7 @@ class ModelManagementService {
       );
       await tempFile.rename(destination.path);
       _log('[FORCE_DL_RENAME_OK] file=${spec.fileName}');
+      if (Platform.isAndroid) await BackgroundDownload.release(spec.downloadUrl);
 
       onProgress(1.0);
       final inspection = await inspect(spec);
@@ -257,6 +286,9 @@ class ModelManagementService {
         'Download fallito (${error.response?.statusCode ?? "N/A"}): ${error.message}',
       );
     } catch (error) {
+      if (Platform.isAndroid && error is ModelDownloadFailureException) {
+        await BackgroundDownload.release(spec.downloadUrl);
+      }
       await _safeDeleteFile(tempFile, '[FORCE_DL_ERROR_CLEANUP]');
       _log('[FORCE_DL_FAIL] file=${spec.fileName} error=$error');
       if (error is ModelDownloadInterruptedException ||
@@ -492,3 +524,4 @@ class _ExportCopyJob {
   final File source;
   final File destination;
 }
+

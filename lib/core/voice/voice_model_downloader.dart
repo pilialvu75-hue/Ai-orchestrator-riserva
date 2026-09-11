@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 import 'package:archive/archive_io.dart';
@@ -199,7 +200,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     }
 
     try {
-      if (existingBytes > 0) {
+      if (Platform.isAndroid) {
+        await BackgroundDownload.transfer(
+          url: url, title: assetName, destination: partialFile,
+          onProgress: (received, total) => onProgress(
+            total > 0 ? (received / total).clamp(0.0, 1.0).toDouble() : 0.0,
+          ),
+        );
+      } else if (existingBytes > 0) {
         await _resumeDownload(
           url: url,
           partialFile: partialFile,
@@ -808,8 +816,14 @@ class VoiceModelDownloader with RuntimeEventEmitter {
         ),
       );
 
+      if (Platform.isAndroid) {
+        await BackgroundDownload.release(AppConstants.sttNemotronTarUrl);
+      }
       onProgress(0.97);
     } catch (error) {
+      if (Platform.isAndroid && (error is VoiceAssetException || error is FormatException)) {
+        await BackgroundDownload.release(AppConstants.sttNemotronTarUrl);
+      }
       if (error is VoiceAssetException) {
         rethrow;
       }
@@ -1138,3 +1152,4 @@ class VoiceModelDownloader with RuntimeEventEmitter {
     return targetDir;
   }
 }
+

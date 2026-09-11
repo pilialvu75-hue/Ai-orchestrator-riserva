@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -49,7 +50,8 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
 
   Future<void> _downloadAndInstall() async {
     final ok = await _updateManager.downloadLatestApk();
-    if (!ok || !mounted) return;
+    if (!ok || !mounted ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
     await _updateManager.prepareInstallIntent();
     unawaited(_updateManager.refreshDiagnostics());
   }
@@ -114,6 +116,15 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
             children: [
+              if (Platform.isAndroid) const Padding(
+                padding: EdgeInsets.only(bottom: 16),
+                child: Text(
+                  'Dopo aver avviato il download puoi uscire dall’app o spegnere '
+                  'lo schermo. Segui l’avanzamento nella notifica Android. '
+                  'Riapri l’app per verificare e installare l’aggiornamento.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
               Text(
                 l10n.t('preferred_release_channel'),
                 style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
@@ -568,3 +579,4 @@ class _DiagnosticsCard extends StatelessWidget {
     );
   }
 }
+

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -47,6 +48,16 @@ class _ModelManagementView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
+                if (Platform.isAndroid) const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'I download avviati proseguono anche con l’app chiusa. '
+                    'Segui la notifica Android. Alla riapertura, premi di nuovo '
+                    'Scarica sullo stesso pacchetto per completarne la preparazione: '
+                    'il trasferimento già avviato viene recuperato.',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
                 FilledButton.icon(
                   onPressed: state.exportingAll
                       ? null
@@ -343,3 +354,4 @@ class _FileRow extends StatelessWidget {
     }
   }
 }
+
