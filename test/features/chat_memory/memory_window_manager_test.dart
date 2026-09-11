@@ -181,6 +181,34 @@ void main() {
       expect(result.overflowDetected, isTrue);
     });
 
+    test('runtime-owned budgeting does not discard turns by character size', () {
+      final manager = MemoryWindowManager(
+        tokenEstimator: const CharacterLengthEstimator(),
+        configProvider: () => MemoryWindowConfig.custom(
+          maxContextLines: 16,
+          maxTotalSize: 512,
+          isWeb: false,
+        ),
+      );
+      final longContent = 'x' * 300;
+
+      final result = manager.trimToWindow(
+        systemPrompt: 'system',
+        userPrompt: 'prompt',
+        contextTurns: <ChatTurn>[
+          ChatTurn(role: ChatRole.user, content: longContent),
+          ChatTurn(role: ChatRole.assistant, content: longContent),
+          const ChatTurn(role: ChatRole.user, content: 'latest question'),
+        ],
+        enforceEstimatedSizeBudget: false,
+      );
+
+      expect(result.contextTurns, hasLength(3));
+      expect(result.contextTurns.first.role, ChatRole.user);
+      expect(result.overflowDetected, isFalse);
+      expect(result.totalSize, greaterThan(512));
+    });
+
     test('drops leading orphan assistant turns even without budget pressure', () {
       final manager = MemoryWindowManager(
         tokenEstimator: const CharacterLengthEstimator(),
