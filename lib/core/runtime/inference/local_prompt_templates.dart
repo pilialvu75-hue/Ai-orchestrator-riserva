@@ -1,4 +1,4 @@
-import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -7,7 +7,8 @@ const String _completeSystemPrompt =
     'You are a helpful assistant. Give complete answers when appropriate.';
 
 // Istruzione per l'abilitazione della ricerca web.
-// Viene aggiunta SOLO quando la richiesta è realmente fattuale/dinamica.
+// Viene aggiunta SOLO quando la richiesta richiede dati dinamici o una ricerca
+// esplicitamente online. Le domande fattuali stabili restano locali.
 const String _webSearchInstruction =
     "IMPORTANTE: Hai accesso a Internet tramite il tag <search>query</search>. "
     "Se l'utente chiede notizie, meteo, fatti recenti, dati in tempo reale o informazioni che cambiano nel tempo, "
@@ -21,26 +22,18 @@ class LocalPromptTemplates {
   // CONTEXT BUDGET
   // ===========================================================================
   //
-  // AndroidFfiRuntimeProvider usa attualmente nCtx=2048.
+  // AndroidFfiRuntimeProvider usa attualmente nCtx=4096.
   //
-  // Non dobbiamo occupare tutto il context window con la history:
+  // MemoryWindowManager seleziona già il contesto dell'Assistente prima che
+  // questo composer venga chiamato. Manteniamo comunque un bound legacy per
+  // altri caller diretti, ma non dobbiamo troncare di nuovo una history valida
+  // a soli 12 turni.
   //
-  //   system prompt
-  //   + history
-  //   + current user prompt
-  //   + generation headroom
-  //
-  // devono poter convivere nello stesso context.
-  //
-  // Il limite è intenzionalmente conservativo e si applica a TUTTE le famiglie.
-  //
-  // Non tronchiamo un messaggio a metà:
-  // manteniamo solamente turni completi, partendo dai più recenti.
-  //
-  // Questo non modifica la memoria persistente: modifica solamente ciò che
-  // viene inviato al modello per la singola inferenza.
+  // Il limite in caratteri resta una rete di sicurezza temporanea finché il
+  // runtime Local non applicherà il budget finale tramite il tokenizer nativo.
+  // Non tronchiamo un messaggio a metà: conserviamo turni completi e recenti.
   static const int _maxContextChars = 11000;
-  static const int _maxContextTurns = 12;
+  static const int _maxContextTurns = 80;
 
   static String compose({
     required String modelId,
@@ -57,16 +50,9 @@ class LocalPromptTemplates {
      *
      * The web-search protocol must NOT be injected into every prompt.
      *
-     * Previously the instruction was always appended to the system prompt.
-     * That caused simple requests such as:
-     *
-     *   "ciao"
-     *   "cavolo"
-     *
-     * to be interpreted by the local model as search requests.
-     *
-     * The search instruction is now enabled only for prompts that are
-     * actually likely to require factual/current information.
+     * Stable factual questions should be answered locally when possible.
+     * Search is reserved for explicit web intent or information whose value is
+     * expected to change with time.
      */
     final enableWebSearch = _isFactualQuery(userPrompt);
 
@@ -156,7 +142,7 @@ class LocalPromptTemplates {
     RuntimeEventLog.instance.emit(
       '[PROMPT_WEB_SEARCH] '
       'enabled=$enableWebSearch '
-      'reason=${enableWebSearch ? 'factual_query' : 'ordinary_conversation'}',
+      'reason=${enableWebSearch ? 'dynamic_or_explicit_query' : 'ordinary_conversation'}',
     );
 
     switch (template) {
@@ -307,7 +293,7 @@ class LocalPromptTemplates {
     }
 
     selected = selected.reversed.toList();
-      
+
     return List<ChatTurn>.unmodifiable(selected);
   }
 
@@ -329,52 +315,68 @@ class LocalPromptTemplates {
     }
 
     /*
-     * Keep this deliberately conservative.
-     *
-     * Ordinary conversational messages such as:
-     *
-     *   ciao
-     *   cavolo
-     *   grazie
-     *   ok
-     *
-     * must NOT activate the search protocol.
-     *
-     * Search activation is reserved for explicit factual/current
-     * information requests.
+     * Search only when the user explicitly asks for web lookup or when the
+     * information is inherently time-sensitive. Generic factual forms such as
+     * "quanto", "quando", "dove" and "cos'è" must not force an Internet round
+     * trip: the local model can answer stable knowledge directly.
      */
-
-    return p.contains('quanto') ||
-        p.contains('quando') ||
-        p.contains('chi è') ||
-        p.contains('chi e ') ||
-        p.contains('chi gioca') ||
-        p.contains('dove') ||
-        p.contains('cosè') ||
-        p.contains('cos\'è') ||
-        p.contains('cosa è') ||
-        p.contains('cosa sono') ||
-        p.contains('definizione') ||
-        p.contains('colore') ||
-        p.contains('cerca') ||
-        p.contains('cercami') ||
-        p.contains('ricerca') ||
-        p.contains('trova') ||
-        p.contains('data') ||
-        p.contains('anno') ||
+    return p.contains('cerca online') ||
+        p.contains('cerca sul web') ||
+        p.contains('cerca su internet') ||
+        p.contains('cercami online') ||
+        p.contains('ricerca online') ||
+        p.contains('ricerca sul web') ||
+        p.contains('search online') ||
+        p.contains('search the web') ||
+        p.contains('look up online') ||
+        p.contains('cherche en ligne') ||
+        p.contains('recherche en ligne') ||
+        p.contains('busca online') ||
+        p.contains('buscar online') ||
+        p.contains('internet') ||
+        p.contains(' sul web') ||
+        p.startsWith('web ') ||
         p.contains('meteo') ||
+        p.contains('weather') ||
+        p.contains('météo') ||
         p.contains('notizie') ||
         p.contains('news') ||
+        p.contains('actualités') ||
+        p.contains('actualites') ||
+        p.contains('noticias') ||
         p.contains('oggi') ||
+        p.contains('today') ||
+        p.contains("aujourd'hui") ||
+        p.contains('hoy') ||
         p.contains('attuale') ||
         p.contains('attualmente') ||
+        p.contains('current') ||
+        p.contains('latest') ||
         p.contains('ultimo') ||
         p.contains('ultima') ||
         p.contains('ultime') ||
-        p.contains('recente') ||
-        p.contains('recenti') ||
+        p.contains('récent') ||
+        p.contains('recent') ||
+        p.contains('reciente') ||
         p.contains('in tempo reale') ||
-        p.contains('tempo reale');
+        p.contains('real time') ||
+        p.contains('en temps réel') ||
+        p.contains('tiempo real') ||
+        p.contains('stasera') ||
+        p.contains('tonight') ||
+        p.contains('ce soir') ||
+        p.contains('esta noche') ||
+        p.contains('chi gioca') ||
+        p.contains('quando gioca') ||
+        p.contains('risultato') ||
+        p.contains('classifica') ||
+        p.contains('standings') ||
+        p.contains('score') ||
+        p.contains('prezzo') ||
+        p.contains('price') ||
+        p.contains('prix') ||
+        p.contains('precio') ||
+        p.contains('quotazione');
   }
 
   static String _buildLlama3Prompt({
