@@ -11,6 +11,9 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_life
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -36,6 +39,9 @@ final class WorkshopProductionLifecycleBundle {
     required this.taskLifecycle,
     required this.projectExecutor,
     this.reuseLibrary,
+    this.reuseSourceSnapshots,
+    this.reuseSourceSnapshotService =
+        const WorkshopReuseSourceSnapshotService(),
     this.workspaceRootPath,
   });
 
@@ -54,6 +60,12 @@ final class WorkshopProductionLifecycleBundle {
   /// Verified local production knowledge available to the reuse-aware
   /// preflight. Null preserves the historical production behaviour.
   final WorkshopReuseLibrary? reuseLibrary;
+
+  /// Safe source snapshots keyed by reusable asset id. Snapshot source is
+  /// staged only into VirtualWorkspace, never directly into the real project.
+  final WorkshopReuseSourceSnapshotIndex? reuseSourceSnapshots;
+
+  final WorkshopReuseSourceSnapshotService reuseSourceSnapshotService;
 
   /// Authoritative executor shared by dashboard preparation, inference and
   /// explicit approval/apply. Exposed only so a UI boundary can recover the
@@ -88,6 +100,9 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopBuildLab? buildLab,
     WorkshopReuseLibrary? reuseLibrary,
     Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
+    WorkshopReuseSourceSnapshotIndex? reuseSourceSnapshots,
+    WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
+        const WorkshopReuseSourceSnapshotService(),
     String? workspaceRootPath,
   }) {
     final orchestratorGateway =
@@ -136,6 +151,8 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       taskLifecycle: lifecycle,
       projectExecutor: projectExecutor,
       reuseLibrary: reuseLibrary,
+      reuseSourceSnapshots: reuseSourceSnapshots,
+      reuseSourceSnapshotService: reuseSourceSnapshotService,
       workspaceRootPath: workspaceRootPath,
     );
   }
@@ -157,6 +174,9 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         const <WorkshopBuildProvider>[],
     WorkshopReuseLibrary? reuseLibrary,
     Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
+    WorkshopReuseSourceSnapshotIndex? reuseSourceSnapshots,
+    WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
+        const WorkshopReuseSourceSnapshotService(),
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -184,12 +204,14 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       buildLab: resolvedBuildLab,
       reuseLibrary: reuseLibrary,
       onReuseLibraryChanged: onReuseLibraryChanged,
+      reuseSourceSnapshots: reuseSourceSnapshots,
+      reuseSourceSnapshotService: reuseSourceSnapshotService,
       workspaceRootPath: normalizedWorkspaceRootPath,
     );
   }
 
-  /// Async production composition that restores the verified local reuse
-  /// catalog before creating the preflight pipeline.
+  /// Async production composition that restores both verified reuse descriptors
+  /// and their safe source-snapshot index before creating the preflight.
   ///
   /// Existing synchronous callers remain unchanged. App/UI composition can opt
   /// into this path when it already owns [PreferencesService], avoiding any new
@@ -205,13 +227,19 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopBuildLab? buildLab,
     Iterable<WorkshopBuildProvider> buildProviders =
         const <WorkshopBuildProvider>[],
+    WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
+        const WorkshopReuseSourceSnapshotService(),
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) async {
-    final store = WorkshopReuseLibraryStore(
+    final reuseStore = WorkshopReuseLibraryStore(
       preferences: preferences,
     );
-    final reuseLibrary = await store.load();
+    final snapshotStore = WorkshopReuseSourceSnapshotStore(
+      preferences: preferences,
+    );
+    final reuseLibrary = await reuseStore.load();
+    final reuseSourceSnapshots = await snapshotStore.load();
 
     return createForWorkspace(
       workspaceRootPath: workspaceRootPath,
@@ -220,7 +248,9 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       buildLab: buildLab,
       buildProviders: buildProviders,
       reuseLibrary: reuseLibrary,
-      onReuseLibraryChanged: store.save,
+      onReuseLibraryChanged: reuseStore.save,
+      reuseSourceSnapshots: reuseSourceSnapshots,
+      reuseSourceSnapshotService: reuseSourceSnapshotService,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
