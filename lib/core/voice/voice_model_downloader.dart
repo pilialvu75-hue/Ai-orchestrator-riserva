@@ -1,9 +1,8 @@
 import 'dart:io';
-import 'dart:isolate';
+import 'package:ai_orchestrator/core/voice/voice_archive_worker.dart';
 import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
-import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 
@@ -18,20 +17,6 @@ class VoiceAssetException implements Exception {
 
   @override
   String toString() => message;
-}
-
-/// Runs archive extraction away from Flutter's UI isolate.
-///
-/// Nemotron is a large archive (~650 MB). Extracting it synchronously on the
-/// Flutter isolate can make Android report the application as unresponsive.
-Future<void> _extractArchiveInWorker(
-  String archivePath,
-  String destinationPath,
-) async {
-  await extractFileToDisk(
-    archivePath,
-    destinationPath,
-  );
 }
 
 class VoiceModelDownloader with RuntimeEventEmitter {
@@ -703,12 +688,7 @@ class VoiceModelDownloader with RuntimeEventEmitter {
       // CRITICAL:
       // Never extract a ~650 MB Nemotron archive
       // on Flutter's UI isolate.
-      await Isolate.run(
-        () => _extractArchiveInWorker(
-          tarPath,
-          extractionDir.path,
-        ),
-      );
+      await extractVoiceArchiveInBackground(tarPath, extractionDir.path);
 
       onProgress(0.88);
 

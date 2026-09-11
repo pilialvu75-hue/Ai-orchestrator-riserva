@@ -191,4 +191,10 @@ void main() {
     expect(line, isNot(contains('generation')));
   });
 
+  test('exports only closed TTS failure reasons', () {
+    final known = publicLogProjection('$time [VOICE_ENGINE] [TTS_FAIL] reason=non_finite_pcm');
+    expect(jsonDecode(known!)['error'], 'non_finite_pcm');
+    final private = publicLogProjection('$time [VOICE_ENGINE] [TTS_FAIL] reason=private-secret');
+    expect(private, isNot(contains('private-secret')));
+  });
 }

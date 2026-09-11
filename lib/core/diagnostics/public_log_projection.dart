@@ -143,6 +143,45 @@ String? publicLogProjection(String line) {
     }
   }
   if (event == 'TTS_FAIL') {
+    final reason = RegExp(
+      r'^reason=(worker_failed|non_finite_pcm|invalid_pcm|playback_failed)
+    final m = RegExp(
+      r'^Bad state: TTS returned invalid audio: (\d{1,9}) of '
+      r'(\d{1,9}) samples are non-finite\.$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'error': 'non_finite_pcm',
+        'invalid': int.parse(m[1]!),
+        'samples': int.parse(m[2]!),
+      });
+    }
+  }
+  if (event == 'ANDROID_PROCESS_EXIT_HISTORY') {
+    try {
+      final data = jsonDecode(rest);
+      if (data is Map) {
+        for (final key in <String>[
+          'timestamp_ms',
+          'reason_code',
+          'status',
+          'pss_kb',
+          'rss_kb',
+        ]) {
+          final value = data[key];
+          if (value is int) result[key] = value;
+        }
+      }
+    } catch (_) {
+      // Retain the event even without a structured exit record.
+    }
+  }
+  // No arbitrary exception text, stack, prompt, path, ID or token is exported.
+  return jsonEncode(result);
+}
+,
+    ).firstMatch(rest);
+    if (reason != null) result['error'] = reason[1]!;
     final m = RegExp(
       r'^Bad state: TTS returned invalid audio: (\d{1,9}) of '
       r'(\d{1,9}) samples are non-finite\.$',
