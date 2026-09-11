@@ -3,15 +3,60 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart
 
 /// Promotes verified Workshop output into the reusable local catalog.
 ///
-/// Promotion is explicit and conservative: an emission must be ready and its
-/// validation score must meet the configured threshold. This prevents failed
-/// or partially verified work from poisoning the offline-first knowledge base.
+/// Promotion is explicit and conservative. Failed or partially verified work
+/// must never poison the offline-first knowledge base.
 final class WorkshopReuseCaptureService {
   const WorkshopReuseCaptureService({
     this.minimumValidationScore = 0.8,
   }) : assert(minimumValidationScore >= 0 && minimumValidationScore <= 1);
 
   final double minimumValidationScore;
+
+  /// Generic verified-output capture used by production build/emission bridges.
+  WorkshopReusableAsset? captureVerifiedOutput({
+    required String id,
+    required String name,
+    required String description,
+    required double validationScore,
+    required WorkshopReusableAssetOrigin origin,
+    required WorkshopReusableAssetKind kind,
+    String? target,
+    String? artifactPath,
+    String? sourceProjectId,
+    String? sourceTaskId,
+    List<String> tags = const <String>[],
+    List<String> capabilities = const <String>[],
+    List<String> entryPaths = const <String>[],
+    DateTime? createdAt,
+  }) {
+    if (validationScore < minimumValidationScore) return null;
+
+    final normalizedId = id.trim();
+    final normalizedName = name.trim();
+    final normalizedDescription = description.trim();
+    if (normalizedId.isEmpty ||
+        normalizedName.isEmpty ||
+        normalizedDescription.isEmpty) {
+      return null;
+    }
+
+    return WorkshopReusableAsset(
+      id: normalizedId,
+      name: normalizedName,
+      kind: kind,
+      origin: origin,
+      description: normalizedDescription,
+      sourceProjectId: _normalized(sourceProjectId),
+      sourceTaskId: _normalized(sourceTaskId),
+      target: _normalized(target),
+      artifactPath: _normalized(artifactPath),
+      tags: _normalizedList(tags),
+      capabilities: _normalizedList(capabilities),
+      entryPaths: _normalizedList(entryPaths),
+      validationScore: validationScore.clamp(0.0, 1.0).toDouble(),
+      createdAt: createdAt,
+    );
+  }
 
   WorkshopReusableAsset? captureEmission({
     required WorkshopAppEmissionPackage package,
@@ -25,28 +70,22 @@ final class WorkshopReuseCaptureService {
     WorkshopReusableAssetKind kind = WorkshopReusableAssetKind.projectTemplate,
   }) {
     if (!package.isReady) return null;
-    if (validationScore < minimumValidationScore) return null;
-
-    final normalizedDescription = description.trim();
-    if (normalizedDescription.isEmpty) return null;
 
     final name = package.appName?.trim();
-    final id = 'emission:${package.id.trim()}';
-
-    return WorkshopReusableAsset(
-      id: id,
+    return captureVerifiedOutput(
+      id: 'emission:${package.id.trim()}',
       name: name == null || name.isEmpty ? package.requestId : name,
       kind: kind,
       origin: WorkshopReusableAssetOrigin.completedProject,
-      description: normalizedDescription,
-      sourceProjectId: _normalized(sourceProjectId),
-      sourceTaskId: _normalized(sourceTaskId),
+      description: description,
+      sourceProjectId: sourceProjectId,
+      sourceTaskId: sourceTaskId,
       target: package.target,
       artifactPath: package.artifactPath,
-      tags: _normalizedList(tags),
-      capabilities: _normalizedList(capabilities),
-      entryPaths: _normalizedList(entryPaths),
-      validationScore: validationScore.clamp(0.0, 1.0).toDouble(),
+      tags: tags,
+      capabilities: capabilities,
+      entryPaths: entryPaths,
+      validationScore: validationScore,
       createdAt: package.createdAt,
     );
   }
