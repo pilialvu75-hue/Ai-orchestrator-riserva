@@ -103,7 +103,7 @@ class _AndroidFfiNativeSessionSubsystem {
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1969 | Function: _ensureNativeSession() | BEFORE LRU eviction check',
       );
-      evictLeastRecentlyUsedSessionIfNeeded(bindings);
+      await evictLeastRecentlyUsedSessionIfNeeded(bindings);
       _log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
@@ -251,30 +251,47 @@ class _AndroidFfiNativeSessionSubsystem {
     }
   }
 
-  void evictLeastRecentlyUsedSessionIfNeeded(LlamaBridgeBindings bindings) {
+  Future<void> evictLeastRecentlyUsedSessionIfNeeded(
+    LlamaBridgeBindings bindings,
+  ) async {
     if (_owner._nativeSessionsByModel.length < _owner._maxActiveNativeSessions) {
       return;
     }
+
     final evictedModelPath = _owner._nativeSessionsByModel.keys.first;
-    final evictedSessionId =
-        _owner._nativeSessionsByModel.remove(evictedModelPath);
+    final evictedSessionId = _owner._nativeSessionsByModel[evictedModelPath];
     if (evictedSessionId == null) {
       return;
     }
+
     _log(
-      '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId max_active=${_owner._maxActiveNativeSessions}',
+      '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId '
+      'max_active=${_owner._maxActiveNativeSessions} phase=shutdown_begin',
     );
-    try {
-      bindings.releaseSession(evictedSessionId);
-    } catch (error) {
+
+    await shutdownNativeSessionGracefully(
+      bindings,
+      evictedSessionId,
+      reason: 'lru_model_switch',
+      modelPath: evictedModelPath,
+    );
+
+    final cachedAfterShutdown = _owner._nativeSessionsByModel[evictedModelPath];
+    if (cachedAfterShutdown == evictedSessionId) {
       _log(
-        '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId release_failed=$error',
+        '[SESSION_EVICT_BLOCKED] strategy=lru path=$evictedModelPath '
+        'session=$evictedSessionId reason=shutdown_incomplete',
       );
-    } finally {
-      if (_owner._nativeSessionId == evictedSessionId) {
-        _owner._nativeSessionId = null;
-      }
+      throw StateError(
+        'Previous local model session did not shut down safely; '
+        'refusing concurrent model switch.',
+      );
     }
+
+    _log(
+      '[SESSION_EVICT] strategy=lru path=$evictedModelPath session=$evictedSessionId '
+      'max_active=${_owner._maxActiveNativeSessions} phase=shutdown_complete',
+    );
   }
 
   Future<void> shutdownNativeSessionGracefully(
