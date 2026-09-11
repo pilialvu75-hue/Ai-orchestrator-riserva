@@ -2,44 +2,47 @@ part of '../../runtime_core.dart';
 
 /// Controllo ottimizzato del ciclo di polling per il runtime nativo FFI.
 ///
-/// Il polling non deve utilizzare un numero fisso troppo basso di iterazioni
-/// come proxy del timeout temporale.
+/// Il polling non deve utilizzare un numero fisso di iterazioni come proxy
+/// del tempo trascorso. Il numero di poll eseguiti dipende dal dispositivo,
+/// dal carico e soprattutto dal fatto che il percorso pre-first-token usa
+/// `Duration.zero` per cedere il controllo senza introdurre un ritardo fisso.
 ///
-/// In particolare, Phi-3.5 Mini può richiedere diversi secondi prima di
-/// produrre il primo token. Il timeout reale del provider è già gestito da
-/// AndroidFfiRuntimeProvider._firstTokenTimeout / _generationTimeout.
+/// I watchdog temporali del provider sono quindi l'unica autorita' terminale:
+/// - first-token deadline / generation timeout prima del primo token;
+/// - no-token-progress timeout dopo l'avvio dello streaming.
 ///
-/// Il precedente limite di 1400 iterazioni poteva terminare l'inferenza dopo
-/// circa 5 secondi sul dispositivo reale, molto prima del timeout temporale
-/// previsto dal runtime.
-///
-/// Il valore attuale mantiene un hard cap di sicurezza molto più alto
-/// (~45 secondi sul profilo di polling osservato), lasciando ai watchdog
-/// temporali la responsabilità principale della decisione di timeout.
+/// La vecchia soglia a iterazioni viene mantenuta esclusivamente come
+/// telemetria diagnostica: raggiungerla non deve piu' cancellare una
+/// generazione ancora legittimamente in prefill/computazione.
 class _AndroidFfiRuntimePollingController {
   _AndroidFfiRuntimePollingController(this._owner);
 
   final AndroidFfiRuntimeProvider _owner;
 
-  /// Hard cap di sicurezza per evitare un loop infinito.
+  /// Soglia diagnostica storica.
   ///
-  /// Il vecchio valore 1400 ha causato:
-  ///
-  ///   1400 poll -> ~5184 ms -> poll_loop_watchdog
-  ///
-  /// sul dispositivo reale.
-  ///
-  /// Con il profilo di polling osservato (~3.7 ms/iterazione), 12000
-  /// iterazioni coprono circa 44 secondi, coerentemente con il timeout
-  /// release di 45 secondi del runtime.
-  ///
-  /// Il timeout temporale rimane comunque la protezione primaria.
+  /// In passato 1400 poll potevano terminare l'inferenza in circa 5 secondi.
+  /// Il successivo valore 12000 era stato scelto assumendo ~3.7 ms/poll, ma
+  /// quell'assunzione non e' valida sul percorso pre-first-token, che effettua
+  /// yield a `Duration.zero` e puo' quindi consumare 12000 iterazioni molto
+  /// prima del vero first-token deadline.
   static const int _maxIdlePollIterations = 12000;
 
   int get maxIdlePollIterations => _maxIdlePollIterations;
 
+  /// Compatibilita' temporanea con il call-site storico.
+  ///
+  /// Non restituisce mai `true`: una quantita' di iterazioni non e' un clock e
+  /// non puo' avere autorita' terminale. Al raggiungimento esatto della vecchia
+  /// soglia emette una sola evidenza diagnostica per quel tratto di inattivita'.
   bool isIdleLimitReached(int consecutiveIdlePolls) {
-    return consecutiveIdlePolls >= _maxIdlePollIterations;
+    if (consecutiveIdlePolls == _maxIdlePollIterations) {
+      _log(
+        '[POLL_IDLE_DIAGNOSTIC] idle_polls=$consecutiveIdlePolls '
+        'terminal_authority=time_based_watchdogs',
+      );
+    }
+    return false;
   }
 
   static bool isImmediateRuntimeTelemetry(String message) =>
