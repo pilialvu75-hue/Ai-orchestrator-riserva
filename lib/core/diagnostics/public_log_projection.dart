@@ -143,6 +143,10 @@ String? publicLogProjection(String line) {
     }
   }
   if (event == 'TTS_FAIL') {
+    final reason = RegExp(
+      r'^reason=(worker_failed|non_finite_pcm|invalid_pcm|playback_failed)$',
+    ).firstMatch(rest);
+    if (reason != null) result['error'] = reason[1]!;
     final m = RegExp(
       r'^Bad state: TTS returned invalid audio: (\d{1,9}) of '
       r'(\d{1,9}) samples are non-finite\.$',

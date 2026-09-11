@@ -269,6 +269,7 @@ final class IsolatedKokoroVoiceEngine
     final future = _generationRunner(request);
     _generationInFlight = future;
 
+    var failureReason = 'worker_failed';
     try {
       final audio = await future;
 
@@ -280,7 +281,10 @@ final class IsolatedKokoroVoiceEngine
         return;
       }
 
+      failureReason = audio.samples.any((sample) => !sample.isFinite)
+          ? 'non_finite_pcm' : 'invalid_pcm';
       validatePcm(audio.samples, audio.sampleRate);
+      failureReason = 'playback_failed';
 
       logEvent(
         _tag,
@@ -297,7 +301,7 @@ final class IsolatedKokoroVoiceEngine
     } on Object {
       logEvent(
         _tag,
-        '[TTS_FAIL] isolated_generation_failed',
+        '[TTS_FAIL] reason=$failureReason',
       );
       rethrow;
     } finally {
