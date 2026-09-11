@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
 class NativeTokenContextBudgetResult {
   const NativeTokenContextBudgetResult({
