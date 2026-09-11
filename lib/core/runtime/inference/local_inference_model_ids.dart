@@ -13,6 +13,7 @@ class LocalInferenceModelIds {
   static const String deepSeekR1_7b = 'deepseek_r1_7b';
 
   static const String qwen3_1_7b = 'qwen3_1_7b';
+  static const String nemotron3Nano4b = 'nemotron3_nano_4b';
 
   static const String phi35Mini = 'phi3_5_mini';
 
