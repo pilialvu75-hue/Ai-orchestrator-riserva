@@ -22,13 +22,16 @@ final class WorkshopPreflightInferencePipeline {
     WorkshopReuseLibrary? reuseLibrary,
     WorkshopReuseDecisionEngine reuseDecisionEngine =
         const WorkshopReuseDecisionEngine(),
+    Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
   })  : _inference = inference,
         _reuseLibrary = reuseLibrary,
-        _reuseDecisionEngine = reuseDecisionEngine;
+        _reuseDecisionEngine = reuseDecisionEngine,
+        _onReuseLibraryChanged = onReuseLibraryChanged;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopReuseLibrary? _reuseLibrary;
   final WorkshopReuseDecisionEngine _reuseDecisionEngine;
+  final Future<void> Function(WorkshopReuseLibrary)? _onReuseLibraryChanged;
 
   WorkshopReuseLibrary? get reuseLibrary => _reuseLibrary;
 
@@ -110,7 +113,14 @@ final class WorkshopPreflightInferencePipeline {
     );
 
     if (result.readyForImplementation && reuseDecision.asset != null) {
-      _reuseLibrary?.markUsed(reuseDecision.asset!.id);
+      final library = _reuseLibrary;
+      if (library != null) {
+        library.markUsed(reuseDecision.asset!.id);
+        final persist = _onReuseLibraryChanged;
+        if (persist != null) {
+          await persist(library);
+        }
+      }
     }
 
     return result;
