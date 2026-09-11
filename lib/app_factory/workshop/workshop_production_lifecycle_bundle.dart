@@ -9,7 +9,10 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipelin
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
 /// Production-facing Cantiere composition returned to the UI layer.
@@ -32,6 +35,7 @@ final class WorkshopProductionLifecycleBundle {
     required this.preflight,
     required this.taskLifecycle,
     required this.projectExecutor,
+    this.reuseLibrary,
     this.workspaceRootPath,
   });
 
@@ -39,9 +43,17 @@ final class WorkshopProductionLifecycleBundle {
 
   /// Read-only Orchestrator -> Architect reasoning boundary composed from the
   /// same role-aware inference stack used by the prepared task lifecycle.
+  ///
+  /// When [reuseLibrary] is available, the preflight can replace a redundant
+  /// Orchestrator inference with verified local production knowledge while
+  /// preserving the Architect and all downstream validation gates.
   final WorkshopPreflightInferencePipeline preflight;
 
   final WorkshopPreparedTaskLifecycle taskLifecycle;
+
+  /// Verified local production knowledge available to the reuse-aware
+  /// preflight. Null preserves the historical production behaviour.
+  final WorkshopReuseLibrary? reuseLibrary;
 
   /// Authoritative executor shared by dashboard preparation, inference and
   /// explicit approval/apply. Exposed only so a UI boundary can recover the
@@ -74,6 +86,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? roleGateways,
     WorkshopBuildLab? buildLab,
+    WorkshopReuseLibrary? reuseLibrary,
     String? workspaceRootPath,
   }) {
     final orchestratorGateway =
@@ -96,6 +109,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
 
     final preflight = WorkshopPreflightInferencePipeline(
       inference: stageInference,
+      reuseLibrary: reuseLibrary,
     );
 
     final inferenceRunner =
@@ -119,6 +133,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       preflight: preflight,
       taskLifecycle: lifecycle,
       projectExecutor: projectExecutor,
+      reuseLibrary: reuseLibrary,
       workspaceRootPath: workspaceRootPath,
     );
   }
@@ -138,6 +153,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopBuildLab? buildLab,
     Iterable<WorkshopBuildProvider> buildProviders =
         const <WorkshopBuildProvider>[],
+    WorkshopReuseLibrary? reuseLibrary,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -163,7 +179,43 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       inferenceService: inferenceService,
       assignments: assignments,
       buildLab: resolvedBuildLab,
+      reuseLibrary: reuseLibrary,
       workspaceRootPath: normalizedWorkspaceRootPath,
+    );
+  }
+
+  /// Async production composition that restores the verified local reuse
+  /// catalog before creating the preflight pipeline.
+  ///
+  /// Existing synchronous callers remain unchanged. App/UI composition can opt
+  /// into this path when it already owns [PreferencesService], avoiding any new
+  /// global storage system or Assistant dependency.
+  static Future<WorkshopProductionLifecycleBundle>
+      createForWorkspaceWithPersistedReuse({
+    required String workspaceRootPath,
+    required PreferencesService preferences,
+    InferenceService? inferenceService,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    WorkshopBuildLab? buildLab,
+    Iterable<WorkshopBuildProvider> buildProviders =
+        const <WorkshopBuildProvider>[],
+    bool includeHiddenFiles = false,
+    int maxFileSizeBytes = 10 * 1024 * 1024,
+  }) async {
+    final reuseLibrary = await WorkshopReuseLibraryStore(
+      preferences: preferences,
+    ).load();
+
+    return createForWorkspace(
+      workspaceRootPath: workspaceRootPath,
+      inferenceService: inferenceService,
+      assignments: assignments,
+      buildLab: buildLab,
+      buildProviders: buildProviders,
+      reuseLibrary: reuseLibrary,
+      includeHiddenFiles: includeHiddenFiles,
+      maxFileSizeBytes: maxFileSizeBytes,
     );
   }
 }
