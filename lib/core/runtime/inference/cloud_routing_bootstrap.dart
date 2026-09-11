@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
+import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/config/ai/assistant_interaction_prompt_resolver.dart';
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
@@ -22,7 +23,6 @@ import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
-import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 
 /// Rebinds the routing-sensitive Assistant services after the standard
 /// dependency graph has been registered.
