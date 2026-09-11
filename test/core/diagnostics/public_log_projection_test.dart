@@ -175,4 +175,20 @@ void main() {
       isNull,
     );
   });
+  test('exports TTS worker lifecycle without arbitrary payload', () {
+    final line = publicLogProjection(
+      '$time [VOICE_ENGINE] [TTS_WORKER_BEGIN] '
+      'generation=9 secret=ghp_private /data/user/private',
+    );
+    expect(
+      jsonDecode(line!),
+      {
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'TTS_WORKER_BEGIN',
+      },
+    );
+    expect(line, isNot(contains('private')));
+    expect(line, isNot(contains('generation')));
+  });
+
 }

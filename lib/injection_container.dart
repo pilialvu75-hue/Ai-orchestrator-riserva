@@ -28,6 +28,7 @@ import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
 import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
+import 'package:ai_orchestrator/core/voice/isolated_kokoro_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
@@ -321,54 +322,57 @@ Future<void> initDependencies({
   sl.registerLazySingleton(() => GetSelectedModel(sl<LocalAiRepository>()));
 
   // ── Voice ─────────────────────────────────────────────────────────────────
-  // SherpaOnnxVoiceEngine è registrato PRIMA dell'interfaccia VoiceEngine 
-  // che lo implementa. In questo modo le dipendenze si risolvono sempre 
-  // verso la stessa instanza Singleton (nessun duplicato STT/TTS).
+  // The concrete Sherpa engine remains the single STT/native delegate.
   sl.registerLazySingleton<SherpaOnnxVoiceEngine>(
     () => SherpaOnnxVoiceEngine(
       languageCode: () => sl<LanguageService>().currentLocale.languageCode,
     ),
   );
-  
+
   sl.registerLazySingleton<VoiceTextNormalizer>(
     () => const VoiceTextNormalizer(),
   );
 
+  // All normal TTS output goes through the isolate-backed decorator so
+  // synchronous sherpa_onnx Kokoro generation cannot block the UI isolate.
   sl.registerLazySingleton<VoiceEngine>(
-    () => sl<SherpaOnnxVoiceEngine>(),
+    () => IsolatedKokoroVoiceEngine(
+      delegate: sl<SherpaOnnxVoiceEngine>(),
+      languageCode: () => sl<LanguageService>().currentLocale.languageCode,
+    ),
   );
-  
+
   sl.registerLazySingleton<VoiceInputService>(
     () => VoiceInputService(
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );
-  
+
   sl.registerLazySingleton<VoiceOutputService>(
     () => VoiceOutputService(
       engine: sl<VoiceEngine>(),
       normalizer: sl<VoiceTextNormalizer>(),
     ),
   );
-  
+
   sl.registerLazySingleton<VoiceModelDownloader>(
     () => VoiceModelDownloader(),
   );
-  
+
   sl.registerLazySingleton<ModelManagementService>(
     () => ModelManagementService(
       localAiRepository: sl<LocalAiRepository>(),
     ),
   );
-  
+
   sl.registerLazySingleton<VoiceLoopManager>(
-  () => VoiceLoopManager(
-    engine: sl<SherpaOnnxVoiceEngine>(),
-    runtimeProvider: sl<LocalRuntimeProvider>(),
-    localAiRepository: sl<LocalAiRepository>(),
-  ),
-);
+    () => VoiceLoopManager(
+      engine: sl<VoiceEngine>(),
+      runtimeProvider: sl<LocalRuntimeProvider>(),
+      localAiRepository: sl<LocalAiRepository>(),
+    ),
+  );
 
   // ── Multimodal ────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ImageService>(() => ImageService());
