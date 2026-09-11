@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_completion.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_response_model.dart';
@@ -64,16 +65,24 @@ class ClaudeDataSource {
           json['usage'] as Map<String, dynamic>? ?? const <String, dynamic>{};
       final inputTokens = usage['input_tokens'] as int? ?? 0;
       final outputTokens = usage['output_tokens'] as int? ?? 0;
+      final stopReason = json['stop_reason']?.toString();
       return AiResponseModel(
         text: text,
         model: json['model'] as String? ?? resolvedModel,
         tokensUsed: inputTokens + outputTokens,
         timestamp: DateTime.now().millisecondsSinceEpoch,
+        completionStatus: normalizeCloudCompletionReason(stopReason),
+        providerFinishReason: stopReason,
+        inputTokens: inputTokens,
+        outputTokens: outputTokens,
       );
     }
 
-    throw ServerException(
-      'Claude API error ${response.statusCode}: ${response.body}',
+    throw CloudHttpException(
+      provider: 'claude',
+      statusCode: response.statusCode,
+      message: response.body,
+      retryAfter: _retryAfter(response),
     );
   }
 
@@ -84,4 +93,9 @@ class ClaudeDataSource {
 
   bool _supportsTemperature(String modelId) =>
       modelId.trim().toLowerCase() != 'claude-sonnet-5';
+
+  Duration? _retryAfter(http.Response response) {
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
+  }
 }
