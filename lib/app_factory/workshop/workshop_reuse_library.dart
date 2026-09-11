@@ -125,7 +125,10 @@ final class WorkshopReusableAsset {
       capabilities: _stringList(json['capabilities']),
       entryPaths: _stringList(json['entryPaths']),
       validationScore: json['validationScore'] is num
-          ? (json['validationScore'] as num).toDouble().clamp(0.0, 1.0)
+          ? (json['validationScore'] as num)
+              .toDouble()
+              .clamp(0.0, 1.0)
+              .toDouble()
           : 1.0,
       reuseCount: json['reuseCount'] is num
           ? math.max(0, (json['reuseCount'] as num).toInt())
@@ -237,9 +240,7 @@ final class WorkshopReuseLibrary {
     if (limit <= 0) return const <WorkshopReuseMatch>[];
 
     final objectiveTokens = _tokens(objective);
-    final required = requiredCapabilities
-        .expand(_tokens)
-        .toSet();
+    final required = requiredCapabilities.expand(_tokens).toSet();
     final normalizedTarget = target?.trim().toLowerCase();
     final matches = <WorkshopReuseMatch>[];
 
@@ -282,7 +283,7 @@ final class WorkshopReuseLibrary {
         reasons.add('proven-reuse');
       }
 
-      final boundedScore = score.clamp(0.0, 1.0);
+      final boundedScore = score.clamp(0.0, 1.0).toDouble();
       if (boundedScore <= 0.35) continue;
 
       matches.add(
