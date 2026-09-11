@@ -122,6 +122,14 @@ final class WorkshopProductionTaskCoordinator {
   /// [handle]: Orchestrator -> Architect -> Engineer -> Reviewer review ->
   /// Reviewer validation. No approval or real apply happens here.
   ///
+  /// If preflight selected verified reusable production knowledge and a safe
+  /// source snapshot exists for that asset, the snapshot is staged into the
+  /// same authoritative VirtualWorkspace before Engineer inference. Existing
+  /// project files are never overwritten by this automatic reuse staging.
+  ///
+  /// A missing or stale optional snapshot is treated as a cache miss: the
+  /// normal AI path continues instead of blocking production.
+  ///
   /// The production UI follows the configured Local / Cloud / Hybrid runtime
   /// by default. Offline execution remains available only when a caller
   /// explicitly requests it.
@@ -134,6 +142,11 @@ final class WorkshopProductionTaskCoordinator {
       request: handle.session.context.request,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+    );
+
+    await _stageReusableSourceIfAvailable(
+      handle: handle,
+      assetId: preflight.reusedAsset?.id,
     );
 
     return _bundle.taskLifecycle.runPrepared(
@@ -152,6 +165,7 @@ final class WorkshopProductionTaskCoordinator {
   /// create or own a second task, workspace, checkpoint, execution or provider
   /// state. A bounded preflight is still regenerated from the same request so
   /// Orchestrator/Architect guidance stays aligned with the prepared session.
+  /// Reuse staging is idempotent for already-present workspace paths.
   Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
     required WorkshopProductionTaskHandle handle,
     required WorkshopResumeContext resumeContext,
@@ -178,6 +192,11 @@ final class WorkshopProductionTaskCoordinator {
       request: handle.session.context.request,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+    );
+
+    await _stageReusableSourceIfAvailable(
+      handle: handle,
+      assetId: preflight.reusedAsset?.id,
     );
 
     return _bundle.taskLifecycle.runPreparedWithResumeContext(
@@ -299,5 +318,31 @@ final class WorkshopProductionTaskCoordinator {
       cleanBuild: cleanBuild,
       arguments: arguments,
     );
+  }
+
+  Future<void> _stageReusableSourceIfAvailable({
+    required WorkshopProductionTaskHandle handle,
+    required String? assetId,
+  }) async {
+    final normalizedAssetId = assetId?.trim();
+    if (normalizedAssetId == null || normalizedAssetId.isEmpty) {
+      return;
+    }
+
+    final snapshot =
+        _bundle.reuseSourceSnapshots?.forAsset(normalizedAssetId);
+    if (snapshot == null) {
+      return;
+    }
+
+    try {
+      await _bundle.reuseSourceSnapshotService.stageInto(
+        snapshot: snapshot,
+        session: handle.session,
+      );
+    } catch (_) {
+      // Reuse is an optimization, never a new availability dependency.
+      // A stale/missing local snapshot falls back to the historical AI path.
+    }
   }
 }
