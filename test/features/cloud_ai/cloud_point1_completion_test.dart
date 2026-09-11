@@ -112,11 +112,9 @@ void main() {
       result.fold(
         (failure) {
           expect(failure, isA<CloudFailure>());
-          expect(
-            (failure as CloudFailure).kind,
-            CloudFailureKind.incompleteOutput,
-          );
-          expect(failure.retryable, isTrue);
+          final cloud = failure as CloudFailure;
+          expect(cloud.kind, CloudFailureKind.incompleteOutput);
+          expect(cloud.retryable, isTrue);
         },
         (_) => fail('Incomplete response must not be reported as success.'),
       );
@@ -186,7 +184,8 @@ void main() {
       result.fold(
         (failure) {
           expect(failure, isA<CloudFailure>());
-          expect((failure as CloudFailure).kind, CloudFailureKind.emptyOutput);
+          final cloud = failure as CloudFailure;
+          expect(cloud.kind, CloudFailureKind.emptyOutput);
         },
         (_) => fail('Empty response must not be reported as success.'),
       );
