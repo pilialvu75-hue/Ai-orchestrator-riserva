@@ -171,7 +171,8 @@ final class WorkshopReuseNeed {
       priority: (json['priority'] is num
               ? (json['priority'] as num).toInt()
               : 50)
-          .clamp(0, 100),
+          .clamp(0, 100)
+          .toInt(),
       minimumQualityScore: (json['minimumQualityScore'] is num
               ? (json['minimumQualityScore'] as num).toDouble()
               : 0.8)
@@ -189,7 +190,10 @@ final class WorkshopReuseNeed {
               .toDouble()
           : null,
       cycleCount: json['cycleCount'] is num
-          ? (json['cycleCount'] as num).toInt().clamp(0, 1 << 30)
+          ? (json['cycleCount'] as num)
+              .toInt()
+              .clamp(0, 1 << 30)
+              .toInt()
           : 0,
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')
               ?.toUtc() ??
