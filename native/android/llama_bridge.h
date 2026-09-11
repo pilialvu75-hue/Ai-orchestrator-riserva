@@ -20,6 +20,13 @@ int64_t llb_create_session(
     int32_t n_gpu_layers
 );
 
+// Exact llama.cpp token count using the vocabulary of an already-loaded
+// RuntimeSession. Returns a non-negative token count or a negative error code.
+int32_t llb_session_token_count(
+    int64_t session_id,
+    const char* text
+);
+
 int32_t llb_session_start_gen(
     int64_t session_id,
     const char* prompt,

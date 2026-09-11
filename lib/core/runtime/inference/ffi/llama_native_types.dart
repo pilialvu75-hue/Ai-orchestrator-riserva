@@ -15,6 +15,9 @@ typedef LlbGpuBackendReasonDart = Pointer<Utf8> Function();
 typedef LlbCreateSessionNative = Int64 Function(Pointer<Utf8>, Int32, Int32, Int32);
 typedef LlbCreateSessionDart = int Function(Pointer<Utf8>, int, int, int);
 
+typedef LlbSessionTokenCountNative = Int32 Function(Int64, Pointer<Utf8>);
+typedef LlbSessionTokenCountDart = int Function(int, Pointer<Utf8>);
+
 typedef LlbSessionStartGenNative = Int32 Function(Int64, Pointer<Utf8>, Int32, Float);
 typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
 

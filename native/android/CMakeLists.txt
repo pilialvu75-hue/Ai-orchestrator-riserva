@@ -106,7 +106,10 @@ add_subdirectory("${LLAMA_CPP_DIR}" llama.cpp EXCLUDE_FROM_ALL)
 
 # ── Bridge shared library ─────────────────────────────────────────────────────
 
-add_library(llama_bridge SHARED llama_bridge.cpp)
+# The entrypoint includes the established bridge implementation in the same
+# translation unit and adds exact tokenizer/context-budget guards without
+# exporting RuntimeSession/model pointers across the FFI boundary.
+add_library(llama_bridge SHARED llama_bridge_entrypoint.cpp)
 
 target_include_directories(llama_bridge PRIVATE
     "${LLAMA_CPP_DIR}/include"
