@@ -29,11 +29,25 @@ void main() {
       expect(fixture.service.currentPrompt, SystemPromptConfig.defaultPrompt);
     });
 
-    test('migrates only the historical bundled default', () async {
+    test('migrates original historical bundled default', () async {
       final fixture = await createService(<String, Object>{
         AppConstants.prefDirectionalPrompt: SystemPromptConfig.legacyDefaultPrompt,
       });
 
+      expect(await fixture.service.migrateLegacyDefaultIfNeeded(), isTrue);
+      expect(
+        fixture.config.getString(AppConstants.prefDirectionalPrompt),
+        SystemPromptConfig.defaultPrompt,
+      );
+    });
+
+    test('migrates conversational core v1 to compact v2', () async {
+      final fixture = await createService(<String, Object>{
+        AppConstants.prefDirectionalPrompt:
+            SystemPromptConfig.previousDefaultPromptV1,
+      });
+
+      expect(fixture.service.currentPrompt, SystemPromptConfig.defaultPrompt);
       expect(await fixture.service.migrateLegacyDefaultIfNeeded(), isTrue);
       expect(
         fixture.config.getString(AppConstants.prefDirectionalPrompt),
@@ -49,6 +63,10 @@ void main() {
 
       expect(await fixture.service.migrateLegacyDefaultIfNeeded(), isFalse);
       expect(fixture.service.currentPrompt, customPrompt);
+      expect(
+        fixture.config.getString(AppConstants.prefDirectionalPrompt),
+        customPrompt,
+      );
     });
   });
 
@@ -71,6 +89,27 @@ void main() {
       );
 
       expect(delegate.lastSystemPrompt, customPrompt);
+    });
+
+    test('upgrades incoming v1 stock marker to current configured identity',
+        () async {
+      final fixture = await createService(<String, Object>{
+        AppConstants.prefDirectionalPrompt:
+            SystemPromptConfig.previousDefaultPromptV1,
+      });
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+      );
+
+      await repository.sendMessage(
+        sessionId: 'assistant-session',
+        userPrompt: 'continua',
+        systemPrompt: SystemPromptConfig.previousDefaultPromptV1,
+      );
+
+      expect(delegate.lastSystemPrompt, SystemPromptConfig.defaultPrompt);
     });
 
     test('preserves explicit specialized system prompt', () async {
