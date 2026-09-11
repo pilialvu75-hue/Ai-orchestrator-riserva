@@ -24,7 +24,7 @@ class AssistantSystemPromptService {
       return SystemPromptConfig.defaultPrompt;
     }
 
-    if (stored == SystemPromptConfig.legacyDefaultPrompt) {
+    if (SystemPromptConfig.isBundledDefault(stored)) {
       return SystemPromptConfig.defaultPrompt;
     }
 
@@ -33,31 +33,32 @@ class AssistantSystemPromptService {
 
   /// Applies the configured Assistant prompt only to ordinary Assistant chat.
   ///
-  /// [SystemPromptConfig.defaultPrompt] is the marker currently carried by
-  /// normal assistant send events. Null/blank and the previous bundled default
-  /// are also treated as ordinary Assistant requests. Any other prompt is
-  /// considered an explicit specialization and is preserved unchanged.
+  /// Any bundled stock prompt (current or historical), null or blank marks an
+  /// ordinary Assistant request. Any other prompt is an explicit specialization
+  /// and is preserved unchanged.
   String resolveForIncoming(String? incomingPrompt) {
     final incoming = incomingPrompt?.trim();
 
     if (incoming == null ||
         incoming.isEmpty ||
-        incoming == SystemPromptConfig.defaultPrompt ||
-        incoming == SystemPromptConfig.legacyDefaultPrompt) {
+        SystemPromptConfig.isBundledDefault(incoming)) {
       return currentPrompt;
     }
 
     return incoming;
   }
 
-  /// Upgrades only the exact historical stock prompt. User-authored prompts are
+  /// Upgrades only exact historical stock prompts. User-authored prompts are
   /// never rewritten merely because a new bundled default ships with the app.
   Future<bool> migrateLegacyDefaultIfNeeded() async {
     final stored = _configRepository
         .getString(AppConstants.prefDirectionalPrompt)
         ?.trim();
 
-    if (stored != SystemPromptConfig.legacyDefaultPrompt) {
+    if (stored == null ||
+        stored.isEmpty ||
+        stored == SystemPromptConfig.defaultPrompt ||
+        !SystemPromptConfig.isBundledDefault(stored)) {
       return false;
     }
 
