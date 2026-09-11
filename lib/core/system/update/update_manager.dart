@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -66,6 +68,7 @@ class _InstalledIdentity {
 }
 
 class UpdateManager {
+  static const String _prefApprovedDownload = 'update_approved_background_manifest';
   static const String _prefPendingApkPath = 'update_pending_apk_path';
   static const String _prefPendingVersion = 'update_pending_version';
   static const String _prefPendingSavedAt = 'update_pending_saved_at';
@@ -127,7 +130,8 @@ class UpdateManager {
     Duration interval = const Duration(hours: 12),
   }) async {
     await _resumePendingInstallerState();
-    if (checkOnStartup && state.value.status != UpdateStatus.readyToInstall) {
+    final resumed = await _resumeApprovedDownload();
+    if (!resumed && checkOnStartup && state.value.status != UpdateStatus.readyToInstall) {
       unawaited(checkForUpdates());
     }
 
@@ -475,6 +479,9 @@ class UpdateManager {
       _logUpdateDownloadStart(
         'url=${manifest.apkUrl} path=$partialPath resume_bytes=$existingPartialBytes',
       );
+      if (Platform.isAndroid) {
+        await _preferences.setString(_prefApprovedDownload, jsonEncode(manifest.toJson()));
+      }
       await _downloadApkToPartialFile(
         manifest: manifest,
         partialFile: partialFile,
@@ -492,6 +499,7 @@ class UpdateManager {
         expectedSizeBytes: manifest.apkSizeBytes,
       );
       if (!verification.valid) {
+        if (Platform.isAndroid) await BackgroundDownload.release(manifest.apkUrl);
         await _cleanupInstallerArtifacts(finalPath);
         await _clearDownloadState();
         _logUpdateDownloadFail(
@@ -533,6 +541,7 @@ class UpdateManager {
         'package_archive_info=${verification.archiveParsed}',
       );
 
+      if (Platform.isAndroid) await BackgroundDownload.release(manifest.apkUrl);
       await _clearDownloadState();
       await _persistPendingInstallerState(
         apkPath: finalPath,
@@ -1147,6 +1156,32 @@ class UpdateManager {
     return true;
   }
 
+  Future<bool> _resumeApprovedDownload() async {
+    if (!Platform.isAndroid || state.value.status == UpdateStatus.readyToInstall) return false;
+    final saved = _preferences.getString(_prefApprovedDownload);
+    if (saved == null) return false;
+    try {
+      final manifest = UpdateManifest.fromJson(jsonDecode(saved) as Map<String, dynamic>);
+      if (_comparator.compare(_currentVersion, manifest.version) >= 0) {
+        await BackgroundDownload.release(manifest.apkUrl);
+        await _preferences.remove(_prefApprovedDownload);
+        return false;
+      }
+      final existing = await BackgroundDownload.channel.invokeMapMethod<String, dynamic>(
+        'status', {'url': manifest.apkUrl},
+      );
+      // Reattach only to a request that was explicitly approved earlier.
+      // Removed/failed requests need another tap; never silently restart them.
+      if (existing == null || existing['status'] == 16) return false;
+      state.value = state.value.copyWith(latestManifest: manifest);
+      unawaited(downloadLatestApk());
+      return true;
+    } catch (error) {
+      _logUpdateDownloadFail('background_restore_failed type=${error.runtimeType}');
+      return false;
+    }
+  }
+
   Future<void> _resumePendingInstallerState() async {
     final pendingPath = _preferences.getString(_prefPendingApkPath);
     if (pendingPath == null || pendingPath.trim().isEmpty) {
@@ -1238,6 +1273,7 @@ class UpdateManager {
   }
 
   Future<void> _clearDownloadState() async {
+    await _preferences.remove(_prefApprovedDownload);
     await _preferences.remove(_prefDownloadPartialPath);
     await _preferences.remove(_prefDownloadVersion);
     await _preferences.remove(_prefDownloadProgress);
@@ -1304,6 +1340,21 @@ class UpdateManager {
     required File partialFile,
     required int existingPartialBytes,
   }) async {
+    if (Platform.isAndroid) {
+      await BackgroundDownload.transfer(
+        url: manifest.apkUrl,
+        title: 'Aggiornamento ${manifest.version}',
+        destination: partialFile,
+        onProgress: (received, total) {
+          state.value = state.value.copyWith(
+            status: UpdateStatus.downloading,
+            downloadProgress: total > 0
+                ? (received / total).clamp(0.0, 1.0).toDouble() : 0.0,
+          );
+        },
+      );
+      return;
+    }
     final headers = <String, dynamic>{};
     if (existingPartialBytes > 0) {
       headers[HttpHeaders.rangeHeader] = 'bytes=$existingPartialBytes-';
@@ -1775,3 +1826,4 @@ class UpdateManager {
     state.dispose();
   }
 }
+

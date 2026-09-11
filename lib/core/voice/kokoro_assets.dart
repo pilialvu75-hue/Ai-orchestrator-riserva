@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -53,11 +54,20 @@ class KokoroAssets {
     final archive = File(p.join(staging.path, archiveName));
     final dio = Dio();
     try {
+      if (Platform.isAndroid) {
+        await BackgroundDownload.transfer(
+          url: archiveUrl, title: 'Voce Kokoro', destination: archive,
+          onProgress: (received, total) => onProgress(
+            (received / archiveBytes * 0.8).clamp(0.0, 0.8).toDouble(),
+          ),
+        );
+      } else {
       await dio.download(archiveUrl, archive.path,
           options: Options(receiveTimeout: const Duration(minutes: 15)),
           onReceiveProgress: (received, total) {
         onProgress((received / archiveBytes * 0.8).clamp(0.0, 0.8).toDouble());
       });
+      }
       final payload = p.join(staging.path, 'payload');
       await _extractInBackground(archive.path, payload);
       onProgress(0.95);
@@ -70,7 +80,11 @@ class KokoroAssets {
         if (await backup.exists()) await backup.rename(destination.path);
         rethrow;
       }
+      if (Platform.isAndroid) await BackgroundDownload.release(archiveUrl);
       onProgress(1);
+    } on FormatException {
+      if (Platform.isAndroid) await BackgroundDownload.release(archiveUrl);
+      rethrow;
     } finally {
       dio.close();
       if (await staging.exists()) await staging.delete(recursive: true);
@@ -155,3 +169,4 @@ class KokoroAssets {
     }
   }
 }
+

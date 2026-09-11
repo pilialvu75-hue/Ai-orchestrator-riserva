@@ -24,6 +24,12 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
   final VoiceEngine _voiceEngine;
   final SherpaOnnxVoiceEngine _directVoiceEngine;
 
+  // Leaving the page must not abort a system-owned transfer via a late emit.
+  @override
+  void emit(ModelManagementState state) {
+    if (!isClosed) super.emit(state);
+  }
+
   Future<void> scanIntegrity() async {
     emit(state.copyWith(scanning: true));
     final inspections = await _service.inspectAll();
@@ -202,3 +208,4 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     } catch (_) {}
   }
 }
+

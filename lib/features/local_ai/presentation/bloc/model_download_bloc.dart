@@ -74,9 +74,11 @@ class ModelDownloadBloc
     final result = await downloadModel(
       DownloadModelParams(
         model: event.model,
-        onProgress: (p) => add(
-          ModelDownloadProgressUpdated(modelId: event.model.id, progress: p),
-        ),
+        onProgress: (p) {
+          if (!isClosed) add(
+            ModelDownloadProgressUpdated(modelId: event.model.id, progress: p),
+          );
+        },
       ),
     );
 
@@ -144,9 +146,11 @@ class ModelDownloadBloc
         modelId: modelId,
         displayName: event.displayName,
         fileName: fileName,
-        onProgress: (p) => add(
-          ModelDownloadProgressUpdated(modelId: modelId, progress: p),
-        ),
+        onProgress: (p) {
+          if (!isClosed) add(
+            ModelDownloadProgressUpdated(modelId: modelId, progress: p),
+          );
+        },
       ),
     );
 
@@ -286,3 +290,4 @@ class ModelDownloadBloc
     }
   }
 }
+
