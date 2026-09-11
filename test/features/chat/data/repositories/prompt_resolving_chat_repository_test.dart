@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/config/ai/assistant_interaction_prompt_resolver.dart';
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
@@ -21,6 +22,11 @@ void main() {
       config: config,
     );
   }
+
+  AssistantInteractionPromptResolver resolverFor(
+    AssistantSystemPromptService service,
+  ) =>
+      AssistantInteractionPromptResolver(systemPromptService: service);
 
   group('AssistantSystemPromptService', () {
     test('uses conversational core when no preference exists', () async {
@@ -61,12 +67,32 @@ void main() {
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
         delegate: delegate,
-        systemPromptService: fixture.service,
+        promptResolver: resolverFor(fixture.service),
       );
 
       await repository.sendMessage(
         sessionId: 'assistant-session',
         userPrompt: 'continua',
+        systemPrompt: SystemPromptConfig.defaultPrompt,
+      );
+
+      expect(delegate.lastSystemPrompt, customPrompt);
+    });
+
+    test('TEXT GENERAL leaves resolved prompt byte-for-byte unchanged', () async {
+      const customPrompt = 'Custom assistant identity.\nKeep exact whitespace.';
+      final fixture = await createService(<String, Object>{
+        AppConstants.prefDirectionalPrompt: customPrompt,
+      });
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        promptResolver: resolverFor(fixture.service),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'text-session',
+        userPrompt: 'ciao',
         systemPrompt: SystemPromptConfig.defaultPrompt,
       );
 
@@ -80,7 +106,7 @@ void main() {
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
         delegate: delegate,
-        systemPromptService: fixture.service,
+        promptResolver: resolverFor(fixture.service),
       );
 
       await repository.sendMessage(

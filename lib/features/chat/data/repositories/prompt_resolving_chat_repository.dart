@@ -1,24 +1,25 @@
-import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
+import 'package:ai_orchestrator/core/config/ai/assistant_interaction_prompt_resolver.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/interaction/interaction_policy.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 
-/// Thin decorator that keeps Assistant prompt preference resolution outside the
-/// persistence/runtime implementation.
+/// Thin decorator that resolves the Assistant identity and presentation policy
+/// before Local/Cloud routing begins.
 ///
-/// All chat behavior is delegated unchanged except [sendMessage], where the
-/// ordinary Assistant prompt marker is replaced with the user's configured
-/// prompt before Local/Cloud routing begins.
+/// Normal Chat is explicitly TEXT/GENERAL, which leaves the resolved base
+/// prompt byte-for-byte unchanged. Other interaction channels use the same
+/// resolver with a different [InteractionProfile].
 class PromptResolvingChatRepository implements ChatRepository {
   const PromptResolvingChatRepository({
     required ChatRepository delegate,
-    required AssistantSystemPromptService systemPromptService,
+    required AssistantInteractionPromptResolver promptResolver,
   })  : _delegate = delegate,
-        _systemPromptService = systemPromptService;
+        _promptResolver = promptResolver;
 
   final ChatRepository _delegate;
-  final AssistantSystemPromptService _systemPromptService;
+  final AssistantInteractionPromptResolver _promptResolver;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
@@ -36,7 +37,10 @@ class PromptResolvingChatRepository implements ChatRepository {
     return _delegate.sendMessage(
       sessionId: sessionId,
       userPrompt: userPrompt,
-      systemPrompt: _systemPromptService.resolveForIncoming(systemPrompt),
+      systemPrompt: _promptResolver.resolve(
+        incomingPrompt: systemPrompt,
+        profile: InteractionProfile.text,
+      ),
       attachments: attachments,
       onPartialResponse: onPartialResponse,
       onRuntimeNotice: onRuntimeNotice,

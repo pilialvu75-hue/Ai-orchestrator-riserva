@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
+import 'package:ai_orchestrator/core/config/ai/assistant_interaction_prompt_resolver.dart';
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
@@ -14,6 +15,8 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
+import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
@@ -21,21 +24,44 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 
-/// Rebinds only the routing-sensitive services after the standard dependency
-/// graph has been registered.
+/// Rebinds the routing-sensitive Assistant services after the standard
+/// dependency graph has been registered.
 ///
 /// Keeping this separate from the main container minimizes regression risk for
-/// the large Local/voice/build dependency graph.
+/// the large Local/voice/build dependency graph while letting Chat and Live
+/// share the same resolved Assistant identity.
 abstract final class CloudRoutingBootstrap {
   static Future<void> configure(GetIt sl) async {
     await _unregisterIfPresent<ChatRepository>(sl);
     await _unregisterIfPresent<Orchestrator>(sl);
     await _unregisterIfPresent<PlannerService>(sl);
     await _unregisterIfPresent<InferenceService>(sl);
+    await _unregisterIfPresent<VoiceLoopManager>(sl);
 
-    final assistantSystemPromptService = AssistantSystemPromptService(
-      configRepository: sl<ConfigRepository>(),
-    );
+    final AssistantSystemPromptService assistantSystemPromptService;
+    if (sl.isRegistered<AssistantSystemPromptService>()) {
+      assistantSystemPromptService = sl<AssistantSystemPromptService>();
+    } else {
+      assistantSystemPromptService = AssistantSystemPromptService(
+        configRepository: sl<ConfigRepository>(),
+      );
+      sl.registerSingleton<AssistantSystemPromptService>(
+        assistantSystemPromptService,
+      );
+    }
+
+    final AssistantInteractionPromptResolver assistantPromptResolver;
+    if (sl.isRegistered<AssistantInteractionPromptResolver>()) {
+      assistantPromptResolver = sl<AssistantInteractionPromptResolver>();
+    } else {
+      assistantPromptResolver = AssistantInteractionPromptResolver(
+        systemPromptService: assistantSystemPromptService,
+      );
+      sl.registerSingleton<AssistantInteractionPromptResolver>(
+        assistantPromptResolver,
+      );
+    }
+
     final migratedLegacyPrompt =
         await assistantSystemPromptService.migrateLegacyDefaultIfNeeded();
     if (migratedLegacyPrompt) {
@@ -43,6 +69,18 @@ abstract final class CloudRoutingBootstrap {
         '[ASSISTANT_PROMPT] migrated legacy bundled prompt to conversational core',
       );
     }
+
+    // Keep Live construction lazy. The audio engine is still initialized only
+    // when Voice is actually used; this merely replaces the base DI factory so
+    // Live receives the same prompt source as normal Chat.
+    sl.registerLazySingleton<VoiceLoopManager>(
+      () => VoiceLoopManager(
+        engine: sl<VoiceEngine>(),
+        runtimeProvider: sl<LocalRuntimeProvider>(),
+        localAiRepository: sl<LocalAiRepository>(),
+        promptResolver: assistantPromptResolver,
+      ),
+    );
 
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(
@@ -86,7 +124,7 @@ abstract final class CloudRoutingBootstrap {
 
     sl.registerLazySingleton<ChatRepository>(
       () => PromptResolvingChatRepository(
-        systemPromptService: assistantSystemPromptService,
+        promptResolver: assistantPromptResolver,
         delegate: ChatRepositoryImpl(
           localDataSource: sl<ChatLocalDataSource>(),
           conversationMemoryService: sl<ConversationMemoryService>(),

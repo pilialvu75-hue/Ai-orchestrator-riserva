@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
+import 'package:ai_orchestrator/core/config/ai/assistant_interaction_prompt_resolver.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/interaction/interaction_policy.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
@@ -15,7 +17,9 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 ///
 ///   microphone -> STT -> selected local model -> inference -> TTS
 ///
-/// The normal Chat UI / ChatRepository pipeline is deliberately bypassed.
+/// The normal Chat UI / ChatRepository pipeline is deliberately bypassed, but
+/// the Assistant identity/presentation prompt is shared with Chat through
+/// [AssistantInteractionPromptResolver].
 ///
 /// STT language is explicitly propagated to the VoiceEngine so Live cannot
 /// silently fall back to an English-only/default recognizer configuration.
@@ -24,9 +28,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required VoiceEngine engine,
     required LocalRuntimeProvider runtimeProvider,
     required LocalAiRepository localAiRepository,
+    required AssistantInteractionPromptResolver promptResolver,
   })  : _engine = engine,
         _runtimeProvider = runtimeProvider,
-        _localAiRepository = localAiRepository;
+        _localAiRepository = localAiRepository,
+        _promptResolver = promptResolver;
 
   static const String _tag = 'VOICE_LOOP';
 
@@ -36,6 +42,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
+  final AssistantInteractionPromptResolver _promptResolver;
 
   CancellationToken? _activeCancellation;
 
@@ -67,6 +74,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
     String? modelPath,
     String? modelId,
     String? systemPrompt,
+    InteractionProfile interactionProfile = const InteractionProfile(
+      mode: InteractionMode.voiceWithScreen,
+      context: InteractionContext.general,
+    ),
     void Function(String text, bool isFinal)?
         onSubtitle,
     void Function(String error)? onError,
@@ -100,6 +111,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
         modelPath: modelPath,
         modelId: modelId,
         systemPrompt: systemPrompt,
+        interactionProfile: interactionProfile,
         onSubtitle: onSubtitle,
         onError: onError,
       );
@@ -282,6 +294,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required String? modelPath,
     required String? modelId,
     required String? systemPrompt,
+    required InteractionProfile interactionProfile,
     required void Function(
       String text,
       bool isFinal,
@@ -496,13 +509,18 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 3. INFERENCE
     // -----------------------------------------------------------------------
 
+    final resolvedSystemPrompt = _promptResolver.resolve(
+      incomingPrompt: systemPrompt,
+      profile: interactionProfile,
+    );
+
     final request =
         InferenceRequest(
       sessionId:
           'voice_loop_'
           '${DateTime.now().microsecondsSinceEpoch}',
       prompt: spokenText,
-      systemPrompt: systemPrompt,
+      systemPrompt: resolvedSystemPrompt,
       isOffline: true,
       maxTokens: 256,
       temperature: 0.7,
