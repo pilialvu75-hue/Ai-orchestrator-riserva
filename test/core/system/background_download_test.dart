@@ -64,6 +64,22 @@ void main() {
     expect(calls, ['start']);
   });
 
+  test('a paused system request is observed until completion, not restarted', () async {
+    mock((call) => call.method == 'start'
+        ? {'status': 4, 'received': 0, 'total': 4, 'reason': 2}
+        : {'status': 8, 'received': 4, 'total': 4, 'path': source.path});
+    await transfer();
+    expect(calls, ['start', 'status']);
+    expect(await destination.readAsBytes(), [1, 2, 3, 4]);
+  });
+
+  test('two observers of the same destination share one transfer', () async {
+    mock((_) => {'status': 8, 'received': 4, 'total': 4, 'path': source.path});
+    await Future.wait([transfer(), transfer()]);
+    expect(calls, ['start']);
+    expect(await destination.readAsBytes(), [1, 2, 3, 4]);
+  });
+
   test('cancel before approval never enqueues a native download', () async {
     final token = CancelToken()..cancel('user');
     mock((_) => {});
