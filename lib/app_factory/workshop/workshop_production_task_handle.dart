@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_life
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -258,10 +259,11 @@ final class WorkshopProductionTaskCoordinator {
   /// this production bundle, but only after the authoritative Cantiere project
   /// has completed and no prepared task remains active.
   ///
-  /// This method does not discover another project path and never consults
-  /// Assistant state. It is only the guarded production bridge from the
-  /// authoritative Cantiere workspace into the already-existing
-  /// build/test/validation layer.
+  /// After a successful artifact-producing build with no explicitly failed
+  /// verification signal, a persisted-reuse bundle learns from the completed
+  /// project: it records a verified project-template descriptor and attempts to
+  /// capture a safe source snapshot. Learning is best-effort and never changes
+  /// the build result.
   Future<WorkshopBuildResult> buildWorkspace({
     required WorkshopBuildTarget target,
     WorkshopBuildExecutionMode mode = WorkshopBuildExecutionMode.automatic,
@@ -270,7 +272,7 @@ final class WorkshopProductionTaskCoordinator {
     bool runFormatter = true,
     bool cleanBuild = false,
     List<String> arguments = const <String>[],
-  }) {
+  }) async {
     final workspaceRootPath = _bundle.workspaceRootPath?.trim();
 
     if (workspaceRootPath == null || workspaceRootPath.isEmpty) {
@@ -308,7 +310,7 @@ final class WorkshopProductionTaskCoordinator {
       );
     }
 
-    return _bundle.dashboardController.buildProject(
+    final result = await _bundle.dashboardController.buildProject(
       projectPath: workspaceRootPath,
       target: target,
       mode: mode,
@@ -318,6 +320,22 @@ final class WorkshopProductionTaskCoordinator {
       cleanBuild: cleanBuild,
       arguments: arguments,
     );
+
+    if (_isReusableBuild(result)) {
+      try {
+        await _learnFromSuccessfulBuild(
+          plan: plan,
+          target: target,
+          result: result,
+          workspaceRootPath: workspaceRootPath,
+        );
+      } catch (_) {
+        // Learning is an optimization. A successful build must never become a
+        // failed build because reusable-cache persistence/capture is stale.
+      }
+    }
+
+    return result;
   }
 
   Future<void> _stageReusableSourceIfAvailable({
@@ -343,6 +361,95 @@ final class WorkshopProductionTaskCoordinator {
     } catch (_) {
       // Reuse is an optimization, never a new availability dependency.
       // A stale/missing local snapshot falls back to the historical AI path.
+    }
+  }
+
+  bool _isReusableBuild(WorkshopBuildResult result) {
+    if (!result.succeeded || !result.hasArtifact || result.errors.isNotEmpty) {
+      return false;
+    }
+    if (result.testsPassed == false ||
+        result.analysisPassed == false ||
+        result.formatPassed == false) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _learnFromSuccessfulBuild({
+    required WorkshopProjectPlan plan,
+    required WorkshopBuildTarget target,
+    required WorkshopBuildResult result,
+    required String workspaceRootPath,
+  }) async {
+    final library = _bundle.reuseLibrary;
+    if (library == null) return;
+
+    var validationScore = 0.8;
+    if (result.testsPassed == true) validationScore += 0.07;
+    if (result.analysisPassed == true) validationScore += 0.07;
+    if (result.formatPassed == true) validationScore += 0.03;
+    validationScore = validationScore.clamp(0.0, 0.97).toDouble();
+
+    final assetId = 'build:${plan.id}:${target.name}';
+    final snapshotIndex = _bundle.reuseSourceSnapshots;
+    final snapshotsRootPath = _bundle.reuseSnapshotsRootPath?.trim();
+
+    List<String> entryPaths = const <String>[];
+    if (snapshotIndex != null &&
+        snapshotsRootPath != null &&
+        snapshotsRootPath.isNotEmpty) {
+      try {
+        final snapshot = await _bundle.reuseSourceSnapshotService.capture(
+          assetId: assetId,
+          workspaceRootPath: workspaceRootPath,
+          snapshotsRootPath: snapshotsRootPath,
+        );
+        snapshotIndex.register(snapshot);
+        entryPaths = snapshot.files.take(32).toList(growable: false);
+        final persistSnapshots = _bundle.onReuseSourceSnapshotsChanged;
+        if (persistSnapshots != null) {
+          await persistSnapshots(snapshotIndex);
+        }
+      } catch (_) {
+        // Metadata reuse remains valuable even when a source snapshot cannot be
+        // captured (e.g. no allow-listed source or transient storage failure).
+      }
+    }
+
+    final descriptionParts = <String>[
+      plan.goal.trim(),
+      ...plan.requirements.map((value) => value.trim()),
+      ...plan.deliverables.map((value) => value.trim()),
+    ].where((value) => value.isNotEmpty).toList(growable: false);
+
+    final asset = _bundle.reuseCaptureService.captureVerifiedOutput(
+      id: assetId,
+      name: plan.title,
+      description: descriptionParts.isEmpty
+          ? 'Verified ${target.name} Workshop project.'
+          : descriptionParts.join(' | '),
+      validationScore: validationScore,
+      origin: WorkshopReusableAssetOrigin.completedProject,
+      kind: WorkshopReusableAssetKind.projectTemplate,
+      target: target.name,
+      artifactPath: result.artifactPath,
+      sourceProjectId: plan.id,
+      tags: <String>[...plan.technologies, target.name],
+      capabilities: <String>[
+        ...plan.requirements,
+        ...plan.deliverables,
+      ],
+      entryPaths: entryPaths,
+      createdAt: result.finishedAt,
+    );
+
+    if (asset == null) return;
+
+    library.register(asset);
+    final persistLibrary = _bundle.onReuseLibraryChanged;
+    if (persistLibrary != null) {
+      await persistLibrary(library);
     }
   }
 }
