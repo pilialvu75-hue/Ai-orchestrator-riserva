@@ -6,6 +6,9 @@ import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_request.dar
 /// history is kept structured and translated only when building the native
 /// payload expected by each provider.
 class AiRequestModel extends AiRequest {
+  static const int _legacyRuntimeDefaultMaxTokens = 512;
+  static const int _defaultCloudMaxTokens = 2048;
+
   const AiRequestModel({
     required super.prompt,
     super.systemPrompt,
@@ -20,11 +23,14 @@ class AiRequestModel extends AiRequest {
   });
 
   factory AiRequestModel.fromEntity(AiRequest entity) {
+    final cloudMaxTokens = entity.maxTokens <= _legacyRuntimeDefaultMaxTokens
+        ? _defaultCloudMaxTokens
+        : entity.maxTokens;
     return AiRequestModel(
       prompt: entity.prompt,
       systemPrompt: entity.systemPrompt,
       temperature: entity.temperature,
-      maxTokens: entity.maxTokens,
+      maxTokens: cloudMaxTokens,
       messages: entity.messages,
       tools: entity.tools,
       modelId: entity.modelId,
@@ -76,8 +82,9 @@ class AiRequestModel extends AiRequest {
   /// Converts this request to the Google Gemini generateContent payload.
   ///
   /// Gemini 3.x and later reject legacy sampling parameters such as
-  /// temperature. Older explicitly selected Gemini models retain the legacy
-  /// temperature field for backward compatibility.
+  /// temperature. They also use reasoning tokens from the same hard output
+  /// budget, so the default Cloud path requests LOW thinking to preserve room
+  /// for the visible answer while still retaining reasoning capability.
   Map<String, dynamic> toGeminiJson({String? model}) {
     final resolvedModel = _resolveModel(model, fallback: 'gemini-3.8-flash');
     final isGemini3OrLater = RegExp(r'^gemini-(?:[3-9]|[1-9][0-9])(?:\.|-)')
@@ -98,6 +105,8 @@ class AiRequestModel extends AiRequest {
       'generationConfig': <String, dynamic>{
         'maxOutputTokens': maxTokens,
         if (!isGemini3OrLater) 'temperature': temperature,
+        if (isGemini3OrLater)
+          'thinkingConfig': const <String, dynamic>{'thinkingLevel': 'LOW'},
       },
       if (tools.isNotEmpty)
         'tools': <Map<String, dynamic>>[
