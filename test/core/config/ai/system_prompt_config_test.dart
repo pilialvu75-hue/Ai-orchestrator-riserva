@@ -12,6 +12,34 @@ void main() {
       expect(SystemPromptConfig.defaultPrompt, isNot(contains('running locally on Android')));
     });
 
+    test('default prompt stays compact enough for small local-model context', () {
+      expect(SystemPromptConfig.defaultPrompt.length, lessThanOrEqualTo(1500));
+      expect(
+        SystemPromptConfig.defaultPrompt.length,
+        lessThan(SystemPromptConfig.previousDefaultPromptV1.length),
+      );
+    });
+
+    test('recognizes current and historical bundled defaults only', () {
+      expect(
+        SystemPromptConfig.isBundledDefault(SystemPromptConfig.defaultPrompt),
+        isTrue,
+      );
+      expect(
+        SystemPromptConfig.isBundledDefault(
+          SystemPromptConfig.previousDefaultPromptV1,
+        ),
+        isTrue,
+      );
+      expect(
+        SystemPromptConfig.isBundledDefault(
+          SystemPromptConfig.legacyDefaultPrompt,
+        ),
+        isTrue,
+      );
+      expect(SystemPromptConfig.isBundledDefault('Custom prompt.'), isFalse);
+    });
+
     test('assistant chat turns receive the shared default prompt', () {
       const event = SendMessageEvent(
         sessionId: 'assistant-session',
