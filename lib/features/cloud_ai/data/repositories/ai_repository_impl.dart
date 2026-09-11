@@ -203,13 +203,14 @@ class AiRepositoryImpl implements AiRepository {
     }
 
     if (response is! CloudCompletionAware) return null;
+    final completion = response as CloudCompletionAware;
 
-    switch (response.completionStatus) {
+    switch (completion.completionStatus) {
       case CloudCompletionStatus.complete:
       case CloudCompletionStatus.unknown:
         return null;
       case CloudCompletionStatus.incomplete:
-        final reason = response.providerFinishReason?.trim();
+        final reason = completion.providerFinishReason?.trim();
         return CloudFailure(
           '${providerDisplayName(provider)} response was incomplete'
           '${reason == null || reason.isEmpty ? '.' : ' ($reason).'}',
@@ -217,7 +218,7 @@ class AiRepositoryImpl implements AiRepository {
           retryable: true,
         );
       case CloudCompletionStatus.blocked:
-        final reason = response.providerFinishReason?.trim();
+        final reason = completion.providerFinishReason?.trim();
         return CloudFailure(
           '${providerDisplayName(provider)} blocked the response'
           '${reason == null || reason.isEmpty ? '.' : ' ($reason).'}',
