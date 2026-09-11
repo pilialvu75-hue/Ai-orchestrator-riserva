@@ -87,6 +87,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     Map<AppAiRole, WorkshopInferenceGateway>? roleGateways,
     WorkshopBuildLab? buildLab,
     WorkshopReuseLibrary? reuseLibrary,
+    Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
     String? workspaceRootPath,
   }) {
     final orchestratorGateway =
@@ -110,6 +111,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     final preflight = WorkshopPreflightInferencePipeline(
       inference: stageInference,
       reuseLibrary: reuseLibrary,
+      onReuseLibraryChanged: onReuseLibraryChanged,
     );
 
     final inferenceRunner =
@@ -154,6 +156,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     Iterable<WorkshopBuildProvider> buildProviders =
         const <WorkshopBuildProvider>[],
     WorkshopReuseLibrary? reuseLibrary,
+    Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
@@ -180,6 +183,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       assignments: assignments,
       buildLab: resolvedBuildLab,
       reuseLibrary: reuseLibrary,
+      onReuseLibraryChanged: onReuseLibraryChanged,
       workspaceRootPath: normalizedWorkspaceRootPath,
     );
   }
@@ -189,7 +193,8 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
   ///
   /// Existing synchronous callers remain unchanged. App/UI composition can opt
   /// into this path when it already owns [PreferencesService], avoiding any new
-  /// global storage system or Assistant dependency.
+  /// global storage system or Assistant dependency. Reuse evidence is persisted
+  /// after a successful reuse-aware preflight.
   static Future<WorkshopProductionLifecycleBundle>
       createForWorkspaceWithPersistedReuse({
     required String workspaceRootPath,
@@ -203,9 +208,10 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) async {
-    final reuseLibrary = await WorkshopReuseLibraryStore(
+    final store = WorkshopReuseLibraryStore(
       preferences: preferences,
-    ).load();
+    );
+    final reuseLibrary = await store.load();
 
     return createForWorkspace(
       workspaceRootPath: workspaceRootPath,
@@ -214,6 +220,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       buildLab: buildLab,
       buildProviders: buildProviders,
       reuseLibrary: reuseLibrary,
+      onReuseLibraryChanged: store.save,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
