@@ -17,29 +17,29 @@ void main() {
         .instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (_) => response.future);
     RuntimeEventLog.instance.clear();
-    addTearDown(() {
+    try {
+      var returned = false;
+      final recording = recordAndroidProcessExitHistory().then((_) {
+        returned = true;
+      });
+      await tester.pump(const Duration(seconds: 3));
+      await recording;
+      expect(returned, isTrue);
+      expect(RuntimeEventLog.instance.entries
+          .where((e) => e.tag == 'ANDROID_PROCESS_EXIT_HISTORY'), isEmpty);
+  
+      response.complete([
+        {'timestamp_ms': 1234, 'reason_code': 5, 'status': 6},
+      ]);
+      await tester.pump();
+      final records = RuntimeEventLog.instance.entries
+          .where((e) => e.tag == 'ANDROID_PROCESS_EXIT_HISTORY').toList();
+      expect(records, hasLength(1));
+      expect(records.single.message, contains('"timestamp_ms":1234'));
+      await tester.pump();
+    } finally {
       messenger.setMockMethodCallHandler(channel, null);
       debugDefaultTargetPlatformOverride = null;
-    });
-
-    var returned = false;
-    final recording = recordAndroidProcessExitHistory().then((_) {
-      returned = true;
-    });
-    await tester.pump(const Duration(seconds: 3));
-    await recording;
-    expect(returned, isTrue);
-    expect(RuntimeEventLog.instance.entries
-        .where((e) => e.tag == 'ANDROID_PROCESS_EXIT_HISTORY'), isEmpty);
-
-    response.complete([
-      {'timestamp_ms': 1234, 'reason_code': 5, 'status': 6},
-    ]);
-    await tester.pump();
-    final records = RuntimeEventLog.instance.entries
-        .where((e) => e.tag == 'ANDROID_PROCESS_EXIT_HISTORY').toList();
-    expect(records, hasLength(1));
-    expect(records.single.message, contains('"timestamp_ms":1234'));
-    await tester.pump();
+    }
   });
 }
