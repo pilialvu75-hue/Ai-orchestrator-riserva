@@ -203,7 +203,9 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
       await _voiceEngine.initialize();
     } catch (_) {}
     try {
-      await _directVoiceEngine.dispose();
+      // This engine belongs to DI and is shared by chat and Live.
+      // dispose() is terminal: initialize() cannot resurrect its recorder.
+      // Missing assets leave initialize() retryable without destroying it.
       await _directVoiceEngine.initialize();
     } catch (_) {}
   }
