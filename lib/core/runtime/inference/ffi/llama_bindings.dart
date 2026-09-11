@@ -19,6 +19,9 @@ class LlamaBridgeBindings {
             lib.lookupFunction<LlbCreateSessionNative, LlbCreateSessionDart>(
           'llb_create_session',
         ),
+        _sessionTokenCount = lib.lookupFunction<
+            LlbSessionTokenCountNative,
+            LlbSessionTokenCountDart>('llb_session_token_count'),
         _sessionStartGen =
             lib.lookupFunction<LlbSessionStartGenNative, LlbSessionStartGenDart>(
           'llb_session_start_gen',
@@ -51,6 +54,7 @@ class LlamaBridgeBindings {
   final LlbGpuBackendNameDart _gpuBackendName;
   final LlbGpuBackendReasonDart _gpuBackendReason;
   final LlbCreateSessionDart _createSession;
+  final LlbSessionTokenCountDart _sessionTokenCount;
   final LlbSessionStartGenDart _sessionStartGen;
   final LlbSessionPollTokenDart _sessionPollToken;
   final LlbSessionCancelDart _sessionCancel;
@@ -79,6 +83,42 @@ class LlamaBridgeBindings {
       );
     } finally {
       calloc.free(pathPtr);
+    }
+  }
+
+  /// Counts tokens with the exact vocabulary of the loaded native session.
+  ///
+  /// This uses the same llama.cpp tokenizer configuration as generation
+  /// (add_special=true, parse_special=true), so prompt budgeting can be based
+  /// on the model's real token count instead of character heuristics.
+  int countTokens(int sessionId, String text) {
+    if (sessionId <= 0) {
+      throw StateError(
+        'Cannot count tokens with invalid sessionId=$sessionId.',
+      );
+    }
+
+    final activeState = _sessionIsActive(sessionId);
+    if (activeState != 1) {
+      throw StateError(
+        'Cannot count tokens on inactive native session '
+        '(sessionId=$sessionId, activeState=$activeState).',
+      );
+    }
+
+    final textPtr = text.toNativeUtf8(allocator: calloc);
+    try {
+      final count = _sessionTokenCount(sessionId, textPtr);
+      if (count < 0) {
+        final lastError = _sessionLastError(sessionId).toDartString().trim();
+        final suffix = lastError.isEmpty ? '' : ' Native error: $lastError';
+        throw StateError(
+          'Native token count failed (sessionId=$sessionId, code=$count).$suffix',
+        );
+      }
+      return count;
+    } finally {
+      calloc.free(textPtr);
     }
   }
 
