@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 void main() {
-  test('package verification rejects missing, altered and truncated assets', () async {
+  test('package verification rejects self-consistent but untrusted payloads', () async {
     final dir = await Directory.systemTemp.createTemp('kokoro-test-');
     try {
       expect(await KokoroAssets.verifyDirectory(dir.path), isNull);
@@ -24,7 +24,8 @@ void main() {
           'tokens': 'tokens.txt', 'data': 'data'},
       };
       await File('${dir.path}/verified.json').writeAsString(jsonEncode(manifest));
-      expect(await KokoroAssets.verifyDirectory(dir.path), isNotNull);
+      // Matching locally recorded hashes must not bless an invalid extraction.
+      expect(await KokoroAssets.verifyDirectory(dir.path), isNull);
       await File('${dir.path}/model.onnx').writeAsBytes([1, 2, 4]);
       expect(await KokoroAssets.verifyDirectory(dir.path), isNull);
       await File('${dir.path}/model.onnx').writeAsBytes([1, 2]);

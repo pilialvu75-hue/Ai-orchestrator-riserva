@@ -15,10 +15,17 @@ class KokoroAssets {
   static const archiveUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
       'kokoro-int8-multi-lang-v1_0.tar.bz2';
-  static const archiveBytes = 131839838;
+  static const archiveBytes = 132303094;
   static const archiveSha256 =
-      '75654a84864be26f345f020f4070c2c019e96dd1b7f9bf6e2ffd59efac6aa5a3';
+      '4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e';
   static const directoryName = 'kokoro-v1_0-int8';
+  // Hashes of the uncompressed upstream files, not hashes learned from
+  // locally extracted data. A valid archive alone does not validate extraction.
+  static const payloadSha256 = <String, String>{
+    'model': '4b86207ef680e394d8343bee22dfc4c512e5c707c6d9578e3f35ab09bffd6b36',
+    'voices': '1c5a5b983d3d50d8586d437a51f3faa2da7919ce76a013c081e65671a3447c29',
+    'tokens': '6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425',
+  };
   static Future<void>? _installing;
 
   static Future<Directory> directory() async {
@@ -115,6 +122,14 @@ class KokoroAssets {
     final model = models.single;
     final voices = unique('voices.bin');
     final tokens = unique('tokens.txt');
+    for (final entry in <String, File>{
+      'model': model, 'voices': voices, 'tokens': tokens,
+    }.entries) {
+      final digest = (await sha256.bind(entry.value.openRead()).first).toString();
+      if (digest != payloadSha256[entry.key]) {
+        throw FormatException('Estrazione Kokoro non valida: ${entry.key}.');
+      }
+    }
     final phontab = unique('phontab');
     final data = phontab.parent;
     for (final name in ['phondata', 'phonindex', 'intonations']) {
@@ -157,7 +172,8 @@ class KokoroAssets {
       }
       final paths = Map<String, dynamic>.from(manifest['paths'] as Map);
       for (final key in ['model', 'voices', 'tokens']) {
-        if (!files.containsKey(paths[key])) return null;
+        if (!files.containsKey(paths[key]) ||
+            files[paths[key]] != payloadSha256[key]) return null;
       }
       final data = paths['data'] as String;
       for (final name in ['phontab', 'phondata', 'phonindex', 'intonations']) {
