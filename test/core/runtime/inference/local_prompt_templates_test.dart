@@ -1,7 +1,7 @@
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
-import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -74,6 +74,66 @@ void main() {
         ),
         isTrue,
       );
+    });
+
+    test('stable factual questions do not force the internal web protocol', () {
+      RuntimeEventLog.instance.clear();
+
+      final prompt = LocalPromptTemplates.compose(
+        modelId: 'phi3_5_mini',
+        prompt: "Cos'è la fotosintesi?",
+        systemPrompt: 'Rispondi in italiano.',
+      );
+
+      expect(prompt, isNot(contains('<search>query</search>')));
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains(
+            '[PROMPT_WEB_SEARCH] enabled=false reason=ordinary_conversation',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('dynamic questions still enable the internal web protocol', () {
+      RuntimeEventLog.instance.clear();
+
+      final prompt = LocalPromptTemplates.compose(
+        modelId: 'phi3_5_mini',
+        prompt: 'Che meteo fa oggi a Parigi?',
+        systemPrompt: 'Rispondi in italiano.',
+      );
+
+      expect(prompt, contains('<search>query</search>'));
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains(
+            '[PROMPT_WEB_SEARCH] enabled=true reason=dynamic_or_explicit_query',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not re-trim a valid short history to twelve turns', () {
+      final context = List<ChatTurn>.generate(
+        18,
+        (index) => ChatTurn(
+          role: index.isEven ? ChatRole.user : ChatRole.assistant,
+          content: 'turn-$index',
+        ),
+      );
+
+      final prompt = LocalPromptTemplates.compose(
+        modelId: 'phi3_5_mini',
+        prompt: 'continua',
+        systemPrompt: 'Rispondi in italiano.',
+        context: context,
+      );
+
+      expect(prompt, contains('turn-0'));
+      expect(prompt, contains('turn-17'));
     });
   });
 }
