@@ -17,6 +17,10 @@ abstract class IChatRepository {
     void Function(String notice)? onRuntimeNotice,
   });
 
+  /// Stops the active response for [sessionId] without deleting persisted
+  /// conversation history or semantic memory.
+  Future<void> cancelActiveResponse(String sessionId);
+
   Future<int> pruneHistory({
     int maxAgeDays,
     int maxRows,

@@ -48,6 +48,10 @@ class PromptResolvingChatRepository implements ChatRepository {
   }
 
   @override
+  Future<void> cancelActiveResponse(String sessionId) =>
+      _delegate.cancelActiveResponse(sessionId);
+
+  @override
   Future<int> pruneHistory({
     int maxAgeDays = AppConstants.chatHistoryMaxAgeDays,
     int maxRows = AppConstants.chatHistoryMaxRows,

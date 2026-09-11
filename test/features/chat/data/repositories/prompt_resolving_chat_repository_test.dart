@@ -117,11 +117,27 @@ void main() {
 
       expect(delegate.lastSystemPrompt, 'Specialized system prompt.');
     });
+
+    test('delegates non-destructive active response cancellation', () async {
+      final fixture = await createService(const <String, Object>{});
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        promptResolver: resolverFor(fixture.service),
+      );
+
+      await repository.cancelActiveResponse('default');
+
+      expect(delegate.cancelledSessionId, 'default');
+      expect(delegate.clearSessionCalls, 0);
+    });
   });
 }
 
 class _RecordingChatRepository implements ChatRepository {
   String? lastSystemPrompt;
+  String? cancelledSessionId;
+  int clearSessionCalls = 0;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async =>
@@ -147,6 +163,11 @@ class _RecordingChatRepository implements ChatRepository {
   }
 
   @override
+  Future<void> cancelActiveResponse(String sessionId) async {
+    cancelledSessionId = sessionId;
+  }
+
+  @override
   Future<int> pruneHistory({
     int maxAgeDays = AppConstants.chatHistoryMaxAgeDays,
     int maxRows = AppConstants.chatHistoryMaxRows,
@@ -154,7 +175,9 @@ class _RecordingChatRepository implements ChatRepository {
       0;
 
   @override
-  Future<void> clearSession(String sessionId) async {}
+  Future<void> clearSession(String sessionId) async {
+    clearSessionCalls += 1;
+  }
 
   @override
   Future<int> deleteMessagesFrom(String sessionId, String messageId) async => 0;

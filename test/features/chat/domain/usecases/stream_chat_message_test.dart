@@ -95,6 +95,10 @@ class _FakeChatRepository implements ChatRepository {
   }) onSendMessage;
 
   @override
+  Future<void> cancelActiveResponse(String sessionId) =>
+      Future<void>.value();
+
+  @override
   Future<void> clearSession(String sessionId) =>
       Future<void>.value();
 

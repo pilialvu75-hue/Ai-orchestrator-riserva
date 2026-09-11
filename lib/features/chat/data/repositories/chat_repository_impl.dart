@@ -49,6 +49,7 @@ class ChatRepositoryImpl implements ChatRepository {
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
+  final Set<String> _cancelledResponseSessions = <String>{};
   final Map<String, Completer<void>> _sessionAbortSignals =
       <String, Completer<void>>{};
   final Map<String, StreamSubscription<InferenceResponse>>
@@ -89,6 +90,7 @@ class ChatRepositoryImpl implements ChatRepository {
               'A response is already in progress for this session.',
             );
           }
+          _cancelledResponseSessions.remove(sessionId);
           try {
             final attachmentsSnapshot =
                 List<ChatAttachment>.unmodifiable(attachments);
@@ -140,6 +142,13 @@ class ChatRepositoryImpl implements ChatRepository {
               'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
             );
 
+            if (_cancelledResponseSessions.contains(sessionId)) {
+              _log(
+                '[CHAT_PIPELINE] action=cancelled_before_stream session=$sessionId',
+              );
+              return userMsg;
+            }
+
             final streamedResponse = StringBuffer();
             String responseProvider = 'local';
 
@@ -163,6 +172,10 @@ class ChatRepositoryImpl implements ChatRepository {
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
             _sessionAbortSignals[sessionId] = abortSignal;
+            if (_cancelledResponseSessions.contains(sessionId) &&
+                !abortSignal.isCompleted) {
+              abortSignal.complete();
+            }
 
             // Ensures listener setup failures still release the abort signal.
             try {
@@ -258,7 +271,8 @@ class ChatRepositoryImpl implements ChatRepository {
                   streamCompleter.future.then((_) => false),
                   abortSignal.future.then((_) => true),
                 ]);
-                if (wasAborted) {
+                if (wasAborted ||
+                    _cancelledResponseSessions.contains(sessionId)) {
                   _log(
                     '[CHAT_PIPELINE] action=stream_aborted session=$sessionId',
                   );
@@ -304,6 +318,7 @@ class ChatRepositoryImpl implements ChatRepository {
             return assistantMsg;
           } finally {
             _activeSendSessions.remove(sessionId);
+            _cancelledResponseSessions.remove(sessionId);
           }
         },
         onError: (error, stackTrace) {
@@ -410,14 +425,33 @@ class ChatRepositoryImpl implements ChatRepository {
   }
 
   @override
+  Future<void> cancelActiveResponse(String sessionId) async {
+    final normalizedSessionId = sessionId.trim();
+    if (normalizedSessionId.isEmpty) return;
+
+    if (_activeSendSessions.contains(normalizedSessionId)) {
+      _cancelledResponseSessions.add(normalizedSessionId);
+    }
+
+    final abortSignal = _sessionAbortSignals[normalizedSessionId];
+    if (abortSignal != null && !abortSignal.isCompleted) {
+      abortSignal.complete();
+    }
+
+    inferenceService?.cancel(normalizedSessionId);
+    await _cancelActiveSubscription(normalizedSessionId);
+
+    _log(
+      '[CANCEL_ACTIVE_RESPONSE] session=$normalizedSessionId',
+    );
+  }
+
+  @override
   Future<void> clearSession(String sessionId) async {
     try {
-      final abortSignal = _sessionAbortSignals.remove(sessionId);
-      if (abortSignal != null && !abortSignal.isCompleted) {
-        abortSignal.complete();
-      }
-      await _cancelActiveSubscription(sessionId);
+      await cancelActiveResponse(sessionId);
       _activeSendSessions.remove(sessionId);
+      _cancelledResponseSessions.remove(sessionId);
 
       Object? error;
       StackTrace? stackTrace;

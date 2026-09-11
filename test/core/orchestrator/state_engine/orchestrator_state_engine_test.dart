@@ -138,6 +138,9 @@ class _FakeChatRepository implements IChatRepository {
       onGetMessages;
 
   @override
+  Future<void> cancelActiveResponse(String sessionId) async {}
+
+  @override
   Future<void> clearSession(String sessionId) async {}
 
   @override
