@@ -171,6 +171,28 @@ class MemoryWindowManager {
     }
 
     /*
+     * Coerenza conversazionale:
+     *
+     * Il trimming può cadere nel mezzo di uno scambio e lasciare come primo
+     * elemento una risposta assistant senza la domanda user a cui rispondeva.
+     * Su modelli piccoli questo frammento orfano è particolarmente ambiguo.
+     *
+     * Dopo avere applicato i limiti, rimuoviamo quindi solo gli eventuali
+     * assistant iniziali finché il contesto parte da un turno user. Non
+     * tocchiamo l'ordine dei turni restanti e non reinseriamo storia più vecchia.
+     */
+    while (startIndex < normalizedTurns.length &&
+        normalizedTurns[startIndex].role == ChatRole.assistant) {
+      final sizeToRemove = sizes[startIndex];
+      runningSize =
+          runningSize > sizeToRemove
+              ? runningSize - sizeToRemove
+              : 0;
+      startIndex++;
+      trimmedLines++;
+    }
+
+    /*
      * Snapshot finale.
      *
      * sublist() è sicuro perché startIndex è sempre mantenuto
