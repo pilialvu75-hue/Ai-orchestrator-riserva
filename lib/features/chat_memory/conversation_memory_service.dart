@@ -29,11 +29,12 @@ class ConversationMemoryService {
     String? systemPrompt,
     String? excludedMessageId,
   }) async {
-    final recalled = await recallRelevantMessages(
-      sessionId: sessionId,
-      query: userPrompt,
-      topK: 4,
-    );
+    // Semantic recall is intentionally not executed on the response hot path
+    // while RollingContextBuilder does not consume recalledContext. Running an
+    // embedding + database scan here added latency without changing the prompt
+    // sent to the model. The recall API and stored embeddings remain available
+    // for the later chronological relevance-aware memory policy.
+    const recalled = <ChatTurn>[];
 
     final result = _rollingContextBuilder.build(
       messages: messages,
@@ -58,7 +59,7 @@ class ConversationMemoryService {
     }
 
     debugPrint(
-      '[CONTEXT_REBUILD] session=$sessionId context_turns=${result.contextTurns.length} recall_turns=${recalled.length}',
+      '[CONTEXT_REBUILD] session=$sessionId context_turns=${result.contextTurns.length} recall_turns=0 recall_mode=deferred',
     );
 
     return result.contextTurns;
