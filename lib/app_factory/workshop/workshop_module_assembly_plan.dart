@@ -232,6 +232,7 @@ final class WorkshopModuleAssemblyPlanner {
     final identical = <String>[];
     final requirementsByKey = <String, WorkshopAssemblyRequirement>{};
     final claimedTargets = <String, String>{};
+    final stagedPins = <String>{};
 
     final decisions = reusePlan.decisions
         .where((item) => item.action == WorkshopCapabilityReuseAction.reuse)
@@ -287,6 +288,14 @@ final class WorkshopModuleAssemblyPlanner {
                 '${decision.need.preferredContractId}.',
           ),
         );
+        continue;
+      }
+
+      // One certified package may intentionally satisfy several project
+      // capabilities. Validate every selected capability/contract above, but
+      // stage the exact asset pin only once so its files do not collide with
+      // themselves.
+      if (!stagedPins.add(pin)) {
         continue;
       }
 
