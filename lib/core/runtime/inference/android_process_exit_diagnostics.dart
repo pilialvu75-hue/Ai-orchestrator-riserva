@@ -10,14 +10,18 @@ Future<void> recordAndroidProcessExitHistory() async {
   if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
   const channel = MethodChannel('com.aiorchestrator/process_exit');
   try {
-    final records = await channel
-        .invokeListMethod<dynamic>('readHistory')
-        .timeout(const Duration(seconds: 2));
-    for (final record in records ?? const <dynamic>[]) {
-      RuntimeEventLog.instance.emit(
-        '[ANDROID_PROCESS_EXIT_HISTORY] ${jsonEncode(record)}',
-      );
-    }
+    // Keep the logging continuation on the original platform future. A timeout
+    // limits startup waiting, but must not discard a late tombstone response.
+    final recording = channel.invokeListMethod<dynamic>('readHistory').then<void>(
+      (records) {
+        for (final record in records ?? const <dynamic>[]) {
+          RuntimeEventLog.instance.emit(
+            '[ANDROID_PROCESS_EXIT_HISTORY] ${jsonEncode(record)}',
+          );
+        }
+      },
+    );
+    await recording.timeout(const Duration(seconds: 2));
   } on Object catch (error) {
     // Diagnostics must never delay or prevent startup.
     RuntimeEventLog.instance.emit('[ANDROID_PROCESS_EXIT_UNAVAILABLE] $error');
