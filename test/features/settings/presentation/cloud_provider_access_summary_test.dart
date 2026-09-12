@@ -14,9 +14,9 @@ void main() {
     expect(openRouter?.accessLabel, 'Account-dependent free access');
 
     expect(groq?.spendSafeByClassification, isTrue);
-    expect(nim?.spendSafeByClassification, isTrue);
-    expect(mistral?.spendSafeByClassification, isTrue);
-    expect(openRouter?.spendSafeByClassification, isTrue);
+    expect(nim?.spendSafeByClassification, isFalse);
+    expect(mistral?.spendSafeByClassification, isFalse);
+    expect(openRouter?.spendSafeByClassification, isFalse);
   });
 
   test('unknown provider returns no summary', () {
