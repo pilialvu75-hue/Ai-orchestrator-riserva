@@ -18,6 +18,25 @@ class ServerException implements Exception {
   String toString() => 'ServerException: $message';
 }
 
+/// Structured HTTP failure from a Cloud provider transport.
+class CloudHttpException implements Exception {
+  const CloudHttpException({
+    required this.provider,
+    required this.statusCode,
+    required this.message,
+    this.retryAfter,
+  });
+
+  final String provider;
+  final int statusCode;
+  final String message;
+  final Duration? retryAfter;
+
+  @override
+  String toString() =>
+      'CloudHttpException(provider: $provider, statusCode: $statusCode, message: $message)';
+}
+
 /// Exception thrown when there is no network connectivity.
 class NetworkException implements Exception {
   const NetworkException([this.message = 'No network connection']);

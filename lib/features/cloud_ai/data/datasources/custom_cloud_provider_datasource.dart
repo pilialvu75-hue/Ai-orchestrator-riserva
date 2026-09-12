@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/error/exceptions.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_completion.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_store.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
@@ -114,12 +115,17 @@ class CustomCloudProviderDataSource {
         : const <String, dynamic>{};
     final input = _readInt(usage['input_tokens']);
     final output = _readInt(usage['output_tokens']);
+    final stopReason = json['stop_reason']?.toString();
 
     return AiResponseModel(
       text: text,
       model: json['model'] as String? ?? model,
       tokensUsed: input + output,
       timestamp: DateTime.now().millisecondsSinceEpoch,
+      completionStatus: normalizeCloudCompletionReason(stopReason),
+      providerFinishReason: stopReason,
+      inputTokens: input,
+      outputTokens: output,
     );
   }
 
@@ -159,13 +165,21 @@ class CustomCloudProviderDataSource {
 
   bool _isSuccess(int statusCode) => statusCode >= 200 && statusCode < 300;
 
-  ServerException _providerError(
+  CloudHttpException _providerError(
     CustomCloudProviderProfile profile,
     http.Response response,
   ) {
-    return ServerException(
-      '${profile.displayName} API error ${response.statusCode}: ${response.body}',
+    return CloudHttpException(
+      provider: profile.id,
+      statusCode: response.statusCode,
+      message: response.body,
+      retryAfter: _retryAfter(response),
     );
+  }
+
+  Duration? _retryAfter(http.Response response) {
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
   }
 
   int _readInt(Object? value) {

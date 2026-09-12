@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/diagnostics/cloud_routing_diagnostics.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_completion.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datasource.dart';
@@ -56,8 +57,7 @@ class AiRepositoryImpl implements AiRepository {
   @override
   String providerDisplayName([String? providerName]) {
     final requested = providerName == null ? _activeProviderId : providerName;
-    return CloudProviderCatalog.definitionFor(requested)?.displayName ??
-        requested;
+    return CloudProviderCatalog.definitionFor(requested)?.displayName ?? requested;
   }
 
   @override
@@ -102,71 +102,61 @@ class AiRepositoryImpl implements AiRepository {
 
     try {
       final model = AiRequestModel.fromEntity(request);
-
-      if (CloudProviderCatalog.isCustom(requested)) {
-        final response = await _customCloudProviderDataSource.complete(
-          requested,
-          model,
-        );
-        CloudRoutingDiagnostics.success(
-          providerId: requested,
-          taskType: request.taskType,
-        );
-        return Right(response);
-      }
-
-      final provider = _builtInProviderFromName(requested);
-      if (provider == null) {
-        const failure = ServerFailure(
-          'Selected cloud AI provider is not supported. Please choose another provider in Settings.',
-        );
-        CloudRoutingDiagnostics.failure(
-          providerId: requested,
-          taskType: request.taskType,
-          failure: failure,
-        );
-        return const Left(failure);
-      }
-
-      // IMPORTANT: an explicit routed request must not mutate the global user
-      // preference. Multiple executions may call different providers
-      // concurrently; their routing decisions must remain isolated.
       final AiResponse response;
 
-      switch (provider) {
-        case ActiveAiProvider.openAi:
-          response = await openAiDataSource.complete(model);
-          break;
-        case ActiveAiProvider.gemini:
-          response = await geminiDataSource.complete(model);
-          break;
-        case ActiveAiProvider.claude:
-          response = await claudeDataSource.complete(model);
-          break;
-        case ActiveAiProvider.grok:
-          if (grokDataSource == null) {
-            const failure = ServerFailure('Grok API key not configured');
-            CloudRoutingDiagnostics.failure(
-              providerId: requested,
-              taskType: request.taskType,
-              failure: failure,
-            );
-            return const Left(failure);
-          }
-          response = await grokDataSource!.complete(model);
-          break;
-        case ActiveAiProvider.copilot:
-          if (copilotDataSource == null) {
-            const failure = ServerFailure('Copilot API key not configured');
-            CloudRoutingDiagnostics.failure(
-              providerId: requested,
-              taskType: request.taskType,
-              failure: failure,
-            );
-            return const Left(failure);
-          }
-          response = await copilotDataSource!.complete(model);
-          break;
+      if (CloudProviderCatalog.isCustom(requested)) {
+        response = await _customCloudProviderDataSource.complete(requested, model);
+      } else {
+        final provider = _builtInProviderFromName(requested);
+        if (provider == null) {
+          const failure = CloudFailure(
+            'Selected cloud AI provider is not supported. Please choose another provider in Settings.',
+            kind: CloudFailureKind.unsupported,
+          );
+          _logFailure(requested, request.taskType, failure);
+          return const Left(failure);
+        }
+
+        // Explicit routed requests never mutate the global user preference.
+        switch (provider) {
+          case ActiveAiProvider.openAi:
+            response = await openAiDataSource.complete(model);
+            break;
+          case ActiveAiProvider.gemini:
+            response = await geminiDataSource.complete(model);
+            break;
+          case ActiveAiProvider.claude:
+            response = await claudeDataSource.complete(model);
+            break;
+          case ActiveAiProvider.grok:
+            if (grokDataSource == null) {
+              const failure = CloudFailure(
+                'Grok API key not configured',
+                kind: CloudFailureKind.authentication,
+              );
+              _logFailure(requested, request.taskType, failure);
+              return const Left(failure);
+            }
+            response = await grokDataSource!.complete(model);
+            break;
+          case ActiveAiProvider.copilot:
+            if (copilotDataSource == null) {
+              const failure = CloudFailure(
+                'Copilot API key not configured',
+                kind: CloudFailureKind.authentication,
+              );
+              _logFailure(requested, request.taskType, failure);
+              return const Left(failure);
+            }
+            response = await copilotDataSource!.complete(model);
+            break;
+        }
+      }
+
+      final completionFailure = _validateCompletion(requested, response);
+      if (completionFailure != null) {
+        _logFailure(requested, request.taskType, completionFailure);
+        return Left(completionFailure);
       }
 
       CloudRoutingDiagnostics.success(
@@ -175,30 +165,117 @@ class AiRepositoryImpl implements AiRepository {
       );
       return Right(response);
     } on NetworkException catch (e) {
-      final failure = NetworkFailure(e.message);
-      CloudRoutingDiagnostics.failure(
-        providerId: requested,
-        taskType: request.taskType,
-        failure: failure,
+      final failure = CloudFailure(
+        e.message,
+        kind: CloudFailureKind.network,
+        retryable: true,
       );
+      _logFailure(requested, request.taskType, failure);
+      return Left(failure);
+    } on CloudHttpException catch (e) {
+      final failure = _mapHttpFailure(e, requested);
+      _logFailure(requested, request.taskType, failure);
       return Left(failure);
     } on ServerException catch (e) {
-      final failure = ServerFailure(e.message);
-      CloudRoutingDiagnostics.failure(
-        providerId: requested,
-        taskType: request.taskType,
-        failure: failure,
+      final failure = CloudFailure(
+        e.message,
+        kind: CloudFailureKind.other,
       );
+      _logFailure(requested, request.taskType, failure);
       return Left(failure);
     } catch (e) {
-      final failure = ServerFailure(e.toString());
-      CloudRoutingDiagnostics.failure(
-        providerId: requested,
-        taskType: request.taskType,
-        failure: failure,
+      final failure = CloudFailure(
+        e.toString(),
+        kind: CloudFailureKind.other,
       );
+      _logFailure(requested, request.taskType, failure);
       return Left(failure);
     }
+  }
+
+  CloudFailure? _validateCompletion(String provider, AiResponse response) {
+    if (response.text.trim().isEmpty) {
+      return CloudFailure(
+        '${providerDisplayName(provider)} returned an empty response.',
+        kind: CloudFailureKind.emptyOutput,
+        retryable: true,
+      );
+    }
+
+    if (response is! CloudCompletionAware) return null;
+    final completion = response as CloudCompletionAware;
+
+    switch (completion.completionStatus) {
+      case CloudCompletionStatus.complete:
+      case CloudCompletionStatus.unknown:
+        return null;
+      case CloudCompletionStatus.incomplete:
+        final reason = completion.providerFinishReason?.trim();
+        return CloudFailure(
+          '${providerDisplayName(provider)} response was incomplete'
+          '${reason == null || reason.isEmpty ? '.' : ' ($reason).'}',
+          kind: CloudFailureKind.incompleteOutput,
+          retryable: true,
+        );
+      case CloudCompletionStatus.blocked:
+        final reason = completion.providerFinishReason?.trim();
+        return CloudFailure(
+          '${providerDisplayName(provider)} blocked the response'
+          '${reason == null || reason.isEmpty ? '.' : ' ($reason).'}',
+          kind: CloudFailureKind.other,
+        );
+    }
+  }
+
+  CloudFailure _mapHttpFailure(CloudHttpException error, String provider) {
+    final status = error.statusCode;
+    final body = error.message.toLowerCase();
+    final display = providerDisplayName(provider);
+
+    if (status == 401 || status == 403) {
+      return CloudFailure(
+        '$display authentication failed.',
+        kind: CloudFailureKind.authentication,
+        statusCode: status,
+      );
+    }
+    if (status == 429) {
+      final quota = body.contains('quota') ||
+          body.contains('credit') ||
+          body.contains('insufficient');
+      return CloudFailure(
+        quota ? '$display quota unavailable.' : '$display rate limit reached.',
+        kind: quota ? CloudFailureKind.quota : CloudFailureKind.rateLimit,
+        statusCode: status,
+        retryable: true,
+        retryAfter: error.retryAfter,
+      );
+    }
+    if (status == 502 || status == 503 || status == 504) {
+      return CloudFailure(
+        '$display provider temporarily overloaded (HTTP $status).',
+        kind: CloudFailureKind.providerUnavailable,
+        statusCode: status,
+        retryable: true,
+        retryAfter: error.retryAfter,
+      );
+    }
+
+    return CloudFailure(
+      '$display API error $status.',
+      kind: CloudFailureKind.other,
+      statusCode: status,
+      retryable: status >= 500,
+      retryAfter: error.retryAfter,
+    );
+  }
+
+  void _logFailure(String provider, String? taskType, Failure failure) {
+    CloudRoutingDiagnostics.failure(
+      providerId: provider,
+      taskType: taskType,
+      failure: failure,
+    );
   }
 
   ActiveAiProvider? _builtInProviderFromName(String? providerName) {

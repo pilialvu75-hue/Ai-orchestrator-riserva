@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
@@ -63,6 +64,23 @@ final class CloudRoutingDiagnostics {
   }
 
   static String _failureReason(Object failure) {
+    if (failure is CloudFailure) {
+      return switch (failure.kind) {
+        CloudFailureKind.authentication => 'authentication',
+        CloudFailureKind.rateLimit => 'rate_limit',
+        CloudFailureKind.quota => 'quota',
+        CloudFailureKind.providerUnavailable => 'provider_unavailable',
+        CloudFailureKind.network => 'network',
+        CloudFailureKind.timeout => 'timeout',
+        CloudFailureKind.incompleteOutput => 'incomplete_output',
+        CloudFailureKind.emptyOutput => 'empty_output',
+        CloudFailureKind.unsupported => 'unsupported',
+        CloudFailureKind.other => 'other',
+      };
+    }
+
+    // Compatibility fallback for legacy callers that have not migrated to a
+    // structured CloudFailure yet.
     final text = failure.toString().toLowerCase();
     if (text.contains('429') || text.contains('rate limit')) {
       return 'rate_limit';
@@ -91,7 +109,7 @@ final class CloudRoutingDiagnostics {
       return 'unsupported';
     }
     if (text.contains('unavailable')) {
-      return 'unavailable';
+      return 'provider_unavailable';
     }
     return 'other';
   }
