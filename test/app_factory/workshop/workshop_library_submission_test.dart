@@ -190,12 +190,7 @@ void main() {
     });
 
     test('requires a stable evidence timestamp instead of using current time', () {
-      final evidence = _validEvidence(
-        generatedAt: null,
-        validatedAt: null,
-        securityReviewedAt: null,
-      );
-      final decision = gate.evaluate(evidence);
+      final decision = gate.evaluate(_validEvidence(includeTimestamps: false));
 
       expect(decision.accepted, isFalse);
       expect(decision.reasons, contains('missing-evidence-timestamp'));
@@ -291,13 +286,10 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     path: 'payload/',
     sha256: _digest,
   ),
-  DateTime? generatedAt = const _DefaultDateTimeMarker(),
-  DateTime? validatedAt = const _DefaultDateTimeMarker(),
-  DateTime? securityReviewedAt = const _DefaultDateTimeMarker(),
+  bool includeTimestamps = true,
 }) {
-  DateTime? resolve(DateTime? value) => value is _DefaultDateTimeMarker
-      ? DateTime.utc(2026, 9, 12, 15)
-      : value;
+  final timestamp =
+      includeTimestamps ? DateTime.utc(2026, 9, 12, 15) : null;
 
   return WorkshopLibraryCaptureEvidence(
     assetId: 'voice.turn_taking',
@@ -313,10 +305,10 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     validationScore: validationScore,
     testsPassed: testsPassed,
     testReport: 'reports/voice-tests.json',
-    validatedAt: resolve(validatedAt),
+    validatedAt: timestamp,
     validatedOn: const <String>['android'],
     securityReviewed: securityReviewed,
-    securityReviewedAt: resolve(securityReviewedAt),
+    securityReviewedAt: timestamp,
     knownVulnerabilities: knownVulnerabilities,
     sbom: 'reports/sbom.spdx.json',
     integrationEffort: WorkshopLibrarySubmissionIntegrationEffort.low,
@@ -329,15 +321,6 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     frameworks: const <String>['flutter'],
     entryPaths: entryPaths,
     dependencies: dependencies,
-    generatedAt: resolve(generatedAt),
+    generatedAt: timestamp,
   );
-}
-
-/// Sentinel that lets tests distinguish "use the default deterministic time"
-/// from an explicit null timestamp.
-final class _DefaultDateTimeMarker implements DateTime {
-  const _DefaultDateTimeMarker();
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
