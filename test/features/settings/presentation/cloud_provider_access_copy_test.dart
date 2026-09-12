@@ -38,17 +38,19 @@ void main() {
     });
 
     test('only verified recurring free-tier routes are spend-safe', () {
-      final groq = CloudProviderCatalog.definitionFor('groq');
-      expect(groq, isNotNull);
-      expect(
-        CloudProviderAccessCopy.isSpendSafeByClassification(groq!),
-        isTrue,
-      );
+      for (final providerId in <String>['groq', 'openRouter']) {
+        final definition = CloudProviderCatalog.definitionFor(providerId);
+        expect(definition, isNotNull, reason: providerId);
+        expect(
+          CloudProviderAccessCopy.isSpendSafeByClassification(definition!),
+          isTrue,
+          reason: providerId,
+        );
+      }
 
       for (final providerId in <String>[
         'nvidiaNim',
         'mistral',
-        'openRouter',
       ]) {
         final definition = CloudProviderCatalog.definitionFor(providerId);
         expect(definition, isNotNull, reason: providerId);
