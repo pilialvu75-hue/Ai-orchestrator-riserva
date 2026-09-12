@@ -44,12 +44,9 @@ void main() {
     });
 
     test('blocks low validation and failed tests', () {
-      final evidence = _validEvidence(
-        validationScore: 0.79,
-        testsPassed: false,
+      final decision = gate.evaluate(
+        _validEvidence(validationScore: 0.79, testsPassed: false),
       );
-
-      final decision = gate.evaluate(evidence);
 
       expect(decision.accepted, isFalse);
       expect(decision.submission, isNull);
@@ -92,9 +89,7 @@ void main() {
 
     test('requires declared capability to match Lego provides', () {
       final decision = gate.evaluate(
-        _validEvidence(
-          capabilities: const <String>['voice.tts'],
-        ),
+        _validEvidence(capabilities: const <String>['voice.tts']),
       );
 
       expect(decision.accepted, isFalse);
@@ -136,7 +131,7 @@ void main() {
       final decision = gate.evaluate(
         _validEvidence(
           entryPaths: const <String>['../outside.dart'],
-          payload: WorkshopLibraryPayloadEvidence(
+          payload: const WorkshopLibraryPayloadEvidence(
             type: WorkshopLibraryPayloadType.repositoryPath,
             path: '../payload',
             sha256: _digest,
@@ -152,7 +147,7 @@ void main() {
     test('upstream reference requires immutable upstream coordinates', () {
       final decision = gate.evaluate(
         _validEvidence(
-          payload: WorkshopLibraryPayloadEvidence(
+          payload: const WorkshopLibraryPayloadEvidence(
             type: WorkshopLibraryPayloadType.upstreamReference,
             sha256: _digest,
             upstreamRepository: 'https://example.invalid/repo',
@@ -194,6 +189,18 @@ void main() {
       );
     });
 
+    test('requires a stable evidence timestamp instead of using current time', () {
+      final evidence = _validEvidence(
+        generatedAt: null,
+        validatedAt: null,
+        securityReviewedAt: null,
+      );
+      final decision = gate.evaluate(evidence);
+
+      expect(decision.accepted, isFalse);
+      expect(decision.reasons, contains('missing-evidence-timestamp'));
+    });
+
     test('output is deterministic when evidence timestamps are provided', () {
       final first = gate.evaluate(_validEvidence()).submission!;
       final second = gate.evaluate(_validEvidence()).submission!;
@@ -207,6 +214,25 @@ void main() {
               tags: const <String>['voice', 'stable', 'voice', ''],
               platforms: const <String>['windows', 'android', 'android'],
               languages: const <String>['dart', 'cpp', 'dart'],
+              connector: const WorkshopLibraryConnectorEvidence(
+                provides: <WorkshopLibraryLegoProvide>[
+                  WorkshopLibraryLegoProvide(
+                    capabilityId: 'voice.turn_taking',
+                    contractId: 'voice.turn_taking.v1',
+                    contractVersion: '1.0',
+                  ),
+                ],
+                adapters: <WorkshopLibraryLegoAdapter>[
+                  WorkshopLibraryLegoAdapter(
+                    target: 'android',
+                    entryPath: 'lib/voice_turn_taking.dart',
+                  ),
+                  WorkshopLibraryLegoAdapter(
+                    target: 'windows',
+                    entryPath: 'lib/voice_turn_taking.dart',
+                  ),
+                ],
+              ),
             ),
           )
           .submission!;
@@ -265,7 +291,14 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     path: 'payload/',
     sha256: _digest,
   ),
+  DateTime? generatedAt = const _DefaultDateTimeMarker(),
+  DateTime? validatedAt = const _DefaultDateTimeMarker(),
+  DateTime? securityReviewedAt = const _DefaultDateTimeMarker(),
 }) {
+  DateTime? resolve(DateTime? value) => value is _DefaultDateTimeMarker
+      ? DateTime.utc(2026, 9, 12, 15)
+      : value;
+
   return WorkshopLibraryCaptureEvidence(
     assetId: 'voice.turn_taking',
     name: 'Voice Turn Taking',
@@ -280,13 +313,13 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     validationScore: validationScore,
     testsPassed: testsPassed,
     testReport: 'reports/voice-tests.json',
-    validatedAt: DateTime.utc(2026, 9, 12, 15),
+    validatedAt: resolve(validatedAt),
     validatedOn: const <String>['android'],
     securityReviewed: securityReviewed,
-    securityReviewedAt: DateTime.utc(2026, 9, 12, 15),
+    securityReviewedAt: resolve(securityReviewedAt),
     knownVulnerabilities: knownVulnerabilities,
     sbom: 'reports/sbom.spdx.json',
-    integrationEffort: WorkshopLibraryIntegrationEffort.low,
+    integrationEffort: WorkshopLibrarySubmissionIntegrationEffort.low,
     adaptationAllowed: true,
     knownConstraints: const <String>['Microphone permission required'],
     connector: connector,
@@ -296,6 +329,15 @@ WorkshopLibraryCaptureEvidence _validEvidence({
     frameworks: const <String>['flutter'],
     entryPaths: entryPaths,
     dependencies: dependencies,
-    generatedAt: DateTime.utc(2026, 9, 12, 15),
+    generatedAt: resolve(generatedAt),
   );
+}
+
+/// Sentinel that lets tests distinguish "use the default deterministic time"
+/// from an explicit null timestamp.
+final class _DefaultDateTimeMarker implements DateTime {
+  const _DefaultDateTimeMarker();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
