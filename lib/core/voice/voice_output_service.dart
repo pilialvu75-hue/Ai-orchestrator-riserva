@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 
@@ -57,14 +59,17 @@ class VoiceOutputService {
   /// Le operazioni vengono serializzate per evitare race condition durante
   /// l'inizializzazione lazy di Sherpa/Piper e durante tap rapidi consecutivi.
   Future<void> speak(String text) {
+    RuntimeEventLog.instance.emit('[VOICE_OUTPUT_REQUEST] chars=${text.length}');
     final normalized =
         _normalizer.normalizeForTts(text);
 
+    RuntimeEventLog.instance.emit('[VOICE_OUTPUT_NORMALIZED] chars=${normalized.length}');
     if (normalized.isEmpty) {
       return Future<void>.value();
     }
 
     return _enqueue(() async {
+      RuntimeEventLog.instance.emit('[VOICE_OUTPUT_DEQUEUED]');
       final currentlySpeaking =
           _engine.isSpeaking;
 
@@ -103,7 +108,9 @@ class VoiceOutputService {
        * il percorso STT/microfono. L'altoparlante della chat deve poter
        * funzionare indipendentemente dalla Live e dal riconoscimento vocale.
        */
+      RuntimeEventLog.instance.emit('[VOICE_OUTPUT_ENGINE_CALL]');
       await _engine.speak(normalized);
+      RuntimeEventLog.instance.emit('[VOICE_OUTPUT_ENGINE_RETURNED]');
 
       // Impostiamo il testo attivo soltanto dopo che il comando speak è
       // stato consegnato correttamente al motore.
@@ -136,8 +143,10 @@ class VoiceOutputService {
 
   Future<void> _refreshStatusSafely() async {
     try {
+      RuntimeEventLog.instance.emit('[VOICE_OUTPUT_INSPECT_BEGIN]');
       _lastStatus =
           await _engine.inspect();
+      RuntimeEventLog.instance.emit('[VOICE_OUTPUT_INSPECT_END]');
     } catch (_) {
       // Lo stato diagnostico è best-effort.
       // Non deve mai far fallire una richiesta TTS già eseguita.
