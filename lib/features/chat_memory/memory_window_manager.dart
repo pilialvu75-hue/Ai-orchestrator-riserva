@@ -30,6 +30,7 @@ class MemoryWindowManager {
     required String? systemPrompt,
     required String userPrompt,
     required List<ChatTurn> contextTurns,
+    bool enforceEstimatedSizeBudget = true,
   }) {
     final config = _configProvider();
 
@@ -37,29 +38,20 @@ class MemoryWindowManager {
         ? 0
         : _tokenEstimator.estimateTextSize(systemPrompt);
 
-    final userSize =
-        _tokenEstimator.estimateTextSize(userPrompt);
+    final userSize = _tokenEstimator.estimateTextSize(userPrompt);
 
     /*
-     * Il context budget è ciò che rimane del limite totale dopo system
-     * prompt e richiesta utente corrente.
+     * Estimated-size budgeting remains available for legacy callers whose
+     * runtime cannot enforce its own context capacity.
      *
-     * IMPORTANT:
-     *
-     * Non usiamo minContextSize come floor operativo.
-     *
-     * Se systemPrompt + userPrompt consumano già tutto il budget,
-     * il contesto disponibile è semplicemente zero.
-     *
-     * Questo mantiene il comportamento coerente con i test esistenti
-     * e, soprattutto, garantisce che il risultato non superi mai
-     * maxTotalSize per effetto del fallback.
+     * Production conversational context now disables this heuristic before
+     * routing because a character count is not a model token count. The
+     * selected runtime is responsible for the final capacity bound:
+     * Android llama.cpp uses the loaded GGUF tokenizer, non-Android local keeps
+     * its legacy composer bound, and Cloud applies its own provider policy.
      */
-    final rawBudget =
-        config.maxTotalSize - systemSize - userSize;
-
-    final availableContextBudget =
-        rawBudget > 0 ? rawBudget : 0;
+    final rawBudget = config.maxTotalSize - systemSize - userSize;
+    final availableContextBudget = rawBudget > 0 ? rawBudget : 0;
 
     final normalizedTurns = <ChatTurn>[];
     final sizes = <int>[];
@@ -79,23 +71,20 @@ class MemoryWindowManager {
         continue;
       }
 
-      final normalizedContent =
-          _tokenEstimator.normalizeText(turn.content);
+      final normalizedContent = _tokenEstimator.normalizeText(turn.content);
 
       if (normalizedContent.isEmpty) {
         trimmedLines++;
         continue;
       }
 
-      final normalizedTurn =
-          normalizedContent == turn.content
-              ? turn
-              : turn.copyWith(
-                  content: normalizedContent,
-                );
+      final normalizedTurn = normalizedContent == turn.content
+          ? turn
+          : turn.copyWith(
+              content: normalizedContent,
+            );
 
-      final turnSize =
-          _tokenEstimator.estimateSize(normalizedTurn);
+      final turnSize = _tokenEstimator.estimateSize(normalizedTurn);
 
       normalizedTurns.add(normalizedTurn);
       sizes.add(turnSize);
@@ -103,49 +92,34 @@ class MemoryWindowManager {
     }
 
     /*
-     * Prima applichiamo il limite massimo di turni.
-     *
-     * Manteniamo i turni più recenti e conserviamo l'ordine originale.
+     * Il limite di turni resta di competenza della memoria conversazionale:
+     * evita history illimitate e mantiene una finestra cronologica recente.
+     * Il limite di capacità del modello, invece, appartiene al runtime.
      */
     var startIndex = 0;
 
-    if (normalizedTurns.length >
-        config.maxContextLines) {
-      startIndex =
-          normalizedTurns.length -
-              config.maxContextLines;
+    if (normalizedTurns.length > config.maxContextLines) {
+      startIndex = normalizedTurns.length - config.maxContextLines;
 
-      for (var index = 0;
-          index < startIndex;
-          index++) {
+      for (var index = 0; index < startIndex; index++) {
         runningSize -= sizes[index];
       }
 
       trimmedLines += startIndex;
     }
 
-    /*
-     * Seconda fase:
-     *
-     * riduciamo il contesto finché il suo peso rientra
-     * nel budget realmente disponibile.
-     *
-     * I turni più vecchi vengono rimossi per primi.
-     */
     var overflowDetected = false;
 
     while (startIndex < normalizedTurns.length) {
-      final remainingLines =
-          normalizedTurns.length - startIndex;
+      final remainingLines = normalizedTurns.length - startIndex;
 
-      final shouldTrimForBudget =
+      final shouldTrimForBudget = enforceEstimatedSizeBudget &&
           runningSize > availableContextBudget;
 
       final shouldTrimForLineLimit =
           remainingLines > config.maxContextLines;
 
-      if (!shouldTrimForBudget &&
-          !shouldTrimForLineLimit) {
+      if (!shouldTrimForBudget && !shouldTrimForLineLimit) {
         break;
       }
 
@@ -153,59 +127,46 @@ class MemoryWindowManager {
         overflowDetected = true;
       }
 
-      /*
-       * Protezione numerica:
-       *
-       * runningSize non deve diventare negativo anche in presenza
-       * di un estimator personalizzato o di dati anomali.
-       */
       final sizeToRemove = sizes[startIndex];
-
-      runningSize =
-          runningSize > sizeToRemove
-              ? runningSize - sizeToRemove
-              : 0;
+      runningSize = runningSize > sizeToRemove
+          ? runningSize - sizeToRemove
+          : 0;
 
       startIndex++;
       trimmedLines++;
     }
 
     /*
-     * Snapshot finale.
-     *
-     * sublist() è sicuro perché startIndex è sempre mantenuto
-     * nell'intervallo [0, normalizedTurns.length].
+     * Coerenza conversazionale:
+     * non lasciamo una risposta assistant orfana come primo turno visibile.
      */
-    final visibleTurns =
-        startIndex == 0
-            ? normalizedTurns
-            : normalizedTurns.sublist(startIndex);
+    while (startIndex < normalizedTurns.length &&
+        normalizedTurns[startIndex].role == ChatRole.assistant) {
+      final sizeToRemove = sizes[startIndex];
+      runningSize = runningSize > sizeToRemove
+          ? runningSize - sizeToRemove
+          : 0;
+      startIndex++;
+      trimmedLines++;
+    }
 
-    /*
-     * totalSize rappresenta il peso effettivamente inviato
-     * al livello successivo:
-     *
-     *   system + user + context residuo
-     *
-     * Per sicurezza lo limitiamo anche qui a maxTotalSize.
-     *
-     * Questa protezione non modifica la selezione dei turni:
-     * impedisce solamente che un estimator non lineare o un valore
-     * anomalo produca un risultato contabile superiore al budget.
-     */
-    final calculatedTotalSize =
-        runningSize + systemSize + userSize;
+    final visibleTurns = startIndex == 0
+        ? normalizedTurns
+        : normalizedTurns.sublist(startIndex);
 
-    final totalSize =
-        calculatedTotalSize > config.maxTotalSize
-            ? config.maxTotalSize
-            : calculatedTotalSize;
+    final calculatedTotalSize = runningSize + systemSize + userSize;
+
+    // When the heuristic budget is disabled, report the actual estimated size
+    // instead of clamping the metric to a limit that was intentionally not
+    // enforced. This keeps diagnostics honest while the runtime performs the
+    // authoritative token-capacity check.
+    final totalSize = enforceEstimatedSizeBudget &&
+            calculatedTotalSize > config.maxTotalSize
+        ? config.maxTotalSize
+        : calculatedTotalSize;
 
     return MemoryWindowResult(
-      contextTurns:
-          List<ChatTurn>.unmodifiable(
-        visibleTurns,
-      ),
+      contextTurns: List<ChatTurn>.unmodifiable(visibleTurns),
       trimmedLines: trimmedLines,
       overflowDetected: overflowDetected,
       totalSize: totalSize,

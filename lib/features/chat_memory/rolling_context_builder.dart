@@ -52,6 +52,11 @@ class RollingContextBuilder {
       systemPrompt: systemPrompt,
       userPrompt: userPrompt,
       contextTurns: turns,
+      // Do not discard conversational turns using a character heuristic before
+      // the runtime/provider is known. The selected backend owns its capacity:
+      // Android local uses exact llama.cpp tokens; legacy local and Cloud apply
+      // their own provider-specific bounds.
+      enforceEstimatedSizeBudget: false,
     );
 
     return RollingContextResult(
