@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
@@ -16,8 +17,10 @@ import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart'
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
@@ -119,6 +122,7 @@ class _AppShellState extends State<AppShell> {
     final messenger = ScaffoldMessenger.of(context);
 
     WorkshopProductionLifecycleBundle? workshopBundle;
+    WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
 
     try {
       final applicationDirectory =
@@ -145,11 +149,26 @@ class _AppShellState extends State<AppShell> {
         assignments: workshopAssignments,
       );
 
+      recoveryCoordinator =
+          WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: di.sl<PreferencesService>(),
+        ),
+      );
+
+      await recoveryCoordinator.restore(
+        workshopBundle.dashboardController,
+      );
+
       if (!mounted) {
         workshopBundle.dashboardController.dispose();
         workshopBundle = null;
         return;
       }
+
+      recoveryCoordinator.attach(
+        workshopBundle.dashboardController,
+      );
 
       await navigator.push(
         MaterialPageRoute<void>(
@@ -182,6 +201,7 @@ class _AppShellState extends State<AppShell> {
           ),
         );
     } finally {
+      await recoveryCoordinator?.detach();
       workshopBundle?.dashboardController.dispose();
 
       if (mounted) {
