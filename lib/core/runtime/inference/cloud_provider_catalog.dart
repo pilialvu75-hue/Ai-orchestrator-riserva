@@ -189,8 +189,8 @@ class CloudProviderCatalog {
       id: 'openRouter',
       displayName: 'OpenRouter Free Pool',
       defaultModel: 'openrouter/free',
-      costClass: CloudProviderCostClass.unknown,
-      accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
+      costClass: CloudProviderCostClass.freeTier,
+      accessClass: CloudProviderAccessClass.recurringFreeTier,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
