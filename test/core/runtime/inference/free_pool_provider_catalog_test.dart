@@ -36,7 +36,7 @@ void main() {
       expect(store.isSystemProfile('openRouter'), isTrue);
     });
 
-    test('distinguishes free access types while keeping all free-pool routes spend-safe', () async {
+    test('distinguishes access classes and fails closed for unverified free access', () async {
       final settings = await createSettings();
 
       expect(
@@ -64,21 +64,26 @@ void main() {
         CloudProviderAccessClass.unknown,
       );
 
+      expect(
+        CloudProviderCatalog.costClassFor('groq'),
+        CloudProviderCostClass.freeTier,
+      );
+      expect(settings.automaticCloudUseAllowed('groq'), isTrue);
+
       for (final provider in <String>[
-        'groq',
         'nvidiaNim',
         'mistral',
         'openRouter',
       ]) {
         expect(
           CloudProviderCatalog.costClassFor(provider),
-          CloudProviderCostClass.freeTier,
-          reason: '$provider must remain inside the free-first spending gate',
+          CloudProviderCostClass.unknown,
+          reason: '$provider must fail closed until free access is verified',
         );
         expect(
           settings.automaticCloudUseAllowed(provider),
-          isTrue,
-          reason: '$provider should be eligible for automatic free-first routing',
+          isFalse,
+          reason: '$provider must not be auto-routed without verified free access',
         );
       }
 
