@@ -53,7 +53,7 @@ void main() {
       );
       expect(
         CloudProviderCatalog.accessClassFor('openRouter'),
-        CloudProviderAccessClass.accountDependentFreeAccess,
+        CloudProviderAccessClass.recurringFreeTier,
       );
       expect(
         CloudProviderCatalog.accessClassFor('openAi'),
@@ -64,16 +64,21 @@ void main() {
         CloudProviderAccessClass.unknown,
       );
 
-      expect(
-        CloudProviderCatalog.costClassFor('groq'),
-        CloudProviderCostClass.freeTier,
-      );
-      expect(settings.automaticCloudUseAllowed('groq'), isTrue);
+      for (final provider in <String>['groq', 'openRouter']) {
+        expect(
+          CloudProviderCatalog.costClassFor(provider),
+          CloudProviderCostClass.freeTier,
+        );
+        expect(
+          settings.automaticCloudUseAllowed(provider),
+          isTrue,
+          reason: '$provider is a verified recurring free-tier route',
+        );
+      }
 
       for (final provider in <String>[
         'nvidiaNim',
         'mistral',
-        'openRouter',
       ]) {
         expect(
           CloudProviderCatalog.costClassFor(provider),
