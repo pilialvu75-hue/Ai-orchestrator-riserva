@@ -8,7 +8,7 @@ final class WorkshopReuseSourceSnapshot {
   WorkshopReuseSourceSnapshot({
     required this.assetId,
     required this.rootPath,
-    required this.files,
+    required List<String> files,
     required this.totalBytes,
     DateTime? createdAt,
   })  : createdAt = (createdAt ?? DateTime.now()).toUtc(),
