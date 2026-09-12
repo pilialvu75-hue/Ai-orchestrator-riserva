@@ -13,7 +13,7 @@ enum WorkshopLibraryPayloadType {
   archive,
 }
 
-enum WorkshopLibraryIntegrationEffort {
+enum WorkshopLibrarySubmissionIntegrationEffort {
   trivial,
   low,
   medium,
@@ -126,21 +126,6 @@ final class WorkshopLibraryConnectorEvidence {
   final String healthcheckType;
   final String? healthcheckPath;
   final String standardVersion;
-
-  Map<String, Object?> toJson() => <String, Object?>{
-        'standard': 'ai-orchestrator-lego',
-        'standard_version': standardVersion,
-        'provides': provides.map((item) => item.toJson()).toList(growable: false),
-        'requires': requires.map((item) => item.toJson()).toList(growable: false),
-        'integration_mode': _integrationModeName(integrationMode),
-        if (adapters.isNotEmpty)
-          'adapters': adapters.map((item) => item.toJson()).toList(growable: false),
-        'configuration_schema': configurationSchema,
-        'healthcheck': <String, Object?>{
-          'type': healthcheckType,
-          'path': healthcheckPath,
-        },
-      };
 }
 
 final class WorkshopLibraryPayloadEvidence {
@@ -157,22 +142,12 @@ final class WorkshopLibraryPayloadEvidence {
   final String? path;
   final String? upstreamRepository;
   final String? upstreamCommit;
-
-  Map<String, Object?> toJson() => <String, Object?>{
-        'type': _payloadTypeName(type),
-        'path': path,
-        'sha256': sha256,
-        'upstream_repository': upstreamRepository,
-        'upstream_commit': upstreamCommit,
-      };
 }
 
-/// Certification evidence produced by the Cantiere before it is even allowed
-/// to prepare a submission for the external Module Library.
+/// Evidence the Cantiere must possess before it may prepare a candidate for
+/// the external Module Library intake.
 ///
-/// This class is intentionally transport-free. It cannot write to GitHub or to
-/// the Library repository. The later bridge may only transmit an already
-/// accepted [WorkshopLibraryIntakeSubmission].
+/// This model is transport-free and cannot write to GitHub or the Library.
 final class WorkshopLibraryCaptureEvidence {
   const WorkshopLibraryCaptureEvidence({
     required this.assetId,
@@ -231,7 +206,7 @@ final class WorkshopLibraryCaptureEvidence {
   final int knownVulnerabilities;
   final String? sbom;
   final String? securityNotes;
-  final WorkshopLibraryIntegrationEffort integrationEffort;
+  final WorkshopLibrarySubmissionIntegrationEffort integrationEffort;
   final bool adaptationAllowed;
   final List<String> knownConstraints;
   final String? adapterNotes;
@@ -245,6 +220,11 @@ final class WorkshopLibraryCaptureEvidence {
   final DateTime? generatedAt;
 }
 
+/// Exact, untrusted intake envelope ready for a later transport bridge.
+///
+/// It deliberately points to `intake/...`, never `modules/...`, and the
+/// manifest status is always `discovered`. Only the Library promotion pipeline
+/// can later certify the candidate.
 final class WorkshopLibraryIntakeSubmission {
   const WorkshopLibraryIntakeSubmission({
     required this.assetId,
@@ -304,13 +284,12 @@ final class WorkshopLibraryCaptureDecision {
   }
 }
 
-/// Strict Cantiere-side gate for external Library submissions.
+/// Strict Cantiere-side capture gate for the external Module Library.
 ///
-/// A locally useful/reusable descriptor is not automatically publishable to
-/// the Module Library. This gate requires evidence that the candidate is
-/// validated, tested, security-reviewed, traceable, Lego-compatible and pinned
-/// to immutable payload bytes. Accepted output always enters Library intake as
-/// `discovered`; this class can never mark its own work `certified`.
+/// A locally reusable descriptor is not automatically publishable. The gate
+/// requires validation, tests, security review, traceability, Lego compatibility
+/// and a SHA-256 pinned payload. Accepted output is still untrusted Library
+/// intake and can never self-certify.
 final class WorkshopLibrarySubmissionGate {
   const WorkshopLibrarySubmissionGate({
     this.minimumValidationScore = 0.8,
@@ -345,10 +324,11 @@ final class WorkshopLibrarySubmissionGate {
     final entryPaths = _normalizedList(evidence.entryPaths);
     final validatedOn = _normalizedList(evidence.validatedOn);
     final constraints = _normalizedList(evidence.knownConstraints);
+    final evidenceAt = evidence.generatedAt ??
+        evidence.validatedAt ??
+        evidence.securityReviewedAt;
 
-    if (!_assetId.hasMatch(assetId)) {
-      reasons.add('invalid-asset-id');
-    }
+    if (!_assetId.hasMatch(assetId)) reasons.add('invalid-asset-id');
     if (name.isEmpty) reasons.add('missing-name');
     if (!_semver.hasMatch(version)) reasons.add('invalid-semver-version');
     if (description.isEmpty) reasons.add('missing-description');
@@ -356,6 +336,7 @@ final class WorkshopLibrarySubmissionGate {
     if (platforms.isEmpty) reasons.add('missing-platforms');
     if (sourceProjectId.isEmpty) reasons.add('missing-source-project-id');
     if (license.isEmpty) reasons.add('missing-license-declaration');
+    if (evidenceAt == null) reasons.add('missing-evidence-timestamp');
 
     if (evidence.validationScore < minimumValidationScore ||
         evidence.validationScore > 1) {
@@ -383,19 +364,12 @@ final class WorkshopLibrarySubmissionGate {
       return WorkshopLibraryCaptureDecision.reject(_dedupe(reasons));
     }
 
-    final generatedAt = (evidence.generatedAt ??
-            evidence.validatedAt ??
-            evidence.securityReviewedAt ??
-            DateTime.now())
-        .toUtc();
-
+    final generatedAt = evidenceAt!.toUtc();
     final manifest = <String, Object?>{
       'id': assetId,
       'name': name,
       'version': version,
       'kind': _assetKindName(evidence.kind),
-      // Intake is explicitly untrusted. Only the Library promotion pipeline may
-      // change this to tested/certified later.
       'status': 'discovered',
       'description': description,
       'tags': tags,
@@ -440,13 +414,13 @@ final class WorkshopLibrarySubmissionGate {
         'notes': _optional(evidence.securityNotes),
       },
       'integration': <String, Object?>{
-        'estimated_effort': _integrationEffortName(evidence.integrationEffort),
+        'estimated_effort': evidence.integrationEffort.name,
         'adaptation_allowed': evidence.adaptationAllowed,
         'known_constraints': constraints,
         'adapter_notes': _optional(evidence.adapterNotes),
       },
-      'connector': evidence.connector.toJson(),
-      'payload': evidence.payload.toJson(),
+      'connector': _connectorJson(evidence.connector),
+      'payload': _payloadJson(evidence.payload),
     };
 
     return WorkshopLibraryCaptureDecision.accept(
@@ -456,7 +430,7 @@ final class WorkshopLibrarySubmissionGate {
         manifest: Map<String, Object?>.unmodifiable(manifest),
         sourceProjectId: sourceProjectId,
         sourceTaskId: sourceTaskId,
-        payloadSha256: evidence.payload.sha256.toLowerCase(),
+        payloadSha256: evidence.payload.sha256.trim().toLowerCase(),
       ),
     );
   }
@@ -470,9 +444,7 @@ final class WorkshopLibrarySubmissionGate {
     if (!_standardVersion.hasMatch(connector.standardVersion.trim())) {
       reasons.add('invalid-lego-standard-version');
     }
-    if (connector.provides.isEmpty) {
-      reasons.add('missing-lego-provides');
-    }
+    if (connector.provides.isEmpty) reasons.add('missing-lego-provides');
 
     final provideKeys = <String>{};
     for (final provide in connector.provides) {
@@ -527,6 +499,12 @@ final class WorkshopLibrarySubmissionGate {
       }
     }
 
+    final configurationSchema = _optional(connector.configurationSchema);
+    if (configurationSchema != null &&
+        !_isSafeRelativePath(configurationSchema)) {
+      reasons.add('invalid-lego-configuration-schema');
+    }
+
     final healthcheckType = connector.healthcheckType.trim();
     if (!const <String>{'test', 'probe', 'none'}.contains(healthcheckType)) {
       reasons.add('invalid-lego-healthcheck-type');
@@ -542,8 +520,7 @@ final class WorkshopLibrarySubmissionGate {
     WorkshopLibraryPayloadEvidence payload,
     List<String> reasons,
   ) {
-    final digest = payload.sha256.trim();
-    if (!_sha256.hasMatch(digest)) {
+    if (!_sha256.hasMatch(payload.sha256.trim())) {
       reasons.add('invalid-payload-sha256');
     }
 
@@ -557,10 +534,12 @@ final class WorkshopLibrarySubmissionGate {
         if (path == null || !_isSafeRelativePath(path)) {
           reasons.add('invalid-payload-path');
         }
+        break;
       case WorkshopLibraryPayloadType.upstreamReference:
         if (repository == null || commit == null) {
           reasons.add('incomplete-upstream-reference');
         }
+        break;
     }
   }
 
@@ -589,16 +568,76 @@ final class WorkshopLibrarySubmissionGate {
     }
   }
 
+  Map<String, Object?> _connectorJson(
+    WorkshopLibraryConnectorEvidence connector,
+  ) {
+    return <String, Object?>{
+      'standard': 'ai-orchestrator-lego',
+      'standard_version': connector.standardVersion.trim(),
+      'provides': connector.provides
+          .map(
+            (item) => <String, Object?>{
+              'capability_id': item.capabilityId.trim(),
+              'contract_id': item.contractId.trim(),
+              if (_optional(item.contractVersion) != null)
+                'contract_version': _optional(item.contractVersion),
+            },
+          )
+          .toList(growable: false),
+      'requires': connector.requires
+          .map(
+            (item) => <String, Object?>{
+              'capability_id': item.capabilityId.trim(),
+              'contract_id': _optional(item.contractId),
+              'minimum_contract_version':
+                  _optional(item.minimumContractVersion),
+              'optional': item.optional,
+            },
+          )
+          .toList(growable: false),
+      'integration_mode': _integrationModeName(connector.integrationMode),
+      if (connector.adapters.isNotEmpty)
+        'adapters': connector.adapters
+            .map(
+              (item) => <String, Object?>{
+                'target': item.target.trim(),
+                'framework': _optional(item.framework),
+                'entry_path': item.entryPath.trim(),
+                'adapter_contract': _optional(item.adapterContract),
+              },
+            )
+            .toList(growable: false),
+      'configuration_schema': _optional(connector.configurationSchema),
+      'healthcheck': <String, Object?>{
+        'type': connector.healthcheckType.trim(),
+        'path': _optional(connector.healthcheckPath),
+      },
+    };
+  }
+
+  Map<String, Object?> _payloadJson(WorkshopLibraryPayloadEvidence payload) {
+    return <String, Object?>{
+      'type': _payloadTypeName(payload.type),
+      'path': _optional(payload.path),
+      'sha256': payload.sha256.trim().toLowerCase(),
+      'upstream_repository': _optional(payload.upstreamRepository),
+      'upstream_commit': _optional(payload.upstreamCommit),
+    };
+  }
+
   static bool _isSafeRelativePath(String value) {
-    final path = value.trim();
-    if (path.isEmpty ||
-        path.startsWith('/') ||
-        path.startsWith('~') ||
-        path.contains('\\') ||
-        path.contains(':') ||
-        path.contains('\u0000')) {
+    final raw = value.trim();
+    if (raw.isEmpty ||
+        raw.startsWith('/') ||
+        raw.startsWith('~') ||
+        raw.contains('\\') ||
+        raw.contains(':') ||
+        raw.contains('\u0000')) {
       return false;
     }
+
+    final path = raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
+    if (path.isEmpty) return false;
     final segments = path.split('/');
     return !segments.any(
       (segment) => segment.isEmpty || segment == '.' || segment == '..',
@@ -642,9 +681,6 @@ String _payloadTypeName(WorkshopLibraryPayloadType value) => switch (value) {
       WorkshopLibraryPayloadType.upstreamReference => 'upstream_reference',
       WorkshopLibraryPayloadType.archive => 'archive',
     };
-
-String _integrationEffortName(WorkshopLibraryIntegrationEffort value) =>
-    value.name;
 
 String _integrationModeName(WorkshopLibraryIntegrationMode value) =>
     switch (value) {
