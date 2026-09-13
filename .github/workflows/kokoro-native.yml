@@ -1,0 +1,26 @@
+name: Kokoro native synthesis
+on:
+  push:
+    branches: [fix/kokoro-fp32-arm]
+  pull_request:
+    paths:
+      - 'lib/core/voice/kokoro_assets.dart'
+      - 'scripts/verify_kokoro_fp32.py'
+      - '.github/workflows/kokoro-native.yml'
+permissions:
+  contents: read
+jobs:
+  synthesize:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install sherpa-onnx==1.13.6 numpy
+      - run: python scripts/verify_kokoro_fp32.py
