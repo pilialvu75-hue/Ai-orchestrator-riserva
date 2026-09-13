@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:ai_orchestrator/core/voice/verified_directory_cache.dart';
 
 import 'package:ai_orchestrator/core/system/background_download.dart';
 import 'package:archive/archive_io.dart';
@@ -27,6 +28,10 @@ class KokoroAssets {
     'tokens': '6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425',
   };
   static Future<void>? _installing;
+  static final _verification = VerifiedDirectoryCache(_verifyInBackground);
+
+  static Future<Map<String, String>?> _verifyInBackground(String root) =>
+      Isolate.run(() => verifyDirectory(root));
 
   static Future<Directory> directory() async {
     final root = await const RuntimeModelPathResolver().privateModelsDirectory();
@@ -35,7 +40,7 @@ class KokoroAssets {
 
   static Future<Map<String, String>?> verifiedPaths() async {
     final dir = await directory();
-    return Isolate.run(() => verifyDirectory(dir.path));
+    return _verification.get(dir.path);
   }
 
   static Future<void> install(void Function(double) onProgress) async {
@@ -79,6 +84,7 @@ class KokoroAssets {
       await _extractInBackground(archive.path, payload);
       onProgress(0.95);
       // Preserve the previous package until a complete replacement is ready.
+      _verification.clear();
       final backup = Directory(p.join(staging.path, 'previous'));
       if (await destination.exists()) await destination.rename(backup.path);
       try {
@@ -93,6 +99,7 @@ class KokoroAssets {
       if (Platform.isAndroid) await BackgroundDownload.release(archiveUrl);
       rethrow;
     } finally {
+      _verification.clear();
       dio.close();
       if (await staging.exists()) await staging.delete(recursive: true);
     }
