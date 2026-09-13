@@ -264,6 +264,9 @@ final class WorkshopDashboardController extends ChangeNotifier {
 
     restoredPlan.status = plan.status;
     restoredPlan.updatedAt = plan.updatedAt;
+    if (restoredPlan.status == WorkshopProjectStatus.completed) {
+      _engine.restoreCompletedProjectStage(requestId);
+    }
 
     String? restoredActiveTaskId;
     String? restoredActiveTaskTitle;

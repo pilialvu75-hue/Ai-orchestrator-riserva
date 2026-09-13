@@ -167,6 +167,7 @@ void main() {
         WorkshopProjectStatus.completed,
       );
       expect(secondController.state.stage, WorkshopStage.completed);
+      expect(secondController.engine.stageOf(requestId), WorkshopStage.completed);
       expect(secondController.state.activeTaskId, isNull);
       expect(secondController.state.completedTasks, 1);
       expect(secondController.state.totalTasks, 1);
