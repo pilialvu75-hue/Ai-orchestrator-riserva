@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_snapshot.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -59,13 +61,29 @@ void main() {
       final need = WorkshopCapabilityNeed(
         capabilityId: 'demo.capability',
         preferredContractId: 'demo.capability.v1',
+        priority: WorkshopProjectPriority.high,
         required: true,
-        reason: 'fixture',
+        targets: const <String>['android'],
+        evidence: const <WorkshopCapabilityEvidence>[
+          WorkshopCapabilityEvidence(
+            source: WorkshopCapabilityEvidenceSource.requirement,
+            text: 'fixture requirement',
+            priority: WorkshopProjectPriority.high,
+          ),
+        ],
       );
       final shoppingList = WorkshopCapabilityShoppingList(
         projectId: 'project-1',
         generatedAt: DateTime.utc(2026, 9, 13),
+        approval: WorkshopProjectApprovalEvidence(
+          projectId: 'project-1',
+          approvalId: 'approval-1',
+          approvedAt: DateTime.utc(2026, 9, 13),
+          approvedBy: 'owner',
+        ),
+        targets: const <String>['android'],
         needs: <WorkshopCapabilityNeed>[need],
+        unmappedInputs: const <String>[],
       );
       final result = const WorkshopCapabilityReusePlanner().plan(
         shoppingList: shoppingList,
