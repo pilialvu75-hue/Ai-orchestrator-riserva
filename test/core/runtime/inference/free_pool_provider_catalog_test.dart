@@ -36,7 +36,7 @@ void main() {
       expect(store.isSystemProfile('openRouter'), isTrue);
     });
 
-    test('distinguishes access classes and fails closed for unverified free access', () async {
+    test('distinguishes access classes from cost and requires AUTO participation', () async {
       final settings = await createSettings();
 
       expect(
@@ -83,17 +83,26 @@ void main() {
         expect(
           CloudProviderCatalog.costClassFor(provider),
           CloudProviderCostClass.unknown,
-          reason: '$provider must fail closed until free access is verified',
+          reason: '$provider keeps unverified billing cost separate from access entitlement',
         );
         expect(
           settings.automaticCloudUseAllowed(provider),
-          isFalse,
-          reason: '$provider must not be auto-routed without verified free access',
+          isTrue,
+          reason: '$provider may participate through its non-paid access class while AUTO participation is enabled',
         );
+
+        await settings.setCloudProviderParticipatesInAuto(provider, false);
+        expect(
+          settings.automaticCloudUseAllowed(provider),
+          isFalse,
+          reason: '$provider must fail closed when the user opts it out of AUTO',
+        );
+        await settings.setCloudProviderParticipatesInAuto(provider, true);
       }
 
       expect(settings.automaticCloudUseAllowed('openAi'), isFalse);
       expect(settings.automaticCloudUseAllowed('claude'), isFalse);
+      expect(settings.automaticCloudUseAllowed('copilot'), isFalse);
     });
 
     test('system free-pool providers are visible to normal Cloud selectors', () async {

@@ -17,7 +17,7 @@ void main() {
     );
   }
 
-  test('AUTO free-first admits only recurring verified free tiers by default',
+  test('AUTO free-first admits opted-in free-access tiers without paid spend',
       () async {
     final service = await createService();
 
@@ -34,20 +34,34 @@ void main() {
 
     expect(service.automaticCloudUseAllowed('gemini'), isTrue);
     expect(service.automaticCloudUseAllowed('groq'), isTrue);
-    expect(service.automaticCloudUseAllowed('nvidiaNim'), isFalse);
-    expect(service.automaticCloudUseAllowed('mistral'), isFalse);
+    expect(service.automaticCloudUseAllowed('nvidiaNim'), isTrue);
+    expect(service.automaticCloudUseAllowed('mistral'), isTrue);
     expect(service.automaticCloudUseAllowed('openRouter'), isTrue);
   });
 
-  test('manual selection remains available while AUTO fails closed', () async {
+  test('manual selection remains independent from AUTO fallback eligibility',
+      () async {
     final service = await createService();
 
     await service.setManualCloudProvider('nvidiaNim');
     expect(service.manualCloudProvider, 'nvidiaNim');
-    expect(service.automaticCloudUseAllowedForTask(
-      'nvidiaNim',
-      CloudTaskClass.general,
-    ), isFalse);
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        'nvidiaNim',
+        CloudTaskClass.general,
+      ),
+      isTrue,
+    );
+
+    await service.setCloudProviderParticipatesInAuto('nvidiaNim', false);
+    expect(service.manualCloudProvider, 'nvidiaNim');
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        'nvidiaNim',
+        CloudTaskClass.general,
+      ),
+      isFalse,
+    );
   });
 
   test('unrestricted remains explicit authorization for uncertain access',
