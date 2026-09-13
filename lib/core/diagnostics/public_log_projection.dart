@@ -14,6 +14,8 @@ String? publicLogProjection(String line) {
     'TTS_LAZY_READY',
     'TTS_GENERATE_BEGIN',
     'TTS_AUDIO_READY',
+    'TTS_TIMING',
+    'TTS_PREPARE_TIMING',
     'TTS_FAIL',
     'TTS_BLOCKED',
     'TTS_WORKER_BEGIN',
@@ -130,7 +132,7 @@ String? publicLogProjection(String line) {
   if (event == 'TTS_GENERATE_BEGIN') {
     final m = RegExp(
       r'^family=kokoro lang=(it|fr|en) sid=(\d{1,3}) '
-      r'speed=([0-9.]{1,12}) chars=(\d{1,9})$',
+      r'speed=([0-9.]{1,12}) chars=(\d{1,9})(?: phrase=\d{1,9})?$',
     ).firstMatch(rest);
     if (m != null) {
       result.addAll(<String, Object>{
@@ -141,6 +143,22 @@ String? publicLogProjection(String line) {
         'chars': int.parse(m[4]!),
       });
     }
+  }
+  if (event == 'TTS_TIMING') {
+    final m = RegExp(
+      r'^reused=(true|false) load_ms=(\d{1,9}) synthesis_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'reused': m[1] == 'true',
+        'load_ms': int.parse(m[2]!),
+        'synthesis_ms': int.parse(m[3]!),
+      });
+    }
+  }
+  if (event == 'TTS_PREPARE_TIMING') {
+    final m = RegExp(r'^asset_ms=(\d{1,9})$').firstMatch(rest);
+    if (m != null) result['asset_ms'] = int.parse(m[1]!);
   }
   if (event == 'TTS_FAIL') {
     final reason = RegExp(
@@ -181,3 +199,4 @@ String? publicLogProjection(String line) {
   // No arbitrary exception text, stack, prompt, path, ID or token is exported.
   return jsonEncode(result);
 }
+
