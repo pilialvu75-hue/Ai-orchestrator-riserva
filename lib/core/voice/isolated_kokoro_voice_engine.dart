@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+import 'package:ai_orchestrator/core/voice/kokoro_worker.dart';
+import 'package:ai_orchestrator/core/voice/tts_text_plan.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
@@ -115,9 +118,9 @@ final class AudioStreamTtsAudioSink implements TtsAudioSink {
 /// sherpa_onnx 1.13.x exposes synchronous Dart TTS generation. Calling that
 /// API from the UI isolate can therefore make Android report an ANR while a
 /// long sentence is being synthesized. This decorator moves the complete
-/// native TTS ownership lifecycle into a compute isolate:
+/// native TTS ownership lifecycle into a reusable owner isolate:
 ///
-///   init bindings -> create OfflineTts -> generate -> free OfflineTts
+///   init bindings -> create OfflineTts -> generate phrases -> free when idle
 ///
 /// No native pointer crosses an isolate boundary. Only paths, generation
 /// options and the generated Float32 PCM are transferred.
@@ -133,7 +136,7 @@ final class IsolatedKokoroVoiceEngine
   })  : _delegate = delegate,
         _languageCode = languageCode ?? (() => 'it'),
         _generationRunner =
-            generationRunner ?? runKokoroTtsGenerationInBackground,
+            generationRunner,
         _assetsProvider = assetsProvider ?? KokoroAssets.verifiedPaths,
         _audioSink = audioSink ?? AudioStreamTtsAudioSink();
 
@@ -141,7 +144,8 @@ final class IsolatedKokoroVoiceEngine
 
   final VoiceEngine _delegate;
   final String Function() _languageCode;
-  final KokoroTtsGenerationRunner _generationRunner;
+  final KokoroTtsGenerationRunner? _generationRunner;
+  KokoroWorker? _worker;
   final KokoroAssetsProvider _assetsProvider;
   final TtsAudioSink _audioSink;
 
@@ -216,7 +220,9 @@ final class IsolatedKokoroVoiceEngine
   }
 
   Future<void> _speakRequest(String sanitized, int generation) async {
+    final preparation = Stopwatch()..start();
     final assets = await _assetsProvider();
+    logEvent(_tag, '[TTS_PREPARE_TIMING] asset_ms=${preparation.elapsedMilliseconds}');
     if (_disposed || generation != _lifecycleGeneration) return;
 
     if (assets == null) {
@@ -236,11 +242,17 @@ final class IsolatedKokoroVoiceEngine
       throw StateError('Invalid TTS speech rate.');
     }
 
-    final language = _languageCode().split(RegExp('[-_]')).first;
-    final lang = const <String>['it', 'fr', 'en'].contains(language)
-        ? language
-        : 'en';
+    final defaultLang = detectTtsLanguage(sanitized, _languageCode());
+    final phrases = ttsPhrases(sanitized);
+    for (var index = 0; index < phrases.length; index++) {
+      if (_disposed || generation != _lifecycleGeneration) return;
+      await _speakPhrase(phrases[index], assets, speed,
+          detectTtsLanguage(phrases[index], defaultLang), generation, index);
+    }
+  }
 
+  Future<void> _speakPhrase(String sanitized, Map<String, String> assets,
+      double speed, String lang, int generation, int index) async {
     // IDs belong to the pinned official Kokoro v1.0 bundle:
     // Sara (IT), Siwis (FR), Heart (EN).
     final sid = lang == 'it' ? 35 : (lang == 'fr' ? 30 : 3);
@@ -259,14 +271,14 @@ final class IsolatedKokoroVoiceEngine
     logEvent(
       _tag,
       '[TTS_GENERATE_BEGIN] family=kokoro lang=$lang sid=$sid '
-      'speed=$speed chars=${sanitized.length}',
+      'speed=$speed chars=${sanitized.length} phrase=$index',
     );
     logEvent(
       _tag,
       '[TTS_WORKER_BEGIN] generation=$generation',
     );
 
-    final future = _generationRunner(request);
+    final future = (_generationRunner ?? _runWarm)(request);
     _generationInFlight = future;
 
     var failureReason = 'worker_failed';
@@ -311,6 +323,18 @@ final class IsolatedKokoroVoiceEngine
     }
   }
 
+  Future<KokoroTtsGeneratedAudio> _runWarm(
+      KokoroTtsGenerationRequest request) async {
+    if (_worker == null || _worker!.isClosed) _worker = KokoroWorker();
+    final result = await _worker!.generate(request.toMessage());
+    logEvent(_tag, '[TTS_TIMING] reused=${result['reused']} '
+        'load_ms=${result['loadMs']} synthesis_ms=${result['synthesisMs']}');
+    return KokoroTtsGeneratedAudio(
+      samples: result['samples'] as Float32List,
+      sampleRate: result['sampleRate'] as int,
+    );
+  }
+
   @override
   Future<void> stopSpeaking() async {
     _lifecycleGeneration++;
@@ -328,6 +352,8 @@ final class IsolatedKokoroVoiceEngine
 
     _disposed = true;
     _lifecycleGeneration++;
+    _worker?.close();
+    _worker = null;
 
     try {
       _audioSink.dispose();
@@ -417,3 +443,4 @@ Map<String, Object?> _generateKokoroTtsInIsolate(
     tts.free();
   }
 }
+

@@ -14,6 +14,39 @@ void main() {
     'data': '/test/espeak-ng-data',
   };
 
+  test('plays the first phrase before the next synthesis finishes', () async {
+    final sink = _FakeTtsAudioSink();
+    final secondStarted = Completer<void>();
+    final second = Completer<KokoroTtsGeneratedAudio>();
+    final requests = <KokoroTtsGenerationRequest>[];
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      languageCode: () => 'it',
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (request) async {
+        requests.add(request);
+        if (requests.length == 2) {
+          secondStarted.complete();
+          return second.future;
+        }
+        return KokoroTtsGeneratedAudio(
+          samples: Float32List.fromList([0.1, -0.1]), sampleRate: 24000);
+      },
+    );
+    final speaking = engine.speak('Bonjour, comment allez-vous? Voici votre réponse.');
+    await secondStarted.future;
+    expect(sink.pushCount, 1);
+    expect(requests.map((r) => r.lang), everyElement('fr'));
+    expect(requests.map((r) => r.sid), everyElement(30));
+    await engine.stopSpeaking();
+    second.complete(KokoroTtsGeneratedAudio(
+      samples: Float32List.fromList([0.2]), sampleRate: 24000));
+    await speaking;
+    expect(sink.pushCount, 1);
+    await engine.dispose();
+  });
+
   test('routes Kokoro generation through injected background runner', () async {
     final delegate = _FakeVoiceEngine();
     final sink = _FakeTtsAudioSink();
@@ -270,3 +303,4 @@ final class _FakeTtsAudioSink implements TtsAudioSink {
     disposeCount++;
   }
 }
+
