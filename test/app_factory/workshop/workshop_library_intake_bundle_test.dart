@@ -30,6 +30,7 @@ void main() {
       );
 
       expect(first.payloadSha256, digest);
+      expect(first.payloadPath, 'payload/library-intake-payload.json');
       expect(second.payloadJson, first.payloadJson);
       expect(second.bundleJson, first.bundleJson);
       expect(second.bundleSha256, first.bundleSha256);
@@ -60,6 +61,37 @@ void main() {
       expect(
         () => WorkshopLibraryIntakeBundle.build(
           submission: _submission(payloadSha256: wrongDigest),
+          files: files,
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('requires archive payload below payload directory', () {
+      final files = <WorkshopLibraryIntakePayloadFile>[
+        WorkshopLibraryIntakePayloadFile(
+          path: 'lib/module.dart',
+          bytes: utf8.encode('module'),
+        ),
+      ];
+      final digest = WorkshopLibraryIntakeBundle.computePayloadSha256(files);
+
+      expect(
+        () => WorkshopLibraryIntakeBundle.build(
+          submission: _submission(
+            payloadSha256: digest,
+            payloadType: 'repository_path',
+          ),
+          files: files,
+        ),
+        throwsStateError,
+      );
+      expect(
+        () => WorkshopLibraryIntakeBundle.build(
+          submission: _submission(
+            payloadSha256: digest,
+            payloadPath: 'outside.json',
+          ),
           files: files,
         ),
         throwsStateError,
@@ -130,6 +162,7 @@ void main() {
       final decoded = jsonDecode(bundle.bundleJson) as Map<String, dynamic>;
       expect(decoded['schema'], 'ai-orchestrator.library-intake-bundle.v1');
       expect(decoded['manifest_path'], 'intake/demo.asset/1.0.0/manifest.json');
+      expect(decoded['payload_path'], 'payload/library-intake-payload.json');
       expect((decoded['manifest'] as Map<String, dynamic>)['status'], 'discovered');
       expect(decoded.containsKey('token'), isFalse);
       expect(decoded.containsKey('authorization'), isFalse);
@@ -138,7 +171,11 @@ void main() {
   });
 }
 
-WorkshopLibraryIntakeSubmission _submission({required String payloadSha256}) {
+WorkshopLibraryIntakeSubmission _submission({
+  required String payloadSha256,
+  String payloadType = 'archive',
+  String payloadPath = 'payload/library-intake-payload.json',
+}) {
   return WorkshopLibraryIntakeSubmission(
     assetId: 'demo.asset',
     version: '1.0.0',
@@ -147,7 +184,8 @@ WorkshopLibraryIntakeSubmission _submission({required String payloadSha256}) {
       'version': '1.0.0',
       'status': 'discovered',
       'payload': <String, Object?>{
-        'type': 'archive',
+        'type': payloadType,
+        'path': payloadPath,
         'sha256': payloadSha256,
       },
     },
