@@ -22,13 +22,11 @@ enum AiRuntimeMode {
       case 'ai_runtime_mode_local':
       case 'fast':
         return AiRuntimeMode.local;
-
       case 'cloud':
       case 'remote':
       case 'ai_runtime_mode_cloud':
       case 'deep':
         return AiRuntimeMode.cloud;
-
       case 'hybrid':
       case 'ai_runtime_mode_hybrid':
       case 'balanced':
@@ -54,12 +52,8 @@ enum CloudSpendingMode {
   }
 }
 
-/// Internet availability is independent from Local/Cloud/Hybrid routing.
-enum InternetPolicy {
-  always,
-}
+enum InternetPolicy { always }
 
-/// Persists runtime settings and notifies listeners when a setting changes.
 class AiRuntimeSettingsService extends ChangeNotifier {
   AiRuntimeSettingsService({required ConfigRepository configRepository})
       : _configRepository = configRepository {
@@ -70,27 +64,17 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     );
   }
 
-  static List<String> get supportedProviders =>
-      CloudProviderCatalog.supportedProviders;
-
+  static List<String> get supportedProviders => CloudProviderCatalog.supportedProviders;
   static const String _cloudModelPrefix = 'cloud.provider.model.';
-  static const String _cloudAutoParticipationPrefix =
-      'cloud.provider.auto_enabled.';
+  static const String _cloudAutoParticipationPrefix = 'cloud.provider.auto_enabled.';
   static const String _cloudSpendingModeKey = 'cloud.spending.mode';
   static const String _cloudBudgetLimitKey = 'cloud.spending.budget_limit';
   static const String _manualCloudProviderKey = 'cloud.manual_provider';
-
   final ConfigRepository _configRepository;
 
-  AiRuntimeMode get runtimeMode => AiRuntimeMode.fromStoredValue(
-      _configRepository.getString(AppConstants.prefAiMode));
+  AiRuntimeMode get runtimeMode => AiRuntimeMode.fromStoredValue(_configRepository.getString(AppConstants.prefAiMode));
+  String get activeProvider => normalizeProvider(_configRepository.getString(AppConstants.prefActiveProvider));
 
-  String get activeProvider =>
-      normalizeProvider(_configRepository.getString(AppConstants.prefActiveProvider));
-
-  /// Null means that direct Cloud chat is in Automatic mode and the Cloud
-  /// router is free to select and fail over between configured providers.
-  /// A concrete provider pins direct Cloud chat to that provider only.
   String? get manualCloudProvider {
     final stored = _configRepository.getString(_manualCloudProviderKey)?.trim();
     if (stored == null || stored.isEmpty) return null;
@@ -98,30 +82,18 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   }
 
   bool get isCloudProviderAutomatic => manualCloudProvider == null;
-
   Future<AiRuntimeMode> loadRuntimeMode() async => runtimeMode;
 
   Future<void> setRuntimeMode(AiRuntimeMode mode) async {
-    await _configRepository.setString(
-      AppConstants.prefAiMode,
-      mode.storageValue,
-    );
+    await _configRepository.setString(AppConstants.prefAiMode, mode.storageValue);
     notifyListeners();
   }
 
   Future<void> setActiveProvider(String provider) async {
-    await _configRepository.setString(
-      AppConstants.prefActiveProvider,
-      normalizeProvider(provider),
-    );
+    await _configRepository.setString(AppConstants.prefActiveProvider, normalizeProvider(provider));
     notifyListeners();
   }
 
-  /// Selects a provider exclusively for direct Cloud chat.
-  ///
-  /// Passing null returns to Automatic mode. Unsupported provider IDs are
-  /// rejected instead of silently falling back to OpenAI, because a manual
-  /// selection must always mean exactly the provider chosen by the user.
   Future<void> setManualCloudProvider(String? provider) async {
     final normalized = provider?.trim();
     if (normalized == null || normalized.isEmpty) {
@@ -129,31 +101,21 @@ class AiRuntimeSettingsService extends ChangeNotifier {
       notifyListeners();
       return;
     }
-
     if (!supportedProviders.contains(normalized)) {
-      throw ArgumentError.value(
-        provider,
-        'provider',
-        'Unsupported Cloud provider.',
-      );
+      throw ArgumentError.value(provider, 'provider', 'Unsupported Cloud provider.');
     }
-
     await _configRepository.setString(_manualCloudProviderKey, normalized);
     notifyListeners();
   }
 
   String cloudModelFor(String provider) {
     final normalized = normalizeProvider(provider);
-    final stored =
-        _configRepository.getString('$_cloudModelPrefix$normalized')?.trim();
+    final stored = _configRepository.getString('$_cloudModelPrefix$normalized')?.trim();
     if (stored != null && stored.isNotEmpty) return stored;
     return CloudProviderCatalog.defaultModelFor(normalized);
   }
 
-  Future<void> setCloudModel(
-    String provider,
-    String modelId,
-  ) async {
+  Future<void> setCloudModel(String provider, String modelId) async {
     final normalized = normalizeProvider(provider);
     final model = modelId.trim();
     if (model.isEmpty) {
@@ -164,89 +126,62 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether [provider] may participate in automatic Cloud routing.
-  ///
-  /// This is deliberately independent from credentials and spending policy.
-  /// Disabling a provider here removes it from AUTO/Hybrid candidate selection
-  /// but does not disable MANUALE: an explicitly pinned direct-Cloud request
-  /// bypasses the automatic policy gate inside [CloudRuntimeProvider].
-  /// Providers default to enabled so existing installations keep their current
-  /// routing behaviour until the user opts out.
   bool cloudProviderParticipatesInAuto(String provider) {
     final normalized = provider.trim();
     if (!supportedProviders.contains(normalized)) return false;
-    return _configRepository
-            .getBool('$_cloudAutoParticipationPrefix$normalized') ??
-        true;
+    return _configRepository.getBool('$_cloudAutoParticipationPrefix$normalized') ?? true;
   }
 
-  Future<void> setCloudProviderParticipatesInAuto(
-    String provider,
-    bool enabled,
-  ) async {
+  Future<void> setCloudProviderParticipatesInAuto(String provider, bool enabled) async {
     final normalized = provider.trim();
     if (!supportedProviders.contains(normalized)) {
-      throw ArgumentError.value(
-        provider,
-        'provider',
-        'Unsupported Cloud provider.',
-      );
+      throw ArgumentError.value(provider, 'provider', 'Unsupported Cloud provider.');
     }
-    await _configRepository.setBool(
-      '$_cloudAutoParticipationPrefix$normalized',
-      enabled,
-    );
+    await _configRepository.setBool('$_cloudAutoParticipationPrefix$normalized', enabled);
     notifyListeners();
   }
 
-  CloudSpendingMode get cloudSpendingMode =>
-      CloudSpendingMode.fromStoredValue(
-        _configRepository.getString(_cloudSpendingModeKey),
-      );
+  CloudSpendingMode get cloudSpendingMode => CloudSpendingMode.fromStoredValue(_configRepository.getString(_cloudSpendingModeKey));
+  bool get automaticCloudSpendingAllowed => cloudSpendingMode == CloudSpendingMode.unrestricted;
+  bool automaticCloudUseAllowed(String provider) => automaticCloudUseAllowedForTask(provider, CloudTaskClass.general);
 
-  /// Legacy aggregate signal retained for callers that only need to know
-  /// whether unrestricted automatic paid Cloud usage is enabled.
-  bool get automaticCloudSpendingAllowed =>
-      cloudSpendingMode == CloudSpendingMode.unrestricted;
-
-  /// Compatibility authorization for callers without task intent.
-  ///
-  /// It is evaluated as a general conversation. This means
-  /// [CloudSpendingMode.complexTasksOnly] never authorizes paid Cloud through a
-  /// legacy provider-only call.
-  bool automaticCloudUseAllowed(String provider) =>
-      automaticCloudUseAllowedForTask(provider, CloudTaskClass.general);
-
-  /// Task-aware automatic Cloud authorization.
-  ///
-  /// Provider participation is checked before spend policy. Free-tier routes
-  /// stay available in every spend-safe mode. Paid routes are allowed
-  /// automatically only when the user explicitly selected unrestricted
-  /// spending, or when the default complex-work policy is active and the task
-  /// is coding/reasoning. Unknown-cost routes fail closed unless unrestricted.
-  /// Prepaid/budget modes deliberately remain closed for paid providers until
-  /// billing/quota adapters can prove that a request is covered.
-  bool automaticCloudUseAllowedForTask(
-    String provider,
-    CloudTaskClass task,
-  ) {
+  /// Authorizes automatic Cloud use without confusing access entitlement with
+  /// billing cost. Recurring free tiers are always spend-safe. Development or
+  /// account-dependent free access is also eligible when the user has left the
+  /// provider opted into AUTO; this is the explicit participation consent and
+  /// still does not authorize providers classified as paid. Promo credit and
+  /// unknown access fail closed because neither proves that the next request is
+  /// free. Paid routes keep the existing task-aware spending policy.
+  bool automaticCloudUseAllowedForTask(String provider, CloudTaskClass task) {
     if (!cloudProviderParticipatesInAuto(provider)) return false;
 
-    final costClass = CloudProviderCatalog.costClassFor(provider);
-    if (costClass == CloudProviderCostClass.freeTier) return true;
-
-    switch (cloudSpendingMode) {
-      case CloudSpendingMode.unrestricted:
+    final accessClass = CloudProviderCatalog.accessClassFor(provider);
+    switch (accessClass) {
+      case CloudProviderAccessClass.recurringFreeTier:
+      case CloudProviderAccessClass.developmentPrototypeFreeAccess:
+      case CloudProviderAccessClass.accountDependentFreeAccess:
         return true;
-      case CloudSpendingMode.complexTasksOnly:
-        return costClass == CloudProviderCostClass.paid &&
-            task != CloudTaskClass.general;
-      case CloudSpendingMode.freeOnly:
-      case CloudSpendingMode.prepaidOnly:
-      case CloudSpendingMode.budgetLimit:
-      case CloudSpendingMode.confirmBeforeSpending:
-        return false;
+      case CloudProviderAccessClass.promoCredit:
+      case CloudProviderAccessClass.unknown:
+        break;
+      case CloudProviderAccessClass.paid:
+        final costClass = CloudProviderCatalog.costClassFor(provider);
+        switch (cloudSpendingMode) {
+          case CloudSpendingMode.unrestricted:
+            return true;
+          case CloudSpendingMode.complexTasksOnly:
+            return costClass == CloudProviderCostClass.paid && task != CloudTaskClass.general;
+          case CloudSpendingMode.freeOnly:
+          case CloudSpendingMode.prepaidOnly:
+          case CloudSpendingMode.budgetLimit:
+          case CloudSpendingMode.confirmBeforeSpending:
+            return false;
+        }
     }
+
+    // Unknown/promo access remains fail-closed unless the user explicitly
+    // authorizes unrestricted Cloud spending.
+    return cloudSpendingMode == CloudSpendingMode.unrestricted;
   }
 
   Future<void> setCloudSpendingMode(CloudSpendingMode mode) async {
@@ -255,9 +190,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   }
 
   double? get cloudBudgetLimit {
-    final value = double.tryParse(
-      (_configRepository.getString(_cloudBudgetLimitKey) ?? '').trim(),
-    );
+    final value = double.tryParse((_configRepository.getString(_cloudBudgetLimitKey) ?? '').trim());
     return value != null && value > 0 ? value : null;
   }
 
@@ -265,119 +198,65 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     if (value == null || value <= 0) {
       await _configRepository.remove(_cloudBudgetLimitKey);
     } else {
-      await _configRepository.setString(
-        _cloudBudgetLimitKey,
-        value.toStringAsFixed(4),
-      );
+      await _configRepository.setString(_cloudBudgetLimitKey, value.toStringAsFixed(4));
     }
     notifyListeners();
   }
 
-  bool get developerMode =>
-      _configRepository.getBool(AppConstants.prefDeveloperMode) ?? false;
+  bool get developerMode => _configRepository.getBool(AppConstants.prefDeveloperMode) ?? false;
 
   Future<void> setDeveloperMode(bool enabled) async {
-    await _configRepository.setBool(
-      AppConstants.prefDeveloperMode,
-      enabled,
-    );
+    await _configRepository.setBool(AppConstants.prefDeveloperMode, enabled);
     notifyListeners();
   }
 
   String normalizeProvider(String? provider) {
-    if (provider != null && supportedProviders.contains(provider)) {
-      return provider;
-    }
+    if (provider != null && supportedProviders.contains(provider)) return provider;
     return 'openAi';
   }
 
-  String? get selectedModelId =>
-      _configRepository.getString(AppConstants.prefSelectedModel);
-
-  MemoryWindowProfile get memoryWindowProfile =>
-      MemoryWindowProfile.fromStoredValue(
-        _configRepository.getString(AppConstants.prefMemoryWindowProfile),
-      );
-
-  int get customMemoryTokenBudget => _readInt(
-        AppConstants.prefMemoryWindowCustomTokenBudget,
-        fallback: 8000,
-      );
-
-  int get customMemoryLineBudget => _readInt(
-        AppConstants.prefMemoryWindowCustomLineBudget,
-        fallback: 60,
-      );
+  String? get selectedModelId => _configRepository.getString(AppConstants.prefSelectedModel);
+  MemoryWindowProfile get memoryWindowProfile => MemoryWindowProfile.fromStoredValue(_configRepository.getString(AppConstants.prefMemoryWindowProfile));
+  int get customMemoryTokenBudget => _readInt(AppConstants.prefMemoryWindowCustomTokenBudget, fallback: 8000);
+  int get customMemoryLineBudget => _readInt(AppConstants.prefMemoryWindowCustomLineBudget, fallback: 60);
 
   Future<void> setMemoryWindowProfile(MemoryWindowProfile profile) async {
-    await _configRepository.setString(
-      AppConstants.prefMemoryWindowProfile,
-      profile.name,
-    );
+    await _configRepository.setString(AppConstants.prefMemoryWindowProfile, profile.name);
     notifyListeners();
   }
 
   Future<void> setMemoryWindowCustomTokenBudget(int value) async {
-    await _configRepository.setString(
-      AppConstants.prefMemoryWindowCustomTokenBudget,
-      value.toString(),
-    );
+    await _configRepository.setString(AppConstants.prefMemoryWindowCustomTokenBudget, value.toString());
     notifyListeners();
   }
 
   Future<void> setMemoryWindowCustomLineBudget(int value) async {
-    await _configRepository.setString(
-      AppConstants.prefMemoryWindowCustomLineBudget,
-      value.toString(),
-    );
+    await _configRepository.setString(AppConstants.prefMemoryWindowCustomLineBudget, value.toString());
     notifyListeners();
   }
 
-  Future<void> setMemoryWindowCustomSettings({
-    required int tokenBudget,
-    required int lineBudget,
-  }) async {
+  Future<void> setMemoryWindowCustomSettings({required int tokenBudget, required int lineBudget}) async {
     await Future.wait<void>([
-      _configRepository.setString(
-        AppConstants.prefMemoryWindowCustomTokenBudget,
-        tokenBudget.toString(),
-      ),
-      _configRepository.setString(
-        AppConstants.prefMemoryWindowCustomLineBudget,
-        lineBudget.toString(),
-      ),
+      _configRepository.setString(AppConstants.prefMemoryWindowCustomTokenBudget, tokenBudget.toString()),
+      _configRepository.setString(AppConstants.prefMemoryWindowCustomLineBudget, lineBudget.toString()),
     ]);
     notifyListeners();
   }
 
   MemoryWindowConfig get memoryWindowConfig => resolveMemoryWindowConfig();
 
-  MemoryWindowConfig resolveMemoryWindowConfig({
-    String? modelId,
-    bool isWeb = kIsWeb,
-  }) {
+  MemoryWindowConfig resolveMemoryWindowConfig({String? modelId, bool isWeb = kIsWeb}) {
     switch (memoryWindowProfile) {
       case MemoryWindowProfile.compact:
         return MemoryWindowConfig.compact(isWeb: isWeb);
-
       case MemoryWindowProfile.standard:
         return MemoryWindowConfig.standard(isWeb: isWeb);
-
       case MemoryWindowProfile.performance:
         return MemoryWindowConfig.performance(isWeb: isWeb);
-
       case MemoryWindowProfile.custom:
-        return MemoryWindowConfig.custom(
-          maxContextLines: customMemoryLineBudget,
-          maxTotalSize: customMemoryTokenBudget,
-          isWeb: isWeb,
-        );
-
+        return MemoryWindowConfig.custom(maxContextLines: customMemoryLineBudget, maxTotalSize: customMemoryTokenBudget, isWeb: isWeb);
       case MemoryWindowProfile.automatic:
-        return MemoryWindowConfig.automatic(
-          modelId: modelId ?? selectedModelId,
-          isWeb: isWeb,
-        );
+        return MemoryWindowConfig.automatic(modelId: modelId ?? selectedModelId, isWeb: isWeb);
     }
   }
 
