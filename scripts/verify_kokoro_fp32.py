@@ -29,7 +29,9 @@ with tempfile.TemporaryDirectory() as work:
     model = next((root / "payload").rglob("model.onnx"))
     folder = model.parent
     for name in ("model.onnx", "voices.bin", "tokens.txt"):
-        print("PAYLOAD_HASH", name, digest(folder / name), flush=True)
+        file_hash = digest(folder / name)
+        assert file_hash in pathlib.Path("lib/core/voice/kokoro_assets.dart").read_text()
+        print("PAYLOAD_HASH", name, file_hash, flush=True)
     tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(
         model=sherpa_onnx.OfflineTtsModelConfig(
             kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(
@@ -43,7 +45,9 @@ with tempfile.TemporaryDirectory() as work:
         ("fr", 30, "Bonjour, comment allez-vous?"),
         ("en", 3, "Hello, how are you?"),
     ):
-        config = sherpa_onnx.GenerationConfig(sid=sid, speed=1.0)
+        config = sherpa_onnx.GenerationConfig()
+        config.sid = sid
+        config.speed = 1.0
         config.extra = {"lang": lang}
         audio = tts.generate(text, config)
         samples = np.asarray(audio.samples)

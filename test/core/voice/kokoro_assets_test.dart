@@ -5,6 +5,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
 
 void main() {
+  test('previous INT8 installation cannot be accepted as FP32', () async {
+    final dir = await Directory.systemTemp.createTemp('kokoro-int8-');
+    try {
+      await File('${dir.path}/verified.json').writeAsString(jsonEncode({
+        'archiveSha256':
+            '4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e',
+      }));
+      expect(await KokoroAssets.verifyDirectory(dir.path), isNull);
+    } finally {
+      await dir.delete(recursive: true);
+    }
+  });
+
   test('package verification rejects self-consistent but untrusted payloads', () async {
     final dir = await Directory.systemTemp.createTemp('kokoro-test-');
     try {

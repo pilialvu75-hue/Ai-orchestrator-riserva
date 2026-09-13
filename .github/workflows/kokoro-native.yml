@@ -1,7 +1,5 @@
 name: Kokoro native synthesis
 on:
-  push:
-    branches: [fix/kokoro-fp32-arm]
   pull_request:
     paths:
       - 'lib/core/voice/kokoro_assets.dart'
