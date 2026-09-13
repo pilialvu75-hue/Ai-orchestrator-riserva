@@ -55,10 +55,11 @@ void main() {
           bytes: utf8.encode('actual'),
         ),
       ];
+      final wrongDigest = List<String>.filled(64, '0').join();
 
       expect(
         () => WorkshopLibraryIntakeBundle.build(
-          submission: _submission(payloadSha256: '0' * 64),
+          submission: _submission(payloadSha256: wrongDigest),
           files: files,
         ),
         throwsStateError,
