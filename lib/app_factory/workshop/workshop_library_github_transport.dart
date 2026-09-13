@@ -193,6 +193,9 @@ final class WorkshopLibraryGitHubTransport {
         'maintainer_can_modify': true,
       },
     );
+    if (created == null) {
+      throw StateError('GitHub pull request creation returned no data.');
+    }
     return _receiptFromPr(branch, created);
   }
 
@@ -315,7 +318,7 @@ final class WorkshopLibraryGitHubTransport {
     String? body,
   }) async {
     if (uri.scheme != 'https' || uri.host.toLowerCase() != 'api.github.com') {
-      throw const StateError('Refusing non-GitHub API transport endpoint.');
+      throw StateError('Refusing non-GitHub API transport endpoint.');
     }
 
     final isSafeRetry = method == 'GET';
