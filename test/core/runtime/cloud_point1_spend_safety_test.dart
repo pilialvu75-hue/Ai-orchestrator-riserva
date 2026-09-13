@@ -30,13 +30,13 @@ void main() {
     expect(CloudProviderCatalog.costClassFor('mistral'),
         CloudProviderCostClass.unknown);
     expect(CloudProviderCatalog.costClassFor('openRouter'),
-        CloudProviderCostClass.unknown);
+        CloudProviderCostClass.freeTier);
 
     expect(service.automaticCloudUseAllowed('gemini'), isTrue);
     expect(service.automaticCloudUseAllowed('groq'), isTrue);
     expect(service.automaticCloudUseAllowed('nvidiaNim'), isFalse);
     expect(service.automaticCloudUseAllowed('mistral'), isFalse);
-    expect(service.automaticCloudUseAllowed('openRouter'), isFalse);
+    expect(service.automaticCloudUseAllowed('openRouter'), isTrue);
   });
 
   test('manual selection remains available while AUTO fails closed', () async {
