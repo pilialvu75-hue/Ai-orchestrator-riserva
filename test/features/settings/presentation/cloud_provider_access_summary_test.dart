@@ -11,12 +11,12 @@ void main() {
     expect(groq?.accessLabel, 'Recurring free tier');
     expect(nim?.accessLabel, 'Development / prototype free access');
     expect(mistral?.accessLabel, 'Account-dependent free access');
-    expect(openRouter?.accessLabel, 'Account-dependent free access');
+    expect(openRouter?.accessLabel, 'Recurring free tier');
 
     expect(groq?.spendSafeByClassification, isTrue);
     expect(nim?.spendSafeByClassification, isFalse);
     expect(mistral?.spendSafeByClassification, isFalse);
-    expect(openRouter?.spendSafeByClassification, isFalse);
+    expect(openRouter?.spendSafeByClassification, isTrue);
   });
 
   test('unknown provider returns no summary', () {
