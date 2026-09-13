@@ -6,8 +6,9 @@ import 'workshop_library_submission.dart';
 
 /// One exact payload file prepared for Module Library intake.
 ///
-/// The path is relative to the Library submission's `payload/` directory.
-/// Bytes are copied defensively so the digest cannot change after construction.
+/// The path is relative to the reusable payload root represented by the
+/// canonical archive document. Bytes are copied defensively so the digest
+/// cannot change after construction.
 final class WorkshopLibraryIntakePayloadFile {
   WorkshopLibraryIntakePayloadFile({
     required String path,
@@ -22,14 +23,19 @@ final class WorkshopLibraryIntakePayloadFile {
 /// Deterministic transport artifact containing the real payload bytes that
 /// correspond to an already accepted [WorkshopLibraryIntakeSubmission].
 ///
-/// This stays transport-free: it neither reads credentials nor writes GitHub.
-/// An authenticated executor can verify `bundleSha256`, then verify the raw
-/// `payloadJson` against `payloadSha256`, before materializing the submission
-/// under `intake/<asset>/<version>/` in the private Module Library.
+/// V1 deliberately uses a canonical JSON archive. The accepted manifest must
+/// therefore declare `payload.type=archive`, a safe path below `payload/`, and
+/// the same SHA-256 as the canonical [payloadJson]. The private Module Library
+/// can later materialize [payloadJson] at [payloadPath] and its existing intake
+/// pipeline will verify the exact same digest before normalization.
+///
+/// This class remains transport-free: it neither reads credentials nor writes
+/// GitHub or the Library.
 final class WorkshopLibraryIntakeBundle {
   const WorkshopLibraryIntakeBundle._({
     required this.pin,
     required this.manifestPath,
+    required this.payloadPath,
     required this.manifest,
     required this.payloadJson,
     required this.payloadSha256,
@@ -39,6 +45,7 @@ final class WorkshopLibraryIntakeBundle {
 
   final String pin;
   final String manifestPath;
+  final String payloadPath;
   final Map<String, Object?> manifest;
 
   /// Canonical UTF-8 JSON string whose SHA-256 is [payloadSha256].
@@ -75,10 +82,33 @@ final class WorkshopLibraryIntakeBundle {
       );
     }
 
+    final manifestPayload = submission.manifest['payload'];
+    if (manifestPayload is! Map) {
+      throw StateError('Library manifest payload descriptor is missing.');
+    }
+    final payloadType = manifestPayload['type']?.toString().trim();
+    final payloadPath = manifestPayload['path']?.toString().trim() ?? '';
+    final manifestPayloadSha256 =
+        manifestPayload['sha256']?.toString().trim().toLowerCase() ?? '';
+    if (payloadType != 'archive') {
+      throw StateError('Library intake bundle v1 requires payload.type=archive.');
+    }
+    if (!payloadPath.startsWith('payload/') || !_isSafePayloadPath(payloadPath)) {
+      throw StateError(
+        'Library intake bundle archive path must stay below payload/.',
+      );
+    }
+    if (manifestPayloadSha256 != payloadSha256) {
+      throw StateError(
+        'Library manifest payload.sha256 does not match the canonical payload.',
+      );
+    }
+
     final bundle = <String, Object?>{
       'schema': 'ai-orchestrator.library-intake-bundle.v1',
       'pin': submission.pin,
       'manifest_path': submission.manifestPath,
+      'payload_path': payloadPath,
       'payload_sha256': payloadSha256,
       'payload_json': payloadJson,
       'manifest': submission.manifest,
@@ -89,6 +119,7 @@ final class WorkshopLibraryIntakeBundle {
     return WorkshopLibraryIntakeBundle._(
       pin: submission.pin,
       manifestPath: submission.manifestPath,
+      payloadPath: payloadPath,
       manifest: Map<String, Object?>.unmodifiable(submission.manifest),
       payloadJson: payloadJson,
       payloadSha256: payloadSha256,
@@ -133,7 +164,12 @@ final class WorkshopLibraryIntakeBundle {
   }
 
   static bool _isSafePayloadPath(String path) {
-    if (path.isEmpty || path.startsWith('/') || path.contains('\\')) {
+    if (path.isEmpty ||
+        path.startsWith('/') ||
+        path.startsWith('~') ||
+        path.contains('\\') ||
+        path.contains(':') ||
+        path.contains('\u0000')) {
       return false;
     }
 
