@@ -73,11 +73,11 @@ class ModelRuntimeManifest {
       id: 'it_tts_archive',
       section: ModelManagementSection.voiceTtsItalian,
       logicalName:
-          'Kokoro — Italiano, Français, English',
-      fileName: 'kokoro-v1_0-int8/verified.json',
+          'Kokoro FP32 — Italiano, Français, English',
+      fileName: '${KokoroAssets.directoryName}/verified.json',
       downloadUrl: KokoroAssets.archiveUrl,
       expectedBytes: KokoroAssets.archiveBytes,
-      estimatedSizeLabel: '~132 MB download',
+      estimatedSizeLabel: '~350 MB download',
     ),
   ];
 }

@@ -9,20 +9,20 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 
-/// Official Sherpa Kokoro v1.0 INT8 bundle. Paola files are never reused.
+/// Official Sherpa Kokoro v1.0 FP32 bundle. Avoids the ARM INT8 path. Paola files are never reused.
 class KokoroAssets {
-  static const archiveName = 'kokoro-int8-multi-lang-v1_0.tar.bz2';
+  static const archiveName = 'kokoro-multi-lang-v1_0.tar.bz2';
   static const archiveUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
-      'kokoro-int8-multi-lang-v1_0.tar.bz2';
-  static const archiveBytes = 132303094;
+      'kokoro-multi-lang-v1_0.tar.bz2';
+  static const archiveBytes = 349906910;
   static const archiveSha256 =
-      '4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e';
-  static const directoryName = 'kokoro-v1_0-int8';
+      'c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298';
+  static const directoryName = 'kokoro-v1_0-fp32';
   // Hashes of the uncompressed upstream files, not hashes learned from
   // locally extracted data. A valid archive alone does not validate extraction.
   static const payloadSha256 = <String, String>{
-    'model': '4b86207ef680e394d8343bee22dfc4c512e5c707c6d9578e3f35ab09bffd6b36',
+    'model': 'b40f62b166ac8164b0627ef48a0b358eda0985e272fb03ef5252e7206305da11',
     'voices': '1c5a5b983d3d50d8586d437a51f3faa2da7919ce76a013c081e65671a3447c29',
     'tokens': '6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425',
   };
