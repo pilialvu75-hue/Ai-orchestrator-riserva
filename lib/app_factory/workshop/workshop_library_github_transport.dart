@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
@@ -27,24 +28,42 @@ final class WorkshopLibraryGitHubSubmissionReceipt {
 /// current Library main, manifest + canonical payload are materialized there,
 /// and a pull request is opened. Existing identical content is reused;
 /// divergent content at the same immutable pin fails closed.
+///
+/// GET requests use bounded retry for transient failures. Mutating requests are
+/// deliberately not blindly retried after an uncertain network result; calling
+/// [submit] again is safe and idempotent because refs, files and PRs are all
+/// rediscovered before mutation.
 final class WorkshopLibraryGitHubTransport {
   WorkshopLibraryGitHubTransport({
     required WorkshopLibraryGitHubCredentialStore credentialStore,
     http.Client? client,
+    Future<void> Function(Duration)? sleeper,
     this.repository = 'pilialvu75-hue/AI-Orchestrator-Module-Library',
     this.baseBranch = 'main',
+    this.maxGetAttempts = 3,
   })  : _credentialStore = credentialStore,
-        _client = client ?? http.Client();
+        _client = client ?? http.Client(),
+        _sleep = sleeper ?? Future<void>.delayed {
+    if (maxGetAttempts < 1 || maxGetAttempts > 5) {
+      throw ArgumentError.value(
+        maxGetAttempts,
+        'maxGetAttempts',
+        'Must be within 1..5.',
+      );
+    }
+  }
 
   static const int _maxPayloadBytes = 20 * 1024 * 1024;
   static const int _maxBundleBytes = 24 * 1024 * 1024;
 
   final WorkshopLibraryGitHubCredentialStore _credentialStore;
   final http.Client _client;
+  final Future<void> Function(Duration) _sleep;
   final String repository;
   final String baseBranch;
+  final int maxGetAttempts;
 
-  Uri get _apiRoot => Uri.parse('https://api.github.com/repos/$repository');
+  Uri get _apiRoot => Uri.parse('https://api.github.com/repos/$repository/');
 
   Future<WorkshopLibraryGitHubSubmissionReceipt> submit(
     WorkshopLibraryIntakeBundle bundle,
@@ -53,7 +72,9 @@ final class WorkshopLibraryGitHubTransport {
     _validateBundle(bundle);
     final credential = await _credentialStore.load();
     if (credential == null || credential.isExpired) {
-      throw StateError('Module Library GitHub authorization is missing or expired.');
+      throw StateError(
+        'Module Library GitHub authorization is missing or expired.',
+      );
     }
 
     final manifestBytes = utf8.encode(jsonEncode(bundle.manifest));
@@ -77,12 +98,20 @@ final class WorkshopLibraryGitHubTransport {
     }
 
     final token = credential.accessToken;
-    final mainManifest = await _content(manifestPath, ref: baseBranch, token: token);
+    final mainManifest = await _content(
+      manifestPath,
+      ref: baseBranch,
+      token: token,
+    );
     if (mainManifest != null) {
-      final mainPayload = await _content(payloadRepoPath, ref: baseBranch, token: token);
-      if (_sameContent(mainManifest, manifestBytes) &&
+      final mainPayload = await _content(
+        payloadRepoPath,
+        ref: baseBranch,
+        token: token,
+      );
+      if (_sameJsonBlob(mainManifest, manifestBytes) &&
           mainPayload != null &&
-          _sameContent(mainPayload, payloadBytes)) {
+          _sameBlob(mainPayload, payloadBytes)) {
         return WorkshopLibraryGitHubSubmissionReceipt(
           repository: repository,
           branch: baseBranch,
@@ -90,7 +119,8 @@ final class WorkshopLibraryGitHubTransport {
         );
       }
       throw StateError(
-        'Module Library immutable intake pin already exists with divergent content.',
+        'Module Library immutable intake pin already exists with divergent '
+        'content.',
       );
     }
 
@@ -101,7 +131,7 @@ final class WorkshopLibraryGitHubTransport {
       final mainSha = _refSha(mainRef, label: 'Library main');
       await _jsonRequest(
         'POST',
-        _apiRoot.resolve('./git/refs'),
+        _api('git/refs'),
         token: token,
         jsonBody: <String, Object?>{
           'ref': 'refs/heads/$branch',
@@ -113,6 +143,7 @@ final class WorkshopLibraryGitHubTransport {
     await _putFile(
       path: manifestPath,
       bytes: manifestBytes,
+      compareAsJson: true,
       branch: branch,
       token: token,
       message: 'intake: add ${bundle.pin} manifest',
@@ -120,29 +151,39 @@ final class WorkshopLibraryGitHubTransport {
     await _putFile(
       path: payloadRepoPath,
       bytes: payloadBytes,
+      compareAsJson: false,
       branch: branch,
       token: token,
       message: 'intake: add ${bundle.pin} payload',
     );
 
-    // Read back both files before claiming a successful handoff.
-    final verifiedManifest = await _content(manifestPath, ref: branch, token: token);
-    final verifiedPayload = await _content(payloadRepoPath, ref: branch, token: token);
+    // Read back both files before claiming a successful handoff. Git blob SHA
+    // works even when the Contents API omits inline content for larger files.
+    final verifiedManifest = await _content(
+      manifestPath,
+      ref: branch,
+      token: token,
+    );
+    final verifiedPayload = await _content(
+      payloadRepoPath,
+      ref: branch,
+      token: token,
+    );
     if (verifiedManifest == null ||
         verifiedPayload == null ||
-        !_sameContent(verifiedManifest, manifestBytes) ||
-        !_sameContent(verifiedPayload, payloadBytes)) {
+        !_sameJsonBlob(verifiedManifest, manifestBytes) ||
+        !_sameBlob(verifiedPayload, payloadBytes)) {
       throw StateError('Module Library branch content could not be verified.');
     }
 
-    final existingPr = await _findPullRequest(branch, token: token);
+    final existingPr = await _findOpenPullRequest(branch, token: token);
     if (existingPr != null) {
       return _receiptFromPr(branch, existingPr);
     }
 
     final created = await _jsonRequest(
       'POST',
-      _apiRoot.resolve('./pulls'),
+      _api('pulls'),
       token: token,
       jsonBody: <String, Object?>{
         'title': 'intake: ${bundle.pin}',
@@ -160,14 +201,20 @@ final class WorkshopLibraryGitHubTransport {
   Future<void> _putFile({
     required String path,
     required List<int> bytes,
+    required bool compareAsJson,
     required String branch,
     required String token,
     required String message,
   }) async {
     final existing = await _content(path, ref: branch, token: token);
     if (existing != null) {
-      if (_sameContent(existing, bytes)) return;
-      throw StateError('Module Library branch contains divergent immutable content at $path.');
+      final same = compareAsJson
+          ? _sameJsonBlob(existing, bytes)
+          : _sameBlob(existing, bytes);
+      if (same) return;
+      throw StateError(
+        'Module Library branch contains divergent immutable content at $path.',
+      );
     }
     await _jsonRequest(
       'PUT',
@@ -188,7 +235,9 @@ final class WorkshopLibraryGitHubTransport {
   }) =>
       _jsonRequest(
         'GET',
-        _contentsUri(path).replace(queryParameters: <String, String>{'ref': ref}),
+        _contentsUri(path).replace(
+          queryParameters: <String, String>{'ref': ref},
+        ),
         token: token,
         missingOk: true,
       );
@@ -196,22 +245,25 @@ final class WorkshopLibraryGitHubTransport {
   Future<Map<String, dynamic>?> _branchRef(
     String branch, {
     required String token,
-  }) =>
-      _jsonRequest(
-        'GET',
-        _apiRoot.resolve('./git/ref/heads/${Uri.encodeComponent(branch)}'),
-        token: token,
-        missingOk: true,
-      );
+  }) {
+    final encodedBranch =
+        branch.split('/').map(Uri.encodeComponent).join('/');
+    return _jsonRequest(
+      'GET',
+      _api('git/ref/heads/$encodedBranch'),
+      token: token,
+      missingOk: true,
+    );
+  }
 
-  Future<Map<String, dynamic>?> _findPullRequest(
+  Future<Map<String, dynamic>?> _findOpenPullRequest(
     String branch, {
     required String token,
   }) async {
     final owner = repository.split('/').first;
-    final uri = _apiRoot.resolve('./pulls').replace(
+    final uri = _api('pulls').replace(
       queryParameters: <String, String>{
-        'state': 'all',
+        'state': 'open',
         'head': '$owner:$branch',
         'base': baseBranch,
         'per_page': '10',
@@ -220,7 +272,9 @@ final class WorkshopLibraryGitHubTransport {
     final response = await _request('GET', uri, token: token);
     final decoded = _decode(response);
     if (decoded is! List) {
-      throw const FormatException('GitHub pull request lookup returned invalid data.');
+      throw const FormatException(
+        'GitHub pull request lookup returned invalid data.',
+      );
     }
     for (final item in decoded) {
       if (item is Map) return Map<String, dynamic>.from(item);
@@ -243,11 +297,15 @@ final class WorkshopLibraryGitHubTransport {
     );
     if (response.statusCode == 404 && missingOk) return null;
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('GitHub Library transport failed with HTTP ${response.statusCode}.');
+      throw StateError(
+        'GitHub Library transport failed with HTTP ${response.statusCode}.',
+      );
     }
     final decoded = _decode(response);
     if (decoded is! Map) {
-      throw const FormatException('GitHub Library transport expected a JSON object.');
+      throw const FormatException(
+        'GitHub Library transport expected a JSON object.',
+      );
     }
     return Map<String, dynamic>.from(decoded);
   }
@@ -261,40 +319,123 @@ final class WorkshopLibraryGitHubTransport {
     if (uri.scheme != 'https' || uri.host.toLowerCase() != 'api.github.com') {
       throw const StateError('Refusing non-GitHub API transport endpoint.');
     }
-    final request = http.Request(method, uri)
-      ..headers.addAll(<String, String>{
-        'Accept': 'application/vnd.github+json',
-        'Authorization': 'Bearer $token',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'Content-Type': 'application/json',
-        'User-Agent': 'ai-orchestrator-workshop-library/1',
-      });
-    if (body != null) request.body = body;
-    final streamed = await _client.send(request);
-    return http.Response.fromStream(streamed);
+
+    final isSafeRetry = method == 'GET';
+    final attempts = isSafeRetry ? maxGetAttempts : 1;
+    Object? lastError;
+    for (var attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        final request = http.Request(method, uri)
+          ..headers.addAll(<String, String>{
+            'Accept': 'application/vnd.github+json',
+            'Authorization': 'Bearer $token',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json',
+            'User-Agent': 'ai-orchestrator-workshop-library/1',
+          });
+        if (body != null) request.body = body;
+        final streamed = await _client.send(request);
+        final response = await http.Response.fromStream(streamed);
+        final transient = response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500;
+        if (!isSafeRetry || !transient || attempt + 1 >= attempts) {
+          return response;
+        }
+        final retryAfter = int.tryParse(
+          response.headers['retry-after']?.trim() ?? '',
+        );
+        await _sleep(
+          Duration(
+            seconds: retryAfter != null && retryAfter > 0
+                ? retryAfter.clamp(1, 30)
+                : (1 << attempt).clamp(1, 8),
+          ),
+        );
+      } catch (error) {
+        lastError = error;
+        if (!isSafeRetry || attempt + 1 >= attempts) rethrow;
+        await _sleep(Duration(seconds: (1 << attempt).clamp(1, 8)));
+      }
+    }
+    throw StateError('GitHub Library transport failed: $lastError');
   }
+
+  Uri _api(String relativePath) => _apiRoot.resolve(relativePath);
 
   Uri _contentsUri(String path) {
     final encoded = path.split('/').map(Uri.encodeComponent).join('/');
-    return _apiRoot.resolve('./contents/$encoded');
+    return _api('contents/$encoded');
   }
 
-  static bool _sameContent(Map<String, dynamic> metadata, List<int> expected) {
-    final encoded = metadata['content']?.toString().replaceAll('\n', '') ?? '';
-    if (encoded.isEmpty) return false;
+  static bool _sameJsonBlob(
+    Map<String, dynamic> metadata,
+    List<int> expected,
+  ) {
+    // Fast path when both sides are the exact same Git blob.
+    if (_sameBlob(metadata, expected)) return true;
+    final actual = _inlineBytes(metadata);
+    if (actual == null) return false;
     try {
-      final actual = base64Decode(encoded);
-      if (actual.length != expected.length) return false;
-      for (var index = 0; index < actual.length; index += 1) {
-        if (actual[index] != expected[index]) return false;
-      }
-      return true;
+      final actualJson = jsonDecode(utf8.decode(actual));
+      final expectedJson = jsonDecode(utf8.decode(expected));
+      return _canonicalJson(actualJson) == _canonicalJson(expectedJson);
     } catch (_) {
       return false;
     }
   }
 
-  static String _refSha(Map<String, dynamic>? ref, {required String label}) {
+  static bool _sameBlob(Map<String, dynamic> metadata, List<int> expected) {
+    final remoteSha = metadata['sha']?.toString().trim().toLowerCase() ?? '';
+    if (RegExp(r'^[a-f0-9]{40}$').hasMatch(remoteSha)) {
+      return remoteSha == _gitBlobSha1(expected);
+    }
+    final actual = _inlineBytes(metadata);
+    if (actual == null || actual.length != expected.length) return false;
+    for (var index = 0; index < actual.length; index += 1) {
+      if (actual[index] != expected[index]) return false;
+    }
+    return true;
+  }
+
+  static List<int>? _inlineBytes(Map<String, dynamic> metadata) {
+    final encoded = metadata['content']?.toString().replaceAll('\n', '') ?? '';
+    if (encoded.isEmpty) return null;
+    try {
+      return base64Decode(encoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _gitBlobSha1(List<int> bytes) {
+    final prefix = utf8.encode('blob ${bytes.length}\u0000');
+    return sha1.convert(<int>[...prefix, ...bytes]).toString();
+  }
+
+  static String _canonicalJson(Object? value) =>
+      jsonEncode(_canonicalize(value));
+
+  static Object? _canonicalize(Object? value) {
+    if (value is Map) {
+      final keys = value.keys.map((key) => key.toString()).toList()..sort();
+      return <String, Object?>{
+        for (final key in keys) key: _canonicalize(value[key]),
+      };
+    }
+    if (value is List) {
+      return value.map(_canonicalize).toList(growable: false);
+    }
+    if (value == null || value is String || value is num || value is bool) {
+      return value;
+    }
+    throw const FormatException('Library JSON contains a non-JSON value.');
+  }
+
+  static String _refSha(
+    Map<String, dynamic>? ref, {
+    required String label,
+  }) {
     final object = ref?['object'];
     if (object is! Map) throw StateError('$label ref is unavailable.');
     final sha = object['sha']?.toString().trim() ?? '';
@@ -304,17 +445,22 @@ final class WorkshopLibraryGitHubTransport {
     return sha;
   }
 
-  static WorkshopLibraryGitHubSubmissionReceipt _receiptFromPr(
+  WorkshopLibraryGitHubSubmissionReceipt _receiptFromPr(
     String branch,
     Map<String, dynamic> pr,
   ) {
     final number = pr['number'];
     final url = Uri.tryParse(pr['html_url']?.toString() ?? '');
-    if (number is! int || url == null || url.scheme != 'https') {
-      throw const FormatException('GitHub pull request response is incomplete.');
+    if (number is! int ||
+        url == null ||
+        url.scheme != 'https' ||
+        url.host.toLowerCase() != 'github.com') {
+      throw const FormatException(
+        'GitHub pull request response is incomplete or untrusted.',
+      );
     }
     return WorkshopLibraryGitHubSubmissionReceipt(
-      repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
+      repository: repository,
       branch: branch,
       alreadyOnMain: false,
       pullRequestNumber: number,
@@ -325,7 +471,10 @@ final class WorkshopLibraryGitHubTransport {
   void _validateRepository() {
     if (repository != 'pilialvu75-hue/AI-Orchestrator-Module-Library' ||
         baseBranch != 'main') {
-      throw StateError('Workshop Library transport is locked to the private canonical Library main branch.');
+      throw StateError(
+        'Workshop Library transport is locked to the private canonical '
+        'Library main branch.',
+      );
     }
   }
 
@@ -335,22 +484,43 @@ final class WorkshopLibraryGitHubTransport {
       throw const FormatException('Module Library bundle SHA-256 mismatch.');
     }
     if (bundle.manifest['status'] != 'discovered') {
-      throw const FormatException('Module Library transport accepts discovered intake only.');
+      throw const FormatException(
+        'Module Library transport accepts discovered intake only.',
+      );
+    }
+    final pinParts = bundle.pin.split('@');
+    if (pinParts.length != 2 ||
+        pinParts.first.trim().isEmpty ||
+        pinParts.last.trim().isEmpty) {
+      throw const FormatException('Module Library bundle pin is invalid.');
+    }
+    final expectedManifestPath =
+        'intake/${pinParts.first}/${pinParts.last}/manifest.json';
+    if (bundle.manifestPath != expectedManifestPath) {
+      throw const FormatException(
+        'Module Library manifest path does not match immutable pin.',
+      );
     }
   }
 
   static String _branchName(String pin, String bundleSha) {
-    final safePin = pin
+    var safePin = pin
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
         .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
+    if (safePin.length > 80) safePin = safePin.substring(0, 80);
+    if (safePin.isEmpty || bundleSha.length < 12) {
+      throw const FormatException('Cannot derive Module Library intake branch.');
+    }
     return 'library-intake/$safePin-${bundleSha.substring(0, 12)}';
   }
 
   static bool _safeRepoPath(String path) {
     if (path.isEmpty ||
         path.startsWith('/') ||
+        path.startsWith('~') ||
         path.contains('\\') ||
+        path.contains(':') ||
         path.contains('\u0000')) {
       return false;
     }
@@ -365,7 +535,9 @@ final class WorkshopLibraryGitHubTransport {
     try {
       return jsonDecode(response.body);
     } catch (_) {
-      throw const FormatException('GitHub Library transport returned invalid JSON.');
+      throw const FormatException(
+        'GitHub Library transport returned invalid JSON.',
+      );
     }
   }
 }
