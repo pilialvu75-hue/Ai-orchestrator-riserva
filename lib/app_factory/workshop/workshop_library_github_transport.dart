@@ -157,8 +157,6 @@ final class WorkshopLibraryGitHubTransport {
       message: 'intake: add ${bundle.pin} payload',
     );
 
-    // Read back both files before claiming a successful handoff. Git blob SHA
-    // works even when the Contents API omits inline content for larger files.
     final verifiedManifest = await _content(
       manifestPath,
       ref: branch,
@@ -345,17 +343,15 @@ final class WorkshopLibraryGitHubTransport {
         final retryAfter = int.tryParse(
           response.headers['retry-after']?.trim() ?? '',
         );
-        await _sleep(
-          Duration(
-            seconds: retryAfter != null && retryAfter > 0
-                ? retryAfter.clamp(1, 30)
-                : (1 << attempt).clamp(1, 8),
-          ),
-        );
+        final delaySeconds = retryAfter != null && retryAfter > 0
+            ? retryAfter.clamp(1, 30).toInt()
+            : (1 << attempt).clamp(1, 8).toInt();
+        await _sleep(Duration(seconds: delaySeconds));
       } catch (error) {
         lastError = error;
         if (!isSafeRetry || attempt + 1 >= attempts) rethrow;
-        await _sleep(Duration(seconds: (1 << attempt).clamp(1, 8)));
+        final delaySeconds = (1 << attempt).clamp(1, 8).toInt();
+        await _sleep(Duration(seconds: delaySeconds));
       }
     }
     throw StateError('GitHub Library transport failed: $lastError');
@@ -372,7 +368,6 @@ final class WorkshopLibraryGitHubTransport {
     Map<String, dynamic> metadata,
     List<int> expected,
   ) {
-    // Fast path when both sides are the exact same Git blob.
     if (_sameBlob(metadata, expected)) return true;
     final actual = _inlineBytes(metadata);
     if (actual == null) return false;
