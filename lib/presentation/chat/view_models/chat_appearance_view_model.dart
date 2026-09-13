@@ -1,7 +1,12 @@
-import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:flutter/material.dart';
 
 class ChatAppearanceViewModel extends ChangeNotifier {
+  ChatAppearanceViewModel() {
+    DebugLabController.instance.addExternalCloseCallback(closeDebugLab);
+  }
+
   bool _showMetrics = false;
   bool _debugLabOpen = false;
   double _textScale = 1.0;
@@ -64,5 +69,11 @@ class ChatAppearanceViewModel extends ChangeNotifier {
       _debugLabOpen = !_debugLabOpen;
     }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    DebugLabController.instance.removeExternalCloseCallback(closeDebugLab);
+    super.dispose();
   }
 }
