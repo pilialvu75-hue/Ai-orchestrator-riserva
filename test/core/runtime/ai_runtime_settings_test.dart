@@ -57,6 +57,34 @@ void main() {
       expect(service.isCloudProviderAutomatic, isTrue);
     });
 
+    test('AUTO participation is enabled by default and persists per provider',
+        () async {
+      final service = await createService();
+
+      expect(service.cloudProviderParticipatesInAuto('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+
+      await service.setCloudProviderParticipatesInAuto('gemini', false);
+
+      expect(service.cloudProviderParticipatesInAuto('gemini'), isFalse);
+      expect(service.automaticCloudUseAllowed('gemini'), isFalse);
+
+      await service.setCloudProviderParticipatesInAuto('gemini', true);
+
+      expect(service.cloudProviderParticipatesInAuto('gemini'), isTrue);
+      expect(service.automaticCloudUseAllowed('gemini'), isTrue);
+    });
+
+    test('AUTO participation rejects unsupported provider IDs', () async {
+      final service = await createService();
+
+      expect(service.cloudProviderParticipatesInAuto('unsupported'), isFalse);
+      await expectLater(
+        service.setCloudProviderParticipatesInAuto('unsupported', false),
+        throwsArgumentError,
+      );
+    });
+
     test('manual Cloud provider rejects unsupported provider IDs', () async {
       final service = await createService();
 
