@@ -85,6 +85,23 @@ class _AiModePageState extends State<AiModePage> {
     _selectProvider(providers.contains(next) ? next : 'openAi');
   }
 
+  Future<void> _setAutoParticipation(bool enabled) async {
+    if (_saving) return;
+    try {
+      await _settingsService.setCloudProviderParticipatesInAuto(
+        _provider,
+        enabled,
+      );
+      if (!mounted) return;
+      setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AUTO provider setting error: $error')),
+      );
+    }
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
@@ -270,7 +287,23 @@ class _AiModePageState extends State<AiModePage> {
                           if (value != null) _selectProvider(value);
                         },
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Partecipa ad AUTO',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: const Text(
+                    'Se disattivato, questo provider viene escluso dal routing '
+                    'automatico. Rimane sempre selezionabile in MANUALE.',
+                    style: TextStyle(color: Colors.white54, height: 1.3),
+                  ),
+                  value: _settingsService.cloudProviderParticipatesInAuto(
+                    _provider,
+                  ),
+                  onChanged: _saving ? null : _setAutoParticipation,
+                ),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
