@@ -368,7 +368,8 @@ final class WorkshopLibraryGitHubAuthClient {
   }
 
   static int? _optionalPositiveSeconds(Object? value) {
-    final parsed = value is int ? value : int.tryParse(value?.toString() ?? '');
+    final int? parsed =
+        value is int ? value : int.tryParse(value?.toString() ?? '');
     return parsed != null && parsed > 0 ? parsed : null;
   }
 }
