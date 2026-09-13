@@ -12,8 +12,17 @@ class DebugLabController extends ChangeNotifier {
   int _rapidTapCount = 0;
   DateTime? _lastTapAt;
   bool _isVisible = false;
+  final Set<VoidCallback> _externalCloseCallbacks = <VoidCallback>{};
 
   bool get isVisible => _isVisible;
+
+  void addExternalCloseCallback(VoidCallback callback) {
+    _externalCloseCallbacks.add(callback);
+  }
+
+  void removeExternalCloseCallback(VoidCallback callback) {
+    _externalCloseCallbacks.remove(callback);
+  }
 
   void registerHeaderTap() {
     final now = DateTime.now();
@@ -39,9 +48,25 @@ class DebugLabController extends ChangeNotifier {
   void close() {
     _rapidTapCount = 0;
     _lastTapAt = null;
-    if (!_isVisible) return;
+
+    // Debug Lab currently has two legacy visibility sources. Always fan out a
+    // panel-close request so any secondary owner can clear its state too,
+    // even when this controller itself is already not visible.
+    for (final callback in List<VoidCallback>.of(_externalCloseCallbacks)) {
+      callback();
+    }
+
+    if (!_isVisible) {
+      RuntimeEventLog.instance.emit(
+        '[DEBUG_LAB_OVERLAY_CLOSE] source=panel_close controller_visible=false',
+      );
+      return;
+    }
+
     _isVisible = false;
-    RuntimeEventLog.instance.emit('[DEBUG_LAB_OVERLAY_CLOSE] source=panel_close');
+    RuntimeEventLog.instance.emit(
+      '[DEBUG_LAB_OVERLAY_CLOSE] source=panel_close controller_visible=true',
+    );
     notifyListeners();
   }
 }
