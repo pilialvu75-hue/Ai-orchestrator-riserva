@@ -74,6 +74,8 @@ class AiRuntimeSettingsService extends ChangeNotifier {
       CloudProviderCatalog.supportedProviders;
 
   static const String _cloudModelPrefix = 'cloud.provider.model.';
+  static const String _cloudAutoParticipationPrefix =
+      'cloud.provider.auto_enabled.';
   static const String _cloudSpendingModeKey = 'cloud.spending.mode';
   static const String _cloudBudgetLimitKey = 'cloud.spending.budget_limit';
   static const String _manualCloudProviderKey = 'cloud.manual_provider';
@@ -162,6 +164,41 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether [provider] may participate in automatic Cloud routing.
+  ///
+  /// This is deliberately independent from credentials and spending policy.
+  /// Disabling a provider here removes it from AUTO/Hybrid candidate selection
+  /// but does not disable MANUALE: an explicitly pinned direct-Cloud request
+  /// bypasses the automatic policy gate inside [CloudRuntimeProvider].
+  /// Providers default to enabled so existing installations keep their current
+  /// routing behaviour until the user opts out.
+  bool cloudProviderParticipatesInAuto(String provider) {
+    final normalized = provider.trim();
+    if (!supportedProviders.contains(normalized)) return false;
+    return _configRepository
+            .getBool('$_cloudAutoParticipationPrefix$normalized') ??
+        true;
+  }
+
+  Future<void> setCloudProviderParticipatesInAuto(
+    String provider,
+    bool enabled,
+  ) async {
+    final normalized = provider.trim();
+    if (!supportedProviders.contains(normalized)) {
+      throw ArgumentError.value(
+        provider,
+        'provider',
+        'Unsupported Cloud provider.',
+      );
+    }
+    await _configRepository.setBool(
+      '$_cloudAutoParticipationPrefix$normalized',
+      enabled,
+    );
+    notifyListeners();
+  }
+
   CloudSpendingMode get cloudSpendingMode =>
       CloudSpendingMode.fromStoredValue(
         _configRepository.getString(_cloudSpendingModeKey),
@@ -182,8 +219,9 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   /// Task-aware automatic Cloud authorization.
   ///
-  /// Free-tier routes stay available in every spend-safe mode. Paid routes are
-  /// allowed automatically only when the user explicitly selected unrestricted
+  /// Provider participation is checked before spend policy. Free-tier routes
+  /// stay available in every spend-safe mode. Paid routes are allowed
+  /// automatically only when the user explicitly selected unrestricted
   /// spending, or when the default complex-work policy is active and the task
   /// is coding/reasoning. Unknown-cost routes fail closed unless unrestricted.
   /// Prepaid/budget modes deliberately remain closed for paid providers until
@@ -192,6 +230,8 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     String provider,
     CloudTaskClass task,
   ) {
+    if (!cloudProviderParticipatesInAuto(provider)) return false;
+
     final costClass = CloudProviderCatalog.costClassFor(provider);
     if (costClass == CloudProviderCostClass.freeTier) return true;
 
