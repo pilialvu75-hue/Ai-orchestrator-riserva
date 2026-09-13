@@ -79,7 +79,6 @@ void main() {
           id: 'new-project',
           title: 'New project',
           instruction: 'Reuse invoice foundation',
-          projectPath: '.',
         ),
         gateway: LocalGitWorkspaceGateway(rootPath: target.path),
       );
