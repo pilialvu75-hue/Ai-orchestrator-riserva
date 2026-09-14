@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -32,7 +33,9 @@ final class DirectiveAwareInferenceService extends InferenceService {
     required CloudRuntimeProvider cloudRuntimeProvider,
     required RuntimeSessionManager sessionManager,
     Tool? webSearchTool,
-  })  : _localOnlyService = InferenceService(
+    CloudBackgroundExecutionLeaseService? backgroundExecutionLeaseService,
+  })  : _backgroundExecutionLeaseService = backgroundExecutionLeaseService,
+        _localOnlyService = InferenceService(
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: () async => AiRuntimeMode.local,
           runtimeProvider: runtimeProvider,
@@ -63,6 +66,7 @@ final class DirectiveAwareInferenceService extends InferenceService {
 
   final InferenceService _localOnlyService;
   final InferenceService _cloudOnlyService;
+  final CloudBackgroundExecutionLeaseService? _backgroundExecutionLeaseService;
 
   @override
   TokenStream stream(InferenceRequest request) {
@@ -72,7 +76,31 @@ final class DirectiveAwareInferenceService extends InferenceService {
       case InferenceRouteDirective.localOnly:
         return _localOnlyService.stream(request);
       case InferenceRouteDirective.cloudOnly:
-        return _cloudOnlyService.stream(request);
+        return _withCloudBackgroundLease(
+          request,
+          _cloudOnlyService.stream(request),
+        );
+    }
+  }
+
+  TokenStream _withCloudBackgroundLease(
+    InferenceRequest request,
+    TokenStream delegate,
+  ) async* {
+    final service = _backgroundExecutionLeaseService;
+    if (service == null) {
+      yield* delegate;
+      return;
+    }
+
+    final lease = await service.acquire(
+      sessionId: request.sessionId,
+      providerHint: request.cloudProviderId ?? 'auto',
+    );
+    try {
+      yield* delegate;
+    } finally {
+      await lease.release();
     }
   }
 
