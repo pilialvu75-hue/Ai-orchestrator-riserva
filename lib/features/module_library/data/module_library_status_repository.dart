@@ -1,36 +1,37 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_research_diagnostics_source.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_research_status_source.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
 import 'package:http/http.dart' as http;
-
-abstract interface class ModuleResearchStatusSource {
-  Future<Map<String, Object?>?> load();
-}
 
 final class ModuleLibraryStatusRepository {
   ModuleLibraryStatusRepository({
     WorkshopLibraryGitHubCredentialStore? credentialStore,
+    ModuleLibraryGitHubConfigStore? configStore,
+    WorkshopLibraryGitHubAuthClient? authClient,
     http.Client? client,
     ModuleResearchStatusSource? researchSource,
   })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
+        _configStore = configStore ?? ModuleLibraryGitHubConfigStore(),
+        _authClient = authClient ?? WorkshopLibraryGitHubAuthClient(),
         _client = client ?? http.Client(),
-        _researchSource = researchSource;
+        _researchSource =
+            researchSource ?? GitHubDiagnosticsResearchStatusSource();
 
   static const String _repository =
       'pilialvu75-hue/AI-Orchestrator-Module-Library';
 
   final WorkshopLibraryGitHubCredentialStore _credentialStore;
+  final ModuleLibraryGitHubConfigStore _configStore;
+  final WorkshopLibraryGitHubAuthClient _authClient;
   final http.Client _client;
-  final ModuleResearchStatusSource? _researchSource;
+  final ModuleResearchStatusSource _researchSource;
 
   Future<List<ModuleCapabilityStatus>> load() async {
-    final credential = await _credentialStore.load();
-    if (credential == null || credential.isExpired) {
-      throw StateError(
-        'Autorizzazione GitHub per Module Library assente o scaduta.',
-      );
-    }
+    final credential = await _usableCredential();
 
     final needs = await _readJson(
       'catalog/needs.json',
@@ -43,7 +44,7 @@ final class ModuleLibraryStatusRepository {
 
     Map<String, Object?>? research;
     try {
-      research = await _researchSource?.load();
+      research = await _researchSource.load();
     } catch (_) {
       research = null;
     }
@@ -53,6 +54,37 @@ final class ModuleLibraryStatusRepository {
       catalogJson: catalog,
       researcherJson: research,
     );
+  }
+
+  Future<WorkshopGitHubUserCredential> _usableCredential() async {
+    final credential = await _credentialStore.load();
+    if (credential == null) {
+      throw StateError(
+        'Autorizzazione GitHub per Module Library assente o scaduta.',
+      );
+    }
+    if (!credential.isExpired) return credential;
+
+    final refreshToken = credential.refreshToken?.trim();
+    final clientId = await _configStore.loadClientId();
+    if (refreshToken == null || refreshToken.isEmpty || clientId == null) {
+      throw StateError(
+        'Autorizzazione GitHub per Module Library assente o scaduta.',
+      );
+    }
+
+    try {
+      final refreshed = await _authClient.refresh(
+        clientId: clientId,
+        refreshToken: refreshToken,
+      );
+      await _credentialStore.save(refreshed);
+      return refreshed;
+    } catch (_) {
+      throw StateError(
+        'Autorizzazione GitHub per Module Library assente o scaduta.',
+      );
+    }
   }
 
   Future<Map<String, Object?>> _readJson(
