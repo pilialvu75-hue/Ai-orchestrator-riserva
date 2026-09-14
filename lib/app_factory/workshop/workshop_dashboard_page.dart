@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controll
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
+import 'package:ai_orchestrator/features/module_library/presentation/module_library_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 
 /// Interfaccia conversazionale principale del Cantiere.
@@ -660,6 +661,28 @@ class _WorkshopDashboardPageState
                   ).pop();
 
                   _openModelSelection();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(
+                  Icons.extension_outlined,
+                ),
+                title:
+                    const Text(
+                  'Moduli',
+                ),
+                onTap: () {
+                  Navigator.of(
+                    context,
+                  ).pop();
+
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const ModuleLibraryPage(),
+                    ),
+                  );
                 },
               ),
               ListTile(
