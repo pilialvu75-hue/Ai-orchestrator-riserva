@@ -65,11 +65,7 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // Number of model layers to request for GPU offload when Vulkan is available.
-  // 99 exceeds the layer count of most GGUF models in use; llama.cpp clamps
-  // any value above the actual layer count to that count, so passing 99 is
-  // equivalent to "offload all layers". The C++ bridge clamps this to 0 at
-  // compile time when GGML_VULKAN is not compiled in (vedi fix CMakeLists.txt
-  // per abilitare davvero il backend Vulkan) e logga un fallback chiaro.
-  static const int nGpuLayers = 10;
+  // CPU baseline while investigating native aborts during Vulkan prefill.
+  // Keep context, batching and sampling unchanged for a controlled comparison.
+  static const int nGpuLayers = 0;
 }
