@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.da
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
@@ -22,8 +23,9 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pip
 /// 4. explicitly apply an already-approved task;
 /// 5. build the authoritative Android workspace only after the project ends.
 ///
-/// No action is automatic and no Assistant configuration, model selection,
-/// memory or conversation state is consulted.
+/// Certified Library reuse is attempted only after the owner explicitly chooses
+/// to run a prepared task. Reused files are staged into VirtualWorkspace only;
+/// they still pass Reviewer, validation, explicit owner approval and apply.
 final class WorkshopProductionDashboardPage extends StatefulWidget {
   const WorkshopProductionDashboardPage({
     super.key,
@@ -58,9 +60,7 @@ class _WorkshopProductionDashboardPageState
   }
 
   Future<void> _runPreparedTask() async {
-    if (_busy) {
-      return;
-    }
+    if (_busy) return;
 
     setState(() {
       _busy = true;
@@ -69,49 +69,48 @@ class _WorkshopProductionDashboardPageState
 
     try {
       final handle = _coordinator.preparedHandle();
-      final result = await _coordinator.runPrepared(
-        handle: handle,
-      );
-
-      if (!mounted) {
-        return;
+      final libraryReuse = widget.bundle.libraryReuseService;
+      if (libraryReuse != null) {
+        final approvedAt = DateTime.now().toUtc();
+        await libraryReuse.stageForPreparedTask(
+          plan: handle.plan,
+          session: handle.session,
+          approval: WorkshopProjectApprovalEvidence(
+            projectId: handle.plan.id,
+            approvalId:
+                'owner-run:${handle.plan.id}:${approvedAt.microsecondsSinceEpoch}',
+            approvedAt: approvedAt,
+            approvedBy: 'owner:execute-task',
+          ),
+        );
       }
 
+      final result = await _coordinator.runPrepared(handle: handle);
+      if (!mounted) return;
       setState(() {
         _handle = handle;
         _inferenceResult = result;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _error = 'Esecuzione del task non riuscita: $error';
       });
     } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-        });
-      }
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _reviewChanges() async {
     final handle = _currentHandle;
     final result = _currentInferenceResult;
-
-    if (handle == null || result == null || !result.readyForApproval) {
-      return;
-    }
+    if (handle == null || result == null || !result.readyForApproval) return;
 
     final decision = await showDialog<WorkshopApplyDecision>(
       context: context,
       builder: (dialogContext) {
         final files = handle.session.diff.files;
         final validation = result.validation;
-
         return AlertDialog(
           title: const Text('Revisione modifiche Cantiere'),
           content: SizedBox(
@@ -138,9 +137,7 @@ class _WorkshopProductionDashboardPageState
                     ...files.map(
                       (file) => Padding(
                         padding: const EdgeInsets.only(bottom: 6),
-                        child: Text(
-                          '${file.changeType.name}: ${file.path}',
-                        ),
+                        child: Text('${file.changeType.name}: ${file.path}'),
                       ),
                     ),
                   if (result.review.findings.isNotEmpty) ...<Widget>[
@@ -187,30 +184,18 @@ class _WorkshopProductionDashboardPageState
       },
     );
 
-    if (decision == null || !mounted) {
-      return;
-    }
+    if (decision == null || !mounted) return;
 
     try {
-      _coordinator.decide(
-        handle: handle,
-        decision: decision,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
+      _coordinator.decide(handle: handle, decision: decision);
+      if (!mounted) return;
       setState(() {
         _error = decision == WorkshopApplyDecision.reject
             ? 'Modifiche rifiutate dal proprietario.'
             : null;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _error = 'Decisione sulle modifiche non riuscita: $error';
       });
@@ -219,7 +204,6 @@ class _WorkshopProductionDashboardPageState
 
   Future<void> _applyApprovedTask() async {
     final handle = _currentHandle;
-
     if (_busy ||
         handle == null ||
         handle.session.status != WorkspaceSessionStatus.approved ||
@@ -231,51 +215,32 @@ class _WorkshopProductionDashboardPageState
       _busy = true;
       _error = null;
     });
-
     try {
-      await _coordinator.applyApproved(
-        handle: handle,
-      );
+      await _coordinator.applyApproved(handle: handle);
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _error = 'Applicazione delle modifiche non riuscita: $error';
       });
     } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-        });
-      }
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _buildCompletedProject() async {
-    if (_busy || !_projectReadyForBuild) {
-      return;
-    }
-
+    if (_busy || !_projectReadyForBuild) return;
     setState(() {
       _busy = true;
       _error = null;
       _buildResult = null;
     });
-
     try {
       final result = await _coordinator.buildWorkspace(
         target: WorkshopBuildTarget.android,
       );
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _buildResult = result;
-
         if (!result.succeeded) {
           _error =
               'Build finale non riuscita: ${result.message ?? result.status.name}';
@@ -284,19 +249,12 @@ class _WorkshopProductionDashboardPageState
         }
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _error = 'Build finale del progetto non riuscita: $error';
       });
     } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-        });
-      }
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -307,15 +265,12 @@ class _WorkshopProductionDashboardPageState
     final state = widget.bundle.dashboardController.state;
     final requestId = state.requestId?.trim();
     final activeTaskId = state.activeTaskId?.trim();
-
     if (requestId == null ||
         requestId.isEmpty ||
         (activeTaskId != null && activeTaskId.isNotEmpty)) {
       return false;
     }
-
     final plan = widget.bundle.dashboardController.engine.planOf(requestId);
-
     return plan != null &&
         plan.isComplete &&
         plan.tasks.isNotEmpty &&
@@ -325,14 +280,12 @@ class _WorkshopProductionDashboardPageState
   WorkshopProductionTaskHandle? get _currentHandle {
     final handle = _handle;
     final activeTaskId = _activeTaskId;
-
     if (handle == null ||
         activeTaskId == null ||
         activeTaskId.isEmpty ||
         handle.taskId != activeTaskId) {
       return null;
     }
-
     return handle;
   }
 
@@ -364,7 +317,6 @@ class _WorkshopProductionDashboardPageState
     final activeTaskId = _activeTaskId;
     final hasPreparedTask = activeTaskId != null && activeTaskId.isNotEmpty;
     final projectReadyForBuild = _projectReadyForBuild;
-
     if (!hasPreparedTask && !projectReadyForBuild) {
       return const SizedBox.shrink();
     }
@@ -372,7 +324,6 @@ class _WorkshopProductionDashboardPageState
     final handle = _currentHandle;
     final result = _currentInferenceResult;
     final status = handle?.session.status;
-
     final actionState = WorkshopProductionActionState.resolve(
       hasPreparedTask: hasPreparedTask,
       hasBoundHandle: handle != null,
@@ -395,9 +346,7 @@ class _WorkshopProductionDashboardPageState
               if (_error != null) ...<Widget>[
                 Text(
                   _error!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -446,13 +395,7 @@ class _WorkshopProductionDashboardPageState
   }
 }
 
-enum WorkshopProductionUiAction {
-  run,
-  review,
-  apply,
-  build,
-  none,
-}
+enum WorkshopProductionUiAction { run, review, apply, build, none }
 
 /// Pure mapping used by the production shell to keep the explicit owner gates
 /// visible and testable independently from the conversational page.
@@ -485,7 +428,6 @@ final class WorkshopProductionActionState {
         enabled: false,
       );
     }
-
     if (!hasPreparedTask && projectReadyForBuild) {
       return const WorkshopProductionActionState(
         action: WorkshopProductionUiAction.build,
@@ -494,7 +436,6 @@ final class WorkshopProductionActionState {
         enabled: true,
       );
     }
-
     if (!hasPreparedTask) {
       return const WorkshopProductionActionState(
         action: WorkshopProductionUiAction.none,
@@ -503,7 +444,6 @@ final class WorkshopProductionActionState {
         enabled: false,
       );
     }
-
     if (!hasBoundHandle) {
       return const WorkshopProductionActionState(
         action: WorkshopProductionUiAction.run,
@@ -512,7 +452,6 @@ final class WorkshopProductionActionState {
         enabled: true,
       );
     }
-
     if (sessionStatus == WorkspaceSessionStatus.approved) {
       return const WorkshopProductionActionState(
         action: WorkshopProductionUiAction.apply,
@@ -521,7 +460,6 @@ final class WorkshopProductionActionState {
         enabled: true,
       );
     }
-
     if (sessionStatus == WorkspaceSessionStatus.completed) {
       return const WorkshopProductionActionState(
         action: WorkshopProductionUiAction.none,
@@ -530,7 +468,6 @@ final class WorkshopProductionActionState {
         enabled: false,
       );
     }
-
     if (sessionStatus == WorkspaceSessionStatus.blocked ||
         sessionStatus == WorkspaceSessionStatus.cancelled) {
       return const WorkshopProductionActionState(
@@ -540,7 +477,6 @@ final class WorkshopProductionActionState {
         enabled: false,
       );
     }
-
     if (inferenceReadyForApproval &&
         sessionStatus == WorkspaceSessionStatus.validation) {
       return const WorkshopProductionActionState(
@@ -550,7 +486,6 @@ final class WorkshopProductionActionState {
         enabled: true,
       );
     }
-
     return const WorkshopProductionActionState(
       action: WorkshopProductionUiAction.none,
       label: 'Task non pronto per approvazione',
