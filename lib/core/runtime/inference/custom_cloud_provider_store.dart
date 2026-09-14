@@ -99,7 +99,7 @@ final class CustomCloudProviderStore extends ChangeNotifier {
       id: 'nvidiaNim',
       displayName: 'NVIDIA NIM',
       endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
-      defaultModel: 'meta/llama-3.1-8b-instruct',
+      defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
       protocol: CustomCloudProviderProtocol.openAiCompatible,
       billing: CustomCloudProviderBilling.free,
     ),
