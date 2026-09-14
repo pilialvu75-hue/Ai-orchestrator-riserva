@@ -25,7 +25,12 @@ object CloudBackgroundExecutionBridge {
                             }
                             val added = activeLeaseIds.add(leaseId)
                             if (added) {
-                                startOrRefreshService(app)
+                                try {
+                                    startService(app)
+                                } catch (error: Exception) {
+                                    activeLeaseIds.remove(leaseId)
+                                    throw error
+                                }
                             }
                             result.success(
                                 mapOf(
@@ -41,9 +46,12 @@ object CloudBackgroundExecutionBridge {
                             }
                             activeLeaseIds.remove(leaseId)
                             if (activeLeaseIds.isEmpty()) {
-                                stopService(app)
-                            } else {
-                                startOrRefreshService(app)
+                                // stopService() is legal from the background and does not
+                                // attempt to start a new component after the user has left
+                                // the foreground.
+                                app.stopService(
+                                    Intent(app, CloudBackgroundExecutionService::class.java),
+                                )
                             }
                             result.success(
                                 mapOf("activeLeases" to activeLeaseIds.size),
@@ -66,7 +74,7 @@ object CloudBackgroundExecutionBridge {
             }
     }
 
-    private fun startOrRefreshService(context: Context) {
+    private fun startService(context: Context) {
         val intent = Intent(context, CloudBackgroundExecutionService::class.java).apply {
             action = CloudBackgroundExecutionService.ACTION_START
             putExtra(
@@ -79,12 +87,5 @@ object CloudBackgroundExecutionBridge {
         } else {
             context.startService(intent)
         }
-    }
-
-    private fun stopService(context: Context) {
-        val intent = Intent(context, CloudBackgroundExecutionService::class.java).apply {
-            action = CloudBackgroundExecutionService.ACTION_STOP
-        }
-        context.startService(intent)
     }
 }
