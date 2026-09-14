@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -15,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
+import 'package:ai_orchestrator/features/chat/data/repositories/background_cloud_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -85,22 +87,35 @@ abstract final class CloudRoutingBootstrap {
     );
 
     sl.registerLazySingleton<ChatRepository>(
-      () => PromptResolvingChatRepository(
-        systemPromptService: assistantSystemPromptService,
-        delegate: ChatRepositoryImpl(
-          localDataSource: sl<ChatLocalDataSource>(),
-          conversationMemoryService: sl<ConversationMemoryService>(),
-          inferenceService: sl<InferenceService>(),
-          runtimeSettingsService: sl<AiRuntimeSettingsService>(),
-          // Important: do not resolve Orchestrator here. Explicit Cloud chat
-          // must remain constructible and usable even if Hannibal is unavailable.
-          orchestratorProvider: () => sl<Orchestrator>(),
-        ),
-      ),
+      () {
+        final routedRepository = PromptResolvingChatRepository(
+          systemPromptService: assistantSystemPromptService,
+          delegate: ChatRepositoryImpl(
+            localDataSource: sl<ChatLocalDataSource>(),
+            conversationMemoryService: sl<ConversationMemoryService>(),
+            inferenceService: sl<InferenceService>(),
+            runtimeSettingsService: sl<AiRuntimeSettingsService>(),
+            // Important: do not resolve Orchestrator here. Explicit Cloud chat
+            // must remain constructible and usable even if Hannibal is unavailable.
+            orchestratorProvider: () => sl<Orchestrator>(),
+          ),
+        );
+
+        return BackgroundCloudChatRepository(
+          delegate: routedRepository,
+          backgroundExecution:
+              const PlatformCloudBackgroundExecutionLease(),
+          // First background ring is deliberately explicit-Cloud only. Hybrid
+          // can execute Local work and therefore remains outside this lease
+          // until routing exposes the actual selected execution boundary.
+          cloudModeActive: () =>
+              sl<AiRuntimeSettingsService>().runtimeMode == AiRuntimeMode.cloud,
+        );
+      },
     );
 
     debugPrint(
-      '[CLOUD_ROUTING] direct Cloud safety path and Hybrid Hannibal routing wired',
+      '[CLOUD_ROUTING] direct Cloud safety path, background lease and Hybrid Hannibal routing wired',
     );
   }
 
