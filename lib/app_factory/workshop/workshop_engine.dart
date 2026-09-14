@@ -578,6 +578,18 @@ final class WorkshopEngine {
     }
   }
 
+  /// Reconciles engine stage with a completed durable recovery plan.
+  /// Does not apply changes or approve unfinished tasks.
+  void restoreCompletedProjectStage(String requestId) {
+    final plan = _requirePlan(requestId);
+    if (plan.status != WorkshopProjectStatus.completed ||
+        !plan.isComplete ||
+        !plan.tasks.every((task) => task.completed)) {
+      throw StateError('Recovered project is not complete.');
+    }
+    _setStage(_requireRequest(requestId), WorkshopStage.completed);
+  }
+
   /// Restituisce il riepilogo del progetto corrente.
   WorkshopProjectSummary? projectSummary(
     String requestId,
