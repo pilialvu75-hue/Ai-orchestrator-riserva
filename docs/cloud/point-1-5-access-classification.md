@@ -18,6 +18,6 @@ Current Point 1.5 free-pool classifications:
 - Groq — recurring free tier.
 - NVIDIA NIM — development/prototype free access.
 - Mistral — account-dependent free access.
-- OpenRouter Free Pool — account-dependent free access.
+- OpenRouter Free Pool — recurring free tier.
 
 Paid, promotional-credit and unknown routes must never become automatically spend-safe merely because credentials exist.
