@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -63,6 +64,8 @@ abstract final class CloudRoutingBootstrap {
         runtimeProvider: sl<LocalRuntimeProvider>(),
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
         sessionManager: sl<RuntimeSessionManager>(),
+        backgroundExecutionLeaseService:
+            CloudBackgroundExecutionLeaseService(),
       ),
     );
 
@@ -100,7 +103,8 @@ abstract final class CloudRoutingBootstrap {
     );
 
     debugPrint(
-      '[CLOUD_ROUTING] direct Cloud safety path and Hybrid Hannibal routing wired',
+      '[CLOUD_ROUTING] direct Cloud safety path, Hybrid Hannibal routing, '
+      'and Cloud background execution lease wired',
     );
   }
 
