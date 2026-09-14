@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_read_aloud_button.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
@@ -1210,10 +1211,17 @@ class _WorkshopChatBubble
             ),
           ),
         ),
-        child: Text(
-          turn.content,
-          style:
-              theme.textTheme.bodyLarge,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(turn.content, style: theme.textTheme.bodyLarge),
+            if (turn.role == ChatRole.assistant && turn.content.trim().isNotEmpty)
+              Align(
+                alignment: Alignment.centerRight,
+                child: WorkshopReadAloudButton(text: turn.content),
+              ),
+          ],
         ),
       ),
     );
