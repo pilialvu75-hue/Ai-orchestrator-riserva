@@ -39,6 +39,7 @@ void main() {
           onGetMessages: (_) async => <ChatMessage>[answer],
         );
         final engine = OrchestratorStateEngine(chatRepository: repository);
+        final subscription = engine.stream.listen((_) {});
         engine.add(const SendMessageEvent(
           sessionId: 'session-1',
           userPrompt: 'Capitale della Francia?',
@@ -61,12 +62,13 @@ void main() {
         final loaded = engine.state as ChatLoaded;
         expect(loaded.messages.single.content, 'Parigi');
         expect(loaded.runtimeMessage, isNull);
-        // Bloc.close schedules asynchronous cancellation: drain the fake clock
-        // before awaiting it, otherwise this widget test cannot finish.
-        final closing = engine.close();
-        await tester.pump();
-        await closing;
+        // Close subscriptions outside the widget test's fake async zone.
+        await tester.runAsync(() async {
+          await subscription.cancel();
+          await engine.close().timeout(const Duration(seconds: 5));
+        });
       },
+      timeout: const Timeout(Duration(seconds: 30)),
     );
 
     testWidgets(
@@ -91,6 +93,7 @@ void main() {
           onGetMessages: (_) async => <ChatMessage>[],
         );
         final engine = OrchestratorStateEngine(chatRepository: repository);
+        final subscription = engine.stream.listen((_) {});
         const event = SendMessageEvent(
           sessionId: 'session-1',
           userPrompt: 'Ciao',
@@ -116,10 +119,13 @@ void main() {
         ));
         await tester.pump();
         expect(engine.state, isA<ChatLoaded>());
-        final closing = engine.close();
-        await tester.pump();
-        await closing;
+        // Close subscriptions outside the widget test's fake async zone.
+        await tester.runAsync(() async {
+          await subscription.cancel();
+          await engine.close().timeout(const Duration(seconds: 5));
+        });
       },
+      timeout: const Timeout(Duration(seconds: 30)),
     );
 
     test(
