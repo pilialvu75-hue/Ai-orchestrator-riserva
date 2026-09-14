@@ -686,6 +686,10 @@ void run_generation(
              " stage=prefill batch_n_tokens=%d n_batch=%d n_ctx=%d offset=%d",
              session->id, owner_epoch, count, prefill_n_batch, n_ctx, offset);
         prefill_status = llama_decode(ctx, prefill_batch.batch);
+        if (session->cancel_requested.load(std::memory_order_acquire)) {
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_during_prefill");
+            return;
+        }
         LOGI("[FORENSIC_AFTER_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
              " stage=prefill status=%d batch_n_tokens=%d offset=%d",
              session->id, owner_epoch, prefill_status, count, offset);
@@ -930,6 +934,10 @@ void run_generation(
         step_batch.batch.n_tokens = 1;
 
         const int decode_status = llama_decode(ctx, step_batch.batch);
+        if (session->cancel_requested.load(std::memory_order_acquire)) {
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_during_decode");
+            return;
+        }
         if (decode_status != 0) {
             session->set_error("Token decode step failed");
             set_state_if_epoch(session, kStateFailed, owner_epoch, "decode_step_failed");
@@ -1082,13 +1090,22 @@ int64_t llb_create_session(
     cparams.n_threads = effective_n_threads;
     cparams.n_threads_batch = effective_n_threads;
     cparams.n_batch = kPrefillBatchSize;
-    cparams.n_ubatch = kPrefillBatchSize;
+    // Bound CPU compute workspace independently of the logical decode batch.
+    // Keep context capacity and the prompt/token budget unchanged.
+    constexpr uint32_t kCpuMicroBatchSize = 128;
+    cparams.n_ubatch = gpu_enabled ? kPrefillBatchSize : kCpuMicroBatchSize;
+    // RuntimeSession owns this atomic for the entire context lifetime. Release
+    // joins the generation worker before freeing the context and its callback.
+    cparams.abort_callback = [](void* data) -> bool {
+        return static_cast<std::atomic<bool>*>(data)->load(std::memory_order_acquire);
+    };
+    cparams.abort_callback_data = &session->cancel_requested;
     cparams.embeddings = false;
     cparams.offload_kqv = gpu_enabled;
     cparams.op_offload = gpu_enabled;
-    LOGI("[LOCAL_EXECUTION_CONFIG] backend=%s gpu_layers=%d n_ctx=%u n_batch=%u",
+    LOGI("[LOCAL_EXECUTION_CONFIG] backend=%s gpu_layers=%d n_ctx=%u n_batch=%u n_ubatch=%u",
          gpu_enabled ? "VULKAN" : "CPU", mparams.n_gpu_layers,
-         cparams.n_ctx, cparams.n_batch);
+         cparams.n_ctx, cparams.n_batch, cparams.n_ubatch);
     LOGI("[FORENSIC_CTX_PARAMS] session=%" PRId64
          " requested_n_ctx=%d effective_n_ctx=%u requested_n_threads=%d effective_n_threads=%d"
          " n_batch=%u n_ubatch=%u",
