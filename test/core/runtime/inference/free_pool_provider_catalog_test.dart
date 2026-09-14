@@ -36,6 +36,26 @@ void main() {
       expect(store.isSystemProfile('openRouter'), isTrue);
     });
 
+    test('system profile models stay aligned with the canonical Cloud catalog', () async {
+      SharedPreferences.setMockInitialValues(const <String, Object>{});
+      final preferences = await SharedPreferences.getInstance();
+      final store = CustomCloudProviderStore.instance;
+      await store.initialize(preferences: preferences);
+
+      for (final provider in <String>[
+        'groq',
+        'nvidiaNim',
+        'mistral',
+        'openRouter',
+      ]) {
+        expect(
+          store.profileFor(provider)?.defaultModel,
+          CloudProviderCatalog.defaultModelFor(provider),
+          reason: '$provider transport profile must use the canonical catalog model',
+        );
+      }
+    });
+
     test('distinguishes access classes from cost and requires AUTO participation', () async {
       final settings = await createSettings();
 
