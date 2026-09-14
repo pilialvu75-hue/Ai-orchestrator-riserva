@@ -80,5 +80,10 @@ object BackgroundDownloads {
                     result.error("BACKGROUND_DOWNLOAD", error.message, null)
                 }
             }
+
+        // Reuse this already-root-registered native bootstrap point for the
+        // separate Cloud foreground lease channel. The two responsibilities
+        // remain isolated in their own objects/channels.
+        CloudBackgroundExecution.register(app, engine)
     }
 }
