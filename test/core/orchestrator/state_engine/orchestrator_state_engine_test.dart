@@ -13,7 +13,7 @@ void main() {
     testWidgets(
       'keeps an outstanding send owned beyond the old UI deadline and displays its late reply',
       (tester) async {
-        final completion = Completer<ChatMessage>();
+        late Completer<ChatMessage> completion;
         var calls = 0;
         final answer = ChatMessage(
           id: 'late-answer',
@@ -32,6 +32,8 @@ void main() {
             void Function(String notice)? onRuntimeNotice,
           }) {
             calls++;
+            // Create the future inside the same error zone as sendMessage.
+            completion = Completer<ChatMessage>();
             return completion.future;
           },
           onGetMessages: (_) async => <ChatMessage>[answer],
@@ -59,14 +61,18 @@ void main() {
         final loaded = engine.state as ChatLoaded;
         expect(loaded.messages.single.content, 'Parigi');
         expect(loaded.runtimeMessage, isNull);
-        await engine.close();
+        // Bloc.close schedules asynchronous cancellation: drain the fake clock
+        // before awaiting it, otherwise this widget test cannot finish.
+        final closing = engine.close();
+        await tester.pump();
+        await closing;
       },
     );
 
     testWidgets(
       'reports a repository timeout and allows a subsequent request',
       (tester) async {
-        final completion = Completer<ChatMessage>();
+        late Completer<ChatMessage> completion;
         var calls = 0;
         final repository = _FakeChatRepository(
           onSendMessage: ({
@@ -78,6 +84,8 @@ void main() {
             void Function(String notice)? onRuntimeNotice,
           }) {
             calls++;
+            // Create the future inside the same error zone as sendMessage.
+            completion = Completer<ChatMessage>();
             return completion.future;
           },
           onGetMessages: (_) async => <ChatMessage>[],
@@ -99,7 +107,18 @@ void main() {
         engine.add(event);
         await tester.pump();
         expect(calls, 2);
-        await engine.close();
+        completion.complete(ChatMessage(
+          id: 'second-answer',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Ciao',
+          timestamp: 4,
+        ));
+        await tester.pump();
+        expect(engine.state, isA<ChatLoaded>());
+        final closing = engine.close();
+        await tester.pump();
+        await closing;
       },
     );
 
