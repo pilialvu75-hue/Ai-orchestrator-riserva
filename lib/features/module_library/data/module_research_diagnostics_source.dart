@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_research_status_source.dart';
 import 'package:http/http.dart' as http;
 
 /// Public, read-only bridge from the shared Diagnostics repository into the
