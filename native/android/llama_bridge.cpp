@@ -546,7 +546,12 @@ void run_generation(
         set_state_if_epoch(session, kStateFailed, owner_epoch, "ctx_size_invalid");
         return;
     }
-    const int prefill_n_batch = n_ctx;
+    const int prefill_n_batch = static_cast<int>(llama_n_batch(ctx));
+    if (prefill_n_batch <= 0) {
+        session->set_error("Invalid prefill batch size");
+        set_state_if_epoch(session, kStateFailed, owner_epoch, "batch_size_invalid");
+        return;
+    }
 
     auto tokenize_prompt = [&](const std::string& text, std::vector<llama_token>* out_tokens) {
         std::vector<llama_token> local_tokens(static_cast<size_t>(n_ctx));
@@ -650,42 +655,46 @@ void run_generation(
          owner_epoch,
          n_tokens);
 
-    BatchGuard prefill_batch(static_cast<int32_t>(tokens.size()), 0, 1);
+    // n_ctx is total sequence capacity; n_batch is the per-decode limit.
+    // Submitting the complete prompt above n_batch triggers GGML_ASSERT.
+    BatchGuard prefill_batch(std::min(n_tokens, prefill_n_batch), 0, 1);
     if (!prefill_batch.initialized) {
         session->set_error("Failed to allocate prefill batch");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_batch_alloc_failed");
         return;
     }
 
-    for (int32_t i = 0; i < static_cast<int32_t>(tokens.size()); ++i) {
-        prefill_batch.batch.token[i] = tokens[static_cast<size_t>(i)];
-        prefill_batch.batch.pos[i] = i;
-        prefill_batch.batch.n_seq_id[i] = 1;
-        prefill_batch.batch.seq_id[i][0] = 0;
-        prefill_batch.batch.logits[i] =
-            (i == static_cast<int32_t>(tokens.size()) - 1) ? 1 : 0;
-    }
-    prefill_batch.batch.n_tokens = static_cast<int32_t>(tokens.size());
-
     const auto prefill_started_at = std::chrono::steady_clock::now();
-    LOGI("[FORENSIC_BEFORE_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
-         " stage=prefill batch_n_tokens=%d n_batch=%d n_ctx=%d",
-         session->id,
-         owner_epoch,
-         prefill_batch.batch.n_tokens,
-         prefill_n_batch,
-         n_ctx);
-    const int prefill_status = llama_decode(ctx, prefill_batch.batch);
-    LOGI("[FORENSIC_AFTER_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
-         " stage=prefill status=%d batch_n_tokens=%d",
-         session->id,
-         owner_epoch,
-         prefill_status,
-         prefill_batch.batch.n_tokens);
-    if (prefill_status != 0) {
-        session->set_error("Prompt prefill decode failed");
-        set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_decode_failed");
-        return;
+    int prefill_status = 0;
+    for (int32_t offset = 0; offset < n_tokens;) {
+        if (session->cancel_requested.load(std::memory_order_acquire) ||
+            session->epoch.load(std::memory_order_acquire) != owner_epoch) {
+            set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_prefill");
+            return;
+        }
+        const int32_t count = std::min(prefill_n_batch, n_tokens - offset);
+        for (int32_t i = 0; i < count; ++i) {
+            const int32_t position = offset + i;
+            prefill_batch.batch.token[i] = tokens[static_cast<size_t>(position)];
+            prefill_batch.batch.pos[i] = position;
+            prefill_batch.batch.n_seq_id[i] = 1;
+            prefill_batch.batch.seq_id[i][0] = 0;
+            prefill_batch.batch.logits[i] = (position == n_tokens - 1) ? 1 : 0;
+        }
+        prefill_batch.batch.n_tokens = count;
+        LOGI("[FORENSIC_BEFORE_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
+             " stage=prefill batch_n_tokens=%d n_batch=%d n_ctx=%d offset=%d",
+             session->id, owner_epoch, count, prefill_n_batch, n_ctx, offset);
+        prefill_status = llama_decode(ctx, prefill_batch.batch);
+        LOGI("[FORENSIC_AFTER_LLAMA_DECODE] session=%" PRId64 " epoch=%" PRIu64
+             " stage=prefill status=%d batch_n_tokens=%d offset=%d",
+             session->id, owner_epoch, prefill_status, count, offset);
+        if (prefill_status != 0) {
+            session->set_error("Prompt prefill decode failed");
+            set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_decode_failed");
+            return;
+        }
+        offset += count;
     }
 
     const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
