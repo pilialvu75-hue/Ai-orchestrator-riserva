@@ -258,5 +258,10 @@ final class WorkshopPreflightInferenceResult {
 
   bool get reusedLocalKnowledge => reuseDecision?.shouldReuse == true;
 
-  WorkshopReusableAsset? get reusedAsset => reuseDecision?.asset;
+  /// A reusable source snapshot may be staged only after the complete
+  /// Orchestrator/Architect preflight has succeeded. Keeping the selected
+  /// candidate hidden while the preflight is incomplete prevents an Architect
+  /// stall/failure from mutating the task VirtualWorkspace before Engineer.
+  WorkshopReusableAsset? get reusedAsset =>
+      readyForImplementation ? reuseDecision?.asset : null;
 }
