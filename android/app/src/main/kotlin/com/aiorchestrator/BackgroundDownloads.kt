@@ -12,6 +12,13 @@ import java.security.MessageDigest
 object BackgroundDownloads {
     fun register(context: Context, engine: FlutterEngine) {
         val app = context.applicationContext
+
+        // BackgroundDownloads is already the app-owned Android background
+        // registration entrypoint. Keep Cloud process-liveness registration
+        // here too so MainActivity stays untouched while Local/Voice work is
+        // being changed independently on other branches.
+        CloudBackgroundExecutionBridge.register(app, engine)
+
         val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val prefs = app.getSharedPreferences("background_downloads_v1", Context.MODE_PRIVATE)
         val directory = app.getExternalFilesDir("background_downloads")
