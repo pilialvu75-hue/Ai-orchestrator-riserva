@@ -15,7 +15,6 @@ import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
-import 'package:ai_orchestrator/features/module_library/presentation/module_library_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
@@ -79,12 +78,6 @@ class _AppShellState extends State<AppShell> {
           child: const SettingsPage(),
         ),
       ),
-    );
-  }
-
-  void _openModules(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ModuleLibraryPage()),
     );
   }
 
@@ -248,14 +241,6 @@ class _AppShellState extends State<AppShell> {
               label: Text(
                 _openingWorkshop ? 'Apertura Cantiere...' : 'Apri Cantiere',
               ),
-            ),
-            const SizedBox(height: 24),
-            Text('Moduli', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => _openModules(context),
-              icon: const Icon(Icons.extension_outlined),
-              label: const Text('Apri Moduli'),
             ),
             const SizedBox(height: 24),
             Text(
