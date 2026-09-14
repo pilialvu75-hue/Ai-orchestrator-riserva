@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -55,6 +57,14 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Keeps an already user-started explicit Cloud response alive while
+             the Activity is backgrounded. No prompts or credentials enter the
+             service; inference remains owned by the Flutter Cloud pipeline. -->
+        <service
+            android:name=".CloudBackgroundExecutionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Flutter Deferred Components meta-data (required by Flutter tooling) -->
         <meta-data
