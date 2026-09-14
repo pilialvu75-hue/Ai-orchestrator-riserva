@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
@@ -76,6 +77,63 @@ void main() {
     expect(gateway.writeCalls, 1);
     expect(plan.taskById('task:implementation')!.completed, isTrue);
     expect(plan.status, WorkshopProjectStatus.completed);
+    expect(gateway.commitCalls, 0);
+    expect(gateway.pushCalls, 0);
+    expect(gateway.pullRequestCalls, 0);
+  });
+
+  test('incomplete Architect preflight stops before Engineer', () async {
+    final gateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: gateway);
+    final plan = _plan();
+    final session = await executor.prepareTask(plan, 'task:implementation');
+    final callOrder = <AppAiRole>[];
+    final inferenceRunner =
+        WorkshopMultiRolePipelineFactory.createPreparedTaskRunner(
+      executor: executor,
+      gateways: _gateways(callOrder),
+    );
+    final lifecycle = WorkshopPreparedTaskLifecycle(
+      inferenceRunner: inferenceRunner,
+      approvalController: WorkshopTaskApprovalController(executor: executor),
+    );
+    const runtimeNotice =
+        'AI_RUNTIME_ERROR|stage=stalled|message=Local model stalled during inference.';
+    final preflight = WorkshopPreflightInferenceResult(
+      analysis: _success('Orchestrator analysis completed.'),
+      architecture: const WorkshopInferenceResult(
+        text: '',
+        runtimeNotice: runtimeNotice,
+        terminalState: InferenceTerminalState.timeout,
+      ),
+    );
+
+    expect(
+      () => lifecycle.runPrepared(
+        taskId: 'task:implementation',
+        preflight: preflight,
+      ),
+      throwsA(
+        isA<WorkshopPreflightIncompleteException>()
+            .having((error) => error.failedStage, 'failedStage', 'Architetto')
+            .having((error) => error.runtimeNotice, 'runtimeNotice', runtimeNotice)
+            .having(
+              (error) => error.toString(),
+              'userSafeMessage',
+              allOf(
+                contains('Preflight del Cantiere incompleto'),
+                isNot(contains('Bad state')),
+              ),
+            ),
+      ),
+    );
+
+    expect(callOrder, isEmpty);
+    expect(session.workspace.read('lib/app.dart'), 'old');
+    expect(gateway.files['lib/app.dart'], 'old');
+    expect(gateway.writeCalls, 0);
     expect(gateway.commitCalls, 0);
     expect(gateway.pushCalls, 0);
     expect(gateway.pullRequestCalls, 0);
