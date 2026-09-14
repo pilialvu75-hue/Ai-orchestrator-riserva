@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
@@ -38,43 +39,29 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-
     _updateManager = di.sl<UpdateManager>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
-
     _updateManager.state.addListener(_onUpdateStateChanged);
-
     unawaited(
       _updateManager.startBackgroundChecks(
         interval: AppConstants.updateCheckInterval,
       ),
     );
-
     unawaited(_runtimeDiagnostics.validateOnStartup());
   }
 
   void _onUpdateStateChanged() {
     final currentState = _updateManager.state.value;
     final latest = currentState.latestManifest;
-
-    if (!mounted || latest == null) {
-      return;
-    }
-
+    if (!mounted || latest == null) return;
     final canOfferUpdate =
         currentState.status == UpdateStatus.updateAvailable ||
         currentState.status == UpdateStatus.readyToInstall;
-
     if (canOfferUpdate && _shownUpdateVersion != latest.version) {
       _shownUpdateVersion = latest.version;
-
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) {
-          if (mounted) {
-            _showUpdateDialog(latest);
-          }
-        },
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showUpdateDialog(latest);
+      });
     }
   }
 
@@ -97,42 +84,31 @@ class _AppShellState extends State<AppShell> {
 
   void _openModules(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const ModuleLibraryPage(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const ModuleLibraryPage()),
     );
   }
 
   Future<void> _openWorkshop(BuildContext context) async {
-    if (_openingWorkshop) {
-      return;
-    }
-
-    setState(() {
-      _openingWorkshop = true;
-    });
-
+    if (_openingWorkshop) return;
+    setState(() => _openingWorkshop = true);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-
     WorkshopProductionLifecycleBundle? workshopBundle;
 
     try {
       final applicationDirectory = await getApplicationDocumentsDirectory();
-
       final workspaceRootPath = p.join(
         applicationDirectory.path,
         'ai_orchestrator_workshop',
       );
-
       final workspaceDirectory = Directory(workspaceRootPath);
-
       await workspaceDirectory.create(recursive: true);
-
       final workshopAssignments = await WorkshopFactory.loadPersistedAssignments();
 
-      workshopBundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workshopBundle = await WorkshopProductionLifecycleBundleFactory
+          .createForWorkspaceWithPersistedReuse(
         workspaceRootPath: workspaceDirectory.path,
+        preferences: di.sl<PreferencesService>(),
         assignments: workshopAssignments,
       );
 
@@ -162,22 +138,14 @@ class _AppShellState extends State<AppShell> {
         workshopBundle?.dashboardController.dispose();
         return;
       }
-
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          SnackBar(
-            content: Text('Impossibile aprire il Cantiere: $error'),
-          ),
+          SnackBar(content: Text('Impossibile aprire il Cantiere: $error')),
         );
     } finally {
       workshopBundle?.dashboardController.dispose();
-
-      if (mounted) {
-        setState(() {
-          _openingWorkshop = false;
-        });
-      }
+      if (mounted) setState(() => _openingWorkshop = false);
     }
   }
 
@@ -185,7 +153,6 @@ class _AppShellState extends State<AppShell> {
     final state = _updateManager.state.value;
     final readyToInstall = state.status == UpdateStatus.readyToInstall;
     final ok = readyToInstall ? true : await _updateManager.downloadLatestApk();
-
     if (!ok || !mounted) {
       if (mounted) {
         final message = _updateManager.state.value.errorMessage ??
@@ -196,10 +163,8 @@ class _AppShellState extends State<AppShell> {
       }
       return;
     }
-
     final installerStarted = await _updateManager.prepareInstallIntent();
     unawaited(_updateManager.refreshDiagnostics());
-
     if (!installerStarted && mounted) {
       final message = _updateManager.state.value.errorMessage ??
           context.l10n.t('force_update_failed');
@@ -210,84 +175,66 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _showUpdateDialog(UpdateManifest manifest) async {
-    if (!mounted) {
-      return;
-    }
-
+    if (!mounted) return;
     final l10n = context.l10n;
     final currentVersion = _updateManager.currentVersion;
-
     final preview = manifest.changelog.trim().isEmpty
         ? 'No changelog available.'
         : manifest.changelog.trim().split('\n').take(4).join('\n');
 
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('${l10n.t('update_available')}: ${manifest.version}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${l10n.t('current_version')}: $currentVersion'),
-                const SizedBox(height: 12),
-                Text(preview),
-              ],
-            ),
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${l10n.t('update_available')}: ${manifest.version}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${l10n.t('current_version')}: $currentVersion'),
+              const SizedBox(height: 12),
+              Text(preview),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: Text(l10n.t('later')),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(_startUpdateFromDialog());
-              },
-              child: Text(l10n.t('update')),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(l10n.t('later')),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              unawaited(_startUpdateFromDialog());
+            },
+            child: Text(l10n.t('update')),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('AI Orchestrator'),
-      ),
+      appBar: AppBar(title: const Text('AI Orchestrator')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              'Assistente',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text('Assistente', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const ChatPage(),
-                  ),
+                  MaterialPageRoute<void>(builder: (_) => const ChatPage()),
                 );
               },
               icon: const Icon(Icons.chat_bubble_outline),
               label: const Text('Apri Assistente'),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Cantiere',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text('Cantiere', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _openingWorkshop ? null : () => _openWorkshop(context),
@@ -303,10 +250,7 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Moduli',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text('Moduli', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () => _openModules(context),
