@@ -8,6 +8,27 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_cont
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
+/// User-safe failure raised when a supplied Orchestrator/Architect preflight
+/// did not complete and therefore must not be forwarded to the Engineer.
+///
+/// The technical runtime notice remains available for diagnostics, while
+/// [toString] deliberately exposes only a bounded Cantiere message so the UI
+/// does not surface internal `Bad state` implementation details.
+final class WorkshopPreflightIncompleteException implements Exception {
+  const WorkshopPreflightIncompleteException({
+    required this.failedStage,
+    this.runtimeNotice,
+  });
+
+  final String failedStage;
+  final String? runtimeNotice;
+
+  @override
+  String toString() =>
+      'Preflight del Cantiere incompleto: fase $failedStage non terminata. '
+      'Riprova.';
+}
+
 /// Coordinates the existing prepared-task inference and explicit owner
 /// approval/apply boundaries without collapsing them into one operation.
 ///
@@ -36,6 +57,7 @@ final class WorkshopPreparedTaskLifecycle {
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) {
+    _requireCompletePreflight(preflight);
     return _inferenceRunner.run(
       taskId: taskId,
       preflight: preflight,
@@ -57,12 +79,28 @@ final class WorkshopPreparedTaskLifecycle {
     bool isOffline = true,
     CancellationToken? cancellationToken,
   }) {
+    _requireCompletePreflight(preflight);
     return _inferenceRunner.runWithResumeContext(
       taskId: taskId,
       resumeContext: resumeContext,
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+    );
+  }
+
+  void _requireCompletePreflight(WorkshopPreflightInferenceResult? preflight) {
+    if (preflight == null || preflight.readyForImplementation) {
+      return;
+    }
+
+    final analysisReady = preflight.analysisReady;
+    final failedResult =
+        analysisReady ? preflight.architecture : preflight.analysis;
+
+    throw WorkshopPreflightIncompleteException(
+      failedStage: analysisReady ? 'Architetto' : 'Orchestratore',
+      runtimeNotice: failedResult?.runtimeNotice,
     );
   }
 
