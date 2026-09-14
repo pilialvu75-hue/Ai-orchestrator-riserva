@@ -489,22 +489,21 @@ class _CapabilityCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(status.title, style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text(status.capabilityId, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Chip(label: Text(status.statusLabel)),
-              ],
+            Text(
+              status.title,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              status.capabilityId,
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                label: Text(status.statusLabel),
+              ),
             ),
             const SizedBox(height: 12),
             LinearProgressIndicator(
