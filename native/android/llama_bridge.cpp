@@ -1044,6 +1044,13 @@ int64_t llb_create_session(
              session_id, effective_gpu_layers);
     }
 #endif
+    // An empty device list prevents GPU backend scheduling in CPU mode.
+    // Zero model layers alone does not disable host-operation offload.
+    static ggml_backend_dev_t cpu_only_devices[] = { nullptr };
+    const bool gpu_enabled = mparams.n_gpu_layers > 0;
+    if (!gpu_enabled) {
+        mparams.devices = cpu_only_devices;
+    }
     mparams.use_mmap = true;
     mparams.use_mlock = false;
 
@@ -1068,7 +1075,11 @@ int64_t llb_create_session(
     cparams.n_batch = kPrefillBatchSize;
     cparams.n_ubatch = kPrefillBatchSize;
     cparams.embeddings = false;
-    cparams.offload_kqv = true;
+    cparams.offload_kqv = gpu_enabled;
+    cparams.op_offload = gpu_enabled;
+    LOGI("[LOCAL_EXECUTION_CONFIG] backend=%s gpu_layers=%d n_ctx=%u n_batch=%u",
+         gpu_enabled ? "VULKAN" : "CPU", mparams.n_gpu_layers,
+         cparams.n_ctx, cparams.n_batch);
     LOGI("[FORENSIC_CTX_PARAMS] session=%" PRId64
          " requested_n_ctx=%d effective_n_ctx=%u requested_n_threads=%d effective_n_threads=%d"
          " n_batch=%u n_ubatch=%u",

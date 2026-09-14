@@ -30,6 +30,7 @@ String? publicLogProjection(String line) {
     'NATIVE_PUSH_BACKPRESSURE',
     'STREAM_COMPLETE',
     'PUSH_REJECTED',
+    'LOCAL_EXECUTION_CONFIG',
     'INFERENCE_BEGIN',
     'INFERENCE_FINISHED',
     'GENERATION_END',
@@ -124,6 +125,21 @@ String? publicLogProjection(String line) {
       'event': isError ? 'FINAL_RESPONSE_ERROR' : 'FINAL_RESPONSE_SUCCESS',
       'is_final': true,
       'text_len': int.parse(finalResponse[3]!),
+    });
+  }
+
+  if (event == 'LOCAL_EXECUTION_CONFIG') {
+    final config = RegExp(
+      r'^mode=cpu_baseline gpu_layers=0 n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (config == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'mode': 'cpu_baseline',
+      'gpu_layers': 0,
+      'n_ctx': int.parse(config[1]!),
+      'n_batch': int.parse(config[2]!),
     });
   }
 

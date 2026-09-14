@@ -120,6 +120,11 @@ class _AndroidFfiNativeSessionSubsystem {
       );
       const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
+      _log(
+        '[LOCAL_EXECUTION_CONFIG] mode=cpu_baseline '
+        'gpu_layers=$desiredGpuLayers n_ctx=${LlamaNativeDefaults.nCtx} '
+        'n_batch=${LlamaNativeDefaults.nBatch}',
+      );
       int created = await createNativeSessionOffUi(
         modelPath,
         nGpuLayers: desiredGpuLayers,
