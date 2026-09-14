@@ -15,16 +15,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   static int _instanceCreateCount = 0;
   static int _instanceDisposeCount = 0;
 
-  static const Duration _preInferenceUiTimeoutDebug =
-      Duration(seconds: 140);
-  static const Duration _preInferenceUiTimeoutRelease =
-      Duration(seconds: 55);
-
-  static Duration get _preInferenceUiTimeout =>
-      kDebugMode
-          ? _preInferenceUiTimeoutDebug
-          : _preInferenceUiTimeoutRelease;
-
   OrchestratorStateEngine({
     required IChatRepository chatRepository,
   })  : _chatRepository = chatRepository,
@@ -202,14 +192,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         'hash=${hashCode.toRadixString(16)}',
       );
 
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage:
-              'Another send is already running. Please wait.',
-        ),
-      );
-
+      // Keep the current pending/streaming bubble visible for the active send.
       return;
     }
 
@@ -387,20 +370,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               },
             );
 
-            await sendFuture.timeout(
-              _preInferenceUiTimeout,
-              onTimeout: () {
-                if (!streamStarted) {
-                  throw TimeoutException(
-                    '[TERMINAL_STATE] '
-                    'state=stalled_pre_inference '
-                    'session=${event.sessionId}',
-                  );
-                }
-
-                return sendFuture;
-              },
-            );
+            // The repository/runtime owns deadlines and cancellation. A UI-only
+            // Future.timeout abandons the wait without stopping inference, hides
+            // late persisted replies and releases the send gate too early.
+            await sendFuture;
 
             final messages =
                 await _chatRepository.getMessages(
@@ -434,16 +407,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               'send_message error '
               'session=${event.sessionId}: $error',
             );
-
-            if (error is TimeoutException) {
-              _log(
-                '[TERMINAL_STATE] '
-                'state=stalled_pre_inference '
-                'session=${event.sessionId} '
-                'reason=orchestrator_timeout_'
-                '${_preInferenceUiTimeout.inSeconds}s',
-              );
-            }
 
             emit(
               ChatLoaded(

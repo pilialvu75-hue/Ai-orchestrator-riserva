@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
@@ -8,6 +10,99 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('OrchestratorStateEngine', () {
+    testWidgets(
+      'keeps an outstanding send owned beyond the old UI deadline and displays its late reply',
+      (tester) async {
+        final completion = Completer<ChatMessage>();
+        var calls = 0;
+        final answer = ChatMessage(
+          id: 'late-answer',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Parigi',
+          timestamp: 3,
+        );
+        final repository = _FakeChatRepository(
+          onSendMessage: ({
+            required String sessionId,
+            required String userPrompt,
+            String? systemPrompt,
+            List<ChatAttachment> attachments = const <ChatAttachment>[],
+            void Function(String partialText)? onPartialResponse,
+            void Function(String notice)? onRuntimeNotice,
+          }) {
+            calls++;
+            return completion.future;
+          },
+          onGetMessages: (_) async => <ChatMessage>[answer],
+        );
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const SendMessageEvent(
+          sessionId: 'session-1',
+          userPrompt: 'Capitale della Francia?',
+        ));
+        await tester.pump();
+        // Cross both the former release (55s) and debug (140s) deadlines.
+        await tester.pump(const Duration(minutes: 3));
+        expect(engine.state, isA<ChatSending>());
+
+        engine.add(const SendMessageEvent(
+          sessionId: 'session-1',
+          userPrompt: 'Seconda domanda',
+        ));
+        await tester.pump();
+        expect(calls, 1);
+        expect(engine.state, isA<ChatSending>());
+
+        completion.complete(answer);
+        await tester.pump();
+        final loaded = engine.state as ChatLoaded;
+        expect(loaded.messages.single.content, 'Parigi');
+        expect(loaded.runtimeMessage, isNull);
+        await engine.close();
+      },
+    );
+
+    testWidgets(
+      'reports a repository timeout and allows a subsequent request',
+      (tester) async {
+        final completion = Completer<ChatMessage>();
+        var calls = 0;
+        final repository = _FakeChatRepository(
+          onSendMessage: ({
+            required String sessionId,
+            required String userPrompt,
+            String? systemPrompt,
+            List<ChatAttachment> attachments = const <ChatAttachment>[],
+            void Function(String partialText)? onPartialResponse,
+            void Function(String notice)? onRuntimeNotice,
+          }) {
+            calls++;
+            return completion.future;
+          },
+          onGetMessages: (_) async => <ChatMessage>[],
+        );
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        const event = SendMessageEvent(
+          sessionId: 'session-1',
+          userPrompt: 'Ciao',
+        );
+        engine.add(event);
+        await tester.pump();
+        completion.completeError(TimeoutException('runtime deadline'));
+        await tester.pump();
+        expect(engine.state, isA<ChatLoaded>());
+        expect(
+          (engine.state as ChatLoaded).runtimeMessage,
+          contains('runtime deadline'),
+        );
+        engine.add(event);
+        await tester.pump();
+        expect(calls, 2);
+        await engine.close();
+      },
+    );
+
     test(
       'keeps partial assistant content and Cloud provider across generic runtime notices',
       () async {
