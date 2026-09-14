@@ -246,7 +246,7 @@ final class WorkshopLibraryRemoteClient {
 
   Future<http.Response> _get(Uri uri, String token) {
     if (uri.scheme != 'https' || uri.host != 'api.github.com') {
-      throw const StateError('Refusing non-GitHub Module Library endpoint.');
+      throw StateError('Refusing non-GitHub Module Library endpoint.');
     }
     return _client.get(
       uri,
@@ -261,7 +261,7 @@ final class WorkshopLibraryRemoteClient {
 
   void _validateRepository() {
     if (repository != 'pilialvu75-hue/AI-Orchestrator-Module-Library') {
-      throw const StateError(
+      throw StateError(
         'Workshop Library reader is locked to the canonical private Library.',
       );
     }
