@@ -5,6 +5,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_pol
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
@@ -30,6 +32,7 @@ final class WorkshopProductionLifecycleBundle {
     this.reuseCaptureService = const WorkshopReuseCaptureService(),
     this.reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
+    this.libraryReuseService,
     this.onReuseLibraryChanged,
     this.onReuseSourceSnapshotsChanged,
     this.reuseSnapshotsRootPath,
@@ -43,6 +46,7 @@ final class WorkshopProductionLifecycleBundle {
   final WorkshopReuseSourceSnapshotIndex? reuseSourceSnapshots;
   final WorkshopReuseCaptureService reuseCaptureService;
   final WorkshopReuseSourceSnapshotService reuseSourceSnapshotService;
+  final WorkshopLibraryReuseService? libraryReuseService;
   final Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged;
   final Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
       onReuseSourceSnapshotsChanged;
@@ -66,6 +70,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         const WorkshopReuseCaptureService(),
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
+    WorkshopLibraryReuseService? libraryReuseService,
     Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
         onReuseSourceSnapshotsChanged,
     String? reuseSnapshotsRootPath,
@@ -113,6 +118,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseSourceSnapshots: reuseSourceSnapshots,
       reuseCaptureService: reuseCaptureService,
       reuseSourceSnapshotService: reuseSourceSnapshotService,
+      libraryReuseService: libraryReuseService,
       onReuseLibraryChanged: onReuseLibraryChanged,
       onReuseSourceSnapshotsChanged: onReuseSourceSnapshotsChanged,
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
@@ -135,6 +141,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         const WorkshopReuseCaptureService(),
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
+    WorkshopLibraryReuseService? libraryReuseService,
     Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
         onReuseSourceSnapshotsChanged,
     String? reuseSnapshotsRootPath,
@@ -166,6 +173,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseSourceSnapshots: reuseSourceSnapshots,
       reuseCaptureService: reuseCaptureService,
       reuseSourceSnapshotService: reuseSourceSnapshotService,
+      libraryReuseService: libraryReuseService,
       onReuseSourceSnapshotsChanged: onReuseSourceSnapshotsChanged,
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       workspaceRootPath: normalizedWorkspaceRootPath,
@@ -186,6 +194,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         const WorkshopReuseCaptureService(),
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
+    WorkshopLibraryReadClient? libraryReadClient,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) async {
@@ -197,6 +206,8 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     final reuseSourceSnapshots = await snapshotStore.load();
     final reuseSnapshotsRootPath =
         '$normalizedWorkspaceRootPath-reuse-snapshots';
+    final resolvedLibraryClient =
+        libraryReadClient ?? WorkshopLibraryReadAdapter();
 
     return createForWorkspace(
       workspaceRootPath: normalizedWorkspaceRootPath,
@@ -209,6 +220,9 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseSourceSnapshots: reuseSourceSnapshots,
       reuseCaptureService: reuseCaptureService,
       reuseSourceSnapshotService: reuseSourceSnapshotService,
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: resolvedLibraryClient,
+      ),
       onReuseSourceSnapshotsChanged: snapshotStore.save,
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       includeHiddenFiles: includeHiddenFiles,
