@@ -2,12 +2,20 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_curator_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
+import 'package:ai_orchestrator/features/module_library/domain/module_curator_advice.dart';
+import 'package:ai_orchestrator/features/module_library/presentation/module_curator_advice_dialog.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+typedef ModuleCuratorRunner = Future<ModuleCuratorResult> Function({
+  required ModuleCuratorTask task,
+  String? capabilityId,
+});
 
 class ModuleLibraryPage extends StatefulWidget {
   const ModuleLibraryPage({
@@ -16,12 +24,14 @@ class ModuleLibraryPage extends StatefulWidget {
     this.credentialStore,
     this.configStore,
     this.authClient,
+    this.curatorRunner,
   });
 
   final ModuleLibraryStatusRepository? repository;
   final WorkshopLibraryGitHubCredentialStore? credentialStore;
   final ModuleLibraryGitHubConfigStore? configStore;
   final WorkshopLibraryGitHubAuthClient? authClient;
+  final ModuleCuratorRunner? curatorRunner;
 
   @override
   State<ModuleLibraryPage> createState() => _ModuleLibraryPageState();
@@ -32,12 +42,15 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
   late final WorkshopLibraryGitHubCredentialStore _credentialStore;
   late final ModuleLibraryGitHubConfigStore _configStore;
   late final WorkshopLibraryGitHubAuthClient _authClient;
+  late final ModuleCuratorRunner _curatorRunner;
   late final bool _externalRepository;
 
   bool _loading = true;
   bool _connected = false;
+  bool _healthLoading = false;
   String? _clientId;
   String? _error;
+  final Set<String> _curatorLoading = <String>{};
   List<ModuleCapabilityStatus> _items = const <ModuleCapabilityStatus>[];
 
   @override
@@ -54,6 +67,12 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
           configStore: _configStore,
           authClient: _authClient,
         );
+    _curatorRunner = widget.curatorRunner ??
+        ModuleCuratorGitHubActionsSource(
+          credentialStore: _credentialStore,
+          configStore: _configStore,
+          authClient: _authClient,
+        ).run;
     unawaited(_initialize());
   }
 
@@ -105,6 +124,54 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
         }
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _runCuratorForCapability(ModuleCapabilityStatus status) async {
+    final capabilityId = status.capabilityId;
+    if (_curatorLoading.contains(capabilityId)) return;
+    setState(() => _curatorLoading.add(capabilityId));
+    try {
+      final result = await _curatorRunner(
+        task: ModuleCuratorTask.rankCandidates,
+        capabilityId: capabilityId,
+      );
+      if (!mounted) return;
+      await showModuleCuratorAdviceDialog(
+        context,
+        title: 'Consiglio AI — ${status.title}',
+        result: result,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await showModuleCuratorErrorDialog(context, error);
+    } finally {
+      if (mounted) {
+        setState(() => _curatorLoading.remove(capabilityId));
+      }
+    }
+  }
+
+  Future<void> _runHealthReview() async {
+    if (_healthLoading) return;
+    setState(() => _healthLoading = true);
+    try {
+      final result = await _curatorRunner(
+        task: ModuleCuratorTask.healthReview,
+      );
+      if (!mounted) return;
+      await showModuleCuratorAdviceDialog(
+        context,
+        title: 'Salute moduli — AI Curator',
+        result: result,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await showModuleCuratorErrorDialog(context, error);
+    } finally {
+      if (mounted) {
+        setState(() => _healthLoading = false);
+      }
     }
   }
 
@@ -349,6 +416,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
     setState(() {
       _connected = false;
       _items = const <ModuleCapabilityStatus>[];
+      _curatorLoading.clear();
+      _healthLoading = false;
       _error = null;
       _loading = false;
     });
@@ -360,6 +429,18 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       appBar: AppBar(
         title: const Text('Moduli'),
         actions: [
+          if (_connected)
+            IconButton(
+              tooltip: 'Salute moduli — AI Curator',
+              onPressed: _healthLoading ? null : () => unawaited(_runHealthReview()),
+              icon: _healthLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.health_and_safety_outlined),
+            ),
           if (_connected)
             IconButton(
               tooltip: 'Aggiorna',
@@ -397,8 +478,17 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                         physics: const AlwaysScrollableScrollPhysics(),
                         itemCount: _items.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) =>
-                            _CapabilityCard(status: _items[index]),
+                        itemBuilder: (context, index) {
+                          final status = _items[index];
+                          return _CapabilityCard(
+                            status: status,
+                            curatorLoading:
+                                _curatorLoading.contains(status.capabilityId),
+                            onCurator: () => unawaited(
+                              _runCuratorForCapability(status),
+                            ),
+                          );
+                        },
                       ),
                     ),
     );
@@ -476,9 +566,15 @@ class _ConnectionView extends StatelessWidget {
 }
 
 class _CapabilityCard extends StatelessWidget {
-  const _CapabilityCard({required this.status});
+  const _CapabilityCard({
+    required this.status,
+    required this.curatorLoading,
+    required this.onCurator,
+  });
 
   final ModuleCapabilityStatus status;
+  final bool curatorLoading;
+  final VoidCallback onCurator;
 
   @override
   Widget build(BuildContext context) {
@@ -550,6 +646,30 @@ class _CapabilityCard extends StatelessWidget {
                 style: theme.textTheme.bodySmall,
               ),
             ],
+            const SizedBox(height: 12),
+            const Divider(),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: curatorLoading ? null : onCurator,
+                icon: curatorLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome_outlined),
+                label: Text(
+                  curatorLoading ? 'Analisi in corso…' : 'Consiglio AI',
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Consultivo: non modifica certificazione, stato o conteggi.',
+              style: theme.textTheme.bodySmall,
+            ),
           ],
         ),
       ),
