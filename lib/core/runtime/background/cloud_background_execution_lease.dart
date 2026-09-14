@@ -41,7 +41,7 @@ class CloudBackgroundExecutionLeaseService {
     }
 
     try {
-      await _channel.invokeMethod<void>('acquire', <String, Object>{
+      await _channel.invokeMethod<Object?>('acquire', <String, Object>{
         'leaseId': leaseId,
         'sessionId': normalizedSession,
         'provider': normalizedProvider,
@@ -66,7 +66,7 @@ class CloudBackgroundExecutionLeaseService {
   Future<void> _releaseNative(String leaseId) async {
     if (!_isAndroid) return;
     try {
-      await _channel.invokeMethod<void>('release', <String, Object>{
+      await _channel.invokeMethod<Object?>('release', <String, Object>{
         'leaseId': leaseId,
       });
       debugPrint('[CLOUD_BACKGROUND] release_ok lease=$leaseId');
