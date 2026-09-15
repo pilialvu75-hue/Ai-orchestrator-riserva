@@ -139,6 +139,11 @@ final class _NoopProvider implements RuntimeInferenceProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
-    return const Stream<InferenceResponse>.empty();
+    return Stream<InferenceResponse>.value(
+      InferenceResponse.finalChunk(
+        text: 'ok',
+        tokensGenerated: 1,
+      ),
+    );
   }
 }
