@@ -244,11 +244,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload '${{ steps.version.outputs.tag }}' \
-            '${{ steps.installer.outputs.setup_path }}' \
-            '${{ steps.installer.outputs.hash_path }}' \
-            --clobber \
-            --repo "$env:GITHUB_REPOSITORY"
+          gh release upload '${{ steps.version.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
           if ($LASTEXITCODE -ne 0) {
             throw 'Failed to upload Windows installer assets to the coordinated GitHub Release.'
           }
