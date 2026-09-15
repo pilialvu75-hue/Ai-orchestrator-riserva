@@ -40,6 +40,7 @@ class ToolResult {
     required this.output,
     this.success = true,
     this.error,
+    this.metadata = const <String, Object?>{},
   });
 
   /// Identifier of the tool that produced this result.
@@ -53,6 +54,14 @@ class ToolResult {
 
   /// Error description when [success] is `false`.
   final String? error;
+
+  /// Optional machine-readable companion data.
+  ///
+  /// Existing agents may continue to consume only [output]. Workflows that
+  /// need typed follow-up operations (for example, opening a selected Web
+  /// search result) can inspect metadata without reparsing presentation text.
+  /// Values must remain JSON-serialisable when a concrete tool exposes them.
+  final Map<String, Object?> metadata;
 
   @override
   String toString() =>
