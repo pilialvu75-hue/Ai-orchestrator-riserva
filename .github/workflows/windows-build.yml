@@ -141,7 +141,7 @@ jobs:
               Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
               Write-Host "Bundled $dll from Visual C++ redistributables."
             } else {
-              Write-Warning "Could not locate $dll for application-local packaging."
+              Write-Warning "Could not locate $dll for application-local packaging. The Setup installer still carries the matching VS2022 redistributable."
             }
           }
 
@@ -165,5 +165,122 @@ jobs:
         with:
           name: ai-orchestrator-windows-x64
           path: ai-orchestrator-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Locate Windows installer toolchain
+        id: installer-tools
+        shell: pwsh
+        run: |
+          $releaseDir = '${{ steps.bundle.outputs.release_dir }}'
+          if (-not $releaseDir -or -not (Test-Path $releaseDir)) {
+            throw "Release directory is unavailable for installer packaging: $releaseDir"
+          }
+
+          $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)(?:\+\d+)?\s*$' | Select-Object -First 1
+          if (-not $versionLine) {
+            throw 'Unable to resolve semantic application version from pubspec.yaml.'
+          }
+          $appVersion = $versionLine.Matches[0].Groups[1].Value
+
+          $isccCandidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          )
+          $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($isccCommand) {
+              $iscc = $isccCommand.Source
+            }
+          }
+          if (-not $iscc) {
+            throw 'Inno Setup compiler ISCC.exe was not found on the windows-2022 runner.'
+          }
+
+          $redist = $null
+          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
+            $redist = Get-ChildItem -Path $env:VCToolsRedistDir -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+
+          if (-not $redist) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($vsInstall) {
+                $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+                if (Test-Path $redistRoot) {
+                  $redist = Get-ChildItem -Path $redistRoot -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+                    Sort-Object FullName -Descending |
+                    Select-Object -First 1
+                }
+              }
+            }
+          }
+
+          if (-not $redist) {
+            throw 'Matching Visual Studio 2022 vc_redist.x64.exe was not found. Refusing to build an installer with an unverified runtime prerequisite.'
+          }
+
+          $outputDir = Join-Path $PWD 'build\windows\installer'
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+
+          $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
+          @(
+            "#define AppVersion `"$appVersion`"",
+            "#define ReleaseDir `"$releaseDir`"",
+            "#define VCRedistPath `"$($redist.FullName)`"",
+            "#define OutputDir `"$outputDir`""
+          ) | Set-Content -Path $generatedDefines -Encoding ASCII
+
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Installer compiler: $iscc"
+          Write-Host "Installer app version: $appVersion"
+          Write-Host "VS2022 redistributable: $($redist.FullName)"
+
+      - name: Build Windows Setup.exe
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = '${{ steps.installer-tools.outputs.iscc }}'
+          $outputDir = '${{ steps.installer-tools.outputs.output_dir }}'
+          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
+
+          & $iscc $script
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $setupPath)) {
+            throw "Expected Setup.exe was not produced: $setupPath"
+          }
+
+          $setupSize = (Get-Item $setupPath).Length
+          if ($setupSize -lt 1048576) {
+            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
+          }
+
+          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
+          $hashPath = "$setupPath.sha256"
+          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
+
+          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows installer: $setupPath ($setupSize bytes)"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-windows-installer-x64
+          path: |
+            ${{ steps.installer.outputs.setup_path }}
+            ${{ steps.installer.outputs.hash_path }}
           if-no-files-found: error
           retention-days: 14
