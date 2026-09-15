@@ -67,6 +67,7 @@ abstract final class CloudRoutingBootstrap {
         fallback: DuckDuckGoProvider(
           client: sl<http.Client>(),
           timeout: const Duration(seconds: 4),
+          enableDetailedDebugLogging: false,
         ),
       ),
       searchCache: ExpiringSearchCache(),
