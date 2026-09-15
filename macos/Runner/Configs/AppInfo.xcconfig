@@ -1,12 +1,10 @@
-// Application-level settings for the Runner target.
-//
-// This may be replaced with a customized file by `flutter create`.
-// Application Bundle ID
+// Application-level settings for the macOS Runner target.
+// Flutter supplies FLUTTER_BUILD_NAME and FLUTTER_BUILD_NUMBER from pubspec.yaml.
+
+// Product identity shown in Finder, the Dock, and the application menu.
+PRODUCT_NAME = AI Orchestrator
+
+// Keep the historical AI Orchestrator bundle identifier stable.
 PRODUCT_BUNDLE_IDENTIFIER = com.aiorchestrator
-// Versioning
-FLUTTER_BUILD_NAME = 1.0.0
-FLUTTER_BUILD_NUMBER = 1
-// Copyright
-PRODUCT_COPYRIGHT = Copyright © 2024 com.aiorchestrator. All rights reserved.
-// macOS Deployment Target
-MACOSX_DEPLOYMENT_TARGET = 10.14
+
+PRODUCT_COPYRIGHT = Copyright © 2026 AI Orchestrator. All rights reserved.
