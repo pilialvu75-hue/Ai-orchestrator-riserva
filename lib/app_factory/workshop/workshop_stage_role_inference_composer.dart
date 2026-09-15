@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_foreground_execution_lease.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_composer.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor_composer.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
@@ -17,6 +18,7 @@ final class WorkshopStageRoleInferenceComposer {
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     WorkshopRoleGatewayFactory? gatewayFactory,
+    WorkshopExecutionLeaseService? foregroundLeaseService,
   }) {
     final executor = WorkshopRoleInferenceExecutorComposer.compose(
       inferenceService: inferenceService,
@@ -26,6 +28,8 @@ final class WorkshopStageRoleInferenceComposer {
 
     return WorkshopStageRoleInference(
       executor: executor,
+      foregroundLeaseService:
+          foregroundLeaseService ?? WorkshopForegroundExecutionLeaseService(),
     );
   }
 }
