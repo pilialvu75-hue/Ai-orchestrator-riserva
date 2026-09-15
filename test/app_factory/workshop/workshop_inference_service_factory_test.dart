@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_service_factory.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
@@ -102,6 +105,40 @@ void main() {
       expect(localRuntime.calls, 1);
       await sl.reset();
     });
+
+    test('Workshop web stack prefers ranked DuckDuckGo Lite results', () async {
+      final requestedHosts = <String>[];
+      final client = _FakeHttpClient((request) async {
+        requestedHosts.add(request.url.host);
+        expect(request.url.queryParameters['q'], 'best recipe apps features');
+
+        return http.Response(
+          '''
+<html><body><table>
+<tr>
+  <td>1.</td>
+  <td><a class="result-link" href="https://example.test/recipe-apps">Best recipe apps</a></td>
+</tr>
+<tr><td class="result-snippet">Meal planning, shopping lists and dietary filters.</td></tr>
+</table></body></html>
+''',
+          200,
+        );
+      });
+
+      final tool = WorkshopInferenceServiceFactory.createWorkshopWebSearchTool(
+        client: client,
+      );
+      final result = await tool.execute(
+        const <String, dynamic>{'query': 'best recipe apps features'},
+      );
+
+      expect(result.success, isTrue);
+      expect(requestedHosts, <String>['lite.duckduckgo.com']);
+      expect(result.output, contains('Best recipe apps'));
+      expect(result.output, contains('Meal planning'));
+      expect(result.output, contains('https://example.test/recipe-apps'));
+    });
   });
 }
 
@@ -123,6 +160,23 @@ AiModel _model({
     validationStatus: ModelValidationStatus.validatedOk,
     runtimeModelId: runtimeModelId,
   );
+}
+
+final class _FakeHttpClient extends http.BaseClient {
+  _FakeHttpClient(this._handler);
+
+  final Future<http.Response> Function(http.BaseRequest request) _handler;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final response = await _handler(request);
+    return http.StreamedResponse(
+      Stream<List<int>>.value(utf8.encode(response.body)),
+      response.statusCode,
+      headers: response.headers,
+      request: request,
+    );
+  }
 }
 
 final class _FakeLocalRuntime extends LocalRuntimeProvider {
