@@ -156,7 +156,7 @@ final class WorkshopPublicWebPageFetcher {
 
       if (_isRedirect(response.statusCode)) {
         final location = response.headers['location'];
-        await response.stream.drain();
+        await _cancelResponseBody(response);
 
         if (location == null || location.trim().isEmpty) {
           _log(
@@ -197,7 +197,7 @@ final class WorkshopPublicWebPageFetcher {
       }
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        await response.stream.drain();
+        await _cancelResponseBody(response);
         _log(
           'status=http_failure host=${_safeHost(current)} '
           'status_code=${response.statusCode}',
@@ -211,7 +211,7 @@ final class WorkshopPublicWebPageFetcher {
       final contentType =
           (response.headers['content-type'] ?? '').trim().toLowerCase();
       if (!_isSupportedTextContentType(contentType)) {
-        await response.stream.drain();
+        await _cancelResponseBody(response);
         _log(
           'status=unsupported_content host=${_safeHost(current)}',
         );
@@ -224,7 +224,7 @@ final class WorkshopPublicWebPageFetcher {
       final declaredLength =
           int.tryParse(response.headers['content-length'] ?? '');
       if (declaredLength != null && declaredLength > maxBytes) {
-        await response.stream.drain();
+        await _cancelResponseBody(response);
         _log(
           'status=too_large host=${_safeHost(current)} '
           'declared_bytes=$declaredLength max_bytes=$maxBytes',
@@ -479,6 +479,16 @@ final class WorkshopPublicWebPageFetcher {
     );
 
     return output;
+  }
+
+  static Future<void> _cancelResponseBody(http.StreamedResponse response) async {
+    try {
+      final subscription = response.stream.listen((_) {});
+      await subscription.cancel();
+    } catch (_) {
+      // The body is intentionally irrelevant on rejected paths. A cancellation
+      // error must not force the Cantiere to consume an unbounded response.
+    }
   }
 
   static String _safeHost(Uri uri) {
