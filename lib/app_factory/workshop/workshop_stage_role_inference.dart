@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_foreground_execution_lease.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -44,9 +45,12 @@ final class WorkshopStageRoleResolver {
 final class WorkshopStageRoleInference {
   const WorkshopStageRoleInference({
     required WorkshopRoleInferenceExecutor executor,
-  }) : _executor = executor;
+    WorkshopExecutionLeaseService? foregroundLeaseService,
+  })  : _executor = executor,
+        _foregroundLeaseService = foregroundLeaseService;
 
   final WorkshopRoleInferenceExecutor _executor;
+  final WorkshopExecutionLeaseService? _foregroundLeaseService;
 
   Future<WorkshopInferenceResult> complete({
     required WorkshopStage stage,
@@ -60,7 +64,7 @@ final class WorkshopStageRoleInference {
     double topP = 0.9,
     double repeatPenalty = 1.1,
     CancellationToken? cancellationToken,
-  }) {
+  }) async {
     final role = WorkshopStageRoleResolver.roleFor(stage);
 
     if (role == AppAiRole.assistantOrchestrator) {
@@ -69,19 +73,33 @@ final class WorkshopStageRoleInference {
       );
     }
 
-    return _executor.complete(
-      role: role,
-      prompt: prompt,
-      systemPrompt: systemPrompt,
-      context: context,
-      sessionId: sessionId,
-      isOffline: isOffline,
-      maxTokens: maxTokens,
-      temperature: temperature,
-      topP: topP,
-      repeatPenalty: repeatPenalty,
-      cancellationToken: cancellationToken,
-    );
+    WorkshopExecutionLease? lease;
+    final leaseService = _foregroundLeaseService;
+    if (leaseService != null) {
+      lease = await leaseService.acquire(
+        operationId: '$sessionId:${stage.name}',
+      );
+    }
+
+    try {
+      return await _executor.complete(
+        role: role,
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        cancellationToken: cancellationToken,
+      );
+    } finally {
+      if (lease != null) {
+        await lease.release();
+      }
+    }
   }
 
   /// Executes one Workshop stage while preserving Cantiere-owned execution
@@ -108,7 +126,7 @@ final class WorkshopStageRoleInference {
     String? attemptId,
     String? checkpointId,
     CancellationToken? cancellationToken,
-  }) {
+  }) async {
     final role = WorkshopStageRoleResolver.roleFor(stage);
 
     if (role == AppAiRole.assistantOrchestrator) {
@@ -117,24 +135,38 @@ final class WorkshopStageRoleInference {
       );
     }
 
-    return _executor.completeWithIdentity(
-      role: role,
-      prompt: prompt,
-      systemPrompt: systemPrompt,
-      context: context,
-      sessionId: sessionId,
-      isOffline: isOffline,
-      maxTokens: maxTokens,
-      temperature: temperature,
-      topP: topP,
-      repeatPenalty: repeatPenalty,
-      requestId: requestId,
-      projectId: projectId,
-      taskId: taskId,
-      executionId: executionId,
-      attemptId: attemptId,
-      checkpointId: checkpointId,
-      cancellationToken: cancellationToken,
-    );
+    WorkshopExecutionLease? lease;
+    final leaseService = _foregroundLeaseService;
+    if (leaseService != null) {
+      lease = await leaseService.acquire(
+        operationId: '$sessionId:${stage.name}',
+      );
+    }
+
+    try {
+      return await _executor.completeWithIdentity(
+        role: role,
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        requestId: requestId,
+        projectId: projectId,
+        taskId: taskId,
+        executionId: executionId,
+        attemptId: attemptId,
+        checkpointId: checkpointId,
+        cancellationToken: cancellationToken,
+      );
+    } finally {
+      if (lease != null) {
+        await lease.release();
+      }
+    }
   }
 }
