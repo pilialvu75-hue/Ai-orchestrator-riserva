@@ -84,7 +84,9 @@ final class WorkshopWebResearchService {
     required Tool webSearchTool,
     this.maxResultsPerLane = 5,
     this.maxCharsPerLane = 6000,
-  }) : _webSearchTool = webSearchTool;
+  })  : assert(maxResultsPerLane > 0),
+        assert(maxCharsPerLane > 0),
+        _webSearchTool = webSearchTool;
 
   final Tool _webSearchTool;
   final int maxResultsPerLane;
