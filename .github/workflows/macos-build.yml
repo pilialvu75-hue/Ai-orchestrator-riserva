@@ -107,11 +107,11 @@ jobs:
           xcodebuild -version
           uname -m
 
-      - name: Validate versioned Xcode project
-        run: xcodebuild -project macos/Runner.xcodeproj -list
-
       - name: Resolve Flutter dependencies
         run: flutter pub get
+
+      - name: Validate versioned Xcode project
+        run: xcodebuild -project macos/Runner.xcodeproj -list
 
       - name: Build macOS release
         run: flutter build macos --release
