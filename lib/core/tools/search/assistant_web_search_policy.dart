@@ -5,11 +5,47 @@
 /// all use the same decision without making Internet access a property of a
 /// specific model/provider.
 abstract final class AssistantWebSearchPolicy {
+  /// Internal marker carried in the system prompt when a caller explicitly
+  /// requires an offline-only turn. Local prompt composition recognizes it and
+  /// must not expose the model to the web-search tool protocol for that turn.
+  static const String offlineOnlyMarker =
+      '[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]';
+
   static bool shouldSearch(String prompt) {
     final value = prompt.trim().toLowerCase();
     if (value.isEmpty) return false;
 
     return _explicitWebIntent(value) || _timeSensitiveIntent(value);
+  }
+
+  /// Returns true when a previous Assistant layer already supplied either live
+  /// web evidence or an explicit best-effort failure marker.
+  ///
+  /// This prevents a Local model from re-emitting <search> after the
+  /// Orchestrator (or the local tool recovery path) has already attempted the
+  /// lookup for the same turn.
+  static bool hasInjectedContext({
+    required String prompt,
+    String? systemPrompt,
+  }) {
+    final combined = '${systemPrompt ?? ''}\n$prompt'.toLowerCase();
+    return combined.contains('[internet search results]') ||
+        combined.contains('[web search results]') ||
+        combined.contains('[web search unavailable]') ||
+        combined.contains('web search results:\n');
+  }
+
+  static bool isOfflineOnly(String? systemPrompt) {
+    return systemPrompt?.contains(offlineOnlyMarker) ?? false;
+  }
+
+  static String applyOfflineOnlyMarker(String? systemPrompt) {
+    final base = systemPrompt?.trim();
+    if (base == null || base.isEmpty) {
+      return offlineOnlyMarker;
+    }
+    if (base.contains(offlineOnlyMarker)) return base;
+    return '$base\n\n$offlineOnlyMarker';
   }
 
   static String extractQuery(String prompt) {
