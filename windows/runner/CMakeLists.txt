@@ -26,4 +26,17 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
-add_dependencies(${BINARY_NAME} flutter_assemble)
+add_dependencies(${BINARY_NAME} flutter_assemble ws2fix)
+
+# Flutter's current Windows engine imports GetHostNameW directly from
+# WS2_32.dll. Windows 7 does not export that symbol, so redirect the engine's
+# Winsock import table to the application-local compatibility shim. The shim
+# forwards every other Winsock function to the real system WS2_32.dll and uses
+# the native GetHostNameW unchanged on Windows 8+.
+add_custom_command(TARGET ${BINARY_NAME} PRE_LINK
+  COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_SOURCE_DIR}/../tool/patch_flutter_windows_win7.ps1"
+    -FlutterDll "${FLUTTER_LIBRARY}"
+  COMMENT "Applying Windows 7 Winsock compatibility patch to Flutter engine"
+  VERBATIM
+)
