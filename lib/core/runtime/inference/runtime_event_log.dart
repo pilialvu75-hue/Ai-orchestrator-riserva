@@ -95,15 +95,17 @@ class RuntimeEventLog {
   /// and persists it to disk.
   ///
   /// The category and tag are inferred automatically from the first
-  /// `[TAG]` token in [message].
+  /// `[TAG]` token in [message]. Sensitive legacy Web-search query fields are
+  /// redacted here, before they can reach memory, listeners or disk.
   void emit(String message) {
-    final tag = _extractTag(message);
+    final safeMessage = redactSensitiveFields(message);
+    final tag = _extractTag(safeMessage);
     final category = _categoryFor(tag);
     final entry = RuntimeEventEntry(
       timestamp: DateTime.now(),
       category: category,
       tag: tag,
-      message: message,
+      message: safeMessage,
     );
 
     if (_entries.length >= maxEntries) _entries.removeAt(0);
@@ -146,6 +148,26 @@ class RuntimeEventLog {
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   static final _tagRegExp = RegExp(r'^\[([A-Z0-9_]+)\]');
+  static final _legacyQuotedQueryRegExp = RegExp(r'\bquery\s*=\s*"');
+
+  /// Central privacy guard for legacy diagnostic fields carrying a complete
+  /// user Web-search query.
+  ///
+  /// The two historical producers interpolate the query as the final
+  /// `query="..."` field without escaping embedded quotes/newlines. Once that
+  /// interpolation has happened there is no reliable way to identify a closing
+  /// quote for every possible user query, so the safe boundary behaviour is to
+  /// retain the structural prefix and redact the entire remaining query tail.
+  ///
+  /// Length-only fields such as `query_chars=42` deliberately remain intact.
+  @visibleForTesting
+  static String redactSensitiveFields(String message) {
+    final match = _legacyQuotedQueryRegExp.firstMatch(message);
+    if (match == null) return message;
+
+    final assignment = message.substring(match.start, match.end);
+    return '${message.substring(0, match.start)}$assignment[REDACTED]"';
+  }
 
   static String _extractTag(String message) {
     final match = _tagRegExp.firstMatch(message.trim());
