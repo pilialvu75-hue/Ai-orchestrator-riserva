@@ -19,6 +19,7 @@ EXPORTS
   WSAGetLastError=WS2_32.WSAGetLastError @111
   WSASetLastError=WS2_32.WSASetLastError @112
   WSAStartup=WS2_32.WSAStartup @115
+  GetHostNameW=CompatGetHostNameW
   freeaddrinfo=WS2_32.freeaddrinfo
   getaddrinfo=WS2_32.getaddrinfo
   getnameinfo=WS2_32.getnameinfo
