@@ -16,6 +16,13 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 /// bounded local analysis and only the Architect is asked to plan the delta.
 /// This preserves every downstream implementation/review/validation/approval
 /// boundary while reducing repeated AI work.
+///
+/// Incomplete preflight results are retained only inside this Cantiere-owned
+/// pipeline. A retry for the exact same request/network/capability contract
+/// reuses a successful Orchestrator analysis and restarts from Architect,
+/// instead of repeating already completed model work. Failed Orchestrator work
+/// is never reused, and changing the explicit offline/network contract creates
+/// a different resume key.
 final class WorkshopPreflightInferencePipeline {
   WorkshopPreflightInferencePipeline({
     required WorkshopStageRoleInference inference,
@@ -32,6 +39,8 @@ final class WorkshopPreflightInferencePipeline {
   final WorkshopReuseLibrary? _reuseLibrary;
   final WorkshopReuseDecisionEngine _reuseDecisionEngine;
   final Future<void> Function(WorkshopReuseLibrary)? _onReuseLibraryChanged;
+  final Map<String, WorkshopPreflightInferenceResult> _resumeByKey =
+      <String, WorkshopPreflightInferenceResult>{};
 
   WorkshopReuseLibrary? get reuseLibrary => _reuseLibrary;
 
@@ -42,15 +51,36 @@ final class WorkshopPreflightInferencePipeline {
     String? target,
     CancellationToken? cancellationToken,
   }) async {
-    final reuseDecision = _reuseDecision(
+    final resumeKey = _resumeKey(
       request: request,
+      isOffline: isOffline,
       requiredCapabilities: requiredCapabilities,
       target: target,
     );
+    final previous = _resumeByKey[resumeKey];
+
+    if (previous?.readyForImplementation == true) {
+      return previous!;
+    }
+
+    final reuseDecision = previous?.analysisReady == true
+        ? previous!.reuseDecision ??
+            _reuseDecision(
+              request: request,
+              requiredCapabilities: requiredCapabilities,
+              target: target,
+            )
+        : _reuseDecision(
+            request: request,
+            requiredCapabilities: requiredCapabilities,
+            target: target,
+          );
 
     final WorkshopInferenceResult analysis;
 
-    if (reuseDecision.shouldReuse && reuseDecision.asset != null) {
+    if (previous?.analysisReady == true) {
+      analysis = previous!.analysis;
+    } else if (reuseDecision.shouldReuse && reuseDecision.asset != null) {
       analysis = WorkshopInferenceResult(
         text: _reuseAnalysis(
           request: request,
@@ -75,10 +105,12 @@ final class WorkshopPreflightInferencePipeline {
     }
 
     if (!analysis.isSuccessful || !analysis.hasText) {
-      return WorkshopPreflightInferenceResult(
+      final result = WorkshopPreflightInferenceResult(
         analysis: analysis,
         reuseDecision: reuseDecision,
       );
+      _resumeByKey[resumeKey] = result;
+      return result;
     }
 
     final architecture = await _inference.complete(
@@ -111,6 +143,7 @@ final class WorkshopPreflightInferencePipeline {
       architecture: architecture,
       reuseDecision: reuseDecision,
     );
+    _resumeByKey[resumeKey] = result;
 
     if (result.readyForImplementation && reuseDecision.asset != null) {
       final library = _reuseLibrary;
@@ -142,6 +175,27 @@ final class WorkshopPreflightInferencePipeline {
       requiredCapabilities: requiredCapabilities,
       target: target,
     );
+  }
+
+  static String _resumeKey({
+    required WorkshopRequest request,
+    required bool isOffline,
+    required List<String> requiredCapabilities,
+    required String? target,
+  }) {
+    return <String>[
+      request.id.trim(),
+      request.title.trim(),
+      request.instruction.trim(),
+      request.operation.name,
+      request.projectPath?.trim() ?? '',
+      request.targetFiles.join('\u001e'),
+      request.constraints.join('\u001e'),
+      request.context.join('\u001e'),
+      isOffline ? 'offline' : 'network-capable',
+      target?.trim() ?? '',
+      requiredCapabilities.join('\u001e'),
+    ].join('\u001f');
   }
 
   static String _analysisPrompt(WorkshopRequest request) {
