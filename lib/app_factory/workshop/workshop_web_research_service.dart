@@ -8,18 +8,32 @@ enum WorkshopWebResearchLane {
   domainSources,
 }
 
+final class WorkshopWebResearchSource {
+  const WorkshopWebResearchSource({
+    required this.title,
+    required this.url,
+    required this.snippet,
+  });
+
+  final String title;
+  final String url;
+  final String snippet;
+}
+
 final class WorkshopWebResearchEvidence {
   const WorkshopWebResearchEvidence({
     required this.lane,
     required this.query,
     required this.output,
     required this.success,
+    this.sources = const <WorkshopWebResearchSource>[],
   });
 
   final WorkshopWebResearchLane lane;
   final String query;
   final String output;
   final bool success;
+  final List<WorkshopWebResearchSource> sources;
 
   bool get hasEvidence => success && output.trim().isNotEmpty;
 }
@@ -37,6 +51,13 @@ final class WorkshopWebEvidencePack {
 
   int get successfulLaneCount =>
       evidence.where((entry) => entry.hasEvidence).length;
+
+  int get sourceCount =>
+      evidence.fold<int>(0, (total, entry) => total + entry.sources.length);
+
+  List<WorkshopWebResearchSource> get sources => List<WorkshopWebResearchSource>.unmodifiable(
+        evidence.expand((entry) => entry.sources),
+      );
 
   String toPromptContext() {
     final usable = evidence.where((entry) => entry.hasEvidence).toList();
@@ -174,20 +195,38 @@ final class WorkshopWebResearchService {
             : maxCharsPerLane;
         final output = _bounded(result.output.trim(), laneLimit);
         remainingEvidenceChars -= output.length;
+        final sources = _structuredSources(result);
+        final failureReason = result.metadata['failure_reason'] as String?;
+
         evidence.add(
           WorkshopWebResearchEvidence(
             lane: entry.key,
             query: entry.value,
             output: output,
             success: result.success && output.isNotEmpty,
+            sources: sources,
           ),
         );
         RuntimeEventLog.instance.emit(
           '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
           'lane=${entry.key.name} status=${result.success ? 'completed' : 'unavailable'} '
-          'evidence_chars=${output.length} '
+          'evidence_chars=${output.length} sources=${sources.length} '
           'remaining_budget_chars=$remainingEvidenceChars',
         );
+
+        // A query-specific empty result should not suppress the other research
+        // lanes. A timeout/provider failure, however, is strong evidence that
+        // Internet/search is unavailable right now; fail fast instead of
+        // spending phone battery and user time on two more predictable waits.
+        if (!result.success &&
+            (failureReason == 'timeout' || failureReason == 'failure')) {
+          RuntimeEventLog.instance.emit(
+            '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
+            'status=circuit_break reason=$failureReason '
+            'after_lane=${entry.key.name}',
+          );
+          break;
+        }
       } catch (error) {
         evidence.add(
           WorkshopWebResearchEvidence(
@@ -202,6 +241,12 @@ final class WorkshopWebResearchService {
           'lane=${entry.key.name} status=failed '
           'error_type=${error.runtimeType}',
         );
+        RuntimeEventLog.instance.emit(
+          '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
+          'status=circuit_break reason=tool_exception '
+          'after_lane=${entry.key.name}',
+        );
+        break;
       }
     }
 
@@ -218,6 +263,39 @@ final class WorkshopWebResearchService {
     const maxSubjectChars = 320;
     if (combined.length <= maxSubjectChars) return combined;
     return combined.substring(0, maxSubjectChars).trimRight();
+  }
+
+  List<WorkshopWebResearchSource> _structuredSources(ToolResult result) {
+    final rawResults = result.metadata['results'];
+    if (rawResults is! List) return const <WorkshopWebResearchSource>[];
+
+    final sources = <WorkshopWebResearchSource>[];
+    final seenUrls = <String>{};
+    for (final item in rawResults) {
+      if (item is! Map) continue;
+
+      final title = item['title']?.toString().trim() ?? '';
+      final url = item['url']?.toString().trim() ?? '';
+      final snippet = item['snippet']?.toString().trim() ?? '';
+      final uri = Uri.tryParse(url);
+      if (uri == null ||
+          (uri.scheme != 'http' && uri.scheme != 'https') ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty ||
+          !seenUrls.add(uri.toString())) {
+        continue;
+      }
+
+      sources.add(
+        WorkshopWebResearchSource(
+          title: title,
+          url: uri.toString(),
+          snippet: snippet,
+        ),
+      );
+    }
+
+    return List<WorkshopWebResearchSource>.unmodifiable(sources);
   }
 
   String _bounded(String value, int limit) {
