@@ -28,7 +28,7 @@ final class WorkshopProposalValidationRunner {
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     if (session.status != WorkspaceSessionStatus.validation) {

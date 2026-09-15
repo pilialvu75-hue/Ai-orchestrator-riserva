@@ -26,7 +26,7 @@ final class WorkshopPreparedTaskInferenceRunner {
   Future<WorkshopTaskInferenceResult> run({
     required String taskId,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     final session = _preparedSession(taskId);
@@ -45,7 +45,7 @@ final class WorkshopPreparedTaskInferenceRunner {
     required String taskId,
     required WorkshopResumeContext resumeContext,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     final session = _preparedSession(taskId);

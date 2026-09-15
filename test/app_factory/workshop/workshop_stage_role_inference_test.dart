@@ -99,6 +99,53 @@ void main() {
       expect(gateways[AppAiRole.reviewer]!.calls, 1);
     });
 
+    test('defaults runtime requests to network-capable mode', () async {
+      final provider = _RecordingProvider();
+      final gateways = <AppAiRole, WorkshopInferenceGateway>{
+        for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+          role: WorkshopInferenceGateway(provider: provider),
+      };
+
+      final coordinator = WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      );
+
+      final result = await coordinator.complete(
+        stage: WorkshopStage.analysis,
+        prompt: 'analyse with network tools available',
+      );
+
+      expect(result.text, 'ok');
+      expect(provider.lastRequest, isNotNull);
+      expect(provider.lastRequest!.isOffline, isFalse);
+    });
+
+    test('preserves explicit offline mode down to the runtime request', () async {
+      final provider = _RecordingProvider();
+      final gateways = <AppAiRole, WorkshopInferenceGateway>{
+        for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+          role: WorkshopInferenceGateway(provider: provider),
+      };
+
+      final coordinator = WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      );
+
+      final result = await coordinator.complete(
+        stage: WorkshopStage.analysis,
+        prompt: 'analyse fully offline',
+        isOffline: true,
+      );
+
+      expect(result.text, 'ok');
+      expect(provider.lastRequest, isNotNull);
+      expect(provider.lastRequest!.isOffline, isTrue);
+    });
+
     test('forwards Cantiere execution identity through stage routing', () async {
       final provider = _RecordingProvider();
       final gateways = <AppAiRole, WorkshopInferenceGateway>{
@@ -133,6 +180,7 @@ void main() {
       expect(provider.lastRequest!.executionId, 'execution-stable');
       expect(provider.lastRequest!.attemptId, 'attempt-4');
       expect(provider.lastRequest!.checkpointId, 'checkpoint-3');
+      expect(provider.lastRequest!.isOffline, isFalse);
     });
   });
 }
@@ -151,7 +199,7 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
