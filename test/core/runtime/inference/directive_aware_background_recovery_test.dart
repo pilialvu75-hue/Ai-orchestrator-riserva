@@ -85,7 +85,10 @@ void main() {
         .toList();
 
     expect(chunks.first.runtimeNotice, contains('interrupted'));
-    expect(chunks.first.runtimeNotice, contains('not retried automatically'));
+    expect(chunks.first.runtimeNotice, contains('not replayed automatically'));
+    expect(chunks.first.runtimeNotice, contains('Gemini'));
+    expect(chunks.first.runtimeNotice, contains('retry it explicitly'));
+    expect(chunks.first.runtimeNotice, contains('recurring free-tier route'));
     expect(chunks.last.text, 'new response');
     expect(cloudCalls, 1, reason: 'Only the new request may be executed.');
     expect(localCalls, 0);

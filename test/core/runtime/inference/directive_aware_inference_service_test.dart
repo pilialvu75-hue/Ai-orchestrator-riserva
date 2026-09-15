@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_journal.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
@@ -15,6 +18,7 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -151,6 +155,69 @@ void main() {
       (methodCalls.first.arguments as Map<Object?, Object?>)['provider'],
       'gemini',
     );
+  });
+
+  test('cloudOnly journals concrete AUTO provider before stream settles',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = await SharedPreferences.getInstance();
+    final journal = CloudBackgroundExecutionJournal(
+      preferences: preferences,
+      bootId: 'boot-current',
+    );
+
+    final localProvider = _CountingLocalRuntimeProvider(onStream: () {});
+    final cloudProvider = CloudRuntimeProvider(
+      sendQuery: (String provider, AiRequest request) async => AiResponse(
+        text: 'cloud answer',
+        model: 'test-cloud-model',
+        tokensUsed: 4,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      ),
+      supportedProviders: () => const <String>['gemini'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([providerName]) => 'Gemini',
+      automaticUseAllowed: (_) => true,
+    );
+
+    final service = DirectiveAwareInferenceService(
+      loadSelectedModel: () async => null,
+      loadRuntimeMode: () async => AiRuntimeMode.cloud,
+      runtimeProvider: localProvider,
+      cloudRuntimeProvider: cloudProvider,
+      sessionManager: RuntimeSessionManager(),
+      backgroundExecutionJournal: journal,
+    );
+
+    final iterator = StreamIterator<InferenceResponse>(
+      service.stream(
+        const InferenceRequest(
+          sessionId: 'background-auto-provider',
+          prompt: 'hello',
+          requestId: 'request-auto-provider',
+          routeDirective: InferenceRouteDirective.cloudOnly,
+        ),
+      ),
+    );
+
+    InferenceResponse? providerChunk;
+    while (await iterator.moveNext()) {
+      if (iterator.current.providerId != null) {
+        providerChunk = iterator.current;
+        break;
+      }
+    }
+
+    expect(providerChunk, isNotNull);
+    expect(providerChunk!.providerId, 'gemini');
+
+    final inFlight = await journal.snapshot();
+    expect(inFlight, hasLength(1));
+    expect(inFlight.single.providerHint, 'auto');
+    expect(inFlight.single.providerId, 'gemini');
+
+    while (await iterator.moveNext()) {}
+    expect(await journal.snapshot(), isEmpty);
   });
 }
 

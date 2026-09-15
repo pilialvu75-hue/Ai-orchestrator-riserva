@@ -40,6 +40,7 @@ void main() {
     expect(record!.requestId, 'request-1');
     expect(record.projectId, 'project-1');
     expect(record.checkpointId, 'checkpoint-3');
+    expect(record.providerId, 'gemini');
 
     final raw = preferences.getString(storageKey);
     expect(raw, isNotNull);
@@ -47,6 +48,49 @@ void main() {
     expect(raw, contains('gemini'));
     expect(raw, isNot(contains('SECRET USER PROMPT')));
     expect(raw, isNot(contains('SECRET SYSTEM PROMPT')));
+  });
+
+  test('AUTO request persists concrete provider once runtime exposes it',
+      () async {
+    final preferences = await SharedPreferences.getInstance();
+    final firstBoot = CloudBackgroundExecutionJournal(
+      preferences: preferences,
+      bootId: 'boot-a',
+      clock: () => DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+
+    final record = await firstBoot.begin(
+      request: const InferenceRequest(
+        sessionId: 'session-auto',
+        prompt: 'secret prompt',
+        requestId: 'request-auto',
+        routeDirective: InferenceRouteDirective.cloudOnly,
+      ),
+      providerHint: 'auto',
+    );
+
+    expect(record, isNotNull);
+    expect(record!.providerId, isNull);
+
+    await firstBoot.observeProvider(record, 'openRouter');
+    final snapshot = await firstBoot.snapshot();
+    expect(snapshot, hasLength(1));
+    expect(snapshot.single.providerHint, 'auto');
+    expect(snapshot.single.providerId, 'openRouter');
+
+    final raw = preferences.getString(storageKey);
+    expect(raw, contains('openRouter'));
+    expect(raw, isNot(contains('secret prompt')));
+
+    final secondBoot = CloudBackgroundExecutionJournal(
+      preferences: preferences,
+      bootId: 'boot-b',
+      clock: () => DateTime.fromMillisecondsSinceEpoch(2000),
+    );
+    final interrupted =
+        await secondBoot.consumeInterruptedForSession('session-auto');
+    expect(interrupted, hasLength(1));
+    expect(interrupted.single.providerId, 'openRouter');
   });
 
   test('new process boot consumes an unfinished request once', () async {
