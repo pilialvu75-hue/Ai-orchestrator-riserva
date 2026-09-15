@@ -17,6 +17,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:ai_orchestrator/features/chat/data/repositories/cloud_web_enriching_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
@@ -64,6 +65,7 @@ abstract final class CloudRoutingBootstrap {
         runtimeProvider: sl<LocalRuntimeProvider>(),
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
         sessionManager: sl<RuntimeSessionManager>(),
+        webSearchTool: sl<WebSearchTool>(),
         backgroundExecutionLeaseService:
             CloudBackgroundExecutionLeaseService(),
       ),
@@ -90,21 +92,25 @@ abstract final class CloudRoutingBootstrap {
     sl.registerLazySingleton<ChatRepository>(
       () => PromptResolvingChatRepository(
         systemPromptService: assistantSystemPromptService,
-        delegate: ChatRepositoryImpl(
-          localDataSource: sl<ChatLocalDataSource>(),
-          conversationMemoryService: sl<ConversationMemoryService>(),
-          inferenceService: sl<InferenceService>(),
-          runtimeSettingsService: sl<AiRuntimeSettingsService>(),
-          // Important: do not resolve Orchestrator here. Explicit Cloud chat
-          // must remain constructible and usable even if Hannibal is unavailable.
-          orchestratorProvider: () => sl<Orchestrator>(),
+        delegate: CloudWebEnrichingChatRepository(
+          runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
+          webSearchTool: sl<WebSearchTool>(),
+          delegate: ChatRepositoryImpl(
+            localDataSource: sl<ChatLocalDataSource>(),
+            conversationMemoryService: sl<ConversationMemoryService>(),
+            inferenceService: sl<InferenceService>(),
+            runtimeSettingsService: sl<AiRuntimeSettingsService>(),
+            // Important: do not resolve Orchestrator here. Explicit Cloud chat
+            // must remain constructible and usable even if Hannibal is unavailable.
+            orchestratorProvider: () => sl<Orchestrator>(),
+          ),
         ),
       ),
     );
 
     debugPrint(
-      '[CLOUD_ROUTING] direct Cloud safety path, Hybrid Hannibal routing, '
-      'and Cloud background execution lease wired',
+      '[CLOUD_ROUTING] direct Cloud safety path, Assistant web enrichment, '
+      'Hybrid Hannibal routing, and Cloud background execution lease wired',
     );
   }
 
