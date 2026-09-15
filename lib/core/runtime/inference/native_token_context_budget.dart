@@ -1,5 +1,7 @@
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
+typedef NativeTokenBudgetTurn = ChatTurn;
+
 class NativeTokenContextSelection {
   const NativeTokenContextSelection({
     required this.context,
