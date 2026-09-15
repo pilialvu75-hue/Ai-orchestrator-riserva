@@ -24,7 +24,7 @@ class _AndroidFfiSessionStateIsolator {
       return request.prompt.trim();
     }
 
-    String composeWithContext(List<ChatTurn> context) {
+    String composeWithContext(List<NativeTokenBudgetTurn> context) {
       return LocalPromptTemplates.compose(
         modelId: modelId,
         prompt: request.prompt,
