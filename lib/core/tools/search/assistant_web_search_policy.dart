@@ -15,7 +15,9 @@ abstract final class AssistantWebSearchPolicy {
     final value = prompt.trim().toLowerCase();
     if (value.isEmpty) return false;
 
-    return _explicitWebIntent(value) || _timeSensitiveIntent(value);
+    return _explicitWebIntent(value) ||
+        _timeSensitiveIntent(value) ||
+        _evidenceDrivenIntent(value);
   }
 
   /// Returns true when a previous Assistant layer already supplied either live
@@ -163,5 +165,103 @@ abstract final class AssistantWebSearchPolicy {
     ];
 
     return markers.any(value.contains);
+  }
+
+  /// Some questions are not explicitly time-sensitive but still benefit from
+  /// external evidence. Rankings, recommendations, comparisons, reviews and
+  /// community opinion are examples: answering only from model memory can
+  /// produce a plausible response without the evidence the user actually
+  /// asked for.
+  ///
+  /// Keep this list deliberately narrower than generic quality words such as
+  /// "good" or "buono" so ordinary explanatory prompts do not trigger a Web
+  /// lookup unnecessarily.
+  static bool _evidenceDrivenIntent(String value) {
+    const phrases = <String>[
+      // Italian.
+      'il migliore',
+      'la migliore',
+      'i migliori',
+      'le migliori',
+      'miglior ',
+      'top ',
+      'recensione',
+      'recensioni',
+      'opinione',
+      'opinioni',
+      'pareri',
+      'confronta ',
+      'confronto ',
+      'comparazione',
+      'consigliami ',
+      'mi consigli ',
+      'raccomanda ',
+      'raccomandazione',
+      'vale la pena',
+      'quale scegliere',
+      'forum',
+      'reddit',
+
+      // English.
+      'the best',
+      'best ',
+      'top ',
+      'review ',
+      'reviews',
+      'opinion',
+      'opinions',
+      'compare ',
+      'comparison',
+      'recommend ',
+      'recommendation',
+      'worth it',
+      'which should i choose',
+
+      // French.
+      'le meilleur',
+      'la meilleure',
+      'les meilleurs',
+      'les meilleures',
+      'avis ',
+      'comparer ',
+      'comparatif',
+      'comparaison',
+      'recommande ',
+      'recommandation',
+      'vaut le coup',
+      'lequel choisir',
+      'laquelle choisir',
+
+      // Spanish.
+      'el mejor',
+      'la mejor',
+      'los mejores',
+      'las mejores',
+      'reseña',
+      'reseñas',
+      'opinión',
+      'opiniones',
+      'comparar ',
+      'comparación',
+      'recomienda ',
+      'recomendación',
+      'vale la pena',
+      'cuál elegir',
+    ];
+
+    if (phrases.any(value.contains)) return true;
+
+    // Catch sentence-start forms that intentionally end with a space above,
+    // without broadening matches to words such as "migliorare".
+    const startPrefixes = <String>[
+      'miglior ',
+      'best ',
+      'top ',
+      'confronta ',
+      'compare ',
+      'comparer ',
+      'comparar ',
+    ];
+    return startPrefixes.any(value.startsWith);
   }
 }
