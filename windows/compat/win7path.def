@@ -1,0 +1,6 @@
+LIBRARY win7path-compatibility-shim
+EXPORTS
+  PathAllocCanonicalize=CompatPathAllocCanonicalize
+  PathCchCombineEx=CompatPathCchCombineEx
+  PathCchRemoveFileSpec=CompatPathCchRemoveFileSpec
+  PathCchRemoveBackslash=CompatPathCchRemoveBackslash

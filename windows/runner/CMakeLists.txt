@@ -26,4 +26,26 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
-add_dependencies(${BINARY_NAME} flutter_assemble)
+add_dependencies(
+  ${BINARY_NAME}
+  flutter_assemble
+  ws2fix
+  nt7fx
+  win7krnl
+  win7path
+  win7sync
+  dxg7fix
+)
+
+# Current Flutter/Dart desktop binaries contain loader-level dependencies that
+# first appeared after Windows 7: GetHostNameW, growable unwind tables,
+# GetCurrentThreadStackLimits, PathCch and WaitOnAddress. Redirect exactly the
+# corresponding import modules to application-local shims. Every shim delegates
+# to the native implementation on Windows 8+ and only uses a fallback on Win7.
+add_custom_command(TARGET ${BINARY_NAME} PRE_LINK
+  COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_SOURCE_DIR}/../tool/patch_flutter_windows_win7.ps1"
+    -FlutterDll "${FLUTTER_LIBRARY}"
+  COMMENT "Applying Windows 7 compatibility redirects to Flutter engine"
+  VERBATIM
+)

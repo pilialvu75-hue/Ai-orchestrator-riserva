@@ -1,0 +1,8 @@
+LIBRARY nt7fx
+EXPORTS
+  RtlAddGrowableFunctionTable=CompatRtlAddGrowableFunctionTable
+  RtlDeleteGrowableFunctionTable=CompatRtlDeleteGrowableFunctionTable
+  RtlCaptureStackBackTrace=ntdll.RtlCaptureStackBackTrace
+  RtlUnwind=ntdll.RtlUnwind
+  RtlUnwindEx=ntdll.RtlUnwindEx
+  VerSetConditionMask=ntdll.VerSetConditionMask

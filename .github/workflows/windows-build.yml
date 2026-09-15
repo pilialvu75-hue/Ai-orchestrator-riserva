@@ -9,6 +9,7 @@ on:
     paths:
       - 'lib/**'
       - 'windows/**'
+      - 'tool/**'
       - 'assets/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
@@ -105,6 +106,12 @@ jobs:
       - name: Build Windows release
         shell: pwsh
         run: flutter build windows --release
+
+      - name: Apply Windows 7 bundle compatibility
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $releaseDir
 
       - name: Prepare portable Windows bundle
         id: bundle
