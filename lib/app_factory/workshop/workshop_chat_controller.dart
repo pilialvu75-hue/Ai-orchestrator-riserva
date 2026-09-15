@@ -180,9 +180,14 @@ final class WorkshopChatController extends ChangeNotifier {
       }
 
       if (result.hasError) {
-        _lastError =
-            result.errorMessage ??
-                'Il modello del Cantiere ha restituito un errore.';
+        final rawError = result.errorMessage;
+        if (_isTechnicalRuntimeError(rawError)) {
+          // Preserve the protocol-level runtime evidence for diagnostics while
+          // keeping the conversational UI user-safe and readable.
+          _lastRuntimeNotice ??= rawError!.trim();
+        }
+
+        _lastError = _userFacingInferenceError(rawError);
 
         _removeLastUserTurn();
 
@@ -206,9 +211,9 @@ final class WorkshopChatController extends ChangeNotifier {
       _messages.add(assistantTurn);
 
       return assistantTurn;
-    } catch (error) {
+    } catch (_) {
       _lastError =
-          'Errore nella conversazione del Cantiere: $error';
+          'Errore nella conversazione del Cantiere. Riprova.';
 
       _removeLastUserTurn();
 
@@ -216,6 +221,40 @@ final class WorkshopChatController extends ChangeNotifier {
     } finally {
       _setBusy(false);
     }
+  }
+
+  static bool _isTechnicalRuntimeError(String? rawError) {
+    final normalized = rawError?.trim();
+    return normalized != null &&
+        normalized.startsWith('AI_RUNTIME_ERROR|');
+  }
+
+  static String _userFacingInferenceError(String? rawError) {
+    final normalized = rawError?.trim();
+
+    if (normalized == null || normalized.isEmpty) {
+      return 'Il modello del Cantiere ha restituito un errore. Riprova.';
+    }
+
+    if (!normalized.startsWith('AI_RUNTIME_ERROR|')) {
+      return normalized;
+    }
+
+    if (normalized.contains('|stage=stalled|')) {
+      return 'Il modello del Cantiere si e fermato durante l\'elaborazione. '
+          'Riprova.';
+    }
+
+    if (normalized.contains('|stage=timeout|')) {
+      return 'Il modello del Cantiere ha impiegato troppo tempo a rispondere. '
+          'Riprova.';
+    }
+
+    if (normalized.contains('|stage=cancelled|')) {
+      return 'L\'elaborazione del Cantiere e stata annullata.';
+    }
+
+    return 'Il runtime del Cantiere non ha completato la risposta. Riprova.';
   }
 
   /// Aggiunge un turno di sistema visibile nella conversazione.
