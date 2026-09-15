@@ -76,7 +76,7 @@ final class CloudBackgroundRecoveryPolicy {
     final definition = CloudProviderCatalog.definitionFor(providerId);
     final displayName = definition?.displayName ?? providerId;
     final isProvenRecurringFree =
-        definition?.costClass == CloudProviderCostClass.freeTier;
+        definition?.accessClass == CloudProviderAccessClass.recurringFreeTier;
 
     if (isProvenRecurringFree) {
       return CloudBackgroundRecoveryDecision(
