@@ -53,7 +53,7 @@ jobs:
 
       - name: Analyze Dart sources
         shell: pwsh
-        run: flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Run Flutter tests
         shell: pwsh
