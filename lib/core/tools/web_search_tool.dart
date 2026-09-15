@@ -102,7 +102,7 @@ class WebSearchTool implements Tool {
         );
       }
 
-      final limited = results.take(limit);
+      final limited = results.take(limit).toList(growable: false);
       RuntimeEventLog.instance.emit(
         '[WEBSEARCH_RESULTS_RECEIVED] count=${results.length} empty=false',
       );
@@ -126,6 +126,17 @@ class WebSearchTool implements Tool {
         toolId: id,
         output: buffer.toString().trimRight(),
         success: true,
+        metadata: <String, Object?>{
+          'results': limited
+              .map(
+                (result) => <String, Object?>{
+                  'title': result.title,
+                  'url': result.url,
+                  'snippet': result.snippet,
+                },
+              )
+              .toList(growable: false),
+        },
       );
     } on TimeoutException catch (error) {
       RuntimeEventLog.instance.emit(
