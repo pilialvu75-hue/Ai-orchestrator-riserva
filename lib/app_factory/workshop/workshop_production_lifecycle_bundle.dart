@@ -18,6 +18,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snaps
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 
@@ -71,11 +73,14 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
     WorkshopLibraryReuseService? libraryReuseService,
+    WorkshopWebResearchService? webResearchService,
     Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
         onReuseSourceSnapshotsChanged,
     String? reuseSnapshotsRootPath,
     String? workspaceRootPath,
   }) {
+    final resolvedWebResearchService =
+        webResearchService ?? WorkshopWebResearchFactory.create();
     final orchestratorGateway = roleGateways?[AppAiRole.workshopOrchestrator];
     final engine = WorkshopFactory.createEngine(
       projectExecutor: projectExecutor,
@@ -92,6 +97,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     final preflight = WorkshopPreflightInferencePipeline(
       inference: stageInference,
       reuseLibrary: reuseLibrary,
+      webResearchService: resolvedWebResearchService,
       onReuseLibraryChanged: onReuseLibraryChanged,
     );
     final inferenceRunner =
@@ -142,6 +148,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
     WorkshopLibraryReuseService? libraryReuseService,
+    WorkshopWebResearchService? webResearchService,
     Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
         onReuseSourceSnapshotsChanged,
     String? reuseSnapshotsRootPath,
@@ -174,6 +181,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseCaptureService: reuseCaptureService,
       reuseSourceSnapshotService: reuseSourceSnapshotService,
       libraryReuseService: libraryReuseService,
+      webResearchService: webResearchService,
       onReuseSourceSnapshotsChanged: onReuseSourceSnapshotsChanged,
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       workspaceRootPath: normalizedWorkspaceRootPath,
@@ -195,6 +203,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     WorkshopReuseSourceSnapshotService reuseSourceSnapshotService =
         const WorkshopReuseSourceSnapshotService(),
     WorkshopLibraryReadClient? libraryReadClient,
+    WorkshopWebResearchService? webResearchService,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) async {
@@ -223,6 +232,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       libraryReuseService: WorkshopLibraryReuseService(
         client: resolvedLibraryClient,
       ),
+      webResearchService: webResearchService,
       onReuseSourceSnapshotsChanged: snapshotStore.save,
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       includeHiddenFiles: includeHiddenFiles,
