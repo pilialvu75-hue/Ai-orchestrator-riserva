@@ -36,7 +36,7 @@ final class WorkshopProposalImplementationRunner {
   Future<WorkshopChangeProposal> run({
     required WorkspaceSession session,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     _validateSession(session, preflight: preflight);
@@ -62,7 +62,7 @@ final class WorkshopProposalImplementationRunner {
     required WorkspaceSession session,
     required WorkshopResumeContext resumeContext,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     _validateSession(session, preflight: preflight);
