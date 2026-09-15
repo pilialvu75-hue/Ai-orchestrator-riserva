@@ -10,21 +10,27 @@ import android.os.Build
 import android.os.IBinder
 
 /**
- * Foreground process-liveness lease for user-started Cloud inference.
+ * Foreground process-liveness lease shared by user-started Cloud and Cantiere
+ * work.
  *
- * The actual HTTP/inference pipeline remains owned by Flutter. This service
- * only raises the Android process priority while an already-authorized Cloud
- * request is running, so moving the app to the background or turning the
- * screen off does not immediately make the request disposable.
+ * The actual inference/build pipelines remain owned by Flutter. This service
+ * only raises the Android process priority while already-authorized work is
+ * running, so moving the app to the background or turning the screen off does
+ * not immediately make that work disposable.
+ *
+ * The historical class/channel name is retained so existing Cloud callers keep
+ * working without a migration or a second Android foreground service.
  */
 class CloudBackgroundExecutionService : Service() {
     companion object {
         const val ACTION_START = "com.aiorchestrator.cloud_background.START"
         const val ACTION_STOP = "com.aiorchestrator.cloud_background.STOP"
         const val EXTRA_ACTIVE_LEASES = "activeLeases"
+        const val EXTRA_CLOUD_LEASES = "cloudLeases"
+        const val EXTRA_WORKSHOP_LEASES = "workshopLeases"
 
         private const val CHANNEL_ID = "ai_orchestrator_cloud_work"
-        private const val CHANNEL_NAME = "Cloud AI in background"
+        private const val CHANNEL_NAME = "AI Orchestrator in background"
         private const val NOTIFICATION_ID = 7312
     }
 
@@ -37,10 +43,19 @@ class CloudBackgroundExecutionService : Service() {
         when (intent?.action) {
             ACTION_STOP -> stopServiceForeground()
             ACTION_START, null -> {
-                val activeLeases = intent?.getIntExtra(EXTRA_ACTIVE_LEASES, 1) ?: 1
+                val fallbackActive =
+                    intent?.getIntExtra(EXTRA_ACTIVE_LEASES, 1)?.coerceAtLeast(1) ?: 1
+                val cloudLeases = intent
+                    ?.getIntExtra(EXTRA_CLOUD_LEASES, fallbackActive)
+                    ?.coerceAtLeast(0)
+                    ?: fallbackActive
+                val workshopLeases = intent
+                    ?.getIntExtra(EXTRA_WORKSHOP_LEASES, 0)
+                    ?.coerceAtLeast(0)
+                    ?: 0
                 startForeground(
                     NOTIFICATION_ID,
-                    buildNotification(activeLeases.coerceAtLeast(1)),
+                    buildNotification(cloudLeases, workshopLeases),
                 )
             }
         }
@@ -57,13 +72,17 @@ class CloudBackgroundExecutionService : Service() {
             CHANNEL_NAME,
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Mantiene attiva una risposta Cloud autorizzata mentre l'app è in background."
+            description =
+                "Mantiene attivo il lavoro AI autorizzato mentre l'app è in background."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(activeLeases: Int): Notification {
+    private fun buildNotification(
+        cloudLeases: Int,
+        workshopLeases: Int,
+    ): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             ?: Intent(this, MainActivity::class.java)
         val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
@@ -78,11 +97,34 @@ class CloudBackgroundExecutionService : Service() {
             launchIntent,
             pendingFlags,
         )
-        val text = if (activeLeases > 1) {
-            "AI Orchestrator sta completando $activeLeases richieste Cloud."
-        } else {
-            "AI Orchestrator sta completando una risposta Cloud."
+
+        val title: String
+        val text: String
+        when {
+            workshopLeases > 0 && cloudLeases == 0 -> {
+                title = "Cantiere in esecuzione"
+                text = if (workshopLeases > 1) {
+                    "AI Orchestrator sta completando $workshopLeases attività del Cantiere."
+                } else {
+                    "AI Orchestrator sta completando un'attività del Cantiere."
+                }
+            }
+
+            cloudLeases > 0 && workshopLeases == 0 -> {
+                title = "Elaborazione Cloud in corso"
+                text = if (cloudLeases > 1) {
+                    "AI Orchestrator sta completando $cloudLeases richieste Cloud."
+                } else {
+                    "AI Orchestrator sta completando una risposta Cloud."
+                }
+            }
+
+            else -> {
+                title = "AI Orchestrator in esecuzione"
+                text = "AI Orchestrator sta completando attività Cloud e del Cantiere."
+            }
         }
+
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -91,7 +133,7 @@ class CloudBackgroundExecutionService : Service() {
         }
         return builder
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Elaborazione Cloud in corso")
+            .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
