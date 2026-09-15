@@ -3,6 +3,7 @@ import 'package:get_it/get_it.dart';
 
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
+import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
@@ -78,7 +79,7 @@ abstract final class CloudRoutingBootstrap {
     );
 
     sl.registerLazySingleton<Orchestrator>(
-      () => Orchestrator(
+      () => AssistantWebAwareOrchestrator(
         intentAnalyzer: sl<IntentAnalyzer>(),
         executor: sl<ExecutionEngine>(),
         inferenceService: sl<InferenceService>(),
@@ -110,7 +111,7 @@ abstract final class CloudRoutingBootstrap {
 
     debugPrint(
       '[CLOUD_ROUTING] direct Cloud safety path, Assistant web enrichment, '
-      'Hybrid Hannibal routing, and Cloud background execution lease wired',
+      'Hybrid web-aware Hannibal routing, and Cloud background execution lease wired',
     );
   }
 
