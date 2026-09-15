@@ -59,6 +59,7 @@ final class WorkshopPreflightInferencePipeline {
     final webEvidence = await _researchEvidence(
       request: request,
       isOffline: isOffline,
+      hasStrongLocalReuse: reuseDecision.shouldReuse,
     );
 
     final WorkshopInferenceResult analysis;
@@ -157,6 +158,7 @@ final class WorkshopPreflightInferencePipeline {
   Future<WorkshopWebEvidencePack> _researchEvidence({
     required WorkshopRequest request,
     required bool isOffline,
+    required bool hasStrongLocalReuse,
   }) async {
     final service = _webResearchService;
     if (service == null) return const WorkshopWebEvidencePack();
@@ -165,6 +167,7 @@ final class WorkshopPreflightInferencePipeline {
       return await service.research(
         request: request,
         isOffline: isOffline,
+        hasStrongLocalReuse: hasStrongLocalReuse,
       );
     } catch (error) {
       // Research is an optional quality layer. A bug/provider failure must not
