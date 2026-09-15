@@ -149,7 +149,6 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     Future<void> Function(WorkshopReuseSourceSnapshotIndex)?
         onReuseSourceSnapshotsChanged,
     String? reuseSnapshotsRootPath,
-    String? workspaceRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
   }) {
