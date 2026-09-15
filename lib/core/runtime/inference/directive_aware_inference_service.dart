@@ -1,8 +1,10 @@
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_journal.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
@@ -34,7 +36,9 @@ final class DirectiveAwareInferenceService extends InferenceService {
     required RuntimeSessionManager sessionManager,
     Tool? webSearchTool,
     CloudBackgroundExecutionLeaseService? backgroundExecutionLeaseService,
+    CloudBackgroundExecutionJournal? backgroundExecutionJournal,
   })  : _backgroundExecutionLeaseService = backgroundExecutionLeaseService,
+        _backgroundExecutionJournal = backgroundExecutionJournal,
         _localOnlyService = InferenceService(
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: () async => AiRuntimeMode.local,
@@ -67,6 +71,7 @@ final class DirectiveAwareInferenceService extends InferenceService {
   final InferenceService _localOnlyService;
   final InferenceService _cloudOnlyService;
   final CloudBackgroundExecutionLeaseService? _backgroundExecutionLeaseService;
+  final CloudBackgroundExecutionJournal? _backgroundExecutionJournal;
 
   @override
   TokenStream stream(InferenceRequest request) {
@@ -76,31 +81,59 @@ final class DirectiveAwareInferenceService extends InferenceService {
       case InferenceRouteDirective.localOnly:
         return _localOnlyService.stream(request);
       case InferenceRouteDirective.cloudOnly:
-        return _withCloudBackgroundLease(
+        return _withCloudBackgroundExecution(
           request,
           _cloudOnlyService.stream(request),
         );
     }
   }
 
-  TokenStream _withCloudBackgroundLease(
+  TokenStream _withCloudBackgroundExecution(
     InferenceRequest request,
     TokenStream delegate,
   ) async* {
-    final service = _backgroundExecutionLeaseService;
-    if (service == null) {
-      yield* delegate;
-      return;
+    final journal = _backgroundExecutionJournal;
+    final interrupted = journal == null
+        ? const <CloudBackgroundExecutionRecord>[]
+        : await journal.consumeInterruptedForSession(request.sessionId);
+
+    if (interrupted.isNotEmpty) {
+      yield InferenceResponse.notice(
+        interrupted.length == 1
+            ? 'A previous Cloud response was interrupted by an app/process restart. '
+                'It was not retried automatically to avoid duplicate provider charges.'
+            : '${interrupted.length} previous Cloud responses were interrupted by an '
+                'app/process restart. They were not retried automatically to avoid '
+                'duplicate provider charges.',
+        providerId: request.cloudProviderId,
+      );
     }
 
-    final lease = await service.acquire(
-      sessionId: request.sessionId,
-      providerHint: request.cloudProviderId ?? 'auto',
-    );
+    final providerHint = request.cloudProviderId ?? 'auto';
+    final journalRecord = journal == null
+        ? null
+        : await journal.begin(
+            request: request,
+            providerHint: providerHint,
+          );
+
+    final leaseService = _backgroundExecutionLeaseService;
+    final lease = leaseService == null
+        ? null
+        : await leaseService.acquire(
+            sessionId: request.sessionId,
+            providerHint: providerHint,
+          );
+
     try {
       yield* delegate;
     } finally {
-      await lease.release();
+      if (lease != null) {
+        await lease.release();
+      }
+      if (journal != null) {
+        await journal.settle(journalRecord);
+      }
     }
   }
 
