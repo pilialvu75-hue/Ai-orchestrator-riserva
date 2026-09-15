@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <dxgi.h>
 
+#include <string>
+
 namespace {
 using CreateDXGIFactory2Fn = HRESULT (WINAPI*)(UINT, REFIID, void**);
 using CreateDXGIFactory1Fn = HRESULT (WINAPI*)(REFIID, void**);
