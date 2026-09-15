@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_servi
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_source_reader.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_source_verification.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_verification_inference_adapter.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 
 void main() {
@@ -178,8 +179,7 @@ void main() {
     );
   });
 
-  test('failed inference and cancelled work yield no semantic evidence',
-      () async {
+  test('failed inference yields no semantic evidence', () async {
     final completion = _Completion(<String>['ignored'], successful: false);
     final adapter = WorkshopWebVerificationInferenceAdapter(
       completion: completion.call,
@@ -228,7 +228,7 @@ final class _Completion {
 
   Future<WorkshopInferenceResult> call(
     WorkshopVerificationInferencePrompt request,
-    dynamic cancellationToken,
+    CancellationToken? cancellationToken,
   ) async {
     requests.add(request);
     final index = calls++;
@@ -237,7 +237,7 @@ final class _Completion {
       text: text,
       terminalState: successful
           ? InferenceTerminalState.success
-          : InferenceTerminalState.error,
+          : InferenceTerminalState.failed,
       errorMessage: successful ? null : 'simulated failure',
     );
   }
