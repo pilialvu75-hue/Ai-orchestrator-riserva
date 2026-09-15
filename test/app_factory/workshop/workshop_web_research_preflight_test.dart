@@ -157,6 +157,59 @@ void main() {
       expect(result.webEvidence.attempted, isTrue);
       expect(result.usedWebEvidence, isFalse);
     });
+
+    test('strong verified local reuse suppresses automatic greenfield research',
+        () async {
+      final tool = _RecordingSearchTool();
+      final service = WorkshopWebResearchService(webSearchTool: tool);
+      const request = WorkshopRequest(
+        id: 'reuse-first-recipe-app',
+        title: 'App di ricette',
+        instruction: 'Crea una nuova app di ricette.',
+        operation: WorkshopOperation.create,
+      );
+
+      expect(
+        service.shouldResearch(request, hasStrongLocalReuse: true),
+        isFalse,
+      );
+
+      final evidence = await service.research(
+        request: request,
+        hasStrongLocalReuse: true,
+      );
+
+      expect(evidence.attempted, isFalse);
+      expect(evidence.hasEvidence, isFalse);
+      expect(tool.queries, isEmpty);
+    });
+
+    test('explicit research intent overrides strong verified local reuse',
+        () async {
+      final tool = _RecordingSearchTool();
+      final service = WorkshopWebResearchService(webSearchTool: tool);
+      const request = WorkshopRequest(
+        id: 'reuse-plus-research',
+        title: 'App di ricette',
+        instruction:
+            'Crea una app di ricette e cerca sul web competitor, forum e recensioni.',
+        operation: WorkshopOperation.create,
+      );
+
+      expect(
+        service.shouldResearch(request, hasStrongLocalReuse: true),
+        isTrue,
+      );
+
+      final evidence = await service.research(
+        request: request,
+        hasStrongLocalReuse: true,
+      );
+
+      expect(evidence.attempted, isTrue);
+      expect(evidence.successfulLaneCount, 3);
+      expect(tool.queries, hasLength(3));
+    });
   });
 }
 
