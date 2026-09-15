@@ -68,14 +68,29 @@ final class WorkshopWebResearchService {
   const WorkshopWebResearchService({
     required Tool webSearchTool,
     this.maxResultsPerLane = 5,
-    this.maxCharsPerLane = 6000,
+    this.maxCharsPerLane = 2400,
+    this.maxTotalEvidenceChars = 6000,
   })  : assert(maxResultsPerLane > 0),
         assert(maxCharsPerLane > 0),
+        assert(maxTotalEvidenceChars > 0),
         _webSearchTool = webSearchTool;
 
   final Tool _webSearchTool;
   final int maxResultsPerLane;
+
+  /// Per-lane ceiling before evidence enters a model prompt.
+  ///
+  /// The Cantiere must remain useful on phones and other constrained hosts, so
+  /// Web research is intentionally compact rather than forwarding full search
+  /// result pages into medium local models.
   final int maxCharsPerLane;
+
+  /// Aggregate evidence ceiling across all research lanes.
+  ///
+  /// This keeps the default three-lane research pack around 6k characters of
+  /// external evidence, leaving substantial context room for the request,
+  /// Library evidence, reasoning and generated output on 4k-context models.
+  final int maxTotalEvidenceChars;
 
   bool hasExplicitResearchIntent(WorkshopRequest request) {
     final value = '${request.title} ${request.instruction} '
@@ -146,13 +161,19 @@ final class WorkshopWebResearchService {
     };
 
     final evidence = <WorkshopWebResearchEvidence>[];
+    var remainingEvidenceChars = maxTotalEvidenceChars;
+
     for (final entry in queries.entries) {
       try {
         final result = await _webSearchTool.execute(<String, dynamic>{
           'query': entry.value,
           'limit': maxResultsPerLane,
         });
-        final output = _bounded(result.output.trim());
+        final laneLimit = remainingEvidenceChars < maxCharsPerLane
+            ? remainingEvidenceChars
+            : maxCharsPerLane;
+        final output = _bounded(result.output.trim(), laneLimit);
+        remainingEvidenceChars -= output.length;
         evidence.add(
           WorkshopWebResearchEvidence(
             lane: entry.key,
@@ -164,7 +185,8 @@ final class WorkshopWebResearchService {
         RuntimeEventLog.instance.emit(
           '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
           'lane=${entry.key.name} status=${result.success ? 'completed' : 'unavailable'} '
-          'evidence_chars=${output.length}',
+          'evidence_chars=${output.length} '
+          'remaining_budget_chars=$remainingEvidenceChars',
         );
       } catch (error) {
         evidence.add(
@@ -198,8 +220,14 @@ final class WorkshopWebResearchService {
     return combined.substring(0, maxSubjectChars).trimRight();
   }
 
-  String _bounded(String value) {
-    if (value.length <= maxCharsPerLane) return value;
-    return '${value.substring(0, maxCharsPerLane).trimRight()}\n[truncated]';
+  String _bounded(String value, int limit) {
+    if (limit <= 0 || value.isEmpty) return '';
+    if (value.length <= limit) return value;
+
+    const marker = '\n[truncated]';
+    if (limit <= marker.length) return value.substring(0, limit);
+
+    final bodyLimit = limit - marker.length;
+    return '${value.substring(0, bodyLimit).trimRight()}$marker';
   }
 }
