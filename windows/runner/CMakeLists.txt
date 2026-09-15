@@ -34,6 +34,7 @@ add_dependencies(
   win7krnl
   win7path
   win7sync
+  dxg7fix
 )
 
 # Current Flutter/Dart desktop binaries contain loader-level dependencies that
