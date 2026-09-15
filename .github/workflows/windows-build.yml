@@ -25,9 +25,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-windows:
+  test-windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -58,6 +58,32 @@ jobs:
       - name: Run Flutter tests
         shell: pwsh
         run: flutter test
+
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter doctor -v
+
+      - name: Resolve Flutter dependencies
+        shell: pwsh
+        run: flutter pub get
 
       - name: Build Windows release
         shell: pwsh
