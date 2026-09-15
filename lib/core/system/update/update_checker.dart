@@ -19,16 +19,18 @@ class UpdateCheckResult {
   final String? errorMessage;
 }
 
-class _ReleaseApkAsset {
-  const _ReleaseApkAsset({
+class _ReleaseAsset {
+  const _ReleaseAsset({
     required this.name,
     required this.url,
     required this.sizeBytes,
+    this.sha256,
   });
 
   final String name;
   final String url;
   final int sizeBytes;
+  final String? sha256;
 }
 
 class UpdateChecker {
@@ -39,6 +41,7 @@ class UpdateChecker {
     required this.manifestUrl,
     required this.githubOwner,
     required this.githubRepo,
+    this.targetPlatform = UpdateTargetPlatform.android,
   })  : _httpClient = httpClient,
         _preferences = preferences,
         _comparator = comparator;
@@ -50,15 +53,19 @@ class UpdateChecker {
   final String manifestUrl;
   final String githubOwner;
   final String githubRepo;
+  final UpdateTargetPlatform targetPlatform;
 
   static const String _cachedManifestLegacyKey = 'system.update.cached_manifest';
   static const String _cachedManifestKeyPrefix = 'system.update.cached_manifest.v2';
+  static const String _windowsSetupAssetName = 'AI-Orchestrator-Setup-x64.exe';
 
   Future<UpdateCheckResult> checkLatestManifest({
     required ReleaseChannel preferredChannel,
     bool allowCachedFallback = true,
   }) async {
-    _logUpdateCheck('start preferred_channel=$preferredChannel');
+    _logUpdateCheck(
+      'start preferred_channel=$preferredChannel target=${targetPlatform.name}',
+    );
     _logVersion('version.json url: $manifestUrl');
     final errors = <String>[];
     try {
@@ -73,8 +80,11 @@ class UpdateChecker {
         fromGitHub,
       );
       if (remoteLatest != null) {
+        final artifact = remoteLatest.artifactFor(targetPlatform);
         _logVersion(
-          'Resolved latest manifest version=${remoteLatest.version} versionCode=${remoteLatest.versionCode ?? '-'} url=${remoteLatest.apkUrl}',
+          'Resolved latest manifest version=${remoteLatest.version} '
+          'versionCode=${remoteLatest.versionCode ?? '-'} '
+          'target=${targetPlatform.name} url=${artifact?.url ?? '-'}',
         );
         await _cacheManifest(remoteLatest);
         return UpdateCheckResult(manifest: remoteLatest, usedCache: false);
@@ -137,7 +147,8 @@ class UpdateChecker {
       final manifest = await _fetchRemoteManifest(preferredChannel);
       if (manifest != null) {
         _logVersion(
-          'Latest from version.json: version=${manifest.version} versionCode=${manifest.versionCode ?? '-'}',
+          'Latest from version.json: version=${manifest.version} '
+          'versionCode=${manifest.versionCode ?? '-'}',
         );
       }
       return manifest;
@@ -156,7 +167,8 @@ class UpdateChecker {
       final manifest = await _fetchFromGitHubReleases(preferredChannel);
       if (manifest != null) {
         _logVersion(
-          'Latest from GitHub releases: version=${manifest.version} versionCode=${manifest.versionCode ?? '-'}',
+          'Latest from GitHub releases: version=${manifest.version} '
+          'versionCode=${manifest.versionCode ?? '-'}',
         );
       }
       return manifest;
@@ -175,7 +187,8 @@ class UpdateChecker {
     if (second == null) return first;
     final comparison = _comparator.compare(second.version, first.version);
     _logVersion(
-      'Comparing remote versions: first=${first.version} second=${second.version} compare=$comparison',
+      'Comparing remote versions: first=${first.version} '
+      'second=${second.version} compare=$comparison',
     );
     _logVersionCompare(
       'first=${first.version} second=${second.version} result=$comparison',
@@ -190,7 +203,9 @@ class UpdateChecker {
     return first;
   }
 
-  Future<UpdateManifest?> _fetchRemoteManifest(ReleaseChannel preferredChannel) async {
+  Future<UpdateManifest?> _fetchRemoteManifest(
+    ReleaseChannel preferredChannel,
+  ) async {
     final uri = Uri.tryParse(manifestUrl);
     if (uri == null) {
       _logVersion('Invalid manifest URL: $manifestUrl');
@@ -203,7 +218,8 @@ class UpdateChecker {
         .timeout(const Duration(seconds: 15));
 
     _logUpdate(
-      'Remote version.json response status=${response.statusCode} bytes=${response.bodyBytes.length}',
+      'Remote version.json response status=${response.statusCode} '
+      'bytes=${response.bodyBytes.length}',
     );
     if (response.statusCode != 200 || response.body.isEmpty) {
       _logUpdate('Remote version.json unavailable or empty');
@@ -218,11 +234,20 @@ class UpdateChecker {
 
     final manifest = UpdateManifest.fromJson(decoded);
     _logVersion(
-      'Manifest parsed version=${manifest.version} versionCode=${manifest.versionCode ?? '-'} channel=${manifest.channel}',
+      'Manifest parsed version=${manifest.version} '
+      'versionCode=${manifest.versionCode ?? '-'} channel=${manifest.channel}',
     );
     if (!preferredChannel.allows(manifest.channel)) {
       _logVersion(
-        'Manifest channel rejected: ${manifest.channel} not allowed for $preferredChannel',
+        'Manifest channel rejected: ${manifest.channel} '
+        'not allowed for $preferredChannel',
+      );
+      return null;
+    }
+    if (!_supportsTarget(manifest)) {
+      _logArtifactInvalid(
+        'source=version_json target=${targetPlatform.name} '
+        'version=${manifest.version} reason=target_asset_missing',
       );
       return null;
     }
@@ -245,7 +270,8 @@ class UpdateChecker {
     ).timeout(const Duration(seconds: 15));
 
     _logUpdate(
-      'GitHub releases response status=${response.statusCode} bytes=${response.bodyBytes.length}',
+      'GitHub releases response status=${response.statusCode} '
+      'bytes=${response.bodyBytes.length}',
     );
     if (response.statusCode != 200 || response.body.isEmpty) {
       _logUpdate('GitHub releases unavailable or empty');
@@ -268,13 +294,13 @@ class UpdateChecker {
 
       final tagName = (release['tag_name'] as String?)?.trim() ?? '';
       if (tagName.isEmpty) {
-        _logApkInvalid('reason=missing_tag');
+        _logArtifactInvalid('reason=missing_tag');
         continue;
       }
 
       final version = _normalizeVersionFromTag(tagName);
       if (version == null) {
-        _logApkInvalid('reason=invalid_version tag=$tagName');
+        _logArtifactInvalid('reason=invalid_version tag=$tagName');
         continue;
       }
       _logVersionRemote('tag=$tagName normalized=$version');
@@ -285,6 +311,21 @@ class UpdateChecker {
         'tag=$tagName file=${apkAsset.name} size_bytes=${apkAsset.sizeBytes}',
       );
 
+      final windowsAsset = _extractWindowsAsset(release);
+      if (windowsAsset != null) {
+        _logWindowsFound(
+          'tag=$tagName file=${windowsAsset.name} '
+          'size_bytes=${windowsAsset.sizeBytes} sha256=${windowsAsset.sha256}',
+        );
+      }
+      if (targetPlatform == UpdateTargetPlatform.windows &&
+          windowsAsset == null) {
+        _logArtifactInvalid(
+          'tag=$tagName target=windows reason=setup_asset_not_found_or_unverified',
+        );
+        continue;
+      }
+
       final manifest = UpdateManifest(
         version: version,
         versionCode: null,
@@ -293,10 +334,15 @@ class UpdateChecker {
         apkUrl: apkAsset.url,
         apkFileName: apkAsset.name,
         apkSizeBytes: apkAsset.sizeBytes,
+        windowsUrl: windowsAsset?.url,
+        windowsFileName: windowsAsset?.name,
+        windowsSizeBytes: windowsAsset?.sizeBytes,
+        windowsSha256: windowsAsset?.sha256,
         changelog: (release['body'] as String?)?.trim() ?? '',
         critical: false,
       );
 
+      if (!_supportsTarget(manifest)) continue;
       if (best == null ||
           _comparator.compare(manifest.version, best.version) > 0) {
         best = manifest;
@@ -306,7 +352,9 @@ class UpdateChecker {
     return best;
   }
 
-  ReleaseChannel _releaseChannelFromGitHubRelease(Map<String, dynamic> release) {
+  ReleaseChannel _releaseChannelFromGitHubRelease(
+    Map<String, dynamic> release,
+  ) {
     final tagName = ((release['tag_name'] as String?) ?? '').toLowerCase();
     if (tagName.contains('nightly')) return ReleaseChannel.nightly;
     if (tagName.contains('dev')) return ReleaseChannel.dev;
@@ -319,55 +367,30 @@ class UpdateChecker {
     final normalized = tag.replaceFirst(RegExp(r'^v'), '');
     final directMatch = _comparator.normalize(normalized);
     if (directMatch != null) return directMatch;
-    final match = RegExp(r'(\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?)')
-        .firstMatch(normalized);
+    final match = RegExp(
+      r'(\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?)',
+    ).firstMatch(normalized);
     return match == null ? null : _comparator.normalize(match.group(1)!);
   }
 
-  _ReleaseApkAsset? _extractApkAsset(Map<String, dynamic> release) {
+  _ReleaseAsset? _extractApkAsset(Map<String, dynamic> release) {
     final assets = release['assets'];
     if (assets is! List) {
       _logApkInvalid('reason=assets_missing');
       return null;
     }
 
-    _ReleaseApkAsset? fallbackAsset;
+    _ReleaseAsset? fallbackAsset;
     for (final rawAsset in assets) {
       if (rawAsset is! Map) continue;
       final asset = Map<String, dynamic>.from(rawAsset);
-      final rawName = ((asset['name'] as String?) ?? '').trim();
-      final name = rawName.toLowerCase();
-      final url = (asset['browser_download_url'] as String?)?.trim();
-      final sizeBytes = switch (asset['size']) {
-        int value => value,
-        String value => int.tryParse(value.trim()) ?? 0,
-        _ => 0,
-      };
-      if (rawName.isEmpty || rawName.contains('/') || !name.endsWith('.apk')) {
-        _logApkInvalid('reason=invalid_apk_name name=$rawName');
-        continue;
-      }
-      if (url == null || url.isEmpty) {
-        _logApkInvalid('reason=missing_apk_url name=$rawName');
-        continue;
-      }
-      if (sizeBytes <= 0) {
-        _logApkInvalid('reason=invalid_apk_size name=$rawName size_bytes=$sizeBytes');
-        continue;
-      }
-      final uri = Uri.tryParse(url);
-      if (uri == null ||
-          !(uri.scheme == 'https' || uri.scheme == 'http') ||
-          uri.host.isEmpty) {
-        _logApkInvalid('reason=invalid_apk_url name=$rawName');
-        continue;
-      }
-
-      final candidate = _ReleaseApkAsset(
-        name: rawName,
-        url: url,
-        sizeBytes: sizeBytes,
+      final candidate = _validatedReleaseAsset(
+        asset,
+        requiredExtension: '.apk',
       );
+      if (candidate == null) continue;
+
+      final name = candidate.name.toLowerCase();
       final looksLikePrimaryRelease = name.contains('app-release') ||
           name.contains('app-arm64-v8a-release');
       if (looksLikePrimaryRelease) {
@@ -381,6 +404,93 @@ class UpdateChecker {
     }
     return fallbackAsset;
   }
+
+  _ReleaseAsset? _extractWindowsAsset(Map<String, dynamic> release) {
+    final assets = release['assets'];
+    if (assets is! List) return null;
+
+    for (final rawAsset in assets) {
+      if (rawAsset is! Map) continue;
+      final asset = Map<String, dynamic>.from(rawAsset);
+      final rawName = ((asset['name'] as String?) ?? '').trim();
+      if (rawName.toLowerCase() != _windowsSetupAssetName.toLowerCase()) {
+        continue;
+      }
+      final candidate = _validatedReleaseAsset(
+        asset,
+        requiredExtension: '.exe',
+        requireSha256: true,
+      );
+      if (candidate != null) return candidate;
+    }
+    return null;
+  }
+
+  _ReleaseAsset? _validatedReleaseAsset(
+    Map<String, dynamic> asset, {
+    required String requiredExtension,
+    bool requireSha256 = false,
+  }) {
+    final rawName = ((asset['name'] as String?) ?? '').trim();
+    final name = rawName.toLowerCase();
+    final url = (asset['browser_download_url'] as String?)?.trim();
+    final sizeBytes = switch (asset['size']) {
+      int value => value,
+      String value => int.tryParse(value.trim()) ?? 0,
+      _ => 0,
+    };
+
+    if (rawName.isEmpty ||
+        rawName.contains('/') ||
+        !name.endsWith(requiredExtension)) {
+      _logArtifactInvalid(
+        'reason=invalid_asset_name name=$rawName expected=$requiredExtension',
+      );
+      return null;
+    }
+    if (url == null || url.isEmpty) {
+      _logArtifactInvalid('reason=missing_asset_url name=$rawName');
+      return null;
+    }
+    if (sizeBytes <= 0) {
+      _logArtifactInvalid(
+        'reason=invalid_asset_size name=$rawName size_bytes=$sizeBytes',
+      );
+      return null;
+    }
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !(uri.scheme == 'https' || uri.scheme == 'http') ||
+        uri.host.isEmpty) {
+      _logArtifactInvalid('reason=invalid_asset_url name=$rawName');
+      return null;
+    }
+
+    final sha256 = _parseGitHubSha256(asset['digest']);
+    if (requireSha256 && sha256 == null) {
+      _logArtifactInvalid('reason=missing_sha256 name=$rawName');
+      return null;
+    }
+
+    return _ReleaseAsset(
+      name: rawName,
+      url: url,
+      sizeBytes: sizeBytes,
+      sha256: sha256,
+    );
+  }
+
+  String? _parseGitHubSha256(Object? rawDigest) {
+    if (rawDigest is! String) return null;
+    final digest = rawDigest.trim().toLowerCase();
+    const prefix = 'sha256:';
+    if (!digest.startsWith(prefix)) return null;
+    final value = digest.substring(prefix.length);
+    return RegExp(r'^[0-9a-f]{64}$').hasMatch(value) ? value : null;
+  }
+
+  bool _supportsTarget(UpdateManifest manifest) =>
+      manifest.artifactFor(targetPlatform) != null;
 
   String _cacheKeyForChannel(ReleaseChannel channel) =>
       '$_cachedManifestKeyPrefix.${channel.storageValue}';
@@ -402,6 +512,13 @@ class UpdateChecker {
       final manifest = UpdateManifest.fromJson(decoded);
       if (preferredChannel != null &&
           !preferredChannel.allows(manifest.channel)) {
+        return null;
+      }
+      if (!_supportsTarget(manifest)) {
+        _logArtifactInvalid(
+          'source=cache target=${targetPlatform.name} '
+          'version=${manifest.version} reason=target_asset_missing',
+        );
         return null;
       }
       return manifest;
@@ -438,9 +555,18 @@ class UpdateChecker {
 
   void _logUpdate(String message) => debugPrint('[UPDATE] $message');
   void _logVersion(String message) => debugPrint('[VERSION] $message');
-  void _logUpdateCheck(String message) => debugPrint('[UPDATE_CHECK] $message');
-  void _logVersionRemote(String message) => debugPrint('[UPDATE_VERSION_REMOTE] $message');
-  void _logVersionCompare(String message) => debugPrint('[UPDATE_VERSION_COMPARE] $message');
-  void _logApkFound(String message) => debugPrint('[UPDATE_APK_FOUND] $message');
-  void _logApkInvalid(String message) => debugPrint('[UPDATE_APK_INVALID] $message');
+  void _logUpdateCheck(String message) =>
+      debugPrint('[UPDATE_CHECK] $message');
+  void _logVersionRemote(String message) =>
+      debugPrint('[UPDATE_VERSION_REMOTE] $message');
+  void _logVersionCompare(String message) =>
+      debugPrint('[UPDATE_VERSION_COMPARE] $message');
+  void _logApkFound(String message) =>
+      debugPrint('[UPDATE_APK_FOUND] $message');
+  void _logApkInvalid(String message) =>
+      debugPrint('[UPDATE_APK_INVALID] $message');
+  void _logWindowsFound(String message) =>
+      debugPrint('[UPDATE_WINDOWS_FOUND] $message');
+  void _logArtifactInvalid(String message) =>
+      debugPrint('[UPDATE_ARTIFACT_INVALID] $message');
 }
