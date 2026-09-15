@@ -1,0 +1,173 @@
+name: Build macOS Desktop
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'macos/**'
+      - 'native/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/macos-build.yml'
+  push:
+    branches:
+      - main
+      - 'platform/macos-foundation'
+    paths:
+      - 'lib/**'
+      - 'macos/**'
+      - 'native/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/macos-build.yml'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-macos:
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Show toolchain
+        run: |
+          flutter --version
+          flutter doctor -v
+          xcodebuild -version
+          uname -m
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart sources
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: |
+          set -o pipefail
+          flutter test --machine 2>&1 | tee flutter-test-results-macos.jsonl
+
+      - name: Upload Flutter test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-results-macos
+          path: flutter-test-results-macos.jsonl
+          if-no-files-found: warn
+          retention-days: 14
+
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Show toolchain
+        run: |
+          flutter --version
+          flutter doctor -v
+          xcodebuild -version
+          uname -m
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release
+
+      - name: Validate and package app bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_dir="$PWD/build/macos/Build/Products/Release"
+          if [[ ! -d "$release_dir" ]]; then
+            echo "macOS release directory not found: $release_dir" >&2
+            exit 1
+          fi
+
+          app_path="$(find "$release_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "$app_path" || ! -d "$app_path" ]]; then
+            echo "No .app bundle found under $release_dir" >&2
+            find "$release_dir" -maxdepth 2 -print || true
+            exit 1
+          fi
+
+          if [[ ! -f "$app_path/Contents/Info.plist" ]]; then
+            echo "Generated app bundle is missing Contents/Info.plist" >&2
+            exit 1
+          fi
+
+          executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")"
+          if [[ -z "$executable_name" || ! -x "$app_path/Contents/MacOS/$executable_name" ]]; then
+            echo "Generated app bundle is missing an executable entry point" >&2
+            exit 1
+          fi
+
+          zip_path="$PWD/ai-orchestrator-macos.zip"
+          rm -f "$zip_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+
+          if [[ ! -s "$zip_path" ]]; then
+            echo "Generated macOS archive is empty" >&2
+            exit 1
+          fi
+
+          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$zip_path" >> "$GITHUB_OUTPUT"
+          echo "Packaged $(basename "$app_path") -> $zip_path"
+
+      - name: Inspect unsigned bundle
+        run: |
+          echo "This foundation gate intentionally validates an unsigned CI build."
+          codesign -dvvv "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
+          spctl --assess --type execute --verbose=4 "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
+
+      - name: Upload macOS app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-macos
+          path: ai-orchestrator-macos.zip
+          if-no-files-found: error
+          retention-days: 14
