@@ -66,7 +66,36 @@ void main() {
       expect(architect.lastSessionId, 'workshop:preflight-request:preflight:planning');
     });
 
-    test('propagates online mode to Orchestrator and Architect', () async {
+    test('keeps network-capable mode by default for Orchestrator and Architect',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final orchestrator = _RecordingGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: callOrder,
+        result: _success('scope analysis'),
+      );
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('implementation plan'),
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator: orchestrator,
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: _request);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.lastIsOffline, isFalse);
+      expect(architect.lastIsOffline, isFalse);
+    });
+
+    test('propagates explicit offline mode to Orchestrator and Architect',
+        () async {
       final callOrder = <AppAiRole>[];
       final orchestrator = _RecordingGateway(
         role: AppAiRole.workshopOrchestrator,
@@ -88,12 +117,12 @@ void main() {
         }),
       ).run(
         request: _request,
-        isOffline: false,
+        isOffline: true,
       );
 
       expect(result.readyForImplementation, isTrue);
-      expect(orchestrator.lastIsOffline, isFalse);
-      expect(architect.lastIsOffline, isFalse);
+      expect(orchestrator.lastIsOffline, isTrue);
+      expect(architect.lastIsOffline, isTrue);
     });
 
     test('stops before Architect when Orchestrator inference fails', () async {
@@ -185,7 +214,7 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
