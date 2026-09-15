@@ -73,6 +73,8 @@ final class WorkshopPinnedPublicHttpClient extends http.BaseClient {
           ? await resolver(host).timeout(timeout)
           : <InternetAddress>[literal];
 
+      // Fail closed if DNS returns even one private/special address. A mixed
+      // public/private answer must never be used as a route into the LAN.
       if (addresses.isEmpty || addresses.any((value) => !isPublicAddress(value))) {
         throw const SocketException('Destination is not a public IP address.');
       }
@@ -85,19 +87,11 @@ final class WorkshopPinnedPublicHttpClient extends http.BaseClient {
         throw const SocketException('Non-default ports are not allowed.');
       }
 
-      Object? firstError;
-      for (final address in addresses) {
-        try {
-          return await Socket.startConnect(address, port);
-        } catch (error) {
-          firstError ??= error;
-        }
-      }
-
-      throw SocketException(
-        'Unable to connect to any validated public address.',
-        osError: firstError is SocketException ? firstError.osError : null,
-      );
+      // HttpClient.connectionFactory expects a ConnectionTask. Socket errors
+      // happen after that task is returned, so pretending to sequentially try
+      // all DNS answers here would be misleading. Pin explicitly to the first
+      // validated address from the shared DNS snapshot instead.
+      return Socket.startConnect(addresses.first, port);
     };
 
     return IOClient(dartClient);
