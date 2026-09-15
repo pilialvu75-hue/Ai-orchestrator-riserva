@@ -145,7 +145,6 @@ class _AppShellState extends State<AppShell> {
       );
     } catch (error) {
       if (!mounted) {
-        workshopBundle?.dashboardController.dispose();
         return;
       }
       messenger
