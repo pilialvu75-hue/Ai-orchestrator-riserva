@@ -1,6 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 
 namespace {
 using GetHostNameWFn = int (WSAAPI*)(PWSTR, int);
@@ -21,9 +21,7 @@ GetHostNameWFn ResolveNativeGetHostNameW() {
 }
 }  // namespace
 
-extern "C" __declspec(dllexport) int WSAAPI GetHostNameW(
-    PWSTR name,
-    int namelen) {
+extern "C" int WSAAPI CompatGetHostNameW(PWSTR name, int namelen) {
   if (auto native = ResolveNativeGetHostNameW(); native != nullptr) {
     return native(name, namelen);
   }
