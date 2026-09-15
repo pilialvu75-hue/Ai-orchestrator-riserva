@@ -109,6 +109,26 @@ jobs:
           xcodebuild -version
           uname -m
 
+      - name: Regenerate pristine macOS scaffold for repair probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf macos.legacy
+          mv macos macos.legacy
+          flutter create --platforms=macos --project-name ai_orchestrator --org com.aiorchestrator .
+          git diff --no-index -- macos.legacy macos > macos-scaffold-repair.diff || true
+          echo "Generated a clean Flutter macOS scaffold because the repository Xcode project is not parseable."
+          wc -l macos-scaffold-repair.diff || true
+
+      - name: Upload scaffold repair diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-scaffold-repair-diff
+          path: macos-scaffold-repair.diff
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Resolve Flutter dependencies
         run: flutter pub get
 
