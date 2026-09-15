@@ -54,7 +54,7 @@ final class WorkshopPreparedTaskLifecycle {
   Future<WorkshopTaskInferenceResult> runPrepared({
     required String taskId,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) {
     _requireCompletePreflight(preflight);
@@ -76,7 +76,7 @@ final class WorkshopPreparedTaskLifecycle {
     required String taskId,
     required WorkshopResumeContext resumeContext,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) {
     _requireCompletePreflight(preflight);
