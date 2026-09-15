@@ -5,17 +5,17 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 
 /// Assistant-only decorator for the shared Local runtime.
 ///
-/// InferenceService restarts Local inference after a model emits a web-search
-/// tool call. The historical continuation kept the original time-sensitive
-/// prompt, so LocalPromptTemplates could instruct the model to request the same
-/// search again. Because the continuation stream intentionally bypasses the
-/// tool interceptor, that second tool call could leak as raw protocol text.
+/// It protects two Assistant-specific boundaries without changing the shared
+/// Android FFI / desktop llama.cpp provider:
 ///
-/// This decorator rewrites only the post-search continuation request. The
-/// underlying Android FFI / desktop llama.cpp provider remains untouched.
+/// 1. post-search continuation, where the historical dynamic prompt could make
+///    the model request the same search again;
+/// 2. explicitly offline dynamic turns, which must never expose the model to
+///    the raw <search> protocol even when the user asks about current data.
 final class AssistantWebContinuationLocalRuntimeProvider
     extends LocalRuntimeProvider {
   AssistantWebContinuationLocalRuntimeProvider({
@@ -56,9 +56,27 @@ final class AssistantWebContinuationLocalRuntimeProvider
     required CancellationToken cancellationToken,
   }) {
     return _delegate.streamInference(
-      request: _rewriteWebContinuation(request),
+      request: _rewriteAssistantRequest(request),
       cancellationToken: cancellationToken,
     );
+  }
+
+  InferenceRequest _rewriteAssistantRequest(InferenceRequest request) {
+    final continuation = _rewriteWebContinuation(request);
+    if (!identical(continuation, request)) {
+      return continuation;
+    }
+
+    if (request.isOffline &&
+        AssistantWebSearchPolicy.shouldSearch(request.prompt) &&
+        !AssistantWebSearchPolicy.hasInjectedContext(
+          prompt: request.prompt,
+          systemPrompt: request.systemPrompt,
+        )) {
+      return _rewriteOfflineDynamicRequest(request);
+    }
+
+    return request;
   }
 
   InferenceRequest _rewriteWebContinuation(InferenceRequest request) {
@@ -118,6 +136,38 @@ final class AssistantWebContinuationLocalRuntimeProvider
       prompt:
           'Answer the original user request now using the supplied context. '
           'Do not request another external lookup.',
+      systemPrompt: sections.join('\n\n'),
+    );
+  }
+
+  InferenceRequest _rewriteOfflineDynamicRequest(InferenceRequest request) {
+    final sections = <String>[];
+    final baseSystemPrompt = request.systemPrompt?.trim();
+    if (baseSystemPrompt != null && baseSystemPrompt.isNotEmpty) {
+      sections.add(baseSystemPrompt);
+    }
+
+    final originalPrompt = request.prompt.trim();
+    if (originalPrompt.isNotEmpty) {
+      sections.add('Original user request:\n$originalPrompt');
+    }
+
+    sections.add(
+      '[WEB SEARCH UNAVAILABLE]\n'
+      'This turn is explicitly offline. Do not request an external lookup. '
+      'Answer from local knowledge. For facts that may have changed recently, '
+      'state clearly that live information cannot be verified while offline.',
+    );
+
+    RuntimeEventLog.instance.emit(
+      '[ASSISTANT_WEB_OFFLINE] session=${request.sessionId} '
+      'prompt_chars=${request.prompt.length} action=suppress_search_protocol',
+    );
+
+    return request.copyWith(
+      prompt:
+          'Answer the original user request from local knowledge only. '
+          'Do not request an external lookup.',
       systemPrompt: sections.join('\n\n'),
     );
   }
