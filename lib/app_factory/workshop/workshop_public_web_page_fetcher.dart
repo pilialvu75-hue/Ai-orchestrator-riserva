@@ -56,9 +56,9 @@ final class WorkshopWebPageFetchResult {
 /// This component deliberately does less than a browser. It only accepts
 /// public HTTP(S) destinations, performs a DNS guard before every request,
 /// follows a small number of redirects manually so every destination is
-/// revalidated, accepts text-like content only, and caps downloaded bytes.
-/// It never executes JavaScript, sends credentials, downloads binary assets or
-/// mutates project state.
+/// revalidated, accepts explicitly allowlisted document content only, and caps
+/// both downloaded bytes and response time. It never executes JavaScript,
+/// sends credentials, downloads binary assets or mutates project state.
 final class WorkshopPublicWebPageFetcher {
   WorkshopPublicWebPageFetcher({
     http.Client? client,
@@ -67,7 +67,8 @@ final class WorkshopPublicWebPageFetcher {
     this.maxBytes = 256 * 1024,
     this.maxTextChars = 24000,
     this.maxRedirects = 3,
-  })  : assert(maxBytes > 0),
+  })  : assert(timeout.inMicroseconds > 0),
+        assert(maxBytes > 0),
         assert(maxTextChars > 0),
         assert(maxRedirects >= 0),
         _client = client ?? http.Client(),
@@ -137,7 +138,8 @@ final class WorkshopPublicWebPageFetcher {
           ..followRedirects = false
           ..maxRedirects = 0
           ..headers.addAll(const <String, String>{
-            'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9',
+            'Accept':
+                'text/html,application/xhtml+xml,text/plain,text/markdown;q=0.9',
             'User-Agent':
                 'Mozilla/5.0 (compatible; AI-Orchestrator/1.0; +https://github.com/pilialvu75-hue/Ai-orchestrator-riserva)',
           });
@@ -192,7 +194,20 @@ final class WorkshopPublicWebPageFetcher {
           );
         }
 
-        current = current.resolveUri(next);
+        final resolvedNext = current.resolveUri(next);
+        if (current.scheme.toLowerCase() == 'https' &&
+            resolvedNext.scheme.toLowerCase() == 'http') {
+          _log(
+            'status=rejected reason=https_downgrade '
+            'host=${_safeHost(current)}',
+          );
+          return const WorkshopWebPageFetchResult(
+            status: WorkshopWebPageFetchStatus.rejectedUrl,
+            reason: 'https_downgrade',
+          );
+        }
+
+        current = resolvedNext;
         continue;
       }
 
@@ -236,8 +251,19 @@ final class WorkshopPublicWebPageFetcher {
       }
 
       final bytes = <int>[];
+      final bodyTimer = Stopwatch()..start();
       try {
-        await for (final chunk in response.stream) {
+        await for (final chunk in response.stream.timeout(timeout)) {
+          if (bodyTimer.elapsed > timeout) {
+            _log(
+              'status=unavailable reason=body_timeout '
+              'host=${_safeHost(current)}',
+            );
+            return const WorkshopWebPageFetchResult(
+              status: WorkshopWebPageFetchStatus.unavailable,
+              reason: 'body_timeout',
+            );
+          }
           if (bytes.length + chunk.length > maxBytes) {
             _log(
               'status=too_large host=${_safeHost(current)} '
@@ -250,6 +276,15 @@ final class WorkshopPublicWebPageFetcher {
           }
           bytes.addAll(chunk);
         }
+      } on TimeoutException {
+        _log(
+          'status=unavailable reason=body_timeout '
+          'host=${_safeHost(current)}',
+        );
+        return const WorkshopWebPageFetchResult(
+          status: WorkshopWebPageFetchStatus.unavailable,
+          reason: 'body_timeout',
+        );
       } catch (error) {
         _log(
           'status=unavailable host=${_safeHost(current)} '
@@ -259,6 +294,8 @@ final class WorkshopPublicWebPageFetcher {
           status: WorkshopWebPageFetchStatus.unavailable,
           reason: 'response_stream_failed',
         );
+      } finally {
+        bodyTimer.stop();
       }
 
       final decoded = utf8.decode(bytes, allowMalformed: true);
@@ -410,7 +447,11 @@ final class WorkshopPublicWebPageFetcher {
   static bool _isSupportedTextContentType(String value) {
     if (value.isEmpty) return false;
     final mime = value.split(';').first.trim();
-    return mime.startsWith('text/') || mime == 'application/xhtml+xml';
+    return mime == 'text/html' ||
+        mime == 'text/plain' ||
+        mime == 'text/markdown' ||
+        mime == 'text/x-markdown' ||
+        mime == 'application/xhtml+xml';
   }
 
   static bool _isHtml(String contentType) {
