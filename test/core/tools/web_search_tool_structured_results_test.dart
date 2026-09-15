@@ -61,6 +61,32 @@ void main() {
     // metadata used for source-opening workflows.
     expect(result.metadata.containsKey('query'), isFalse);
   });
+
+  test('distinguishes no results from a provider/network failure', () async {
+    final noResultsTool = WebSearchTool(
+      searchProvider: _FixedSearchProvider(const <SearchResult>[]),
+      includeErrorDetailsInDiagnostics: false,
+    );
+    final noResults = await noResultsTool.execute(<String, dynamic>{
+      'query': 'best recipe apps',
+    });
+
+    expect(noResults.success, isFalse);
+    expect(noResults.metadata['failure_reason'], 'no_results');
+    expect(noResults.metadata.containsKey('query'), isFalse);
+
+    final failedTool = WebSearchTool(
+      searchProvider: _FailingSearchProvider(),
+      includeErrorDetailsInDiagnostics: false,
+    );
+    final failed = await failedTool.execute(<String, dynamic>{
+      'query': 'best recipe apps',
+    });
+
+    expect(failed.success, isFalse);
+    expect(failed.metadata['failure_reason'], 'failure');
+    expect(failed.metadata.containsKey('query'), isFalse);
+  });
 }
 
 final class _FixedSearchProvider implements SearchProvider {
@@ -75,5 +101,15 @@ final class _FixedSearchProvider implements SearchProvider {
   Future<List<SearchResult>> search(String query, {int limit = 5}) async {
     expect(query, 'best recipe apps');
     return results;
+  }
+}
+
+final class _FailingSearchProvider implements SearchProvider {
+  @override
+  Duration get timeout => const Duration(seconds: 1);
+
+  @override
+  Future<List<SearchResult>> search(String query, {int limit = 5}) async {
+    throw StateError('simulated provider failure');
   }
 }
