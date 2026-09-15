@@ -2,10 +2,14 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _readNormalizedText(String path) {
+  return File(path).readAsStringSync().replaceAll('\r\n', '\n');
+}
+
 void main() {
   group('native token budget contract', () {
     test('CMake builds the token-budget bridge entrypoint', () {
-      final cmake = File('native/android/CMakeLists.txt').readAsStringSync();
+      final cmake = _readNormalizedText('native/android/CMakeLists.txt');
 
       expect(
         cmake,
@@ -14,9 +18,9 @@ void main() {
     });
 
     test('native bridge exposes exact session token counting', () {
-      final header = File('native/android/llama_bridge.h').readAsStringSync();
+      final header = _readNormalizedText('native/android/llama_bridge.h');
       final entrypoint =
-          File('native/android/llama_bridge_entrypoint.cpp').readAsStringSync();
+          _readNormalizedText('native/android/llama_bridge_entrypoint.cpp');
 
       expect(header, contains('llb_session_token_count'));
       expect(entrypoint, contains('llb_session_token_count'));
@@ -27,7 +31,7 @@ void main() {
 
     test('start generation enforces prompt plus generation within nCtx', () {
       final entrypoint =
-          File('native/android/llama_bridge_entrypoint.cpp').readAsStringSync();
+          _readNormalizedText('native/android/llama_bridge_entrypoint.cpp');
 
       expect(entrypoint, contains('kPromptTokenSafetyMargin'));
       expect(entrypoint, contains('prompt_tokens'));
@@ -40,15 +44,15 @@ void main() {
     });
 
     test('Dart FFI contract requires the exact token count symbol', () {
-      final nativeTypes = File(
+      final nativeTypes = _readNormalizedText(
         'lib/core/runtime/inference/ffi/llama_native_types.dart',
-      ).readAsStringSync();
-      final bindings = File(
+      );
+      final bindings = _readNormalizedText(
         'lib/core/runtime/inference/ffi/llama_bindings.dart',
-      ).readAsStringSync();
-      final loader = File(
+      );
+      final loader = _readNormalizedText(
         'lib/core/runtime/inference/ffi/llama_ffi_loader.dart',
-      ).readAsStringSync();
+      );
 
       expect(nativeTypes, contains('LlbSessionTokenCountNative'));
       expect(bindings, contains("'llb_session_token_count'"));
