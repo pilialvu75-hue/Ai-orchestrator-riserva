@@ -14,7 +14,6 @@ on:
   push:
     branches:
       - main
-      - 'platform/macos-foundation'
     paths:
       - 'lib/**'
       - 'macos/**'
@@ -36,7 +35,7 @@ concurrency:
 
 jobs:
   test-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
@@ -83,7 +82,7 @@ jobs:
           retention-days: 14
 
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
