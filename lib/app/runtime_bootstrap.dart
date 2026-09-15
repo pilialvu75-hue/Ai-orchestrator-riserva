@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/custom_cloud_provider_sto
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/system/update/platform_update_services.dart';
 import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_repository.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
@@ -55,6 +56,10 @@ class RuntimeBootstrap {
       grokApiKey: grokApiKey,
       copilotApiKey: copilotApiKey,
       appVersion: appVersion,
+    );
+    await configurePlatformUpdateServices(
+      di.sl,
+      currentVersion: appVersion,
     );
 
     await CloudRoutingBootstrap.configure(di.sl);

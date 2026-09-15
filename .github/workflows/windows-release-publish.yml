@@ -1,0 +1,275 @@
+name: Publish Windows Release Asset
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/windows-release-publish.yml'
+      - 'windows/installer/**'
+  workflow_run:
+    workflows:
+      - Build & Release APK
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: windows-release-publish-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate-publisher:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate publisher contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f windows/installer/ai_orchestrator.iss
+          grep -q 'OutputBaseFilename=AI-Orchestrator-Setup-x64' windows/installer/ai_orchestrator.iss
+          grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
+          echo 'Windows release publisher contract is valid.'
+
+  publish-windows:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout exact Android release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve coordinated release version
+        id: version
+        shell: pwsh
+        run: |
+          $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)(?:\+\d+)?\s*$' | Select-Object -First 1
+          if (-not $versionLine) {
+            throw 'Unable to resolve semantic application version from pubspec.yaml.'
+          }
+
+          $versionName = $versionLine.Matches[0].Groups[1].Value
+          $versionCode = '${{ github.event.workflow_run.run_number }}'
+          if (-not $versionCode -or $versionCode -notmatch '^\d+$') {
+            throw "Invalid Android workflow run number: $versionCode"
+          }
+
+          $releaseVersion = "$versionName+$versionCode"
+          $tag = "v$releaseVersion"
+
+          $pubspec = Get-Content 'pubspec.yaml' -Raw
+          $updated = $pubspec -replace '(?m)^version:\s*.*$', "version: $releaseVersion"
+          if ($updated -eq $pubspec) {
+            throw 'Failed to inject coordinated Windows release version into pubspec.yaml.'
+          }
+          Set-Content -Path 'pubspec.yaml' -Value $updated -Encoding utf8
+
+          "version_name=$versionName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version_code=$versionCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "release_version=$releaseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          Write-Host "Coordinated Windows version: $releaseVersion"
+          Write-Host "Target GitHub release: $tag"
+          Write-Host "Source commit: ${{ github.event.workflow_run.head_sha }}"
+
+      - name: Resolve Flutter dependencies
+        shell: pwsh
+        run: flutter pub get
+
+      - name: Build coordinated Windows release
+        shell: pwsh
+        run: flutter build windows --release
+
+      - name: Prepare Windows release payload
+        id: payload
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          if (-not (Test-Path $releaseDir)) {
+            throw "Windows release directory not found: $releaseDir"
+          }
+
+          $exe = Join-Path $releaseDir 'ai_orchestrator.exe'
+          if (-not (Test-Path $exe)) {
+            throw "Windows executable not found: $exe"
+          }
+          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
+            throw 'Flutter data directory is missing from the Windows release bundle.'
+          }
+
+          $runtimeDlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+          foreach ($dll in $runtimeDlls) {
+            if (Test-Path (Join-Path $releaseDir $dll)) {
+              continue
+            }
+            $candidate = $null
+            if ($env:VCToolsRedistDir) {
+              $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } |
+                Select-Object -First 1
+            }
+            if ($candidate) {
+              Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
+            }
+          }
+
+          $isccCandidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          )
+          $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($isccCommand) {
+              $iscc = $isccCommand.Source
+            }
+          }
+          if (-not $iscc) {
+            throw 'Inno Setup compiler ISCC.exe was not found on the windows-2022 runner.'
+          }
+
+          $redist = $null
+          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
+            $redist = Get-ChildItem -Path $env:VCToolsRedistDir -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+          if (-not $redist) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($vsInstall) {
+                $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+                if (Test-Path $redistRoot) {
+                  $redist = Get-ChildItem -Path $redistRoot -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+                    Sort-Object FullName -Descending |
+                    Select-Object -First 1
+                }
+              }
+            }
+          }
+          if (-not $redist) {
+            throw 'Matching Visual Studio 2022 vc_redist.x64.exe was not found.'
+          }
+
+          $outputDir = Join-Path $PWD 'build\windows\release-publish'
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
+          @(
+            "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
+            "#define ReleaseDir `"$releaseDir`"",
+            "#define VCRedistPath `"$($redist.FullName)`"",
+            "#define OutputDir `"$outputDir`""
+          ) | Set-Content -Path $generatedDefines -Encoding ASCII
+
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build versioned Windows Setup.exe
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = '${{ steps.payload.outputs.iscc }}'
+          $outputDir = '${{ steps.payload.outputs.output_dir }}'
+          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
+
+          & $iscc $script
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $setupPath)) {
+            throw "Expected Setup.exe was not produced: $setupPath"
+          }
+          $setupSize = (Get-Item $setupPath).Length
+          if ($setupSize -lt 1048576) {
+            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
+          }
+
+          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
+          $hashPath = "$setupPath.sha256"
+          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
+
+          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup_sha256=$($hash.Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows release installer: $setupPath ($setupSize bytes)"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: Verify matching Android release exists
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $gh = Get-Command gh -ErrorAction SilentlyContinue
+          if (-not $gh) {
+            throw 'GitHub CLI is unavailable on the hosted runner.'
+          }
+          gh release view '${{ steps.version.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json tagName,publishedAt
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The matching Android GitHub Release does not exist; refusing to publish a mismatched Windows installer.'
+          }
+
+      - name: Publish Windows installer into matching GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ steps.version.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to upload Windows installer assets to the coordinated GitHub Release.'
+          }
+
+      - name: Verify published Windows release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh release view '${{ steps.version.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json assets | ConvertFrom-Json
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe') {
+            throw 'Published release is missing AI-Orchestrator-Setup-x64.exe.'
+          }
+          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
+            throw 'Published release is missing the Windows installer SHA-256 file.'
+          }
+          Write-Host "Windows release assets published on ${{ steps.version.outputs.tag }}"
+
+      - name: Preserve published installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-windows-release-${{ steps.version.outputs.release_version }}
+          path: |
+            ${{ steps.installer.outputs.setup_path }}
+            ${{ steps.installer.outputs.hash_path }}
+          if-no-files-found: error
+          retention-days: 14

@@ -8,18 +8,34 @@ enum WorkshopWebResearchLane {
   domainSources,
 }
 
+final class WorkshopWebResearchSource {
+  const WorkshopWebResearchSource({
+    required this.title,
+    required this.url,
+    required this.snippet,
+  });
+
+  final String title;
+  final String url;
+  final String snippet;
+}
+
 final class WorkshopWebResearchEvidence {
   const WorkshopWebResearchEvidence({
     required this.lane,
     required this.query,
     required this.output,
     required this.success,
+    this.sources = const <WorkshopWebResearchSource>[],
+    this.failureReason,
   });
 
   final WorkshopWebResearchLane lane;
   final String query;
   final String output;
   final bool success;
+  final List<WorkshopWebResearchSource> sources;
+  final String? failureReason;
 
   bool get hasEvidence => success && output.trim().isNotEmpty;
 }
@@ -37,6 +53,11 @@ final class WorkshopWebEvidencePack {
 
   int get successfulLaneCount =>
       evidence.where((entry) => entry.hasEvidence).length;
+
+  int get sourceCount => evidence.fold<int>(
+        0,
+        (total, entry) => total + entry.sources.length,
+      );
 
   String toPromptContext() {
     final usable = evidence.where((entry) => entry.hasEvidence).toList();
@@ -174,20 +195,34 @@ final class WorkshopWebResearchService {
             : maxCharsPerLane;
         final output = _bounded(result.output.trim(), laneLimit);
         remainingEvidenceChars -= output.length;
+        final failureReason = _failureReason(result.metadata['failure_reason']);
+        final sources = _structuredSources(result.metadata['results']);
         evidence.add(
           WorkshopWebResearchEvidence(
             lane: entry.key,
             query: entry.value,
             output: output,
             success: result.success && output.isNotEmpty,
+            sources: sources,
+            failureReason: failureReason,
           ),
         );
         RuntimeEventLog.instance.emit(
           '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
           'lane=${entry.key.name} status=${result.success ? 'completed' : 'unavailable'} '
-          'evidence_chars=${output.length} '
+          'evidence_chars=${output.length} sources=${sources.length} '
+          'failure_reason=${failureReason ?? 'none'} '
           'remaining_budget_chars=$remainingEvidenceChars',
         );
+
+        if (!result.success && _opensCircuit(failureReason)) {
+          RuntimeEventLog.instance.emit(
+            '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
+            'status=stopped reason=web_unavailable '
+            'failure_reason=$failureReason',
+          );
+          break;
+        }
       } catch (error) {
         evidence.add(
           WorkshopWebResearchEvidence(
@@ -195,6 +230,7 @@ final class WorkshopWebResearchService {
             query: entry.value,
             output: '',
             success: false,
+            failureReason: 'exception',
           ),
         );
         RuntimeEventLog.instance.emit(
@@ -202,6 +238,11 @@ final class WorkshopWebResearchService {
           'lane=${entry.key.name} status=failed '
           'error_type=${error.runtimeType}',
         );
+        RuntimeEventLog.instance.emit(
+          '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
+          'status=stopped reason=web_exception',
+        );
+        break;
       }
     }
 
@@ -230,4 +271,36 @@ final class WorkshopWebResearchService {
     final bodyLimit = limit - marker.length;
     return '${value.substring(0, bodyLimit).trimRight()}$marker';
   }
+
+  String? _failureReason(Object? value) {
+    if (value is! String) return null;
+    final normalized = value.trim().toLowerCase();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  bool _opensCircuit(String? failureReason) {
+    return failureReason == 'timeout' || failureReason == 'failure';
+  }
+
+  List<WorkshopWebResearchSource> _structuredSources(Object? raw) {
+    if (raw is! List) return const <WorkshopWebResearchSource>[];
+
+    final sources = <WorkshopWebResearchSource>[];
+    for (final item in raw.take(maxResultsPerLane)) {
+      if (item is! Map) continue;
+      final url = _metadataString(item['url']);
+      if (url.isEmpty) continue;
+      sources.add(
+        WorkshopWebResearchSource(
+          title: _metadataString(item['title']),
+          url: url,
+          snippet: _metadataString(item['snippet']),
+        ),
+      );
+    }
+    return List<WorkshopWebResearchSource>.unmodifiable(sources);
+  }
+
+  String _metadataString(Object? value) =>
+      value is String ? value.trim() : '';
 }
