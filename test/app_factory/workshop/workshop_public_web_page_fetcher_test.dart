@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -126,6 +127,38 @@ void main() {
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
       expect(result.reason, 'non_public_ip');
+      expect(client.calls, 1);
+    });
+
+    test('cancels an ignored redirect body instead of draining it', () async {
+      var cancelled = false;
+      late StreamController<List<int>> controller;
+      controller = StreamController<List<int>>(
+        onCancel: () {
+          cancelled = true;
+        },
+      );
+      addTearDown(controller.close);
+
+      final client = _FakeHttpClient((_) async => http.StreamedResponse(
+            controller.stream,
+            302,
+            headers: const <String, String>{
+              'location': 'http://127.0.0.1/internal',
+            },
+          ));
+      final fetcher = WorkshopPublicWebPageFetcher(
+        client: client,
+        resolver: _publicResolver,
+      );
+
+      final result = await fetcher
+          .fetch('https://example.com/redirect-with-unbounded-body')
+          .timeout(const Duration(seconds: 1));
+
+      expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
+      expect(result.reason, 'non_public_ip');
+      expect(cancelled, isTrue);
       expect(client.calls, 1);
     });
 
