@@ -105,6 +105,65 @@ void main() {
     expect(captured.prompt, isNot(contains('Ultime notizie')));
   });
 
+  test('explicitly offline dynamic turn never reaches Local web protocol',
+      () async {
+    final token = CancellationToken();
+    final request = const InferenceRequest(
+      sessionId: 'assistant',
+      prompt: 'Che meteo fa oggi a Parigi?',
+      systemPrompt: 'Base prompt.',
+      isOffline: true,
+      modelId: 'phi3_5_mini',
+      modelPath: '/models/phi.gguf',
+    );
+
+    await provider
+        .streamInference(request: request, cancellationToken: token)
+        .drain<void>();
+
+    final captured = verify(
+      () => delegate.streamInference(
+        request: captureAny(named: 'request'),
+        cancellationToken: token,
+      ),
+    ).captured.single as InferenceRequest;
+
+    expect(captured.isOffline, isTrue);
+    expect(captured.prompt, isNot(contains('meteo')));
+    expect(captured.prompt, isNot(contains('oggi')));
+    expect(captured.systemPrompt, contains('Original user request:'));
+    expect(captured.systemPrompt, contains('Che meteo fa oggi a Parigi?'));
+    expect(captured.systemPrompt, contains('[WEB SEARCH UNAVAILABLE]'));
+    expect(captured.systemPrompt, contains('explicitly offline'));
+    expect(captured.modelId, 'phi3_5_mini');
+    expect(captured.modelPath, '/models/phi.gguf');
+  });
+
+  test('stable offline question passes through unchanged', () async {
+    final token = CancellationToken();
+    final request = const InferenceRequest(
+      sessionId: 'assistant',
+      prompt: 'Spiegami la fotosintesi.',
+      systemPrompt: 'Base prompt.',
+      isOffline: true,
+    );
+
+    await provider
+        .streamInference(request: request, cancellationToken: token)
+        .drain<void>();
+
+    final captured = verify(
+      () => delegate.streamInference(
+        request: captureAny(named: 'request'),
+        cancellationToken: token,
+      ),
+    ).captured.single as InferenceRequest;
+
+    expect(captured.prompt, request.prompt);
+    expect(captured.systemPrompt, request.systemPrompt);
+    expect(captured.isOffline, isTrue);
+  });
+
   test('search session without a results marker passes through unchanged',
       () async {
     final token = CancellationToken();
