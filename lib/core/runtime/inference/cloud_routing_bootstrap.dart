@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
@@ -10,6 +11,7 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_journal.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
@@ -41,6 +43,7 @@ abstract final class CloudRoutingBootstrap {
     await _unregisterIfPresent<Orchestrator>(sl);
     await _unregisterIfPresent<PlannerService>(sl);
     await _unregisterIfPresent<InferenceService>(sl);
+    await _unregisterIfPresent<CloudBackgroundExecutionJournal>(sl);
 
     final assistantSystemPromptService = AssistantSystemPromptService(
       configRepository: sl<ConfigRepository>(),
@@ -86,6 +89,12 @@ abstract final class CloudRoutingBootstrap {
       delegate: sl<LocalRuntimeProvider>(),
     );
 
+    sl.registerLazySingleton<CloudBackgroundExecutionJournal>(
+      () => CloudBackgroundExecutionJournal(
+        preferences: sl<SharedPreferences>(),
+      ),
+    );
+
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(
         loadSelectedModel: () async {
@@ -108,6 +117,7 @@ abstract final class CloudRoutingBootstrap {
         webSearchTool: assistantWebSearchTool,
         backgroundExecutionLeaseService:
             CloudBackgroundExecutionLeaseService(),
+        backgroundExecutionJournal: sl<CloudBackgroundExecutionJournal>(),
       ),
     );
 
@@ -151,7 +161,8 @@ abstract final class CloudRoutingBootstrap {
     debugPrint(
       '[CLOUD_ROUTING] direct Cloud safety path, Assistant general web search, '
       'privacy-safe diagnostics, Hybrid web-aware Hannibal routing, '
-      'Local web continuation guard, and Cloud background execution lease wired',
+      'Local web continuation guard, Cloud background execution lease, '
+      'and recovery journal wired',
     );
   }
 
