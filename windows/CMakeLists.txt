@@ -58,7 +58,7 @@ install(TARGETS ${BINARY_NAME}
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
-install(TARGETS ws2fix nt7fx win7krnl win7path win7sync
+install(TARGETS ws2fix nt7fx win7krnl win7path win7sync dxg7fix
   RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
