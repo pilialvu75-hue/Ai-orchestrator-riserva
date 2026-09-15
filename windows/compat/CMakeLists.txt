@@ -7,7 +7,7 @@ add_library(nt7fx SHARED nt7fx.cpp nt7fx.def)
 apply_standard_settings(nt7fx)
 set_target_properties(nt7fx PROPERTIES OUTPUT_NAME nt7fx PREFIX "")
 
-add_library(win7krnl SHARED win7krnl.cpp win7krnl.def)
+add_library(win7krnl SHARED win7krnl.cpp win7krnl_extra.cpp win7krnl.def)
 apply_standard_settings(win7krnl)
 set_target_properties(win7krnl PROPERTIES OUTPUT_NAME win7krnl PREFIX "")
 
