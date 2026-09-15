@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
@@ -16,6 +17,10 @@ import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/expiring_search_cache.dart';
+import 'package:ai_orchestrator/core/tools/search/fallback_search_provider.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
@@ -48,6 +53,25 @@ abstract final class CloudRoutingBootstrap {
       );
     }
 
+    // Assistant-only search stack. General ranked Web results come from
+    // DuckDuckGo Lite; the existing Instant Answer provider remains a fallback.
+    // The cache is intentionally short-lived so time-sensitive facts cannot
+    // remain stale for the lifetime of the app process. The global
+    // WebSearchTool registration is untouched, keeping Workshop/Cantiere out of
+    // this Assistant-first rollout.
+    final assistantWebSearchTool = WebSearchTool(
+      searchProvider: FallbackSearchProvider(
+        primary: DuckDuckGoLiteProvider(
+          client: sl<http.Client>(),
+        ),
+        fallback: DuckDuckGoProvider(
+          client: sl<http.Client>(),
+          timeout: const Duration(seconds: 4),
+        ),
+      ),
+      searchCache: ExpiringSearchCache(),
+    );
+
     // Assistant-only runtime decorator. The globally registered Local runtime
     // remains the canonical FFI/desktop provider used by diagnostics, Workshop
     // and the rest of the application.
@@ -75,7 +99,7 @@ abstract final class CloudRoutingBootstrap {
         runtimeProvider: assistantLocalRuntimeProvider,
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
         sessionManager: sl<RuntimeSessionManager>(),
-        webSearchTool: sl<WebSearchTool>(),
+        webSearchTool: assistantWebSearchTool,
         backgroundExecutionLeaseService:
             CloudBackgroundExecutionLeaseService(),
       ),
@@ -93,7 +117,7 @@ abstract final class CloudRoutingBootstrap {
         executor: sl<ExecutionEngine>(),
         inferenceService: sl<InferenceService>(),
         plannerService: sl<PlannerService>(),
-        webSearchTool: sl<WebSearchTool>(),
+        webSearchTool: assistantWebSearchTool,
         runtimeSettingsService: sl<AiRuntimeSettingsService>(),
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
       ),
@@ -104,7 +128,7 @@ abstract final class CloudRoutingBootstrap {
         systemPromptService: assistantSystemPromptService,
         delegate: CloudWebEnrichingChatRepository(
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
-          webSearchTool: sl<WebSearchTool>(),
+          webSearchTool: assistantWebSearchTool,
           delegate: ChatRepositoryImpl(
             localDataSource: sl<ChatLocalDataSource>(),
             conversationMemoryService: sl<ConversationMemoryService>(),
@@ -119,7 +143,7 @@ abstract final class CloudRoutingBootstrap {
     );
 
     debugPrint(
-      '[CLOUD_ROUTING] direct Cloud safety path, Assistant web enrichment, '
+      '[CLOUD_ROUTING] direct Cloud safety path, Assistant general web search, '
       'Hybrid web-aware Hannibal routing, Local web continuation guard, '
       'and Cloud background execution lease wired',
     );
