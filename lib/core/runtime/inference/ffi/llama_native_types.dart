@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
+export 'package:ai_orchestrator/core/runtime/inference/native_token_context_budget.dart';
+
 typedef LlbInitBackendNative = Void Function();
 typedef LlbInitBackendDart = void Function();
 
@@ -43,6 +45,9 @@ abstract final class LlamaNativeDefaults {
   // (system prompt + contesto file + history nella stessa finestra).
   // Se noti pressione di memoria con modelli 7B, riporta a 2048 o 3072.
   static const int nCtx = 4096;
+
+  /// Must stay aligned with kPromptTokenSafetyMargin in the native bridge.
+  static const int promptTokenSafetyMargin = 32;
 
   static final int _nThreads = _calculateThreadCount();
 

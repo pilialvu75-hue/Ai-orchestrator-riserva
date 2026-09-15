@@ -55,5 +55,16 @@ void main() {
       expect(bindings, contains('int countTokens(int sessionId, String text)'));
       expect(loader, contains('llb_session_token_count'));
     });
+
+    test('Dart and native prompt safety margins stay aligned', () {
+      final nativeTypes = File(
+        'lib/core/runtime/inference/ffi/llama_native_types.dart',
+      ).readAsStringSync();
+      final entrypoint =
+          File('native/android/llama_bridge_entrypoint.cpp').readAsStringSync();
+
+      expect(nativeTypes, contains('promptTokenSafetyMargin = 32'));
+      expect(entrypoint, contains('kPromptTokenSafetyMargin = 32'));
+    });
   });
 }
