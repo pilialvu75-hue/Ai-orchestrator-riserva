@@ -5,17 +5,18 @@
 
 #include "resource.h"
 
-namespace {
-
 /// Window attribute that enables dark mode window decorations.
 ///
-/// Redefined in case the developer's machine has a Windows SDK older than
-/// version 10.0.22000.0.
-/// See: https://docs.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
-constexpr DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+/// Keep this under a project-local name because newer Windows SDKs expose
+/// DWMWA_USE_IMMERSIVE_DARK_MODE themselves, which makes a same-name fallback
+/// ambiguous at compile time.
+constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
 
 /// A class that wraps a window class registration and ensures that
 /// registration is cleaned up when no longer needed.
+///
+/// This intentionally lives in the global namespace: Win32Window declares it
+/// as a friend in win32_window.h so it can register the private WndProc.
 class WindowClassRegistrar {
  public:
   ~WindowClassRegistrar() {
@@ -69,8 +70,6 @@ void WindowClassRegistrar::UnregisterWindowClass() {
   ::UnregisterClass(kClassName, nullptr);
   registered_ = false;
 }
-
-}  // namespace
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -249,7 +248,7 @@ void Win32Window::UpdateTheme(HWND const window) {
 
   if (result == ERROR_SUCCESS) {
     BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DwmSetWindowAttribute(window, kDwmwaUseImmersiveDarkMode,
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
 }
