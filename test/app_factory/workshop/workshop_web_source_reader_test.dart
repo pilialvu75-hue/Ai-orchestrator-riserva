@@ -92,7 +92,7 @@ void main() {
 
     expect(result.documents, hasLength(2));
     expect(
-      result.documents.map((entry) => entry.sourceHost),
+      result.documents.map((entry) => entry.sourceHost).toList(),
       <String>['same.test', 'different.test'],
     );
     expect(client.requestedHosts, <String>['same.test', 'different.test']);
@@ -123,7 +123,8 @@ void main() {
   test('keeps page-level evidence inside the aggregate character budget',
       () async {
     final client = _FakeClient((request) async {
-      return _textResponse('${request.url.host} ${'x' * 200}');
+      final payload = List<String>.filled(200, 'x').join();
+      return _textResponse('${request.url.host} $payload');
     });
     final reader = WorkshopWebSourceReader(
       fetcher: _fetcher(client),
