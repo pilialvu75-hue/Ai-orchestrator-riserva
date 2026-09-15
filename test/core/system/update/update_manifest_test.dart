@@ -19,6 +19,7 @@ void main() {
     expect(manifest.apkUrl, 'https://example.com/app.apk');
     expect(manifest.apkFileName, 'app.apk');
     expect(manifest.critical, isFalse);
+    expect(manifest.windowsArtifact, isNull);
   });
 
   test('parses simplified version.json format (versionName/apkUrl/forceUpdate)', () {
@@ -35,6 +36,55 @@ void main() {
     expect(manifest.minSupported, 'v0.0.0');
     expect(manifest.apkFileName, 'app-release.apk');
     expect(manifest.critical, isFalse);
+  });
+
+  test('parses and selects Windows installer metadata without changing Android payload', () {
+    final manifest = UpdateManifest.fromJson(const {
+      'versionName': '1.0.13.200',
+      'versionCode': 13,
+      'apkUrl': 'https://example.com/app-release.apk',
+      'windowsUrl': 'https://example.com/AI-Orchestrator-Setup-x64.exe',
+      'windowsFileName': 'AI-Orchestrator-Setup-x64.exe',
+      'windowsSizeBytes': 41447219,
+      'windowsSha256':
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    });
+
+    final android = manifest.artifactFor(UpdateTargetPlatform.android);
+    final windows = manifest.artifactFor(UpdateTargetPlatform.windows);
+
+    expect(android, isNotNull);
+    expect(android!.fileName, 'app-release.apk');
+    expect(android.url, 'https://example.com/app-release.apk');
+    expect(windows, isNotNull);
+    expect(windows!.fileName, 'AI-Orchestrator-Setup-x64.exe');
+    expect(windows.url, 'https://example.com/AI-Orchestrator-Setup-x64.exe');
+    expect(windows.sizeBytes, 41447219);
+    expect(
+      windows.sha256,
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    );
+  });
+
+  test('serializes Windows installer metadata for persisted/cached manifests', () {
+    final manifest = UpdateManifest.fromJson(const {
+      'version': '1.0.13',
+      'apk_url': 'https://example.com/app.apk',
+      'windows_url': 'https://example.com/AI-Orchestrator-Setup-x64.exe',
+      'windows_size_bytes': 1024,
+      'windows_sha256':
+          'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    });
+
+    final encoded = manifest.toJson();
+    expect(encoded['windows_url'],
+        'https://example.com/AI-Orchestrator-Setup-x64.exe');
+    expect(encoded['windows_file_name'], 'AI-Orchestrator-Setup-x64.exe');
+    expect(encoded['windows_size_bytes'], 1024);
+    expect(
+      encoded['windows_sha256'],
+      'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    );
   });
 
   test('forceUpdate:true maps to critical:true', () {
@@ -75,6 +125,35 @@ void main() {
         'version': '1.0.12',
         'apk_url': 'https://example.com/app.apk',
         'apk_size_bytes': 0,
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test('rejects malformed Windows installer metadata', () {
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.13',
+        'apk_url': 'https://example.com/app.apk',
+        'windows_url': 'https://example.com/setup.zip',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.13',
+        'apk_url': 'https://example.com/app.apk',
+        'windows_url': 'https://example.com/setup.exe',
+        'windows_size_bytes': 0,
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.13',
+        'apk_url': 'https://example.com/app.apk',
+        'windows_url': 'https://example.com/setup.exe',
+        'windows_sha256': 'not-a-sha',
       }),
       throwsFormatException,
     );
