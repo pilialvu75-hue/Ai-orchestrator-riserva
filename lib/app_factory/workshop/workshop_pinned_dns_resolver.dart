@@ -14,7 +14,7 @@ final class WorkshopPinnedDnsResolver {
     WorkshopDnsLookup? lookup,
     WorkshopClock? clock,
     this.ttl = const Duration(seconds: 30),
-  })  : assert(ttl > Duration.zero),
+  })  : assert(ttl.inMicroseconds > 0),
         _lookup = lookup ?? _defaultLookup,
         _clock = clock ?? DateTime.now;
 
