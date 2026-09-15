@@ -61,6 +61,7 @@ class WebSearchTool implements Tool {
         output: '',
         success: false,
         error: 'A non-empty "query" parameter is required.',
+        metadata: <String, Object?>{'failure_reason': 'empty_query'},
       );
     }
 
@@ -99,6 +100,7 @@ class WebSearchTool implements Tool {
           output: '',
           success: false,
           error: 'No search results found.',
+          metadata: const <String, Object?>{'failure_reason': 'no_results'},
         );
       }
 
@@ -152,6 +154,7 @@ class WebSearchTool implements Tool {
         error: includeErrorDetailsInDiagnostics
             ? 'Web search timed out: $error'
             : 'Web search timed out.',
+        metadata: const <String, Object?>{'failure_reason': 'timeout'},
       );
     } catch (error) {
       RuntimeEventLog.instance.emit(
@@ -167,6 +170,7 @@ class WebSearchTool implements Tool {
         error: includeErrorDetailsInDiagnostics
             ? 'Web search failed: $error'
             : 'Web search failed.',
+        metadata: const <String, Object?>{'failure_reason': 'failure'},
       );
     }
   }
