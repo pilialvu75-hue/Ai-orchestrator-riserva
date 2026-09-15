@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_journal.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
+import 'package:ai_orchestrator/core/runtime/background/cloud_background_recovery_policy.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -37,8 +38,11 @@ final class DirectiveAwareInferenceService extends InferenceService {
     Tool? webSearchTool,
     CloudBackgroundExecutionLeaseService? backgroundExecutionLeaseService,
     CloudBackgroundExecutionJournal? backgroundExecutionJournal,
+    CloudBackgroundRecoveryPolicy backgroundRecoveryPolicy =
+        const CloudBackgroundRecoveryPolicy(),
   })  : _backgroundExecutionLeaseService = backgroundExecutionLeaseService,
         _backgroundExecutionJournal = backgroundExecutionJournal,
+        _backgroundRecoveryPolicy = backgroundRecoveryPolicy,
         _localOnlyService = InferenceService(
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: () async => AiRuntimeMode.local,
@@ -72,6 +76,7 @@ final class DirectiveAwareInferenceService extends InferenceService {
   final InferenceService _cloudOnlyService;
   final CloudBackgroundExecutionLeaseService? _backgroundExecutionLeaseService;
   final CloudBackgroundExecutionJournal? _backgroundExecutionJournal;
+  final CloudBackgroundRecoveryPolicy _backgroundRecoveryPolicy;
 
   @override
   TokenStream stream(InferenceRequest request) {
@@ -99,12 +104,7 @@ final class DirectiveAwareInferenceService extends InferenceService {
 
     if (interrupted.isNotEmpty) {
       yield InferenceResponse.notice(
-        interrupted.length == 1
-            ? 'A previous Cloud response was interrupted by an app/process restart. '
-                'It was not retried automatically to avoid duplicate provider charges.'
-            : '${interrupted.length} previous Cloud responses were interrupted by an '
-                'app/process restart. They were not retried automatically to avoid '
-                'duplicate provider charges.',
+        _backgroundRecoveryPolicy.noticeFor(interrupted),
         providerId: request.cloudProviderId,
       );
     }
@@ -125,8 +125,20 @@ final class DirectiveAwareInferenceService extends InferenceService {
             providerHint: providerHint,
           );
 
+    var observedProviderId = journalRecord?.providerId;
     try {
-      yield* delegate;
+      await for (final chunk in delegate) {
+        final providerId = chunk.providerId?.trim();
+        if (journal != null &&
+            journalRecord != null &&
+            providerId != null &&
+            providerId.isNotEmpty &&
+            providerId != observedProviderId) {
+          observedProviderId = providerId;
+          await journal.observeProvider(journalRecord, providerId);
+        }
+        yield chunk;
+      }
     } finally {
       if (lease != null) {
         await lease.release();
