@@ -3,6 +3,8 @@ import 'dart:ffi';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ffi/ffi.dart';
 
+export 'package:ai_orchestrator/core/runtime/inference/native_token_context_budget.dart';
+
 class LlamaBridgeBindings {
   LlamaBridgeBindings(DynamicLibrary lib)
       : _initBackend =
@@ -49,6 +51,9 @@ class LlamaBridgeBindings {
         _sessionLastError = lib.lookupFunction<
             LlbSessionLastErrorNative,
             LlbSessionLastErrorDart>('llb_session_last_error');
+
+  static LlamaBridgeBindings? _currentBudgetBindings;
+  static int? _currentBudgetSessionId;
 
   final LlbInitBackendDart _initBackend;
   final LlbGpuBackendNameDart _gpuBackendName;
@@ -122,6 +127,27 @@ class LlamaBridgeBindings {
     }
   }
 
+  /// Returns an exact-token counter for the native session most recently
+  /// validated as active on this isolate.
+  ///
+  /// Generation startup calls [sessionIsActive] synchronously immediately
+  /// before composing the prompt, so this exposes that exact RuntimeSession to
+  /// the prompt-budgeting layer without leaking native pointers or model/vocab
+  /// handles across the FFI boundary.
+  static int? countTokensForCurrentSession(String text) {
+    final bindings = _currentBudgetBindings;
+    final sessionId = _currentBudgetSessionId;
+    if (bindings == null || sessionId == null || sessionId <= 0) {
+      return null;
+    }
+    if (bindings._sessionIsActive(sessionId) != 1) {
+      _currentBudgetBindings = null;
+      _currentBudgetSessionId = null;
+      return null;
+    }
+    return bindings.countTokens(sessionId, text);
+  }
+
   /// Starts generation for [sessionId] using the caller-owned [promptPtr].
   ///
   /// The caller is responsible for keeping [promptPtr] valid until the first
@@ -175,9 +201,27 @@ class LlamaBridgeBindings {
 
   void cancelSession(int sessionId) => _sessionCancel(sessionId);
 
-  void releaseSession(int sessionId) => _releaseSession(sessionId);
+  void releaseSession(int sessionId) {
+    if (_currentBudgetBindings == this &&
+        _currentBudgetSessionId == sessionId) {
+      _currentBudgetBindings = null;
+      _currentBudgetSessionId = null;
+    }
+    _releaseSession(sessionId);
+  }
 
-  int sessionIsActive(int sessionId) => _sessionIsActive(sessionId);
+  int sessionIsActive(int sessionId) {
+    final state = _sessionIsActive(sessionId);
+    if (state == 1) {
+      _currentBudgetBindings = this;
+      _currentBudgetSessionId = sessionId;
+    } else if (_currentBudgetBindings == this &&
+        _currentBudgetSessionId == sessionId) {
+      _currentBudgetBindings = null;
+      _currentBudgetSessionId = null;
+    }
+    return state;
+  }
 
   int sessionIsGenerating(int sessionId) => _sessionIsGenerating(sessionId);
 
