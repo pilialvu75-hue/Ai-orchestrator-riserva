@@ -92,7 +92,7 @@ final class WorkshopWebResearchService {
   final int maxResultsPerLane;
   final int maxCharsPerLane;
 
-  bool shouldResearch(WorkshopRequest request) {
+  bool hasExplicitResearchIntent(WorkshopRequest request) {
     final value = '${request.title} ${request.instruction} '
             '${request.context.join(' ')}'
         .trim()
@@ -119,7 +119,20 @@ final class WorkshopWebResearchService {
       'migliori pratiche',
     ];
 
-    if (explicitResearchMarkers.any(value.contains)) return true;
+    return explicitResearchMarkers.any(value.contains);
+  }
+
+  bool shouldResearch(
+    WorkshopRequest request, {
+    bool hasStrongLocalReuse = false,
+  }) {
+    if (hasExplicitResearchIntent(request)) return true;
+
+    // Library-first: when a verified local asset already covers the request,
+    // automatic market/domain research would add latency and network use before
+    // the Architect has even identified a delta. Explicit research requests
+    // still win because they express a user requirement.
+    if (hasStrongLocalReuse) return false;
 
     // A greenfield create request with no explicit target files is where market
     // and domain evidence is most likely to improve the product before any code
@@ -132,11 +145,16 @@ final class WorkshopWebResearchService {
   Future<WorkshopWebEvidencePack> research({
     required WorkshopRequest request,
     bool isOffline = false,
+    bool hasStrongLocalReuse = false,
   }) async {
-    if (isOffline || !shouldResearch(request)) {
+    if (isOffline ||
+        !shouldResearch(
+          request,
+          hasStrongLocalReuse: hasStrongLocalReuse,
+        )) {
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_WEB_RESEARCH] request=${request.id} '
-        'status=skipped reason=${isOffline ? 'offline' : 'not_needed'}',
+        'status=skipped reason=${isOffline ? 'offline' : hasStrongLocalReuse ? 'strong_local_reuse' : 'not_needed'}',
       );
       return const WorkshopWebEvidencePack();
     }
