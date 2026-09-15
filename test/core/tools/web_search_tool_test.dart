@@ -40,6 +40,20 @@ class _FakeSearchProvider implements SearchProvider {
   }
 }
 
+class _ThrowingSearchProvider implements SearchProvider {
+  const _ThrowingSearchProvider(this.error);
+
+  final Object error;
+
+  @override
+  Duration get timeout => const Duration(seconds: 5);
+
+  @override
+  Future<List<SearchResult>> search(String query, {int limit = 5}) async {
+    throw error;
+  }
+}
+
 void main() {
   test('returns compact search context from DuckDuckGo JSON', () async {
     RuntimeEventLog.instance.clear();
@@ -107,5 +121,30 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('privacy mode redacts provider exception from logs and tool error',
+      () async {
+    RuntimeEventLog.instance.clear();
+    const secret = 'private-search-term-987654';
+    final provider = _ThrowingSearchProvider(
+      StateError('failed https://example.test/search?q=$secret'),
+    );
+    final tool = WebSearchTool(
+      searchProvider: provider,
+      includeErrorDetailsInDiagnostics: false,
+    );
+
+    final result = await tool.execute(<String, dynamic>{'query': secret});
+    final diagnostics = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .join('\n');
+
+    expect(result.success, isFalse);
+    expect(result.error, 'Web search failed.');
+    expect(result.error, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains('example.test')));
+    expect(diagnostics, contains('error_type=StateError'));
   });
 }

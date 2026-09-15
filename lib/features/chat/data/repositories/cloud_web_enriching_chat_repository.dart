@@ -84,7 +84,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
       } else {
         RuntimeEventLog.instance.emit(
           '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=cloud '
-          'status=unavailable reason=${result.error ?? 'empty_results'}',
+          'status=unavailable reason=tool_unavailable',
         );
         onRuntimeNotice?.call(
           'Web search unavailable; continuing without live web data.',
@@ -93,7 +93,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
     } catch (error) {
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=cloud '
-        'status=failed error=$error',
+        'status=failed error_type=${error.runtimeType}',
       );
       onRuntimeNotice?.call(
         'Web search unavailable; continuing without live web data.',

@@ -167,7 +167,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       if (!result.success || result.output.trim().isEmpty) {
         RuntimeEventLog.instance.emit(
           '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
-          'status=unavailable reason=${result.error ?? 'empty_results'} '
+          'status=unavailable reason=tool_unavailable '
           'action=continue_without_web',
         );
         return systemPrompt;
@@ -182,7 +182,8 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     } catch (error) {
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
-        'status=failed error=$error action=continue_without_web',
+        'status=failed error_type=${error.runtimeType} '
+        'action=continue_without_web',
       );
       return systemPrompt;
     }

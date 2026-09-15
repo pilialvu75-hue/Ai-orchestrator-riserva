@@ -12,12 +12,24 @@ class DuckDuckGoProvider implements SearchProvider {
   DuckDuckGoProvider({
     http.Client? client,
     this.timeout = const Duration(seconds: 5),
+    this.enableDetailedDebugLogging = true,
+    this.includeErrorDetailsInDiagnostics = true,
   }) : _client = client ?? http.Client();
 
   final http.Client _client;
 
   @override
   final Duration timeout;
+
+  /// Keeps the historical verbose diagnostic output enabled by default so
+  /// existing global/Workshop callers are behavior-compatible. Assistant can
+  /// disable it because user search queries and returned payloads may contain
+  /// private text that should not be copied into debug logs.
+  final bool enableDetailedDebugLogging;
+
+  /// Controls whether exception text is copied into RuntimeEventLog. Some HTTP
+  /// exceptions include the request URI, which may contain the user's query.
+  final bool includeErrorDetailsInDiagnostics;
 
   @override
   Future<List<SearchResult>> search(
@@ -38,11 +50,11 @@ class DuckDuckGoProvider implements SearchProvider {
       },
     );
 
-    debugPrint('[DDG] ============================================');
-    debugPrint('[DDG] Starting search');
-    debugPrint('[DDG] Query: $query');
-    debugPrint('[DDG] URL: $uri');
-    debugPrint('[DDG] Timeout: ${timeout.inSeconds}s');
+    _debug('[DDG] ============================================');
+    _debug('[DDG] Starting search');
+    _debug('[DDG] Query: $query');
+    _debug('[DDG] URL: $uri');
+    _debug('[DDG] Timeout: ${timeout.inSeconds}s');
     RuntimeEventLog.instance.emit(
       '[WEBSEARCH_PROVIDER_SELECTED] provider=duckduckgo limit=$clampedLimit',
     );
@@ -66,17 +78,17 @@ class DuckDuckGoProvider implements SearchProvider {
 
       stopwatch.stop();
 
-      debugPrint('[DDG] HTTP ${response.statusCode}');
+      _debug('[DDG] HTTP ${response.statusCode}');
       RuntimeEventLog.instance.emit(
         response.statusCode >= 200 && response.statusCode < 300
             ? '[WEBSEARCH_HTTP_SUCCESS] status=${response.statusCode} elapsed_ms=${stopwatch.elapsedMilliseconds}'
             : '[WEBSEARCH_HTTP_FAILURE] status=${response.statusCode} elapsed_ms=${stopwatch.elapsedMilliseconds}',
       );
-      debugPrint('[DDG] Elapsed ${stopwatch.elapsedMilliseconds} ms');
+      _debug('[DDG] Elapsed ${stopwatch.elapsedMilliseconds} ms');
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        debugPrint('[DDG] HTTP ERROR');
-        debugPrint(response.body);
+        _debug('[DDG] HTTP ERROR');
+        _debug(response.body);
 
         throw http.ClientException(
           'DuckDuckGo returned HTTP ${response.statusCode}.',
@@ -84,7 +96,7 @@ class DuckDuckGoProvider implements SearchProvider {
         );
       }
 
-      debugPrint(
+      _debug(
         '[DDG] Raw body (${response.body.length} chars)',
       );
 
@@ -105,9 +117,9 @@ class DuckDuckGoProvider implements SearchProvider {
       final abstractUrl =
           (decoded['AbstractURL'] as String?)?.trim();
 
-      debugPrint('[DDG] Heading: "$heading"');
-      debugPrint('[DDG] Abstract length: ${abstract?.length ?? 0}');
-      debugPrint('[DDG] AbstractURL: $abstractUrl');
+      _debug('[DDG] Heading: "$heading"');
+      _debug('[DDG] Abstract length: ${abstract?.length ?? 0}');
+      _debug('[DDG] AbstractURL: $abstractUrl');
 
       final results = <SearchResult>[];
 
@@ -132,29 +144,33 @@ class DuckDuckGoProvider implements SearchProvider {
         results,
       );
 
-      debugPrint(
+      _debug(
         '[DDG] Related topics collected: ${results.length}',
       );
 
       final output =
           results.take(clampedLimit).toList(growable: false);
 
-      debugPrint('[DDG] Returning ${output.length} results');
-      debugPrint('[DDG] ============================================');
+      _debug('[DDG] Returning ${output.length} results');
+      _debug('[DDG] ============================================');
 
       return output;
     } catch (e, s) {
-      stopwatch.stop();
+      if (stopwatch.isRunning) stopwatch.stop();
 
-      debugPrint('[DDG] EXCEPTION');
-      debugPrint(e.toString());
-      debugPrint(s.toString());
+      _debug('[DDG] EXCEPTION');
+      _debug(e.toString());
+      _debug(s.toString());
       RuntimeEventLog.instance.emit(
         e is TimeoutException
-            ? '[WEBSEARCH_HTTP_TIMEOUT] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e'
-            : '[WEBSEARCH_HTTP_FAILURE] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e',
+            ? includeErrorDetailsInDiagnostics
+                ? '[WEBSEARCH_HTTP_TIMEOUT] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e'
+                : '[WEBSEARCH_HTTP_TIMEOUT] elapsed_ms=${stopwatch.elapsedMilliseconds} error_type=${e.runtimeType}'
+            : includeErrorDetailsInDiagnostics
+                ? '[WEBSEARCH_HTTP_FAILURE] elapsed_ms=${stopwatch.elapsedMilliseconds} error=$e'
+                : '[WEBSEARCH_HTTP_FAILURE] elapsed_ms=${stopwatch.elapsedMilliseconds} error_type=${e.runtimeType}',
       );
-      debugPrint('[DDG] ============================================');
+      _debug('[DDG] ============================================');
 
       rethrow;
     }
@@ -190,6 +206,12 @@ class DuckDuckGoProvider implements SearchProvider {
           results,
         );
       }
+    }
+  }
+
+  void _debug(String message) {
+    if (enableDetailedDebugLogging) {
+      debugPrint(message);
     }
   }
 }
