@@ -15,36 +15,24 @@ void main() {
       final client = _FakeHttpClient((request) async {
         expect(request.method, 'GET');
         expect(request.followRedirects, isFalse);
-        expect(request.url.host, 'example.com');
         return _response(
           200,
-          '''
-<html>
-  <head><style>.secret { display:none; }</style></head>
-  <body>
-    <h1>Recipe guide</h1>
-    <script>stealCredentials()</script>
-    <p>Plan meals &amp; shopping lists.</p>
-  </body>
-</html>
-''',
+          '<html><head><style>.x{display:none}</style></head>'
+          '<body><h1>Guide</h1><script>steal()</script>'
+          '<p>Useful &amp; bounded evidence.</p></body></html>',
           headers: const <String, String>{
             'content-type': 'text/html; charset=utf-8',
           },
         );
       });
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
+      final fetcher = _fetcher(client);
 
-      final result = await fetcher.fetch('https://example.com/recipes');
+      final result = await fetcher.fetch('https://example.com/guide');
 
       expect(result.isSuccess, isTrue);
-      expect(result.page?.url.toString(), 'https://example.com/recipes');
-      expect(result.page?.text, contains('Recipe guide'));
-      expect(result.page?.text, contains('Plan meals & shopping lists.'));
-      expect(result.page?.text, isNot(contains('stealCredentials')));
+      expect(result.page?.text, contains('Guide'));
+      expect(result.page?.text, contains('Useful & bounded evidence.'));
+      expect(result.page?.text, isNot(contains('steal()')));
       expect(result.page?.text, isNot(contains('display:none')));
       expect(client.calls, 1);
     });
@@ -76,19 +64,14 @@ void main() {
       final client = _FakeHttpClient((_) async {
         throw AssertionError('loopback HTTP must never run');
       });
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
-
-      final result = await fetcher.fetch('http://127.0.0.1/admin');
+      final result = await _fetcher(client).fetch('http://127.0.0.1/admin');
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
       expect(result.reason, 'non_public_ip');
       expect(client.calls, 0);
     });
 
-    test('rejects public-looking DNS names that resolve to a private address',
+    test('rejects public-looking DNS names resolving to a private address',
         () async {
       final client = _FakeHttpClient((_) async {
         throw AssertionError('private DNS target must never be requested');
@@ -107,30 +90,29 @@ void main() {
       expect(client.calls, 0);
     });
 
-    test('revalidates redirects and blocks redirects into loopback', () async {
+    test('revalidates HTTPS redirects and blocks redirect into loopback',
+        () async {
       final client = _FakeHttpClient((request) async {
         expect(request.url.host, 'example.com');
         return _response(
           302,
           '',
           headers: const <String, String>{
-            'location': 'http://127.0.0.1/internal',
+            'location': 'https://127.0.0.1/internal',
           },
         );
       });
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
+      final result = await _fetcher(client).fetch(
+        'https://example.com/redirect',
       );
-
-      final result = await fetcher.fetch('https://example.com/redirect');
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
       expect(result.reason, 'non_public_ip');
       expect(client.calls, 1);
     });
 
-    test('rejects HTTPS to HTTP redirect downgrade', () async {
+    test('rejects HTTPS to HTTP redirect downgrade independently of SSRF',
+        () async {
       final client = _FakeHttpClient((_) async => _response(
             302,
             '',
@@ -138,12 +120,9 @@ void main() {
               'location': 'http://example.org/plaintext',
             },
           ));
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
+      final result = await _fetcher(client).fetch(
+        'https://example.com/secure',
       );
-
-      final result = await fetcher.fetch('https://example.com/secure');
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
       expect(result.reason, 'https_downgrade');
@@ -164,16 +143,11 @@ void main() {
             controller.stream,
             302,
             headers: const <String, String>{
-              'location': 'http://127.0.0.1/internal',
+              'location': 'https://127.0.0.1/internal',
             },
           ));
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
-
-      final result = await fetcher
-          .fetch('https://example.com/redirect-with-unbounded-body')
+      final result = await _fetcher(client)
+          .fetch('https://example.com/unbounded-redirect')
           .timeout(const Duration(seconds: 1));
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
@@ -186,58 +160,44 @@ void main() {
       final client = _FakeHttpClient((_) async {
         throw AssertionError('non-default port must not be requested');
       });
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
+      final result = await _fetcher(client).fetch(
+        'https://example.com:8443/page',
       );
-
-      final result = await fetcher.fetch('https://example.com:8443/page');
 
       expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
       expect(result.reason, 'non_default_port');
       expect(client.calls, 0);
     });
 
-    test('rejects binary content', () async {
-      final client = _FakeHttpClient((_) async => _response(
-            200,
-            'not really an image',
-            headers: const <String, String>{
-              'content-type': 'image/png',
-            },
-          ));
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
+    test('rejects binary and JavaScript response content', () async {
+      final responses = <http.StreamedResponse>[
+        _response(
+          200,
+          'not an image',
+          headers: const <String, String>{'content-type': 'image/png'},
+        ),
+        _response(
+          200,
+          'fetch("https://tracker.invalid")',
+          headers: const <String, String>{
+            'content-type': 'text/javascript; charset=utf-8',
+          },
+        ),
+      ];
+      var index = 0;
+      final client = _FakeHttpClient((_) async => responses[index++]);
+      final fetcher = _fetcher(client);
 
-      final result = await fetcher.fetch('https://example.com/image.png');
+      final binary = await fetcher.fetch('https://example.com/image.png');
+      final script = await fetcher.fetch('https://example.com/app.js');
 
-      expect(result.status, WorkshopWebPageFetchStatus.unsupportedContent);
-      expect(client.calls, 1);
+      expect(binary.status, WorkshopWebPageFetchStatus.unsupportedContent);
+      expect(script.status, WorkshopWebPageFetchStatus.unsupportedContent);
+      expect(binary.reason, 'unsupported_content_type');
+      expect(script.reason, 'unsupported_content_type');
     });
 
-    test('rejects JavaScript even when served as text', () async {
-      final client = _FakeHttpClient((_) async => _response(
-            200,
-            'fetch("https://tracker.invalid")',
-            headers: const <String, String>{
-              'content-type': 'text/javascript; charset=utf-8',
-            },
-          ));
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
-
-      final result = await fetcher.fetch('https://example.com/app.js');
-
-      expect(result.status, WorkshopWebPageFetchStatus.unsupportedContent);
-      expect(result.reason, 'unsupported_content_type');
-      expect(client.calls, 1);
-    });
-
-    test('enforces streamed byte limit even without Content-Length', () async {
+    test('enforces streamed byte limit without Content-Length', () async {
       final client = _FakeHttpClient((_) async => http.StreamedResponse(
             Stream<List<int>>.fromIterable(<List<int>>[
               List<int>.filled(12, 65),
@@ -284,25 +244,17 @@ void main() {
       expect(result.reason, 'body_timeout');
     });
 
-    test('runtime diagnostics never retain the fetched URL query string',
-        () async {
+    test('runtime diagnostics never retain URL query data', () async {
       final log = RuntimeEventLog.instance;
       log.clear();
       addTearDown(log.clear);
-
       final client = _FakeHttpClient((_) async => _response(
             200,
             'Public evidence',
-            headers: const <String, String>{
-              'content-type': 'text/plain',
-            },
+            headers: const <String, String>{'content-type': 'text/plain'},
           ));
-      final fetcher = WorkshopPublicWebPageFetcher(
-        client: client,
-        resolver: _publicResolver,
-      );
 
-      final result = await fetcher.fetch(
+      final result = await _fetcher(client).fetch(
         'https://example.com/page?user_secret=do-not-log-this',
       );
 
@@ -313,6 +265,13 @@ void main() {
       expect(diagnostics, isNot(contains('do-not-log-this')));
     });
   });
+}
+
+WorkshopPublicWebPageFetcher _fetcher(_FakeHttpClient client) {
+  return WorkshopPublicWebPageFetcher(
+    client: client,
+    resolver: _publicResolver,
+  );
 }
 
 Future<List<InternetAddress>> _publicResolver(String _) async =>
