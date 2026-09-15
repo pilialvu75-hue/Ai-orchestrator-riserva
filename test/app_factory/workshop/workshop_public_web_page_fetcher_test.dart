@@ -130,6 +130,26 @@ void main() {
       expect(client.calls, 1);
     });
 
+    test('rejects HTTPS to HTTP redirect downgrade', () async {
+      final client = _FakeHttpClient((_) async => _response(
+            302,
+            '',
+            headers: const <String, String>{
+              'location': 'http://example.org/plaintext',
+            },
+          ));
+      final fetcher = WorkshopPublicWebPageFetcher(
+        client: client,
+        resolver: _publicResolver,
+      );
+
+      final result = await fetcher.fetch('https://example.com/secure');
+
+      expect(result.status, WorkshopWebPageFetchStatus.rejectedUrl);
+      expect(result.reason, 'https_downgrade');
+      expect(client.calls, 1);
+    });
+
     test('cancels an ignored redirect body instead of draining it', () async {
       var cancelled = false;
       late StreamController<List<int>> controller;
@@ -197,6 +217,26 @@ void main() {
       expect(client.calls, 1);
     });
 
+    test('rejects JavaScript even when served as text', () async {
+      final client = _FakeHttpClient((_) async => _response(
+            200,
+            'fetch("https://tracker.invalid")',
+            headers: const <String, String>{
+              'content-type': 'text/javascript; charset=utf-8',
+            },
+          ));
+      final fetcher = WorkshopPublicWebPageFetcher(
+        client: client,
+        resolver: _publicResolver,
+      );
+
+      final result = await fetcher.fetch('https://example.com/app.js');
+
+      expect(result.status, WorkshopWebPageFetchStatus.unsupportedContent);
+      expect(result.reason, 'unsupported_content_type');
+      expect(client.calls, 1);
+    });
+
     test('enforces streamed byte limit even without Content-Length', () async {
       final client = _FakeHttpClient((_) async => http.StreamedResponse(
             Stream<List<int>>.fromIterable(<List<int>>[
@@ -218,6 +258,30 @@ void main() {
 
       expect(result.status, WorkshopWebPageFetchStatus.tooLarge);
       expect(result.reason, 'stream_size_limit');
+    });
+
+    test('bounds a response body that never produces data', () async {
+      final controller = StreamController<List<int>>();
+      addTearDown(controller.close);
+      final client = _FakeHttpClient((_) async => http.StreamedResponse(
+            controller.stream,
+            200,
+            headers: const <String, String>{
+              'content-type': 'text/plain; charset=utf-8',
+            },
+          ));
+      final fetcher = WorkshopPublicWebPageFetcher(
+        client: client,
+        resolver: _publicResolver,
+        timeout: const Duration(milliseconds: 25),
+      );
+
+      final result = await fetcher
+          .fetch('https://example.com/slow.txt')
+          .timeout(const Duration(seconds: 1));
+
+      expect(result.status, WorkshopWebPageFetchStatus.unavailable);
+      expect(result.reason, 'body_timeout');
     });
 
     test('runtime diagnostics never retain the fetched URL query string',
