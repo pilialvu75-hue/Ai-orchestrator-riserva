@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/planner/planner_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -47,6 +48,14 @@ abstract final class CloudRoutingBootstrap {
       );
     }
 
+    // Assistant-only runtime decorator. The globally registered Local runtime
+    // remains the canonical FFI/desktop provider used by diagnostics, Workshop
+    // and the rest of the application.
+    final assistantLocalRuntimeProvider =
+        AssistantWebContinuationLocalRuntimeProvider(
+      delegate: sl<LocalRuntimeProvider>(),
+    );
+
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(
         loadSelectedModel: () async {
@@ -63,7 +72,7 @@ abstract final class CloudRoutingBootstrap {
         },
         loadRuntimeMode: () =>
             sl<AiRuntimeSettingsService>().loadRuntimeMode(),
-        runtimeProvider: sl<LocalRuntimeProvider>(),
+        runtimeProvider: assistantLocalRuntimeProvider,
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
         sessionManager: sl<RuntimeSessionManager>(),
         webSearchTool: sl<WebSearchTool>(),
@@ -111,7 +120,8 @@ abstract final class CloudRoutingBootstrap {
 
     debugPrint(
       '[CLOUD_ROUTING] direct Cloud safety path, Assistant web enrichment, '
-      'Hybrid web-aware Hannibal routing, and Cloud background execution lease wired',
+      'Hybrid web-aware Hannibal routing, Local web continuation guard, '
+      'and Cloud background execution lease wired',
     );
   }
 
