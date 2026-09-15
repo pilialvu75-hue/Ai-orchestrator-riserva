@@ -95,6 +95,29 @@ void main() {
       expect(resolverCalls, 1);
     });
 
+    test('mixed public and private DNS result fails closed', () async {
+      var resolverCalls = 0;
+      final client = WorkshopPinnedPublicHttpClient(
+        resolver: (host) async {
+          resolverCalls += 1;
+          expect(host, 'example.com');
+          return <InternetAddress>[
+            InternetAddress('93.184.216.34'),
+            InternetAddress('192.168.1.42'),
+          ];
+        },
+      );
+      addTearDown(client.close);
+
+      final request = http.Request(
+        'GET',
+        Uri.parse('https://example.com/research'),
+      );
+
+      await expectLater(client.send(request), throwsA(anything));
+      expect(resolverCalls, 1);
+    });
+
     test('literal loopback fails without invoking DNS resolver', () async {
       var resolverCalls = 0;
       final client = WorkshopPinnedPublicHttpClient(
