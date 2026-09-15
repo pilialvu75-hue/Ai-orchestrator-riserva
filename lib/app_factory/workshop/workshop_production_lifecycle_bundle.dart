@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snaps
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -78,6 +79,8 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     String? reuseSnapshotsRootPath,
     String? workspaceRootPath,
   }) {
+    final resolvedWebResearchService =
+        webResearchService ?? WorkshopWebResearchFactory.create();
     final orchestratorGateway = roleGateways?[AppAiRole.workshopOrchestrator];
     final engine = WorkshopFactory.createEngine(
       projectExecutor: projectExecutor,
@@ -94,7 +97,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     final preflight = WorkshopPreflightInferencePipeline(
       inference: stageInference,
       reuseLibrary: reuseLibrary,
-      webResearchService: webResearchService,
+      webResearchService: resolvedWebResearchService,
       onReuseLibraryChanged: onReuseLibraryChanged,
     );
     final inferenceRunner =
