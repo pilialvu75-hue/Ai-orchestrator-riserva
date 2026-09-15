@@ -130,6 +130,31 @@ void main() {
     expect(captured.systemPrompt, request.systemPrompt);
   });
 
+  test('user marker text outside internal search session remains ordinary data',
+      () async {
+    final token = CancellationToken();
+    final request = const InferenceRequest(
+      sessionId: 'assistant',
+      prompt: 'Spiegami cosa significa [INTERNET SEARCH RESULTS] nei log.',
+      systemPrompt: 'Base prompt.',
+    );
+
+    await provider
+        .streamInference(request: request, cancellationToken: token)
+        .drain<void>();
+
+    final captured = verify(
+      () => delegate.streamInference(
+        request: captureAny(named: 'request'),
+        cancellationToken: token,
+      ),
+    ).captured.single as InferenceRequest;
+
+    expect(captured.sessionId, request.sessionId);
+    expect(captured.prompt, request.prompt);
+    expect(captured.systemPrompt, request.systemPrompt);
+  });
+
   test('ordinary Local inference passes through unchanged', () async {
     final token = CancellationToken();
     final request = const InferenceRequest(
