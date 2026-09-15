@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
@@ -37,6 +38,20 @@ class _FakeSearchProvider implements SearchProvider {
   Future<List<SearchResult>> search(String query, {int limit = 5}) async {
     calls++;
     return _results.take(limit).toList(growable: false);
+  }
+}
+
+class _ThrowingSearchProvider implements SearchProvider {
+  const _ThrowingSearchProvider(this.error);
+
+  final Object error;
+
+  @override
+  Duration get timeout => const Duration(seconds: 5);
+
+  @override
+  Future<List<SearchResult>> search(String query, {int limit = 5}) async {
+    throw error;
   }
 }
 
@@ -107,5 +122,55 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('privacy mode redacts provider exception from logs and tool error',
+      () async {
+    RuntimeEventLog.instance.clear();
+    const secret = 'private-search-term-987654';
+    final provider = _ThrowingSearchProvider(
+      StateError('failed https://example.test/search?q=$secret'),
+    );
+    final tool = WebSearchTool(
+      searchProvider: provider,
+      includeErrorDetailsInDiagnostics: false,
+    );
+
+    final result = await tool.execute(<String, dynamic>{'query': secret});
+    final diagnostics = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .join('\n');
+
+    expect(result.success, isFalse);
+    expect(result.error, 'Web search failed.');
+    expect(result.error, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains('example.test')));
+    expect(diagnostics, contains('error_type=StateError'));
+  });
+
+  test('privacy mode redacts timeout details from logs and tool error',
+      () async {
+    RuntimeEventLog.instance.clear();
+    const secret = 'timeout-private-query-112233';
+    final provider = _ThrowingSearchProvider(
+      TimeoutException('timeout https://example.test/search?q=$secret'),
+    );
+    final tool = WebSearchTool(
+      searchProvider: provider,
+      includeErrorDetailsInDiagnostics: false,
+    );
+
+    final result = await tool.execute(<String, dynamic>{'query': secret});
+    final diagnostics = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .join('\n');
+
+    expect(result.success, isFalse);
+    expect(result.error, 'Web search timed out.');
+    expect(result.error, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains('example.test')));
+    expect(diagnostics, contains('error_type=TimeoutException'));
   });
 }

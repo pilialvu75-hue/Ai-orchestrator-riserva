@@ -14,6 +14,7 @@ class WebSearchTool implements Tool {
     SearchProvider? searchProvider,
     SearchCache? searchCache,
     this.maxResults = 5,
+    this.includeErrorDetailsInDiagnostics = true,
     Duration timeout = const Duration(seconds: 5),
   })  : _searchProvider = searchProvider ??
             DuckDuckGoProvider(
@@ -25,6 +26,11 @@ class WebSearchTool implements Tool {
   final SearchProvider _searchProvider;
   final SearchCache? _searchCache;
   final int maxResults;
+
+  /// Existing callers keep detailed diagnostics by default. Assistant can turn
+  /// this off so provider exceptions cannot copy a query-bearing URL into the
+  /// runtime log or the user-visible tool error.
+  final bool includeErrorDetailsInDiagnostics;
 
   @override
   String get id => 'web_search';
@@ -90,7 +96,7 @@ class WebSearchTool implements Tool {
         );
         return ToolResult(
           toolId: id,
-          output: '', // Modificato: stringa vuota per evitare di iniettare falsi risultati nel prompt
+          output: '',
           success: false,
           error: 'No search results found.',
         );
@@ -123,23 +129,33 @@ class WebSearchTool implements Tool {
       );
     } on TimeoutException catch (error) {
       RuntimeEventLog.instance.emit(
-        '[WEBSEARCH_EXIT] success=false reason=timeout error=$error',
+        includeErrorDetailsInDiagnostics
+            ? '[WEBSEARCH_EXIT] success=false reason=timeout error=$error'
+            : '[WEBSEARCH_EXIT] success=false reason=timeout '
+                'error_type=${error.runtimeType}',
       );
       return ToolResult(
         toolId: id,
         output: '',
         success: false,
-        error: 'Web search timed out: $error',
+        error: includeErrorDetailsInDiagnostics
+            ? 'Web search timed out: $error'
+            : 'Web search timed out.',
       );
     } catch (error) {
       RuntimeEventLog.instance.emit(
-        '[WEBSEARCH_EXIT] success=false reason=failure error=$error',
+        includeErrorDetailsInDiagnostics
+            ? '[WEBSEARCH_EXIT] success=false reason=failure error=$error'
+            : '[WEBSEARCH_EXIT] success=false reason=failure '
+                'error_type=${error.runtimeType}',
       );
       return ToolResult(
         toolId: id,
         output: '',
         success: false,
-        error: 'Web search failed: $error',
+        error: includeErrorDetailsInDiagnostics
+            ? 'Web search failed: $error'
+            : 'Web search failed.',
       );
     }
   }
