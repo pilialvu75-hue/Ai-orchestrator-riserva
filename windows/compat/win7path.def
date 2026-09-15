@@ -3,3 +3,4 @@ EXPORTS
   PathAllocCanonicalize=CompatPathAllocCanonicalize
   PathCchCombineEx=CompatPathCchCombineEx
   PathCchRemoveFileSpec=CompatPathCchRemoveFileSpec
+  PathCchRemoveBackslash=CompatPathCchRemoveBackslash
