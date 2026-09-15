@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
@@ -146,5 +147,30 @@ void main() {
     expect(diagnostics, isNot(contains(secret)));
     expect(diagnostics, isNot(contains('example.test')));
     expect(diagnostics, contains('error_type=StateError'));
+  });
+
+  test('privacy mode redacts timeout details from logs and tool error',
+      () async {
+    RuntimeEventLog.instance.clear();
+    const secret = 'timeout-private-query-112233';
+    final provider = _ThrowingSearchProvider(
+      TimeoutException('timeout https://example.test/search?q=$secret'),
+    );
+    final tool = WebSearchTool(
+      searchProvider: provider,
+      includeErrorDetailsInDiagnostics: false,
+    );
+
+    final result = await tool.execute(<String, dynamic>{'query': secret});
+    final diagnostics = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .join('\n');
+
+    expect(result.success, isFalse);
+    expect(result.error, 'Web search timed out.');
+    expect(result.error, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains(secret)));
+    expect(diagnostics, isNot(contains('example.test')));
+    expect(diagnostics, contains('error_type=TimeoutException'));
   });
 }
