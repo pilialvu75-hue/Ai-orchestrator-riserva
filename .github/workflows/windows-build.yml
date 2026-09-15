@@ -59,8 +59,22 @@ jobs:
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Run Flutter tests
+        id: flutter-tests
         shell: pwsh
-        run: flutter test
+        run: |
+          flutter test --machine 2>&1 | Tee-Object -FilePath flutter-test-results.jsonl
+          $testExit = $LASTEXITCODE
+          Write-Host "Flutter test exit code: $testExit"
+          exit $testExit
+
+      - name: Upload Flutter test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-results-windows
+          path: flutter-test-results.jsonl
+          if-no-files-found: warn
+          retention-days: 14
 
   build-windows:
     runs-on: windows-2022
