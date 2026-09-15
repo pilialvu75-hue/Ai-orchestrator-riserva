@@ -50,6 +50,9 @@ final class CloudBackgroundExecutionJournal {
             ? 'unknown'
             : request.sessionId.trim();
         final normalizedRequestId = request.requestId?.trim();
+        final normalizedProviderHint = providerHint.trim().isEmpty
+            ? 'auto'
+            : providerHint.trim();
         final now = _clock();
         final record = CloudBackgroundExecutionRecord(
           jobId: normalizedRequestId != null && normalizedRequestId.isNotEmpty
@@ -61,9 +64,9 @@ final class CloudBackgroundExecutionJournal {
               normalizedRequestId != null && normalizedRequestId.isNotEmpty
                   ? normalizedRequestId
                   : null,
-          providerHint: providerHint.trim().isEmpty
-              ? 'auto'
-              : providerHint.trim(),
+          providerHint: normalizedProviderHint,
+          providerId:
+              normalizedProviderHint == 'auto' ? null : normalizedProviderHint,
           startedAtEpochMs: now.millisecondsSinceEpoch,
           projectId: _nonEmpty(request.projectId),
           taskId: _nonEmpty(request.taskId),
@@ -79,7 +82,8 @@ final class CloudBackgroundExecutionJournal {
 
         debugPrint(
           '[CLOUD_BACKGROUND_RECOVERY] journal_begin job=${record.jobId} '
-          'session=${record.sessionId} provider=${record.providerHint}',
+          'session=${record.sessionId} provider_hint=${record.providerHint} '
+          'provider=${record.providerId ?? 'unresolved'}',
         );
         return record;
       } catch (error) {
@@ -87,6 +91,41 @@ final class CloudBackgroundExecutionJournal {
           '[CLOUD_BACKGROUND_RECOVERY] journal_begin_skipped error=$error',
         );
         return null;
+      }
+    });
+  }
+
+  /// Persists the concrete provider selected by AUTO/failover once the stream
+  /// exposes it. This remains metadata-only and writes only when the provider
+  /// identity changes.
+  Future<void> observeProvider(
+    CloudBackgroundExecutionRecord? record,
+    String? providerId,
+  ) {
+    if (record == null) return Future<void>.value();
+    final normalizedProvider = _nonEmpty(providerId);
+    if (normalizedProvider == null) return Future<void>.value();
+
+    return _serialize(() async {
+      try {
+        final records = _readRecords();
+        final index = records.indexWhere((item) => item.jobId == record.jobId);
+        if (index < 0) return;
+
+        final current = records[index];
+        if (current.providerId == normalizedProvider) return;
+
+        records[index] = current.copyWith(providerId: normalizedProvider);
+        await _writeRecords(records);
+        debugPrint(
+          '[CLOUD_BACKGROUND_RECOVERY] provider_observed '
+          'job=${record.jobId} provider=$normalizedProvider',
+        );
+      } catch (error) {
+        debugPrint(
+          '[CLOUD_BACKGROUND_RECOVERY] provider_observe_skipped '
+          'job=${record.jobId} error=$error',
+        );
       }
     });
   }
@@ -230,6 +269,7 @@ final class CloudBackgroundExecutionRecord {
     required this.sessionId,
     required this.providerHint,
     required this.startedAtEpochMs,
+    this.providerId,
     this.requestId,
     this.projectId,
     this.taskId,
@@ -243,6 +283,7 @@ final class CloudBackgroundExecutionRecord {
   final String sessionId;
   final String providerHint;
   final int startedAtEpochMs;
+  final String? providerId;
   final String? requestId;
   final String? projectId;
   final String? taskId;
@@ -250,12 +291,32 @@ final class CloudBackgroundExecutionRecord {
   final String? attemptId;
   final String? checkpointId;
 
+  CloudBackgroundExecutionRecord copyWith({
+    String? providerId,
+  }) {
+    return CloudBackgroundExecutionRecord(
+      jobId: jobId,
+      bootId: bootId,
+      sessionId: sessionId,
+      providerHint: providerHint,
+      startedAtEpochMs: startedAtEpochMs,
+      providerId: providerId ?? this.providerId,
+      requestId: requestId,
+      projectId: projectId,
+      taskId: taskId,
+      executionId: executionId,
+      attemptId: attemptId,
+      checkpointId: checkpointId,
+    );
+  }
+
   Map<String, Object?> toJson() => <String, Object?>{
         'jobId': jobId,
         'bootId': bootId,
         'sessionId': sessionId,
         'providerHint': providerHint,
         'startedAtEpochMs': startedAtEpochMs,
+        if (providerId != null) 'providerId': providerId,
         if (requestId != null) 'requestId': requestId,
         if (projectId != null) 'projectId': projectId,
         if (taskId != null) 'taskId': taskId,
@@ -295,6 +356,7 @@ final class CloudBackgroundExecutionRecord {
       sessionId: sessionId,
       providerHint: providerHint,
       startedAtEpochMs: startedAtEpochMs.toInt(),
+      providerId: optionalString('providerId'),
       requestId: optionalString('requestId'),
       projectId: optionalString('projectId'),
       taskId: optionalString('taskId'),
