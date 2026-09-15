@@ -56,24 +56,29 @@ function Replace-ExactAsciiImport(
   Write-Host "Redirected $Original -> $Replacement at byte offset $offset"
 }
 
+$redirects = @(
+  @('WS2_32.dll', 'ws2fix.dll'),
+  @('ntdll.dll', 'nt7fx.dll'),
+  @('KERNEL32.dll', 'win7krnl.dll'),
+  @('api-ms-win-core-path-l1-1-0.dll', 'win7path-compatibility-shim.dll'),
+  @('api-ms-win-core-synch-l1-2-0.dll', 'ai-orchestrator-sync-win7fix.dll')
+)
+
 $bytes = [IO.File]::ReadAllBytes($FlutterDll)
-Replace-ExactAsciiImport $bytes 'WS2_32.dll' 'ws2fix.dll'
-Replace-ExactAsciiImport $bytes 'ntdll.dll' 'nt7fx.dll'
+foreach ($redirect in $redirects) {
+  Replace-ExactAsciiImport $bytes $redirect[0] $redirect[1]
+}
 [IO.File]::WriteAllBytes($FlutterDll, $bytes)
 
 $verified = [IO.File]::ReadAllBytes($FlutterDll)
-$checks = @(
-  @('WS2_32.dll', 0),
-  @('ws2fix.dll', 1),
-  @('ntdll.dll', 0),
-  @('nt7fx.dll', 1)
-)
-foreach ($check in $checks) {
-  $pattern = [Text.Encoding]::ASCII.GetBytes([string]$check[0])
-  $count = (Find-PatternOffsets $verified $pattern).Count
-  if ($count -ne [int]$check[1]) {
-    throw "Post-patch validation failed for $($check[0]): expected $($check[1]), found $count."
+foreach ($redirect in $redirects) {
+  $oldPattern = [Text.Encoding]::ASCII.GetBytes([string]$redirect[0])
+  $newPattern = [Text.Encoding]::ASCII.GetBytes([string]$redirect[1])
+  $oldCount = (Find-PatternOffsets $verified $oldPattern).Count
+  $newCount = (Find-PatternOffsets $verified $newPattern).Count
+  if ($oldCount -ne 0 -or $newCount -ne 1) {
+    throw "Post-patch validation failed for $($redirect[0]): old=$oldCount new=$newCount."
   }
 }
 
-Write-Host 'Flutter Windows 7 import redirection validated.'
+Write-Host 'Flutter Windows 7 import redirection validated for all known loader blockers.'
