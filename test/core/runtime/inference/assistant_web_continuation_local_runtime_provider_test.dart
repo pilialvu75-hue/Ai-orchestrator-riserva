@@ -105,6 +105,31 @@ void main() {
     expect(captured.prompt, isNot(contains('Ultime notizie')));
   });
 
+  test('search session without a results marker passes through unchanged',
+      () async {
+    final token = CancellationToken();
+    final request = const InferenceRequest(
+      sessionId: 'assistant::search',
+      prompt: 'Continuation payload without injected web evidence.',
+      systemPrompt: 'Base prompt.',
+    );
+
+    await provider
+        .streamInference(request: request, cancellationToken: token)
+        .drain<void>();
+
+    final captured = verify(
+      () => delegate.streamInference(
+        request: captureAny(named: 'request'),
+        cancellationToken: token,
+      ),
+    ).captured.single as InferenceRequest;
+
+    expect(captured.sessionId, request.sessionId);
+    expect(captured.prompt, request.prompt);
+    expect(captured.systemPrompt, request.systemPrompt);
+  });
+
   test('ordinary Local inference passes through unchanged', () async {
     final token = CancellationToken();
     final request = const InferenceRequest(
