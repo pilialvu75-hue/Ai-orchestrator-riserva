@@ -147,18 +147,21 @@ class RuntimeEventLog {
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   static final _tagRegExp = RegExp(r'^\[([A-Z0-9_]+)\]');
-  static final _quotedQueryRegExp = RegExp(r'query="([^"]*)"');
+  static final _quotedQueryRegExp = RegExp(r'(^|\s)query="([^"]*)"');
 
-  /// Redacts raw search-query fields before they enter either the in-memory or
-  /// persisted diagnostics stream. The length is retained because it is useful
-  /// for debugging protocol extraction without storing the user's query text.
+  /// Redacts raw standalone search-query fields before they enter either the
+  /// in-memory or persisted diagnostics stream. The length is retained because
+  /// it is useful for debugging protocol extraction without storing the user's
+  /// query text.
   ///
-  /// This is intentionally narrow: ordinary messages and unquoted `query_*`
-  /// metadata (for example `query_chars=42`) are left byte-for-byte unchanged.
+  /// This is intentionally narrow: ordinary messages, similarly named fields
+  /// such as `retry_query`, and unquoted `query_*` metadata (for example
+  /// `query_chars=42`) are left byte-for-byte unchanged.
   static String redactSensitiveText(String message) {
     return message.replaceAllMapped(
       _quotedQueryRegExp,
-      (match) => 'query_chars=${(match.group(1) ?? '').length}',
+      (match) =>
+          '${match.group(1) ?? ''}query_chars=${(match.group(2) ?? '').length}',
     );
   }
 
