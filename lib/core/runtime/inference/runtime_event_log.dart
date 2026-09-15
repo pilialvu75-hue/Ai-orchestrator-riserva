@@ -97,13 +97,14 @@ class RuntimeEventLog {
   /// The category and tag are inferred automatically from the first
   /// `[TAG]` token in [message].
   void emit(String message) {
-    final tag = _extractTag(message);
+    final safeMessage = redactSensitiveText(message);
+    final tag = _extractTag(safeMessage);
     final category = _categoryFor(tag);
     final entry = RuntimeEventEntry(
       timestamp: DateTime.now(),
       category: category,
       tag: tag,
-      message: message,
+      message: safeMessage,
     );
 
     if (_entries.length >= maxEntries) _entries.removeAt(0);
@@ -146,6 +147,20 @@ class RuntimeEventLog {
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   static final _tagRegExp = RegExp(r'^\[([A-Z0-9_]+)\]');
+  static final _quotedQueryRegExp = RegExp(r'query="([^"]*)"');
+
+  /// Redacts raw search-query fields before they enter either the in-memory or
+  /// persisted diagnostics stream. The length is retained because it is useful
+  /// for debugging protocol extraction without storing the user's query text.
+  ///
+  /// This is intentionally narrow: ordinary messages and unquoted `query_*`
+  /// metadata (for example `query_chars=42`) are left byte-for-byte unchanged.
+  static String redactSensitiveText(String message) {
+    return message.replaceAllMapped(
+      _quotedQueryRegExp,
+      (match) => 'query_chars=${(match.group(1) ?? '').length}',
+    );
+  }
 
   static String _extractTag(String message) {
     final match = _tagRegExp.firstMatch(message.trim());
@@ -335,7 +350,8 @@ class RuntimeEventLog {
 mixin RuntimeEventEmitter {
   void logEvent(String tag, String message) {
     final full = '[$tag] $message';
-    debugPrint(full);
-    RuntimeEventLog.instance.emit(full);
+    final safeFull = RuntimeEventLog.redactSensitiveText(full);
+    debugPrint(safeFull);
+    RuntimeEventLog.instance.emit(safeFull);
   }
 }
