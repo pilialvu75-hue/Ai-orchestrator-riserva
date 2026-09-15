@@ -126,9 +126,14 @@ final class WorkshopEngine {
   ///
   /// L'API execute() rimane comunque utile per il percorso conversazionale
   /// diretto e per la compatibilità con i chiamanti esistenti.
+  ///
+  /// Per default il percorso rimane network-capable anche con un modello
+  /// locale. [isOffline] va impostato a true solo per un vincolo offline
+  /// esplicito.
   Future<WorkshopResult> execute(
-    WorkshopRequest request,
-  ) async {
+    WorkshopRequest request, {
+    bool isOffline = false,
+  }) async {
     _registerRequest(request);
 
     try {
@@ -185,6 +190,7 @@ final class WorkshopEngine {
       final implementationResult =
           await _prepareImplementation(
         request,
+        isOffline: isOffline,
       );
 
       _rememberResult(
@@ -743,8 +749,9 @@ final class WorkshopEngine {
   ///
   /// Non bypassiamo questo confine.
   Future<WorkshopResult> _prepareImplementation(
-    WorkshopRequest request,
-  ) async {
+    WorkshopRequest request, {
+    bool isOffline = false,
+  }) async {
     final gateway = _inferenceGateway;
 
     if (gateway == null) {
@@ -776,7 +783,7 @@ final class WorkshopEngine {
           _workshopSystemPrompt,
       sessionId:
           'workshop:${request.id}',
-      isOffline: true,
+      isOffline: isOffline,
       modelId: null,
       modelPath: null,
     );

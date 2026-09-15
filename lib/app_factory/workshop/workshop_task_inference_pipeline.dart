@@ -64,7 +64,7 @@ final class WorkshopTaskInferencePipeline {
   Future<WorkshopTaskInferenceResult> run({
     required WorkspaceSession session,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     final proposal = await _implementationRunner.run(
@@ -93,7 +93,7 @@ final class WorkshopTaskInferencePipeline {
     required WorkspaceSession session,
     required WorkshopResumeContext resumeContext,
     WorkshopPreflightInferenceResult? preflight,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     final proposal = await _implementationRunner.runWithResumeContext(

@@ -31,7 +31,7 @@ final class WorkshopProposalReviewRunner {
 
   Future<WorkshopReviewVerdict> run({
     required WorkspaceSession session,
-    bool isOffline = true,
+    bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     if (session.status != WorkspaceSessionStatus.review) {

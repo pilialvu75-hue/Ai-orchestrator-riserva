@@ -27,12 +27,16 @@ class WorkshopInferenceGateway {
   ///
   /// [context] must contain Workshop/project conversation turns only.
   /// The Assistant conversation is never implicitly included.
+  ///
+  /// Local inference is not synonymous with offline inference. By default the
+  /// Cantiere keeps network tools available and only sets [isOffline] when the
+  /// caller explicitly requires a network-free execution path.
   Stream<InferenceResponse> stream({
     required String prompt,
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
@@ -67,7 +71,7 @@ class WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
@@ -109,7 +113,7 @@ class WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
@@ -169,7 +173,7 @@ class WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,
@@ -202,7 +206,7 @@ class WorkshopInferenceGateway {
     String? systemPrompt,
     List<ChatTurn> context = const <ChatTurn>[],
     String sessionId = 'workshop',
-    bool isOffline = true,
+    bool isOffline = false,
     int? maxTokens,
     double? temperature,
     double topP = 0.9,

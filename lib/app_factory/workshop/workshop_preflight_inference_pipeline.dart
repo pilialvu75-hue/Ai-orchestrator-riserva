@@ -37,7 +37,7 @@ final class WorkshopPreflightInferencePipeline {
 
   Future<WorkshopPreflightInferenceResult> run({
     required WorkshopRequest request,
-    bool isOffline = true,
+    bool isOffline = false,
     List<String> requiredCapabilities = const <String>[],
     String? target,
     CancellationToken? cancellationToken,
