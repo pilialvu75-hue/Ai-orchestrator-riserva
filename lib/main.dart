@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'package:ai_orchestrator/app/app_shell.dart';
+import 'package:ai_orchestrator/app/app_shell_router.dart';
 import 'package:ai_orchestrator/app/runtime_bootstrap.dart';
 import 'package:ai_orchestrator/app/splash_screen.dart';
 import 'package:ai_orchestrator/app/startup_transition_controller.dart';
@@ -292,7 +292,7 @@ class AppRoot extends StatelessWidget {
             ),
             home: AppLegalInitializer(
               eulaService: di.sl<EulaService>(),
-              child: const AppShell(),
+              child: const AppShellRouter(),
             ),
           );
         },
