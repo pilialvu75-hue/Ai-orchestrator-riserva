@@ -1,6 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+abstract interface class WorkshopExecutionLease {
+  Future<void> release();
+}
+
+abstract interface class WorkshopExecutionLeaseService {
+  Future<WorkshopExecutionLease> acquire({
+    required String operationId,
+  });
+}
+
 /// Best-effort Android process-liveness lease for owner-started Cantiere work.
 ///
 /// The native bridge is intentionally shared with Cloud inference so Android
@@ -8,7 +18,8 @@ import 'package:flutter/services.dart';
 /// The foreground service does not own Workshop execution: Flutter keeps the
 /// authoritative task/runtime/workspace lifecycle and this lease only protects
 /// it while the app is backgrounded.
-class WorkshopForegroundExecutionLeaseService {
+final class WorkshopForegroundExecutionLeaseService
+    implements WorkshopExecutionLeaseService {
   WorkshopForegroundExecutionLeaseService({
     MethodChannel? channel,
     TargetPlatform? platformOverride,
@@ -27,7 +38,8 @@ class WorkshopForegroundExecutionLeaseService {
       !kIsWeb &&
       (_platformOverride ?? defaultTargetPlatform) == TargetPlatform.android;
 
-  Future<WorkshopForegroundExecutionLease> acquire({
+  @override
+  Future<WorkshopExecutionLease> acquire({
     required String operationId,
   }) async {
     final normalizedOperation =
@@ -36,7 +48,7 @@ class WorkshopForegroundExecutionLeaseService {
         'workshop-$normalizedOperation-${DateTime.now().microsecondsSinceEpoch}-${_sequence++}';
 
     if (!_isAndroid) {
-      return WorkshopForegroundExecutionLease._noop(leaseId);
+      return _WorkshopForegroundExecutionLease.noop(leaseId);
     }
 
     try {
@@ -50,7 +62,7 @@ class WorkshopForegroundExecutionLeaseService {
         '[WORKSHOP_BACKGROUND] acquire_ok lease=$leaseId '
         'operation=$normalizedOperation',
       );
-      return WorkshopForegroundExecutionLease._(
+      return _WorkshopForegroundExecutionLease(
         leaseId: leaseId,
         releaseCallback: _releaseNative,
       );
@@ -62,7 +74,7 @@ class WorkshopForegroundExecutionLeaseService {
         '[WORKSHOP_BACKGROUND] acquire_skipped lease=$leaseId '
         'operation=$normalizedOperation error=$error',
       );
-      return WorkshopForegroundExecutionLease._noop(leaseId);
+      return _WorkshopForegroundExecutionLease.noop(leaseId);
     }
   }
 
@@ -81,14 +93,15 @@ class WorkshopForegroundExecutionLeaseService {
   }
 }
 
-class WorkshopForegroundExecutionLease {
-  WorkshopForegroundExecutionLease._({
+final class _WorkshopForegroundExecutionLease
+    implements WorkshopExecutionLease {
+  _WorkshopForegroundExecutionLease({
     required this.leaseId,
     required Future<void> Function(String leaseId)? releaseCallback,
   }) : _releaseCallback = releaseCallback;
 
-  factory WorkshopForegroundExecutionLease._noop(String leaseId) =>
-      WorkshopForegroundExecutionLease._(
+  factory _WorkshopForegroundExecutionLease.noop(String leaseId) =>
+      _WorkshopForegroundExecutionLease(
         leaseId: leaseId,
         releaseCallback: null,
       );
@@ -98,8 +111,7 @@ class WorkshopForegroundExecutionLease {
 
   bool _released = false;
 
-  bool get isReleased => _released;
-
+  @override
   Future<void> release() async {
     if (_released) return;
     _released = true;
