@@ -1,3 +1,5 @@
+#include "ci_generated.iss"
+
 #ifndef AppVersion
   #error AppVersion must be provided by CI
 #endif
