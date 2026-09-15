@@ -1,0 +1,34 @@
+LIBRARY ws2fix
+EXPORTS
+  bind=WS2_32.bind @2
+  closesocket=WS2_32.closesocket @3
+  connect=WS2_32.connect @4
+  getpeername=WS2_32.getpeername @5
+  getsockname=WS2_32.getsockname @6
+  getsockopt=WS2_32.getsockopt @7
+  htons=WS2_32.htons @9
+  ioctlsocket=WS2_32.ioctlsocket @10
+  inet_addr=WS2_32.inet_addr @11
+  listen=WS2_32.listen @13
+  ntohs=WS2_32.ntohs @15
+  recv=WS2_32.recv @16
+  send=WS2_32.send @19
+  setsockopt=WS2_32.setsockopt @21
+  shutdown=WS2_32.shutdown @22
+  socket=WS2_32.socket @23
+  WSAGetLastError=WS2_32.WSAGetLastError @111
+  WSASetLastError=WS2_32.WSASetLastError @112
+  WSAStartup=WS2_32.WSAStartup @115
+  freeaddrinfo=WS2_32.freeaddrinfo
+  getaddrinfo=WS2_32.getaddrinfo
+  getnameinfo=WS2_32.getnameinfo
+  inet_pton=WS2_32.inet_pton
+  InetNtopW=WS2_32.InetNtopW
+  InetPtonW=WS2_32.InetPtonW
+  WSAAddressToStringW=WS2_32.WSAAddressToStringW
+  WSAIoctl=WS2_32.WSAIoctl
+  WSARecv=WS2_32.WSARecv
+  WSARecvFrom=WS2_32.WSARecvFrom
+  WSASend=WS2_32.WSASend
+  WSASendTo=WS2_32.WSASendTo
+  WSASocketW=WS2_32.WSASocketW
