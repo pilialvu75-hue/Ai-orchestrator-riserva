@@ -107,34 +107,8 @@ jobs:
           xcodebuild -version
           uname -m
 
-      - name: Regenerate pristine macOS scaffold for repair probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf macos.legacy
-          mv macos macos.legacy
-          flutter create --platforms=macos --project-name ai_orchestrator --org com.aiorchestrator .
-          git diff --no-index -- macos.legacy macos > macos-scaffold-repair.diff || true
-          echo "Generated a clean Flutter macOS scaffold because the repository Xcode project is not parseable."
-          wc -l macos-scaffold-repair.diff || true
-
-      - name: Upload scaffold repair diff
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-scaffold-repair-diff
-          path: macos-scaffold-repair.diff
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload regenerated macOS scaffold
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-regenerated-scaffold
-          path: macos/
-          if-no-files-found: error
-          retention-days: 14
+      - name: Validate versioned Xcode project
+        run: xcodebuild -project macos/Runner.xcodeproj -list
 
       - name: Resolve Flutter dependencies
         run: flutter pub get
@@ -169,6 +143,17 @@ jobs:
           executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")"
           if [[ -z "$executable_name" || ! -x "$app_path/Contents/MacOS/$executable_name" ]]; then
             echo "Generated app bundle is missing an executable entry point" >&2
+            exit 1
+          fi
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")"
+          if [[ "$bundle_id" != "com.aiorchestrator" ]]; then
+            echo "Unexpected macOS bundle identifier: $bundle_id" >&2
+            exit 1
+          fi
+
+          if ! /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app_path/Contents/Info.plist" >/dev/null; then
+            echo "Generated app bundle is missing NSMicrophoneUsageDescription" >&2
             exit 1
           fi
 
