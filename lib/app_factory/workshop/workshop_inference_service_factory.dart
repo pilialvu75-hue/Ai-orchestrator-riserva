@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
@@ -8,6 +9,10 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
+import 'package:ai_orchestrator/core/tools/search/expiring_search_cache.dart';
+import 'package:ai_orchestrator/core/tools/search/fallback_search_provider.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 
 /// Builds the lightweight inference service used by one Workshop role/model.
@@ -45,9 +50,56 @@ abstract final class WorkshopInferenceServiceFactory {
       runtimeProvider: sl<LocalRuntimeProvider>(),
       cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
       sessionManager: sl<RuntimeSessionManager>(),
-      webSearchTool:
-          sl.isRegistered<WebSearchTool>() ? sl<WebSearchTool>() : null,
+      webSearchTool: _resolveWorkshopWebSearchTool(sl),
     );
+  }
+
+  /// Creates the Workshop-owned public Web stack.
+  ///
+  /// Ranked DuckDuckGo Lite results are preferred because Cantiere research
+  /// needs ordinary Web pages, not only Instant Answers. The historical
+  /// DuckDuckGo JSON provider remains a fallback, and the short-lived cache
+  /// avoids repeating identical lookups while preventing dynamic evidence from
+  /// staying stale for the lifetime of the app.
+  ///
+  /// This is deliberately separate from the Assistant bootstrap: Assistant and
+  /// Cantiere share proven provider infrastructure but keep independent routing
+  /// and research policies.
+  static WebSearchTool createWorkshopWebSearchTool({
+    required http.Client client,
+  }) {
+    return WebSearchTool(
+      searchProvider: FallbackSearchProvider(
+        primary: DuckDuckGoLiteProvider(
+          client: client,
+          includeErrorDetailsInDiagnostics: false,
+        ),
+        fallback: DuckDuckGoProvider(
+          client: client,
+          timeout: const Duration(seconds: 4),
+          enableDetailedDebugLogging: false,
+          includeErrorDetailsInDiagnostics: false,
+        ),
+        includeErrorDetailsInDiagnostics: false,
+      ),
+      searchCache: ExpiringSearchCache(),
+      includeErrorDetailsInDiagnostics: false,
+    );
+  }
+
+  static WebSearchTool? _resolveWorkshopWebSearchTool(GetIt sl) {
+    if (sl.isRegistered<http.Client>()) {
+      return createWorkshopWebSearchTool(client: sl<http.Client>());
+    }
+
+    // Keep reduced test/service-locator configurations compatible. Production
+    // registers an HTTP client, but a caller that only wires the historical
+    // WebSearchTool can still use it rather than losing Web capability.
+    if (sl.isRegistered<WebSearchTool>()) {
+      return sl<WebSearchTool>();
+    }
+
+    return null;
   }
 
   /// Resolves the exact Workshop model from the shared installed-model store.
