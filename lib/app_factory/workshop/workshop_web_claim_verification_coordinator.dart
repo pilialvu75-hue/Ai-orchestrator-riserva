@@ -19,12 +19,6 @@ final class WorkshopWebClaimCandidate {
   final bool requiresFreshness;
 }
 
-/// Semantic boundary that extracts only project-relevant claims from already
-/// opened Web documents.
-///
-/// Production may use a Workshop role inference adapter; tests can remain fully
-/// deterministic. Implementations must return an empty list rather than invent
-/// claims when extraction is uncertain or malformed.
 abstract interface class WorkshopWebClaimExtractor {
   Future<List<WorkshopWebClaimCandidate>> extract({
     required WorkshopRequest request,
@@ -34,10 +28,6 @@ abstract interface class WorkshopWebClaimExtractor {
   });
 }
 
-/// Classifies one opened source against one claim.
-///
-/// The classifier performs semantic interpretation only. Final truth/usage
-/// decisions remain in [WorkshopWebVerificationPolicy].
 abstract interface class WorkshopWebObservationClassifier {
   Future<WorkshopWebSourceObservation?> classify({
     required WorkshopWebClaimCandidate claim,
@@ -94,8 +84,8 @@ final class WorkshopWebVerificationPack {
   }
 }
 
-/// Retrieves independent evidence for a claim and turns opened pages into
-/// source observations. It never decides the final verification status.
+/// Turns already-opened pages into observations and, only when requested by
+/// the verification policy, performs a small claim-specific Web corroboration.
 final class WorkshopWebClaimCorroborator {
   const WorkshopWebClaimCorroborator({
     required Tool webSearchTool,
@@ -118,19 +108,15 @@ final class WorkshopWebClaimCorroborator {
   final int maxCorroborationPages;
   final int maxClassifierChars;
 
-  Future<List<WorkshopWebSourceObservation>> corroborate({
+  Future<List<WorkshopWebSourceObservation>> classifyOpenedSources({
     required WorkshopWebClaimCandidate claim,
     required WorkshopWebSourceReadPack sourcePack,
     required bool isOffline,
     CancellationToken? cancellationToken,
   }) async {
     final observations = <WorkshopWebSourceObservation>[];
-    final seenHosts = <String>{};
-
     for (final document in sourcePack.documents) {
       if (_cancelled(cancellationToken)) break;
-      final host = _normalizedHost(document.finalUrl.host);
-      if (host.isNotEmpty) seenHosts.add(host);
       final observation = await _classify(
         claim: claim,
         source: document.source,
@@ -141,8 +127,24 @@ final class WorkshopWebClaimCorroborator {
       );
       if (observation != null) observations.add(observation);
     }
+    return List<WorkshopWebSourceObservation>.unmodifiable(observations);
+  }
 
-    if (isOffline || _cancelled(cancellationToken)) {
+  Future<List<WorkshopWebSourceObservation>> addOnlineCorroboration({
+    required WorkshopWebClaimCandidate claim,
+    required List<WorkshopWebSourceObservation> existingObservations,
+    CancellationToken? cancellationToken,
+  }) async {
+    final observations = <WorkshopWebSourceObservation>[
+      ...existingObservations,
+    ];
+    final seenHosts = existingObservations
+        .map((entry) => Uri.tryParse(entry.source.url)?.host ?? '')
+        .map(_normalizedHost)
+        .where((host) => host.isNotEmpty)
+        .toSet();
+
+    if (_cancelled(cancellationToken)) {
       return List<WorkshopWebSourceObservation>.unmodifiable(observations);
     }
 
@@ -261,8 +263,8 @@ final class WorkshopWebClaimCorroborator {
   }
 }
 
-/// Coordinates claim extraction, independent corroboration and deterministic
-/// verification. This layer is read-only and never mutates the project.
+/// Coordinates claim extraction, conditional independent corroboration and the
+/// deterministic verification policy. This layer is read-only.
 final class WorkshopWebClaimVerificationCoordinator {
   const WorkshopWebClaimVerificationCoordinator({
     required WorkshopWebClaimExtractor extractor,
@@ -311,20 +313,36 @@ final class WorkshopWebClaimVerificationCoordinator {
       final statement = claim.statement.trim();
       if (statement.isEmpty) continue;
 
-      final observations = await _corroborator.corroborate(
+      var observations = await _corroborator.classifyOpenedSources(
         claim: claim,
         sourcePack: sourcePack,
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
-      final verification = _policy.evaluate(
+      var verification = _policy.evaluate(
         claim: statement,
         kind: claim.kind,
         observations: observations,
         requiresFreshness: claim.requiresFreshness,
       );
-      verifications.add(verification);
 
+      if (!isOffline &&
+          !_cancelled(cancellationToken) &&
+          verification.needsCorroboration) {
+        observations = await _corroborator.addOnlineCorroboration(
+          claim: claim,
+          existingObservations: observations,
+          cancellationToken: cancellationToken,
+        );
+        verification = _policy.evaluate(
+          claim: statement,
+          kind: claim.kind,
+          observations: observations,
+          requiresFreshness: claim.requiresFreshness,
+        );
+      }
+
+      verifications.add(verification);
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_WEB_VERIFY] request=${request.id} '
         'kind=${claim.kind.name} status=${verification.status.name} '
