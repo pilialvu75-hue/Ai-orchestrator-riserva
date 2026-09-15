@@ -64,11 +64,11 @@ final class AssistantWebContinuationLocalRuntimeProvider
   InferenceRequest _rewriteWebContinuation(InferenceRequest request) {
     final prompt = request.prompt;
     final markerIndex = prompt.indexOf(_resultsMarker);
-    final isContinuation =
-        request.sessionId.contains(_continuationSessionMarker) ||
-            markerIndex >= 0;
 
-    if (!isContinuation || markerIndex < 0) {
+    // Only InferenceService's internal search continuation owns this protocol.
+    // A user message that merely contains the marker text must remain data.
+    if (!request.sessionId.contains(_continuationSessionMarker) ||
+        markerIndex < 0) {
       return request;
     }
 
