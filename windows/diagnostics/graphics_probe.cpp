@@ -8,6 +8,7 @@
 #include <strsafe.h>
 
 #include <cstdarg>
+#include <iterator>
 
 namespace {
 
