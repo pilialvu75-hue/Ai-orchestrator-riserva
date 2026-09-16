@@ -569,6 +569,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return envPath.trim();
     }
 
+    if (Platform.isMacOS) {
+      final executableDirectory =
+          File(Platform.resolvedExecutable).parent.path;
+      final bundledHelper = File(
+        '$executableDirectory${Platform.pathSeparator}llama-completion',
+      );
+      if (bundledHelper.existsSync()) {
+        return bundledHelper.path;
+      }
+    }
+
     return 'llama-cli';
   }
 
