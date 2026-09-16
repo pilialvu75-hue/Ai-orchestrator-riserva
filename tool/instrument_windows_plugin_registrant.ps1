@@ -42,13 +42,17 @@ foreach ($line in $lines) {
       $line -match '^\s*([A-Za-z_][A-Za-z0-9_]*RegisterWithRegistrar)\s*\(') {
     $currentRegistrar = $Matches[1]
     $registrarCount++
-    [void]$output.Add("  startup_trace::Mark(\"PLUGIN before $currentRegistrar\");")
+    [void]$output.Add(
+      ('  startup_trace::Mark("PLUGIN before {0}");' -f $currentRegistrar)
+    )
   }
 
   [void]$output.Add($line)
 
   if ($null -ne $currentRegistrar -and $line -match '\);\s*$') {
-    [void]$output.Add("  startup_trace::Mark(\"PLUGIN after $currentRegistrar\");")
+    [void]$output.Add(
+      ('  startup_trace::Mark("PLUGIN after {0}");' -f $currentRegistrar)
+    )
     $currentRegistrar = $null
   }
 }
