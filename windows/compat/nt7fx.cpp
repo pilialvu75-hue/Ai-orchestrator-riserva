@@ -49,11 +49,14 @@ extern "C" DWORD WINAPI CompatRtlAddGrowableFunctionTable(
                   maximum_entry_count, range_base, range_end);
   }
 
-  // Dart's Windows AOT/runtime records currently pass EntryCount equal to
-  // MaximumEntryCount, so a fixed dynamic function table is sufficient on
-  // Windows 7 where growable function tables do not exist.
+  // Windows 7 has fixed dynamic function tables but not growable ones. The
+  // Flutter/Dart engine only imports Add/Delete (not RtlGrowFunctionTable), so
+  // registering the entries that already exist as a fixed table preserves the
+  // unwind metadata it actually uses. Do not require EntryCount to equal the
+  // advertised maximum: valid callers may reserve capacity they never grow.
   if (dynamic_table == nullptr || function_table == nullptr ||
-      entry_count != maximum_entry_count || range_end <= range_base) {
+      entry_count == 0 || entry_count > maximum_entry_count ||
+      range_end <= range_base) {
     return 0xC000000DL;  // STATUS_INVALID_PARAMETER
   }
 
