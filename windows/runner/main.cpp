@@ -79,10 +79,21 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("02 console initialized");
 
   // Initialize COM, so that it is available for use in the library and/or
-  // plugins.
+  // plugins. Only balance CoInitializeEx with CoUninitialize when this call
+  // actually acquired a COM initialization reference.
   startup_trace::Mark("03 before CoInitializeEx");
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  startup_trace::Mark("04 after CoInitializeEx");
+  const HRESULT com_result =
+      ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const bool com_initialized = SUCCEEDED(com_result);
+  if (com_result == S_OK) {
+    startup_trace::Mark("04 CoInitializeEx initialized apartment");
+  } else if (com_result == S_FALSE) {
+    startup_trace::Mark("04 CoInitializeEx apartment already initialized");
+  } else if (com_result == RPC_E_CHANGED_MODE) {
+    startup_trace::Mark("04 CoInitializeEx changed-mode result; continuing");
+  } else {
+    startup_trace::Mark("04 CoInitializeEx failed; continuing for diagnostics");
+  }
 
   startup_trace::Mark("05 before DartProject");
   flutter::DartProject project(L"data");
@@ -116,6 +127,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("12 before window.Create");
   if (!window.Create(L"ai_orchestrator", origin, size)) {
     startup_trace::Mark("13 window.Create returned false");
+    if (com_initialized) {
+      ::CoUninitialize();
+    }
     return EXIT_FAILURE;
   }
   startup_trace::Mark("14 window.Create returned true");
@@ -123,13 +137,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   startup_trace::Mark("15 entering message loop");
   ::MSG msg;
-  while (::GetMessage(&msg, nullptr, 0, 0)) {
-    ::TranslateMessage(&msg);
-    ::DispatchMessage(&msg);
+  int exit_code = EXIT_SUCCESS;
+  for (;;) {
+    const BOOL get_message_result = ::GetMessage(&msg, nullptr, 0, 0);
+    if (get_message_result > 0) {
+      ::TranslateMessage(&msg);
+      ::DispatchMessage(&msg);
+      continue;
+    }
+    if (get_message_result == 0) {
+      startup_trace::Mark("16 message loop received WM_QUIT");
+      break;
+    }
+    startup_trace::Mark("16 message loop GetMessage failed");
+    exit_code = EXIT_FAILURE;
+    break;
   }
-  startup_trace::Mark("16 message loop exited");
 
-  ::CoUninitialize();
-  startup_trace::Mark("17 clean shutdown");
-  return EXIT_SUCCESS;
+  if (com_initialized) {
+    ::CoUninitialize();
+    startup_trace::Mark("17 COM uninitialized");
+  } else {
+    startup_trace::Mark("17 COM cleanup not required");
+  }
+  startup_trace::Mark("18 clean shutdown");
+  return exit_code;
 }
