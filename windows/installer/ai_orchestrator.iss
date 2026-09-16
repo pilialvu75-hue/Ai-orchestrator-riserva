@@ -53,6 +53,7 @@ Source: "{#VCRedistPath}"; DestDir: "{tmp}"; DestName: "vc_redist.x64.exe"; Flag
 [Icons]
 Name: "{group}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\AI Orchestrator - diagnostica Win7 (senza plugin)"; Filename: "{app}\{#AppExeName}"; Parameters: "--win7-no-plugins"; Comment: "Avvio diagnostico Windows 7 senza registrazione plugin"
+Name: "{group}\AI Orchestrator - apri log diagnostico Win7"; Filename: "{sys}\notepad.exe"; Parameters: """{localappdata}\AI-Orchestrator\Diagnostics\AI-Orchestrator-win7-startup.log"""; Comment: "Apre il trace di avvio Windows 7"
 Name: "{autodesktop}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
