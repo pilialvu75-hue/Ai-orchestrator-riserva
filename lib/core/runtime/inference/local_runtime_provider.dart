@@ -391,14 +391,19 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           (chunk) {
             if (chunk.isEmpty) return;
 
-            fullText.write(chunk);
+            final visibleChunk = Platform.isMacOS
+                ? chunk.replaceAll(' [end of text]\n', '')
+                : chunk;
+            if (visibleChunk.isEmpty) return;
+
+            fullText.write(visibleChunk);
 
             estimatedTokenCount +=
-                _estimateTokenCount(chunk);
+                _estimateTokenCount(visibleChunk);
 
             controller.add(
               InferenceResponse.token(
-                text: chunk,
+                text: visibleChunk,
                 model: modelId,
               ),
             );
