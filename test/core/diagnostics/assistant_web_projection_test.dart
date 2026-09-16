@@ -58,7 +58,7 @@ void main() {
     );
 
     expect(jsonDecode(unavailable!)['reason'], 'tool_unavailable');
-    expect(jsonDecode(unavailable)['decision'], 'failure');
+    expect(jsonDecode(unavailable!)['decision'], 'failure');
     expect(jsonDecode(failed!)['reason'], 'execution_error');
     expect(failed, isNot(contains('SocketException')));
   });
