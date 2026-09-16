@@ -38,6 +38,19 @@ add_dependencies(
   dxg7fix
 )
 
+# The generated registrar is intentionally not committed by Flutter. Instrument
+# it after flutter_assemble has finalized generated Windows sources and before
+# the runner is compiled. The script is idempotent and discovers registrar calls
+# by pattern, so adding/removing plugins does not require maintaining a manual
+# list here.
+add_custom_command(TARGET ${BINARY_NAME} PRE_BUILD
+  COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_SOURCE_DIR}/../tool/instrument_windows_plugin_registrant.ps1"
+    -RegistrantPath "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+  COMMENT "Instrumenting Windows plugin registration startup trace"
+  VERBATIM
+)
+
 # Current Flutter/Dart desktop binaries contain loader-level dependencies that
 # first appeared after Windows 7: GetHostNameW, growable unwind tables,
 # GetCurrentThreadStackLimits, PathCch and WaitOnAddress. Redirect exactly the
