@@ -48,6 +48,7 @@ String? publicLogProjection(String line) {
     'TOKEN_STREAM',
     'FINAL_RESPONSE',
     'CLOUD_ROUTING',
+    'ASSISTANT_WEB_ENRICH',
     'ANDROID_PROCESS_EXIT_HISTORY',
     'FORENSIC_UNCAUGHT_DART_EXCEPTION',
     'FORENSIC_GLOBAL_EXCEPTION_HANDLERS_INSTALLED',
@@ -92,6 +93,75 @@ String? publicLogProjection(String line) {
       'decision': routing[4]!,
       'reason': routing[5]!,
     });
+  }
+
+  // Assistant Web enrichment is public only through a closed telemetry grammar.
+  // Session identifiers, query text, result text and exception details are
+  // deliberately discarded. This lets Diagnostics prove whether the app-owned
+  // Web lookup ran before Cloud/Hybrid inference without exporting conversation
+  // contents.
+  if (event == 'ASSISTANT_WEB_ENRICH') {
+    final attempt = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,80} mode=(cloud|hybrid) '
+      r'action=search query_chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (attempt != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': 'ASSISTANT_WEB_SEARCH',
+        'mode': attempt[1]!,
+        'decision': 'attempt',
+        'reason': 'dispatch',
+        'query_chars': int.parse(attempt[2]!),
+      });
+    }
+
+    final success = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,80} mode=(cloud|hybrid) '
+      r'status=success result_chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (success != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': 'ASSISTANT_WEB_SEARCH',
+        'mode': success[1]!,
+        'decision': 'success',
+        'reason': 'completed',
+        'result_chars': int.parse(success[2]!),
+      });
+    }
+
+    final unavailable = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,80} mode=(cloud|hybrid) '
+      r'status=unavailable reason=tool_unavailable'
+      r'(?: action=continue_without_web)?$',
+    ).firstMatch(rest);
+    if (unavailable != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': 'ASSISTANT_WEB_SEARCH',
+        'mode': unavailable[1]!,
+        'decision': 'failure',
+        'reason': 'tool_unavailable',
+      });
+    }
+
+    final failed = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,80} mode=(cloud|hybrid) '
+      r'status=failed error_type=[A-Za-z_][A-Za-z0-9_]{0,79}'
+      r'(?: action=continue_without_web)?$',
+    ).firstMatch(rest);
+    if (failed != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': 'ASSISTANT_WEB_SEARCH',
+        'mode': failed[1]!,
+        'decision': 'failure',
+        'reason': 'execution_error',
+      });
+    }
+
+    return null;
   }
 
   // TOKEN_STREAM is exported only for the exact Cloud-provider notice. Token
@@ -215,4 +285,3 @@ String? publicLogProjection(String line) {
   // No arbitrary exception text, stack, prompt, path, ID or token is exported.
   return jsonEncode(result);
 }
-
