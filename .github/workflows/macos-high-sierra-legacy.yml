@@ -1,0 +1,110 @@
+name: Validate macOS High Sierra Legacy Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'platform/macos-high-sierra-legacy'
+    paths:
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+      - '.github/workflows/macos-high-sierra-legacy.yml'
+  pull_request:
+    paths:
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+      - '.github/workflows/macos-high-sierra-legacy.yml'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-high-sierra-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-runtime:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          cmake --version
+          clang --version
+          uname -m
+
+      - name: Build High Sierra CPU-only llama runtime
+        run: bash native/macos_legacy/build_llama_cli.sh
+
+      - name: Inspect compatibility contract
+        run: |
+          set -euo pipefail
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-completion"
+          file "$helper"
+          lipo -archs "$helper"
+          otool -l "$helper" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' || true
+          otool -L "$helper"
+
+      - name: Smoke test real GGUF inference
+        shell: bash
+        env:
+          TINY_GGUF_REVISION: def3e2dd70df35ecbf6403ea347de4c5977220c1
+          TINY_GGUF_FILE: stories15M-q8_0.gguf
+        run: |
+          set -euo pipefail
+
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-completion"
+          smoke_dir="$RUNNER_TEMP/ai-orchestrator-high-sierra-smoke"
+          model="$smoke_dir/$TINY_GGUF_FILE"
+          mkdir -p "$smoke_dir"
+
+          model_url="https://huggingface.co/ggml-org/tiny-llamas/resolve/$TINY_GGUF_REVISION/$TINY_GGUF_FILE?download=true"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 180 \
+            --output "$model" "$model_url"
+
+          header="$(dd if="$model" bs=1 count=4 2>/dev/null)"
+          if [[ "$header" != "GGUF" ]]; then
+            echo "Downloaded smoke model does not have a GGUF header" >&2
+            exit 1
+          fi
+
+          "$helper" \
+            -m "$model" \
+            -p "The sky is" \
+            -n 8 \
+            --temp 0 \
+            --top-p 1 \
+            --top-k 40 \
+            --repeat-penalty 1.0 \
+            --no-conversation \
+            --no-display-prompt \
+            --verbosity 0 \
+            > "$RUNNER_TEMP/high-sierra-smoke-output.txt"
+
+          if [[ ! -s "$RUNNER_TEMP/high-sierra-smoke-output.txt" ]]; then
+            echo "High Sierra helper produced no inference output" >&2
+            exit 1
+          fi
+
+          echo "HIGH_SIERRA_GGUF_SMOKE_OK"
+
+      - name: Upload legacy helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-completion-macos-high-sierra-x86_64
+          path: build/llama-macos-high-sierra/bin/llama-completion
+          if-no-files-found: error
+          retention-days: 14
