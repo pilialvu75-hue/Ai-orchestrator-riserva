@@ -12,21 +12,57 @@ namespace {
 
 volatile LONG g_fatal_trace_active = 0;
 
-bool BuildTracePath(wchar_t (&path)[MAX_PATH]) {
-  const DWORD length = ::GetTempPathW(MAX_PATH, path);
+bool AppendWide(wchar_t (&path)[MAX_PATH], const wchar_t* suffix) {
+  if (suffix == nullptr) {
+    return false;
+  }
+  const int current = ::lstrlenW(path);
+  const int extra = ::lstrlenW(suffix);
+  if (current < 0 || extra < 0 || current + extra >= MAX_PATH) {
+    return false;
+  }
+  ::lstrcatW(path, suffix);
+  return true;
+}
+
+bool EnsureDirectory(const wchar_t* path) {
+  if (::CreateDirectoryW(path, nullptr)) {
+    return true;
+  }
+  return ::GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+bool BuildPersistentTracePath(wchar_t (&path)[MAX_PATH]) {
+  const DWORD length =
+      ::GetEnvironmentVariableW(L"LOCALAPPDATA", path, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) {
     return false;
   }
 
-  static const wchar_t kTraceName[] = L"AI-Orchestrator-win7-startup.log";
-  const DWORD trace_name_chars =
-      static_cast<DWORD>(sizeof(kTraceName) / sizeof(kTraceName[0]));
-  if (length + trace_name_chars > MAX_PATH) {
+  if (!AppendWide(path, L"\\AI-Orchestrator") || !EnsureDirectory(path)) {
     return false;
   }
+  if (!AppendWide(path, L"\\Diagnostics") || !EnsureDirectory(path)) {
+    return false;
+  }
+  return AppendWide(path, L"\\AI-Orchestrator-win7-startup.log");
+}
 
-  ::lstrcatW(path, kTraceName);
-  return true;
+bool BuildTemporaryTracePath(wchar_t (&path)[MAX_PATH]) {
+  const DWORD length = ::GetTempPathW(MAX_PATH, path);
+  if (length == 0 || length >= MAX_PATH) {
+    return false;
+  }
+  return AppendWide(path, L"AI-Orchestrator-win7-startup.log");
+}
+
+bool BuildTracePath(wchar_t (&path)[MAX_PATH]) {
+  path[0] = L'\0';
+  if (BuildPersistentTracePath(path)) {
+    return true;
+  }
+  path[0] = L'\0';
+  return BuildTemporaryTracePath(path);
 }
 
 void AppendAndFlush(const char* stage) {
@@ -81,8 +117,8 @@ void AppendHexLine(const char* label, ULONG_PTR value, int digits) {
   AppendAndFlush(line);
 }
 
-void AppendFaultModule(void* address) {
-  if (address == nullptr) {
+void AppendModuleForAddress(const char* label, void* address) {
+  if (label == nullptr || address == nullptr) {
     return;
   }
 
@@ -101,10 +137,51 @@ void AppendFaultModule(void* address) {
     return;
   }
 
-  char line[MAX_PATH + 32] = {};
-  ::lstrcpyA(line, "fatal_module=");
+  char line[MAX_PATH + 64] = {};
+  if (::lstrlenA(label) + ::lstrlenA(module_path) >=
+      static_cast<int>(sizeof(line))) {
+    return;
+  }
+  ::lstrcpyA(line, label);
   ::lstrcatA(line, module_path);
   AppendAndFlush(line);
+}
+
+void AppendFaultModule(void* address) {
+  AppendModuleForAddress("fatal_module=", address);
+}
+
+using CaptureStackBackTraceFn =
+    USHORT(WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
+
+void AppendStackSnapshot() {
+  FARPROC capture_proc = nullptr;
+  HMODULE kernel32 = ::GetModuleHandleW(L"kernel32.dll");
+  if (kernel32 != nullptr) {
+    capture_proc = ::GetProcAddress(kernel32, "RtlCaptureStackBackTrace");
+  }
+  if (capture_proc == nullptr) {
+    HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+    if (ntdll != nullptr) {
+      capture_proc = ::GetProcAddress(ntdll, "RtlCaptureStackBackTrace");
+    }
+  }
+  if (capture_proc == nullptr) {
+    AppendAndFlush("fatal_stack=<capture-unavailable>");
+    return;
+  }
+
+  auto capture = reinterpret_cast<CaptureStackBackTraceFn>(capture_proc);
+  void* frames[12] = {};
+  const USHORT count = capture(0, 12, frames, nullptr);
+  for (USHORT index = 0; index < count; ++index) {
+    char label[] = "fatal_stack_00=";
+    label[12] = static_cast<char>('0' + ((index / 10) % 10));
+    label[13] = static_cast<char>('0' + (index % 10));
+    AppendHexLine(label, reinterpret_cast<ULONG_PTR>(frames[index]),
+                  static_cast<int>(sizeof(void*) * 2));
+    AppendModuleForAddress("fatal_stack_module=", frames[index]);
+  }
 }
 
 bool IsFatalCode(DWORD code) {
@@ -135,6 +212,7 @@ LONG CALLBACK FatalVectoredHandler(EXCEPTION_POINTERS* exception_pointers) {
                 reinterpret_cast<ULONG_PTR>(record->ExceptionAddress),
                 static_cast<int>(sizeof(void*) * 2));
   AppendFaultModule(record->ExceptionAddress);
+  AppendStackSnapshot();
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -178,7 +256,7 @@ void Reset() {
   }
 
   InstallFatalCapture();
-  AppendAndFlush("00 fatal capture installed");
+  AppendAndFlush("00 fatal capture installed (diagnostics v2)");
 }
 
 void Mark(const char* stage) {
