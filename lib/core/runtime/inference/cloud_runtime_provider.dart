@@ -503,17 +503,25 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         score += 10;
       }
 
-      // Automatic routing is strictly free-first. Paid Cloud can participate
-      // only after every usable free-tier route has been filtered out by
-      // capability, configuration, health/quota or spending policy.
+      // Automatic routing keeps access semantics separate from billing cost:
+      // durable recurring free tiers come first; explicitly opted-in
+      // development/account-dependent free access forms a second fallback tier;
+      // paid routes can follow only when the spending policy authorizes them.
+      // Promotional credit and unknown access remain last and fail closed unless
+      // the policy explicitly allows their use.
       if (enforceAutomaticPolicy) {
-        switch (CloudProviderCatalog.costClassFor(provider)) {
-          case CloudProviderCostClass.freeTier:
+        switch (CloudProviderCatalog.accessClassFor(provider)) {
+          case CloudProviderAccessClass.recurringFreeTier:
             score += 1000;
             break;
-          case CloudProviderCostClass.paid:
+          case CloudProviderAccessClass.developmentPrototypeFreeAccess:
+          case CloudProviderAccessClass.accountDependentFreeAccess:
+            score += 500;
             break;
-          case CloudProviderCostClass.unknown:
+          case CloudProviderAccessClass.paid:
+            break;
+          case CloudProviderAccessClass.promoCredit:
+          case CloudProviderAccessClass.unknown:
             score -= 500;
             break;
         }
@@ -813,7 +821,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       request.cloudProviderId ?? '',
       request.allowCloudProviderFailover,
     );
-    return '${providerOrder.join(">")}::$contentHash';
+    return '${providerOrder.join(">") }::$contentHash';
   }
 
   void _putCache(String key, _CachedCloudResponse value) {
