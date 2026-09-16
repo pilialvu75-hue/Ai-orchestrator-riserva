@@ -6,11 +6,13 @@ on:
     branches:
       - 'platform/macos-high-sierra-legacy'
     paths:
+      - 'legacy_macos/**'
       - 'native/macos_legacy/**'
       - 'third_party/llama.cpp'
       - '.github/workflows/macos-high-sierra-legacy.yml'
   pull_request:
     paths:
+      - 'legacy_macos/**'
       - 'native/macos_legacy/**'
       - 'third_party/llama.cpp'
       - '.github/workflows/macos-high-sierra-legacy.yml'
@@ -51,7 +53,7 @@ jobs:
       - name: Build High Sierra CPU-only llama runtime
         run: bash native/macos_legacy/build_llama_cli.sh
 
-      - name: Inspect compatibility contract
+      - name: Inspect runtime compatibility contract
         run: |
           set -euo pipefail
           helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
@@ -150,10 +152,42 @@ jobs:
           print(f"HIGH_SIERRA_GGUF_SAMPLE={completed.stdout.strip()[:160]!r}")
           PY
 
-      - name: Upload legacy helper
+      - name: Build lightweight High Sierra app
+        run: bash legacy_macos/build_app.sh
+
+      - name: Inspect app compatibility contract
+        run: |
+          set -euo pipefail
+          app="$PWD/build/macos-high-sierra-app/AI Orchestrator Legacy.app"
+          executable="$app/Contents/MacOS/AI Orchestrator Legacy"
+          helper="$app/Contents/Resources/llama-cli"
+          test -d "$app"
+          file "$executable"
+          file "$helper"
+          test "$(lipo -archs "$executable")" = "x86_64"
+          test "$(lipo -archs "$helper")" = "x86_64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = "10.13"
+          otool -l "$executable" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' || true
+          otool -L "$executable"
+          codesign --verify --deep --strict "$app"
+          "$executable" --self-test
+
+      - name: Package physical-test app
+        run: |
+          set -euo pipefail
+          cd build/macos-high-sierra-app
+          ditto -c -k --sequesterRsrc --keepParent \
+            "AI Orchestrator Legacy.app" \
+            "AI-Orchestrator-High-Sierra-x86_64.zip"
+          shasum -a 256 "AI-Orchestrator-High-Sierra-x86_64.zip" \
+            > "AI-Orchestrator-High-Sierra-x86_64.zip.sha256"
+
+      - name: Upload legacy physical-test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: llama-cli-macos-high-sierra-x86_64
-          path: build/llama-macos-high-sierra/bin/llama-cli
+          name: AI-Orchestrator-High-Sierra-x86_64
+          path: |
+            build/macos-high-sierra-app/AI-Orchestrator-High-Sierra-x86_64.zip
+            build/macos-high-sierra-app/AI-Orchestrator-High-Sierra-x86_64.zip.sha256
           if-no-files-found: error
           retention-days: 14
