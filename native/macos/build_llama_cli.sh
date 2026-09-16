@@ -10,6 +10,9 @@ if [[ ! -f "$source_dir/CMakeLists.txt" ]]; then
   exit 1
 fi
 
+# The desktop process provider is one-shot: it streams stdout and waits for the
+# helper to exit.  llama-completion matches that contract, while the current
+# llama-cli is conversational and returns to stdin after the first answer.
 cmake -S "$source_dir" -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' \
@@ -18,7 +21,7 @@ cmake -S "$source_dir" -B "$build_dir" \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_TOOLS=ON \
-  -DLLAMA_BUILD_SERVER=ON \
+  -DLLAMA_BUILD_SERVER=OFF \
   -DLLAMA_BUILD_WEBUI=OFF \
   -DLLAMA_OPENSSL=OFF \
   -DGGML_BUILD_TESTS=OFF \
@@ -31,17 +34,17 @@ cmake -S "$source_dir" -B "$build_dir" \
   -DGGML_METAL_MACOSX_VERSION_MIN=12.0
 
 jobs="${LLAMA_MACOS_BUILD_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-cmake --build "$build_dir" --config Release --target llama-cli --parallel "$jobs"
+cmake --build "$build_dir" --config Release --target llama-completion --parallel "$jobs"
 
-helper="$build_dir/bin/llama-cli"
+helper="$build_dir/bin/llama-completion"
 if [[ ! -x "$helper" ]]; then
-  echo "llama-cli was not produced at $helper" >&2
+  echo "llama-completion was not produced at $helper" >&2
   exit 1
 fi
 
 archs="$(lipo -archs "$helper")"
 if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
-  echo "llama-cli is not Universal 2: $archs" >&2
+  echo "llama-completion is not Universal 2: $archs" >&2
   exit 1
 fi
 
@@ -50,7 +53,7 @@ fi
 # system frameworks and /usr/lib are portable parts of macOS.
 dependencies="$(otool -L "$helper" | awk '/^\t/{print}')"
 if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
-  echo "llama-cli contains a non-portable dynamic dependency" >&2
+  echo "llama-completion contains a non-portable dynamic dependency" >&2
   printf '%s\n' "$dependencies" >&2
   exit 1
 fi
