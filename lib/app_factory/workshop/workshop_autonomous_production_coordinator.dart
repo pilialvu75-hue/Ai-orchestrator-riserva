@@ -311,15 +311,14 @@ final class WorkshopAutonomousProductionCoordinator {
       arguments: buildArguments,
     );
 
-    if (!buildResult.succeeded ||
-        (policy.requireFinalArtifact && !buildResult.hasArtifact)) {
+    if (!_isVerifiedBuild(buildResult)) {
       return _result(
         status: WorkshopAutonomousProductionStatus.buildFailed,
         plan: currentHandle.plan,
         taskResults: taskResults,
         buildResult: buildResult,
         message: buildResult.message ??
-            'Workshop final build did not produce a valid artifact.',
+            'Workshop final build did not satisfy all verification gates.',
       );
     }
 
@@ -330,6 +329,24 @@ final class WorkshopAutonomousProductionCoordinator {
       buildResult: buildResult,
       message: 'Workshop production completed with a validated build artifact.',
     );
+  }
+
+  bool _isVerifiedBuild(WorkshopBuildResult buildResult) {
+    if (!buildResult.succeeded) {
+      return false;
+    }
+    if (policy.requireFinalArtifact && !buildResult.hasArtifact) {
+      return false;
+    }
+    if (buildResult.errors.isNotEmpty) {
+      return false;
+    }
+    if (buildResult.formatPassed == false ||
+        buildResult.analysisPassed == false ||
+        buildResult.testsPassed == false) {
+      return false;
+    }
+    return true;
   }
 
   WorkshopAutonomousProductionResult _result({
