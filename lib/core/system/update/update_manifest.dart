@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/system/update/version_parser.dart';
 enum UpdateTargetPlatform {
   android,
   windows,
+  macos,
 }
 
 class UpdateArtifact {
@@ -36,6 +37,10 @@ class UpdateManifest {
     this.windowsFileName,
     this.windowsSizeBytes,
     this.windowsSha256,
+    this.macosUrl,
+    this.macosFileName,
+    this.macosSizeBytes,
+    this.macosSha256,
     required this.changelog,
     required this.critical,
   });
@@ -51,6 +56,10 @@ class UpdateManifest {
   final String? windowsFileName;
   final int? windowsSizeBytes;
   final String? windowsSha256;
+  final String? macosUrl;
+  final String? macosFileName;
+  final int? macosSizeBytes;
+  final String? macosSha256;
   final String changelog;
   final bool critical;
 
@@ -72,9 +81,22 @@ class UpdateManifest {
     );
   }
 
+  UpdateArtifact? get macosArtifact {
+    final url = macosUrl;
+    final fileName = macosFileName;
+    if (url == null || fileName == null) return null;
+    return UpdateArtifact(
+      url: url,
+      fileName: fileName,
+      sizeBytes: macosSizeBytes,
+      sha256: macosSha256,
+    );
+  }
+
   UpdateArtifact? artifactFor(UpdateTargetPlatform target) => switch (target) {
         UpdateTargetPlatform.android => androidArtifact,
         UpdateTargetPlatform.windows => windowsArtifact,
+        UpdateTargetPlatform.macos => macosArtifact,
       };
 
   bool isCompatibleWith({
@@ -99,6 +121,10 @@ class UpdateManifest {
         if (windowsFileName != null) 'windows_file_name': windowsFileName,
         if (windowsSizeBytes != null) 'windows_size_bytes': windowsSizeBytes,
         if (windowsSha256 != null) 'windows_sha256': windowsSha256,
+        if (macosUrl != null) 'macos_url': macosUrl,
+        if (macosFileName != null) 'macos_file_name': macosFileName,
+        if (macosSizeBytes != null) 'macos_size_bytes': macosSizeBytes,
+        if (macosSha256 != null) 'macos_sha256': macosSha256,
         'changelog': changelog,
         'critical': critical,
       };
@@ -122,6 +148,14 @@ class UpdateManifest {
         json['windows_size_bytes'] ?? json['windowsSizeBytes'];
     final rawWindowsSha256 =
         ((json['windows_sha256'] ?? json['windowsSha256']) as String?)?.trim();
+    final rawMacosUrl =
+        ((json['macos_url'] ?? json['macosUrl']) as String?)?.trim();
+    final rawMacosFileName =
+        ((json['macos_file_name'] ?? json['macosFileName']) as String?)?.trim();
+    final rawMacosSizeBytes =
+        json['macos_size_bytes'] ?? json['macosSizeBytes'];
+    final rawMacosSha256 =
+        ((json['macos_sha256'] ?? json['macosSha256']) as String?)?.trim();
 
     if (rawVersion == null || rawVersion.isEmpty) {
       throw const FormatException('Invalid manifest: missing version');
@@ -200,6 +234,57 @@ class UpdateManifest {
       }
     }
 
+    String? macosUrl;
+    String? macosFileName;
+    int? macosSizeBytes;
+    String? macosSha256;
+    final hasMacosMetadata =
+        rawMacosUrl != null ||
+        rawMacosFileName != null ||
+        rawMacosSizeBytes != null ||
+        rawMacosSha256 != null;
+    if (hasMacosMetadata) {
+      if (rawMacosUrl == null || rawMacosUrl.isEmpty) {
+        throw const FormatException(
+          'Invalid manifest: macos_url is required when macOS metadata is present',
+        );
+      }
+      final macosUri = _validateHttpUrl(rawMacosUrl, fieldName: 'macos_url');
+      final derivedMacosFileName =
+          rawMacosFileName ??
+          (macosUri.pathSegments.isNotEmpty
+              ? macosUri.pathSegments.last.trim()
+              : '');
+      if (derivedMacosFileName.isEmpty ||
+          derivedMacosFileName.contains('/') ||
+          !derivedMacosFileName.toLowerCase().endsWith('.dmg')) {
+        throw FormatException(
+          'Invalid manifest: macOS filename must be a non-empty .dmg name, got: $derivedMacosFileName',
+        );
+      }
+      macosUrl = rawMacosUrl;
+      macosFileName = derivedMacosFileName;
+      macosSizeBytes = switch (rawMacosSizeBytes) {
+        int value => value,
+        String value => int.tryParse(value.trim()),
+        _ => null,
+      };
+      if (macosSizeBytes != null && macosSizeBytes <= 0) {
+        throw FormatException(
+          'Invalid manifest: macOS installer size must be > 0, got: $macosSizeBytes',
+        );
+      }
+      if (rawMacosSha256 != null && rawMacosSha256.isNotEmpty) {
+        final normalizedSha = rawMacosSha256.toLowerCase();
+        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(normalizedSha)) {
+          throw const FormatException(
+            'Invalid manifest: macos_sha256 must be a 64-character hexadecimal SHA-256',
+          );
+        }
+        macosSha256 = normalizedSha;
+      }
+    }
+
     // Missing min_supported must never block updates by default.
     final rawResolvedMinSupported =
         (rawMinSupported != null && rawMinSupported.isNotEmpty)
@@ -241,6 +326,10 @@ class UpdateManifest {
       windowsFileName: windowsFileName,
       windowsSizeBytes: windowsSizeBytes,
       windowsSha256: windowsSha256,
+      macosUrl: macosUrl,
+      macosFileName: macosFileName,
+      macosSizeBytes: macosSizeBytes,
+      macosSha256: macosSha256,
       changelog: (json['changelog'] as String?)?.trim() ?? '',
       critical: json['critical'] == true || json['forceUpdate'] == true,
     );

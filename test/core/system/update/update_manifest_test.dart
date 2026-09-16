@@ -20,6 +20,7 @@ void main() {
     expect(manifest.apkFileName, 'app.apk');
     expect(manifest.critical, isFalse);
     expect(manifest.windowsArtifact, isNull);
+    expect(manifest.macosArtifact, isNull);
   });
 
   test('parses simplified version.json format (versionName/apkUrl/forceUpdate)', () {
@@ -66,6 +67,38 @@ void main() {
     );
   });
 
+  test('parses and selects macOS DMG metadata without changing other targets', () {
+    final manifest = UpdateManifest.fromJson(const {
+      'versionName': '1.0.14.300',
+      'versionCode': 14,
+      'apkUrl': 'https://example.com/app-release.apk',
+      'windowsUrl': 'https://example.com/AI-Orchestrator-Setup-x64.exe',
+      'windowsSizeBytes': 41447219,
+      'windowsSha256':
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      'macosUrl': 'https://example.com/AI-Orchestrator-macOS.dmg',
+      'macosFileName': 'AI-Orchestrator-macOS.dmg',
+      'macosSizeBytes': 73400320,
+      'macosSha256':
+          'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    });
+
+    final android = manifest.artifactFor(UpdateTargetPlatform.android);
+    final windows = manifest.artifactFor(UpdateTargetPlatform.windows);
+    final macos = manifest.artifactFor(UpdateTargetPlatform.macos);
+
+    expect(android, isNotNull);
+    expect(windows, isNotNull);
+    expect(macos, isNotNull);
+    expect(macos!.fileName, 'AI-Orchestrator-macOS.dmg');
+    expect(macos.url, 'https://example.com/AI-Orchestrator-macOS.dmg');
+    expect(macos.sizeBytes, 73400320);
+    expect(
+      macos.sha256,
+      'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    );
+  });
+
   test('serializes Windows installer metadata for persisted/cached manifests', () {
     final manifest = UpdateManifest.fromJson(const {
       'version': '1.0.13',
@@ -84,6 +117,26 @@ void main() {
     expect(
       encoded['windows_sha256'],
       'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    );
+  });
+
+  test('serializes macOS installer metadata for persisted/cached manifests', () {
+    final manifest = UpdateManifest.fromJson(const {
+      'version': '1.0.14',
+      'apk_url': 'https://example.com/app.apk',
+      'macos_url': 'https://example.com/AI-Orchestrator-macOS.dmg',
+      'macos_size_bytes': 2048,
+      'macos_sha256':
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    });
+
+    final encoded = manifest.toJson();
+    expect(encoded['macos_url'], 'https://example.com/AI-Orchestrator-macOS.dmg');
+    expect(encoded['macos_file_name'], 'AI-Orchestrator-macOS.dmg');
+    expect(encoded['macos_size_bytes'], 2048);
+    expect(
+      encoded['macos_sha256'],
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     );
   });
 
@@ -154,6 +207,35 @@ void main() {
         'apk_url': 'https://example.com/app.apk',
         'windows_url': 'https://example.com/setup.exe',
         'windows_sha256': 'not-a-sha',
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test('rejects malformed macOS installer metadata', () {
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.14',
+        'apk_url': 'https://example.com/app.apk',
+        'macos_url': 'https://example.com/app.zip',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.14',
+        'apk_url': 'https://example.com/app.apk',
+        'macos_url': 'https://example.com/app.dmg',
+        'macos_size_bytes': 0,
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => UpdateManifest.fromJson(const {
+        'version': '1.0.14',
+        'apk_url': 'https://example.com/app.apk',
+        'macos_url': 'https://example.com/app.dmg',
+        'macos_sha256': 'not-a-sha',
       }),
       throwsFormatException,
     );
