@@ -149,9 +149,10 @@ jobs:
             exit 1
           fi
 
-          if otool -L "$helper_target" | grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/'; then
+          dependencies="$(otool -L "$helper_target" | awk '/^\t/{print}')"
+          if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
             echo "Bundled llama-cli contains a non-portable dependency" >&2
-            otool -L "$helper_target" >&2
+            printf '%s\n' "$dependencies" >&2
             exit 1
           fi
 
