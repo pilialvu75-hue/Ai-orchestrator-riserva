@@ -52,6 +52,21 @@ bool MemoryEquals(const volatile VOID* address, const VOID* compare, SIZE_T size
       return false;
   }
 }
+
+void WakeFallbackWaiters() {
+  EnsureFallbackInitialized();
+
+  // Synchronize the wake with the exact same lock used by the waiter around
+  // its value check and SleepConditionVariableCS call. Without this lock, a
+  // wake can occur after MemoryEquals() reports equality but immediately
+  // before the waiter is actually queued by SleepConditionVariableCS, losing
+  // the notification forever. Taking the lock forces the waker either to run
+  // before the value check (so the waiter observes the new value) or after the
+  // sleep operation has atomically released the lock and queued the waiter.
+  EnterCriticalSection(&g_wait_lock);
+  WakeAllConditionVariable(&g_wait_condition);
+  LeaveCriticalSection(&g_wait_lock);
+}
 }  // namespace
 
 extern "C" BOOL WINAPI CompatWaitOnAddress(
@@ -112,11 +127,10 @@ extern "C" VOID WINAPI CompatWakeByAddressSingle(PVOID address) {
     return;
   }
 
-  EnsureFallbackInitialized();
-  // A shared condition variable intentionally wakes all waiters. WaitOnAddress
-  // permits spurious wakeups and callers must re-check the observed value, so
-  // this preserves correctness while avoiding a per-address allocation table.
-  WakeAllConditionVariable(&g_wait_condition);
+  // The fallback intentionally wakes all waiters. WaitOnAddress permits
+  // spurious wakeups and callers must re-check their observed value. Using the
+  // shared lock here is essential to prevent a lost-wakeup race on Windows 7.
+  WakeFallbackWaiters();
 }
 
 extern "C" VOID WINAPI CompatWakeByAddressAll(PVOID address) {
@@ -127,6 +141,5 @@ extern "C" VOID WINAPI CompatWakeByAddressAll(PVOID address) {
     return;
   }
 
-  EnsureFallbackInitialized();
-  WakeAllConditionVariable(&g_wait_condition);
+  WakeFallbackWaiters();
 }
