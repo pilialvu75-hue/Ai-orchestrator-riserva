@@ -391,14 +391,19 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           (chunk) {
             if (chunk.isEmpty) return;
 
-            fullText.write(chunk);
+            final visibleChunk = Platform.isMacOS
+                ? chunk.replaceAll(' [end of text]\n', '')
+                : chunk;
+            if (visibleChunk.isEmpty) return;
+
+            fullText.write(visibleChunk);
 
             estimatedTokenCount +=
-                _estimateTokenCount(chunk);
+                _estimateTokenCount(visibleChunk);
 
             controller.add(
               InferenceResponse.token(
-                text: chunk,
+                text: visibleChunk,
                 model: modelId,
               ),
             );
@@ -569,6 +574,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return envPath.trim();
     }
 
+    if (Platform.isMacOS) {
+      final executableDirectory =
+          File(Platform.resolvedExecutable).parent.path;
+      final bundledHelper = File(
+        '$executableDirectory${Platform.pathSeparator}llama-completion',
+      );
+      if (bundledHelper.existsSync()) {
+        return bundledHelper.path;
+      }
+    }
+
     return 'llama-cli';
   }
 
@@ -597,8 +613,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       LlamaNativeDefaults.topK.toString(),
       '--repeat-penalty',
       effectiveRepeatPenalty.toString(),
+      if (Platform.isMacOS) ...<String>[
+        '--no-conversation',
+        '--verbosity',
+        '0',
+      ],
       '--no-display-prompt',
-      '--log-disable',
+      if (!Platform.isMacOS) '--log-disable',
     ];
   }
 

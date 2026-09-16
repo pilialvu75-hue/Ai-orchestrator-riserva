@@ -14,7 +14,7 @@ on:
   push:
     branches:
       - main
-      - 'platform/macos-foundation'
+      - 'platform/macos-local-runtime'
     paths:
       - 'lib/**'
       - 'macos/**'
@@ -59,6 +59,7 @@ jobs:
         run: |
           flutter --version
           xcodebuild -version
+          cmake --version
           uname -m
 
       - name: Resolve Flutter dependencies
@@ -83,7 +84,7 @@ jobs:
 
   build-macos:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -105,6 +106,7 @@ jobs:
         run: |
           flutter --version
           xcodebuild -version
+          cmake --version
           uname -m
 
       - name: Resolve Flutter dependencies
@@ -113,8 +115,58 @@ jobs:
       - name: Validate versioned Xcode project
         run: xcodebuild -project macos/Runner.xcodeproj -list
 
+      - name: Build bundled llama.cpp runtime
+        run: bash native/macos/build_llama_cli.sh
+
       - name: Build macOS release
         run: flutter build macos --release
+
+      - name: Embed and validate llama.cpp runtime
+        id: runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_dir="$PWD/build/macos/Build/Products/Release"
+          app_path="$(find "$release_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          helper_source="$PWD/build/llama-macos/bin/llama-completion"
+          helper_target="$app_path/Contents/MacOS/llama-completion"
+
+          if [[ -z "$app_path" || ! -d "$app_path" ]]; then
+            echo "No .app bundle found under $release_dir" >&2
+            exit 1
+          fi
+          if [[ ! -x "$helper_source" ]]; then
+            echo "Built llama-completion helper is missing: $helper_source" >&2
+            exit 1
+          fi
+
+          install -m 0755 "$helper_source" "$helper_target"
+
+          archs="$(lipo -archs "$helper_target")"
+          if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
+            echo "Bundled llama-completion is not Universal 2: $archs" >&2
+            exit 1
+          fi
+
+          dependencies="$(otool -L "$helper_target" | awk '/^\t/{print}')"
+          if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
+            echo "Bundled llama-completion contains a non-portable dependency" >&2
+            printf '%s\n' "$dependencies" >&2
+            exit 1
+          fi
+
+          "$helper_target" --version
+
+          codesign --force --sign - --timestamp=none "$helper_target"
+          codesign --force --sign - --timestamp=none \
+            --entitlements "$PWD/macos/Runner/Release.entitlements" \
+            "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
+          echo "helper_path=$helper_target" >> "$GITHUB_OUTPUT"
+          echo "Bundled llama-completion architectures: $archs"
 
       - name: Validate and package app bundle
         id: bundle
@@ -122,19 +174,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_dir="$PWD/build/macos/Build/Products/Release"
-          if [[ ! -d "$release_dir" ]]; then
-            echo "macOS release directory not found: $release_dir" >&2
-            exit 1
-          fi
+          app_path="${{ steps.runtime.outputs.app_path }}"
+          helper_path="${{ steps.runtime.outputs.helper_path }}"
 
-          app_path="$(find "$release_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
           if [[ -z "$app_path" || ! -d "$app_path" ]]; then
-            echo "No .app bundle found under $release_dir" >&2
-            find "$release_dir" -maxdepth 2 -print || true
+            echo "macOS app bundle output is missing" >&2
             exit 1
           fi
-
+          if [[ ! -x "$helper_path" ]]; then
+            echo "macOS app bundle is missing bundled llama-completion" >&2
+            exit 1
+          fi
           if [[ ! -f "$app_path/Contents/Info.plist" ]]; then
             echo "Generated app bundle is missing Contents/Info.plist" >&2
             exit 1
@@ -170,10 +220,11 @@ jobs:
           echo "zip_path=$zip_path" >> "$GITHUB_OUTPUT"
           echo "Packaged $(basename "$app_path") -> $zip_path"
 
-      - name: Inspect unsigned bundle
+      - name: Inspect ad-hoc signed bundle
         run: |
-          echo "This foundation gate intentionally validates an unsigned CI build."
-          codesign -dvvv "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
+          codesign -dvvv "${{ steps.bundle.outputs.app_path }}" 2>&1
+          codesign -d --entitlements :- "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
+          otool -L "${{ steps.runtime.outputs.helper_path }}"
           spctl --assess --type execute --verbose=4 "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
 
       - name: Upload macOS app bundle
