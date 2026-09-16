@@ -87,9 +87,14 @@ void main() {
     final staging = Directory(p.join(sandbox.path, 'staging'));
     await staging.create();
 
-    for (final invalidPath in <String>['../escape.txt', '/absolute.txt', 'C:/escape.txt', 'a//b.txt']) {
-      expect(
-        () => materializer.materialize(
+    for (final invalidPath in <String>[
+      '../escape.txt',
+      '/absolute.txt',
+      'C:/escape.txt',
+      'a//b.txt',
+    ]) {
+      await expectLater(
+        materializer.materialize(
           stagingRoot: staging.path,
           operations: <WorkshopAirLabFileOperation>[
             WorkshopAirLabFileOperation(
@@ -158,6 +163,46 @@ void main() {
     expect(readOnly.code, 'path_read_only');
   });
 
+  test('update and delete operations stay inside controlled staging', () async {
+    final sandbox = await Directory.systemTemp.createTemp('airlab-actions-');
+    addTearDown(() async {
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    final staging = Directory(p.join(sandbox.path, 'staging'));
+    await staging.create();
+    final updateFile = File(p.join(staging.path, 'update.txt'));
+    final deleteFile = File(p.join(staging.path, 'delete.txt'));
+    await updateFile.writeAsString('old');
+    await deleteFile.writeAsString('remove-me');
+
+    const materializer = WorkshopAirLabIoStagingMaterializer();
+    final result = await materializer.materialize(
+      stagingRoot: staging.path,
+      operations: const <WorkshopAirLabFileOperation>[
+        WorkshopAirLabFileOperation(
+          action: WorkshopAirLabFileOperationAction.update,
+          path: 'update.txt',
+          content: 'new',
+        ),
+        WorkshopAirLabFileOperation(
+          action: WorkshopAirLabFileOperationAction.delete,
+          path: 'delete.txt',
+        ),
+      ],
+      fileScope: const WorkshopTaskFileScope(
+        allowed: <String>['update.txt', 'delete.txt'],
+      ),
+    );
+
+    expect(await updateFile.readAsString(), 'new');
+    expect(await deleteFile.exists(), isFalse);
+    expect(result.updatedCount, 1);
+    expect(result.deletedCount, 1);
+    expect(result.createdCount, 0);
+    expect(result.changedFiles, <String>['update.txt', 'delete.txt']);
+  });
+
   test('payload limits reject oversized AIrLab output before mutation', () async {
     final sandbox = await Directory.systemTemp.createTemp('airlab-limits-');
     addTearDown(() async {
@@ -198,6 +243,90 @@ void main() {
     );
 
     expect(await File(p.join(staging.path, 'too-large.txt')).exists(), isFalse);
+  });
+
+  test('operation and aggregate payload limits fail before any mutation', () async {
+    final sandbox = await Directory.systemTemp.createTemp('airlab-bounds-');
+    addTearDown(() async {
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    final staging = Directory(p.join(sandbox.path, 'staging'));
+    await staging.create();
+
+    const operationBounded = WorkshopAirLabIoStagingMaterializer(
+      limits: WorkshopAirLabStagingLimits(
+        maxOperations: 1,
+        maxPerFilePayloadBytes: 16,
+        maxTotalPayloadBytes: 32,
+      ),
+    );
+    await expectLater(
+      operationBounded.materialize(
+        stagingRoot: staging.path,
+        operations: const <WorkshopAirLabFileOperation>[
+          WorkshopAirLabFileOperation(
+            action: WorkshopAirLabFileOperationAction.create,
+            path: 'one.txt',
+            content: '1',
+          ),
+          WorkshopAirLabFileOperation(
+            action: WorkshopAirLabFileOperationAction.create,
+            path: 'two.txt',
+            content: '2',
+          ),
+        ],
+        fileScope: const WorkshopTaskFileScope(
+          allowed: <String>['one.txt', 'two.txt'],
+        ),
+      ),
+      throwsA(
+        isA<WorkshopAirLabStagingException>().having(
+          (error) => error.code,
+          'code',
+          'operation_limit_exceeded',
+        ),
+      ),
+    );
+
+    const totalBounded = WorkshopAirLabIoStagingMaterializer(
+      limits: WorkshopAirLabStagingLimits(
+        maxOperations: 4,
+        maxPerFilePayloadBytes: 4,
+        maxTotalPayloadBytes: 5,
+      ),
+    );
+    await expectLater(
+      totalBounded.materialize(
+        stagingRoot: staging.path,
+        operations: const <WorkshopAirLabFileOperation>[
+          WorkshopAirLabFileOperation(
+            action: WorkshopAirLabFileOperationAction.create,
+            path: 'three.txt',
+            content: '123',
+          ),
+          WorkshopAirLabFileOperation(
+            action: WorkshopAirLabFileOperationAction.create,
+            path: 'four.txt',
+            content: '456',
+          ),
+        ],
+        fileScope: const WorkshopTaskFileScope(
+          allowed: <String>['three.txt', 'four.txt'],
+        ),
+      ),
+      throwsA(
+        isA<WorkshopAirLabStagingException>().having(
+          (error) => error.code,
+          'code',
+          'total_payload_limit_exceeded',
+        ),
+      ),
+    );
+
+    for (final name in <String>['one.txt', 'two.txt', 'three.txt', 'four.txt']) {
+      expect(await File(p.join(staging.path, name)).exists(), isFalse);
+    }
   });
 
   test('symlink escape is rejected without touching the linked destination', () async {
@@ -267,8 +396,24 @@ MockClient _successfulClient({
           'supports_tools': false,
           'max_context_tokens': null,
           'task_families': <String>['software', 'web', 'cad', 'manufacturing'],
-          'input_kinds': <String>['text', 'image', 'drawing', 'file', 'measurement', 'project'],
-          'artifact_formats': <String>['airlab', 'step', 'scad', 'dxf', 'svg', '3mf', 'stl', 'gcode'],
+          'input_kinds': <String>[
+            'text',
+            'image',
+            'drawing',
+            'file',
+            'measurement',
+            'project',
+          ],
+          'artifact_formats': <String>[
+            'airlab',
+            'step',
+            'scad',
+            'dxf',
+            'svg',
+            '3mf',
+            'stl',
+            'gcode',
+          ],
         }),
         200,
       );
