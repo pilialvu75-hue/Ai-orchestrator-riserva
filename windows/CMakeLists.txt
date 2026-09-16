@@ -55,7 +55,10 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
-install(TARGETS ${BINARY_NAME} ai_orchestrator_windows_probe
+install(TARGETS
+  ${BINARY_NAME}
+  ai_orchestrator_windows_probe
+  ai_orchestrator_windows_graphics_probe
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
