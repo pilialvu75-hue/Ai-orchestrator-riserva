@@ -821,7 +821,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       request.cloudProviderId ?? '',
       request.allowCloudProviderFailover,
     );
-    return '${providerOrder.join(">") }::$contentHash';
+    return '${providerOrder.join(">")}::$contentHash';
   }
 
   void _putCache(String key, _CachedCloudResponse value) {
