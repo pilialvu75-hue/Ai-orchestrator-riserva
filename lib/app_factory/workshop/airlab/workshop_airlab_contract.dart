@@ -146,6 +146,66 @@ class WorkshopAirLabArtifact {
   final String status;
 }
 
+enum WorkshopAirLabFileOperationAction {
+  create,
+  update,
+  delete,
+}
+
+/// Untrusted file operation proposed by AIrLab.
+///
+/// Parsing this contract never grants write authority. Cantiere must validate
+/// paths, file scope, payload limits and staging containment before applying it.
+final class WorkshopAirLabFileOperation {
+  const WorkshopAirLabFileOperation({
+    required this.action,
+    required this.path,
+    this.content,
+  });
+
+  factory WorkshopAirLabFileOperation.fromJson(Map<String, dynamic> json) {
+    final rawAction = _requiredString(json, 'action').trim().toLowerCase();
+    final action = switch (rawAction) {
+      'create' => WorkshopAirLabFileOperationAction.create,
+      'update' => WorkshopAirLabFileOperationAction.update,
+      'delete' => WorkshopAirLabFileOperationAction.delete,
+      _ => throw FormatException(
+          'AIrLab operation action "$rawAction" is not supported.',
+        ),
+    };
+    final path = _requiredString(json, 'path');
+    final rawContent = json['content'];
+    if (rawContent != null && rawContent is! String) {
+      throw const FormatException(
+        'AIrLab operation content must be a string when present.',
+      );
+    }
+    if ((action == WorkshopAirLabFileOperationAction.create ||
+            action == WorkshopAirLabFileOperationAction.update) &&
+        rawContent == null) {
+      throw FormatException(
+        'AIrLab ${action.name} operation requires content.',
+      );
+    }
+    if (action == WorkshopAirLabFileOperationAction.delete &&
+        rawContent != null) {
+      throw const FormatException(
+        'AIrLab delete operation cannot include content.',
+      );
+    }
+
+    return WorkshopAirLabFileOperation(
+      action: action,
+      path: path,
+      content: rawContent as String?,
+    );
+  }
+
+  final WorkshopAirLabFileOperationAction action;
+  final String path;
+  final String? content;
+}
+
 class WorkshopAirLabTaskResponse {
   const WorkshopAirLabTaskResponse({
     required this.requestId,
@@ -154,6 +214,7 @@ class WorkshopAirLabTaskResponse {
     required this.plan,
     required this.artifacts,
     required this.metadata,
+    this.operations = const <WorkshopAirLabFileOperation>[],
   });
 
   factory WorkshopAirLabTaskResponse.fromJson(Map<String, dynamic> json) {
@@ -166,18 +227,43 @@ class WorkshopAirLabTaskResponse {
       throw const FormatException('AIrLab metadata must be an object.');
     }
 
+    final artifacts = <WorkshopAirLabArtifact>[];
+    for (final artifact in rawArtifacts) {
+      if (artifact is! Map) {
+        throw const FormatException('Each AIrLab artifact must be an object.');
+      }
+      artifacts.add(
+        WorkshopAirLabArtifact.fromJson(
+          Map<String, dynamic>.from(artifact),
+        ),
+      );
+    }
+
+    final operations = <WorkshopAirLabFileOperation>[];
+    final rawOperations = json['operations'];
+    if (rawOperations != null) {
+      if (rawOperations is! List) {
+        throw const FormatException('AIrLab operations must be an array.');
+      }
+      for (final operation in rawOperations) {
+        if (operation is! Map) {
+          throw const FormatException('Each AIrLab operation must be an object.');
+        }
+        operations.add(
+          WorkshopAirLabFileOperation.fromJson(
+            Map<String, dynamic>.from(operation),
+          ),
+        );
+      }
+    }
+
     return WorkshopAirLabTaskResponse(
       requestId: _requiredString(json, 'request_id'),
       status: _requiredString(json, 'status'),
       engineId: _requiredString(json, 'engine_id'),
       plan: _stringList(json['plan'], 'plan'),
-      artifacts: rawArtifacts
-          .map(
-            (artifact) => WorkshopAirLabArtifact.fromJson(
-              Map<String, dynamic>.from(artifact as Map),
-            ),
-          )
-          .toList(growable: false),
+      operations: List<WorkshopAirLabFileOperation>.unmodifiable(operations),
+      artifacts: List<WorkshopAirLabArtifact>.unmodifiable(artifacts),
       metadata: Map<String, dynamic>.from(metadata),
     );
   }
@@ -186,6 +272,7 @@ class WorkshopAirLabTaskResponse {
   final String status;
   final String engineId;
   final List<String> plan;
+  final List<WorkshopAirLabFileOperation> operations;
   final List<WorkshopAirLabArtifact> artifacts;
   final Map<String, dynamic> metadata;
 }
