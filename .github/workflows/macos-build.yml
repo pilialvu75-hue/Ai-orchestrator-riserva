@@ -15,6 +15,7 @@ on:
     branches:
       - main
       - 'platform/macos-local-runtime'
+      - 'platform/macos-runtime-smoke'
     paths:
       - 'lib/**'
       - 'macos/**'
@@ -117,6 +118,101 @@ jobs:
 
       - name: Build bundled llama.cpp runtime
         run: bash native/macos/build_llama_cli.sh
+
+      - name: Smoke test real GGUF inference
+        shell: bash
+        env:
+          TINY_GGUF_REVISION: def3e2dd70df35ecbf6403ea347de4c5977220c1
+          TINY_GGUF_FILE: stories15M-q8_0.gguf
+        run: |
+          set -euo pipefail
+
+          helper="$PWD/build/llama-macos/bin/llama-completion"
+          smoke_dir="$RUNNER_TEMP/ai-orchestrator-macos-smoke"
+          model="$smoke_dir/$TINY_GGUF_FILE"
+          mkdir -p "$smoke_dir"
+
+          if [[ ! -x "$helper" ]]; then
+            echo "llama-completion helper is missing: $helper" >&2
+            exit 1
+          fi
+
+          model_url="https://huggingface.co/ggml-org/tiny-llamas/resolve/$TINY_GGUF_REVISION/$TINY_GGUF_FILE?download=true"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 180 \
+            --output "$model" "$model_url"
+
+          model_bytes="$(stat -f '%z' "$model")"
+          if (( model_bytes < 1000000 )); then
+            echo "Downloaded GGUF is unexpectedly small: ${model_bytes} bytes" >&2
+            exit 1
+          fi
+
+          header="$(dd if="$model" bs=1 count=4 2>/dev/null)"
+          if [[ "$header" != "GGUF" ]]; then
+            echo "Downloaded smoke model does not have a GGUF header" >&2
+            exit 1
+          fi
+
+          HELPER="$helper" MODEL="$model" python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          helper = os.environ["HELPER"]
+          model = os.environ["MODEL"]
+          cmd = [
+              helper,
+              "-m", model,
+              "-p", "The sky is",
+              "-n", "8",
+              "--temp", "0",
+              "--top-p", "1",
+              "--top-k", "40",
+              "--repeat-penalty", "1.0",
+              "--no-conversation",
+              "--no-display-prompt",
+              "--verbosity", "0",
+          ]
+
+          try:
+              completed = subprocess.run(
+                  cmd,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+                  timeout=120,
+                  check=False,
+              )
+          except subprocess.TimeoutExpired as exc:
+              print("macOS llama.cpp smoke inference timed out after 120 seconds", file=sys.stderr)
+              if exc.stdout:
+                  print(exc.stdout, file=sys.stderr)
+              if exc.stderr:
+                  print(exc.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          stdout = completed.stdout.strip()
+          stderr = completed.stderr.strip()
+          if completed.returncode != 0:
+              print(f"llama-completion exited with {completed.returncode}", file=sys.stderr)
+              if stdout:
+                  print(f"stdout: {stdout}", file=sys.stderr)
+              if stderr:
+                  print(f"stderr: {stderr}", file=sys.stderr)
+              raise SystemExit(1)
+
+          if not stdout:
+              print("llama-completion produced no stdout tokens", file=sys.stderr)
+              if stderr:
+                  print(f"stderr: {stderr}", file=sys.stderr)
+              raise SystemExit(1)
+
+          print(f"GGUF_SMOKE_OK output_chars={len(stdout)}")
+          print(f"GGUF_SMOKE_SAMPLE={stdout[:160]!r}")
+          PY
+
+          rm -f "$model"
 
       - name: Build macOS release
         run: flutter build macos --release
