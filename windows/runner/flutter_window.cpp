@@ -5,8 +5,9 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "startup_trace.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool skip_plugins)
+    : project_(project), skip_plugins_(skip_plugins) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -34,9 +35,13 @@ bool FlutterWindow::OnCreate() {
   }
   startup_trace::Mark("26 controller engine and view ready");
 
-  startup_trace::Mark("27 before RegisterPlugins");
-  RegisterPlugins(flutter_controller_->engine());
-  startup_trace::Mark("28 after RegisterPlugins");
+  if (skip_plugins_) {
+    startup_trace::Mark("27 diagnostic mode: RegisterPlugins skipped");
+  } else {
+    startup_trace::Mark("27 before RegisterPlugins");
+    RegisterPlugins(flutter_controller_->engine());
+    startup_trace::Mark("28 after RegisterPlugins");
+  }
 
   startup_trace::Mark("29 before SetChildContent");
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
