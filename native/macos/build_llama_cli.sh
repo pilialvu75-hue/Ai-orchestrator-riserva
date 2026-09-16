@@ -11,12 +11,15 @@ if [[ ! -f "$source_dir/CMakeLists.txt" ]]; then
 fi
 
 # The desktop process provider is one-shot: it streams stdout and waits for the
-# helper to exit.  llama-completion matches that contract, while the current
+# helper to exit. llama-completion matches that contract, while the current
 # llama-cli is conversational and returns to stdin after the first answer.
+# Prefix mapping keeps build-machine source paths out of the shipped Mach-O.
 cmake -S "$source_dir" -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$repo_root=." \
+  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$repo_root=." \
   -DBUILD_SHARED_LIBS=OFF \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
@@ -55,6 +58,11 @@ dependencies="$(otool -L "$helper" | awk '/^\t/{print}')"
 if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
   echo "llama-completion contains a non-portable dynamic dependency" >&2
   printf '%s\n' "$dependencies" >&2
+  exit 1
+fi
+
+if strings "$helper" | grep -F "$repo_root/" >/dev/null; then
+  echo "llama-completion contains build-machine source paths" >&2
   exit 1
 fi
 
