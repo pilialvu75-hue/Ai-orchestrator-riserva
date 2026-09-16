@@ -81,22 +81,46 @@ class WorkshopAirLabClient {
   }
 
   Future<WorkshopAirLabCapabilities> capabilities() async {
-    final json = await _getJson('v1/capabilities');
-    final capabilities = WorkshopAirLabCapabilities.fromJson(json);
-    if (capabilities.service != 'airlab') {
+    try {
+      final json = await _getJson('v1/capabilities');
+      final capabilities = WorkshopAirLabCapabilities.fromJson(json);
+      if (capabilities.service != 'airlab') {
+        throw const WorkshopAirLabException(
+          'Endpoint does not identify itself as AIrLab.',
+          code: 'incompatible_service',
+        );
+      }
+      return capabilities;
+    } on TimeoutException {
       throw const WorkshopAirLabException(
-        'Endpoint does not identify itself as AIrLab.',
-        code: 'incompatible_service',
+        'AIrLab capability request timed out.',
+        code: 'transport_timeout',
+      );
+    } on http.ClientException catch (error) {
+      throw WorkshopAirLabException(
+        'AIrLab capability request is unavailable: ${error.message}',
+        code: 'transport_unavailable',
       );
     }
-    return capabilities;
   }
 
   Future<WorkshopAirLabTaskResponse> submitTask(
     WorkshopAirLabTaskRequest request,
   ) async {
-    final json = await _postJson('v1/tasks', request.toJson());
-    return WorkshopAirLabTaskResponse.fromJson(json);
+    try {
+      final json = await _postJson('v1/tasks', request.toJson());
+      return WorkshopAirLabTaskResponse.fromJson(json);
+    } on TimeoutException {
+      throw const WorkshopAirLabException(
+        'AIrLab task request timed out.',
+        code: 'transport_timeout',
+      );
+    } on http.ClientException catch (error) {
+      throw WorkshopAirLabException(
+        'AIrLab task request is unavailable: ${error.message}',
+        code: 'transport_unavailable',
+      );
+    }
   }
 
   Future<Map<String, dynamic>> _getJson(String path) async {
