@@ -25,6 +25,7 @@ cmake -S "$source_dir" -B "$build_dir" \
   -DGGML_BUILD_EXAMPLES=OFF \
   -DGGML_NATIVE=OFF \
   -DGGML_OPENMP=OFF \
+  -DGGML_BLAS=OFF \
   -DGGML_METAL=ON \
   -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_METAL_MACOSX_VERSION_MIN=12.0
@@ -44,9 +45,13 @@ if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
   exit 1
 fi
 
-if otool -L "$helper" | grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/'; then
+# For a universal Mach-O, `otool -L` prints absolute paths to the inspected
+# file as architecture headers. Inspect only tab-indented dependency records;
+# system frameworks and /usr/lib are portable parts of macOS.
+dependencies="$(otool -L "$helper" | awk '/^\t/{print}')"
+if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
   echo "llama-cli contains a non-portable dynamic dependency" >&2
-  otool -L "$helper" >&2
+  printf '%s\n' "$dependencies" >&2
   exit 1
 fi
 
