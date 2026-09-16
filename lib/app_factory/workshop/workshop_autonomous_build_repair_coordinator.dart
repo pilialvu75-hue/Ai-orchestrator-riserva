@@ -58,11 +58,13 @@ final class WorkshopAutonomousBuildRepairCoordinator {
     WorkshopAutonomousProductionPolicy productionPolicy =
         const WorkshopAutonomousProductionPolicy(),
     this.repairPolicy = const WorkshopAutonomousBuildRepairPolicy(),
-  }) : _production = WorkshopAutonomousProductionCoordinator(
+  })  : _bundle = bundle,
+        _production = WorkshopAutonomousProductionCoordinator(
           bundle: bundle,
           policy: productionPolicy,
         );
 
+  final WorkshopProductionLifecycleBundle _bundle;
   final WorkshopAutonomousProductionCoordinator _production;
   final WorkshopAutonomousBuildRepairPolicy repairPolicy;
 
@@ -114,15 +116,21 @@ final class WorkshopAutonomousBuildRepairCoordinator {
     );
     attempts.add(result);
 
-    var repairableFailureDetected = _isRepairableBuildFailure(result);
-
     for (var repairIndex = 0;
         repairIndex < repairPolicy.maxRepairAttempts &&
-            repairableFailureDetected &&
+            _isRepairableBuildFailure(result) &&
             cancellationToken?.isCancelled != true;
         repairIndex++) {
       final failedBuild = result.buildResult!;
       final repairNumber = repairIndex + 1;
+
+      // Today project sessions are indexed by task id and startProduction()
+      // uses a stable initial task id. Completed sessions are safe to forget at
+      // this project boundary: the real workspace already contains their
+      // applied output and the completed plan retains the project history.
+      // Releasing them prevents a repair project from accidentally reusing the
+      // completed WorkspaceSession belonging to the previous production.
+      _releaseCompletedTaskSessions(result);
 
       result = await _production.runNewProduction(
         title: '$title — build repair $repairNumber',
@@ -167,13 +175,6 @@ final class WorkshopAutonomousBuildRepairCoordinator {
       if (result.succeeded) {
         break;
       }
-
-      repairableFailureDetected =
-          repairableFailureDetected || _isRepairableBuildFailure(result);
-
-      if (!_isRepairableBuildFailure(result)) {
-        break;
-      }
     }
 
     return WorkshopAutonomousBuildRepairResult(
@@ -181,6 +182,21 @@ final class WorkshopAutonomousBuildRepairCoordinator {
           List<WorkshopAutonomousProductionResult>.unmodifiable(attempts),
       repairableFailureDetected: attempts.any(_isRepairableBuildFailure),
     );
+  }
+
+  void _releaseCompletedTaskSessions(
+    WorkshopAutonomousProductionResult result,
+  ) {
+    for (final task in result.plan.tasks) {
+      if (!task.completed) {
+        continue;
+      }
+
+      final session = _bundle.projectExecutor.sessionForTask(task.id);
+      if (session?.isCompleted == true) {
+        _bundle.projectExecutor.forgetTaskSession(task.id);
+      }
+    }
   }
 
   bool _isRepairableBuildFailure(
@@ -238,7 +254,8 @@ final class WorkshopAutonomousBuildRepairCoordinator {
     }
 
     final omitted = combined.length - repairPolicy.maxDiagnosticChars;
-    final tail = combined.substring(combined.length - repairPolicy.maxDiagnosticChars);
+    final tail =
+        combined.substring(combined.length - repairPolicy.maxDiagnosticChars);
     return '[... $omitted diagnostic characters omitted ...]\n$tail';
   }
 }
