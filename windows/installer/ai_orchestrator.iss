@@ -16,6 +16,7 @@
 #define AppName "AI Orchestrator"
 #define AppExeName "ai_orchestrator.exe"
 #define ProbeExeName "AI-Orchestrator-Windows-Diagnostics.exe"
+#define GraphicsProbeExeName "AI-Orchestrator-Windows-Graphics-Diagnostics.exe"
 
 [Setup]
 AppId={{4DB0E2A9-841F-4AC8-BC18-C72DBBA31E42}
@@ -54,6 +55,7 @@ Source: "{#VCRedistPath}"; DestDir: "{tmp}"; DestName: "vc_redist.x64.exe"; Flag
 [Icons]
 Name: "{group}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\AI Orchestrator - Diagnostica Windows"; Filename: "{app}\{#ProbeExeName}"; Comment: "Verifica loader, runtime, shim Win7, DLL, CPU e memoria senza avviare Flutter"
+Name: "{group}\AI Orchestrator - Diagnostica grafica Windows"; Filename: "{app}\{#GraphicsProbeExeName}"; Comment: "Verifica D3D9, DXGI, OpenGL, DWM, monitor e driver grafici senza avviare Flutter"
 Name: "{group}\AI Orchestrator - diagnostica Win7 (senza plugin)"; Filename: "{app}\{#AppExeName}"; Parameters: "--win7-no-plugins"; Comment: "Avvio diagnostico Windows 7 senza registrazione plugin"
 Name: "{group}\AI Orchestrator - apri log diagnostico Win7"; Filename: "{sys}\notepad.exe"; Parameters: """{localappdata}\AI-Orchestrator\Diagnostics\AI-Orchestrator-win7-startup.log"""; Comment: "Apre il trace di avvio Windows 7"
 Name: "{autodesktop}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
@@ -62,3 +64,4 @@ Name: "{autodesktop}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"; Tasks: d
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione componenti Microsoft Visual C++..."; Flags: waituntilterminated runhidden
 Filename: "{app}\{#AppExeName}"; Description: "Avvia AI Orchestrator"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#ProbeExeName}"; Description: "Esegui Diagnostica Windows (consigliato per i test Win7)"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\{#GraphicsProbeExeName}"; Description: "Esegui Diagnostica grafica Windows"; Flags: nowait postinstall skipifsilent unchecked
