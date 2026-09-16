@@ -1,0 +1,193 @@
+name: Validate macOS High Sierra Legacy Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'platform/macos-high-sierra-legacy'
+    paths:
+      - 'legacy_macos/**'
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+      - '.github/workflows/macos-high-sierra-legacy.yml'
+  pull_request:
+    paths:
+      - 'legacy_macos/**'
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+      - '.github/workflows/macos-high-sierra-legacy.yml'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-high-sierra-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-runtime:
+    # Build and execute x86_64 natively. This prevents Rosetta or an arm64 host
+    # from hiding architecture/CPU compatibility mistakes before physical tests.
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          cmake --version
+          clang --version
+          uname -m
+          test "$(uname -m)" = "x86_64"
+
+      - name: Build High Sierra CPU-only llama runtime
+        run: bash native/macos_legacy/build_llama_cli.sh
+
+      - name: Inspect runtime compatibility contract
+        run: |
+          set -euo pipefail
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
+          file "$helper"
+          test "$(lipo -archs "$helper")" = "x86_64"
+          otool -l "$helper" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' || true
+          otool -L "$helper"
+
+      - name: Smoke test real GGUF inference
+        shell: bash
+        env:
+          TINY_GGUF_REVISION: def3e2dd70df35ecbf6403ea347de4c5977220c1
+          TINY_GGUF_FILE: stories15M-q8_0.gguf
+        run: |
+          set -euo pipefail
+
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
+          smoke_dir="$RUNNER_TEMP/ai-orchestrator-high-sierra-smoke"
+          model="$smoke_dir/$TINY_GGUF_FILE"
+          output="$RUNNER_TEMP/high-sierra-smoke-output.txt"
+          mkdir -p "$smoke_dir"
+
+          if [[ ! -x "$helper" ]]; then
+            echo "High Sierra helper is missing: $helper" >&2
+            exit 1
+          fi
+
+          model_url="https://huggingface.co/ggml-org/tiny-llamas/resolve/$TINY_GGUF_REVISION/$TINY_GGUF_FILE?download=true"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 180 \
+            --output "$model" "$model_url"
+
+          model_bytes="$(stat -f '%z' "$model")"
+          if (( model_bytes < 1000000 )); then
+            echo "Downloaded GGUF is unexpectedly small: ${model_bytes} bytes" >&2
+            exit 1
+          fi
+
+          header="$(dd if="$model" bs=1 count=4 2>/dev/null)"
+          if [[ "$header" != "GGUF" ]]; then
+            echo "Downloaded smoke model does not have a GGUF header" >&2
+            exit 1
+          fi
+
+          python3 - "$helper" "$model" "$output" <<'PY'
+          import subprocess
+          import sys
+
+          helper, model, output = sys.argv[1:4]
+          cmd = [
+              helper,
+              "-m", model,
+              "-p", "The sky is",
+              "-n", "8",
+              "-t", "2",
+              "--temp", "0",
+              "--top-p", "1",
+              "--top-k", "40",
+              "--repeat-penalty", "1.0",
+          ]
+          try:
+              completed = subprocess.run(
+                  cmd,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+                  timeout=180,
+                  check=False,
+              )
+          except subprocess.TimeoutExpired as exc:
+              print("High Sierra GGUF smoke inference timed out", file=sys.stderr)
+              if exc.stdout:
+                  print(exc.stdout, file=sys.stderr)
+              if exc.stderr:
+                  print(exc.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          with open(output, "w", encoding="utf-8") as handle:
+              handle.write(completed.stdout)
+
+          if completed.returncode != 0:
+              print(f"llama-cli exited with {completed.returncode}", file=sys.stderr)
+              if completed.stdout:
+                  print(completed.stdout, file=sys.stderr)
+              if completed.stderr:
+                  print(completed.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          if not completed.stdout.strip():
+              print("High Sierra helper produced no inference output", file=sys.stderr)
+              if completed.stderr:
+                  print(completed.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          print(f"HIGH_SIERRA_GGUF_SMOKE_OK output_chars={len(completed.stdout.strip())}")
+          print(f"HIGH_SIERRA_GGUF_SAMPLE={completed.stdout.strip()[:160]!r}")
+          PY
+
+      - name: Build lightweight High Sierra app
+        run: bash legacy_macos/build_app.sh
+
+      - name: Inspect app compatibility contract
+        run: |
+          set -euo pipefail
+          app="$PWD/build/macos-high-sierra-app/AI Orchestrator Legacy.app"
+          executable="$app/Contents/MacOS/AI Orchestrator Legacy"
+          helper="$app/Contents/Resources/llama-cli"
+          test -d "$app"
+          file "$executable"
+          file "$helper"
+          test "$(lipo -archs "$executable")" = "x86_64"
+          test "$(lipo -archs "$helper")" = "x86_64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = "10.13"
+          otool -l "$executable" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' || true
+          otool -L "$executable"
+          codesign --verify --deep --strict "$app"
+          "$executable" --self-test
+
+      - name: Package physical-test app
+        run: |
+          set -euo pipefail
+          cd build/macos-high-sierra-app
+          ditto -c -k --sequesterRsrc --keepParent \
+            "AI Orchestrator Legacy.app" \
+            "AI-Orchestrator-High-Sierra-x86_64.zip"
+          shasum -a 256 "AI-Orchestrator-High-Sierra-x86_64.zip" \
+            > "AI-Orchestrator-High-Sierra-x86_64.zip.sha256"
+
+      - name: Upload legacy physical-test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Orchestrator-High-Sierra-x86_64
+          path: |
+            build/macos-high-sierra-app/AI-Orchestrator-High-Sierra-x86_64.zip
+            build/macos-high-sierra-app/AI-Orchestrator-High-Sierra-x86_64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
