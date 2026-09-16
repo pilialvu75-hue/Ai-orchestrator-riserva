@@ -115,7 +115,8 @@ final class WorkshopAirLabIoStagingMaterializer
         final targetPath = p.normalize(
           p.joinAll(<String>[rootPath, ...relativePath.split('/')]),
         );
-        if (!_isInside(canonicalRoot, p.normalize(p.absolute(targetPath)))) {
+        final absoluteTarget = p.normalize(p.absolute(targetPath));
+        if (!_isInside(rootPath, absoluteTarget)) {
           throw WorkshopAirLabStagingException(
             'AIrLab path escapes the assigned staging root.',
             code: 'path_escape',
@@ -135,7 +136,6 @@ final class WorkshopAirLabIoStagingMaterializer
             operation: operation,
             relativePath: relativePath,
             targetPath: targetPath,
-            payloadBytes: payloadBytes,
           ),
         );
       }
@@ -316,8 +316,8 @@ final class WorkshopAirLabIoStagingMaterializer
     }
   }
 
-  static bool _isInside(String canonicalRoot, String candidate) {
-    return p.equals(canonicalRoot, candidate) || p.isWithin(canonicalRoot, candidate);
+  static bool _isInside(String root, String candidate) {
+    return p.equals(root, candidate) || p.isWithin(root, candidate);
   }
 }
 
@@ -336,9 +336,7 @@ String _normalizeOperationPath(String rawPath) {
       path: rawPath,
     );
   }
-  if (value.startsWith('/') ||
-      value.startsWith('//') ||
-      RegExp(r'^[A-Za-z]:/').hasMatch(value)) {
+  if (value.startsWith('/') || RegExp(r'^[A-Za-z]:/').hasMatch(value)) {
     throw WorkshopAirLabStagingException(
       'AIrLab operation path must be relative.',
       code: 'absolute_path_forbidden',
@@ -427,11 +425,9 @@ final class _PreparedOperation {
     required this.operation,
     required this.relativePath,
     required this.targetPath,
-    required this.payloadBytes,
   });
 
   final WorkshopAirLabFileOperation operation;
   final String relativePath;
   final String targetPath;
-  final int payloadBytes;
 }
