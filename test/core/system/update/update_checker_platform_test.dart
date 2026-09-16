@@ -15,6 +15,8 @@ void main() {
   const repo = 'Ai-orchestrator-riserva';
   const windowsSha =
       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const macosSha =
+      'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
 
   Future<SharedPreferences> preferencesWith(
     Map<String, Object> initialValues,
@@ -96,6 +98,75 @@ void main() {
     },
   );
 
+  test(
+    'macOS ignores Android-only version.json and selects verified DMG from GitHub release',
+    () async {
+      final preferences = await preferencesWith(const {});
+      final client = MockClient((request) async {
+        if (request.url.toString() == manifestUrl) {
+          return http.Response(
+            jsonEncode(const {
+              'versionName': '1.0.14+2100',
+              'apkUrl': 'https://example.com/app-release.apk',
+            }),
+            200,
+          );
+        }
+        if (request.url.host == 'api.github.com') {
+          return http.Response(
+            jsonEncode([
+              {
+                'tag_name': 'v1.0.14+2101',
+                'draft': false,
+                'prerelease': false,
+                'body': 'Coordinated macOS release',
+                'assets': [
+                  {
+                    'name': 'app-release.apk',
+                    'browser_download_url':
+                        'https://github.com/example/app-release.apk',
+                    'size': 165000000,
+                  },
+                  {
+                    'name': 'AI-Orchestrator-macOS.dmg',
+                    'browser_download_url':
+                        'https://github.com/example/AI-Orchestrator-macOS.dmg',
+                    'size': 73400320,
+                    'digest': 'sha256:$macosSha',
+                  },
+                ],
+              },
+            ]),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final checker = UpdateChecker(
+        httpClient: client,
+        preferences: preferences,
+        comparator: const VersionComparator(),
+        manifestUrl: manifestUrl,
+        githubOwner: owner,
+        githubRepo: repo,
+        targetPlatform: UpdateTargetPlatform.macos,
+      );
+
+      final result = await checker.checkLatestManifest(
+        preferredChannel: ReleaseChannel.stable,
+        allowCachedFallback: false,
+      );
+
+      expect(result.manifest, isNotNull);
+      expect(result.manifest!.version, contains('2101'));
+      expect(result.manifest!.macosArtifact!.fileName, 'AI-Orchestrator-macOS.dmg');
+      expect(result.manifest!.macosArtifact!.sizeBytes, 73400320);
+      expect(result.manifest!.macosArtifact!.sha256, macosSha);
+      expect(result.manifest!.androidArtifact.fileName, 'app-release.apk');
+    },
+  );
+
   test('Android keeps accepting APK-only GitHub releases', () async {
     final preferences = await preferencesWith(const {});
     final client = MockClient((request) async {
@@ -142,6 +213,7 @@ void main() {
     expect(result.manifest, isNotNull);
     expect(result.manifest!.androidArtifact.fileName, 'app-release.apk');
     expect(result.manifest!.windowsArtifact, isNull);
+    expect(result.manifest!.macosArtifact, isNull);
   });
 
   test('Windows fails closed when Setup.exe has no GitHub SHA-256 digest', () async {
@@ -197,6 +269,59 @@ void main() {
     expect(result.manifest, isNull);
   });
 
+  test('macOS fails closed when DMG has no GitHub SHA-256 digest', () async {
+    final preferences = await preferencesWith(const {});
+    final client = MockClient((request) async {
+      if (request.url.toString() == manifestUrl) {
+        return http.Response('not found', 404);
+      }
+      if (request.url.host == 'api.github.com') {
+        return http.Response(
+          jsonEncode([
+            {
+              'tag_name': 'v1.0.14+2102',
+              'draft': false,
+              'prerelease': false,
+              'assets': [
+                {
+                  'name': 'app-release.apk',
+                  'browser_download_url':
+                      'https://github.com/example/app-release.apk',
+                  'size': 165000000,
+                },
+                {
+                  'name': 'AI-Orchestrator-macOS.dmg',
+                  'browser_download_url':
+                      'https://github.com/example/AI-Orchestrator-macOS.dmg',
+                  'size': 73400320,
+                },
+              ],
+            },
+          ]),
+          200,
+        );
+      }
+      return http.Response('not found', 404);
+    });
+
+    final checker = UpdateChecker(
+      httpClient: client,
+      preferences: preferences,
+      comparator: const VersionComparator(),
+      manifestUrl: manifestUrl,
+      githubOwner: owner,
+      githubRepo: repo,
+      targetPlatform: UpdateTargetPlatform.macos,
+    );
+
+    final result = await checker.checkLatestManifest(
+      preferredChannel: ReleaseChannel.stable,
+      allowCachedFallback: false,
+    );
+
+    expect(result.manifest, isNull);
+  });
+
   test('Windows does not reuse an Android-only cached manifest', () async {
     final preferences = await preferencesWith({
       'system.update.cached_manifest': jsonEncode(const {
@@ -212,6 +337,30 @@ void main() {
       githubOwner: owner,
       githubRepo: repo,
       targetPlatform: UpdateTargetPlatform.windows,
+    );
+
+    final cached = await checker.getCachedManifest(
+      preferredChannel: ReleaseChannel.stable,
+    );
+
+    expect(cached, isNull);
+  });
+
+  test('macOS does not reuse an Android-only cached manifest', () async {
+    final preferences = await preferencesWith({
+      'system.update.cached_manifest': jsonEncode(const {
+        'versionName': '1.0.14+2103',
+        'apkUrl': 'https://example.com/app-release.apk',
+      }),
+    });
+    final checker = UpdateChecker(
+      httpClient: MockClient((_) async => http.Response('not found', 404)),
+      preferences: preferences,
+      comparator: const VersionComparator(),
+      manifestUrl: manifestUrl,
+      githubOwner: owner,
+      githubRepo: repo,
+      targetPlatform: UpdateTargetPlatform.macos,
     );
 
     final cached = await checker.getCachedManifest(
