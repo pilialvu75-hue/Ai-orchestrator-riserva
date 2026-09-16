@@ -16,6 +16,7 @@ on:
       - main
       - 'platform/macos-local-runtime'
       - 'platform/macos-runtime-smoke'
+      - 'platform/macos-distribution'
     paths:
       - 'lib/**'
       - 'macos/**'
@@ -323,10 +324,50 @@ jobs:
           otool -L "${{ steps.runtime.outputs.helper_path }}"
           spctl --assess --type execute --verbose=4 "${{ steps.bundle.outputs.app_path }}" 2>&1 || true
 
+      - name: Create and verify macOS DMG
+        id: dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dmg_path="$PWD/AI-Orchestrator-macOS.dmg"
+          bash native/macos/package_dmg.sh \
+            "${{ steps.bundle.outputs.app_path }}" \
+            "$dmg_path"
+
+          if [[ ! -s "$dmg_path" || ! -s "$dmg_path.sha256" ]]; then
+            echo "DMG packager did not produce the expected files" >&2
+            exit 1
+          fi
+
+          dmg_size="$(stat -f '%z' "$dmg_path")"
+          dmg_sha256="$(shasum -a 256 "$dmg_path" | awk '{print tolower($1)}')"
+          expected_sha256="$(awk '{print tolower($1)}' "$dmg_path.sha256")"
+          if [[ "$dmg_sha256" != "$expected_sha256" ]]; then
+            echo "DMG SHA-256 sidecar does not match generated image" >&2
+            exit 1
+          fi
+
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha256_path=$dmg_path.sha256" >> "$GITHUB_OUTPUT"
+          echo "dmg_size=$dmg_size" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
+          echo "DMG verified: $dmg_path ($dmg_size bytes) sha256=$dmg_sha256"
+
       - name: Upload macOS app bundle
         uses: actions/upload-artifact@v4
         with:
           name: ai-orchestrator-macos
           path: ai-orchestrator-macos.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-macos-dmg
+          path: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.dmg.outputs.dmg_sha256_path }}
           if-no-files-found: error
           retention-days: 14
