@@ -104,6 +104,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("08 after command line parsing");
 
   bool skip_plugins = false;
+  bool disable_impeller = false;
   std::vector<std::string> dart_arguments;
   dart_arguments.reserve(command_line_arguments.size());
   for (const auto& argument : command_line_arguments) {
@@ -112,7 +113,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       startup_trace::Mark("08a Win7 plugin-free diagnostic mode requested");
       continue;
     }
+    if (argument == "--win7-no-impeller") {
+      disable_impeller = true;
+      startup_trace::Mark("08b Win7 no-Impeller diagnostic mode requested");
+      continue;
+    }
     dart_arguments.push_back(argument);
+  }
+
+  if (disable_impeller) {
+    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+    startup_trace::Mark("08c Impeller disabled; Skia requested");
+  } else {
+    startup_trace::Mark("08c renderer default retained");
   }
 
   project.set_dart_entrypoint_arguments(std::move(dart_arguments));
