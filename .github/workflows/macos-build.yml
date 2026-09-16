@@ -115,13 +115,13 @@ jobs:
       - name: Validate versioned Xcode project
         run: xcodebuild -project macos/Runner.xcodeproj -list
 
-      - name: Build bundled llama-cli runtime
+      - name: Build bundled llama.cpp runtime
         run: bash native/macos/build_llama_cli.sh
 
       - name: Build macOS release
         run: flutter build macos --release
 
-      - name: Embed and validate llama-cli runtime
+      - name: Embed and validate llama.cpp runtime
         id: runtime
         shell: bash
         run: |
@@ -129,15 +129,15 @@ jobs:
 
           release_dir="$PWD/build/macos/Build/Products/Release"
           app_path="$(find "$release_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          helper_source="$PWD/build/llama-macos/bin/llama-cli"
-          helper_target="$app_path/Contents/MacOS/llama-cli"
+          helper_source="$PWD/build/llama-macos/bin/llama-completion"
+          helper_target="$app_path/Contents/MacOS/llama-completion"
 
           if [[ -z "$app_path" || ! -d "$app_path" ]]; then
             echo "No .app bundle found under $release_dir" >&2
             exit 1
           fi
           if [[ ! -x "$helper_source" ]]; then
-            echo "Built llama-cli helper is missing: $helper_source" >&2
+            echo "Built llama-completion helper is missing: $helper_source" >&2
             exit 1
           fi
 
@@ -145,13 +145,13 @@ jobs:
 
           archs="$(lipo -archs "$helper_target")"
           if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
-            echo "Bundled llama-cli is not Universal 2: $archs" >&2
+            echo "Bundled llama-completion is not Universal 2: $archs" >&2
             exit 1
           fi
 
           dependencies="$(otool -L "$helper_target" | awk '/^\t/{print}')"
           if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
-            echo "Bundled llama-cli contains a non-portable dependency" >&2
+            echo "Bundled llama-completion contains a non-portable dependency" >&2
             printf '%s\n' "$dependencies" >&2
             exit 1
           fi
@@ -166,7 +166,7 @@ jobs:
 
           echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
           echo "helper_path=$helper_target" >> "$GITHUB_OUTPUT"
-          echo "Bundled llama-cli architectures: $archs"
+          echo "Bundled llama-completion architectures: $archs"
 
       - name: Validate and package app bundle
         id: bundle
@@ -182,7 +182,7 @@ jobs:
             exit 1
           fi
           if [[ ! -x "$helper_path" ]]; then
-            echo "macOS app bundle is missing bundled llama-cli" >&2
+            echo "macOS app bundle is missing bundled llama-completion" >&2
             exit 1
           fi
           if [[ ! -f "$app_path/Contents/Info.plist" ]]; then
