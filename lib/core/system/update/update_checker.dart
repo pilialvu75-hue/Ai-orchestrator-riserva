@@ -58,6 +58,7 @@ class UpdateChecker {
   static const String _cachedManifestLegacyKey = 'system.update.cached_manifest';
   static const String _cachedManifestKeyPrefix = 'system.update.cached_manifest.v2';
   static const String _windowsSetupAssetName = 'AI-Orchestrator-Setup-x64.exe';
+  static const String _macosDmgAssetName = 'AI-Orchestrator-macOS.dmg';
 
   Future<UpdateCheckResult> checkLatestManifest({
     required ReleaseChannel preferredChannel,
@@ -122,7 +123,8 @@ class UpdateChecker {
       return UpdateCheckResult(
         manifest: null,
         usedCache: false,
-        errorMessage: errors.isEmpty ? 'No update data available' : errors.join(' | '),
+        errorMessage:
+            errors.isEmpty ? 'No update data available' : errors.join(' | '),
       );
     }
     final cached = await getCachedManifest(
@@ -326,6 +328,20 @@ class UpdateChecker {
         continue;
       }
 
+      final macosAsset = _extractMacosAsset(release);
+      if (macosAsset != null) {
+        _logMacosFound(
+          'tag=$tagName file=${macosAsset.name} '
+          'size_bytes=${macosAsset.sizeBytes} sha256=${macosAsset.sha256}',
+        );
+      }
+      if (targetPlatform == UpdateTargetPlatform.macos && macosAsset == null) {
+        _logArtifactInvalid(
+          'tag=$tagName target=macos reason=dmg_asset_not_found_or_unverified',
+        );
+        continue;
+      }
+
       final manifest = UpdateManifest(
         version: version,
         versionCode: null,
@@ -338,6 +354,10 @@ class UpdateChecker {
         windowsFileName: windowsAsset?.name,
         windowsSizeBytes: windowsAsset?.sizeBytes,
         windowsSha256: windowsAsset?.sha256,
+        macosUrl: macosAsset?.url,
+        macosFileName: macosAsset?.name,
+        macosSizeBytes: macosAsset?.sizeBytes,
+        macosSha256: macosAsset?.sha256,
         changelog: (release['body'] as String?)?.trim() ?? '',
         critical: false,
       );
@@ -419,6 +439,27 @@ class UpdateChecker {
       final candidate = _validatedReleaseAsset(
         asset,
         requiredExtension: '.exe',
+        requireSha256: true,
+      );
+      if (candidate != null) return candidate;
+    }
+    return null;
+  }
+
+  _ReleaseAsset? _extractMacosAsset(Map<String, dynamic> release) {
+    final assets = release['assets'];
+    if (assets is! List) return null;
+
+    for (final rawAsset in assets) {
+      if (rawAsset is! Map) continue;
+      final asset = Map<String, dynamic>.from(rawAsset);
+      final rawName = ((asset['name'] as String?) ?? '').trim();
+      if (rawName.toLowerCase() != _macosDmgAssetName.toLowerCase()) {
+        continue;
+      }
+      final candidate = _validatedReleaseAsset(
+        asset,
+        requiredExtension: '.dmg',
         requireSha256: true,
       );
       if (candidate != null) return candidate;
@@ -567,6 +608,8 @@ class UpdateChecker {
       debugPrint('[UPDATE_APK_INVALID] $message');
   void _logWindowsFound(String message) =>
       debugPrint('[UPDATE_WINDOWS_FOUND] $message');
+  void _logMacosFound(String message) =>
+      debugPrint('[UPDATE_MACOS_FOUND] $message');
   void _logArtifactInvalid(String message) =>
       debugPrint('[UPDATE_ARTIFACT_INVALID] $message');
 }
