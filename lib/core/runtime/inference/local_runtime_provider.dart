@@ -597,9 +597,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       LlamaNativeDefaults.topK.toString(),
       '--repeat-penalty',
       effectiveRepeatPenalty.toString(),
-      if (Platform.isMacOS) '--no-conversation',
+      if (Platform.isMacOS) ...<String>[
+        '--no-conversation',
+        '--verbosity',
+        '0',
+      ],
       '--no-display-prompt',
-      '--log-disable',
+      if (!Platform.isMacOS) '--log-disable',
     ];
   }
 
