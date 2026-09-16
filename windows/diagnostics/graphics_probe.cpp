@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d9.h>
+#include <d3d11.h>
 #include <dwmapi.h>
 #include <dxgi.h>
 #include <gl/GL.h>
@@ -15,6 +16,10 @@ namespace {
 HANDLE g_report = INVALID_HANDLE_VALUE;
 wchar_t g_report_path[MAX_PATH] = {};
 int g_warnings = 0;
+
+using D3D11CreateDeviceFn = HRESULT(WINAPI*)(
+    IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*,
+    UINT, UINT, ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
 
 bool AppendPath(wchar_t (&path)[MAX_PATH], const wchar_t* suffix) {
   return SUCCEEDED(StringCchCatW(path, MAX_PATH, suffix));
@@ -88,6 +93,45 @@ void WriteAnsiField(const wchar_t* label, const char* value) {
   const int converted = ::MultiByteToWideChar(
       CP_ACP, 0, value, -1, wide, static_cast<int>(std::size(wide)));
   WriteFormat(L"%s=%s", label, converted > 0 ? wide : L"<conversion-failed>");
+}
+
+HMODULE LoadSystemLibrary(const wchar_t* name) {
+  wchar_t path[MAX_PATH] = {};
+  const UINT length = ::GetSystemDirectoryW(path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH || !AppendPath(path, L"\\") ||
+      !AppendPath(path, name)) {
+    return nullptr;
+  }
+  return ::LoadLibraryW(path);
+}
+
+void ReportSystemGraphicsDll(const wchar_t* name) {
+  HMODULE module = LoadSystemLibrary(name);
+  if (module == nullptr) {
+    WriteFormat(L"DLL   %s=missing error=%lu", name, ::GetLastError());
+    return;
+  }
+  WriteFormat(L"DLL   %s=available", name);
+  ::FreeLibrary(module);
+}
+
+const wchar_t* FeatureLevelName(D3D_FEATURE_LEVEL level) {
+  switch (level) {
+    case D3D_FEATURE_LEVEL_11_0:
+      return L"11_0";
+    case D3D_FEATURE_LEVEL_10_1:
+      return L"10_1";
+    case D3D_FEATURE_LEVEL_10_0:
+      return L"10_0";
+    case D3D_FEATURE_LEVEL_9_3:
+      return L"9_3";
+    case D3D_FEATURE_LEVEL_9_2:
+      return L"9_2";
+    case D3D_FEATURE_LEVEL_9_1:
+      return L"9_1";
+    default:
+      return L"unknown";
+  }
 }
 
 void ReportDesktopEnvironment() {
@@ -218,6 +262,75 @@ void ReportD3D9() {
   }
 
   d3d->Release();
+}
+
+void ReportD3D11() {
+  WriteLine(L"");
+  WriteLine(L"[Direct3D 11 / ANGLE prerequisites]");
+
+  HMODULE d3d11 = LoadSystemLibrary(L"d3d11.dll");
+  if (d3d11 == nullptr) {
+    Warn(L"d3d11.dll is unavailable error=%lu", ::GetLastError());
+  } else {
+    auto create_device = reinterpret_cast<D3D11CreateDeviceFn>(
+        ::GetProcAddress(d3d11, "D3D11CreateDevice"));
+    if (create_device == nullptr) {
+      Warn(L"d3d11.dll does not export D3D11CreateDevice");
+    } else {
+      const D3D_FEATURE_LEVEL requested_levels[] = {
+          D3D_FEATURE_LEVEL_11_0,
+          D3D_FEATURE_LEVEL_10_1,
+          D3D_FEATURE_LEVEL_10_0,
+          D3D_FEATURE_LEVEL_9_3,
+          D3D_FEATURE_LEVEL_9_2,
+          D3D_FEATURE_LEVEL_9_1,
+      };
+      ID3D11Device* device = nullptr;
+      ID3D11DeviceContext* context = nullptr;
+      D3D_FEATURE_LEVEL selected_level = D3D_FEATURE_LEVEL_9_1;
+      HRESULT hr = create_device(
+          nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+          D3D11_CREATE_DEVICE_BGRA_SUPPORT, requested_levels,
+          static_cast<UINT>(std::size(requested_levels)), D3D11_SDK_VERSION,
+          &device, &selected_level, &context);
+      if (SUCCEEDED(hr)) {
+        WriteFormat(L"D3D11 hardware_device=pass feature_level=%s (0x%04X)",
+                    FeatureLevelName(selected_level),
+                    static_cast<unsigned int>(selected_level));
+      } else {
+        WriteFormat(L"D3D11 hardware_device=fail hr=0x%08lX",
+                    static_cast<unsigned long>(hr));
+      }
+      if (context != nullptr) context->Release();
+      if (device != nullptr) device->Release();
+
+      if (FAILED(hr)) {
+        device = nullptr;
+        context = nullptr;
+        selected_level = D3D_FEATURE_LEVEL_9_1;
+        hr = create_device(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, requested_levels,
+            static_cast<UINT>(std::size(requested_levels)), D3D11_SDK_VERSION,
+            &device, &selected_level, &context);
+        if (SUCCEEDED(hr)) {
+          WriteFormat(L"D3D11 WARP_device=pass feature_level=%s (0x%04X)",
+                      FeatureLevelName(selected_level),
+                      static_cast<unsigned int>(selected_level));
+        } else {
+          Warn(L"D3D11 WARP device creation failed hr=0x%08lX",
+               static_cast<unsigned long>(hr));
+        }
+        if (context != nullptr) context->Release();
+        if (device != nullptr) device->Release();
+      }
+    }
+    ::FreeLibrary(d3d11);
+  }
+
+  ReportSystemGraphicsDll(L"d3dcompiler_47.dll");
+  ReportSystemGraphicsDll(L"d3dcompiler_43.dll");
+  ReportSystemGraphicsDll(L"dxcompiler.dll");
 }
 
 void ReportDxgi() {
@@ -386,6 +499,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE,
   ReportDesktopEnvironment();
   ReportMonitors();
   ReportD3D9();
+  ReportD3D11();
   ReportDxgi();
   ReportOpenGl();
 
