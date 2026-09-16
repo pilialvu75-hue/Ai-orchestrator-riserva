@@ -27,7 +27,9 @@ concurrency:
 
 jobs:
   validate-runtime:
-    runs-on: macos-15
+    # Build and execute x86_64 natively. This prevents Rosetta or an arm64 host
+    # from hiding architecture/CPU compatibility mistakes before physical tests.
+    runs-on: macos-15-intel
     timeout-minutes: 60
 
     steps:
@@ -44,6 +46,7 @@ jobs:
           cmake --version
           clang --version
           uname -m
+          test "$(uname -m)" = "x86_64"
 
       - name: Build High Sierra CPU-only llama runtime
         run: bash native/macos_legacy/build_llama_cli.sh
@@ -51,9 +54,9 @@ jobs:
       - name: Inspect compatibility contract
         run: |
           set -euo pipefail
-          helper="$PWD/build/llama-macos-high-sierra/bin/llama-completion"
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
           file "$helper"
-          lipo -archs "$helper"
+          test "$(lipo -archs "$helper")" = "x86_64"
           otool -l "$helper" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' || true
           otool -L "$helper"
 
@@ -65,15 +68,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          helper="$PWD/build/llama-macos-high-sierra/bin/llama-completion"
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
           smoke_dir="$RUNNER_TEMP/ai-orchestrator-high-sierra-smoke"
           model="$smoke_dir/$TINY_GGUF_FILE"
+          output="$RUNNER_TEMP/high-sierra-smoke-output.txt"
           mkdir -p "$smoke_dir"
+
+          if [[ ! -x "$helper" ]]; then
+            echo "High Sierra helper is missing: $helper" >&2
+            exit 1
+          fi
 
           model_url="https://huggingface.co/ggml-org/tiny-llamas/resolve/$TINY_GGUF_REVISION/$TINY_GGUF_FILE?download=true"
           curl --fail --location --retry 3 --retry-all-errors \
             --connect-timeout 20 --max-time 180 \
             --output "$model" "$model_url"
+
+          model_bytes="$(stat -f '%z' "$model")"
+          if (( model_bytes < 1000000 )); then
+            echo "Downloaded GGUF is unexpectedly small: ${model_bytes} bytes" >&2
+            exit 1
+          fi
 
           header="$(dd if="$model" bs=1 count=4 2>/dev/null)"
           if [[ "$header" != "GGUF" ]]; then
@@ -81,30 +96,64 @@ jobs:
             exit 1
           fi
 
-          "$helper" \
-            -m "$model" \
-            -p "The sky is" \
-            -n 8 \
-            --temp 0 \
-            --top-p 1 \
-            --top-k 40 \
-            --repeat-penalty 1.0 \
-            --no-conversation \
-            --no-display-prompt \
-            --verbosity 0 \
-            > "$RUNNER_TEMP/high-sierra-smoke-output.txt"
+          python3 - "$helper" "$model" "$output" <<'PY'
+          import subprocess
+          import sys
 
-          if [[ ! -s "$RUNNER_TEMP/high-sierra-smoke-output.txt" ]]; then
-            echo "High Sierra helper produced no inference output" >&2
-            exit 1
-          fi
+          helper, model, output = sys.argv[1:4]
+          cmd = [
+              helper,
+              "-m", model,
+              "-p", "The sky is",
+              "-n", "8",
+              "-t", "2",
+              "--temp", "0",
+              "--top-p", "1",
+              "--top-k", "40",
+              "--repeat-penalty", "1.0",
+          ]
+          try:
+              completed = subprocess.run(
+                  cmd,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+                  timeout=180,
+                  check=False,
+              )
+          except subprocess.TimeoutExpired as exc:
+              print("High Sierra GGUF smoke inference timed out", file=sys.stderr)
+              if exc.stdout:
+                  print(exc.stdout, file=sys.stderr)
+              if exc.stderr:
+                  print(exc.stderr, file=sys.stderr)
+              raise SystemExit(1)
 
-          echo "HIGH_SIERRA_GGUF_SMOKE_OK"
+          with open(output, "w", encoding="utf-8") as handle:
+              handle.write(completed.stdout)
+
+          if completed.returncode != 0:
+              print(f"llama-cli exited with {completed.returncode}", file=sys.stderr)
+              if completed.stdout:
+                  print(completed.stdout, file=sys.stderr)
+              if completed.stderr:
+                  print(completed.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          if not completed.stdout.strip():
+              print("High Sierra helper produced no inference output", file=sys.stderr)
+              if completed.stderr:
+                  print(completed.stderr, file=sys.stderr)
+              raise SystemExit(1)
+
+          print(f"HIGH_SIERRA_GGUF_SMOKE_OK output_chars={len(completed.stdout.strip())}")
+          print(f"HIGH_SIERRA_GGUF_SAMPLE={completed.stdout.strip()[:160]!r}")
+          PY
 
       - name: Upload legacy helper
         uses: actions/upload-artifact@v4
         with:
-          name: llama-completion-macos-high-sierra-x86_64
-          path: build/llama-macos-high-sierra/bin/llama-completion
+          name: llama-cli-macos-high-sierra-x86_64
+          path: build/llama-macos-high-sierra/bin/llama-cli
           if-no-files-found: error
           retention-days: 14
