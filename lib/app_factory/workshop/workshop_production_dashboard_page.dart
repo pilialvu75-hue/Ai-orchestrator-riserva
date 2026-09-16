@@ -4,28 +4,21 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.da
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
-/// Owner-facing production shell for the conversational Cantiere.
+/// Production shell that connects the conversational Cantiere to the real
+/// guarded production pipeline.
 ///
-/// The existing [WorkshopDashboardPage] remains responsible for the Workshop
-/// conversation and project preparation. This shell only exposes the guarded
-/// production actions for the exact task prepared by that dashboard:
-///
-/// 1. run Engineer -> Reviewer -> Reviewer against VirtualWorkspace;
-/// 2. inspect the staged diff and explicit Reviewer verdicts;
-/// 3. explicitly approve or reject the staged changes;
-/// 4. explicitly apply an already-approved task;
-/// 5. build the authoritative Android workspace only after the project ends.
-///
-/// Certified Library reuse is attempted only after the owner explicitly chooses
-/// to run a prepared task. Reused files are staged into VirtualWorkspace only;
-/// they still pass Reviewer, validation, explicit owner approval and apply.
+/// Once the user approves the conversational proposal, the dashboard prepares
+/// the first task. This shell observes that authoritative state and starts the
+/// non-mutating Orchestrator -> Architect -> Engineer -> Reviewer pipeline
+/// automatically. Real workspace mutation still requires an explicit owner
+/// approval in the review dialog. After that approval, apply, next-task
+/// preparation and the final build are advanced automatically.
 final class WorkshopProductionDashboardPage extends StatefulWidget {
   const WorkshopProductionDashboardPage({
     super.key,
@@ -48,48 +41,81 @@ class _WorkshopProductionDashboardPageState
   WorkshopProductionTaskHandle? _handle;
   WorkshopTaskInferenceResult? _inferenceResult;
   WorkshopBuildResult? _buildResult;
+  String? _runningTaskId;
   bool _busy = false;
+  bool _autoAdvanceScheduled = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _coordinator = WorkshopProductionTaskCoordinator(
-      bundle: widget.bundle,
-    );
+    _coordinator = WorkshopProductionTaskCoordinator(bundle: widget.bundle);
+    widget.bundle.dashboardController.addListener(_onDashboardChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
+  }
+
+  @override
+  void dispose() {
+    widget.bundle.dashboardController.removeListener(_onDashboardChanged);
+    super.dispose();
+  }
+
+  void _onDashboardChanged() {
+    if (!mounted) return;
+    _scheduleAutoAdvance();
+  }
+
+  void _scheduleAutoAdvance() {
+    if (!mounted || _autoAdvanceScheduled) return;
+    _autoAdvanceScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _autoAdvanceScheduled = false;
+      if (!mounted) return;
+      await _autoAdvance();
+    });
+  }
+
+  Future<void> _autoAdvance() async {
+    if (_busy) return;
+
+    final activeTaskId = _activeTaskId;
+    if (activeTaskId != null &&
+        activeTaskId.isNotEmpty &&
+        _runningTaskId != activeTaskId &&
+        _currentHandle == null) {
+      await _runPreparedTask();
+      return;
+    }
+
+    if (_projectReadyForBuild && _buildResult == null) {
+      await _buildCompletedProject();
+    }
   }
 
   Future<void> _runPreparedTask() async {
     if (_busy) return;
 
+    final taskId = _activeTaskId;
+    if (taskId == null || taskId.isEmpty) return;
+
     setState(() {
       _busy = true;
+      _runningTaskId = taskId;
       _error = null;
+      _handle = null;
+      _inferenceResult = null;
     });
 
     try {
       final handle = _coordinator.preparedHandle();
-      final libraryReuse = widget.bundle.libraryReuseService;
-      if (libraryReuse != null) {
-        final approvedAt = DateTime.now().toUtc();
-        await libraryReuse.stageForPreparedTask(
-          plan: handle.plan,
-          session: handle.session,
-          approval: WorkshopProjectApprovalEvidence(
-            projectId: handle.plan.id,
-            approvalId:
-                'owner-run:${handle.plan.id}:${approvedAt.microsecondsSinceEpoch}',
-            approvedAt: approvedAt,
-            approvedBy: 'owner:execute-task',
-          ),
-        );
-      }
-
       final result = await _coordinator.runPrepared(handle: handle);
       if (!mounted) return;
       setState(() {
         _handle = handle;
         _inferenceResult = result;
+        if (!result.readyForApproval) {
+          _error = 'Il task è stato elaborato ma non ha superato la revisione.';
+        }
       });
     } catch (error) {
       if (!mounted) return;
@@ -177,7 +203,7 @@ class _WorkshopProductionDashboardPageState
               onPressed: () => Navigator.of(dialogContext).pop(
                 WorkshopApplyDecision.approve,
               ),
-              child: const Text('Approva'),
+              child: const Text('Approva e continua'),
             ),
           ],
         );
@@ -188,12 +214,16 @@ class _WorkshopProductionDashboardPageState
 
     try {
       _coordinator.decide(handle: handle, decision: decision);
-      if (!mounted) return;
-      setState(() {
-        _error = decision == WorkshopApplyDecision.reject
-            ? 'Modifiche rifiutate dal proprietario.'
-            : null;
-      });
+      if (decision == WorkshopApplyDecision.reject) {
+        setState(() {
+          _error = 'Modifiche rifiutate dal proprietario.';
+        });
+        return;
+      }
+
+      // The click on "Approva e continua" is the explicit owner mutation gate.
+      // Apply is still performed through the existing guarded lifecycle.
+      await _applyApprovedTask();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -215,25 +245,51 @@ class _WorkshopProductionDashboardPageState
       _busy = true;
       _error = null;
     });
+
     try {
       await _coordinator.applyApproved(handle: handle);
+      if (!mounted) return;
+
+      setState(() {
+        _handle = null;
+        _inferenceResult = null;
+        _runningTaskId = null;
+      });
+
+      if (_projectReadyForBuild) {
+        // Let the current guarded apply finish its UI/state turn first.
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
+        return;
+      }
+
+      final session = await widget.bundle.dashboardController.prepareNextTask();
+      if (!mounted) return;
+      if (session == null && !_projectReadyForBuild) {
+        setState(() {
+          _error = 'Il progetto non è completo e non esiste un altro task eseguibile.';
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = 'Applicazione delle modifiche non riuscita: $error';
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        _scheduleAutoAdvance();
+      }
     }
   }
 
   Future<void> _buildCompletedProject() async {
-    if (_busy || !_projectReadyForBuild) return;
+    if (_busy || !_projectReadyForBuild || _buildResult != null) return;
+
     setState(() {
       _busy = true;
       _error = null;
-      _buildResult = null;
     });
+
     try {
       final result = await _coordinator.buildWorkspace(
         target: WorkshopBuildTarget.android,
@@ -317,21 +373,12 @@ class _WorkshopProductionDashboardPageState
     final activeTaskId = _activeTaskId;
     final hasPreparedTask = activeTaskId != null && activeTaskId.isNotEmpty;
     final projectReadyForBuild = _projectReadyForBuild;
-    if (!hasPreparedTask && !projectReadyForBuild) {
-      return const SizedBox.shrink();
-    }
-
     final handle = _currentHandle;
     final result = _currentInferenceResult;
-    final status = handle?.session.status;
-    final actionState = WorkshopProductionActionState.resolve(
-      hasPreparedTask: hasPreparedTask,
-      hasBoundHandle: handle != null,
-      inferenceReadyForApproval: result?.readyForApproval ?? false,
-      sessionStatus: status,
-      projectReadyForBuild: projectReadyForBuild,
-      isBusy: _busy,
-    );
+
+    if (!hasPreparedTask && !projectReadyForBuild && _buildResult == null) {
+      return const SizedBox.shrink();
+    }
 
     return SafeArea(
       top: false,
@@ -353,40 +400,40 @@ class _WorkshopProductionDashboardPageState
               if (_buildResult?.succeeded == true &&
                   _buildResult?.hasArtifact == true) ...<Widget>[
                 Text(
-                  'Artifact: ${_buildResult!.artifactPath}',
+                  'Artifact pronto: ${_buildResult!.artifactPath}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
                 const SizedBox(height: 8),
               ],
-              Text(
-                hasPreparedTask
-                    ? 'Task: $activeTaskId'
-                    : 'Progetto completato — build finale',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: actionState.enabled
-                    ? switch (actionState.action) {
-                        WorkshopProductionUiAction.run => _runPreparedTask,
-                        WorkshopProductionUiAction.review => _reviewChanges,
-                        WorkshopProductionUiAction.apply => _applyApprovedTask,
-                        WorkshopProductionUiAction.build => _buildCompletedProject,
-                        WorkshopProductionUiAction.none => null,
-                      }
-                    : null,
-                icon: _busy
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(actionState.icon),
-                label: Text(actionState.label),
-              ),
+              if (_busy)
+                const FilledButton.icon(
+                  onPressed: null,
+                  icon: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  label: Text('Cantiere in esecuzione…'),
+                )
+              else if (handle != null && result?.readyForApproval == true)
+                FilledButton.icon(
+                  onPressed: _reviewChanges,
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: const Text('Rivedi, approva e continua'),
+                )
+              else if (hasPreparedTask && _runningTaskId != activeTaskId)
+                FilledButton.icon(
+                  onPressed: _runPreparedTask,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Riprendi task'),
+                )
+              else if (projectReadyForBuild && _buildResult == null)
+                FilledButton.icon(
+                  onPressed: _buildCompletedProject,
+                  icon: const Icon(Icons.android),
+                  label: const Text('Genera APK finale'),
+                ),
             ],
           ),
         ),
@@ -397,8 +444,9 @@ class _WorkshopProductionDashboardPageState
 
 enum WorkshopProductionUiAction { run, review, apply, build, none }
 
-/// Pure mapping used by the production shell to keep the explicit owner gates
-/// visible and testable independently from the conversational page.
+/// Pure mapping retained for compatibility and unit tests. The production page
+/// now auto-advances run/apply/build, while explicit owner review remains the
+/// mutation gate.
 final class WorkshopProductionActionState {
   const WorkshopProductionActionState({
     required this.action,
