@@ -29,7 +29,7 @@ class AppDelegate: FlutterAppDelegate {
 
     let helperURL = executableURL
       .deletingLastPathComponent()
-      .appendingPathComponent("llama-cli", isDirectory: false)
+      .appendingPathComponent("llama-completion", isDirectory: false)
 
     guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
       return
