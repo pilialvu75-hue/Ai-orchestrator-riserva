@@ -1,0 +1,261 @@
+name: Publish macOS Release Asset
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/macos-release-publish.yml'
+      - 'macos/**'
+      - 'native/macos/**'
+      - 'lib/core/system/update/**'
+  workflow_run:
+    workflows:
+      - Build & Release APK
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-release-publish-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate-publisher:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Validate publisher contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f native/macos/build_llama_cli.sh
+          test -f macos/Runner/Release.entitlements
+          command -v hdiutil >/dev/null
+          command -v codesign >/dev/null
+          grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
+          echo 'macOS release publisher contract is valid.'
+
+  publish-macos:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout exact Android release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Resolve coordinated release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_name="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9]+)?[[:space:]]*$/\1/p' pubspec.yaml | head -n 1)"
+          version_code='${{ github.event.workflow_run.run_number }}'
+          if [[ -z "$version_name" ]]; then
+            echo 'Unable to resolve semantic application version from pubspec.yaml.' >&2
+            exit 1
+          fi
+          if [[ ! "$version_code" =~ ^[0-9]+$ ]]; then
+            echo "Invalid Android workflow run number: $version_code" >&2
+            exit 1
+          fi
+
+          release_version="$version_name+$version_code"
+          tag="v$release_version"
+          python3 - "$release_version" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          release_version = sys.argv[1]
+          path = Path('pubspec.yaml')
+          text = path.read_text()
+          updated, count = re.subn(
+              r'^version:\s*.*$',
+              f'version: {release_version}',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('Failed to inject coordinated macOS release version into pubspec.yaml.')
+          path.write_text(updated)
+          PY
+
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Coordinated macOS version: $release_version"
+          echo "Target GitHub release: $tag"
+          echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Build bundled llama.cpp runtime
+        run: bash native/macos/build_llama_cli.sh
+
+      - name: Build coordinated macOS release
+        run: flutter build macos --release
+
+      - name: Embed and sign macOS runtime
+        id: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$PWD/build/macos/Build/Products/Release"
+          app_path="$(find "$release_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          helper_source="$PWD/build/llama-macos/bin/llama-completion"
+
+          if [[ -z "$app_path" || ! -d "$app_path" ]]; then
+            echo "No .app bundle found under $release_dir" >&2
+            exit 1
+          fi
+          if [[ ! -x "$helper_source" ]]; then
+            echo "Built llama-completion helper is missing: $helper_source" >&2
+            exit 1
+          fi
+
+          helper_target="$app_path/Contents/MacOS/llama-completion"
+          install -m 0755 "$helper_source" "$helper_target"
+
+          archs="$(lipo -archs "$helper_target")"
+          if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
+            echo "Bundled llama-completion is not Universal 2: $archs" >&2
+            exit 1
+          fi
+
+          dependencies="$(otool -L "$helper_target" | awk '/^\t/{print}')"
+          if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$dependencies"; then
+            echo 'Bundled llama-completion contains a non-portable dependency' >&2
+            printf '%s\n' "$dependencies" >&2
+            exit 1
+          fi
+
+          codesign --force --sign - --timestamp=none "$helper_target"
+          codesign --force --sign - --timestamp=none \
+            --entitlements "$PWD/macos/Runner/Release.entitlements" \
+            "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
+          echo "helper_path=$helper_target" >> "$GITHUB_OUTPUT"
+          echo "macOS app ready: $app_path"
+
+      - name: Build verified DMG
+        id: dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path='${{ steps.app.outputs.app_path }}'
+          output_dir="$PWD/build/macos/release-publish"
+          stage_dir="$output_dir/dmg-root"
+          dmg_path="$output_dir/AI-Orchestrator-macOS.dmg"
+          hash_path="$dmg_path.sha256"
+
+          rm -rf "$output_dir"
+          mkdir -p "$stage_dir"
+          ditto "$app_path" "$stage_dir/AI Orchestrator.app"
+          ln -s /Applications "$stage_dir/Applications"
+
+          hdiutil create \
+            -volname 'AI Orchestrator' \
+            -srcfolder "$stage_dir" \
+            -ov \
+            -format UDZO \
+            "$dmg_path"
+          hdiutil verify "$dmg_path"
+
+          dmg_size="$(stat -f%z "$dmg_path")"
+          if [[ "$dmg_size" -lt 1048576 ]]; then
+            echo "Generated DMG is unexpectedly small: $dmg_size bytes" >&2
+            exit 1
+          fi
+
+          dmg_sha256="$(shasum -a 256 "$dmg_path" | awk '{print tolower($1)}')"
+          printf '%s  %s\n' "$dmg_sha256" 'AI-Orchestrator-macOS.dmg' > "$hash_path"
+
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "hash_path=$hash_path" >> "$GITHUB_OUTPUT"
+          echo "dmg_size=$dmg_size" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
+          echo "macOS DMG: $dmg_path ($dmg_size bytes)"
+          echo "SHA256: $dmg_sha256"
+
+      - name: Verify matching Android release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view '${{ steps.version.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,publishedAt >/dev/null
+
+      - name: Publish macOS DMG into matching GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload '${{ steps.version.outputs.tag }}' \
+            '${{ steps.dmg.outputs.dmg_path }}' \
+            '${{ steps.dmg.outputs.hash_path }}' \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify published macOS release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view '${{ steps.version.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name')"
+          grep -Fxq 'AI-Orchestrator-macOS.dmg' <<<"$assets"
+          grep -Fxq 'AI-Orchestrator-macOS.dmg.sha256' <<<"$assets"
+          echo "macOS release assets published on ${{ steps.version.outputs.tag }}"
+
+      - name: Preserve published DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-macos-release-${{ steps.version.outputs.release_version }}
+          path: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.dmg.outputs.hash_path }}
+          if-no-files-found: error
+          retention-days: 14
