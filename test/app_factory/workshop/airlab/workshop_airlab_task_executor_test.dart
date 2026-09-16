@@ -177,6 +177,46 @@ void main() {
     expect(executor.isAvailable, isFalse);
   });
 
+  test('network loss after a successful probe is contained as a task failure', () async {
+    final executor = WorkshopAirLabTaskExecutor(
+      client: WorkshopAirLabClient(
+        baseUri: Uri.parse('http://127.0.0.1:8788'),
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/health') {
+            return http.Response(
+              jsonEncode(<String, dynamic>{
+                'status': 'ok',
+                'service': 'airlab',
+                'engine_id': 'mock-builder-v2',
+              }),
+              200,
+            );
+          }
+          throw http.ClientException('connection lost after probe', request.url);
+        }),
+      ),
+    );
+
+    final result = await executor.execute(
+      task: _task(
+        kind: WorkshopTaskKind.planning,
+        objective: 'Plan an application',
+      ),
+      guardDecision: const WorkshopTaskExecutionGuardDecision.allowed(
+        taskId: 'task-1',
+        resource: WorkshopTaskResource.local,
+        providerId: 'airlab',
+      ),
+      context: const WorkshopTaskExecutionContext(),
+    );
+
+    expect(result.status, WorkshopTaskStatus.failed);
+    expect(result.message, contains('AIrLab request failed'));
+    expect(result.message, contains('connection lost after probe'));
+    expect(result.metadata['code'], 'transport_unavailable');
+    expect(executor.isAvailable, isTrue);
+  });
+
   test('mapper turns image + measurement CAD work into cad.reconstruct', () {
     final request = const WorkshopAirLabTaskRequestMapper().map(
       task: _task(
