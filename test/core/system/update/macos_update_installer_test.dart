@@ -118,6 +118,7 @@ void main() {
     final installer = MacosUpdateInstaller();
     final finalPath =
         '${tempDirectory.path}${Platform.pathSeparator}AI-Orchestrator-macOS.dmg';
+    final expectedSha = List<String>.filled(64, 'a').join();
 
     await expectLater(
       installer.download(
@@ -126,7 +127,7 @@ void main() {
         finalPath: finalPath,
         partialPath: '$finalPath.part',
         expectedSizeBytes: 1024,
-        expectedSha256: 'a' * 64,
+        expectedSha256: expectedSha,
         onProgress: (_, __) {},
       ),
       throwsArgumentError,
@@ -137,6 +138,7 @@ void main() {
     final installer = MacosUpdateInstaller();
     final finalPath =
         '${tempDirectory.path}${Platform.pathSeparator}AI-Orchestrator-macOS.dmg';
+    final expectedSha = List<String>.filled(64, 'b').join();
 
     await expectLater(
       installer.download(
@@ -145,7 +147,7 @@ void main() {
         finalPath: finalPath,
         partialPath: '$finalPath.part',
         expectedSizeBytes: 1024,
-        expectedSha256: 'b' * 64,
+        expectedSha256: expectedSha,
         onProgress: (_, __) {},
       ),
       throwsArgumentError,
