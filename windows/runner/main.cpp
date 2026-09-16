@@ -30,15 +30,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("06 after DartProject");
 
   startup_trace::Mark("07 before command line parsing");
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
+  std::vector<std::string> command_line_arguments = GetCommandLineArguments();
   startup_trace::Mark("08 after command line parsing");
 
-  project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
+  bool skip_plugins = false;
+  std::vector<std::string> dart_arguments;
+  dart_arguments.reserve(command_line_arguments.size());
+  for (const auto& argument : command_line_arguments) {
+    if (argument == "--win7-no-plugins") {
+      skip_plugins = true;
+      startup_trace::Mark("08a Win7 plugin-free diagnostic mode requested");
+      continue;
+    }
+    dart_arguments.push_back(argument);
+  }
+
+  project.set_dart_entrypoint_arguments(std::move(dart_arguments));
   startup_trace::Mark("09 after Dart entrypoint args");
 
   startup_trace::Mark("10 before FlutterWindow constructor");
-  FlutterWindow window(project);
+  FlutterWindow window(project, skip_plugins);
   startup_trace::Mark("11 after FlutterWindow constructor");
 
   Win32Window::Point origin(10, 10);
