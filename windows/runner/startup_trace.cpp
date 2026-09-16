@@ -1,6 +1,7 @@
 #include "startup_trace.h"
 
 #include <windows.h>
+#include <dbghelp.h>
 
 #include <cstdlib>
 #include <exception>
@@ -11,6 +12,19 @@
 namespace {
 
 volatile LONG g_fatal_trace_active = 0;
+volatile LONG g_minidump_written = 0;
+HMODULE g_dbghelp_module = nullptr;
+
+using MiniDumpWriteDumpFn = BOOL(WINAPI*)(
+    HANDLE,
+    DWORD,
+    HANDLE,
+    MINIDUMP_TYPE,
+    PMINIDUMP_EXCEPTION_INFORMATION,
+    PMINIDUMP_USER_STREAM_INFORMATION,
+    PMINIDUMP_CALLBACK_INFORMATION);
+
+MiniDumpWriteDumpFn g_minidump_write_dump = nullptr;
 
 bool AppendWide(wchar_t (&path)[MAX_PATH], const wchar_t* suffix) {
   if (suffix == nullptr) {
@@ -32,7 +46,8 @@ bool EnsureDirectory(const wchar_t* path) {
   return ::GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-bool BuildPersistentTracePath(wchar_t (&path)[MAX_PATH]) {
+bool BuildPersistentDiagnosticsPath(wchar_t (&path)[MAX_PATH],
+                                    const wchar_t* file_name) {
   const DWORD length =
       ::GetEnvironmentVariableW(L"LOCALAPPDATA", path, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) {
@@ -45,24 +60,33 @@ bool BuildPersistentTracePath(wchar_t (&path)[MAX_PATH]) {
   if (!AppendWide(path, L"\\Diagnostics") || !EnsureDirectory(path)) {
     return false;
   }
-  return AppendWide(path, L"\\AI-Orchestrator-win7-startup.log");
+  if (!AppendWide(path, L"\\")) {
+    return false;
+  }
+  return AppendWide(path, file_name);
 }
 
-bool BuildTemporaryTracePath(wchar_t (&path)[MAX_PATH]) {
+bool BuildTemporaryDiagnosticsPath(wchar_t (&path)[MAX_PATH],
+                                   const wchar_t* file_name) {
   const DWORD length = ::GetTempPathW(MAX_PATH, path);
   if (length == 0 || length >= MAX_PATH) {
     return false;
   }
-  return AppendWide(path, L"AI-Orchestrator-win7-startup.log");
+  return AppendWide(path, file_name);
 }
 
-bool BuildTracePath(wchar_t (&path)[MAX_PATH]) {
+bool BuildDiagnosticsPath(wchar_t (&path)[MAX_PATH],
+                          const wchar_t* file_name) {
   path[0] = L'\0';
-  if (BuildPersistentTracePath(path)) {
+  if (BuildPersistentDiagnosticsPath(path, file_name)) {
     return true;
   }
   path[0] = L'\0';
-  return BuildTemporaryTracePath(path);
+  return BuildTemporaryDiagnosticsPath(path, file_name);
+}
+
+bool BuildTracePath(wchar_t (&path)[MAX_PATH]) {
+  return BuildDiagnosticsPath(path, L"AI-Orchestrator-win7-startup.log");
 }
 
 void AppendAndFlush(const char* stage) {
@@ -184,6 +208,79 @@ void AppendStackSnapshot() {
   }
 }
 
+void PrepareMiniDumpWriter() {
+  wchar_t system_directory[MAX_PATH] = {};
+  const UINT length = ::GetSystemDirectoryW(system_directory, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    AppendAndFlush("minidump_prepare=<system-directory-unavailable>");
+    return;
+  }
+  if (!AppendWide(system_directory, L"\\dbghelp.dll")) {
+    AppendAndFlush("minidump_prepare=<dbghelp-path-too-long>");
+    return;
+  }
+
+  g_dbghelp_module = ::LoadLibraryW(system_directory);
+  if (g_dbghelp_module == nullptr) {
+    AppendHexLine("minidump_dbghelp_load_error=", ::GetLastError(), 8);
+    return;
+  }
+
+  g_minidump_write_dump = reinterpret_cast<MiniDumpWriteDumpFn>(
+      ::GetProcAddress(g_dbghelp_module, "MiniDumpWriteDump"));
+  if (g_minidump_write_dump == nullptr) {
+    AppendAndFlush("minidump_prepare=<MiniDumpWriteDump-unavailable>");
+    return;
+  }
+  AppendAndFlush("00a minidump writer prepared");
+}
+
+void WriteMiniDumpOnce(EXCEPTION_POINTERS* exception_pointers) {
+  if (::InterlockedCompareExchange(&g_minidump_written, 1, 0) != 0) {
+    return;
+  }
+  if (g_minidump_write_dump == nullptr) {
+    AppendAndFlush("minidump_result=<writer-unavailable>");
+    return;
+  }
+
+  wchar_t dump_path[MAX_PATH] = {};
+  if (!BuildDiagnosticsPath(dump_path, L"AI-Orchestrator-win7-crash.dmp")) {
+    AppendAndFlush("minidump_result=<path-unavailable>");
+    return;
+  }
+
+  HANDLE dump_file = ::CreateFileW(dump_path, GENERIC_WRITE,
+                                   FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (dump_file == INVALID_HANDLE_VALUE) {
+    AppendHexLine("minidump_create_error=", ::GetLastError(), 8);
+    return;
+  }
+
+  MINIDUMP_EXCEPTION_INFORMATION exception_info = {};
+  PMINIDUMP_EXCEPTION_INFORMATION exception_info_ptr = nullptr;
+  if (exception_pointers != nullptr) {
+    exception_info.ThreadId = ::GetCurrentThreadId();
+    exception_info.ExceptionPointers = exception_pointers;
+    exception_info.ClientPointers = FALSE;
+    exception_info_ptr = &exception_info;
+  }
+
+  const BOOL written = g_minidump_write_dump(
+      ::GetCurrentProcess(), ::GetCurrentProcessId(), dump_file,
+      MiniDumpNormal, exception_info_ptr, nullptr, nullptr);
+  const DWORD error = written ? ERROR_SUCCESS : ::GetLastError();
+  ::FlushFileBuffers(dump_file);
+  ::CloseHandle(dump_file);
+
+  if (written) {
+    AppendAndFlush("minidump_result=written");
+  } else {
+    AppendHexLine("minidump_write_error=", error, 8);
+  }
+}
+
 bool IsFatalCode(DWORD code) {
   return code == 0x40000015UL ||  // STATUS_FATAL_APP_EXIT
          code == 0xC0000409UL ||  // fail-fast / stack buffer overrun
@@ -213,24 +310,29 @@ LONG CALLBACK FatalVectoredHandler(EXCEPTION_POINTERS* exception_pointers) {
                 static_cast<int>(sizeof(void*) * 2));
   AppendFaultModule(record->ExceptionAddress);
   AppendStackSnapshot();
+  WriteMiniDumpOnce(exception_pointers);
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
 void __cdecl InvalidParameterHandler(const wchar_t*, const wchar_t*,
                                      const wchar_t*, unsigned int, uintptr_t) {
   AppendAndFlush("FATAL CRT invalid parameter handler invoked");
+  WriteMiniDumpOnce(nullptr);
 }
 
 void AbortSignalHandler(int) {
   AppendAndFlush("FATAL SIGABRT observed");
+  WriteMiniDumpOnce(nullptr);
 }
 
 [[noreturn]] void TerminateHandler() noexcept {
   AppendAndFlush("FATAL std::terminate invoked");
+  WriteMiniDumpOnce(nullptr);
   std::abort();
 }
 
 void InstallFatalCapture() {
+  PrepareMiniDumpWriter();
   ::AddVectoredExceptionHandler(1, FatalVectoredHandler);
   _set_invalid_parameter_handler(InvalidParameterHandler);
   signal(SIGABRT, AbortSignalHandler);
@@ -255,8 +357,10 @@ void Reset() {
     ::CloseHandle(file);
   }
 
+  g_fatal_trace_active = 0;
+  g_minidump_written = 0;
   InstallFatalCapture();
-  AppendAndFlush("00 fatal capture installed (diagnostics v2)");
+  AppendAndFlush("00 fatal capture installed (diagnostics v3 + minidump)");
 }
 
 void Mark(const char* stage) {

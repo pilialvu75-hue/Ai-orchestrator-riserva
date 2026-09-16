@@ -38,6 +38,7 @@ set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("compat")
 add_subdirectory("runner")
+add_subdirectory("diagnostics")
 
 # Generated plugin build rules.
 include(flutter/generated_plugins.cmake)
@@ -54,7 +55,7 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
-install(TARGETS ${BINARY_NAME}
+install(TARGETS ${BINARY_NAME} ai_orchestrator_windows_probe
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

@@ -62,6 +62,7 @@ function Replace-ExactAsciiImport(
 
 $requiredFiles = @(
   'ai_orchestrator.exe',
+  'AI-Orchestrator-Windows-Diagnostics.exe',
   'flutter_windows.dll',
   'onnxruntime.dll',
   'ws2fix.dll',
