@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_executor.dart
 
 import 'workshop_airlab_client.dart';
 import 'workshop_airlab_contract.dart';
+import 'workshop_airlab_staging_materializer.dart';
 
 /// Maps a generic Cantiere task into the stable AIrLab protocol.
 ///
@@ -169,18 +170,22 @@ final class WorkshopAirLabTaskRequestMapper {
 /// - it never silently falls back to a Cloud provider;
 /// - it probes AIrLab before each execution;
 /// - it validates advertised task/input/artifact capabilities;
-/// - it never applies AIrLab output directly to the real repository.
+/// - proposed file operations are treated as untrusted input;
+/// - it never promotes staged AIrLab output to the real repository.
 final class WorkshopAirLabTaskExecutor implements WorkshopTaskExecutor {
   WorkshopAirLabTaskExecutor({
     required WorkshopAirLabClient client,
     this.resource = WorkshopTaskResource.local,
     this.providerId = 'airlab',
     WorkshopAirLabTaskRequestMapper mapper = const WorkshopAirLabTaskRequestMapper(),
+    WorkshopAirLabStagingMaterializer? stagingMaterializer,
   })  : _client = client,
-        _mapper = mapper;
+        _mapper = mapper,
+        _stagingMaterializer = stagingMaterializer;
 
   final WorkshopAirLabClient _client;
   final WorkshopAirLabTaskRequestMapper _mapper;
+  final WorkshopAirLabStagingMaterializer? _stagingMaterializer;
   WorkshopAirLabProbe? _lastProbe;
 
   @override
@@ -272,21 +277,114 @@ final class WorkshopAirLabTaskExecutor implements WorkshopTaskExecutor {
         );
       }
 
-      onProgress?.call(
-        WorkshopTaskExecutionProgress(
-          taskId: task.id,
-          phase: 'airlab_complete',
-          message: 'AIrLab round trip completed.',
-          completedSteps: response.plan.length,
-          totalSteps: response.plan.length,
-          progress: 1,
-        ),
-      );
+      WorkshopAirLabStagingResult? stagingResult;
+      WorkshopTaskCheckpoint? checkpoint;
+      if (response.operations.isNotEmpty) {
+        final materializer = _stagingMaterializer;
+        if (materializer == null) {
+          return WorkshopTaskExecutionResult(
+            taskId: task.id,
+            status: WorkshopTaskStatus.failed,
+            message: 'AIrLab proposed file operations but no controlled staging materializer is configured.',
+            metadata: <String, dynamic>{
+              'executor': executorId,
+              'requestId': response.requestId,
+              'engineId': response.engineId,
+              'code': 'staging_materializer_unavailable',
+            },
+          );
+        }
 
+        final stagingRoot = context.stagingRoot?.trim();
+        if (stagingRoot == null || stagingRoot.isEmpty) {
+          return WorkshopTaskExecutionResult(
+            taskId: task.id,
+            status: WorkshopTaskStatus.failed,
+            message: 'AIrLab proposed file operations but Cantiere did not assign a staging root.',
+            metadata: <String, dynamic>{
+              'executor': executorId,
+              'requestId': response.requestId,
+              'engineId': response.engineId,
+              'code': 'staging_root_missing',
+            },
+          );
+        }
+
+        onProgress?.call(
+          WorkshopTaskExecutionProgress(
+            taskId: task.id,
+            phase: 'airlab_stage',
+            message: 'Validating AIrLab operations in controlled Cantiere staging.',
+          ),
+        );
+
+        stagingResult = await materializer.materialize(
+          stagingRoot: stagingRoot,
+          operations: response.operations,
+          fileScope: task.fileScope,
+        );
+
+        checkpoint = WorkshopTaskCheckpoint(
+          id: '${task.id}-airlab-${response.requestId}',
+          createdAt: DateTime.now().toUtc(),
+          phase: 'airlab-staged-awaiting-approval',
+          completedSteps: const <String>[
+            'guard-approved',
+            'airlab-round-trip-complete',
+            'airlab-operations-validated',
+            'airlab-staging-complete',
+          ],
+          changedFiles: stagingResult.changedFiles,
+          metadata: <String, dynamic>{
+            'request_id': response.requestId,
+            'engine_id': response.engineId,
+            'task_id': task.id,
+            'stagingOnly': true,
+            'repositoryModified': false,
+            'operationCount': stagingResult.operationCount,
+            'payloadBytes': stagingResult.totalPayloadBytes,
+          },
+        );
+
+        onProgress?.call(
+          WorkshopTaskExecutionProgress(
+            taskId: task.id,
+            phase: 'airlab_staged',
+            message: 'AIrLab operations are staged and require the normal Cantiere approval boundary.',
+            completedSteps: stagingResult.operationCount,
+            totalSteps: stagingResult.operationCount,
+            progress: 1,
+            checkpoint: checkpoint,
+            metadata: <String, dynamic>{
+              'changedFiles': stagingResult.changedFiles,
+              'repositoryModified': false,
+            },
+          ),
+        );
+      } else {
+        onProgress?.call(
+          WorkshopTaskExecutionProgress(
+            taskId: task.id,
+            phase: 'airlab_complete',
+            message: 'AIrLab round trip completed.',
+            completedSteps: response.plan.length,
+            totalSteps: response.plan.length,
+            progress: 1,
+          ),
+        );
+      }
+
+      final staged = stagingResult != null;
       return WorkshopTaskExecutionResult(
         taskId: task.id,
-        status: WorkshopTaskStatus.completed,
-        message: 'AIrLab completed the task round trip.',
+        status: staged
+            ? WorkshopTaskStatus.waitingApproval
+            : WorkshopTaskStatus.completed,
+        message: staged
+            ? 'AIrLab output was materialized into controlled staging and is awaiting normal Cantiere approval.'
+            : 'AIrLab completed the task round trip.',
+        checkpoint: checkpoint,
+        changedFiles: stagingResult?.changedFiles ?? const <String>[],
         artifacts: response.artifacts.map((artifact) => artifact.path).toList(growable: false),
         metadata: <String, dynamic>{
           'executor': executorId,
@@ -298,6 +396,28 @@ final class WorkshopAirLabTaskExecutor implements WorkshopTaskExecutor {
           'artifactFormats': response.artifacts
               .map((artifact) => artifact.format)
               .toList(growable: false),
+          'repositoryModified': false,
+          'stagingOnly': staged,
+          'promotionRequired': staged,
+          if (stagingResult != null) ...<String, dynamic>{
+            'operationCount': stagingResult.operationCount,
+            'createdCount': stagingResult.createdCount,
+            'updatedCount': stagingResult.updatedCount,
+            'deletedCount': stagingResult.deletedCount,
+            'payloadBytes': stagingResult.totalPayloadBytes,
+          },
+        },
+      );
+    } on WorkshopAirLabStagingException catch (error) {
+      return WorkshopTaskExecutionResult(
+        taskId: task.id,
+        status: WorkshopTaskStatus.failed,
+        message: 'AIrLab staging rejected: ${error.message}',
+        metadata: <String, dynamic>{
+          'executor': executorId,
+          'code': error.code,
+          if (error.path != null) 'path': error.path,
+          'repositoryModified': false,
         },
       );
     } on WorkshopAirLabException catch (error) {
