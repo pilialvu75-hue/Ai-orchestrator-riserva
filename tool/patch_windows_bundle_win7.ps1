@@ -61,6 +61,7 @@ function Replace-ExactAsciiImport(
 }
 
 $requiredFiles = @(
+  'ai_orchestrator.exe',
   'flutter_windows.dll',
   'onnxruntime.dll',
   'ws2fix.dll',
@@ -76,6 +77,34 @@ foreach ($name in $requiredFiles) {
     throw "Windows 7 compatibility file is missing from release bundle: $path"
   }
 }
+
+# Keep the application runner itself honest. Diagnostic code must not silently
+# add direct imports of APIs that were introduced after Windows 7. These names
+# should never be present in the runner binary; compatibility access must be
+# isolated behind the existing shims or resolved dynamically.
+$runnerPath = Join-Path $ReleaseDir 'ai_orchestrator.exe'
+$runnerBytes = [IO.File]::ReadAllBytes($runnerPath)
+$runnerForbiddenSymbols = @(
+  'WaitOnAddress',
+  'WakeByAddressSingle',
+  'WakeByAddressAll',
+  'GetCurrentThreadStackLimits',
+  'GetSystemTimePreciseAsFileTime',
+  'GetProcessMitigationPolicy',
+  'CreateFile2',
+  'PathCchCanonicalize',
+  'PathCchCombine',
+  'PathCchRemoveBackslash',
+  'RtlAddGrowableFunctionTable',
+  'RtlDeleteGrowableFunctionTable'
+)
+foreach ($symbol in $runnerForbiddenSymbols) {
+  $count = Count-AsciiPattern $runnerBytes $symbol
+  if ($count -ne 0) {
+    throw "Windows 7 runner validation failed: '$symbol' appears $count time(s) in ai_orchestrator.exe."
+  }
+}
+Write-Host 'Windows 7 runner forbidden-symbol validation passed.'
 
 # Flutter is patched during the native build. Verify those redirects survived
 # installation before touching ONNX Runtime.
