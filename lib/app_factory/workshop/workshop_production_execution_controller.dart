@@ -13,6 +13,17 @@ enum WorkshopProductionExecutionStatus {
   cancelled,
 }
 
+final class WorkshopProductionExecutionPolicy {
+  const WorkshopProductionExecutionPolicy({
+    this.maxDistinctTasksPerProject = 64,
+  }) : assert(maxDistinctTasksPerProject > 0);
+
+  /// Hard guard against malformed/cyclic plans causing unbounded unattended
+  /// execution. Retries of the same authoritative task do not consume a new
+  /// slot; a new project automatically starts with a fresh budget.
+  final int maxDistinctTasksPerProject;
+}
+
 final class WorkshopProductionExecutionState {
   const WorkshopProductionExecutionState({
     this.status = WorkshopProductionExecutionStatus.idle,
@@ -21,6 +32,7 @@ final class WorkshopProductionExecutionState {
     this.error,
     this.startedAt,
     this.finishedAt,
+    this.isOffline = false,
   });
 
   final WorkshopProductionExecutionStatus status;
@@ -29,6 +41,10 @@ final class WorkshopProductionExecutionState {
   final Object? error;
   final DateTime? startedAt;
   final DateTime? finishedAt;
+
+  /// Execution mode captured when this task attempt started. Retry preserves
+  /// this value so an explicitly offline task can never silently become online.
+  final bool isOffline;
 
   bool get isRunning =>
       status == WorkshopProductionExecutionStatus.running ||
@@ -47,6 +63,7 @@ final class WorkshopProductionExecutionState {
     Object? error,
     DateTime? startedAt,
     DateTime? finishedAt,
+    bool? isOffline,
     bool clearResult = false,
     bool clearError = false,
     bool clearFinishedAt = false,
@@ -58,6 +75,7 @@ final class WorkshopProductionExecutionState {
       error: clearError ? null : error ?? this.error,
       startedAt: startedAt ?? this.startedAt,
       finishedAt: clearFinishedAt ? null : finishedAt ?? this.finishedAt,
+      isOffline: isOffline ?? this.isOffline,
     );
   }
 }
@@ -71,6 +89,7 @@ abstract interface class WorkshopProductionExecutionRunner {
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     required CancellationToken cancellationToken,
+    required bool isOffline,
   });
 }
 
@@ -90,9 +109,11 @@ final class WorkshopProductionTaskExecutionRunner
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     required CancellationToken cancellationToken,
+    required bool isOffline,
   }) {
     return _coordinator.runPrepared(
       handle: handle,
+      isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
   }
@@ -103,22 +124,32 @@ final class WorkshopProductionTaskExecutionRunner
 /// A page may attach/detach listeners without owning the task itself. The
 /// controller never approves or applies changes: after inference succeeds, the
 /// existing Reviewer/validation/owner approval/apply gates remain authoritative.
+///
+/// The controller also owns the bounded per-project task-attempt guard because
+/// this state must survive page rebuilds. A retry of the same task is allowed;
+/// only newly observed authoritative task ids consume the project budget.
 final class WorkshopProductionExecutionController extends ChangeNotifier {
   WorkshopProductionExecutionController({
     required WorkshopProductionExecutionRunner runner,
+    this.policy = const WorkshopProductionExecutionPolicy(),
   }) : _runner = runner;
 
   final WorkshopProductionExecutionRunner _runner;
+  final WorkshopProductionExecutionPolicy policy;
 
   WorkshopProductionExecutionState _state =
       const WorkshopProductionExecutionState();
   CancellationToken? _cancellationToken;
   Future<WorkshopTaskInferenceResult>? _activeRun;
   bool _disposed = false;
+  String? _activePlanId;
+  final Set<String> _startedTaskIds = <String>{};
 
   WorkshopProductionExecutionState get state => _state;
 
-  Future<WorkshopTaskInferenceResult> start() {
+  int get distinctTasksStartedInCurrentProject => _startedTaskIds.length;
+
+  Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
     _ensureAvailable();
 
     final activeRun = _activeRun;
@@ -127,6 +158,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
 
     final handle = _runner.preparedHandle();
+    _registerPreparedTask(handle);
+
     final token = CancellationToken();
     _cancellationToken = token;
 
@@ -135,10 +168,11 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         status: WorkshopProductionExecutionStatus.running,
         handle: handle,
         startedAt: DateTime.now().toUtc(),
+        isOffline: isOffline,
       ),
     );
 
-    final run = _execute(handle, token);
+    final run = _execute(handle, token, isOffline: isOffline);
     _activeRun = run;
     return run;
   }
@@ -146,6 +180,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   /// Restarts a terminal failed/cancelled execution using the coordinator's
   /// currently prepared task. This deliberately does not retry successful or
   /// still-running work, preventing duplicate inference/apply chains.
+  ///
+  /// The original offline/online decision is preserved across retry.
   Future<WorkshopTaskInferenceResult> retry() {
     _ensureAvailable();
     if (_activeRun != null) {
@@ -156,8 +192,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'Workshop production execution can only retry after failure or cancellation.',
       );
     }
-    _setState(const WorkshopProductionExecutionState());
-    return start();
+    final isOffline = _state.isOffline;
+    _setState(WorkshopProductionExecutionState(isOffline: isOffline));
+    return start(isOffline: isOffline);
   }
 
   void cancel() {
@@ -179,12 +216,14 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
   Future<WorkshopTaskInferenceResult> _execute(
     WorkshopProductionTaskHandle handle,
-    CancellationToken token,
-  ) async {
+    CancellationToken token, {
+    required bool isOffline,
+  }) async {
     try {
       final result = await _runner.runPrepared(
         handle: handle,
         cancellationToken: token,
+        isOffline: isOffline,
       );
 
       if (token.isCancelled) {
@@ -235,6 +274,34 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
+  void _registerPreparedTask(WorkshopProductionTaskHandle handle) {
+    final planId = handle.plan.id.trim();
+    final taskId = handle.taskId.trim();
+    if (planId.isEmpty || taskId.isEmpty) {
+      throw StateError(
+        'Workshop production execution requires authoritative plan and task ids.',
+      );
+    }
+
+    if (_activePlanId != planId) {
+      _activePlanId = planId;
+      _startedTaskIds.clear();
+    }
+
+    if (_startedTaskIds.contains(taskId)) {
+      return;
+    }
+
+    if (_startedTaskIds.length >= policy.maxDistinctTasksPerProject) {
+      throw StateError(
+        'Workshop production task limit reached for project "$planId" '
+        '(${policy.maxDistinctTasksPerProject}).',
+      );
+    }
+
+    _startedTaskIds.add(taskId);
+  }
+
   void reset() {
     _ensureAvailable();
     if (_activeRun != null) {
@@ -267,6 +334,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _disposed = true;
     _cancellationToken?.cancel();
     _cancellationToken = null;
+    _startedTaskIds.clear();
+    _activePlanId = null;
     super.dispose();
   }
 }
