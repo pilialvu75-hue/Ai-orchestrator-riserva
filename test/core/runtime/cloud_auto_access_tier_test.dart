@@ -14,19 +14,21 @@ void main() {
     );
   }
 
-  test('AUTO admits opted-in free-access fallback tiers without paid spend', () async {
+  test('AUTO requires opt-in for account/prototype free-access fallback tiers',
+      () async {
     final settings = await service();
 
     // Durable recurring free tiers remain first-class AUTO candidates.
     expect(settings.automaticCloudUseAllowed('gemini'), isTrue);
-    expect(settings.automaticCloudUseAllowed('groq'), isTrue);
     expect(settings.automaticCloudUseAllowed('openRouter'), isTrue);
 
-    // Configured development/account-dependent free access can now provide the
-    // second AUTO tier instead of ending routing when the recurring tier is
-    // unavailable or opted out.
-    expect(settings.automaticCloudUseAllowed('nvidiaNim'), isTrue);
-    expect(settings.automaticCloudUseAllowed('mistral'), isTrue);
+    // Account- or plan-dependent access fails closed until the user explicitly
+    // opts the route into AUTO.
+    for (final provider in <String>['groq', 'nvidiaNim', 'mistral']) {
+      expect(settings.automaticCloudUseAllowed(provider), isFalse);
+      await settings.setCloudProviderParticipatesInAuto(provider, true);
+      expect(settings.automaticCloudUseAllowed(provider), isTrue);
+    }
 
     // Paid and unknown-access providers remain protected for general chat.
     expect(settings.automaticCloudUseAllowed('claude'), isFalse);
@@ -34,9 +36,12 @@ void main() {
     expect(settings.automaticCloudUseAllowed('copilot'), isFalse);
   });
 
-  test('AUTO participation switch remains authoritative for fallback tiers', () async {
+  test('AUTO participation switch remains authoritative for fallback tiers',
+      () async {
     final settings = await service();
 
+    expect(settings.automaticCloudUseAllowed('nvidiaNim'), isFalse);
+    await settings.setCloudProviderParticipatesInAuto('nvidiaNim', true);
     expect(settings.automaticCloudUseAllowed('nvidiaNim'), isTrue);
     await settings.setCloudProviderParticipatesInAuto('nvidiaNim', false);
     expect(settings.automaticCloudUseAllowed('nvidiaNim'), isFalse);
