@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AI Orchestrator
+Comment=Offline-first multi-platform AI assistant and app factory
+Exec=ai-orchestrator
+Icon=ai-orchestrator
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+StartupWMClass=com.aiorchestrator
