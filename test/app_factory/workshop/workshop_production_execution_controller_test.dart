@@ -101,6 +101,22 @@ void main() {
     controller.dispose();
   });
 
+  test('resetForNextTask preserves explicit offline execution mode', () async {
+    final runner = _ImmediateRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    await controller.start(isOffline: true);
+    controller.resetForNextTask();
+
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(controller.state.isOffline, isTrue);
+
+    controller.reset();
+    expect(controller.state.isOffline, isFalse);
+
+    controller.dispose();
+  });
+
   test('distinct task guard is bounded per project and resets for a new plan',
       () async {
     final runner = _ImmediateRunner(_handle());
@@ -125,6 +141,48 @@ void main() {
     );
     await controller.start();
     expect(controller.distinctTasksStartedInCurrentProject, 1);
+
+    controller.dispose();
+  });
+
+  test('build repair budget is bounded across execution resets', () {
+    final runner = _ImmediateRunner(_handle());
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      policy: const WorkshopProductionExecutionPolicy(
+        maxBuildRepairAttempts: 2,
+      ),
+    );
+
+    expect(
+      controller.reserveBuildRepairAttempt(rootProjectId: 'project:root'),
+      isTrue,
+    );
+    expect(controller.buildRepairAttempts, 1);
+    expect(controller.buildRepairRootProjectId, 'project:root');
+
+    controller.resetForNextTask();
+    expect(
+      controller.reserveBuildRepairAttempt(rootProjectId: 'project:root'),
+      isTrue,
+    );
+    expect(controller.buildRepairAttempts, 2);
+    expect(
+      controller.reserveBuildRepairAttempt(rootProjectId: 'project:root'),
+      isFalse,
+    );
+    expect(controller.buildRepairAttempts, 2);
+
+    expect(
+      controller.reserveBuildRepairAttempt(rootProjectId: 'project:new-root'),
+      isTrue,
+    );
+    expect(controller.buildRepairAttempts, 1);
+    expect(controller.buildRepairRootProjectId, 'project:new-root');
+
+    controller.clearBuildRepairChain();
+    expect(controller.buildRepairAttempts, 0);
+    expect(controller.buildRepairRootProjectId, isNull);
 
     controller.dispose();
   });
