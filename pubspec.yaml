@@ -51,7 +51,10 @@ dependencies:
   archive: ^3.6.1
 
   uuid: ^4.4.0
-  intl: ^0.20.2
+  # Flutter 3.22.x pins flutter_localizations to intl 0.19.x. This branch is
+  # diagnostic-only and deliberately aligns that single SDK-pinned dependency
+  # without changing the production dependency graph on main.
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
