@@ -33,6 +33,7 @@ void main() {
     expect(controller.state.status, WorkshopProductionExecutionStatus.succeeded);
     expect(identical(controller.state.result, result), isTrue);
     expect(controller.state.finishedAt, isNotNull);
+    expect(controller.state.canRetry, isFalse);
 
     controller.dispose();
   });
@@ -52,6 +53,37 @@ void main() {
 
     expect(controller.state.status, WorkshopProductionExecutionStatus.cancelled);
     expect(controller.state.result, isNull);
+    expect(controller.state.canRetry, isTrue);
+
+    controller.dispose();
+  });
+
+  test('failed execution can be retried without duplicating active work', () async {
+    final runner = _RetryRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    await expectLater(controller.start(), throwsStateError);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(controller.state.canRetry, isTrue);
+    expect(runner.runCount, 1);
+
+    final retried = controller.retry();
+    expect(controller.state.status, WorkshopProductionExecutionStatus.running);
+    expect(runner.runCount, 2);
+
+    final result = await retried;
+    expect(result.review.summary, 'Test verdict.');
+    expect(controller.state.status, WorkshopProductionExecutionStatus.succeeded);
+    expect(controller.state.canRetry, isFalse);
+
+    controller.dispose();
+  });
+
+  test('retry is rejected when execution is not terminally retryable', () {
+    final runner = _ControlledRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    expect(controller.retry, throwsStateError);
 
     controller.dispose();
   });
@@ -81,6 +113,28 @@ final class _ControlledRunner implements WorkshopProductionExecutionRunner {
 
   void complete(WorkshopTaskInferenceResult result) {
     _completer.complete(result);
+  }
+}
+
+final class _RetryRunner implements WorkshopProductionExecutionRunner {
+  _RetryRunner(this.handle);
+
+  final WorkshopProductionTaskHandle handle;
+  int runCount = 0;
+
+  @override
+  WorkshopProductionTaskHandle preparedHandle() => handle;
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPrepared({
+    required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+  }) async {
+    runCount += 1;
+    if (runCount == 1) {
+      throw StateError('transient inference failure');
+    }
+    return _result();
   }
 }
 
