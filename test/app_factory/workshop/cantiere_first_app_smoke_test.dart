@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../../tool/cantiere_first_app_smoke.dart' as first_app_smoke;
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test(
     'Cantiere produces a real installable Android counter APK',
     () async {
