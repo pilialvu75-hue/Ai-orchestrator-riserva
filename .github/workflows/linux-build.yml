@@ -166,6 +166,23 @@ jobs:
           test -x "$bundle/ai_orchestrator"
           test -d "$bundle/data/flutter_assets"
           install -m 0755 "$helper" "$bundle/llama-completion"
+          install -m 0755 "$PWD/native/linux/llama-runtime" "$bundle/llama-runtime"
+
+          cat > "$bundle/run-ai-orchestrator" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          bundle_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          export LLAMA_CPP_EXECUTABLE="${LLAMA_CPP_EXECUTABLE:-$bundle_dir/llama-runtime}"
+          exec "$bundle_dir/ai_orchestrator" "$@"
+          EOF
+          chmod 0755 "$bundle/run-ai-orchestrator"
+
+          test -x "$bundle/llama-runtime"
+          test -x "$bundle/run-ai-orchestrator"
+          bash -n "$bundle/llama-runtime"
+          bash -n "$bundle/run-ai-orchestrator"
+          grep -Fq 'LLAMA_CPP_EXECUTABLE' "$bundle/run-ai-orchestrator"
+          grep -Fq 'llama-completion' "$bundle/llama-runtime"
 
           if ldd "$bundle/ai_orchestrator" | grep -F 'not found'; then
             echo 'Linux app has unresolved dynamic dependencies' >&2
@@ -185,7 +202,7 @@ jobs:
           set -euo pipefail
           bundle="$PWD/build/linux/x64/release/bundle"
           set +e
-          xvfb-run -a timeout 12s "$bundle/ai_orchestrator" > linux-launch.log 2>&1
+          xvfb-run -a timeout 12s "$bundle/run-ai-orchestrator" > linux-launch.log 2>&1
           status=$?
           set -e
           cat linux-launch.log
@@ -200,6 +217,8 @@ jobs:
           set -euo pipefail
           mkdir -p build/linux/dist/AI-Orchestrator
           cp -a build/linux/x64/release/bundle/. build/linux/dist/AI-Orchestrator/
+          test -x build/linux/dist/AI-Orchestrator/run-ai-orchestrator
+          test -x build/linux/dist/AI-Orchestrator/llama-runtime
           tar -C build/linux/dist -czf ai-orchestrator-linux-x64.tar.gz AI-Orchestrator
           test -s ai-orchestrator-linux-x64.tar.gz
           sha256sum ai-orchestrator-linux-x64.tar.gz > ai-orchestrator-linux-x64.tar.gz.sha256
@@ -217,6 +236,7 @@ jobs:
           dpkg-deb --contents "$deb" | tee linux-deb-contents.log
           grep -F './usr/bin/ai-orchestrator' linux-deb-contents.log
           grep -F './usr/lib/ai-orchestrator/llama-completion' linux-deb-contents.log
+          grep -F './usr/lib/ai-orchestrator/llama-runtime' linux-deb-contents.log
 
       - name: Upload Linux portable bundle
         uses: actions/upload-artifact@v4
@@ -248,3 +268,38 @@ jobs:
             linux-deb-contents.log
           if-no-files-found: warn
           retention-days: 14
+
+  validate-debian-compatibility:
+    name: validate-deb-${{ matrix.os }}
+    needs: build-linux
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Download exact Debian package from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-orchestrator-linux-deb-x64
+          path: linux-deb
+
+      - name: Validate package dependency resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(find linux-deb -type f -name 'AI-Orchestrator_*_amd64.deb' -print -quit)"
+          test -n "$deb"
+          test -s "$deb"
+          deb="$(realpath "$deb")"
+          echo "Runner: ${{ matrix.os }}"
+          echo "Package: $deb"
+          dpkg-deb -f "$deb" Package Version Architecture Depends
+          sudo apt-get update
+          sudo apt-get install --simulate --no-install-recommends -y "$deb" | tee apt-install-simulate.log
+          grep -Eq 'ai-orchestrator|AI Orchestrator' apt-install-simulate.log
+          echo 'LINUX_DEB_DEPENDENCY_RESOLUTION_OK'

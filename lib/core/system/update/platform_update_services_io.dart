@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/system/update/linux_update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_checker.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
@@ -16,7 +17,7 @@ Future<void> configurePlatformUpdateServices(
   GetIt sl, {
   required String currentVersion,
 }) async {
-  if (!Platform.isWindows) return;
+  if (!Platform.isWindows && !Platform.isLinux) return;
 
   if (sl.isRegistered<UpdateManager>()) {
     await sl.unregister<UpdateManager>();
@@ -24,6 +25,10 @@ Future<void> configurePlatformUpdateServices(
   if (sl.isRegistered<UpdateChecker>()) {
     await sl.unregister<UpdateChecker>();
   }
+
+  final targetPlatform = Platform.isWindows
+      ? UpdateTargetPlatform.windows
+      : UpdateTargetPlatform.linux;
 
   sl.registerLazySingleton<UpdateChecker>(
     () => UpdateChecker(
@@ -33,12 +38,25 @@ Future<void> configurePlatformUpdateServices(
       manifestUrl: AppConstants.updateManifestUrl,
       githubOwner: AppConstants.updateGitHubOwner,
       githubRepo: AppConstants.updateGitHubRepo,
-      targetPlatform: UpdateTargetPlatform.windows,
+      targetPlatform: targetPlatform,
     ),
   );
 
+  if (Platform.isWindows) {
+    sl.registerLazySingleton<UpdateManager>(
+      () => WindowsUpdateManager(
+        updateChecker: sl<UpdateChecker>(),
+        comparator: sl<VersionComparator>(),
+        preferences: sl<SharedPreferences>(),
+        intentHandler: sl<AndroidIntentHandler>(),
+        currentVersion: currentVersion,
+      ),
+    );
+    return;
+  }
+
   sl.registerLazySingleton<UpdateManager>(
-    () => WindowsUpdateManager(
+    () => LinuxUpdateManager(
       updateChecker: sl<UpdateChecker>(),
       comparator: sl<VersionComparator>(),
       preferences: sl<SharedPreferences>(),

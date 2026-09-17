@@ -1,0 +1,226 @@
+name: Publish Linux Release Asset
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/linux-release-publish.yml'
+      - 'linux/packaging/**'
+      - 'native/linux/**'
+      - 'lib/core/system/update/**'
+  workflow_run:
+    workflows:
+      - Build & Release APK
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: linux-release-publish-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate-publisher:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate publisher contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x linux/packaging/build_deb.sh || test -f linux/packaging/build_deb.sh
+          test -f native/linux/build_llama_cli.sh
+          grep -q 'Package: ai-orchestrator' linux/packaging/build_deb.sh
+          grep -q 'Architecture: amd64' linux/packaging/build_deb.sh
+          grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
+          echo 'Linux release publisher contract is valid.'
+
+  publish-linux:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout exact Android release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Linux desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev \
+            libasound2-dev liblzma-dev curl file binutils xdg-utils
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Resolve coordinated release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_version="$(awk '/^version:/ {print $2; exit}' pubspec.yaml)"
+          version_name="${raw_version%%+*}"
+          version_code='${{ github.event.workflow_run.run_number }}'
+
+          if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unable to resolve semantic application version from pubspec.yaml: $raw_version" >&2
+            exit 1
+          fi
+          if [[ ! "$version_code" =~ ^[0-9]+$ ]]; then
+            echo "Invalid Android workflow run number: $version_code" >&2
+            exit 1
+          fi
+
+          release_version="$version_name+$version_code"
+          tag="v$release_version"
+          sed -i -E "s/^version:[[:space:]].*$/version: $release_version/" pubspec.yaml
+          grep -q "^version: $release_version$" pubspec.yaml
+
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Coordinated Linux version: $release_version"
+          echo "Target GitHub release: $tag"
+          echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Build bundled llama.cpp runtime
+        run: bash native/linux/build_llama_cli.sh
+
+      - name: Build coordinated Linux release
+        run: flutter build linux --release
+
+      - name: Embed and validate llama.cpp runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$PWD/build/linux/x64/release/bundle"
+          helper="$PWD/build/llama-linux/bin/llama-completion"
+          test -x "$bundle/ai_orchestrator"
+          test -x "$helper"
+          install -m 0755 "$helper" "$bundle/llama-completion"
+
+          if ldd "$bundle/ai_orchestrator" | grep -F 'not found'; then
+            echo 'Linux app has unresolved dynamic dependencies' >&2
+            exit 1
+          fi
+          if ldd "$bundle/llama-completion" | grep -F 'not found'; then
+            echo 'Bundled llama-completion has unresolved dynamic dependencies' >&2
+            exit 1
+          fi
+
+      - name: Build versioned Debian installer
+        id: package
+        shell: bash
+        env:
+          AI_ORCHESTRATOR_PACKAGE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          bash linux/packaging/build_deb.sh
+          source_deb="$(find build/linux/package -maxdepth 1 -type f -name 'AI-Orchestrator_*_amd64.deb' -print -quit)"
+          if [[ -z "$source_deb" || ! -s "$source_deb" ]]; then
+            echo 'Debian package was not produced.' >&2
+            exit 1
+          fi
+
+          release_dir="$PWD/build/linux/release-publish"
+          mkdir -p "$release_dir"
+          release_deb="$release_dir/AI-Orchestrator-Linux-amd64.deb"
+          release_sha="$release_deb.sha256"
+          cp "$source_deb" "$release_deb"
+          sha256sum "$release_deb" | sed 's#  .*#  AI-Orchestrator-Linux-amd64.deb#' > "$release_sha"
+
+          dpkg-deb --info "$release_deb"
+          dpkg-deb --contents "$release_deb" | tee "$release_dir/deb-contents.log"
+          grep -F './usr/bin/ai-orchestrator' "$release_dir/deb-contents.log"
+          grep -F './usr/lib/ai-orchestrator/llama-completion' "$release_dir/deb-contents.log"
+          package_version="$(dpkg-deb -f "$release_deb" Version)"
+          test "$package_version" = '${{ steps.version.outputs.release_version }}'
+
+          release_size="$(stat -c '%s' "$release_deb")"
+          release_hash="$(sha256sum "$release_deb" | awk '{print tolower($1)}')"
+          test "$release_size" -gt 1048576
+          test "$(awk '{print tolower($1)}' "$release_sha")" = "$release_hash"
+
+          echo "deb_path=$release_deb" >> "$GITHUB_OUTPUT"
+          echo "sha_path=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "deb_size=$release_size" >> "$GITHUB_OUTPUT"
+          echo "deb_sha256=$release_hash" >> "$GITHUB_OUTPUT"
+          echo "Linux release installer: $release_deb ($release_size bytes)"
+          echo "SHA256: $release_hash"
+
+      - name: Verify matching Android release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null
+          gh release view '${{ steps.version.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt >/dev/null
+
+      - name: Publish Linux installer into matching GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload '${{ steps.version.outputs.tag }}' \
+            '${{ steps.package.outputs.deb_path }}' \
+            '${{ steps.package.outputs.sha_path }}' \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify published Linux release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view '${{ steps.version.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          grep -Fxq 'AI-Orchestrator-Linux-amd64.deb' <<<"$assets"
+          grep -Fxq 'AI-Orchestrator-Linux-amd64.deb.sha256' <<<"$assets"
+          echo "Linux release assets published on ${{ steps.version.outputs.tag }}"
+
+      - name: Preserve published installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-linux-release-${{ steps.version.outputs.release_version }}
+          path: |
+            ${{ steps.package.outputs.deb_path }}
+            ${{ steps.package.outputs.sha_path }}
+            build/linux/release-publish/deb-contents.log
+          if-no-files-found: error
+          retention-days: 14
