@@ -59,6 +59,7 @@ class UpdateChecker {
   static const String _cachedManifestKeyPrefix = 'system.update.cached_manifest.v2';
   static const String _windowsSetupAssetName = 'AI-Orchestrator-Setup-x64.exe';
   static const String _macosDmgAssetName = 'AI-Orchestrator-macOS.dmg';
+  static const String _linuxDebAssetName = 'AI-Orchestrator-Linux-amd64.deb';
 
   Future<UpdateCheckResult> checkLatestManifest({
     required ReleaseChannel preferredChannel,
@@ -342,6 +343,20 @@ class UpdateChecker {
         continue;
       }
 
+      final linuxAsset = _extractLinuxAsset(release);
+      if (linuxAsset != null) {
+        _logLinuxFound(
+          'tag=$tagName file=${linuxAsset.name} '
+          'size_bytes=${linuxAsset.sizeBytes} sha256=${linuxAsset.sha256}',
+        );
+      }
+      if (targetPlatform == UpdateTargetPlatform.linux && linuxAsset == null) {
+        _logArtifactInvalid(
+          'tag=$tagName target=linux reason=deb_asset_not_found_or_unverified',
+        );
+        continue;
+      }
+
       final manifest = UpdateManifest(
         version: version,
         versionCode: null,
@@ -358,6 +373,10 @@ class UpdateChecker {
         macosFileName: macosAsset?.name,
         macosSizeBytes: macosAsset?.sizeBytes,
         macosSha256: macosAsset?.sha256,
+        linuxUrl: linuxAsset?.url,
+        linuxFileName: linuxAsset?.name,
+        linuxSizeBytes: linuxAsset?.sizeBytes,
+        linuxSha256: linuxAsset?.sha256,
         changelog: (release['body'] as String?)?.trim() ?? '',
         critical: false,
       );
@@ -460,6 +479,27 @@ class UpdateChecker {
       final candidate = _validatedReleaseAsset(
         asset,
         requiredExtension: '.dmg',
+        requireSha256: true,
+      );
+      if (candidate != null) return candidate;
+    }
+    return null;
+  }
+
+  _ReleaseAsset? _extractLinuxAsset(Map<String, dynamic> release) {
+    final assets = release['assets'];
+    if (assets is! List) return null;
+
+    for (final rawAsset in assets) {
+      if (rawAsset is! Map) continue;
+      final asset = Map<String, dynamic>.from(rawAsset);
+      final rawName = ((asset['name'] as String?) ?? '').trim();
+      if (rawName.toLowerCase() != _linuxDebAssetName.toLowerCase()) {
+        continue;
+      }
+      final candidate = _validatedReleaseAsset(
+        asset,
+        requiredExtension: '.deb',
         requireSha256: true,
       );
       if (candidate != null) return candidate;
@@ -610,6 +650,8 @@ class UpdateChecker {
       debugPrint('[UPDATE_WINDOWS_FOUND] $message');
   void _logMacosFound(String message) =>
       debugPrint('[UPDATE_MACOS_FOUND] $message');
+  void _logLinuxFound(String message) =>
+      debugPrint('[UPDATE_LINUX_FOUND] $message');
   void _logArtifactInvalid(String message) =>
       debugPrint('[UPDATE_ARTIFACT_INVALID] $message');
 }
