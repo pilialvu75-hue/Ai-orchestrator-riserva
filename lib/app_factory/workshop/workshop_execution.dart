@@ -261,7 +261,7 @@ final class WorkshopExecution {
       value is num ? value.toDouble() : 0;
 }
 
-/// Aggregate usage/cost across the retained attempts of one logical execution.
+/// Aggregate usage/cost across every retained attempt of one logical execution.
 final class WorkshopExecutionUsageSummary {
   const WorkshopExecutionUsageSummary({
     required this.attemptCount,
@@ -281,7 +281,7 @@ final class WorkshopExecutionUsageSummary {
 }
 
 /// Versioned index for stable Workshop execution identities, current runtime
-/// binding and a bounded per-attempt audit trail.
+/// binding and a per-attempt audit trail.
 ///
 /// Workflow/project state remains owned by the Workshop task and checkpoint
 /// contracts. The `items` section preserves the historical v1 current-record
@@ -292,9 +292,7 @@ final class WorkshopExecutionStore {
   WorkshopExecutionStore({
     required PreferencesService preferences,
     Uuid uuid = const Uuid(),
-    this.maxAttemptsPerExecution = 32,
-  })  : assert(maxAttemptsPerExecution > 0),
-        _preferences = preferences,
+  })  : _preferences = preferences,
         _uuid = uuid;
 
   static const String _storageKey = 'workshop.executions.v1';
@@ -302,7 +300,6 @@ final class WorkshopExecutionStore {
 
   final PreferencesService _preferences;
   final Uuid _uuid;
-  final int maxAttemptsPerExecution;
 
   Future<WorkshopExecution> create({
     required String projectId,
@@ -398,7 +395,6 @@ final class WorkshopExecutionStore {
       () => <String, WorkshopExecution>{},
     );
     attempts[execution.attemptId] = execution;
-    _trimAttempts(attempts, preserveAttemptId: execution.attemptId);
 
     await _writeState(state);
   }
@@ -556,14 +552,6 @@ final class WorkshopExecutionStore {
             .putIfAbsent(execution.attemptId, () => execution);
       }
 
-      for (final entry in attempts.entries) {
-        final currentAttemptId = current[entry.key]?.attemptId;
-        _trimAttempts(
-          entry.value,
-          preserveAttemptId: currentAttemptId,
-        );
-      }
-
       return _WorkshopExecutionStoreState(
         current: current,
         attempts: attempts,
@@ -603,21 +591,6 @@ final class WorkshopExecutionStore {
         ),
       }),
     );
-  }
-
-  void _trimAttempts(
-    Map<String, WorkshopExecution> attempts, {
-    String? preserveAttemptId,
-  }) {
-    if (attempts.length <= maxAttemptsPerExecution) return;
-
-    final ordered = attempts.values.toList(growable: false)
-      ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
-    for (final attempt in ordered) {
-      if (attempts.length <= maxAttemptsPerExecution) break;
-      if (attempt.attemptId == preserveAttemptId) continue;
-      attempts.remove(attempt.attemptId);
-    }
   }
 
   String _requireIdentity(String value, String field) {
