@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+// Deliberately tiny entrypoint: no AI, storage, voice, updater, or app bootstrap.
+// A successful first frame here proves the Flutter/Win7 engine path itself.
 void main() {
   runApp(const Win7SmokeApp());
 }
