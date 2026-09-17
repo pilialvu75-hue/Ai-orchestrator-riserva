@@ -144,6 +144,7 @@ final class WorkshopBuildSourceSnapshotter {
       '.dart_tool',
       '.gradle',
       '.idea',
+      '.cantiere_artifacts',
       'build',
     };
     if (segments.any(excludedDirectories.contains)) return true;
