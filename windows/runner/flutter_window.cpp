@@ -47,9 +47,10 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   startup_trace::Mark("30 after SetChildContent");
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    startup_trace::Mark("31 first frame callback");
+  flutter_controller_->engine()->SetNextFrameCallback([this]() {
+    startup_trace::Mark("31 first frame callback entered");
     this->Show();
+    startup_trace::Mark("31a first frame window shown");
   });
   startup_trace::Mark("32 after SetNextFrameCallback");
 
@@ -90,7 +91,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   switch (message) {
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      if (flutter_controller_ && flutter_controller_->engine()) {
+        flutter_controller_->engine()->ReloadSystemFonts();
+      }
       break;
   }
 

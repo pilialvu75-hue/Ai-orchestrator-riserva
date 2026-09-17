@@ -38,6 +38,7 @@ set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("compat")
 add_subdirectory("runner")
+add_subdirectory("diagnostics")
 
 # Generated plugin build rules.
 include(flutter/generated_plugins.cmake)
@@ -54,12 +55,21 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
-install(TARGETS ${BINARY_NAME}
+install(TARGETS
+  ${BINARY_NAME}
+  ai_orchestrator_windows_probe
+  ai_orchestrator_windows_graphics_probe
+  ai_orchestrator_windows_bootstrap_probe
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(TARGETS ws2fix nt7fx win7krnl win7path win7sync dxg7fix
   RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/diagnostics/AI-Orchestrator-Collect-Diagnostics.cmd"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}"

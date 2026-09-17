@@ -15,6 +15,9 @@
 
 #define AppName "AI Orchestrator"
 #define AppExeName "ai_orchestrator.exe"
+#define ProbeExeName "AI-Orchestrator-Windows-Diagnostics.exe"
+#define GraphicsProbeExeName "AI-Orchestrator-Windows-Graphics-Diagnostics.exe"
+#define BootstrapProbeExeName "AI-Orchestrator-Windows-Bootstrap-Diagnostics.exe"
 
 [Setup]
 AppId={{4DB0E2A9-841F-4AC8-BC18-C72DBBA31E42}
@@ -52,10 +55,20 @@ Source: "{#VCRedistPath}"; DestDir: "{tmp}"; DestName: "vc_redist.x64.exe"; Flag
 
 [Icons]
 Name: "{group}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"
+Name: "{group}\AI Orchestrator - Diagnostica Windows"; Filename: "{app}\{#ProbeExeName}"; Comment: "Verifica loader, runtime, shim Win7, DLL, CPU e memoria senza avviare Flutter"
+Name: "{group}\AI Orchestrator - Diagnostica grafica Windows"; Filename: "{app}\{#GraphicsProbeExeName}"; Comment: "Verifica D3D9, DXGI, OpenGL, DWM, monitor e driver grafici senza avviare Flutter"
+Name: "{group}\AI Orchestrator - Diagnostica bootstrap pre-main"; Filename: "{app}\{#BootstrapProbeExeName}"; Comment: "Avvia AI Orchestrator sotto un debugger leggero e registra crash anche prima di wWinMain"
+Name: "{group}\AI Orchestrator - bootstrap senza Impeller"; Filename: "{app}\{#BootstrapProbeExeName}"; Parameters: "--win7-no-impeller"; Comment: "Bootstrap trace con Impeller disabilitato"
 Name: "{group}\AI Orchestrator - diagnostica Win7 (senza plugin)"; Filename: "{app}\{#AppExeName}"; Parameters: "--win7-no-plugins"; Comment: "Avvio diagnostico Windows 7 senza registrazione plugin"
+Name: "{group}\AI Orchestrator - diagnostica Win7 (senza Impeller)"; Filename: "{app}\{#AppExeName}"; Parameters: "--win7-no-impeller"; Comment: "Avvio diagnostico Windows 7 con Impeller disabilitato e renderer Skia"
+Name: "{group}\AI Orchestrator - diagnostica Win7 (senza Impeller e plugin)"; Filename: "{app}\{#AppExeName}"; Parameters: "--win7-no-impeller --win7-no-plugins"; Comment: "Avvio diagnostico Windows 7 con Skia e senza registrazione plugin"
 Name: "{group}\AI Orchestrator - apri log diagnostico Win7"; Filename: "{sys}\notepad.exe"; Parameters: """{localappdata}\AI-Orchestrator\Diagnostics\AI-Orchestrator-win7-startup.log"""; Comment: "Apre il trace di avvio Windows 7"
+Name: "{group}\AI Orchestrator - Raccogli diagnostica Windows"; Filename: "{cmd}"; Parameters: "/C ""{app}\AI-Orchestrator-Collect-Diagnostics.cmd"""; WorkingDir: "{app}"; Comment: "Copia log, crash dump e informazioni di sistema in una cartella sul Desktop"
 Name: "{autodesktop}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione componenti Microsoft Visual C++..."; Flags: waituntilterminated runhidden
 Filename: "{app}\{#AppExeName}"; Description: "Avvia AI Orchestrator"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#ProbeExeName}"; Description: "Esegui Diagnostica Windows (consigliato per i test Win7)"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\{#GraphicsProbeExeName}"; Description: "Esegui Diagnostica grafica Windows"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\{#BootstrapProbeExeName}"; Description: "Esegui Diagnostica bootstrap pre-main"; Flags: nowait postinstall skipifsilent unchecked

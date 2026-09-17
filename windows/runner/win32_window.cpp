@@ -12,6 +12,114 @@
 /// ambiguous at compile time.
 constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
 
+namespace {
+
+constexpr wchar_t kWindowStateRegistryKey[] =
+    L"Software\\AI-Orchestrator\\Window";
+constexpr wchar_t kWindowPlacementValue[] = L"Placement";
+constexpr unsigned int kMinimumWindowWidth = 640;
+constexpr unsigned int kMinimumWindowHeight = 480;
+
+bool SavedPlacementIsVisible(const WINDOWPLACEMENT& placement) {
+  RECT rect = placement.rcNormalPosition;
+  if (rect.right <= rect.left || rect.bottom <= rect.top) {
+    return false;
+  }
+  return ::MonitorFromRect(&rect, MONITOR_DEFAULTTONULL) != nullptr;
+}
+
+bool RestoreWindowPlacement(HWND window) {
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  DWORD bytes = sizeof(placement);
+  const LSTATUS result = ::RegGetValueW(
+      HKEY_CURRENT_USER,
+      kWindowStateRegistryKey,
+      kWindowPlacementValue,
+      RRF_RT_REG_BINARY,
+      nullptr,
+      &placement,
+      &bytes);
+  if (result != ERROR_SUCCESS || bytes != sizeof(placement) ||
+      placement.length != sizeof(placement) ||
+      !SavedPlacementIsVisible(placement)) {
+    return false;
+  }
+
+  // Never restore a minimized window. Preserve maximized state, otherwise
+  // restore as a normal desktop window.
+  if (placement.showCmd != SW_SHOWMAXIMIZED) {
+    placement.showCmd = SW_SHOWNORMAL;
+    placement.flags = 0;
+  }
+  return ::SetWindowPlacement(window, &placement) != FALSE;
+}
+
+void SaveWindowPlacement(HWND window) {
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  if (!::GetWindowPlacement(window, &placement)) {
+    return;
+  }
+
+  if (placement.showCmd == SW_SHOWMINIMIZED ||
+      placement.showCmd == SW_MINIMIZE ||
+      placement.showCmd == SW_SHOWMINNOACTIVE) {
+    placement.showCmd = SW_SHOWNORMAL;
+    placement.flags = 0;
+  }
+
+  HKEY key = nullptr;
+  DWORD disposition = 0;
+  if (::RegCreateKeyExW(
+          HKEY_CURRENT_USER,
+          kWindowStateRegistryKey,
+          0,
+          nullptr,
+          REG_OPTION_NON_VOLATILE,
+          KEY_SET_VALUE,
+          nullptr,
+          &key,
+          &disposition) != ERROR_SUCCESS) {
+    return;
+  }
+
+  ::RegSetValueExW(
+      key,
+      kWindowPlacementValue,
+      0,
+      REG_BINARY,
+      reinterpret_cast<const BYTE*>(&placement),
+      static_cast<DWORD>(sizeof(placement)));
+  ::RegCloseKey(key);
+}
+
+void CenterWindowOnNearestMonitor(HWND window) {
+  RECT rect{};
+  if (!::GetWindowRect(window, &rect)) {
+    return;
+  }
+
+  HMONITOR monitor = ::MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (!::GetMonitorInfoW(monitor, &info)) {
+    return;
+  }
+
+  const LONG width = rect.right - rect.left;
+  const LONG height = rect.bottom - rect.top;
+  const LONG work_width = info.rcWork.right - info.rcWork.left;
+  const LONG work_height = info.rcWork.bottom - info.rcWork.top;
+  const LONG x = info.rcWork.left + (work_width - width) / 2;
+  const LONG y = info.rcWork.top + (work_height - height) / 2;
+
+  ::SetWindowPos(window, nullptr, x, y, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+}  // namespace
+
 /// A class that wraps a window class registration and ensures that
 /// registration is cleaned up when no longer needed.
 ///
@@ -21,7 +129,9 @@ class WindowClassRegistrar {
  public:
   ~WindowClassRegistrar() {
     if (registered_) {
-      ::UnregisterClass(kClassName, nullptr);
+      if (::UnregisterClass(kClassName, nullptr)) {
+        registered_ = false;
+      }
     }
   }
 
@@ -67,8 +177,9 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
 }
 
 void WindowClassRegistrar::UnregisterWindowClass() {
-  ::UnregisterClass(kClassName, nullptr);
-  registered_ = false;
+  if (::UnregisterClass(kClassName, nullptr)) {
+    registered_ = false;
+  }
 }
 
 // The number of Win32Window objects that currently exist.
@@ -107,6 +218,10 @@ bool Win32Window::Create(const std::wstring& title,
 
   if (!window) {
     return false;
+  }
+
+  if (!RestoreWindowPlacement(window)) {
+    CenterWindowOnNearestMonitor(window);
   }
 
   UpdateTheme(window);
@@ -157,6 +272,10 @@ Win32Window::MessageHandler(HWND hwnd, UINT const message,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_CLOSE:
+      SaveWindowPlacement(hwnd);
+      break;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -164,6 +283,18 @@ Win32Window::MessageHandler(HWND hwnd, UINT const message,
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      auto* min_max = reinterpret_cast<MINMAXINFO*>(lparam);
+      HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+      const double scale_factor = dpi / 96.0;
+      min_max->ptMinTrackSize.x =
+          static_cast<LONG>(kMinimumWindowWidth * scale_factor);
+      min_max->ptMinTrackSize.y =
+          static_cast<LONG>(kMinimumWindowHeight * scale_factor);
+      return 0;
+    }
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
