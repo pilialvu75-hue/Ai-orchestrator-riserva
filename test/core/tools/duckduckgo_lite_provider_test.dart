@@ -51,12 +51,29 @@ class _FakeProvider implements SearchProvider {
 
 void main() {
   group('DuckDuckGoLiteProvider', () {
-    test('parses ranked Lite results without an API key', () async {
+    test('submits browser-like POST and parses ranked Lite results', () async {
       final client = _FakeClient((request) async {
+        expect(request.method, 'POST');
         expect(request.url.host, 'lite.duckduckgo.com');
-        expect(request.url.queryParameters['q'], 'latest flutter release');
-        expect(request.headers['user-agent'], contains('AI-Orchestrator'));
-        expect(request.headers.containsKey('accept-language'), isFalse);
+        expect(request.url.path, '/lite/');
+        expect(request.url.query, isEmpty);
+        expect(request, isA<http.Request>());
+
+        final formRequest = request as http.Request;
+        expect(formRequest.bodyFields['q'], 'latest flutter release');
+        expect(formRequest.bodyFields['b'], '');
+        expect(
+          request.headers['content-type'],
+          contains('application/x-www-form-urlencoded'),
+        );
+        expect(request.headers['user-agent'], startsWith('Mozilla/5.0'));
+        expect(request.headers['user-agent'], isNot(contains('AI-Orchestrator')));
+        expect(request.headers['sec-fetch-mode'], 'navigate');
+        expect(request.headers['sec-fetch-dest'], 'document');
+        expect(request.headers['sec-fetch-site'], 'same-origin');
+        expect(request.headers['sec-fetch-user'], '?1');
+        expect(request.headers['referer'], 'https://lite.duckduckgo.com/');
+        expect(request.headers['accept-language'], isNotEmpty);
 
         return http.Response(
           '''
@@ -122,13 +139,15 @@ void main() {
       );
     });
 
-    test('privacy mode keeps a query-bearing HTTP error out of diagnostics',
-        () async {
+    test('privacy mode keeps query out of URI and diagnostics', () async {
       RuntimeEventLog.instance.clear();
       const secret = 'lite-private-query-12345';
-      final client = _FakeClient(
-        (_) async => http.Response('Service unavailable', 503),
-      );
+      final client = _FakeClient((request) async {
+        expect(request.url.toString(), isNot(contains(secret)));
+        expect(request, isA<http.Request>());
+        expect((request as http.Request).bodyFields['q'], secret);
+        return http.Response('Service unavailable', 503);
+      });
       final provider = DuckDuckGoLiteProvider(
         client: client,
         includeErrorDetailsInDiagnostics: false,
