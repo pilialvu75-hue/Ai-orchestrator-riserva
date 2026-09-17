@@ -148,8 +148,8 @@ class CloudProviderCatalog {
       id: 'groq',
       displayName: 'Groq',
       defaultModel: 'qwen/qwen3.8-27b',
-      costClass: CloudProviderCostClass.freeTier,
-      accessClass: CloudProviderAccessClass.recurringFreeTier,
+      costClass: CloudProviderCostClass.unknown,
+      accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
       capabilities: <CloudProviderCapability>{
         CloudProviderCapability.general,
         CloudProviderCapability.reasoning,
