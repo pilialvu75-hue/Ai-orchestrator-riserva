@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+helper="$runtime_dir/llama-completion"
+
+if [[ ! -x "$helper" ]]; then
+  echo "[LINUX_RUNTIME] bundled llama-completion missing: $helper" >&2
+  exit 127
+fi
+
+exec "$helper" --no-conversation --verbosity 0 "$@"
