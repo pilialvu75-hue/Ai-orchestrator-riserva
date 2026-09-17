@@ -1,0 +1,286 @@
+name: Apply Cantiere navigation lifecycle patch
+
+on:
+  push:
+    branches:
+      - fix/cantiere-project-lifecycle-nav-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[cantiere-nav-applied]') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fail-closed lifecycle patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          shell_path = Path('lib/app/app_shell.dart')
+          shell = shell_path.read_text()
+
+          old_import = "import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';\n"
+          new_import = old_import + "import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';\n"
+          if shell.count(old_import) != 1:
+              raise SystemExit('Unexpected WorkshopFactory import count')
+          shell = shell.replace(old_import, new_import, 1)
+
+          old_class = 'class _AppShellState extends State<AppShell> {'
+          new_class = 'class _AppShellState extends State<AppShell> with WidgetsBindingObserver {'
+          if shell.count(old_class) != 1:
+              raise SystemExit('Unexpected AppShell state declaration count')
+          shell = shell.replace(old_class, new_class, 1)
+
+          old_fields = "  bool _openingWorkshop = false;\n"
+          new_fields = """  bool _openingWorkshop = false;
+          WorkshopProductionLifecycleBundle? _workshopBundle;
+          WorkshopProductionRecoveryCoordinator? _workshopRecoveryCoordinator;
+          WorkshopProductionExecutionController? _workshopExecutionController;
+          List<WorkshopModelAssignment>? _workshopAssignments;
+          """
+          if shell.count(old_fields) != 1:
+              raise SystemExit('Unexpected AppShell Workshop field anchor count')
+          shell = shell.replace(old_fields, new_fields, 1)
+
+          old_init = """  void initState() {
+              super.initState();
+              _updateManager = di.sl<UpdateManager>();
+          """
+          new_init = """  void initState() {
+              super.initState();
+              WidgetsBinding.instance.addObserver(this);
+              _updateManager = di.sl<UpdateManager>();
+          """
+          if shell.count(old_init) != 1:
+              raise SystemExit('Unexpected AppShell initState anchor count')
+          shell = shell.replace(old_init, new_init, 1)
+
+          old_dispose = """  @override
+            void dispose() {
+              _updateManager.state.removeListener(_onUpdateStateChanged);
+              super.dispose();
+            }
+          """
+          new_dispose = """  @override
+            void didChangeAppLifecycleState(AppLifecycleState state) {
+              if (state == AppLifecycleState.inactive ||
+                  state == AppLifecycleState.paused ||
+                  state == AppLifecycleState.detached ||
+                  state == AppLifecycleState.hidden) {
+                unawaited(_flushWorkshopCheckpoint());
+              }
+            }
+
+            Future<void> _flushWorkshopCheckpoint() async {
+              final recovery = _workshopRecoveryCoordinator;
+              final bundle = _workshopBundle;
+              if (recovery == null || bundle == null) return;
+              try {
+                await recovery.saveCurrent(bundle.dashboardController);
+              } catch (error) {
+                debugPrint('Workshop checkpoint flush failed: $error');
+              }
+            }
+
+            Future<void> _disposeWorkshopSession() async {
+              final execution = _workshopExecutionController;
+              final recovery = _workshopRecoveryCoordinator;
+              final bundle = _workshopBundle;
+
+              _workshopExecutionController = null;
+              _workshopRecoveryCoordinator = null;
+              _workshopBundle = null;
+              _workshopAssignments = null;
+
+              execution?.dispose();
+              if (recovery != null) {
+                try {
+                  await recovery.detach();
+                } catch (error) {
+                  debugPrint('Workshop recovery detach failed: $error');
+                }
+              }
+              bundle?.dashboardController.dispose();
+            }
+
+            @override
+            void dispose() {
+              WidgetsBinding.instance.removeObserver(this);
+              _updateManager.state.removeListener(_onUpdateStateChanged);
+              unawaited(_disposeWorkshopSession());
+              super.dispose();
+            }
+          """
+          if shell.count(old_dispose) != 1:
+              raise SystemExit('Unexpected AppShell dispose block count')
+          shell = shell.replace(old_dispose, new_dispose, 1)
+
+          open_pattern = re.compile(
+              r"  Future<void> _openWorkshop\(BuildContext context\) async \{.*?\n  Future<void> _startUpdateFromDialog\(\) async \{",
+              re.S,
+          )
+          match = open_pattern.search(shell)
+          if not match:
+              raise SystemExit('Could not locate _openWorkshop block')
+
+          replacement = """  Future<void> _ensureWorkshopSession() async {
+              if (_workshopBundle != null &&
+                  _workshopRecoveryCoordinator != null &&
+                  _workshopExecutionController != null &&
+                  _workshopAssignments != null) {
+                return;
+              }
+
+              final applicationDirectory = await getApplicationDocumentsDirectory();
+              final workspaceRootPath = p.join(
+                applicationDirectory.path,
+                'ai_orchestrator_workshop',
+              );
+              final workspaceDirectory = Directory(workspaceRootPath);
+              await workspaceDirectory.create(recursive: true);
+              final workshopAssignments = await WorkshopFactory.loadPersistedAssignments();
+
+              final bundle = await WorkshopProductionLifecycleBundleFactory
+                  .createForWorkspaceWithPersistedReuse(
+                workspaceRootPath: workspaceDirectory.path,
+                preferences: di.sl<PreferencesService>(),
+                assignments: workshopAssignments,
+              );
+              final recovery = WorkshopProductionRecoveryCoordinator(
+                checkpointStore: PersistentWorkshopCheckpointStore(
+                  preferences: di.sl<PreferencesService>(),
+                ),
+              );
+
+              try {
+                await recovery.restore(bundle.dashboardController);
+                if (!mounted) {
+                  bundle.dashboardController.dispose();
+                  return;
+                }
+
+                recovery.attach(bundle.dashboardController);
+                final taskCoordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+                final execution = WorkshopProductionExecutionController(
+                  runner: WorkshopProductionTaskExecutionRunner(
+                    coordinator: taskCoordinator,
+                  ),
+                );
+
+                _workshopBundle = bundle;
+                _workshopRecoveryCoordinator = recovery;
+                _workshopExecutionController = execution;
+                _workshopAssignments = workshopAssignments;
+              } catch (_) {
+                await recovery.detach(flushCurrent: false);
+                bundle.dashboardController.dispose();
+                rethrow;
+              }
+            }
+
+            Future<void> _openWorkshop(BuildContext context) async {
+              if (_openingWorkshop) return;
+              setState(() => _openingWorkshop = true);
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
+
+              try {
+                await _ensureWorkshopSession();
+                if (!mounted) return;
+
+                final workshopBundle = _workshopBundle;
+                final workshopAssignments = _workshopAssignments;
+                final executionController = _workshopExecutionController;
+                if (workshopBundle == null ||
+                    workshopAssignments == null ||
+                    executionController == null) {
+                  throw StateError('Il lifecycle persistente del Cantiere non è disponibile.');
+                }
+
+                await navigator.push(MaterialPageRoute<void>(
+                  builder: (_) => SafeArea(
+                    top: false,
+                    left: false,
+                    right: false,
+                    maintainBottomViewPadding: true,
+                    minimum: const EdgeInsets.only(bottom: 12),
+                    child: WorkshopProductionDashboardPage(
+                      bundle: workshopBundle,
+                      modelAssignments: workshopAssignments,
+                      executionController: executionController,
+                    ),
+                  ),
+                ));
+              } catch (error) {
+                if (!mounted) return;
+                messenger
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(content: Text('Impossibile aprire il Cantiere: $error')),
+                  );
+              } finally {
+                if (mounted) setState(() => _openingWorkshop = false);
+              }
+            }
+
+            Future<void> _startUpdateFromDialog() async {"""
+          shell = shell[:match.start()] + replacement + shell[match.end():]
+          shell_path.write_text(shell)
+
+          page_path = Path('lib/app_factory/workshop/workshop_dashboard_page.dart')
+          page = page_path.read_text()
+
+          ownership = """  bool get _ownsDashboardController =>
+              widget._dashboardController != null;
+
+          """
+          if page.count(ownership) != 1:
+              raise SystemExit('Unexpected dashboard ownership getter count')
+          page = page.replace(ownership, '', 1)
+
+          old_page_dispose = """    _chatController.clearConversation();
+              _chatController.dispose();
+
+              if (_ownsDashboardController) {
+                _dashboardController?.dispose();
+              }
+
+              super.dispose();
+          """
+          new_page_dispose = """    _chatController.clearConversation();
+              _chatController.dispose();
+
+              // The production/application lifecycle owns an injected dashboard
+              // controller. Removing this route must never dispose project state.
+              super.dispose();
+          """
+          if page.count(old_page_dispose) != 1:
+              raise SystemExit('Unexpected dashboard dispose block count')
+          page = page.replace(old_page_dispose, new_page_dispose, 1)
+          page_path.write_text(page)
+          PY
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Commit patched sources
+        run: |
+          if git diff --quiet -- lib/app/app_shell.dart lib/app_factory/workshop/workshop_dashboard_page.dart; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/app/app_shell.dart lib/app_factory/workshop/workshop_dashboard_page.dart
+          git commit -m "fix(cantiere): keep production alive across navigation [cantiere-nav-applied]"
+          git push origin HEAD:fix/cantiere-project-lifecycle-nav-v1
