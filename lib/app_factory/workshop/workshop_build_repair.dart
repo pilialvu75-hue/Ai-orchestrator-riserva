@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
@@ -13,13 +17,16 @@ final class WorkshopBuildRepairPolicy {
     this.maxRepairAttempts = 2,
     this.maxDiagnosticChars = 6000,
     this.maxGoalChars = 4000,
+    this.maxFingerprintEvidenceChars = 1200,
   })  : assert(maxRepairAttempts >= 0),
         assert(maxDiagnosticChars > 0),
-        assert(maxGoalChars > 0);
+        assert(maxGoalChars > 0),
+        assert(maxFingerprintEvidenceChars > 0);
 
   final int maxRepairAttempts;
   final int maxDiagnosticChars;
   final int maxGoalChars;
+  final int maxFingerprintEvidenceChars;
 }
 
 enum WorkshopBuildDisposition {
@@ -131,6 +138,34 @@ final class WorkshopBuildRepairPlanner {
       errorCodes: errors,
       reason: _nonRepairableReason(result, verificationFailed),
     );
+  }
+
+  /// Stable privacy-preserving signature used to stop a repair chain when the
+  /// same substantive build failure repeats.
+  ///
+  /// Raw diagnostics are never persisted in the lifecycle controller. The
+  /// canonical signature includes build stage/error metadata plus a bounded,
+  /// whitespace-normalized tail of diagnostic evidence and stores only SHA-256.
+  String failureSignature(WorkshopBuildResult result) {
+    final errors = result.errors
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false)
+      ..sort();
+    final evidence = _normalizedFingerprintEvidence(result);
+    final canonical = <String>[
+      'target=${result.target.name}',
+      'status=${result.status.name}',
+      'exit=${result.exitCode ?? 'unknown'}',
+      'errors=${errors.join(',')}',
+      'format=${result.formatPassed}',
+      'analysis=${result.analysisPassed}',
+      'tests=${result.testsPassed}',
+      'message=${_normalizeWhitespace(result.message ?? '')}',
+      'evidence=$evidence',
+    ].join('|');
+
+    return sha256.convert(utf8.encode(canonical)).toString();
   }
 
   WorkshopBuildRepairRequest createRepairRequest({
@@ -253,6 +288,26 @@ final class WorkshopBuildRepairPlanner {
       omittedLabel: 'diagnostic characters',
     );
   }
+
+  String _normalizedFingerprintEvidence(WorkshopBuildResult build) {
+    final combined = <String>[
+      build.stderr.trim(),
+      build.stdout.trim(),
+    ].where((value) => value.isNotEmpty).join('\n');
+
+    if (combined.isEmpty) return '';
+
+    final normalized = _normalizeWhitespace(combined);
+    if (normalized.length <= policy.maxFingerprintEvidenceChars) {
+      return normalized;
+    }
+    return normalized.substring(
+      normalized.length - policy.maxFingerprintEvidenceChars,
+    );
+  }
+
+  String _normalizeWhitespace(String value) =>
+      value.replaceAll(RegExp(r'\s+'), ' ').trim();
 
   String _boundedTail(
     String value,
