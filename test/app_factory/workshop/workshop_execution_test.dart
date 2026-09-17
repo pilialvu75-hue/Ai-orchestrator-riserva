@@ -173,8 +173,11 @@ void main() {
       expect(resumed.estimatedCredits, 1.5);
       expect(resumed.actualCost, isNull);
       expect(resumed.startedAt, checkpointed.startedAt);
-      expect(resumed.effectiveAttemptStartedAt,
-          isNot(before(checkpointed.effectiveAttemptStartedAt)));
+      expect(
+        resumed.effectiveAttemptStartedAt
+            .isBefore(checkpointed.effectiveAttemptStartedAt),
+        isFalse,
+      );
 
       final stored = await store.load(checkpointed.executionId);
       expect(stored, isNotNull);
