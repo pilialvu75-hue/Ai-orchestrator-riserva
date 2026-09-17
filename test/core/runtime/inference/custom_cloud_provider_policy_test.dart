@@ -22,7 +22,7 @@ void main() {
     await CustomCloudProviderStore.instance.initialize(preferences: preferences);
   });
 
-  test('custom Free route participates in AUTO spend-safe policy', () async {
+  test('custom Free route requires explicit AUTO participation', () async {
     final profile = await CustomCloudProviderStore.instance.create(
       displayName: 'Future Free',
       endpoint: 'https://free.example.test/v1/chat/completions',
@@ -32,6 +32,16 @@ void main() {
     );
     final service = await createService();
 
+    expect(service.automaticCloudUseAllowed(profile.id), isFalse);
+    expect(
+      service.automaticCloudUseAllowedForTask(
+        profile.id,
+        CloudTaskClass.coding,
+      ),
+      isFalse,
+    );
+
+    await service.setCloudProviderParticipatesInAuto(profile.id, true);
     expect(service.automaticCloudUseAllowed(profile.id), isTrue);
     expect(
       service.automaticCloudUseAllowedForTask(
@@ -40,6 +50,7 @@ void main() {
       ),
       isTrue,
     );
+
     await service.setManualCloudProvider(profile.id);
     expect(service.manualCloudProvider, profile.id);
     expect(service.cloudModelFor(profile.id), 'free-1');
