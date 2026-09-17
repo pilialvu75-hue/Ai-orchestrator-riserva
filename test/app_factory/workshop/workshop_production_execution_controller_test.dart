@@ -58,23 +58,73 @@ void main() {
     controller.dispose();
   });
 
-  test('failed execution can be retried without duplicating active work', () async {
+  test('failed offline execution retries offline without duplicating active work',
+      () async {
     final runner = _RetryRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
 
-    await expectLater(controller.start(), throwsStateError);
+    await expectLater(controller.start(isOffline: true), throwsStateError);
     expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
     expect(controller.state.canRetry, isTrue);
+    expect(controller.state.isOffline, isTrue);
     expect(runner.runCount, 1);
+    expect(runner.offlineModes, <bool>[true]);
 
     final retried = controller.retry();
     expect(controller.state.status, WorkshopProductionExecutionStatus.running);
+    expect(controller.state.isOffline, isTrue);
     expect(runner.runCount, 2);
 
     final result = await retried;
     expect(result.review.summary, 'Test verdict.');
+    expect(runner.offlineModes, <bool>[true, true]);
     expect(controller.state.status, WorkshopProductionExecutionStatus.succeeded);
     expect(controller.state.canRetry, isFalse);
+    expect(controller.state.isOffline, isTrue);
+
+    controller.dispose();
+  });
+
+  test('explicit offline execution is forwarded to the production runner',
+      () async {
+    final runner = _ControlledRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    final run = controller.start(isOffline: true);
+
+    expect(runner.isOffline, isTrue);
+    expect(controller.state.isOffline, isTrue);
+
+    runner.complete(_result());
+    await run;
+
+    controller.dispose();
+  });
+
+  test('distinct task guard is bounded per project and resets for a new plan',
+      () async {
+    final runner = _ImmediateRunner(_handle());
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      policy: const WorkshopProductionExecutionPolicy(
+        maxDistinctTasksPerProject: 1,
+      ),
+    );
+
+    await controller.start();
+    expect(controller.distinctTasksStartedInCurrentProject, 1);
+
+    controller.reset();
+    runner.handle = _handle(taskId: 'task-2');
+    expect(controller.start, throwsStateError);
+    expect(controller.distinctTasksStartedInCurrentProject, 1);
+
+    runner.handle = _handle(
+      taskId: 'task-2',
+      planId: 'project:request-2',
+    );
+    await controller.start();
+    expect(controller.distinctTasksStartedInCurrentProject, 1);
 
     controller.dispose();
   });
@@ -97,6 +147,7 @@ final class _ControlledRunner implements WorkshopProductionExecutionRunner {
       Completer<WorkshopTaskInferenceResult>();
   int runCount = 0;
   CancellationToken? token;
+  bool? isOffline;
 
   @override
   WorkshopProductionTaskHandle preparedHandle() => handle;
@@ -105,9 +156,11 @@ final class _ControlledRunner implements WorkshopProductionExecutionRunner {
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     required CancellationToken cancellationToken,
+    required bool isOffline,
   }) {
     runCount += 1;
     token = cancellationToken;
+    this.isOffline = isOffline;
     return _completer.future;
   }
 
@@ -121,6 +174,7 @@ final class _RetryRunner implements WorkshopProductionExecutionRunner {
 
   final WorkshopProductionTaskHandle handle;
   int runCount = 0;
+  final List<bool> offlineModes = <bool>[];
 
   @override
   WorkshopProductionTaskHandle preparedHandle() => handle;
@@ -129,8 +183,10 @@ final class _RetryRunner implements WorkshopProductionExecutionRunner {
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     required CancellationToken cancellationToken,
+    required bool isOffline,
   }) async {
     runCount += 1;
+    offlineModes.add(isOffline);
     if (runCount == 1) {
       throw StateError('transient inference failure');
     }
@@ -138,14 +194,35 @@ final class _RetryRunner implements WorkshopProductionExecutionRunner {
   }
 }
 
-WorkshopProductionTaskHandle _handle() {
+final class _ImmediateRunner implements WorkshopProductionExecutionRunner {
+  _ImmediateRunner(this.handle);
+
+  WorkshopProductionTaskHandle handle;
+
+  @override
+  WorkshopProductionTaskHandle preparedHandle() => handle;
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPrepared({
+    required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) async {
+    return _result();
+  }
+}
+
+WorkshopProductionTaskHandle _handle({
+  String taskId = 'task-1',
+  String planId = 'project:request-1',
+}) {
   const request = WorkshopRequest(
     id: 'request-1',
     title: 'Test',
     instruction: 'Test execution lifecycle.',
   );
   final plan = WorkshopProjectPlan(
-    id: 'project:request-1',
+    id: planId,
     title: 'Test',
     goal: 'Test execution lifecycle.',
   );
@@ -155,7 +232,7 @@ WorkshopProductionTaskHandle _handle() {
   );
   return WorkshopProductionTaskHandle(
     plan: plan,
-    taskId: 'task-1',
+    taskId: taskId,
     session: session,
   );
 }
