@@ -17,6 +17,7 @@ import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart'
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
@@ -41,6 +42,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   WorkshopProductionLifecycleBundle? _workshopBundle;
   WorkshopProductionRecoveryCoordinator? _workshopRecoveryCoordinator;
   WorkshopProductionExecutionController? _workshopExecutionController;
+  WorkshopChatController? _workshopChatController;
   List<WorkshopModelAssignment>? _workshopAssignments;
 
   @override
@@ -95,15 +97,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _disposeWorkshopSession() async {
     final execution = _workshopExecutionController;
+    final chat = _workshopChatController;
     final recovery = _workshopRecoveryCoordinator;
     final bundle = _workshopBundle;
 
     _workshopExecutionController = null;
+    _workshopChatController = null;
     _workshopRecoveryCoordinator = null;
     _workshopBundle = null;
     _workshopAssignments = null;
 
     execution?.dispose();
+    chat?.dispose();
     if (recovery != null) {
       try {
         await recovery.detach();
@@ -135,6 +140,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_workshopBundle != null &&
         _workshopRecoveryCoordinator != null &&
         _workshopExecutionController != null &&
+        _workshopChatController != null &&
         _workshopAssignments != null) {
       return;
     }
@@ -175,10 +181,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           coordinator: taskCoordinator,
         ),
       );
+      final chat = WorkshopChatController(
+        inferenceGateway: WorkshopFactory.createInferenceGateway(
+          assignments: workshopAssignments,
+        ),
+        sessionId:
+            'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
+      );
 
       _workshopBundle = bundle;
       _workshopRecoveryCoordinator = recovery;
       _workshopExecutionController = execution;
+      _workshopChatController = chat;
       _workshopAssignments = workshopAssignments;
     } catch (_) {
       await recovery.detach(flushCurrent: false);
@@ -200,9 +214,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final workshopBundle = _workshopBundle;
       final workshopAssignments = _workshopAssignments;
       final executionController = _workshopExecutionController;
+      final chatController = _workshopChatController;
       if (workshopBundle == null ||
           workshopAssignments == null ||
-          executionController == null) {
+          executionController == null ||
+          chatController == null) {
         throw StateError('Il lifecycle persistente del Cantiere non è disponibile.');
       }
 
@@ -217,6 +233,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             bundle: workshopBundle,
             modelAssignments: workshopAssignments,
             executionController: executionController,
+            chatController: chatController,
           ),
         ),
       ));
