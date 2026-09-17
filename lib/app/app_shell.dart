@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
@@ -32,15 +33,20 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UpdateManager _updateManager;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   String? _shownUpdateVersion;
   bool _openingWorkshop = false;
+  WorkshopProductionLifecycleBundle? _workshopBundle;
+  WorkshopProductionRecoveryCoordinator? _workshopRecoveryCoordinator;
+  WorkshopProductionExecutionController? _workshopExecutionController;
+  List<WorkshopModelAssignment>? _workshopAssignments;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _updateManager = di.sl<UpdateManager>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
     _updateManager.state.addListener(_onUpdateStateChanged);
@@ -66,8 +72,53 @@ class _AppShellState extends State<AppShell> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      unawaited(_flushWorkshopCheckpoint());
+    }
+  }
+
+  Future<void> _flushWorkshopCheckpoint() async {
+    final recovery = _workshopRecoveryCoordinator;
+    final bundle = _workshopBundle;
+    if (recovery == null || bundle == null) return;
+
+    try {
+      await recovery.saveCurrent(bundle.dashboardController);
+    } catch (error) {
+      debugPrint('Workshop checkpoint flush failed: $error');
+    }
+  }
+
+  Future<void> _disposeWorkshopSession() async {
+    final execution = _workshopExecutionController;
+    final recovery = _workshopRecoveryCoordinator;
+    final bundle = _workshopBundle;
+
+    _workshopExecutionController = null;
+    _workshopRecoveryCoordinator = null;
+    _workshopBundle = null;
+    _workshopAssignments = null;
+
+    execution?.dispose();
+    if (recovery != null) {
+      try {
+        await recovery.detach();
+      } catch (error) {
+        debugPrint('Workshop recovery detach failed: $error');
+      }
+    }
+    bundle?.dashboardController.dispose();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _updateManager.state.removeListener(_onUpdateStateChanged);
+    unawaited(_disposeWorkshopSession());
     super.dispose();
   }
 
@@ -80,54 +131,80 @@ class _AppShellState extends State<AppShell> {
     ));
   }
 
+  Future<void> _ensureWorkshopSession() async {
+    if (_workshopBundle != null &&
+        _workshopRecoveryCoordinator != null &&
+        _workshopExecutionController != null &&
+        _workshopAssignments != null) {
+      return;
+    }
+
+    final applicationDirectory = await getApplicationDocumentsDirectory();
+    final workspaceRootPath = p.join(
+      applicationDirectory.path,
+      'ai_orchestrator_workshop',
+    );
+    final workspaceDirectory = Directory(workspaceRootPath);
+    await workspaceDirectory.create(recursive: true);
+    final workshopAssignments = await WorkshopFactory.loadPersistedAssignments();
+
+    final bundle = await WorkshopProductionLifecycleBundleFactory
+        .createForWorkspaceWithPersistedReuse(
+      workspaceRootPath: workspaceDirectory.path,
+      preferences: di.sl<PreferencesService>(),
+      assignments: workshopAssignments,
+    );
+    final recovery = WorkshopProductionRecoveryCoordinator(
+      checkpointStore: PersistentWorkshopCheckpointStore(
+        preferences: di.sl<PreferencesService>(),
+      ),
+    );
+
+    try {
+      await recovery.restore(bundle.dashboardController);
+
+      if (!mounted) {
+        bundle.dashboardController.dispose();
+        return;
+      }
+
+      recovery.attach(bundle.dashboardController);
+      final taskCoordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+      final execution = WorkshopProductionExecutionController(
+        runner: WorkshopProductionTaskExecutionRunner(
+          coordinator: taskCoordinator,
+        ),
+      );
+
+      _workshopBundle = bundle;
+      _workshopRecoveryCoordinator = recovery;
+      _workshopExecutionController = execution;
+      _workshopAssignments = workshopAssignments;
+    } catch (_) {
+      await recovery.detach(flushCurrent: false);
+      bundle.dashboardController.dispose();
+      rethrow;
+    }
+  }
+
   Future<void> _openWorkshop(BuildContext context) async {
     if (_openingWorkshop) return;
     setState(() => _openingWorkshop = true);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    WorkshopProductionLifecycleBundle? workshopBundle;
-    WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
-    WorkshopProductionExecutionController? executionController;
 
     try {
-      final applicationDirectory = await getApplicationDocumentsDirectory();
-      final workspaceRootPath = p.join(
-        applicationDirectory.path,
-        'ai_orchestrator_workshop',
-      );
-      final workspaceDirectory = Directory(workspaceRootPath);
-      await workspaceDirectory.create(recursive: true);
-      final workshopAssignments = await WorkshopFactory.loadPersistedAssignments();
+      await _ensureWorkshopSession();
+      if (!mounted) return;
 
-      workshopBundle = await WorkshopProductionLifecycleBundleFactory
-          .createForWorkspaceWithPersistedReuse(
-        workspaceRootPath: workspaceDirectory.path,
-        preferences: di.sl<PreferencesService>(),
-        assignments: workshopAssignments,
-      );
-
-      recoveryCoordinator = WorkshopProductionRecoveryCoordinator(
-        checkpointStore: PersistentWorkshopCheckpointStore(
-          preferences: di.sl<PreferencesService>(),
-        ),
-      );
-      await recoveryCoordinator.restore(workshopBundle.dashboardController);
-
-      if (!mounted) {
-        workshopBundle.dashboardController.dispose();
-        workshopBundle = null;
-        return;
+      final workshopBundle = _workshopBundle;
+      final workshopAssignments = _workshopAssignments;
+      final executionController = _workshopExecutionController;
+      if (workshopBundle == null ||
+          workshopAssignments == null ||
+          executionController == null) {
+        throw StateError('Il lifecycle persistente del Cantiere non è disponibile.');
       }
-
-      recoveryCoordinator.attach(workshopBundle.dashboardController);
-      final taskCoordinator = WorkshopProductionTaskCoordinator(
-        bundle: workshopBundle,
-      );
-      executionController = WorkshopProductionExecutionController(
-        runner: WorkshopProductionTaskExecutionRunner(
-          coordinator: taskCoordinator,
-        ),
-      );
 
       await navigator.push(MaterialPageRoute<void>(
         builder: (_) => SafeArea(
@@ -137,9 +214,9 @@ class _AppShellState extends State<AppShell> {
           maintainBottomViewPadding: true,
           minimum: const EdgeInsets.only(bottom: 12),
           child: WorkshopProductionDashboardPage(
-            bundle: workshopBundle!,
+            bundle: workshopBundle,
             modelAssignments: workshopAssignments,
-            executionController: executionController!,
+            executionController: executionController,
           ),
         ),
       ));
@@ -151,9 +228,6 @@ class _AppShellState extends State<AppShell> {
           SnackBar(content: Text('Impossibile aprire il Cantiere: $error')),
         );
     } finally {
-      executionController?.dispose();
-      await recoveryCoordinator?.detach();
-      workshopBundle?.dashboardController.dispose();
       if (mounted) setState(() => _openingWorkshop = false);
     }
   }
