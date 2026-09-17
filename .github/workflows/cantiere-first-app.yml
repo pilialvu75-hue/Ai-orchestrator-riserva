@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'tool/cantiere_first_app_smoke.dart'
+      - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
       - 'lib/app_factory/**'
       - '.github/workflows/cantiere-first-app.yml'
   workflow_dispatch:
@@ -49,7 +50,9 @@ jobs:
         run: flutter pub get
 
       - name: Analyze first-app acceptance smoke
-        run: dart analyze tool/cantiere_first_app_smoke.dart
+        run: |
+          dart analyze tool/cantiere_first_app_smoke.dart
+          flutter analyze test/app_factory/workshop/cantiere_first_app_smoke_test.dart
 
       - name: Create deterministic Android starter workspace
         id: workspace
@@ -68,13 +71,16 @@ jobs:
       - name: Run guarded Cantiere pipeline and real APK build
         shell: bash
         env:
+          CANTIERE_FIRST_APP_WORKSPACE: ${{ steps.workspace.outputs.path }}
           CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
           CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
         run: |
           set -euo pipefail
           test -x "$CANTIERE_FLUTTER_EXECUTABLE"
           test -x "$CANTIERE_DART_EXECUTABLE"
-          dart run tool/cantiere_first_app_smoke.dart "${{ steps.workspace.outputs.path }}" \
+          flutter test \
+            test/app_factory/workshop/cantiere_first_app_smoke_test.dart \
+            --reporter expanded \
             2>&1 | tee "${RUNNER_TEMP}/cantiere-first-app.log"
 
       - name: Upload first-app diagnostics on failure
