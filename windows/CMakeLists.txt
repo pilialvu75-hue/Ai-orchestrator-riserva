@@ -59,6 +59,7 @@ install(TARGETS
   ${BINARY_NAME}
   ai_orchestrator_windows_probe
   ai_orchestrator_windows_graphics_probe
+  ai_orchestrator_windows_bootstrap_probe
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
