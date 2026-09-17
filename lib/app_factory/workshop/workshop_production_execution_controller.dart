@@ -36,6 +36,10 @@ final class WorkshopProductionExecutionState {
 
   bool get hasResult => result != null;
 
+  bool get canRetry =>
+      status == WorkshopProductionExecutionStatus.failed ||
+      status == WorkshopProductionExecutionStatus.cancelled;
+
   WorkshopProductionExecutionState copyWith({
     WorkshopProductionExecutionStatus? status,
     WorkshopProductionTaskHandle? handle,
@@ -137,6 +141,23 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     final run = _execute(handle, token);
     _activeRun = run;
     return run;
+  }
+
+  /// Restarts a terminal failed/cancelled execution using the coordinator's
+  /// currently prepared task. This deliberately does not retry successful or
+  /// still-running work, preventing duplicate inference/apply chains.
+  Future<WorkshopTaskInferenceResult> retry() {
+    _ensureAvailable();
+    if (_activeRun != null) {
+      return _activeRun!;
+    }
+    if (!_state.canRetry) {
+      throw StateError(
+        'Workshop production execution can only retry after failure or cancellation.',
+      );
+    }
+    _setState(const WorkshopProductionExecutionState());
+    return start();
   }
 
   void cancel() {
