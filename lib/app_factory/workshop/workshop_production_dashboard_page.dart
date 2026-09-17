@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.da
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
@@ -23,11 +24,13 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     required this.bundle,
     required this.modelAssignments,
     required this.executionController,
+    required this.chatController,
   });
 
   final WorkshopProductionLifecycleBundle bundle;
   final List<WorkshopModelAssignment> modelAssignments;
   final WorkshopProductionExecutionController executionController;
+  final WorkshopChatController chatController;
 
   @override
   State<WorkshopProductionDashboardPage> createState() =>
@@ -308,6 +311,7 @@ class _WorkshopProductionDashboardPageState
         child: WorkshopConversationSelection(
           child: WorkshopDashboardPage(
             dashboardController: widget.bundle.dashboardController,
+            chatController: widget.chatController,
             modelAssignments: widget.modelAssignments,
           ),
         ),
