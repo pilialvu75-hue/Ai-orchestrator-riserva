@@ -23,20 +23,28 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 /// Reviewer -> validation -> explicit approval -> guarded apply -> Build Lab ->
 /// real APK.
 ///
+/// When [--prepare-only] is supplied, the guarded Cantiere lifecycle stops just
+/// after apply/format. This mode exists for Flutter-test based CI: the outer
+/// `flutter test` process owns the Flutter SDK lock, so the real analyzer/tests/
+/// APK build are executed by the workflow immediately after that process exits.
+/// The generated workspace is the same workspace produced by this lifecycle.
+///
 /// Inference is deterministic on purpose: this test validates orchestration,
 /// workspace safety and the real build path without making CI depend on a model,
 /// provider quota or network. Real-model device validation remains a separate
 /// acceptance gate.
 Future<void> main(List<String> args) async {
-  if (args.length != 1) {
+  final prepareOnly = args.length == 2 && args[1] == '--prepare-only';
+  if (args.isEmpty || args.length > 2 || (args.length == 2 && !prepareOnly)) {
     stderr.writeln(
-      'Usage: dart run tool/cantiere_first_app_smoke.dart <workspace-path>',
+      'Usage: dart run tool/cantiere_first_app_smoke.dart '
+      '<workspace-path> [--prepare-only]',
     );
     exitCode = 64;
     return;
   }
 
-  final workspace = Directory(args.single).absolute;
+  final workspace = Directory(args.first).absolute;
   if (!await workspace.exists()) {
     stderr.writeln('Workspace does not exist: ${workspace.path}');
     exitCode = 66;
@@ -151,6 +159,13 @@ Future<void> main(List<String> args) async {
         'dart format check failed (${format.exitCode}).\n'
         '${format.stdout}\n${format.stderr}',
       );
+    }
+
+    if (prepareOnly) {
+      stdout.writeln(
+        '[FIRST_APP] stage=workspace status=ready path=${workspace.path}',
+      );
+      return;
     }
 
     stdout.writeln('[FIRST_APP] stage=build status=running target=android');
