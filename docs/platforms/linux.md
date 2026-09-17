@@ -14,6 +14,12 @@ The first distribution target is Debian/Ubuntu-compatible systems.
 - The app emits the shared runtime/forensics events through `RuntimeEventLog`, including model validation and inference failures.
 - Installation registers the desktop entry and scalable Linux icon; package maintainer scripts refresh desktop/icon caches when the host exposes those utilities.
 
+## Distribution compatibility
+
+The baseline package is built on Ubuntu 22.04 so the generated native binaries retain an older glibc baseline. Debian package dependencies use alternatives for the GTK and ALSA runtime package-name transition (`libgtk-3-0t64 | libgtk-3-0` and `libasound2t64 | libasound2`), allowing the same package metadata to cover both the older Ubuntu/Debian naming and newer t64-based distributions. `libsecret-1-0` and `xdg-utils` remain explicit runtime dependencies.
+
+The first hardware-validation target remains an amd64 Debian/Ubuntu desktop. Until real-machine tests are available, compatibility is enforced through CI package inspection, dynamic-link checks, GUI smoke tests and the portable fallback bundle.
+
 ## CI artifacts
 
 `Build Linux Desktop` produces:
