@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
@@ -84,7 +85,17 @@ final class LocalGitWorkspaceGateway implements GitWorkspaceGateway {
       );
     }
 
-    return file.readAsString();
+    // VirtualWorkspace is intentionally text-only. Real application projects
+    // routinely contain PNGs, fonts, native objects and other binary assets.
+    // They must remain untouched in the backing workspace instead of making
+    // project initialization fail just because they are not valid UTF-8.
+    final bytes = await file.readAsBytes();
+
+    try {
+      return utf8.decode(bytes, allowMalformed: false);
+    } on FormatException {
+      return null;
+    }
   }
 
   @override
@@ -213,7 +224,7 @@ final class LocalGitWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> push() async {
     throw UnsupportedError(
       'LocalGitWorkspaceGateway does not push to a remote repository. '
-      'Remote Git support will be added through a dedicated Git backend.',
+      'Remote Git support will be added through a dedicated remote backend.',
     );
   }
 
