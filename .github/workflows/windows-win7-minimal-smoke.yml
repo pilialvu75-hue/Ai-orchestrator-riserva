@@ -86,6 +86,13 @@ jobs:
             Write-Warning 'dumpbin.exe unavailable; skipping PE import assertion.'
           }
 
+      - name: Add one-click smoke launchers
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          Copy-Item 'windows\diagnostics\AI-Orchestrator-Win7-Smoke-Normal.cmd' $releaseDir -Force
+          Copy-Item 'windows\diagnostics\AI-Orchestrator-Win7-Smoke-No-Impeller.cmd' $releaseDir -Force
+
       - name: Package minimal smoke candidate
         id: package
         shell: pwsh
