@@ -46,13 +46,6 @@ final class CloudProviderAccessCopy {
     CloudProviderDefinition definition,
   ) {
     return definition.costClass == CloudProviderCostClass.freeTier &&
-        switch (definition.accessClass) {
-          CloudProviderAccessClass.recurringFreeTier ||
-          CloudProviderAccessClass.developmentPrototypeFreeAccess ||
-          CloudProviderAccessClass.accountDependentFreeAccess => true,
-          CloudProviderAccessClass.promoCredit ||
-          CloudProviderAccessClass.paid ||
-          CloudProviderAccessClass.unknown => false,
-        };
+        definition.accessClass == CloudProviderAccessClass.recurringFreeTier;
   }
 }
