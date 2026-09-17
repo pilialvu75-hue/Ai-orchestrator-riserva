@@ -13,6 +13,10 @@ if [[ ! -x "$bundle_dir/llama-completion" ]]; then
   echo "Bundled llama-completion is missing: $bundle_dir/llama-completion" >&2
   exit 1
 fi
+if [[ ! -f "$repo_root/native/linux/llama-runtime" ]]; then
+  echo "Linux runtime wrapper is missing: $repo_root/native/linux/llama-runtime" >&2
+  exit 1
+fi
 
 version="${AI_ORCHESTRATOR_PACKAGE_VERSION:-$(awk '/^version:/ {print $2; exit}' "$repo_root/pubspec.yaml")}"
 version="${version#v}"
@@ -35,6 +39,8 @@ mkdir -p \
   "$package_root/usr/share/icons/hicolor/scalable/apps"
 
 cp -a "$bundle_dir/." "$package_root/usr/lib/ai-orchestrator/"
+install -m 0755 "$repo_root/native/linux/llama-runtime" \
+  "$package_root/usr/lib/ai-orchestrator/llama-runtime"
 install -m 0644 "$repo_root/linux/packaging/ai-orchestrator.desktop" \
   "$package_root/usr/share/applications/ai-orchestrator.desktop"
 install -m 0644 "$repo_root/linux/packaging/ai-orchestrator.svg" \
@@ -42,13 +48,15 @@ install -m 0644 "$repo_root/linux/packaging/ai-orchestrator.svg" \
 
 cat > "$package_root/usr/bin/ai-orchestrator" <<'EOF'
 #!/usr/bin/env bash
-set -e
-exec /usr/lib/ai-orchestrator/ai_orchestrator "$@"
+set -euo pipefail
+runtime_root=/usr/lib/ai-orchestrator
+export LLAMA_CPP_EXECUTABLE="${LLAMA_CPP_EXECUTABLE:-$runtime_root/llama-runtime}"
+exec "$runtime_root/ai_orchestrator" "$@"
 EOF
 chmod 0755 "$package_root/usr/bin/ai-orchestrator"
 
 cat > "$package_root/DEBIAN/postinst" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/sh
 set -e
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
@@ -61,7 +69,7 @@ EOF
 chmod 0755 "$package_root/DEBIAN/postinst"
 
 cat > "$package_root/DEBIAN/postrm" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/sh
 set -e
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
