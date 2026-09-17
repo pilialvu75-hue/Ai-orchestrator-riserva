@@ -96,6 +96,17 @@ Description: AI Orchestrator desktop application
  Offline-first multi-platform AI assistant and app factory.
 EOF
 
+# Fail the package build if the installed launcher would ever fall back to an
+# unbundled system llama-cli. This checks the exact files that enter the .deb.
+test -x "$package_root/usr/lib/ai-orchestrator/llama-completion"
+test -x "$package_root/usr/lib/ai-orchestrator/llama-runtime"
+test -x "$package_root/usr/bin/ai-orchestrator"
+bash -n "$package_root/usr/lib/ai-orchestrator/llama-runtime"
+bash -n "$package_root/usr/bin/ai-orchestrator"
+grep -Fq 'LLAMA_CPP_EXECUTABLE' "$package_root/usr/bin/ai-orchestrator"
+grep -Fq '/usr/lib/ai-orchestrator' "$package_root/usr/bin/ai-orchestrator"
+grep -Fq 'llama-completion' "$package_root/usr/lib/ai-orchestrator/llama-runtime"
+
 mkdir -p "$output_dir"
 deb_path="$output_dir/AI-Orchestrator_${version}_amd64.deb"
 rm -f "$deb_path" "$deb_path.sha256"
