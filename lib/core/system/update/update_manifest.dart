@@ -6,6 +6,7 @@ enum UpdateTargetPlatform {
   android,
   windows,
   macos,
+  linux,
 }
 
 class UpdateArtifact {
@@ -41,6 +42,10 @@ class UpdateManifest {
     this.macosFileName,
     this.macosSizeBytes,
     this.macosSha256,
+    this.linuxUrl,
+    this.linuxFileName,
+    this.linuxSizeBytes,
+    this.linuxSha256,
     required this.changelog,
     required this.critical,
   });
@@ -60,6 +65,10 @@ class UpdateManifest {
   final String? macosFileName;
   final int? macosSizeBytes;
   final String? macosSha256;
+  final String? linuxUrl;
+  final String? linuxFileName;
+  final int? linuxSizeBytes;
+  final String? linuxSha256;
   final String changelog;
   final bool critical;
 
@@ -93,10 +102,23 @@ class UpdateManifest {
     );
   }
 
+  UpdateArtifact? get linuxArtifact {
+    final url = linuxUrl;
+    final fileName = linuxFileName;
+    if (url == null || fileName == null) return null;
+    return UpdateArtifact(
+      url: url,
+      fileName: fileName,
+      sizeBytes: linuxSizeBytes,
+      sha256: linuxSha256,
+    );
+  }
+
   UpdateArtifact? artifactFor(UpdateTargetPlatform target) => switch (target) {
         UpdateTargetPlatform.android => androidArtifact,
         UpdateTargetPlatform.windows => windowsArtifact,
         UpdateTargetPlatform.macos => macosArtifact,
+        UpdateTargetPlatform.linux => linuxArtifact,
       };
 
   bool isCompatibleWith({
@@ -125,6 +147,10 @@ class UpdateManifest {
         if (macosFileName != null) 'macos_file_name': macosFileName,
         if (macosSizeBytes != null) 'macos_size_bytes': macosSizeBytes,
         if (macosSha256 != null) 'macos_sha256': macosSha256,
+        if (linuxUrl != null) 'linux_url': linuxUrl,
+        if (linuxFileName != null) 'linux_file_name': linuxFileName,
+        if (linuxSizeBytes != null) 'linux_size_bytes': linuxSizeBytes,
+        if (linuxSha256 != null) 'linux_sha256': linuxSha256,
         'changelog': changelog,
         'critical': critical,
       };
@@ -156,6 +182,14 @@ class UpdateManifest {
         json['macos_size_bytes'] ?? json['macosSizeBytes'];
     final rawMacosSha256 =
         ((json['macos_sha256'] ?? json['macosSha256']) as String?)?.trim();
+    final rawLinuxUrl =
+        ((json['linux_url'] ?? json['linuxUrl']) as String?)?.trim();
+    final rawLinuxFileName =
+        ((json['linux_file_name'] ?? json['linuxFileName']) as String?)?.trim();
+    final rawLinuxSizeBytes =
+        json['linux_size_bytes'] ?? json['linuxSizeBytes'];
+    final rawLinuxSha256 =
+        ((json['linux_sha256'] ?? json['linuxSha256']) as String?)?.trim();
 
     if (rawVersion == null || rawVersion.isEmpty) {
       throw const FormatException('Invalid manifest: missing version');
@@ -285,6 +319,57 @@ class UpdateManifest {
       }
     }
 
+    String? linuxUrl;
+    String? linuxFileName;
+    int? linuxSizeBytes;
+    String? linuxSha256;
+    final hasLinuxMetadata =
+        rawLinuxUrl != null ||
+        rawLinuxFileName != null ||
+        rawLinuxSizeBytes != null ||
+        rawLinuxSha256 != null;
+    if (hasLinuxMetadata) {
+      if (rawLinuxUrl == null || rawLinuxUrl.isEmpty) {
+        throw const FormatException(
+          'Invalid manifest: linux_url is required when Linux metadata is present',
+        );
+      }
+      final linuxUri = _validateHttpUrl(rawLinuxUrl, fieldName: 'linux_url');
+      final derivedLinuxFileName =
+          rawLinuxFileName ??
+          (linuxUri.pathSegments.isNotEmpty
+              ? linuxUri.pathSegments.last.trim()
+              : '');
+      if (derivedLinuxFileName.isEmpty ||
+          derivedLinuxFileName.contains('/') ||
+          !derivedLinuxFileName.toLowerCase().endsWith('.deb')) {
+        throw FormatException(
+          'Invalid manifest: Linux filename must be a non-empty .deb name, got: $derivedLinuxFileName',
+        );
+      }
+      linuxUrl = rawLinuxUrl;
+      linuxFileName = derivedLinuxFileName;
+      linuxSizeBytes = switch (rawLinuxSizeBytes) {
+        int value => value,
+        String value => int.tryParse(value.trim()),
+        _ => null,
+      };
+      if (linuxSizeBytes != null && linuxSizeBytes <= 0) {
+        throw FormatException(
+          'Invalid manifest: Linux installer size must be > 0, got: $linuxSizeBytes',
+        );
+      }
+      if (rawLinuxSha256 != null && rawLinuxSha256.isNotEmpty) {
+        final normalizedSha = rawLinuxSha256.toLowerCase();
+        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(normalizedSha)) {
+          throw const FormatException(
+            'Invalid manifest: linux_sha256 must be a 64-character hexadecimal SHA-256',
+          );
+        }
+        linuxSha256 = normalizedSha;
+      }
+    }
+
     // Missing min_supported must never block updates by default.
     final rawResolvedMinSupported =
         (rawMinSupported != null && rawMinSupported.isNotEmpty)
@@ -330,6 +415,10 @@ class UpdateManifest {
       macosFileName: macosFileName,
       macosSizeBytes: macosSizeBytes,
       macosSha256: macosSha256,
+      linuxUrl: linuxUrl,
+      linuxFileName: linuxFileName,
+      linuxSizeBytes: linuxSizeBytes,
+      linuxSha256: linuxSha256,
       changelog: (json['changelog'] as String?)?.trim() ?? '',
       critical: json['critical'] == true || json['forceUpdate'] == true,
     );
