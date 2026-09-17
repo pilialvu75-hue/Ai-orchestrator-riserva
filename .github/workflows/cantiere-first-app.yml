@@ -1,0 +1,96 @@
+name: Cantiere First App APK
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tool/cantiere_first_app_smoke.dart'
+      - 'lib/app_factory/**'
+      - '.github/workflows/cantiere-first-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: cantiere-first-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  first-app-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve AI Orchestrator dependencies
+        run: flutter pub get
+
+      - name: Create deterministic Android starter workspace
+        id: workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="${RUNNER_TEMP}/cantiere-first-app"
+          rm -rf "$WORKSPACE"
+          flutter create \
+            --platforms=android \
+            --project-name=cantiere_first_app \
+            --org=ai.orchestrator.generated \
+            "$WORKSPACE"
+          echo "path=$WORKSPACE" >> "$GITHUB_OUTPUT"
+
+      - name: Run guarded Cantiere pipeline and real APK build
+        shell: bash
+        env:
+          CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
+          CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
+        run: |
+          set -euo pipefail
+          test -x "$CANTIERE_FLUTTER_EXECUTABLE"
+          test -x "$CANTIERE_DART_EXECUTABLE"
+          dart run tool/cantiere_first_app_smoke.dart "${{ steps.workspace.outputs.path }}" \
+            | tee "${RUNNER_TEMP}/cantiere-first-app.log"
+
+      - name: Verify and package first APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="${{ steps.workspace.outputs.path }}/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          mkdir -p build/cantiere-first-app
+          cp "$SOURCE" build/cantiere-first-app/cantiere-first-app.apk
+          sha256sum build/cantiere-first-app/cantiere-first-app.apk \
+            > build/cantiere-first-app/cantiere-first-app.apk.sha256
+          cp "${RUNNER_TEMP}/cantiere-first-app.log" \
+            build/cantiere-first-app/cantiere-first-app.log
+
+      - name: Upload first app artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-first-app-android
+          path: build/cantiere-first-app/
+          if-no-files-found: error
+          retention-days: 14
