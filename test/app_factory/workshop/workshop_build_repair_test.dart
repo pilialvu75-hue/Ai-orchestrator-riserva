@@ -93,6 +93,58 @@ void main() {
     });
   });
 
+  group('WorkshopBuildRepairPlanner fingerprint', () {
+    const planner = WorkshopBuildRepairPlanner(
+      policy: WorkshopBuildRepairPolicy(
+        maxFingerprintEvidenceChars: 80,
+      ),
+    );
+
+    test('same normalized failure produces same privacy-safe signature', () {
+      final first = _build(
+        status: WorkshopBuildStatus.failed,
+        errors: const <String>['local_test_failed'],
+        stderr: '  failing   test\nexpected 1   actual 2 ',
+        exitCode: 1,
+        testsPassed: false,
+      );
+      final same = _build(
+        status: WorkshopBuildStatus.failed,
+        errors: const <String>['local_test_failed'],
+        stderr: 'failing test expected 1 actual 2',
+        exitCode: 1,
+        testsPassed: false,
+      );
+
+      final firstSignature = planner.failureSignature(first);
+      final sameSignature = planner.failureSignature(same);
+
+      expect(firstSignature, sameSignature);
+      expect(firstSignature.length, 64);
+      expect(firstSignature, isNot(contains('failing test')));
+    });
+
+    test('different diagnostic evidence produces a different signature', () {
+      final first = _build(
+        status: WorkshopBuildStatus.failed,
+        errors: const <String>['local_build_failed'],
+        stderr: 'Undefined name Alpha.',
+        exitCode: 1,
+      );
+      final different = _build(
+        status: WorkshopBuildStatus.failed,
+        errors: const <String>['local_build_failed'],
+        stderr: 'Undefined name Beta.',
+        exitCode: 1,
+      );
+
+      expect(
+        planner.failureSignature(first),
+        isNot(planner.failureSignature(different)),
+      );
+    });
+  });
+
   group('WorkshopBuildRepairPlanner prompt safety', () {
     test('bounds goal and diagnostics and labels output as untrusted', () {
       const planner = WorkshopBuildRepairPlanner(
