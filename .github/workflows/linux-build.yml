@@ -268,3 +268,37 @@ jobs:
             linux-deb-contents.log
           if-no-files-found: warn
           retention-days: 14
+
+  validate-debian-compatibility:
+    name: validate-deb-${{ matrix.os }}
+    needs: build-linux
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Download exact Debian package from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-orchestrator-linux-deb-x64
+          path: linux-deb
+
+      - name: Validate package dependency resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(find linux-deb -type f -name 'AI-Orchestrator_*_amd64.deb' -print -quit)"
+          test -n "$deb"
+          test -s "$deb"
+          echo "Runner: ${{ matrix.os }}"
+          echo "Package: $deb"
+          dpkg-deb -f "$deb" Package Version Architecture Depends
+          sudo apt-get update
+          sudo apt-get install --simulate --no-install-recommends -y "$deb" | tee apt-install-simulate.log
+          grep -Eq 'ai-orchestrator|AI Orchestrator' apt-install-simulate.log
+          echo 'LINUX_DEB_DEPENDENCY_RESOLUTION_OK'
