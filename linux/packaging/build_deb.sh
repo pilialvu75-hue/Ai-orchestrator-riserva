@@ -88,7 +88,7 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libgtk-3-0, libsecret-1-0, libasound2, xdg-utils
+Depends: libgtk-3-0t64 | libgtk-3-0, libsecret-1-0, libasound2t64 | libasound2, xdg-utils
 Maintainer: AI Orchestrator
 Installed-Size: $installed_kb
 Homepage: https://github.com/pilialvu75-hue/Ai-orchestrator-riserva
