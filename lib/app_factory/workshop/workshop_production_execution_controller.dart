@@ -16,12 +16,19 @@ enum WorkshopProductionExecutionStatus {
 final class WorkshopProductionExecutionPolicy {
   const WorkshopProductionExecutionPolicy({
     this.maxDistinctTasksPerProject = 64,
-  }) : assert(maxDistinctTasksPerProject > 0);
+    this.maxBuildRepairAttempts = 2,
+  })  : assert(maxDistinctTasksPerProject > 0),
+        assert(maxBuildRepairAttempts >= 0);
 
   /// Hard guard against malformed/cyclic plans causing unbounded unattended
   /// execution. Retries of the same authoritative task do not consume a new
   /// slot; a new project automatically starts with a fresh budget.
   final int maxDistinctTasksPerProject;
+
+  /// Hard upper bound for project-code build repair productions belonging to
+  /// one logical repair chain. Infrastructure failures never consume this
+  /// budget because they are not eligible for AI repair.
+  final int maxBuildRepairAttempts;
 }
 
 final class WorkshopProductionExecutionState {
@@ -125,9 +132,9 @@ final class WorkshopProductionTaskExecutionRunner
 /// controller never approves or applies changes: after inference succeeds, the
 /// existing Reviewer/validation/owner approval/apply gates remain authoritative.
 ///
-/// The controller also owns the bounded per-project task-attempt guard because
-/// this state must survive page rebuilds. A retry of the same task is allowed;
-/// only newly observed authoritative task ids consume the project budget.
+/// The controller also owns bounded execution budgets that must survive route
+/// rebuilds: distinct tasks per project and build-repair attempts per logical
+/// repair chain. It still owns no build logic and performs no workspace writes.
 final class WorkshopProductionExecutionController extends ChangeNotifier {
   WorkshopProductionExecutionController({
     required WorkshopProductionExecutionRunner runner,
@@ -144,10 +151,14 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   bool _disposed = false;
   String? _activePlanId;
   final Set<String> _startedTaskIds = <String>{};
+  String? _buildRepairRootProjectId;
+  int _buildRepairAttempts = 0;
 
   WorkshopProductionExecutionState get state => _state;
 
   int get distinctTasksStartedInCurrentProject => _startedTaskIds.length;
+  int get buildRepairAttempts => _buildRepairAttempts;
+  String? get buildRepairRootProjectId => _buildRepairRootProjectId;
 
   Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
     _ensureAvailable();
@@ -212,6 +223,41 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       ),
     );
     token.cancel();
+  }
+
+  /// Reserves one bounded AI build-repair attempt for [rootProjectId].
+  ///
+  /// A new root project starts a fresh repair budget. Subsequent repair projects
+  /// in the same chain must keep passing the original root id so navigation or
+  /// a new repair-plan id cannot silently reset the limit.
+  bool reserveBuildRepairAttempt({required String rootProjectId}) {
+    _ensureAvailable();
+    final normalized = rootProjectId.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(
+        rootProjectId,
+        'rootProjectId',
+        'Workshop build repair root project id cannot be empty.',
+      );
+    }
+
+    if (_buildRepairRootProjectId != normalized) {
+      _buildRepairRootProjectId = normalized;
+      _buildRepairAttempts = 0;
+    }
+
+    if (_buildRepairAttempts >= policy.maxBuildRepairAttempts) {
+      return false;
+    }
+
+    _buildRepairAttempts += 1;
+    return true;
+  }
+
+  void clearBuildRepairChain() {
+    _ensureAvailable();
+    _buildRepairRootProjectId = null;
+    _buildRepairAttempts = 0;
   }
 
   Future<WorkshopTaskInferenceResult> _execute(
@@ -302,6 +348,20 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _startedTaskIds.add(taskId);
   }
 
+  /// Clears terminal task state before the next task while preserving the
+  /// explicitly selected offline/online mode for the same production chain.
+  void resetForNextTask() {
+    _ensureAvailable();
+    if (_activeRun != null) {
+      throw StateError(
+        'Cannot reset Workshop production execution while a task is running.',
+      );
+    }
+    _setState(WorkshopProductionExecutionState(isOffline: _state.isOffline));
+  }
+
+  /// Full execution-state reset. This intentionally resets the execution mode
+  /// but leaves the independently bounded build-repair chain untouched.
   void reset() {
     _ensureAvailable();
     if (_activeRun != null) {
@@ -336,6 +396,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _cancellationToken = null;
     _startedTaskIds.clear();
     _activePlanId = null;
+    _buildRepairRootProjectId = null;
+    _buildRepairAttempts = 0;
     super.dispose();
   }
 }
