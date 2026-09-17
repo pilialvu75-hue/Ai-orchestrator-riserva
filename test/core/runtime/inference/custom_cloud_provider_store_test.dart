@@ -27,6 +27,12 @@ void main() {
     expect(definition!.displayName, 'Future Free AI');
     expect(definition.defaultModel, 'future-code-1');
     expect(definition.costClass, CloudProviderCostClass.freeTier);
+    expect(
+      definition.accessClass,
+      CloudProviderAccessClass.accountDependentFreeAccess,
+      reason:
+          'User-declared free billing is not proof of a durable recurring free tier.',
+    );
     expect(definition.isCustom, isTrue);
     expect(
       CloudProviderCatalog.supports(
@@ -49,6 +55,10 @@ void main() {
     expect(
       CloudProviderCatalog.costClassFor(profile.id),
       CloudProviderCostClass.paid,
+    );
+    expect(
+      CloudProviderCatalog.accessClassFor(profile.id),
+      CloudProviderAccessClass.paid,
     );
   });
 
