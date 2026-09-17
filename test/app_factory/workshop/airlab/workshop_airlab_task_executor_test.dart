@@ -30,10 +30,7 @@ void main() {
         }
 
         if (request.url.path == '/v1/capabilities') {
-          return http.Response(
-            jsonEncode(_capabilities()),
-            200,
-          );
+          return http.Response(jsonEncode(_capabilities()), 200);
         }
 
         if (request.url.path == '/v1/tasks') {
@@ -45,39 +42,7 @@ void main() {
           expect(payload['project_id'], 'project-42');
 
           return http.Response(
-            jsonEncode(<String, dynamic>{
-              'request_id': 'airlab-request-1',
-              'status': 'ok',
-              'engine_id': 'mock-builder-v2',
-              'plan': <String>[
-                'classify software task as software.build',
-                'inspect reusable modules and prior validated assets',
-                'prepare implement work for target web',
-                'validate the result before publication',
-              ],
-              'operations': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'action': 'create',
-                  'path': '.airlab/mock-result.txt',
-                  'content': 'mock',
-                },
-              ],
-              'artifacts': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'format': 'airlab',
-                  'role': 'source',
-                  'path': 'project/project.airlab.json',
-                  'editable': true,
-                  'derived': false,
-                  'status': 'planned',
-                },
-              ],
-              'metadata': <String, dynamic>{
-                'mock': true,
-                'task_family': 'software',
-                'task_kind': 'software.build',
-              },
-            }),
+            jsonEncode(_taskResponse(operations: const <Map<String, dynamic>>[])),
             200,
           );
         }
@@ -108,6 +73,7 @@ void main() {
     expect(result.artifacts, <String>['project/project.airlab.json']);
     expect(result.metadata['requestId'], 'airlab-request-1');
     expect(result.metadata['engineId'], 'mock-builder-v2');
+    expect(result.metadata['repositoryModified'], isFalse);
     expect(executor.isAvailable, isTrue);
     expect(
       phases,
@@ -217,6 +183,43 @@ void main() {
     expect(executor.isAvailable, isTrue);
   });
 
+  test('proposed operations fail closed without a staging materializer', () async {
+    final executor = WorkshopAirLabTaskExecutor(
+      client: WorkshopAirLabClient(
+        baseUri: Uri.parse('http://127.0.0.1:8788'),
+        httpClient: _successfulClient(
+          operations: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'action': 'create',
+              'path': '.airlab/mock-result.txt',
+              'content': 'mock',
+            },
+          ],
+        ),
+      ),
+    );
+
+    final result = await executor.execute(
+      task: _task(
+        kind: WorkshopTaskKind.codeGeneration,
+        objective: 'Create a notes application',
+        fileScope: const WorkshopTaskFileScope(
+          allowed: <String>['.airlab/mock-result.txt'],
+        ),
+      ),
+      guardDecision: const WorkshopTaskExecutionGuardDecision.allowed(
+        taskId: 'task-1',
+        resource: WorkshopTaskResource.local,
+        providerId: 'airlab',
+      ),
+      context: const WorkshopTaskExecutionContext(stagingRoot: '/controlled/staging'),
+    );
+
+    expect(result.status, WorkshopTaskStatus.failed);
+    expect(result.metadata['code'], 'staging_materializer_unavailable');
+    expect(result.metadata['requestId'], 'airlab-request-1');
+  });
+
   test('mapper turns image + measurement CAD work into cad.reconstruct', () {
     final request = const WorkshopAirLabTaskRequestMapper().map(
       task: _task(
@@ -273,6 +276,61 @@ void main() {
   });
 }
 
+MockClient _successfulClient({
+  List<Map<String, dynamic>> operations = const <Map<String, dynamic>>[],
+}) {
+  return MockClient((request) async {
+    if (request.url.path == '/health') {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'status': 'ok',
+          'service': 'airlab',
+          'engine_id': 'mock-builder-v2',
+        }),
+        200,
+      );
+    }
+    if (request.url.path == '/v1/capabilities') {
+      return http.Response(jsonEncode(_capabilities()), 200);
+    }
+    if (request.url.path == '/v1/tasks') {
+      return http.Response(jsonEncode(_taskResponse(operations: operations)), 200);
+    }
+    return http.Response('{}', 404);
+  });
+}
+
+Map<String, dynamic> _taskResponse({
+  required List<Map<String, dynamic>> operations,
+}) =>
+    <String, dynamic>{
+      'request_id': 'airlab-request-1',
+      'status': 'ok',
+      'engine_id': 'mock-builder-v2',
+      'plan': <String>[
+        'classify software task as software.build',
+        'inspect reusable modules and prior validated assets',
+        'prepare implement work for target web',
+        'validate the result before publication',
+      ],
+      if (operations.isNotEmpty) 'operations': operations,
+      'artifacts': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'format': 'airlab',
+          'role': 'source',
+          'path': 'project/project.airlab.json',
+          'editable': true,
+          'derived': false,
+          'status': 'planned',
+        },
+      ],
+      'metadata': <String, dynamic>{
+        'mock': true,
+        'task_family': 'software',
+        'task_kind': 'software.build',
+      },
+    };
+
 Map<String, dynamic> _capabilities() => <String, dynamic>{
       'service': 'airlab',
       'engine_id': 'mock-builder-v2',
@@ -306,6 +364,7 @@ WorkshopTaskContract _task({
   required WorkshopTaskKind kind,
   required String objective,
   Map<String, dynamic> metadata = const <String, dynamic>{},
+  WorkshopTaskFileScope fileScope = const WorkshopTaskFileScope(),
 }) {
   return WorkshopTaskContract(
     id: 'task-1',
@@ -313,5 +372,6 @@ WorkshopTaskContract _task({
     objective: objective,
     kind: kind,
     metadata: metadata,
+    fileScope: fileScope,
   );
 }
