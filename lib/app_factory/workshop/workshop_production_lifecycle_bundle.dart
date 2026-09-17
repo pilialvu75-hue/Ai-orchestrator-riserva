@@ -4,12 +4,14 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_github_user_token_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_private_github_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_capture_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
@@ -22,6 +24,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_facto
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 
 final class WorkshopProductionLifecycleBundle {
   const WorkshopProductionLifecycleBundle({
@@ -218,12 +221,16 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     final resolvedLibraryClient =
         libraryReadClient ?? WorkshopLibraryReadAdapter();
 
+    final resolvedBuildProviders = buildLab != null || buildProviders.isNotEmpty
+        ? buildProviders
+        : _defaultPrivateBuildProviders();
+
     return createForWorkspace(
       workspaceRootPath: normalizedWorkspaceRootPath,
       inferenceService: inferenceService,
       assignments: assignments,
       buildLab: buildLab,
-      buildProviders: buildProviders,
+      buildProviders: resolvedBuildProviders,
       reuseLibrary: reuseLibrary,
       onReuseLibraryChanged: reuseStore.save,
       reuseSourceSnapshots: reuseSourceSnapshots,
@@ -238,5 +245,23 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
+  }
+
+  static Iterable<WorkshopBuildProvider> _defaultPrivateBuildProviders() {
+    final tokenProvider = WorkshopGitHubUserTokenProvider(
+      clientIdProvider: ModuleLibraryGitHubConfigStore().loadClientId,
+    );
+
+    return <WorkshopBuildProvider>[
+      WorkshopPrivateGitHubBuildProvider(
+        configuration: const WorkshopPrivateGitHubBuildConfiguration(
+          repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
+          workflowFile: 'build-cantiere-android.yml',
+          baseBranch: 'main',
+          requirePrivateRepository: true,
+        ),
+        accessTokenProvider: tokenProvider.call,
+      ),
+    ];
   }
 }
