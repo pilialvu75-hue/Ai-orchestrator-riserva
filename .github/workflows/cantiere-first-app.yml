@@ -68,24 +68,12 @@ jobs:
             "$WORKSPACE"
           echo "path=$WORKSPACE" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare isolated Flutter SDK for nested Build Lab
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUILD_FLUTTER_ROOT="${RUNNER_TEMP}/cantiere-build-flutter"
-          rm -rf "$BUILD_FLUTTER_ROOT"
-          mkdir -p "$BUILD_FLUTTER_ROOT"
-          cp -a --reflink=auto "${FLUTTER_ROOT}/." "$BUILD_FLUTTER_ROOT/"
-          test -x "$BUILD_FLUTTER_ROOT/bin/flutter"
-          test -x "$BUILD_FLUTTER_ROOT/bin/dart"
-          "$BUILD_FLUTTER_ROOT/bin/flutter" --version
-
-      - name: Run guarded Cantiere pipeline and real APK build
+      - name: Run guarded Cantiere production lifecycle
         shell: bash
         env:
           CANTIERE_FIRST_APP_WORKSPACE: ${{ steps.workspace.outputs.path }}
-          CANTIERE_FLUTTER_EXECUTABLE: ${{ runner.temp }}/cantiere-build-flutter/bin/flutter
-          CANTIERE_DART_EXECUTABLE: ${{ runner.temp }}/cantiere-build-flutter/bin/dart
+          CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
+          CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
         run: |
           set -euo pipefail
           test -x "$CANTIERE_FLUTTER_EXECUTABLE"
@@ -94,6 +82,25 @@ jobs:
             test/app_factory/workshop/cantiere_first_app_smoke_test.dart \
             --reporter expanded \
             2>&1 | tee "${RUNNER_TEMP}/cantiere-first-app.log"
+
+      - name: Validate generated app and build real APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ steps.workspace.outputs.path }}"
+          {
+            echo '[FIRST_APP] stage=external_validation status=running'
+            dart format --output=none --set-exit-if-changed lib test
+            flutter analyze
+            flutter test --reporter expanded
+            echo '[FIRST_APP] stage=build status=running target=android'
+            flutter build apk --release
+            SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+            test -s "$SOURCE"
+            BYTES="$(stat -c%s "$SOURCE")"
+            echo "[FIRST_APP] stage=artifact status=ready bytes=$BYTES"
+            echo "CANTIERE_FIRST_APP_APK=$PWD/$SOURCE"
+          } 2>&1 | tee -a "${RUNNER_TEMP}/cantiere-first-app.log"
 
       - name: Upload first-app diagnostics on failure
         if: ${{ failure() }}
