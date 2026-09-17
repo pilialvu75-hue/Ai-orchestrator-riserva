@@ -253,7 +253,7 @@ class CloudProviderCatalog {
       costClass:
           free ? CloudProviderCostClass.freeTier : CloudProviderCostClass.paid,
       accessClass: free
-          ? CloudProviderAccessClass.recurringFreeTier
+          ? CloudProviderAccessClass.accountDependentFreeAccess
           : CloudProviderAccessClass.paid,
       isCustom: true,
       capabilities: const <CloudProviderCapability>{
