@@ -257,7 +257,6 @@ class _WorkshopProductionDashboardPageState
       });
 
       if (_projectReadyForBuild) {
-        // Let the current guarded apply finish its UI/state turn first.
         WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
         return;
       }
@@ -408,13 +407,13 @@ class _WorkshopProductionDashboardPageState
                 const SizedBox(height: 8),
               ],
               if (_busy)
-                const FilledButton.icon(
+                FilledButton.icon(
                   onPressed: null,
-                  icon: SizedBox.square(
+                  icon: const SizedBox.square(
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  label: Text('Cantiere in esecuzione…'),
+                  label: const Text('Cantiere in esecuzione…'),
                 )
               else if (handle != null && result?.readyForApproval == true)
                 FilledButton.icon(
