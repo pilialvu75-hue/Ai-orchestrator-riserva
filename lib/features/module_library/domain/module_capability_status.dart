@@ -208,6 +208,54 @@ abstract final class ModuleCapabilityStatusProjector {
       );
     }
 
+    // Certified catalog assets remain visible even if their capability is not
+    // pre-declared in needs.json. Needs are coverage goals, not a display allowlist.
+    final catalogOnlyCapabilities = <String>{};
+    for (final asset in catalog) {
+      if (_string(asset['status']).toLowerCase() != 'certified') continue;
+      for (final capabilityId in _stringList(asset['capabilities'])) {
+        if (!seenNeeds.contains(capabilityId)) catalogOnlyCapabilities.add(capabilityId);
+      }
+    }
+    for (final capabilityId in catalogOnlyCapabilities) {
+      var active = 0;
+      var deprecated = 0;
+      var revoked = 0;
+      final pins = <String>[];
+      final targets = <String>{};
+      for (final asset in catalog) {
+        if (_string(asset['status']).toLowerCase() != 'certified' ||
+            !_stringList(asset['capabilities']).contains(capabilityId)) continue;
+        targets.addAll(_stringList(asset['platforms']));
+        final id = _string(asset['id']);
+        final version = _string(asset['version']);
+        if (id.isEmpty || version.isEmpty) {
+          throw FormatException('Certified Module Library asset for $capabilityId has no pin.');
+        }
+        switch (_string(asset['availability']).toLowerCase()) {
+          case 'revoked': revoked += 1;
+          case 'deprecated': deprecated += 1;
+          case '':
+          case 'active': active += 1; pins.add('$id@$version');
+          default: throw FormatException('Invalid Module Library availability for $id@$version.');
+        }
+      }
+      pins.sort();
+      final sortedTargets = targets.toList()..sort();
+      result.add(ModuleCapabilityStatus(
+        capabilityId: capabilityId,
+        title: capabilityId,
+        desiredCandidates: 1,
+        certifiedActive: active,
+        certifiedDeprecated: deprecated,
+        revoked: revoked,
+        targets: List<String>.unmodifiable(sortedTargets),
+        research: ModuleResearchSignal(available: researcherJson != null),
+        availability: active > 0 ? ModuleCapabilityAvailability.complete : ModuleCapabilityAvailability.absent,
+        certifiedPins: List<String>.unmodifiable(pins),
+      ));
+    }
+
     result.sort((left, right) => left.capabilityId.compareTo(right.capabilityId));
     return List<ModuleCapabilityStatus>.unmodifiable(result);
   }
