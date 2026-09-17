@@ -17,14 +17,14 @@ void main() {
     );
   }
 
-  test('AUTO free-first admits opted-in free-access tiers without paid spend',
+  test('AUTO free-first requires opt-in for conditional free-access tiers',
       () async {
     final service = await createService();
 
     expect(CloudProviderCatalog.costClassFor('gemini'),
         CloudProviderCostClass.freeTier);
     expect(CloudProviderCatalog.costClassFor('groq'),
-        CloudProviderCostClass.freeTier);
+        CloudProviderCostClass.unknown);
     expect(CloudProviderCatalog.costClassFor('nvidiaNim'),
         CloudProviderCostClass.unknown);
     expect(CloudProviderCatalog.costClassFor('mistral'),
@@ -33,10 +33,15 @@ void main() {
         CloudProviderCostClass.freeTier);
 
     expect(service.automaticCloudUseAllowed('gemini'), isTrue);
-    expect(service.automaticCloudUseAllowed('groq'), isTrue);
-    expect(service.automaticCloudUseAllowed('nvidiaNim'), isTrue);
-    expect(service.automaticCloudUseAllowed('mistral'), isTrue);
     expect(service.automaticCloudUseAllowed('openRouter'), isTrue);
+    expect(service.automaticCloudUseAllowed('groq'), isFalse);
+    expect(service.automaticCloudUseAllowed('nvidiaNim'), isFalse);
+    expect(service.automaticCloudUseAllowed('mistral'), isFalse);
+
+    for (final provider in <String>['groq', 'nvidiaNim', 'mistral']) {
+      await service.setCloudProviderParticipatesInAuto(provider, true);
+      expect(service.automaticCloudUseAllowed(provider), isTrue);
+    }
   });
 
   test('manual selection remains independent from AUTO fallback eligibility',
@@ -50,27 +55,33 @@ void main() {
         'nvidiaNim',
         CloudTaskClass.general,
       ),
-      isTrue,
+      isFalse,
     );
 
-    await service.setCloudProviderParticipatesInAuto('nvidiaNim', false);
+    await service.setCloudProviderParticipatesInAuto('nvidiaNim', true);
     expect(service.manualCloudProvider, 'nvidiaNim');
     expect(
       service.automaticCloudUseAllowedForTask(
         'nvidiaNim',
         CloudTaskClass.general,
       ),
-      isFalse,
+      isTrue,
     );
   });
 
-  test('unrestricted remains explicit authorization for uncertain access',
+  test('unrestricted spending does not bypass explicit AUTO participation',
       () async {
     final service = await createService();
 
     await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
-    expect(service.automaticCloudUseAllowed('nvidiaNim'), isTrue);
-    expect(service.automaticCloudUseAllowed('mistral'), isTrue);
+
+    expect(service.automaticCloudUseAllowed('groq'), isFalse);
+    expect(service.automaticCloudUseAllowed('nvidiaNim'), isFalse);
+    expect(service.automaticCloudUseAllowed('mistral'), isFalse);
+    expect(service.automaticCloudUseAllowed('copilot'), isFalse);
     expect(service.automaticCloudUseAllowed('openRouter'), isTrue);
+
+    await service.setCloudProviderParticipatesInAuto('copilot', true);
+    expect(service.automaticCloudUseAllowed('copilot'), isTrue);
   });
 }
