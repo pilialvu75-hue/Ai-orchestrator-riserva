@@ -179,8 +179,7 @@ void main() {
       }
     });
 
-    test('unrestricted remains explicit authorization for all cost classes',
-        () async {
+    test('unrestricted still requires AUTO opt-in for unknown access', () async {
       final service = await createService();
 
       await service.setCloudSpendingMode(CloudSpendingMode.unrestricted);
@@ -189,6 +188,11 @@ void main() {
       expect(service.automaticCloudUseAllowed('gemini'), isTrue);
       expect(service.automaticCloudUseAllowed('claude'), isTrue);
       expect(service.automaticCloudUseAllowed('openAi'), isTrue);
+
+      // Unknown/account-dependent routes fail closed until explicitly opted in;
+      // unrestricted spending must not silently enable their AUTO participation.
+      expect(service.automaticCloudUseAllowed('copilot'), isFalse);
+      await service.setCloudProviderParticipatesInAuto('copilot', true);
       expect(service.automaticCloudUseAllowed('copilot'), isTrue);
       expect(
         service.automaticCloudUseAllowedForTask(

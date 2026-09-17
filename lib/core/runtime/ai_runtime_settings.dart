@@ -129,7 +129,19 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   bool cloudProviderParticipatesInAuto(String provider) {
     final normalized = provider.trim();
     if (!supportedProviders.contains(normalized)) return false;
-    return _configRepository.getBool('$_cloudAutoParticipationPrefix$normalized') ?? true;
+
+    final stored =
+        _configRepository.getBool('$_cloudAutoParticipationPrefix$normalized');
+    if (stored != null) return stored;
+
+    return switch (CloudProviderCatalog.accessClassFor(normalized)) {
+      CloudProviderAccessClass.recurringFreeTier ||
+      CloudProviderAccessClass.paid => true,
+      CloudProviderAccessClass.developmentPrototypeFreeAccess ||
+      CloudProviderAccessClass.accountDependentFreeAccess ||
+      CloudProviderAccessClass.promoCredit ||
+      CloudProviderAccessClass.unknown => false,
+    };
   }
 
   Future<void> setCloudProviderParticipatesInAuto(String provider, bool enabled) async {
@@ -146,12 +158,12 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   bool automaticCloudUseAllowed(String provider) => automaticCloudUseAllowedForTask(provider, CloudTaskClass.general);
 
   /// Authorizes automatic Cloud use without confusing access entitlement with
-  /// billing cost. Recurring free tiers are always spend-safe. Development or
-  /// account-dependent free access is also eligible when the user has left the
-  /// provider opted into AUTO; this is the explicit participation consent and
-  /// still does not authorize providers classified as paid. Promo credit and
-  /// unknown access fail closed because neither proves that the next request is
-  /// free. Paid routes keep the existing task-aware spending policy.
+  /// billing cost. Recurring free tiers participate by default. Development or
+  /// account-dependent free access is eligible only after explicit AUTO opt-in;
+  /// this prevents account/plan-dependent routes from silently becoming
+  /// spend-safe. Promo credit and unknown access also default off. Paid routes
+  /// keep their existing task-aware spending policy and default participation,
+  /// so spending authorization remains controlled by [cloudSpendingMode].
   bool automaticCloudUseAllowedForTask(String provider, CloudTaskClass task) {
     if (!cloudProviderParticipatesInAuto(provider)) return false;
 
@@ -180,7 +192,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
     }
 
     // Unknown/promo access remains fail-closed unless the user explicitly
-    // authorizes unrestricted Cloud spending.
+    // opts the provider into AUTO and authorizes unrestricted Cloud spending.
     return cloudSpendingMode == CloudSpendingMode.unrestricted;
   }
 

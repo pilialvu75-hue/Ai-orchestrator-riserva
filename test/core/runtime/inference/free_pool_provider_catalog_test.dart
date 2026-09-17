@@ -61,7 +61,7 @@ void main() {
 
       expect(
         CloudProviderCatalog.accessClassFor('groq'),
-        CloudProviderAccessClass.recurringFreeTier,
+        CloudProviderAccessClass.accountDependentFreeAccess,
       );
       expect(
         CloudProviderCatalog.accessClassFor('nvidiaNim'),
@@ -84,19 +84,18 @@ void main() {
         CloudProviderAccessClass.unknown,
       );
 
-      for (final provider in <String>['groq', 'openRouter']) {
-        expect(
-          CloudProviderCatalog.costClassFor(provider),
-          CloudProviderCostClass.freeTier,
-        );
-        expect(
-          settings.automaticCloudUseAllowed(provider),
-          isTrue,
-          reason: '$provider is a verified recurring free-tier route',
-        );
-      }
+      expect(
+        CloudProviderCatalog.costClassFor('openRouter'),
+        CloudProviderCostClass.freeTier,
+      );
+      expect(
+        settings.automaticCloudUseAllowed('openRouter'),
+        isTrue,
+        reason: 'OpenRouter free pool is a verified recurring free-tier route',
+      );
 
       for (final provider in <String>[
+        'groq',
         'nvidiaNim',
         'mistral',
       ]) {
@@ -107,17 +106,17 @@ void main() {
         );
         expect(
           settings.automaticCloudUseAllowed(provider),
-          isTrue,
-          reason: '$provider may participate through its non-paid access class while AUTO participation is enabled',
+          isFalse,
+          reason: '$provider must fail closed until explicitly opted into AUTO',
         );
 
-        await settings.setCloudProviderParticipatesInAuto(provider, false);
+        await settings.setCloudProviderParticipatesInAuto(provider, true);
         expect(
           settings.automaticCloudUseAllowed(provider),
-          isFalse,
-          reason: '$provider must fail closed when the user opts it out of AUTO',
+          isTrue,
+          reason: '$provider may participate after explicit AUTO opt-in',
         );
-        await settings.setCloudProviderParticipatesInAuto(provider, true);
+        await settings.setCloudProviderParticipatesInAuto(provider, false);
       }
 
       expect(settings.automaticCloudUseAllowed('openAi'), isFalse);

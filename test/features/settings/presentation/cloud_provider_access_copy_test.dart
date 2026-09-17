@@ -38,17 +38,15 @@ void main() {
     });
 
     test('only verified recurring free-tier routes are spend-safe', () {
-      for (final providerId in <String>['groq', 'openRouter']) {
-        final definition = CloudProviderCatalog.definitionFor(providerId);
-        expect(definition, isNotNull, reason: providerId);
-        expect(
-          CloudProviderAccessCopy.isSpendSafeByClassification(definition!),
-          isTrue,
-          reason: providerId,
-        );
-      }
+      final openRouter = CloudProviderCatalog.definitionFor('openRouter');
+      expect(openRouter, isNotNull);
+      expect(
+        CloudProviderAccessCopy.isSpendSafeByClassification(openRouter!),
+        isTrue,
+      );
 
       for (final providerId in <String>[
+        'groq',
         'nvidiaNim',
         'mistral',
       ]) {
@@ -60,6 +58,21 @@ void main() {
           reason: providerId,
         );
       }
+
+      const accountDependentDeclaredFree = CloudProviderDefinition(
+        id: 'custom_free',
+        displayName: 'Custom free',
+        defaultModel: 'model',
+        capabilities: <CloudProviderCapability>{CloudProviderCapability.general},
+        costClass: CloudProviderCostClass.freeTier,
+        accessClass: CloudProviderAccessClass.accountDependentFreeAccess,
+      );
+      expect(
+        CloudProviderAccessCopy.isSpendSafeByClassification(
+          accountDependentDeclaredFree,
+        ),
+        isFalse,
+      );
     });
 
     test('paid and unknown providers are never classified spend-safe', () {

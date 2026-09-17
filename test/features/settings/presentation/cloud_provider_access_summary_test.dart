@@ -8,12 +8,12 @@ void main() {
     final mistral = CloudProviderAccessSummary.forProvider('mistral');
     final openRouter = CloudProviderAccessSummary.forProvider('openRouter');
 
-    expect(groq?.accessLabel, 'Recurring free tier');
+    expect(groq?.accessLabel, 'Account-dependent free access');
     expect(nim?.accessLabel, 'Development / prototype free access');
     expect(mistral?.accessLabel, 'Account-dependent free access');
     expect(openRouter?.accessLabel, 'Recurring free tier');
 
-    expect(groq?.spendSafeByClassification, isTrue);
+    expect(groq?.spendSafeByClassification, isFalse);
     expect(nim?.spendSafeByClassification, isFalse);
     expect(mistral?.spendSafeByClassification, isFalse);
     expect(openRouter?.spendSafeByClassification, isTrue);
