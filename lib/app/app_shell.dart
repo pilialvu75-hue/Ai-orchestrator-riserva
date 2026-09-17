@@ -19,8 +19,10 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/settings_pa
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
@@ -33,7 +35,6 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   late final UpdateManager _updateManager;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
-
   String? _shownUpdateVersion;
   bool _openingWorkshop = false;
 
@@ -43,11 +44,9 @@ class _AppShellState extends State<AppShell> {
     _updateManager = di.sl<UpdateManager>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
     _updateManager.state.addListener(_onUpdateStateChanged);
-    unawaited(
-      _updateManager.startBackgroundChecks(
-        interval: AppConstants.updateCheckInterval,
-      ),
-    );
+    unawaited(_updateManager.startBackgroundChecks(
+      interval: AppConstants.updateCheckInterval,
+    ));
     unawaited(_runtimeDiagnostics.validateOnStartup());
   }
 
@@ -73,14 +72,12 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openSettings(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BlocProvider.value(
-          value: context.read<ModelDownloadBloc>(),
-          child: const SettingsPage(),
-        ),
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => BlocProvider.value(
+        value: context.read<ModelDownloadBloc>(),
+        child: const SettingsPage(),
       ),
-    );
+    ));
   }
 
   Future<void> _openWorkshop(BuildContext context) async {
@@ -90,6 +87,7 @@ class _AppShellState extends State<AppShell> {
     final messenger = ScaffoldMessenger.of(context);
     WorkshopProductionLifecycleBundle? workshopBundle;
     WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
+    WorkshopProductionExecutionController? executionController;
 
     try {
       final applicationDirectory = await getApplicationDocumentsDirectory();
@@ -113,10 +111,7 @@ class _AppShellState extends State<AppShell> {
           preferences: di.sl<PreferencesService>(),
         ),
       );
-
-      await recoveryCoordinator.restore(
-        workshopBundle.dashboardController,
-      );
+      await recoveryCoordinator.restore(workshopBundle.dashboardController);
 
       if (!mounted) {
         workshopBundle.dashboardController.dispose();
@@ -124,35 +119,39 @@ class _AppShellState extends State<AppShell> {
         return;
       }
 
-      recoveryCoordinator.attach(
-        workshopBundle.dashboardController,
+      recoveryCoordinator.attach(workshopBundle.dashboardController);
+      final taskCoordinator = WorkshopProductionTaskCoordinator(
+        bundle: workshopBundle,
       );
-
-      await navigator.push(
-        MaterialPageRoute<void>(
-          builder: (_) => SafeArea(
-            top: false,
-            left: false,
-            right: false,
-            maintainBottomViewPadding: true,
-            minimum: const EdgeInsets.only(bottom: 12),
-            child: WorkshopProductionDashboardPage(
-              bundle: workshopBundle!,
-              modelAssignments: workshopAssignments,
-            ),
-          ),
+      executionController = WorkshopProductionExecutionController(
+        runner: WorkshopProductionTaskExecutionRunner(
+          coordinator: taskCoordinator,
         ),
       );
+
+      await navigator.push(MaterialPageRoute<void>(
+        builder: (_) => SafeArea(
+          top: false,
+          left: false,
+          right: false,
+          maintainBottomViewPadding: true,
+          minimum: const EdgeInsets.only(bottom: 12),
+          child: WorkshopProductionDashboardPage(
+            bundle: workshopBundle!,
+            modelAssignments: workshopAssignments,
+            executionController: executionController!,
+          ),
+        ),
+      ));
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(content: Text('Impossibile aprire il Cantiere: $error')),
         );
     } finally {
+      executionController?.dispose();
       await recoveryCoordinator?.detach();
       workshopBundle?.dashboardController.dispose();
       if (mounted) setState(() => _openingWorkshop = false);
@@ -167,9 +166,7 @@ class _AppShellState extends State<AppShell> {
       if (mounted) {
         final message = _updateManager.state.value.errorMessage ??
             context.l10n.t('force_update_failed');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
       return;
     }
@@ -178,9 +175,7 @@ class _AppShellState extends State<AppShell> {
     if (!installerStarted && mounted) {
       final message = _updateManager.state.value.errorMessage ??
           context.l10n.t('force_update_failed');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -260,10 +255,8 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Impostazioni',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text('Impostazioni',
+                style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () => _openSettings(context),
