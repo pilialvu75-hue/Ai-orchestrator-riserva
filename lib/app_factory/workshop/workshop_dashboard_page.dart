@@ -56,14 +56,17 @@ class WorkshopDashboardPage extends StatefulWidget {
     super.key,
     WorkshopAppEmissionController? emissionController,
     WorkshopDashboardController? dashboardController,
+    WorkshopChatController? chatController,
     List<WorkshopModelAssignment>? modelAssignments,
   })  : _emissionController = emissionController,
         _dashboardController = dashboardController,
+        _chatController = chatController,
         _modelAssignments =
             modelAssignments ?? WorkshopModelAssignments.defaults;
 
   final WorkshopAppEmissionController? _emissionController;
   final WorkshopDashboardController? _dashboardController;
+  final WorkshopChatController? _chatController;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -85,6 +88,8 @@ class _WorkshopDashboardPageState
 
   late final WorkshopChatController
       _chatController;
+
+  late final bool _ownsChatController;
 
   final TextEditingController
       _messageController =
@@ -122,16 +127,20 @@ class _WorkshopDashboardPageState
      * L'InferenceService può essere condiviso come infrastruttura
      * di basso livello, ma la selezione del modello rimane isolata.
      */
+    _ownsChatController =
+        widget._chatController == null;
+
     _chatController =
-        WorkshopChatController(
-      inferenceGateway:
-          WorkshopFactory.createInferenceGateway(
-        assignments:
-            widget._modelAssignments,
-      ),
-      sessionId:
-          'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
-    );
+        widget._chatController ??
+            WorkshopChatController(
+              inferenceGateway:
+                  WorkshopFactory.createInferenceGateway(
+                assignments:
+                    widget._modelAssignments,
+              ),
+              sessionId:
+                  'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
+            );
 
     _chatController.addListener(
       _onChatChanged,
@@ -163,10 +172,12 @@ class _WorkshopDashboardPageState
     _messageController.dispose();
     _scrollController.dispose();
 
-    _chatController.clearConversation();
-    _chatController.dispose();
+    if (_ownsChatController) {
+      _chatController.clearConversation();
+      _chatController.dispose();
+    }
 
-    // Injected production state is owned above this route.
+    // Injected production and chat state are owned above this route.
     // Route disposal must not terminate or erase the project lifecycle.
 
     super.dispose();
@@ -283,9 +294,10 @@ class _WorkshopDashboardPageState
         instruction: instruction,
       );
 
-      await _chatController.send(
-        'La proposta è approvata. '
-        'Procedi con la preparazione della produzione.',
+      _chatController.addSystemMessage(
+        'Proposta approvata. '
+        'Preparazione della produzione avviata.',
+        excludeFromContext: true,
       );
 
       try {
@@ -844,6 +856,14 @@ class _WorkshopProjectBar
     final model =
         chatController.lastModel;
 
+    final progress =
+        (dashboardState?.progress ?? 0)
+            .clamp(0.0, 1.0)
+            .toDouble();
+
+    final progressPercent =
+        (progress * 100).round();
+
     return Material(
       elevation: 1,
       color:
@@ -922,6 +942,23 @@ class _WorkshopProjectBar
             _WorkshopStageStrip(
               currentStage: stage,
             ),
+            if (dashboardState?.hasProject == true) ...<Widget>[
+              const SizedBox(height: 7),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: LinearProgressIndicator(
+                      value: progress,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$progressPercent%',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
