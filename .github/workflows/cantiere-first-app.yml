@@ -48,6 +48,9 @@ jobs:
       - name: Resolve AI Orchestrator dependencies
         run: flutter pub get
 
+      - name: Analyze first-app acceptance smoke
+        run: dart analyze tool/cantiere_first_app_smoke.dart
+
       - name: Create deterministic Android starter workspace
         id: workspace
         shell: bash
@@ -72,7 +75,16 @@ jobs:
           test -x "$CANTIERE_FLUTTER_EXECUTABLE"
           test -x "$CANTIERE_DART_EXECUTABLE"
           dart run tool/cantiere_first_app_smoke.dart "${{ steps.workspace.outputs.path }}" \
-            | tee "${RUNNER_TEMP}/cantiere-first-app.log"
+            2>&1 | tee "${RUNNER_TEMP}/cantiere-first-app.log"
+
+      - name: Upload first-app diagnostics on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-first-app-diagnostics
+          path: ${{ runner.temp }}/cantiere-first-app.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify and package first APK
         shell: bash
