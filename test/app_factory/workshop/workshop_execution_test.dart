@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
@@ -11,6 +13,7 @@ void main() {
   group('WorkshopExecution', () {
     test('serializes distinct execution and attempt identities', () {
       final now = DateTime.utc(2026, 9, 5, 16, 30);
+      final attemptStartedAt = now.add(const Duration(minutes: 5));
       final execution = WorkshopExecution(
         executionId: 'execution-1',
         attemptId: 'attempt-1',
@@ -25,7 +28,8 @@ void main() {
         accountId: 'account-1',
         status: WorkshopExecutionStatus.checkpointed,
         startedAt: now,
-        updatedAt: now,
+        attemptStartedAt: attemptStartedAt,
+        updatedAt: attemptStartedAt,
         checkpointId: 'checkpoint-1',
         resumePhase: 'implementation',
         inputTokens: 100,
@@ -46,9 +50,10 @@ void main() {
       expect(restored.checkpointId, 'checkpoint-1');
       expect(restored.totalTokens, 150);
       expect(restored.isTerminal, isFalse);
+      expect(restored.effectiveAttemptStartedAt, attemptStartedAt);
     });
 
-    test('legacy records recover with execution id as initial attempt id', () {
+    test('legacy records recover execution start as attempt start', () {
       final now = DateTime.utc(2026, 9, 5, 16, 30);
       final restored = WorkshopExecution.fromJson(<String, dynamic>{
         'executionId': 'legacy-execution',
@@ -65,6 +70,8 @@ void main() {
       expect(restored.executionId, 'legacy-execution');
       expect(restored.attemptId, 'legacy-execution');
       expect(restored.checkpointId, 'checkpoint-1');
+      expect(restored.attemptStartedAt, isNull);
+      expect(restored.effectiveAttemptStartedAt, now);
     });
 
     test('store persists executions and finds latest resumable execution', () async {
@@ -86,6 +93,7 @@ void main() {
       expect(created.executionId, isNotEmpty);
       expect(created.attemptId, isNotEmpty);
       expect(created.attemptId, isNot(created.executionId));
+      expect(created.attemptStartedAt, isNotNull);
 
       final checkpointed = created.copyWith(
         status: WorkshopExecutionStatus.checkpointed,
@@ -102,9 +110,13 @@ void main() {
       expect(recovered.projectId, 'project-1');
       expect(recovered.checkpointId, 'checkpoint-1');
       expect(recovered.resumePhase, 'review');
+
+      final attempts = await store.loadAttempts(created.executionId);
+      expect(attempts, hasLength(1));
+      expect(attempts.single.attemptId, created.attemptId);
     });
 
-    test('provider failover starts a new attempt of the same execution', () async {
+    test('provider failover preserves old attempt and resets new usage', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       final preferences = PreferencesService(
         await SharedPreferences.getInstance(),
@@ -121,6 +133,7 @@ void main() {
         providerId: 'openAi',
         modelId: 'model-a',
         accountId: 'account-a',
+        estimatedCredits: 4,
       );
       final checkpointed = created.copyWith(
         status: WorkshopExecutionStatus.checkpointed,
@@ -128,7 +141,6 @@ void main() {
         resumePhase: 'implementation',
         inputTokens: 120,
         outputTokens: 30,
-        estimatedCredits: 4,
         actualCost: 0.12,
       );
       await store.save(checkpointed);
@@ -140,6 +152,7 @@ void main() {
         providerId: 'gemini',
         modelId: 'model-b',
         accountId: 'account-b',
+        estimatedCredits: 1.5,
       );
 
       expect(resumed.executionId, checkpointed.executionId);
@@ -155,17 +168,120 @@ void main() {
       expect(resumed.executorId, 'executor-b');
       expect(resumed.allocationId, 'allocation-b');
       expect(resumed.status, WorkshopExecutionStatus.created);
-      expect(resumed.inputTokens, 120);
-      expect(resumed.outputTokens, 30);
-      expect(resumed.estimatedCredits, 4);
-      expect(resumed.actualCost, 0.12);
+      expect(resumed.inputTokens, 0);
+      expect(resumed.outputTokens, 0);
+      expect(resumed.estimatedCredits, 1.5);
+      expect(resumed.actualCost, isNull);
       expect(resumed.startedAt, checkpointed.startedAt);
+      expect(resumed.effectiveAttemptStartedAt,
+          isNot(before(checkpointed.effectiveAttemptStartedAt)));
 
       final stored = await store.load(checkpointed.executionId);
       expect(stored, isNotNull);
       expect(stored!.attemptId, resumed.attemptId);
       expect(stored.providerId, 'gemini');
       expect(stored.checkpointId, 'checkpoint-7');
+
+      var attempts = await store.loadAttempts(checkpointed.executionId);
+      expect(attempts, hasLength(2));
+      expect(attempts.first.attemptId, checkpointed.attemptId);
+      expect(attempts.first.providerId, 'openAi');
+      expect(attempts.first.inputTokens, 120);
+      expect(attempts.first.outputTokens, 30);
+      expect(attempts.first.actualCost, 0.12);
+      expect(attempts.last.attemptId, resumed.attemptId);
+      expect(attempts.last.providerId, 'gemini');
+
+      final completedSecondAttempt = resumed.copyWith(
+        status: WorkshopExecutionStatus.completed,
+        inputTokens: 20,
+        outputTokens: 10,
+        actualCost: 0.03,
+      );
+      await store.save(completedSecondAttempt);
+
+      attempts = await store.loadAttempts(checkpointed.executionId);
+      expect(attempts, hasLength(2));
+      expect(attempts.last.status, WorkshopExecutionStatus.completed);
+
+      final usage = await store.usageForExecution(checkpointed.executionId);
+      expect(usage.attemptCount, 2);
+      expect(usage.inputTokens, 140);
+      expect(usage.outputTokens, 40);
+      expect(usage.totalTokens, 180);
+      expect(usage.estimatedCredits, 5.5);
+      expect(usage.actualCost, closeTo(0.15, 0.000001));
+    });
+
+    test('historical v1 current record becomes first attempt audit entry',
+        () async {
+      final now = DateTime.utc(2026, 9, 5, 16, 30);
+      final legacy = <String, dynamic>{
+        'executionId': 'execution-legacy',
+        'attemptId': 'attempt-legacy',
+        'projectId': 'project-1',
+        'taskId': 'task-1',
+        'sessionId': 'session-1',
+        'resource': 'cloud',
+        'providerId': 'claude',
+        'status': 'checkpointed',
+        'startedAt': now.toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+        'checkpointId': 'checkpoint-legacy',
+        'inputTokens': 11,
+        'outputTokens': 7,
+        'estimatedCredits': 1.25,
+        'actualCost': 0.02,
+      };
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'workshop.executions.v1': jsonEncode(<String, dynamic>{
+          'version': 1,
+          'items': <String, dynamic>{
+            'execution-legacy': legacy,
+          },
+        }),
+      });
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final store = WorkshopExecutionStore(preferences: preferences);
+
+      final attempts = await store.loadAttempts('execution-legacy');
+
+      expect(attempts, hasLength(1));
+      expect(attempts.single.attemptId, 'attempt-legacy');
+      expect(attempts.single.effectiveAttemptStartedAt, now);
+
+      final next = await store.beginNextAttempt(
+        execution: attempts.single,
+        providerId: 'gemini',
+      );
+      final migratedAttempts = await store.loadAttempts('execution-legacy');
+      expect(migratedAttempts, hasLength(2));
+      expect(migratedAttempts.first.attemptId, 'attempt-legacy');
+      expect(migratedAttempts.last.attemptId, next.attemptId);
+    });
+
+    test('saving one attempt repeatedly updates audit record in place', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final store = WorkshopExecutionStore(preferences: preferences);
+
+      final created = await store.create(
+        projectId: 'project-1',
+        taskId: 'task-1',
+        sessionId: 'session-1',
+        resource: WorkshopTaskResource.local,
+      );
+      await store.save(created.copyWith(inputTokens: 10));
+      await store.save(created.copyWith(inputTokens: 25, outputTokens: 5));
+
+      final attempts = await store.loadAttempts(created.executionId);
+      expect(attempts, hasLength(1));
+      expect(attempts.single.inputTokens, 25);
+      expect(attempts.single.outputTokens, 5);
     });
   });
 
