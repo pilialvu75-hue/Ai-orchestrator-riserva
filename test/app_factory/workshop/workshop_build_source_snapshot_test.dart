@@ -80,7 +80,9 @@ void main() {
 }
 
 Future<void> _write(Directory root, String relativePath, String content) async {
-  final file = File(p.join(root.path, ...relativePath.split('/')));
+  final file = File(
+    p.joinAll(<String>[root.path, ...relativePath.split('/')]),
+  );
   await file.parent.create(recursive: true);
   await file.writeAsString(content);
 }
