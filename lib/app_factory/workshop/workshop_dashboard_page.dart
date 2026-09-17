@@ -99,8 +99,6 @@ class _WorkshopDashboardPageState
   String? _pendingInstruction;
   String? _pendingTitle;
 
-  bool get _ownsDashboardController =>
-      widget._dashboardController != null;
 
   @override
   void initState() {
@@ -168,9 +166,8 @@ class _WorkshopDashboardPageState
     _chatController.clearConversation();
     _chatController.dispose();
 
-    if (_ownsDashboardController) {
-      _dashboardController?.dispose();
-    }
+    // Injected production state is owned above this route.
+    // Route disposal must not terminate or erase the project lifecycle.
 
     super.dispose();
   }
