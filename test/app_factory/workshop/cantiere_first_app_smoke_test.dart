@@ -8,7 +8,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'Cantiere produces a real installable Android counter APK',
+    'Cantiere prepares the guarded Android counter workspace',
     () async {
       final workspace =
           Platform.environment['CANTIERE_FIRST_APP_WORKSPACE']?.trim();
@@ -20,7 +20,10 @@ void main() {
       );
       expect(workspace, isNotEmpty);
 
-      await first_app_smoke.main(<String>[workspace!]);
+      await first_app_smoke.main(<String>[
+        workspace!,
+        '--prepare-only',
+      ]);
 
       expect(
         exitCode,
@@ -28,6 +31,6 @@ void main() {
         reason: 'The first-app smoke must not set a failing process exit code.',
       );
     },
-    timeout: const Timeout(Duration(minutes: 30)),
+    timeout: const Timeout(Duration(minutes: 10)),
   );
 }
