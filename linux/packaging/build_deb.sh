@@ -14,10 +14,14 @@ if [[ ! -x "$bundle_dir/llama-completion" ]]; then
   exit 1
 fi
 
-version="$(awk '/^version:/ {print $2; exit}' "$repo_root/pubspec.yaml")"
-version="${version%%+*}"
+version="${AI_ORCHESTRATOR_PACKAGE_VERSION:-$(awk '/^version:/ {print $2; exit}' "$repo_root/pubspec.yaml")}"
+version="${version#v}"
 if [[ -z "$version" ]]; then
   echo "Unable to determine package version from pubspec.yaml" >&2
+  exit 1
+fi
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~-][0-9A-Za-z.+~:-]+)*$ ]]; then
+  echo "Invalid Debian package version: $version" >&2
   exit 1
 fi
 
@@ -43,6 +47,32 @@ exec /usr/lib/ai-orchestrator/ai_orchestrator "$@"
 EOF
 chmod 0755 "$package_root/usr/bin/ai-orchestrator"
 
+cat > "$package_root/DEBIAN/postinst" <<'EOF'
+#!/usr/bin/env bash
+set -e
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+exit 0
+EOF
+chmod 0755 "$package_root/DEBIAN/postinst"
+
+cat > "$package_root/DEBIAN/postrm" <<'EOF'
+#!/usr/bin/env bash
+set -e
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+exit 0
+EOF
+chmod 0755 "$package_root/DEBIAN/postrm"
+
 installed_kb="$(du -sk "$package_root/usr" | awk '{print $1}')"
 cat > "$package_root/DEBIAN/control" <<EOF
 Package: ai-orchestrator
@@ -50,9 +80,10 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libgtk-3-0, libsecret-1-0, libasound2
+Depends: libgtk-3-0, libsecret-1-0, libasound2, xdg-utils
 Maintainer: AI Orchestrator
 Installed-Size: $installed_kb
+Homepage: https://github.com/pilialvu75-hue/Ai-orchestrator-riserva
 Description: AI Orchestrator desktop application
  Offline-first multi-platform AI assistant and app factory.
 EOF
