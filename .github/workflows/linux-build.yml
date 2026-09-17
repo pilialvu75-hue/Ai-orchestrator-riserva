@@ -295,6 +295,7 @@ jobs:
           deb="$(find linux-deb -type f -name 'AI-Orchestrator_*_amd64.deb' -print -quit)"
           test -n "$deb"
           test -s "$deb"
+          deb="$(realpath "$deb")"
           echo "Runner: ${{ matrix.os }}"
           echo "Package: $deb"
           dpkg-deb -f "$deb" Package Version Architecture Depends
