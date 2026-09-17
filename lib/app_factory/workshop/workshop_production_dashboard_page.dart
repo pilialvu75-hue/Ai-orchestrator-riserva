@@ -263,7 +263,8 @@ class _WorkshopProductionDashboardPageState
       );
       if (!mounted) return;
 
-      final assessment = _repairPreparer.planner.assess(result);
+      final planner = _repairPreparer.planner;
+      final assessment = planner.assess(result);
       if (assessment.isVerifiedSuccess) {
         widget.executionController.clearBuildRepairChain();
         setState(() {
@@ -276,11 +277,22 @@ class _WorkshopProductionDashboardPageState
       if (assessment.isRepairable) {
         final rootProjectId =
             widget.executionController.buildRepairRootProjectId ?? failedPlan.id;
-        final reserved = widget.executionController.reserveBuildRepairAttempt(
+        final reservation = widget.executionController.reserveBuildRepairAttempt(
           rootProjectId: rootProjectId,
+          failureSignature: planner.failureSignature(result),
         );
 
-        if (!reserved) {
+        if (reservation == WorkshopBuildRepairReservation.repeatedFailure) {
+          setState(() {
+            _buildResult = result;
+            _error =
+                'Build non riuscita: il repair ha prodotto lo stesso guasto '
+                'del tentativo precedente. Catena interrotta per evitare un loop.';
+          });
+          return;
+        }
+
+        if (reservation == WorkshopBuildRepairReservation.budgetExhausted) {
           setState(() {
             _buildResult = result;
             _error =
