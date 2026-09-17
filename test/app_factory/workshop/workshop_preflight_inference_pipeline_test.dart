@@ -66,6 +66,78 @@ void main() {
       expect(architect.lastSessionId, 'workshop:preflight-request:preflight:planning');
     });
 
+    test('infers Android app target and supplies the real build contract',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final orchestrator = _RecordingGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: callOrder,
+        result: _success('Use the supported Android path.'),
+      );
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('Implement the Flutter app source.'),
+      );
+      const appRequest = WorkshopRequest(
+        id: 'counter-app',
+        title: 'Contatore',
+        instruction:
+            'Crea una semplice app contatore con pulsante +, pulsante - e Reset.',
+        operation: WorkshopOperation.create,
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator: orchestrator,
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: appRequest);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.lastPrompt, contains('TARGET BUILD CONTRACT'));
+      expect(orchestrator.lastPrompt, contains('target: android'));
+      expect(orchestrator.lastPrompt, contains('Flutter/Dart'));
+      expect(architect.lastPrompt, contains('target: android'));
+      expect(architect.lastPrompt, contains('lib/main.dart'));
+    });
+
+    test('does not force Android when the request explicitly targets Windows',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final orchestrator = _RecordingGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: callOrder,
+        result: _success('Windows scope'),
+      );
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('Windows plan'),
+      );
+      const windowsRequest = WorkshopRequest(
+        id: 'windows-app',
+        title: 'Utility Windows',
+        instruction: 'Crea una piccola app Windows con file EXE finale.',
+        operation: WorkshopOperation.create,
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator: orchestrator,
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: windowsRequest);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.lastPrompt, contains('target: windows'));
+      expect(orchestrator.lastPrompt, isNot(contains('Current Android artifact executor')));
+    });
+
     test('keeps network-capable mode by default for Orchestrator and Architect',
         () async {
       final callOrder = <AppAiRole>[];
