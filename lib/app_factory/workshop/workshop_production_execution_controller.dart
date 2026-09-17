@@ -13,6 +13,12 @@ enum WorkshopProductionExecutionStatus {
   cancelled,
 }
 
+enum WorkshopBuildRepairReservation {
+  reserved,
+  budgetExhausted,
+  repeatedFailure,
+}
+
 final class WorkshopProductionExecutionPolicy {
   const WorkshopProductionExecutionPolicy({
     this.maxDistinctTasksPerProject = 64,
@@ -152,6 +158,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   String? _activePlanId;
   final Set<String> _startedTaskIds = <String>{};
   String? _buildRepairRootProjectId;
+  String? _lastBuildRepairFailureSignature;
   int _buildRepairAttempts = 0;
 
   WorkshopProductionExecutionState get state => _state;
@@ -159,6 +166,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   int get distinctTasksStartedInCurrentProject => _startedTaskIds.length;
   int get buildRepairAttempts => _buildRepairAttempts;
   String? get buildRepairRootProjectId => _buildRepairRootProjectId;
+  String? get lastBuildRepairFailureSignature =>
+      _lastBuildRepairFailureSignature;
 
   Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
     _ensureAvailable();
@@ -229,34 +238,54 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   ///
   /// A new root project starts a fresh repair budget. Subsequent repair projects
   /// in the same chain must keep passing the original root id so navigation or
-  /// a new repair-plan id cannot silently reset the limit.
-  bool reserveBuildRepairAttempt({required String rootProjectId}) {
+  /// a new repair-plan id cannot silently reset the limit. Repeating the exact
+  /// same privacy-preserving failure signature stops before consuming another
+  /// attempt, preventing a deterministic repair loop.
+  WorkshopBuildRepairReservation reserveBuildRepairAttempt({
+    required String rootProjectId,
+    required String failureSignature,
+  }) {
     _ensureAvailable();
-    final normalized = rootProjectId.trim();
-    if (normalized.isEmpty) {
+    final normalizedRoot = rootProjectId.trim();
+    final normalizedSignature = failureSignature.trim();
+    if (normalizedRoot.isEmpty) {
       throw ArgumentError.value(
         rootProjectId,
         'rootProjectId',
         'Workshop build repair root project id cannot be empty.',
       );
     }
+    if (normalizedSignature.isEmpty) {
+      throw ArgumentError.value(
+        failureSignature,
+        'failureSignature',
+        'Workshop build repair failure signature cannot be empty.',
+      );
+    }
 
-    if (_buildRepairRootProjectId != normalized) {
-      _buildRepairRootProjectId = normalized;
+    if (_buildRepairRootProjectId != normalizedRoot) {
+      _buildRepairRootProjectId = normalizedRoot;
       _buildRepairAttempts = 0;
+      _lastBuildRepairFailureSignature = null;
+    }
+
+    if (_lastBuildRepairFailureSignature == normalizedSignature) {
+      return WorkshopBuildRepairReservation.repeatedFailure;
     }
 
     if (_buildRepairAttempts >= policy.maxBuildRepairAttempts) {
-      return false;
+      return WorkshopBuildRepairReservation.budgetExhausted;
     }
 
     _buildRepairAttempts += 1;
-    return true;
+    _lastBuildRepairFailureSignature = normalizedSignature;
+    return WorkshopBuildRepairReservation.reserved;
   }
 
   void clearBuildRepairChain() {
     _ensureAvailable();
     _buildRepairRootProjectId = null;
+    _lastBuildRepairFailureSignature = null;
     _buildRepairAttempts = 0;
   }
 
@@ -397,6 +426,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _startedTaskIds.clear();
     _activePlanId = null;
     _buildRepairRootProjectId = null;
+    _lastBuildRepairFailureSignature = null;
     _buildRepairAttempts = 0;
     super.dispose();
   }
