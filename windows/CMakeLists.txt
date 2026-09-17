@@ -40,12 +40,15 @@ add_subdirectory("compat")
 add_subdirectory("runner")
 add_subdirectory("diagnostics")
 
-# Generated plugin build rules.
-include(flutter/generated_plugins.cmake)
+# ENGINE-ONLY WIN7 DIAGNOSTIC CANDIDATE:
+# Intentionally do not include flutter/generated_plugins.cmake. The normal
+# generated file links every Windows plugin DLL into ai_orchestrator.exe, which
+# makes the loader initialize them before wWinMain. This branch is designed to
+# prove whether the Flutter engine can reach the first frame with absolutely no
+# native plugin DLL statically linked into the process.
+set(PLUGIN_BUNDLED_LIBRARIES "")
 
 # === Installation ===
-# Keep all support files next to the executable so the Release directory is
-# directly runnable and can be zipped as a portable bundle.
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -80,19 +83,14 @@ install(FILES "${FLUTTER_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-if(PLUGIN_BUNDLED_LIBRARIES)
-  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
-endif()
-
-# Native assets emitted by Dart/Flutter packages.
+# Native assets emitted by Dart/Flutter packages remain present because the Dart
+# application may reference them after startup. They are not linked into the
+# runner and therefore cannot participate in pre-main plugin initialization.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-# Recopy Flutter assets on every build to prevent stale bundle contents.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
 install(CODE "
   file(REMOVE_RECURSE \"${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
@@ -101,7 +99,6 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
-# AOT library is required for Profile and Release builds.
 install(FILES "${AOT_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
