@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
+import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/groq_datasource.dart';
@@ -75,6 +76,58 @@ void main() {
           'openrouter.ai',
         ],
       );
+    });
+
+    test('new provider adapters preserve HTTP rate-limit metadata', () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          '{"error":"rate limited"}',
+          429,
+          headers: <String, String>{'retry-after': '7'},
+        ),
+      );
+
+      final repository = AiRepositoryImpl(
+        openAiDataSource: OpenAiDataSource(apiKey: 'unused'),
+        geminiDataSource: GeminiDataSource(apiKey: 'unused'),
+        claudeDataSource: ClaudeDataSource(apiKey: 'unused'),
+        groqDataSource: GroqDataSource(apiKey: 'groq-test', httpClient: client),
+        nvidiaNimDataSource:
+            NvidiaNimDataSource(apiKey: 'nvidia-test', httpClient: client),
+        mistralDataSource:
+            MistralDataSource(apiKey: 'mistral-test', httpClient: client),
+        openRouterDataSource:
+            OpenRouterDataSource(apiKey: 'openrouter-test', httpClient: client),
+      );
+
+      for (final provider in <String>[
+        'groq',
+        'nvidiaNim',
+        'mistral',
+        'openRouter',
+      ]) {
+        final result = await repository.sendQueryWithProvider(
+          provider,
+          const AiRequest(prompt: 'test'),
+        );
+
+        result.fold(
+          (failure) {
+            expect(failure, isA<CloudFailure>(), reason: provider);
+            final cloudFailure = failure as CloudFailure;
+            expect(cloudFailure.kind, CloudFailureKind.rateLimit,
+                reason: provider);
+            expect(cloudFailure.statusCode, 429, reason: provider);
+            expect(cloudFailure.retryable, isTrue, reason: provider);
+            expect(
+              cloudFailure.retryAfter,
+              const Duration(seconds: 7),
+              reason: provider,
+            );
+          },
+          (_) => fail('$provider should surface HTTP 429 as a failure'),
+        );
+      }
     });
   });
 }
