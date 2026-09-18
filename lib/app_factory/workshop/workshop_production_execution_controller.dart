@@ -342,18 +342,26 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     required bool isOffline,
     required bool isRetry,
   }) async {
-    await _beginJournalAttempt(
+    // Journaling is observability/recovery infrastructure and must never delay
+    // the actual production runner. Start both operations immediately, then
+    // join the journal boundary before persisting any terminal/checkpoint state.
+    // This also preserves the historical synchronous-start contract used by
+    // cancellation and single-flight callers.
+    final journalStart = _beginJournalAttempt(
       handle: handle,
       isOffline: isOffline,
       isRetry: isRetry,
     );
 
     try {
-      final result = await _runner.runPrepared(
+      final resultFuture = _runner.runPrepared(
         handle: handle,
         cancellationToken: token,
         isOffline: isOffline,
       );
+      final result = await resultFuture;
+
+      await journalStart;
 
       if (token.isCancelled) {
         await _persistJournalStatus(
@@ -382,6 +390,10 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
       return result;
     } catch (error) {
+      // If inference fails before persistence has finished, still let the
+      // attempt creation settle before recording the failure/cancellation.
+      await journalStart;
+
       if (token.isCancelled) {
         await _persistJournalStatus(
           WorkshopExecutionStatus.cancelled,
