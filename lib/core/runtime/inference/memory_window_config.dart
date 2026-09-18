@@ -109,13 +109,10 @@ class MemoryWindowConfig {
   /// Lascia margine a system prompt, prompt corrente e generazione.
   static const int _automaticStandardMaxTotalSize = 3584;
 
-  /// Contesto prudenziale per modelli 7B+ nel profilo AUTOMATIC.
+  /// Legacy character-size metadata for larger AUTOMATIC profiles.
   ///
-  /// 4096 caratteri ≈ 1024 token.
-  ///
-  /// È intenzionalmente molto più basso del vecchio 6144:
-  /// con nCtx=2048 e maxTokens=1024 per i 7B+, non vogliamo arrivare
-  /// al limite nativo solamente attraverso la memoria conversazionale.
+  /// The Android conversational path no longer uses this value as the model
+  /// capacity authority; exact GGUF tokens decide the final prompt window.
   static const int _automaticLargeMaxTotalSize = 4096;
 
   final MemoryWindowProfile profile;
