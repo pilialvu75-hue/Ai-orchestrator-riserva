@@ -28,7 +28,7 @@ class WorkspaceEmbeddingService {
       return vector;
     }
     final tokens = normalized
-        .split(RegExp(r'[^\\p{L}\\p{N}_]+', unicode: true))
+        .split(RegExp(r'[^\p{L}\p{N}_]+', unicode: true))
         .where((token) => token.isNotEmpty)
         .toList(growable: false);
     if (tokens.isEmpty) return vector;
