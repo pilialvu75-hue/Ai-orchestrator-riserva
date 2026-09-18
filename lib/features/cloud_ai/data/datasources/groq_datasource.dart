@@ -53,13 +53,21 @@ class GroqDataSource {
       return AiResponseModel.fromOpenAiJson(json);
     }
 
-    throw ServerException(
-      'Groq API error ${response.statusCode}: ${response.body}',
+    throw CloudHttpException(
+      provider: 'groq',
+      statusCode: response.statusCode,
+      message: response.body,
+      retryAfter: _retryAfter(response),
     );
   }
 
   String _modelFor(AiRequestModel request) {
     final requested = request.modelId?.trim();
     return requested != null && requested.isNotEmpty ? requested : model;
+  }
+
+  Duration? _retryAfter(http.Response response) {
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
   }
 }
