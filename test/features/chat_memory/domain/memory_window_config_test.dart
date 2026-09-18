@@ -34,6 +34,7 @@ void main() {
 
       expect(config.profile, MemoryWindowProfile.automatic);
       expect(config.activeProfile, MemoryWindowProfile.compact);
+      expect(config.maxContextLines, 80);
       expect(config.maxTotalSize, 3072);
     });
 
@@ -44,8 +45,26 @@ void main() {
       );
 
       expect(config.activeProfile, MemoryWindowProfile.compact);
-      expect(config.maxContextLines, 24);
+      expect(config.maxContextLines, 80);
       expect(config.maxTotalSize, 3072);
+    });
+
+    test('automatic web profile keeps conservative line cap', () {
+      final config = MemoryWindowConfig.automatic(
+        modelId: 'phi3_5_mini',
+        isWeb: true,
+      );
+
+      expect(config.activeProfile, MemoryWindowProfile.compact);
+      expect(config.maxContextLines, 16);
+      expect(config.maxTotalSize, 3072);
+    });
+
+    test('manual compact profile keeps explicit 24-turn behavior', () {
+      final config = MemoryWindowConfig.compact(isWeb: false);
+
+      expect(config.profile, MemoryWindowProfile.compact);
+      expect(config.maxContextLines, 24);
     });
 
     test('custom web values clamp to conservative thresholds', () {
