@@ -94,7 +94,10 @@ jobs:
           set -euo pipefail
           test -x "$CANTIERE_FLUTTER_EXECUTABLE"
           test -x "$CANTIERE_DART_EXECUTABLE"
-          "$CANTIERE_DART_EXECUTABLE" run             tool/workshop_local_build_acceptance.dart             "${{ steps.workspace.outputs.path }}"             2>&1 | tee -a "${RUNNER_TEMP}/cantiere-first-app.log"
+          "$CANTIERE_DART_EXECUTABLE" run \
+            tool/workshop_local_build_acceptance.dart \
+            "${{ steps.workspace.outputs.path }}" \
+            2>&1 | tee -a "${RUNNER_TEMP}/cantiere-first-app.log"
 
       - name: Upload first-app diagnostics on failure
         if: ${{ failure() }}
