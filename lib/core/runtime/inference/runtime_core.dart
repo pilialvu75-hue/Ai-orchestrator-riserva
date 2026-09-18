@@ -25,6 +25,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/native_token_context_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
@@ -726,11 +727,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
+    int Function(String prompt)? exactTokenCounter,
+    int? requestedGenerationTokens,
   }) =>
       _sessionStateIsolator.composePrompt(
         request,
         modelId: modelId,
         bypassNonessentialLayers: bypassNonessentialLayers,
+        exactTokenCounter: exactTokenCounter,
+        requestedGenerationTokens: requestedGenerationTokens,
       );
 
   static String? _validateModelFileForRuntime(String modelPath) {
