@@ -58,6 +58,32 @@ void main() {
     controller.dispose();
   });
 
+  test('cancelAndWait reaches the cancellation boundary before returning',
+      () async {
+    final runner = _ControlledRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    controller.start();
+    final waiting = controller.cancelAndWait();
+
+    expect(
+      controller.state.status,
+      WorkshopProductionExecutionStatus.cancelling,
+    );
+    expect(runner.token?.isCancelled, isTrue);
+
+    runner.complete(_result());
+    await waiting;
+
+    expect(
+      controller.state.status,
+      WorkshopProductionExecutionStatus.cancelled,
+    );
+    expect(controller.state.isRunning, isFalse);
+
+    controller.dispose();
+  });
+
   test('failed offline execution retries offline without duplicating active work',
       () async {
     final runner = _RetryRunner(_handle());
