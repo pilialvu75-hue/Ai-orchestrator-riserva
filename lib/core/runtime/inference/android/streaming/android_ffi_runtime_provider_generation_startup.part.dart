@@ -309,6 +309,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
         bypassNonessentialLayers: isForensicSelfTest,
         contextOverride: contextTurns,
         enforceLegacyContextBound: false,
+        emitDiagnostics: false,
       );
       return SamplingMetadata.fromPrompt(composed).stripFrom(composed);
     }
