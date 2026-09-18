@@ -24,12 +24,16 @@ class _AndroidFfiSessionStateIsolator {
       return request.prompt.trim();
     }
 
-    String composeWithContext(List<ChatTurn> context) {
+    String composeWithContext(
+      List<ChatTurn> context, {
+      required bool enforceLegacyContextBound,
+    }) {
       return LocalPromptTemplates.compose(
         modelId: modelId,
         prompt: request.prompt,
         systemPrompt: request.systemPrompt,
         context: context,
+        enforceLegacyContextBound: enforceLegacyContextBound,
       );
     }
 
@@ -39,12 +43,18 @@ class _AndroidFfiSessionStateIsolator {
         'exact=false reason=no_explicit_native_counter '
         'context_turns=${request.context.length}',
       );
-      return composeWithContext(request.context);
+      return composeWithContext(
+        request.context,
+        enforceLegacyContextBound: true,
+      );
     }
 
     final selection = NativeTokenContextBudget.select(
       context: request.context,
-      composePrompt: composeWithContext,
+      composePrompt: (context) => composeWithContext(
+        context,
+        enforceLegacyContextBound: false,
+      ),
       countTokens: exactTokenCounter,
       nCtx: LlamaNativeDefaults.nCtx,
       requestedGenerationTokens: requestedGenerationTokens,
