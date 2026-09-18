@@ -7,6 +7,8 @@ class _AndroidFfiSessionStateIsolator {
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
+    List<ChatTurn>? contextOverride,
+    bool enforceLegacyContextBound = true,
   }) {
     if (bypassNonessentialLayers) {
       _log(
@@ -26,7 +28,8 @@ class _AndroidFfiSessionStateIsolator {
       modelId: modelId,
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
-      context: request.context,
+      context: contextOverride ?? request.context,
+      enforceLegacyContextBound: enforceLegacyContextBound,
     );
   }
 
