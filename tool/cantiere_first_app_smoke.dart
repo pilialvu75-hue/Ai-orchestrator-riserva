@@ -75,6 +75,7 @@ Future<void> main(List<String> args) async {
       WorkshopLocalBuildProvider(
         configuration: WorkshopLocalBuildConfiguration(
           flutterExecutable: flutterExecutable,
+          dartExecutable: dartExecutable,
           timeout: const Duration(minutes: 20),
         ),
       ),
