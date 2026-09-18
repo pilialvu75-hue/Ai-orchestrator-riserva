@@ -78,6 +78,25 @@ void main() {
       expect(stt.statusLabel, 'Ricerca non disponibile 0/2');
     });
 
+    test('shows certified capabilities that are not pre-declared as needs', () {
+      final cellar = _asset('ai.model_storage.whuppi.cellar', 'ai.model_storage')
+        ..['platforms'] = <String>['linux'];
+      final rows = ModuleCapabilityStatusProjector.project(
+        needsJson: _needs(),
+        catalogJson: _catalog(<Map<String, Object?>>[cellar]),
+        researcherJson: _researcher(<Map<String, Object?>>[]),
+      );
+
+      final storage = rows.firstWhere(
+        (row) => row.capabilityId == 'ai.model_storage',
+      );
+      expect(storage.presentCount, 1);
+      expect(storage.canReuse, isTrue);
+      expect(storage.certifiedPins, <String>['ai.model_storage.whuppi.cellar@1.0.0']);
+      expect(storage.targets, <String>['linux']);
+      expect(storage.availability, ModuleCapabilityAvailability.complete);
+    });
+
     test('non-certified catalog entries cannot become present', () {
       final discovered = _asset('voice.stt.intake', 'voice.stt')
         ..['status'] = 'discovered';

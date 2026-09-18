@@ -579,7 +579,13 @@ class _CapabilityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final outline = theme.colorScheme.primary;
     return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: outline, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -685,7 +691,13 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Chip(label: Text('$label: $value'));
+    final theme = Theme.of(context);
+    return Chip(
+      label: Text('$label: $value'),
+      shape: StadiumBorder(
+        side: BorderSide(color: theme.colorScheme.primary, width: 1.5),
+      ),
+    );
   }
 }
 
