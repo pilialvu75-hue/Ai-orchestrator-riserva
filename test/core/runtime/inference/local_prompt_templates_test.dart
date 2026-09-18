@@ -142,7 +142,7 @@ void main() {
         6,
         (index) => ChatTurn(
           role: index.isEven ? ChatRole.user : ChatRole.assistant,
-          content: 'turn-$index-${'x' * 2500}',
+          content: 'turn-$index-${List<String>.filled(2500, 'x').join()}',
         ),
       );
 
@@ -171,7 +171,7 @@ void main() {
         6,
         (index) => ChatTurn(
           role: index.isEven ? ChatRole.user : ChatRole.assistant,
-          content: 'turn-$index-${'x' * 2500}',
+          content: 'turn-$index-${List<String>.filled(2500, 'x').join()}',
         ),
       );
 
