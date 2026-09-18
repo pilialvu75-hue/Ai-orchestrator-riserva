@@ -5,6 +5,7 @@ project(runner LANGUAGES CXX)
 # registrar and do not link plugin import libraries into the runner. Plugin DLL
 # targets are built by the top-level CMake and loaded explicitly at runtime.
 add_executable(${BINARY_NAME} WIN32
+  "dynamic_plugins.cpp"
   "flutter_window.cpp"
   "main.cpp"
   "startup_trace.cpp"
