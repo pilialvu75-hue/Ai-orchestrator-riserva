@@ -4,7 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('runtime-owned budgeting can bypass legacy character bound', () {
-    final veryLargeTurn = 'legacy-marker ' + ('x' * 12000);
+    final veryLargeTurn =
+        'legacy-marker ${List<String>.filled(12000, 'x').join()}';
     final context = <ChatTurn>[
       ChatTurn(role: ChatRole.user, content: veryLargeTurn),
       const ChatTurn(role: ChatRole.assistant, content: 'answer-marker'),
