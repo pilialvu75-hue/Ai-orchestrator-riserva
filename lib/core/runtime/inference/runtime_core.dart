@@ -13,6 +13,7 @@ import 'dart:isolate';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/native_token_context_budget.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/serial_inference_task.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
