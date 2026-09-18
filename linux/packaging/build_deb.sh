@@ -111,7 +111,11 @@ mkdir -p "$output_dir"
 deb_path="$output_dir/AI-Orchestrator_${version}_amd64.deb"
 rm -f "$deb_path" "$deb_path.sha256"
 dpkg-deb --build --root-owner-group "$package_root" "$deb_path"
-sha256sum "$deb_path" > "$deb_path.sha256"
+deb_name="$(basename "$deb_path")"
+(
+  cd "$output_dir"
+  sha256sum "$deb_name" > "$deb_name.sha256"
+)
 
 echo "LINUX_DEB=$deb_path"
 echo "LINUX_DEB_SHA256=$deb_path.sha256"
