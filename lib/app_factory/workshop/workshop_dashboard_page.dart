@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_contr
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/module_library/presentation/module_library_page.dart';
@@ -106,6 +107,7 @@ class _WorkshopDashboardPageState
 
   String? _pendingInstruction;
   String? _pendingTitle;
+  String? _pendingApprovedProposal;
 
 
   @override
@@ -255,6 +257,7 @@ class _WorkshopDashboardPageState
       _pendingInstruction,
     );
 
+    _pendingApprovedProposal = result.content.trim();
     _pendingConfirmation = true;
 
     setState(() {});
@@ -292,9 +295,17 @@ class _WorkshopDashboardPageState
     });
 
     try {
+      final approvedProposal = _pendingApprovedProposal?.trim();
+
       controller.startProduction(
         title: title,
         instruction: instruction,
+        context: approvedProposal == null || approvedProposal.isEmpty
+            ? const <String>[]
+            : <String>[
+                WorkshopPreflightInferencePipeline
+                    .approvedProposalContextEntry(approvedProposal),
+              ],
       );
 
       _chatController.addSystemMessage(
@@ -343,6 +354,7 @@ class _WorkshopDashboardPageState
 
     setState(() {
       _pendingConfirmation = false;
+      _pendingApprovedProposal = null;
     });
 
     _messageController.text =
@@ -455,6 +467,7 @@ class _WorkshopDashboardPageState
       _pendingConfirmation = false;
       _pendingInstruction = null;
       _pendingTitle = null;
+      _pendingApprovedProposal = null;
     });
 
     _chatController.clearConversation();
