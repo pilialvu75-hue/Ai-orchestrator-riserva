@@ -40,13 +40,13 @@ void main() {
         openAiDataSource: OpenAiDataSource(apiKey: 'unused'),
         geminiDataSource: GeminiDataSource(apiKey: 'unused'),
         claudeDataSource: ClaudeDataSource(apiKey: 'unused'),
-        groqDataSource: GroqDataSource(apiKey: 'groq-test', httpClient: client),
+        groqDataSource: GroqDataSource(apiKeyProvider: () => 'groq-test', httpClient: client),
         nvidiaNimDataSource:
-            NvidiaNimDataSource(apiKey: 'nvidia-test', httpClient: client),
+            NvidiaNimDataSource(apiKeyProvider: () => 'nvidia-test', httpClient: client),
         mistralDataSource:
-            MistralDataSource(apiKey: 'mistral-test', httpClient: client),
+            MistralDataSource(apiKeyProvider: () => 'mistral-test', httpClient: client),
         openRouterDataSource:
-            OpenRouterDataSource(apiKey: 'openrouter-test', httpClient: client),
+            OpenRouterDataSource(apiKeyProvider: () => 'openrouter-test', httpClient: client),
       );
 
       for (final provider in <String>[
@@ -91,13 +91,13 @@ void main() {
         openAiDataSource: OpenAiDataSource(apiKey: 'unused'),
         geminiDataSource: GeminiDataSource(apiKey: 'unused'),
         claudeDataSource: ClaudeDataSource(apiKey: 'unused'),
-        groqDataSource: GroqDataSource(apiKey: 'groq-test', httpClient: client),
+        groqDataSource: GroqDataSource(apiKeyProvider: () => 'groq-test', httpClient: client),
         nvidiaNimDataSource:
-            NvidiaNimDataSource(apiKey: 'nvidia-test', httpClient: client),
+            NvidiaNimDataSource(apiKeyProvider: () => 'nvidia-test', httpClient: client),
         mistralDataSource:
-            MistralDataSource(apiKey: 'mistral-test', httpClient: client),
+            MistralDataSource(apiKeyProvider: () => 'mistral-test', httpClient: client),
         openRouterDataSource:
-            OpenRouterDataSource(apiKey: 'openrouter-test', httpClient: client),
+            OpenRouterDataSource(apiKeyProvider: () => 'openrouter-test', httpClient: client),
       );
 
       for (final provider in <String>[
