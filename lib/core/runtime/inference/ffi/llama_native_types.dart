@@ -44,6 +44,9 @@ abstract final class LlamaNativeDefaults {
   // Se noti pressione di memoria con modelli 7B, riporta a 2048 o 3072.
   static const int nCtx = 4096;
 
+  /// Must stay aligned with kPromptTokenSafetyMargin in the native bridge.
+  static const int promptTokenSafetyMargin = 32;
+
   static final int _nThreads = _calculateThreadCount();
 
   static int _calculateThreadCount() {
