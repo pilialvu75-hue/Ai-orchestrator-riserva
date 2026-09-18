@@ -348,6 +348,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
     List<String> technologies = const <String>[],
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
+    List<String> context = const <String>[],
   }) {
     _ensureNotDisposed();
 
@@ -381,7 +382,11 @@ final class WorkshopDashboardController extends ChangeNotifier {
       operation: WorkshopOperation.create,
       targetFiles: const <String>[],
       constraints: constraints,
-      context: const <String>[],
+      context: List<String>.unmodifiable(
+        context
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty),
+      ),
     );
 
     _engine.createProjectPlan(
