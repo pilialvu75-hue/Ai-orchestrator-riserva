@@ -287,10 +287,58 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log('[NATIVE_MODEL_LOAD_SUCCESS] path=$resolvedModelPath modelId=$modelId' ' session=$nativeSessionId');
     AndroidFfiRuntimeProvider._log('[NATIVE_CONTEXT_CREATE] path=$resolvedModelPath status=ok');
     AndroidFfiRuntimeProvider._logAi('native session ready');
+
+    final budgetRequestedMaxTokens = isForensicSelfTest
+        ? 4
+        : (request.maxTokens > 0
+            ? request.maxTokens
+            : AndroidFfiRuntimeProvider._defaultMaxTokens);
+    final budgetGenerationReserve = budgetRequestedMaxTokens
+        .clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens)
+        .toInt();
+    final maxPromptTokens = (
+      LlamaNativeDefaults.nCtx -
+      budgetGenerationReserve -
+      LlamaNativeDefaults.promptTokenSafetyMargin
+    ).clamp(1, LlamaNativeDefaults.nCtx).toInt();
+
+    String composePromptForBudget(List<ChatTurn> contextTurns) {
+      final composed = _composePrompt(
+        request,
+        modelId: modelId,
+        bypassNonessentialLayers: isForensicSelfTest,
+        contextOverride: contextTurns,
+        enforceLegacyContextBound: false,
+      );
+      return SamplingMetadata.fromPrompt(composed).stripFrom(composed);
+    }
+
+    final tokenBudget = NativeTokenContextBudget.fit(
+      contextTurns: request.context,
+      maxPromptTokens: maxPromptTokens,
+      composePrompt: composePromptForBudget,
+      countTokens: (candidatePrompt) =>
+          bindings.countTokens(nativeSessionId, candidatePrompt),
+    );
+
+    AndroidFfiRuntimeProvider._log(
+      '[TOKEN_CONTEXT_BUDGET] session=$sessionId'
+      ' prompt_tokens=${tokenBudget.promptTokens}'
+      ' max_prompt_tokens=$maxPromptTokens'
+      ' original_turns=${request.context.length}'
+      ' selected_turns=${tokenBudget.contextTurns.length}'
+      ' trimmed_turns=${tokenBudget.trimmedTurns}'
+      ' generation_reserve=$budgetGenerationReserve'
+      ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}'
+      ' fits=${tokenBudget.fitsRequestedBudget}',
+    );
+
     final composedPrompt = _composePrompt(
       request,
       modelId: modelId,
       bypassNonessentialLayers: isForensicSelfTest,
+      contextOverride: tokenBudget.contextTurns,
+      enforceLegacyContextBound: false,
     );
     final samplingMetadata = SamplingMetadata.fromPrompt(composedPrompt);
     final prompt = samplingMetadata.stripFrom(composedPrompt);
@@ -328,12 +376,8 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log( '[CONTEXT_SIZE] session=$sessionId context_lines=${request.context.length} system_chars=${(request.systemPrompt ?? '').length} prompt_chars=${request.prompt.length} composed_prompt_chars=${prompt.length}', );
     AndroidFfiRuntimeProvider._log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate', );
-    final requestedMaxTokens = isForensicSelfTest
-    ? 4
-    : (request.maxTokens > 0
-        ? request.maxTokens
-        : AndroidFfiRuntimeProvider._defaultMaxTokens);
-    final maxTokens = requestedMaxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens);
+    final requestedMaxTokens = budgetRequestedMaxTokens;
+    final maxTokens = budgetGenerationReserve;
     final effectiveTemperature = isForensicSelfTest
         ? 0.1
         : (samplingMetadata.temperature ?? request.temperature);
