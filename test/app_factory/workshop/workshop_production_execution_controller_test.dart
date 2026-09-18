@@ -1,20 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('one execution is shared by multiple observers', () async {
     final result = _result();
     final runner = _ControlledRunner(_handle());
@@ -236,6 +241,84 @@ void main() {
     controller.dispose();
   });
 
+  test('persistent journal keeps one execution and distinct retry attempts',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final runner = _RetryRunner(_handle());
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      executionStore: store,
+    );
+
+    await expectLater(
+      controller.start(isOffline: true),
+      throwsStateError,
+    );
+
+    final firstCurrent = (await store.loadAll()).single;
+    expect(firstCurrent.status, WorkshopExecutionStatus.failed);
+    expect(firstCurrent.resource, WorkshopTaskResource.local);
+    expect(firstCurrent.providerId, isNull);
+    expect(firstCurrent.modelId, isNull);
+    expect(firstCurrent.metadata['failureType'], 'StateError');
+    final stableExecutionId = firstCurrent.executionId;
+    final firstAttemptId = firstCurrent.attemptId;
+
+    await controller.retry();
+
+    final secondCurrent = (await store.loadAll()).single;
+    final attempts = await store.loadAttempts(stableExecutionId);
+    expect(secondCurrent.executionId, stableExecutionId);
+    expect(secondCurrent.attemptId, isNot(firstAttemptId));
+    expect(secondCurrent.status, WorkshopExecutionStatus.checkpointed);
+    expect(secondCurrent.resumePhase, 'review');
+    expect(attempts, hasLength(2));
+    expect(
+      attempts.map((attempt) => attempt.executionId).toSet(),
+      <String>{stableExecutionId},
+    );
+    expect(
+      attempts.map((attempt) => attempt.attemptId).toSet().length,
+      2,
+    );
+    expect(controller.executionJournalError, isNull);
+
+    controller.dispose();
+  });
+
+  test('journal completes only after the guarded apply boundary', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final runner = _ReadyRunner(_handle());
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      executionStore: store,
+    );
+
+    await controller.start();
+
+    final waiting = (await store.loadAll()).single;
+    expect(waiting.status, WorkshopExecutionStatus.waitingApproval);
+    expect(waiting.resumePhase, 'waitingApproval');
+    expect(controller.journalExecution, isNotNull);
+
+    await controller.markCurrentExecutionCompleted();
+
+    final completed = (await store.loadAll()).single;
+    expect(completed.status, WorkshopExecutionStatus.completed);
+    expect(completed.resumePhase, 'completed');
+    expect(controller.journalExecution, isNull);
+
+    controller.dispose();
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
@@ -301,6 +384,24 @@ final class _RetryRunner implements WorkshopProductionExecutionRunner {
   }
 }
 
+final class _ReadyRunner implements WorkshopProductionExecutionRunner {
+  _ReadyRunner(this.handle);
+
+  final WorkshopProductionTaskHandle handle;
+
+  @override
+  WorkshopProductionTaskHandle preparedHandle() => handle;
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPrepared({
+    required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) async {
+    return _readyResult();
+  }
+}
+
 final class _ImmediateRunner implements WorkshopProductionExecutionRunner {
   _ImmediateRunner(this.handle);
 
@@ -341,6 +442,24 @@ WorkshopProductionTaskHandle _handle({
     plan: plan,
     taskId: taskId,
     session: session,
+  );
+}
+
+WorkshopTaskInferenceResult _readyResult() {
+  return const WorkshopTaskInferenceResult(
+    proposal: WorkshopChangeProposal(
+      requestId: 'request-1',
+      explanation: 'Validated proposal.',
+      changes: <WorkspaceFileChange>[],
+    ),
+    review: WorkshopReviewVerdict(
+      approved: true,
+      summary: 'Review passed.',
+    ),
+    validation: WorkshopValidationVerdict(
+      valid: true,
+      summary: 'Validation passed.',
+    ),
   );
 }
 
