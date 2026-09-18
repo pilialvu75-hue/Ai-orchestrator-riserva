@@ -6,6 +6,8 @@
 #include "startup_trace.h"
 #include "utils.h"
 
+// WIN7_DYNAMIC_LEGACY_V2: physical compatibility candidate.
+
 namespace {
 
 bool AppendPathPart(wchar_t (&path)[MAX_PATH], const wchar_t* suffix) {
