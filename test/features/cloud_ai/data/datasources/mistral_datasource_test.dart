@@ -101,7 +101,7 @@ void main() {
       expect(called, isFalse);
     });
 
-    test('surfaces non-success Mistral responses as ServerException', () async {
+    test('surfaces non-success Mistral responses as CloudHttpException', () async {
       final client = MockClient(
         (request) async => http.Response('{"error":"rate limited"}', 429),
       );
@@ -113,11 +113,14 @@ void main() {
       expect(
         () => dataSource.complete(const AiRequestModel(prompt: 'hello')),
         throwsA(
-          isA<ServerException>().having(
-            (error) => error.message,
-            'message',
-            contains('Mistral API error 429'),
-          ),
+          isA<CloudHttpException>()
+              .having((error) => error.provider, 'provider', 'mistral')
+              .having((error) => error.statusCode, 'statusCode', 429)
+              .having(
+                (error) => error.message,
+                'message',
+                contains('rate limited'),
+              ),
         ),
       );
     });
