@@ -222,6 +222,7 @@ class _WorkshopProductionDashboardPageState
     });
     try {
       await _coordinator.applyApproved(handle: handle);
+      await widget.executionController.markCurrentExecutionCompleted();
       if (!mounted) return;
       widget.executionController.resetForNextTask();
 
@@ -259,6 +260,8 @@ class _WorkshopProductionDashboardPageState
 
     try {
       await widget.executionController.cancelAndWait();
+
+      await widget.executionController.abandonCurrentExecution();
 
       if (widget.executionController.state.status !=
           WorkshopProductionExecutionStatus.idle) {

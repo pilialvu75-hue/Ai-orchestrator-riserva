@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -145,10 +147,13 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   WorkshopProductionExecutionController({
     required WorkshopProductionExecutionRunner runner,
     this.policy = const WorkshopProductionExecutionPolicy(),
-  }) : _runner = runner;
+    WorkshopExecutionStore? executionStore,
+  })  : _runner = runner,
+        _executionStore = executionStore;
 
   final WorkshopProductionExecutionRunner _runner;
   final WorkshopProductionExecutionPolicy policy;
+  final WorkshopExecutionStore? _executionStore;
 
   WorkshopProductionExecutionState _state =
       const WorkshopProductionExecutionState();
@@ -160,6 +165,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   String? _buildRepairRootProjectId;
   String? _lastBuildRepairFailureSignature;
   int _buildRepairAttempts = 0;
+  WorkshopExecution? _journalExecution;
+  Object? _executionJournalError;
 
   WorkshopProductionExecutionState get state => _state;
 
@@ -168,8 +175,17 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   String? get buildRepairRootProjectId => _buildRepairRootProjectId;
   String? get lastBuildRepairFailureSignature =>
       _lastBuildRepairFailureSignature;
+  WorkshopExecution? get journalExecution => _journalExecution;
+  Object? get executionJournalError => _executionJournalError;
 
   Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
+    return _start(isOffline: isOffline, isRetry: false);
+  }
+
+  Future<WorkshopTaskInferenceResult> _start({
+    required bool isOffline,
+    required bool isRetry,
+  }) {
     _ensureAvailable();
 
     final activeRun = _activeRun;
@@ -192,7 +208,12 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       ),
     );
 
-    final run = _execute(handle, token, isOffline: isOffline);
+    final run = _execute(
+      handle,
+      token,
+      isOffline: isOffline,
+      isRetry: isRetry,
+    );
     _activeRun = run;
     return run;
   }
@@ -214,7 +235,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
     final isOffline = _state.isOffline;
     _setState(WorkshopProductionExecutionState(isOffline: isOffline));
-    return start(isOffline: isOffline);
+    return _start(isOffline: isOffline, isRetry: true);
   }
 
   void cancel() {
@@ -319,15 +340,34 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     WorkshopProductionTaskHandle handle,
     CancellationToken token, {
     required bool isOffline,
+    required bool isRetry,
   }) async {
+    // Journaling is observability/recovery infrastructure and must never delay
+    // the actual production runner. Start both operations immediately, then
+    // join the journal boundary before persisting any terminal/checkpoint state.
+    // This also preserves the historical synchronous-start contract used by
+    // cancellation and single-flight callers.
+    final journalStart = _beginJournalAttempt(
+      handle: handle,
+      isOffline: isOffline,
+      isRetry: isRetry,
+    );
+
     try {
-      final result = await _runner.runPrepared(
+      final resultFuture = _runner.runPrepared(
         handle: handle,
         cancellationToken: token,
         isOffline: isOffline,
       );
+      final result = await resultFuture;
+
+      await journalStart;
 
       if (token.isCancelled) {
+        await _persistJournalStatus(
+          WorkshopExecutionStatus.cancelled,
+          resumePhase: 'cancelled',
+        );
         _setState(
           _state.copyWith(
             status: WorkshopProductionExecutionStatus.cancelled,
@@ -337,6 +377,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           ),
         );
       } else {
+        await _persistInferenceCheckpoint(result);
         _setState(
           _state.copyWith(
             status: WorkshopProductionExecutionStatus.succeeded,
@@ -349,7 +390,15 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
       return result;
     } catch (error) {
+      // If inference fails before persistence has finished, still let the
+      // attempt creation settle before recording the failure/cancellation.
+      await journalStart;
+
       if (token.isCancelled) {
+        await _persistJournalStatus(
+          WorkshopExecutionStatus.cancelled,
+          resumePhase: 'cancelled',
+        );
         _setState(
           _state.copyWith(
             status: WorkshopProductionExecutionStatus.cancelled,
@@ -359,6 +408,13 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           ),
         );
       } else {
+        await _persistJournalStatus(
+          WorkshopExecutionStatus.failed,
+          resumePhase: 'failed',
+          metadata: <String, dynamic>{
+            'failureType': error.runtimeType.toString(),
+          },
+        );
         _setState(
           _state.copyWith(
             status: WorkshopProductionExecutionStatus.failed,
@@ -372,6 +428,146 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     } finally {
       _activeRun = null;
       _cancellationToken = null;
+    }
+  }
+
+  Future<void> _beginJournalAttempt({
+    required WorkshopProductionTaskHandle handle,
+    required bool isOffline,
+    required bool isRetry,
+  }) async {
+    final store = _executionStore;
+    if (store == null) return;
+
+    final resource =
+        isOffline ? WorkshopTaskResource.local : WorkshopTaskResource.hybridAi;
+    try {
+      final current = _journalExecution;
+      WorkshopExecution execution;
+      if (isRetry &&
+          current != null &&
+          current.projectId == handle.plan.id &&
+          current.taskId == handle.taskId) {
+        execution = await store.beginNextAttempt(
+          execution: current,
+          resource: resource,
+        );
+      } else {
+        execution = await store.create(
+          projectId: handle.plan.id,
+          taskId: handle.taskId,
+          sessionId: 'production:${handle.plan.id}:${handle.taskId}',
+          resource: resource,
+          metadata: <String, dynamic>{
+            'surface': 'workshop-production',
+            'multiRole': true,
+            'offline': isOffline,
+          },
+        );
+      }
+
+      execution = execution.copyWith(
+        status: WorkshopExecutionStatus.running,
+        resumePhase: 'inference',
+      );
+      await store.save(execution);
+      _journalExecution = execution;
+      _executionJournalError = null;
+    } catch (error) {
+      // The journal is observability/recovery infrastructure. It must never
+      // bypass or duplicate the guarded production lifecycle if persistence is
+      // temporarily unavailable.
+      _executionJournalError = error;
+    }
+  }
+
+  Future<void> _persistInferenceCheckpoint(
+    WorkshopTaskInferenceResult result,
+  ) async {
+    final reviewApproved = result.review.approved;
+    final validationValid = result.validation?.valid;
+    final ready = result.readyForApproval;
+    await _persistJournalStatus(
+      ready
+          ? WorkshopExecutionStatus.waitingApproval
+          : WorkshopExecutionStatus.checkpointed,
+      resumePhase: ready
+          ? 'waitingApproval'
+          : reviewApproved
+              ? 'validation'
+              : 'review',
+      metadata: <String, dynamic>{
+        'reviewApproved': reviewApproved,
+        'validationValid': validationValid,
+        'proposalChangeCount': result.proposal.changes.length,
+      },
+    );
+  }
+
+  Future<void> _persistJournalStatus(
+    WorkshopExecutionStatus status, {
+    String? resumePhase,
+    Map<String, dynamic> metadata = const <String, dynamic>{},
+  }) async {
+    final store = _executionStore;
+    final current = _journalExecution;
+    if (store == null || current == null) return;
+
+    try {
+      final updated = current.copyWith(
+        status: status,
+        resumePhase: resumePhase,
+        metadata: <String, dynamic>{
+          ...current.metadata,
+          ...metadata,
+        },
+      );
+      await store.save(updated);
+      _journalExecution = updated;
+      _executionJournalError = null;
+    } catch (error) {
+      _executionJournalError = error;
+    }
+  }
+
+  /// Marks the current logical Execution complete only after the real guarded
+  /// apply has succeeded. This never applies workspace changes by itself.
+  Future<void> markCurrentExecutionCompleted() async {
+    _ensureAvailable();
+    await _persistJournalStatus(
+      WorkshopExecutionStatus.completed,
+      resumePhase: 'completed',
+    );
+    if (_journalExecution?.status == WorkshopExecutionStatus.completed) {
+      _journalExecution = null;
+    }
+  }
+
+  /// Cancels a non-terminal logical Execution when the owner explicitly closes
+  /// the project. Process death does not call this method: a running record is
+  /// intentionally left resumable for P4 recovery.
+  Future<void> abandonCurrentExecution() async {
+    _ensureAvailable();
+    final current = _journalExecution;
+    if (current == null) return;
+
+    final store = _executionStore;
+    if (store == null || current.isTerminal) {
+      _journalExecution = null;
+      return;
+    }
+
+    final cancelled = current.copyWith(
+      status: WorkshopExecutionStatus.cancelled,
+      resumePhase: 'cancelled',
+    );
+    try {
+      await store.save(cancelled);
+      _journalExecution = null;
+      _executionJournalError = null;
+    } catch (error) {
+      _executionJournalError = error;
+      rethrow;
     }
   }
 
@@ -454,6 +650,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _buildRepairRootProjectId = null;
     _lastBuildRepairFailureSignature = null;
     _buildRepairAttempts = 0;
+    _journalExecution = null;
+    _executionJournalError = null;
     super.dispose();
   }
 }
