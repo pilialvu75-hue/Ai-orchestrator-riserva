@@ -30,6 +30,10 @@ void main() {
       );
 
       expect(isolator, contains('NativeTokenContextBudget.select('));
+      expect(
+        isolator,
+        contains('applyLegacyContextBound: exactTokenCounter == null'),
+      );
       expect(isolator, contains('LlamaNativeDefaults.promptTokenSafetyMargin'));
       expect(isolator, contains('[CONTEXT_TOKEN_BUDGET]'));
       expect(bindings, isNot(contains('countTokensForCurrentSession')));
