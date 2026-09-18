@@ -53,22 +53,13 @@ class MemoryWindowConfig {
    * RUNTIME SAFETY
    * ---------------------------------------------------------------------------
    *
-   * Il runtime Android attuale utilizza un contesto nativo di circa 2048 token.
+   * Android llama.cpp uses nCtx=4096 and applies the final prompt-capacity
+   * bound with the exact tokenizer of the loaded GGUF model.
    *
-   * InferenceRequest può richiedere fino a 1024 token di generazione per
-   * modelli 7B/8B/9B.
-   *
-   * Per questo il profilo AUTOMATICO non deve saturare il contesto nativo
-   * solamente con la cronologia.
-   *
-   * I valori sono espressi in caratteri perché l'implementazione corrente
-   * dell'ITokenEstimator utilizza CharacterLengthEstimator.
-   *
-   * Approssimazione:
-   *
-   *   4 caratteri ≈ 1 token
-   *
-   * Il limite effettivo viene comunque applicato da MemoryWindowManager.
+   * [maxTotalSize] remains character-based for persisted-setting compatibility
+   * and legacy callers. Production conversational routing does not use that
+   * heuristic as the model-capacity authority; runtime/provider-specific
+   * boundaries perform the final capacity check.
    */
 
   /// Limite massimo storico del profilo desktop/manuale performance.
@@ -277,22 +268,23 @@ class MemoryWindowConfig {
     required MemoryWindowProfile activeProfile,
     required bool isWeb,
   }) {
-    final maxContextLines = switch (activeProfile) {
-      MemoryWindowProfile.compact =>
-        isWeb ? 16 : 24,
-
-      MemoryWindowProfile.standard =>
-        isWeb ? 32 : 40,
-
-      MemoryWindowProfile.performance =>
-        isWeb ? 40 : 48,
-
-      MemoryWindowProfile.custom =>
-        isWeb ? 32 : 40,
-
-      MemoryWindowProfile.automatic =>
-        isWeb ? 32 : 40,
-    };
+    // AUTOMATIC no longer guesses model capacity by truncating recent
+    // conversation before routing. Non-web backends receive the largest
+    // chronological candidate window and apply their authoritative bound:
+    // Android uses exact GGUF tokens, Cloud has its provider cap, and legacy
+    // local composition keeps its compatibility character bound.
+    //
+    // Web keeps the existing conservative line caps because its execution
+    // environment is intentionally more constrained.
+    final maxContextLines = isWeb
+        ? switch (activeProfile) {
+            MemoryWindowProfile.compact => 16,
+            MemoryWindowProfile.standard => 32,
+            MemoryWindowProfile.performance => 40,
+            MemoryWindowProfile.custom => 32,
+            MemoryWindowProfile.automatic => 32,
+          }
+        : _desktopMaxContextLines;
 
     final maxTotalSize = switch (activeProfile) {
       MemoryWindowProfile.compact =>
