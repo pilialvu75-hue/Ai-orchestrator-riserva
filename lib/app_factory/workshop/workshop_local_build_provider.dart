@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Configurazione della Flutter SDK locale.
 ///
@@ -258,6 +259,11 @@ final class WorkshopLocalBuildProvider
     WorkshopBuildRequest request,
   ) async {
     final startedAt = DateTime.now();
+    _emitBuildEvent(
+      target: request.target,
+      stage: 'begin',
+      details: 'mode=${request.mode.name} clean=${request.cleanBuild}',
+    );
 
     if (!_targetCanRunHere(request.target)) {
       return _failure(
@@ -337,6 +343,11 @@ final class WorkshopLocalBuildProvider
         '[WORKSHOP_LOCAL_BUILD_STEP] begin=${step.name} '
         'executor=${step.executable.name}',
       );
+      _emitBuildEvent(
+        target: request.target,
+        stage: 'step_begin',
+        details: 'step=${step.name} executor=${step.executable.name}',
+      );
       final result = await _runStep(
         request: request,
         step: step,
@@ -346,6 +357,11 @@ final class WorkshopLocalBuildProvider
       stdoutBuffer.writeln(
         '[WORKSHOP_LOCAL_BUILD_STEP] end=${step.name} '
         'exit_code=${result.exitCode}',
+      );
+      _emitBuildEvent(
+        target: request.target,
+        stage: 'step_end',
+        details: 'step=${step.name} exit_code=${result.exitCode}',
       );
 
       if (step.name == 'format') {
@@ -361,6 +377,11 @@ final class WorkshopLocalBuildProvider
       }
 
       if (result.exitCode != 0) {
+        _emitBuildEvent(
+          target: request.target,
+          stage: 'failed',
+          details: 'step=${step.name} exit_code=${result.exitCode}',
+        );
         return WorkshopBuildResult(
           requestId: request.id,
           target: request.target,
@@ -389,6 +410,11 @@ final class WorkshopLocalBuildProvider
     );
 
     if (artifactPath == null) {
+      _emitBuildEvent(
+        target: request.target,
+        stage: 'failed',
+        details: 'reason=artifact_not_detected',
+      );
       return WorkshopBuildResult(
         requestId: request.id,
         target: request.target,
@@ -408,6 +434,11 @@ final class WorkshopLocalBuildProvider
 
     stdoutBuffer.writeln(
       '[WORKSHOP_LOCAL_BUILD_ARTIFACT] path=$artifactPath',
+    );
+    _emitBuildEvent(
+      target: request.target,
+      stage: 'succeeded',
+      details: 'artifact_present=true',
     );
     return WorkshopBuildResult(
       requestId: request.id,
@@ -642,6 +673,18 @@ final class WorkshopLocalBuildProvider
         .split(RegExp(r'\r?\n'))
         .first
         .trim();
+  }
+
+  static void _emitBuildEvent({
+    required WorkshopBuildTarget target,
+    required String stage,
+    String? details,
+  }) {
+    final suffix =
+        details == null || details.trim().isEmpty ? '' : ' ${details.trim()}';
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_LOCAL_BUILD] target=${target.name} stage=$stage$suffix',
+    );
   }
 
   WorkshopBuildResult _failure(
