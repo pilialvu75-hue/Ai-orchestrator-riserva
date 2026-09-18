@@ -36,6 +36,22 @@ void main() {
       expect(bindings, isNot(contains('_currentBudgetSessionId')));
     });
 
+    test('exact path disables legacy trim but fallback keeps it', () {
+      final isolator = _read(
+        'lib/core/runtime/inference/android/helpers/'
+        'android_ffi_runtime_provider_session_state_isolator.part.dart',
+      );
+
+      expect(
+        isolator,
+        contains('enforceLegacyContextBound: false'),
+      );
+      expect(
+        isolator,
+        contains('enforceLegacyContextBound: true'),
+      );
+    });
+
     test('Dart safety margin stays aligned with native bridge', () {
       final nativeTypes = _read(
         'lib/core/runtime/inference/ffi/llama_native_types.dart',
