@@ -102,7 +102,7 @@ void main() {
       expect(called, isFalse);
     });
 
-    test('surfaces non-success OpenRouter responses as ServerException',
+    test('surfaces non-success OpenRouter responses as CloudHttpException',
         () async {
       final client = MockClient(
         (request) async => http.Response('{"error":"rate limited"}', 429),
@@ -115,11 +115,14 @@ void main() {
       expect(
         () => dataSource.complete(const AiRequestModel(prompt: 'hello')),
         throwsA(
-          isA<ServerException>().having(
-            (error) => error.message,
-            'message',
-            contains('OpenRouter API error 429'),
-          ),
+          isA<CloudHttpException>()
+              .having((error) => error.provider, 'provider', 'openRouter')
+              .having((error) => error.statusCode, 'statusCode', 429)
+              .having(
+                (error) => error.message,
+                'message',
+                contains('rate limited'),
+              ),
         ),
       );
     });
