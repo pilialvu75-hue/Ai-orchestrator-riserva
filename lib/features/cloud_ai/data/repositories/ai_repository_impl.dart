@@ -8,6 +8,10 @@ import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datas
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/custom_cloud_provider_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/groq_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/mistral_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/nvidia_nim_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openrouter_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_request.dart';
@@ -15,7 +19,7 @@ import 'package:ai_orchestrator/features/cloud_ai/domain/entities/ai_response.da
 import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
 import 'package:dartz/dartz.dart';
 
-enum ActiveAiProvider { openAi, gemini, claude, grok, copilot }
+enum ActiveAiProvider { openAi, gemini, claude, grok, copilot, groq, nvidiaNim, mistral, openRouter }
 
 class AiRepositoryImpl implements AiRepository {
   AiRepositoryImpl({
@@ -24,6 +28,10 @@ class AiRepositoryImpl implements AiRepository {
     required this.claudeDataSource,
     this.grokDataSource,
     this.copilotDataSource,
+    this.groqDataSource,
+    this.nvidiaNimDataSource,
+    this.mistralDataSource,
+    this.openRouterDataSource,
     CustomCloudProviderDataSource? customCloudProviderDataSource,
     ActiveAiProvider activeAiProvider = ActiveAiProvider.openAi,
   })  : _customCloudProviderDataSource =
@@ -35,6 +43,10 @@ class AiRepositoryImpl implements AiRepository {
   final ClaudeDataSource claudeDataSource;
   final GrokDataSource? grokDataSource;
   final CopilotDataSource? copilotDataSource;
+  final GroqDataSource? groqDataSource;
+  final NvidiaNimDataSource? nvidiaNimDataSource;
+  final MistralDataSource? mistralDataSource;
+  final OpenRouterDataSource? openRouterDataSource;
   final CustomCloudProviderDataSource _customCloudProviderDataSource;
 
   String _activeProviderId;
@@ -149,6 +161,18 @@ class AiRepositoryImpl implements AiRepository {
               return const Left(failure);
             }
             response = await copilotDataSource!.complete(model);
+            break;
+          case ActiveAiProvider.groq:
+            response = await groqDataSource!.complete(model);
+            break;
+          case ActiveAiProvider.nvidiaNim:
+            response = await nvidiaNimDataSource!.complete(model);
+            break;
+          case ActiveAiProvider.mistral:
+            response = await mistralDataSource!.complete(model);
+            break;
+          case ActiveAiProvider.openRouter:
+            response = await openRouterDataSource!.complete(model);
             break;
         }
       }
@@ -300,6 +324,14 @@ class AiRepositoryImpl implements AiRepository {
         return grokDataSource?.isConfigured ?? false;
       case ActiveAiProvider.copilot:
         return copilotDataSource?.isConfigured ?? false;
+      case ActiveAiProvider.groq:
+        return groqDataSource?.isConfigured ?? false;
+      case ActiveAiProvider.nvidiaNim:
+        return nvidiaNimDataSource?.isConfigured ?? false;
+      case ActiveAiProvider.mistral:
+        return mistralDataSource?.isConfigured ?? false;
+      case ActiveAiProvider.openRouter:
+        return openRouterDataSource?.isConfigured ?? false;
     }
   }
 }
