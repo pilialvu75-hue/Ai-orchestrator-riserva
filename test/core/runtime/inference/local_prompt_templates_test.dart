@@ -135,5 +135,64 @@ void main() {
       expect(prompt, contains('turn-0'));
       expect(prompt, contains('turn-17'));
     });
+
+    test('legacy bound remains the default safety fallback', () {
+      RuntimeEventLog.instance.clear();
+      final context = List<ChatTurn>.generate(
+        6,
+        (index) => ChatTurn(
+          role: index.isEven ? ChatRole.user : ChatRole.assistant,
+          content: 'turn-$index-${'x' * 2500}',
+        ),
+      );
+
+      final prompt = LocalPromptTemplates.compose(
+        modelId: 'phi3_5_mini',
+        prompt: 'continua',
+        systemPrompt: 'Rispondi in italiano.',
+        context: context,
+      );
+
+      expect(prompt, isNot(contains('turn-0-')));
+      expect(prompt, contains('turn-5-'));
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains(
+            '[PROMPT_CONTEXT_BOUND] mode=legacy applied=true',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('runtime-owned budget disables the second character trim', () {
+      RuntimeEventLog.instance.clear();
+      final context = List<ChatTurn>.generate(
+        6,
+        (index) => ChatTurn(
+          role: index.isEven ? ChatRole.user : ChatRole.assistant,
+          content: 'turn-$index-${'x' * 2500}',
+        ),
+      );
+
+      final prompt = LocalPromptTemplates.compose(
+        modelId: 'phi3_5_mini',
+        prompt: 'continua',
+        systemPrompt: 'Rispondi in italiano.',
+        context: context,
+        enforceLegacyContextBound: false,
+      );
+
+      expect(prompt, contains('turn-0-'));
+      expect(prompt, contains('turn-5-'));
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.message.contains(
+            '[PROMPT_CONTEXT_BOUND] mode=runtime_owned applied=false',
+          ),
+        ),
+        isTrue,
+      );
+    });
   });
 }
