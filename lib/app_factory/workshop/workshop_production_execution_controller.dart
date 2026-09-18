@@ -537,13 +537,25 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _ensureAvailable();
     final current = _journalExecution;
     if (current == null) return;
-    if (!current.isTerminal) {
-      await _persistJournalStatus(
-        WorkshopExecutionStatus.cancelled,
-        resumePhase: 'cancelled',
-      );
+
+    final store = _executionStore;
+    if (store == null || current.isTerminal) {
+      _journalExecution = null;
+      return;
     }
-    _journalExecution = null;
+
+    final cancelled = current.copyWith(
+      status: WorkshopExecutionStatus.cancelled,
+      resumePhase: 'cancelled',
+    );
+    try {
+      await store.save(cancelled);
+      _journalExecution = null;
+      _executionJournalError = null;
+    } catch (error) {
+      _executionJournalError = error;
+      rethrow;
+    }
   }
 
   void _registerPreparedTask(WorkshopProductionTaskHandle handle) {
