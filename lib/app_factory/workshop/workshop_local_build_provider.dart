@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 final class WorkshopLocalBuildConfiguration {
   const WorkshopLocalBuildConfiguration({
     required this.flutterExecutable,
+    this.dartExecutable,
     this.environment = const <String, String>{},
     this.timeout = const Duration(minutes: 30),
   });
@@ -32,9 +33,97 @@ final class WorkshopLocalBuildConfiguration {
   ///   dal futuro LocalToolchainManager.
   final String flutterExecutable;
 
+  /// Optional Dart executable. When omitted, the provider first looks for the
+  /// Dart binary next to Flutter and then falls back to PATH.
+  final String? dartExecutable;
+
   final Map<String, String> environment;
 
   final Duration timeout;
+}
+
+enum WorkshopLocalBuildExecutable {
+  flutter,
+  dart,
+}
+
+final class WorkshopLocalBuildStep {
+  const WorkshopLocalBuildStep({
+    required this.name,
+    required this.executable,
+    required this.arguments,
+  });
+
+  final String name;
+  final WorkshopLocalBuildExecutable executable;
+  final List<String> arguments;
+}
+
+/// Deterministic command plan for a local/offline Flutter build.
+///
+/// Dependency resolution is always explicit and offline. A clean build runs
+/// before dependency resolution because `flutter clean` removes generated
+/// package metadata.
+abstract final class WorkshopLocalBuildPlanner {
+  static List<WorkshopLocalBuildStep> plan(WorkshopBuildRequest request) {
+    return <WorkshopLocalBuildStep>[
+      if (request.cleanBuild)
+        const WorkshopLocalBuildStep(
+          name: 'clean',
+          executable: WorkshopLocalBuildExecutable.flutter,
+          arguments: <String>['clean'],
+        ),
+      const WorkshopLocalBuildStep(
+        name: 'pub_get_offline',
+        executable: WorkshopLocalBuildExecutable.flutter,
+        arguments: <String>['pub', 'get', '--offline'],
+      ),
+      if (request.runFormatter)
+        const WorkshopLocalBuildStep(
+          name: 'format',
+          executable: WorkshopLocalBuildExecutable.dart,
+          arguments: <String>[
+            'format',
+            '--output=none',
+            '--set-exit-if-changed',
+            '.',
+          ],
+        ),
+      if (request.runAnalyzer)
+        const WorkshopLocalBuildStep(
+          name: 'analyze',
+          executable: WorkshopLocalBuildExecutable.flutter,
+          arguments: <String>['analyze', '--no-pub'],
+        ),
+      if (request.runTests)
+        const WorkshopLocalBuildStep(
+          name: 'test',
+          executable: WorkshopLocalBuildExecutable.flutter,
+          arguments: <String>['test', '--no-pub'],
+        ),
+      WorkshopLocalBuildStep(
+        name: 'build',
+        executable: WorkshopLocalBuildExecutable.flutter,
+        arguments: <String>[
+          'build',
+          _buildTargetArgument(request.target),
+          '--no-pub',
+          ...request.arguments,
+        ],
+      ),
+    ];
+  }
+
+  static String _buildTargetArgument(WorkshopBuildTarget target) {
+    return switch (target) {
+      WorkshopBuildTarget.android => 'apk',
+      WorkshopBuildTarget.windows => 'windows',
+      WorkshopBuildTarget.linux => 'linux',
+      WorkshopBuildTarget.macos => 'macos',
+      WorkshopBuildTarget.ios => 'ios',
+      WorkshopBuildTarget.web => 'web',
+    };
+  }
 }
 
 /// Provider di build Flutter locale/offline.
@@ -218,42 +307,7 @@ final class WorkshopLocalBuildProvider
       );
     }
 
-    final steps = <_BuildStep>[
-      if (request.runFormatter)
-        const _BuildStep(
-          name: 'format',
-          arguments: <String>[
-            'format',
-            '--output=none',
-            '.',
-          ],
-        ),
-      if (request.runAnalyzer)
-        const _BuildStep(
-          name: 'analyze',
-          arguments: <String>[
-            'analyze',
-            '--no-pub',
-          ],
-        ),
-      if (request.runTests)
-        const _BuildStep(
-          name: 'test',
-          arguments: <String>[
-            'test',
-            '--no-pub',
-          ],
-        ),
-      _BuildStep(
-        name: 'build',
-        arguments: <String>[
-          'build',
-          _buildTargetArgument(request.target),
-          '--no-pub',
-          ...request.arguments,
-        ],
-      ),
-    ];
+    final steps = WorkshopLocalBuildPlanner.plan(request);
 
     final stdoutBuffer = StringBuffer();
     final stderrBuffer = StringBuffer();
@@ -279,13 +333,20 @@ final class WorkshopLocalBuildProvider
         );
       }
 
+      stdoutBuffer.writeln(
+        '[WORKSHOP_LOCAL_BUILD_STEP] begin=${step.name} '
+        'executor=${step.executable.name}',
+      );
       final result = await _runStep(
         request: request,
         step: step,
       );
-
       stdoutBuffer.write(result.stdout);
       stderrBuffer.write(result.stderr);
+      stdoutBuffer.writeln(
+        '[WORKSHOP_LOCAL_BUILD_STEP] end=${step.name} '
+        'exit_code=${result.exitCode}',
+      );
 
       if (step.name == 'format') {
         formatPassed = result.exitCode == 0;
@@ -327,6 +388,27 @@ final class WorkshopLocalBuildProvider
       request.target,
     );
 
+    if (artifactPath == null) {
+      return WorkshopBuildResult(
+        requestId: request.id,
+        target: request.target,
+        status: WorkshopBuildStatus.failed,
+        startedAt: startedAt,
+        finishedAt: DateTime.now(),
+        stdout: stdoutBuffer.toString(),
+        stderr: stderrBuffer.toString(),
+        exitCode: 0,
+        formatPassed: formatPassed,
+        analysisPassed: analysisPassed,
+        testsPassed: testsPassed,
+        message: 'Build command completed but no artifact was detected.',
+        errors: const <String>['build_artifact_not_detected'],
+      );
+    }
+
+    stdoutBuffer.writeln(
+      '[WORKSHOP_LOCAL_BUILD_ARTIFACT] path=$artifactPath',
+    );
     return WorkshopBuildResult(
       requestId: request.id,
       target: request.target,
@@ -340,14 +422,7 @@ final class WorkshopLocalBuildProvider
       formatPassed: formatPassed,
       analysisPassed: analysisPassed,
       testsPassed: testsPassed,
-      message: artifactPath == null
-          ? 'Build completed but no artifact was detected.'
-          : 'Local Flutter build completed successfully.',
-      warnings: artifactPath == null
-          ? const <String>[
-              'build_artifact_not_detected',
-            ]
-          : const <String>[],
+      message: 'Local Flutter build completed successfully.',
     );
   }
 
@@ -375,7 +450,7 @@ final class WorkshopLocalBuildProvider
 
   Future<_ProcessResult> _runStep({
     required WorkshopBuildRequest request,
-    required _BuildStep step,
+    required WorkshopLocalBuildStep step,
   }) async {
     final environment = <String, String>{
       ...Platform.environment,
@@ -383,8 +458,12 @@ final class WorkshopLocalBuildProvider
       ...request.environment,
     };
 
+    final executable = step.executable == WorkshopLocalBuildExecutable.dart
+        ? _resolveDartExecutable()
+        : _configuration.flutterExecutable;
+
     final process = await Process.start(
-      _configuration.flutterExecutable,
+      executable,
       step.arguments,
       workingDirectory: request.projectPath,
       environment: environment,
@@ -439,6 +518,29 @@ final class WorkshopLocalBuildProvider
     }
   }
 
+  String _resolveDartExecutable() {
+    final configured = _configuration.dartExecutable?.trim();
+    if (configured != null && configured.isNotEmpty) {
+      return configured;
+    }
+
+    final flutterExecutable = _configuration.flutterExecutable.trim();
+    final flutterFile = File(flutterExecutable);
+    final hasExplicitPath = flutterFile.isAbsolute ||
+        flutterExecutable.contains(Platform.pathSeparator);
+    if (hasExplicitPath) {
+      final siblingName = Platform.isWindows ? 'dart.bat' : 'dart';
+      final sibling = File(
+        '${flutterFile.parent.path}${Platform.pathSeparator}$siblingName',
+      );
+      if (sibling.existsSync()) {
+        return sibling.path;
+      }
+    }
+
+    return 'dart';
+  }
+
   Future<String?> _findArtifact(
     String projectPath,
     WorkshopBuildTarget target,
@@ -491,30 +593,6 @@ final class WorkshopLocalBuildProvider
     }
 
     return null;
-  }
-
-  String _buildTargetArgument(
-    WorkshopBuildTarget target,
-  ) {
-    switch (target) {
-      case WorkshopBuildTarget.android:
-        return 'apk';
-
-      case WorkshopBuildTarget.windows:
-        return 'windows';
-
-      case WorkshopBuildTarget.linux:
-        return 'linux';
-
-      case WorkshopBuildTarget.macos:
-        return 'macos';
-
-      case WorkshopBuildTarget.ios:
-        return 'ios';
-
-      case WorkshopBuildTarget.web:
-        return 'web';
-    }
   }
 
   bool _targetCanRunHere(
@@ -596,16 +674,6 @@ final class WorkshopLocalBuildProvider
     _runningProcesses.clear();
     _cancelledRequests.clear();
   }
-}
-
-final class _BuildStep {
-  const _BuildStep({
-    required this.name,
-    required this.arguments,
-  });
-
-  final String name;
-  final List<String> arguments;
 }
 
 final class _ProcessResult {
