@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_detector.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_service.dart';
@@ -31,6 +32,7 @@ final class WorkshopDashboardControllerState {
     this.lastMessage,
     this.lastError,
     this.lastBuildResult,
+    this.projectApproval,
     this.localToolchainInspected = false,
     this.isBusy = false,
   });
@@ -66,6 +68,13 @@ final class WorkshopDashboardControllerState {
 
   final WorkshopBuildResult? lastBuildResult;
 
+  /// Explicit owner authorization granted at the project proposal boundary.
+  ///
+  /// This is project-scoped evidence, not permission to bypass Reviewer or
+  /// validation. Production may use it only to apply changes that have already
+  /// passed those guards inside the same authoritative project.
+  final WorkshopProjectApprovalEvidence? projectApproval;
+
   /// Indica se la toolchain locale è già stata ispezionata.
   final bool localToolchainInspected;
 
@@ -79,6 +88,11 @@ final class WorkshopDashboardControllerState {
       lastError != null && lastError!.trim().isNotEmpty;
 
   bool get hasBuildResult => lastBuildResult != null;
+
+  bool get isProjectApproved =>
+      projectApproval != null &&
+      projectId != null &&
+      projectApproval!.projectId == projectId;
 
   WorkshopDashboardControllerState copyWith({
     String? requestId,
@@ -94,11 +108,13 @@ final class WorkshopDashboardControllerState {
     String? lastMessage,
     String? lastError,
     WorkshopBuildResult? lastBuildResult,
+    WorkshopProjectApprovalEvidence? projectApproval,
     bool? localToolchainInspected,
     bool? isBusy,
     bool clearActiveTask = false,
     bool clearError = false,
     bool clearBuildResult = false,
+    bool clearProjectApproval = false,
   }) {
     return WorkshopDashboardControllerState(
       requestId: requestId ?? this.requestId,
@@ -120,6 +136,9 @@ final class WorkshopDashboardControllerState {
       lastBuildResult: clearBuildResult
           ? null
           : lastBuildResult ?? this.lastBuildResult,
+      projectApproval: clearProjectApproval
+          ? null
+          : projectApproval ?? this.projectApproval,
       localToolchainInspected:
           localToolchainInspected ?? this.localToolchainInspected,
       isBusy: isBusy ?? this.isBusy,
@@ -443,12 +462,56 @@ final class WorkshopDashboardController extends ChangeNotifier {
         lastMessage: 'Produzione preparata nel Cantiere.',
         clearError: true,
         clearBuildResult: true,
+        clearProjectApproval: true,
         clearActiveTask: true,
         isBusy: false,
       ),
     );
 
     return plan;
+  }
+
+  /// Records the owner's explicit approval of the current project proposal.
+  ///
+  /// This authorization is deliberately project-scoped. It allows the
+  /// production UI to continue validated tasks without asking the owner to
+  /// approve every generated file, but it never makes unreviewed or invalid
+  /// changes applicable.
+  WorkshopProjectApprovalEvidence approveCurrentProject({
+    String approvedBy = 'owner',
+  }) {
+    _ensureNotDisposed();
+
+    final projectId = _state.projectId?.trim();
+    if (projectId == null || projectId.isEmpty) {
+      throw StateError(
+        'Cannot approve Workshop production without an active project.',
+      );
+    }
+
+    final existing = _state.projectApproval;
+    if (existing != null && existing.projectId == projectId) {
+      return existing;
+    }
+
+    final now = DateTime.now().toUtc();
+    final approval = WorkshopProjectApprovalEvidence(
+      projectId: projectId,
+      approvalId: 'approval:$projectId:${now.microsecondsSinceEpoch}',
+      approvedAt: now,
+      approvedBy: approvedBy.trim().isEmpty ? 'owner' : approvedBy.trim(),
+    );
+
+    _updateState(
+      _state.copyWith(
+        projectApproval: approval,
+        lastMessage:
+            'Proposta approvata: produzione autonoma autorizzata entro i gate.',
+        clearError: true,
+      ),
+    );
+
+    return approval;
   }
 
   /// Prepara il prossimo task del progetto.
@@ -759,6 +822,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
         lastMessage: 'Produzione annullata.',
         clearActiveTask: true,
         clearError: true,
+        clearProjectApproval: true,
         isBusy: false,
       ),
     );
