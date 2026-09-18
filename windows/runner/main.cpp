@@ -62,6 +62,36 @@ void PreservePreviousStartupDiagnostics() {
                        L"AI-Orchestrator-win7-crash.previous.dmp");
 }
 
+struct NativeOsVersionInfo {
+  ULONG size;
+  ULONG major;
+  ULONG minor;
+  ULONG build;
+  ULONG platform_id;
+  WCHAR service_pack[128];
+};
+
+bool IsWindows7() {
+  HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+  if (ntdll == nullptr) {
+    return false;
+  }
+
+  using RtlGetVersionFn = LONG(WINAPI*)(NativeOsVersionInfo*);
+  auto rtl_get_version = reinterpret_cast<RtlGetVersionFn>(
+      ::GetProcAddress(ntdll, "RtlGetVersion"));
+  if (rtl_get_version == nullptr) {
+    return false;
+  }
+
+  NativeOsVersionInfo version = {};
+  version.size = sizeof(version);
+  if (rtl_get_version(&version) != 0) {
+    return false;
+  }
+  return version.major == 6 && version.minor == 1;
+}
+
 }  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
@@ -104,28 +134,42 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("08 after command line parsing");
 
   bool skip_plugins = false;
-  bool disable_impeller = false;
+  bool legacy_renderer = IsWindows7();
+  if (legacy_renderer) {
+    startup_trace::Mark(
+        "08a Win7 detected; conservative renderer auto-enabled");
+  }
+
   std::vector<std::string> dart_arguments;
   dart_arguments.reserve(command_line_arguments.size());
   for (const auto& argument : command_line_arguments) {
     if (argument == "--win7-no-plugins") {
       skip_plugins = true;
-      startup_trace::Mark("08a Win7 plugin-free diagnostic mode requested");
+      startup_trace::Mark("08b Win7 plugin-free diagnostic mode requested");
       continue;
     }
-    if (argument == "--win7-no-impeller") {
-      disable_impeller = true;
-      startup_trace::Mark("08b Win7 no-Impeller diagnostic mode requested");
+    if (argument == "--win7-no-impeller" ||
+        argument == "--win7-legacy-renderer") {
+      legacy_renderer = true;
+      startup_trace::Mark("08c legacy renderer explicitly requested");
+      continue;
+    }
+    if (argument == "--win7-default-renderer") {
+      legacy_renderer = false;
+      startup_trace::Mark("08c default renderer explicitly requested");
       continue;
     }
     dart_arguments.push_back(argument);
   }
 
-  if (disable_impeller) {
+  if (legacy_renderer) {
     project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    startup_trace::Mark("08c Impeller disabled; Skia requested");
+    project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
+    project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
+    startup_trace::Mark(
+        "08d legacy renderer: Impeller off, low-power GPU, platform UI thread");
   } else {
-    startup_trace::Mark("08c renderer default retained");
+    startup_trace::Mark("08d renderer default retained");
   }
 
   project.set_dart_entrypoint_arguments(std::move(dart_arguments));
