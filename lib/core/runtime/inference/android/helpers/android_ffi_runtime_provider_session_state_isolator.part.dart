@@ -7,6 +7,8 @@ class _AndroidFfiSessionStateIsolator {
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
+    int Function(String prompt)? exactTokenCounter,
+    int? requestedGenerationTokens,
   }) {
     if (bypassNonessentialLayers) {
       _log(
@@ -22,12 +24,48 @@ class _AndroidFfiSessionStateIsolator {
       return request.prompt.trim();
     }
 
-    return LocalPromptTemplates.compose(
-      modelId: modelId,
-      prompt: request.prompt,
-      systemPrompt: request.systemPrompt,
+    String composeWithContext(List<ChatTurn> context) {
+      return LocalPromptTemplates.compose(
+        modelId: modelId,
+        prompt: request.prompt,
+        systemPrompt: request.systemPrompt,
+        context: context,
+      );
+    }
+
+    if (exactTokenCounter == null || requestedGenerationTokens == null) {
+      _log(
+        '[CONTEXT_TOKEN_BUDGET] session=${request.sessionId} '
+        'exact=false reason=no_explicit_native_counter '
+        'context_turns=${request.context.length}',
+      );
+      return composeWithContext(request.context);
+    }
+
+    final selection = NativeTokenContextBudget.select(
       context: request.context,
+      composePrompt: composeWithContext,
+      countTokens: exactTokenCounter,
+      nCtx: LlamaNativeDefaults.nCtx,
+      requestedGenerationTokens: requestedGenerationTokens,
+      safetyMargin: LlamaNativeDefaults.promptTokenSafetyMargin,
     );
+
+    _log(
+      '[CONTEXT_TOKEN_BUDGET] session=${request.sessionId} '
+      'exact=true n_ctx=${LlamaNativeDefaults.nCtx} '
+      'generation_headroom=$requestedGenerationTokens '
+      'safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin} '
+      'prompt_budget=${selection.promptBudgetTokens} '
+      'prompt_tokens=${selection.promptTokens} '
+      'available_generation=${selection.availableGenerationTokens} '
+      'original_turns=${request.context.length} '
+      'kept_turns=${selection.context.length} '
+      'dropped_turns=${selection.droppedTurns} '
+      'trimmed=${selection.wasTrimmed}',
+    );
+
+    return selection.prompt;
   }
 
   void _log(String message) {

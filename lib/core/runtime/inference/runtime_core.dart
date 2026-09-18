@@ -13,6 +13,7 @@ import 'dart:isolate';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/serial_inference_task.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/native_session_worker.dart';
@@ -25,6 +26,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
+import 'package:ai_orchestrator/core/runtime/inference/native_token_context_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_exceptions.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_state_machine.dart';
@@ -726,11 +728,15 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
+    int Function(String prompt)? exactTokenCounter,
+    int? requestedGenerationTokens,
   }) =>
       _sessionStateIsolator.composePrompt(
         request,
         modelId: modelId,
         bypassNonessentialLayers: bypassNonessentialLayers,
+        exactTokenCounter: exactTokenCounter,
+        requestedGenerationTokens: requestedGenerationTokens,
       );
 
   static String? _validateModelFileForRuntime(String modelPath) {
