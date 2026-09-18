@@ -30,6 +30,7 @@ class _AndroidFfiSessionStateIsolator {
         prompt: request.prompt,
         systemPrompt: request.systemPrompt,
         context: context,
+        applyLegacyContextBound: exactTokenCounter == null,
       );
     }
 
