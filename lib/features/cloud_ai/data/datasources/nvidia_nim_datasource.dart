@@ -20,7 +20,7 @@ class NvidiaNimDataSource {
     http.Client? httpClient,
     this.model = 'nvidia/nemotron-3-ultra-550b-a55b',
   })  : _apiKeyProvider = apiKeyProvider ??
-            (() => CloudCredentialStore.instance.secretFor('nvidia') ?? apiKey),
+            (() => CloudCredentialStore.instance.secretFor('nvidiaNim') ?? apiKey),
         _client = httpClient ?? http.Client();
 
   static const String _chatCompletionsUrl =
