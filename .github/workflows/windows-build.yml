@@ -107,6 +107,12 @@ jobs:
         shell: pwsh
         run: flutter build windows --release
 
+      - name: Verify Windows dynamic plugin linkage
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\verify_windows_dynamic_plugins.ps1') -ReleaseDir $releaseDir
+
       - name: Apply Windows 7 bundle compatibility
         shell: pwsh
         run: |
