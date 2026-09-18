@@ -31,8 +31,13 @@ class MemoryWindowManager {
     required String userPrompt,
     required List<ChatTurn> contextTurns,
     bool enforceEstimatedSizeBudget = true,
+    bool preferDeepHistory = false,
   }) {
     final config = _configProvider();
+    final effectiveMaxContextLines =
+        preferDeepHistory && config.isAutomatic
+            ? config.maxContinuityContextLines
+            : config.maxContextLines;
 
     final systemSize = systemPrompt == null
         ? 0
@@ -98,8 +103,8 @@ class MemoryWindowManager {
      */
     var startIndex = 0;
 
-    if (normalizedTurns.length > config.maxContextLines) {
-      startIndex = normalizedTurns.length - config.maxContextLines;
+    if (normalizedTurns.length > effectiveMaxContextLines) {
+      startIndex = normalizedTurns.length - effectiveMaxContextLines;
 
       for (var index = 0; index < startIndex; index++) {
         runningSize -= sizes[index];
@@ -117,7 +122,7 @@ class MemoryWindowManager {
           runningSize > availableContextBudget;
 
       final shouldTrimForLineLimit =
-          remainingLines > config.maxContextLines;
+          remainingLines > effectiveMaxContextLines;
 
       if (!shouldTrimForBudget && !shouldTrimForLineLimit) {
         break;

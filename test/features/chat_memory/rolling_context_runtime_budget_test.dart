@@ -57,4 +57,70 @@ void main() {
     expect(result.overflowDetected, isFalse);
     expect(result.totalChars, greaterThan(512));
   });
+  test('ordinary Phi prompt keeps latency-friendly automatic history', () {
+    final builder = RollingContextBuilder(
+      windowManager: MemoryWindowManager(
+        tokenEstimator: const CharacterLengthEstimator(),
+        configProvider: () => MemoryWindowConfig.automatic(
+          modelId: 'phi3_5_mini',
+          isWeb: false,
+        ),
+      ),
+    );
+
+    final messages = List<ChatMessage>.generate(
+      40,
+      (index) => ChatMessage(
+        id: 'm$index',
+        sessionId: 's',
+        role: index.isEven ? 'user' : 'assistant',
+        content: 'turn-$index',
+        timestamp: index,
+      ),
+    );
+
+    final result = builder.build(
+      messages: messages,
+      userPrompt: 'Spiegami meglio questo punto.',
+      systemPrompt: 'system',
+    );
+
+    expect(result.contextTurns, hasLength(24));
+    expect(result.contextTurns.first.content, 'turn-16');
+    expect(result.contextTurns.last.content, 'turn-39');
+  });
+
+  test('explicit continuity cue expands Phi chronology before runtime budget', () {
+    final builder = RollingContextBuilder(
+      windowManager: MemoryWindowManager(
+        tokenEstimator: const CharacterLengthEstimator(),
+        configProvider: () => MemoryWindowConfig.automatic(
+          modelId: 'phi3_5_mini',
+          isWeb: false,
+        ),
+      ),
+    );
+
+    final messages = List<ChatMessage>.generate(
+      40,
+      (index) => ChatMessage(
+        id: 'm$index',
+        sessionId: 's',
+        role: index.isEven ? 'user' : 'assistant',
+        content: 'turn-$index',
+        timestamp: index,
+      ),
+    );
+
+    final result = builder.build(
+      messages: messages,
+      userPrompt: 'Fai come abbiamo deciso nella conversazione precedente.',
+      systemPrompt: 'system',
+    );
+
+    expect(result.contextTurns, hasLength(40));
+    expect(result.contextTurns.first.content, 'turn-0');
+    expect(result.contextTurns.last.content, 'turn-39');
+  });
+
 }

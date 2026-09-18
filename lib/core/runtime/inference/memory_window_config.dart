@@ -44,6 +44,7 @@ class MemoryWindowConfig {
     required this.profile,
     required this.activeProfile,
     required this.maxContextLines,
+    required this.maxContinuityContextLines,
     required this.maxTotalSize,
     required this.minContextSize,
   });
@@ -53,22 +54,12 @@ class MemoryWindowConfig {
    * RUNTIME SAFETY
    * ---------------------------------------------------------------------------
    *
-   * Il runtime Android attuale utilizza un contesto nativo di circa 2048 token.
+   * Android llama.cpp uses nCtx=4096 and applies the final prompt-capacity
+   * bound with the exact tokenizer of the loaded GGUF model.
    *
-   * InferenceRequest può richiedere fino a 1024 token di generazione per
-   * modelli 7B/8B/9B.
-   *
-   * Per questo il profilo AUTOMATICO non deve saturare il contesto nativo
-   * solamente con la cronologia.
-   *
-   * I valori sono espressi in caratteri perché l'implementazione corrente
-   * dell'ITokenEstimator utilizza CharacterLengthEstimator.
-   *
-   * Approssimazione:
-   *
-   *   4 caratteri ≈ 1 token
-   *
-   * Il limite effettivo viene comunque applicato da MemoryWindowManager.
+   * [maxTotalSize] remains character-based for persisted-setting compatibility
+   * and legacy callers. Production conversational routing does not treat it as
+   * Android's token-capacity authority.
    */
 
   /// Limite massimo storico del profilo desktop/manuale performance.
@@ -118,19 +109,22 @@ class MemoryWindowConfig {
   /// Lascia margine a system prompt, prompt corrente e generazione.
   static const int _automaticStandardMaxTotalSize = 3584;
 
-  /// Contesto prudenziale per modelli 7B+ nel profilo AUTOMATIC.
+  /// Legacy character-size metadata for larger AUTOMATIC profiles.
   ///
-  /// 4096 caratteri ≈ 1024 token.
-  ///
-  /// È intenzionalmente molto più basso del vecchio 6144:
-  /// con nCtx=2048 e maxTokens=1024 per i 7B+, non vogliamo arrivare
-  /// al limite nativo solamente attraverso la memoria conversazionale.
+  /// The Android conversational path no longer uses this value as the model
+  /// capacity authority; exact GGUF tokens decide the final prompt window.
   static const int _automaticLargeMaxTotalSize = 4096;
 
   final MemoryWindowProfile profile;
   final MemoryWindowProfile activeProfile;
 
   final int maxContextLines;
+
+  /// Maximum chronological candidate window that AUTOMATIC may expose when
+  /// the user explicitly refers to earlier conversation state. Manual profiles
+  /// keep this equal to [maxContextLines].
+  final int maxContinuityContextLines;
+
   final int maxTotalSize;
   final int minContextSize;
 
@@ -232,6 +226,7 @@ class MemoryWindowConfig {
       profile: MemoryWindowProfile.custom,
       activeProfile: MemoryWindowProfile.custom,
       maxContextLines: normalizedMaxContextLines,
+      maxContinuityContextLines: normalizedMaxContextLines,
       maxTotalSize: normalizedMaxTotalSize,
       minContextSize: normalizedMinContextSize,
     );
@@ -251,6 +246,7 @@ class MemoryWindowConfig {
       profile: profile,
       activeProfile: activeProfile,
       maxContextLines: preset.$1,
+      maxContinuityContextLines: preset.$1,
       maxTotalSize: preset.$2,
       minContextSize: preset.$3,
     );
@@ -335,6 +331,11 @@ class MemoryWindowConfig {
       profile: MemoryWindowProfile.automatic,
       activeProfile: activeProfile,
       maxContextLines: maxContextLines,
+      // Keep ordinary prompts on the latency-friendly model-family window.
+      // Deep conversational references may expose more chronology on non-web
+      // runtimes; the selected backend still owns its final capacity bound.
+      maxContinuityContextLines:
+          isWeb ? maxContextLines : _desktopMaxContextLines,
       maxTotalSize: maxTotalSize,
       minContextSize: minContextSize,
     );

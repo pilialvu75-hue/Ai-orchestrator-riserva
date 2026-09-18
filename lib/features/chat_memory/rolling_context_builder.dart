@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/features/chat_memory/conversation_continuity_detector.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
 import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
@@ -57,6 +58,11 @@ class RollingContextBuilder {
       // Android local uses exact llama.cpp tokens; legacy local and Cloud apply
       // their own provider-specific bounds.
       enforceEstimatedSizeBudget: false,
+      // Keep ordinary turns latency-friendly. Expand chronology only when the
+      // user explicitly refers to earlier conversation state; manual profiles
+      // and Web still enforce their configured ceiling inside the manager.
+      preferDeepHistory:
+          ConversationContinuityDetector.needsDeepHistory(userPrompt),
     );
 
     return RollingContextResult(
