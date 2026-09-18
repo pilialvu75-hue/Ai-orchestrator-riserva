@@ -233,9 +233,12 @@ final class ModuleCuratorGitHubActionsSource {
       }
       if (decoded['status'] == 'completed') {
         if (decoded['conclusion'] == 'success') return;
+        final conclusion = decoded['conclusion']?.toString() ?? 'unknown';
         throw StateError(
-          'Esecuzione Curator fallita su GitHub Actions. '
-          'Controlla il workflow e che GEMINI_API_KEY sia configurato.',
+          'Esecuzione Curator non riuscita su GitHub Actions '
+          '(run #$runId, esito: $conclusion). '
+          'La chiave Gemini, i limiti del provider, la rete o il workflow '
+          'possono essere la causa; consulta i log del run per il dettaglio.',
         );
       }
       await _delay(pollInterval);
