@@ -44,6 +44,7 @@ class MemoryWindowConfig {
     required this.profile,
     required this.activeProfile,
     required this.maxContextLines,
+    required this.maxContinuityContextLines,
     required this.maxTotalSize,
     required this.minContextSize,
   });
@@ -57,9 +58,8 @@ class MemoryWindowConfig {
    * bound with the exact tokenizer of the loaded GGUF model.
    *
    * [maxTotalSize] remains character-based for persisted-setting compatibility
-   * and legacy callers. Production conversational routing does not use that
-   * heuristic as the model-capacity authority; runtime/provider-specific
-   * boundaries perform the final capacity check.
+   * and legacy callers. Production conversational routing does not treat it as
+   * Android's token-capacity authority.
    */
 
   /// Limite massimo storico del profilo desktop/manuale performance.
@@ -122,6 +122,12 @@ class MemoryWindowConfig {
   final MemoryWindowProfile activeProfile;
 
   final int maxContextLines;
+
+  /// Maximum chronological candidate window that AUTOMATIC may expose when
+  /// the user explicitly refers to earlier conversation state. Manual profiles
+  /// keep this equal to [maxContextLines].
+  final int maxContinuityContextLines;
+
   final int maxTotalSize;
   final int minContextSize;
 
@@ -223,6 +229,7 @@ class MemoryWindowConfig {
       profile: MemoryWindowProfile.custom,
       activeProfile: MemoryWindowProfile.custom,
       maxContextLines: normalizedMaxContextLines,
+      maxContinuityContextLines: normalizedMaxContextLines,
       maxTotalSize: normalizedMaxTotalSize,
       minContextSize: normalizedMinContextSize,
     );
@@ -242,6 +249,7 @@ class MemoryWindowConfig {
       profile: profile,
       activeProfile: activeProfile,
       maxContextLines: preset.$1,
+      maxContinuityContextLines: preset.$1,
       maxTotalSize: preset.$2,
       minContextSize: preset.$3,
     );
@@ -268,23 +276,22 @@ class MemoryWindowConfig {
     required MemoryWindowProfile activeProfile,
     required bool isWeb,
   }) {
-    // AUTOMATIC no longer guesses model capacity by truncating recent
-    // conversation before routing. Non-web backends receive the largest
-    // chronological candidate window and apply their authoritative bound:
-    // Android uses exact GGUF tokens, Cloud has its provider cap, and legacy
-    // local composition keeps its compatibility character bound.
-    //
-    // Web keeps the existing conservative line caps because its execution
-    // environment is intentionally more constrained.
-    final maxContextLines = isWeb
-        ? switch (activeProfile) {
-            MemoryWindowProfile.compact => 16,
-            MemoryWindowProfile.standard => 32,
-            MemoryWindowProfile.performance => 40,
-            MemoryWindowProfile.custom => 32,
-            MemoryWindowProfile.automatic => 32,
-          }
-        : _desktopMaxContextLines;
+    final maxContextLines = switch (activeProfile) {
+      MemoryWindowProfile.compact =>
+        isWeb ? 16 : 24,
+
+      MemoryWindowProfile.standard =>
+        isWeb ? 32 : 40,
+
+      MemoryWindowProfile.performance =>
+        isWeb ? 40 : 48,
+
+      MemoryWindowProfile.custom =>
+        isWeb ? 32 : 40,
+
+      MemoryWindowProfile.automatic =>
+        isWeb ? 32 : 40,
+    };
 
     final maxTotalSize = switch (activeProfile) {
       MemoryWindowProfile.compact =>
@@ -327,6 +334,11 @@ class MemoryWindowConfig {
       profile: MemoryWindowProfile.automatic,
       activeProfile: activeProfile,
       maxContextLines: maxContextLines,
+      // Keep ordinary prompts on the latency-friendly model-family window.
+      // Deep conversational references may expose more chronology on non-web
+      // runtimes; the selected backend still owns its final capacity bound.
+      maxContinuityContextLines:
+          isWeb ? maxContextLines : _desktopMaxContextLines,
       maxTotalSize: maxTotalSize,
       minContextSize: minContextSize,
     );
