@@ -13,15 +13,28 @@ enum WorkshopProductionExecutionStatus {
   cancelled,
 }
 
+enum WorkshopBuildRepairReservation {
+  reserved,
+  budgetExhausted,
+  repeatedFailure,
+}
+
 final class WorkshopProductionExecutionPolicy {
   const WorkshopProductionExecutionPolicy({
     this.maxDistinctTasksPerProject = 64,
-  }) : assert(maxDistinctTasksPerProject > 0);
+    this.maxBuildRepairAttempts = 2,
+  })  : assert(maxDistinctTasksPerProject > 0),
+        assert(maxBuildRepairAttempts >= 0);
 
   /// Hard guard against malformed/cyclic plans causing unbounded unattended
   /// execution. Retries of the same authoritative task do not consume a new
   /// slot; a new project automatically starts with a fresh budget.
   final int maxDistinctTasksPerProject;
+
+  /// Hard upper bound for project-code build repair productions belonging to
+  /// one logical repair chain. Infrastructure failures never consume this
+  /// budget because they are not eligible for AI repair.
+  final int maxBuildRepairAttempts;
 }
 
 final class WorkshopProductionExecutionState {
@@ -144,10 +157,17 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   bool _disposed = false;
   String? _activePlanId;
   final Set<String> _startedTaskIds = <String>{};
+  String? _buildRepairRootProjectId;
+  String? _lastBuildRepairFailureSignature;
+  int _buildRepairAttempts = 0;
 
   WorkshopProductionExecutionState get state => _state;
 
   int get distinctTasksStartedInCurrentProject => _startedTaskIds.length;
+  int get buildRepairAttempts => _buildRepairAttempts;
+  String? get buildRepairRootProjectId => _buildRepairRootProjectId;
+  String? get lastBuildRepairFailureSignature =>
+      _lastBuildRepairFailureSignature;
 
   Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
     _ensureAvailable();
@@ -240,6 +260,61 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
+  /// Reserves one bounded AI build-repair attempt for [rootProjectId].
+  ///
+  /// A new root project starts a fresh repair budget. Subsequent repair projects
+  /// in the same chain must keep passing the original root id so navigation or
+  /// a new repair-plan id cannot silently reset the limit. Repeating the exact
+  /// same privacy-preserving failure signature stops before consuming another
+  /// attempt, preventing a deterministic repair loop.
+  WorkshopBuildRepairReservation reserveBuildRepairAttempt({
+    required String rootProjectId,
+    required String failureSignature,
+  }) {
+    _ensureAvailable();
+    final normalizedRoot = rootProjectId.trim();
+    final normalizedSignature = failureSignature.trim();
+    if (normalizedRoot.isEmpty) {
+      throw ArgumentError.value(
+        rootProjectId,
+        'rootProjectId',
+        'Workshop build repair root project id cannot be empty.',
+      );
+    }
+    if (normalizedSignature.isEmpty) {
+      throw ArgumentError.value(
+        failureSignature,
+        'failureSignature',
+        'Workshop build repair failure signature cannot be empty.',
+      );
+    }
+
+    if (_buildRepairRootProjectId != normalizedRoot) {
+      _buildRepairRootProjectId = normalizedRoot;
+      _buildRepairAttempts = 0;
+      _lastBuildRepairFailureSignature = null;
+    }
+
+    if (_lastBuildRepairFailureSignature == normalizedSignature) {
+      return WorkshopBuildRepairReservation.repeatedFailure;
+    }
+
+    if (_buildRepairAttempts >= policy.maxBuildRepairAttempts) {
+      return WorkshopBuildRepairReservation.budgetExhausted;
+    }
+
+    _buildRepairAttempts += 1;
+    _lastBuildRepairFailureSignature = normalizedSignature;
+    return WorkshopBuildRepairReservation.reserved;
+  }
+
+  void clearBuildRepairChain() {
+    _ensureAvailable();
+    _buildRepairRootProjectId = null;
+    _lastBuildRepairFailureSignature = null;
+    _buildRepairAttempts = 0;
+  }
+
   Future<WorkshopTaskInferenceResult> _execute(
     WorkshopProductionTaskHandle handle,
     CancellationToken token, {
@@ -328,6 +403,20 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _startedTaskIds.add(taskId);
   }
 
+  /// Clears terminal task state before the next task while preserving the
+  /// explicitly selected offline/online mode for the same production chain.
+  void resetForNextTask() {
+    _ensureAvailable();
+    if (_activeRun != null) {
+      throw StateError(
+        'Cannot reset Workshop production execution while a task is running.',
+      );
+    }
+    _setState(WorkshopProductionExecutionState(isOffline: _state.isOffline));
+  }
+
+  /// Full execution-state reset. This intentionally resets the execution mode
+  /// but leaves the independently bounded build-repair chain untouched.
   void reset() {
     _ensureAvailable();
     if (_activeRun != null) {
@@ -362,6 +451,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _cancellationToken = null;
     _startedTaskIds.clear();
     _activePlanId = null;
+    _buildRepairRootProjectId = null;
+    _lastBuildRepairFailureSignature = null;
+    _buildRepairAttempts = 0;
     super.dispose();
   }
 }
