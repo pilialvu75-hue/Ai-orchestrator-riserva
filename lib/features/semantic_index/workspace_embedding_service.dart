@@ -27,26 +27,29 @@ class WorkspaceEmbeddingService {
     if (normalized.isEmpty) {
       return vector;
     }
-    final tokens = normalized
+    final legacyTokens = normalized
+        .split(RegExp(r'[^a-z0-9_]+'))
+        .where((token) => token.isNotEmpty)
+        .toList(growable: false);
+    final unicodeTokens = normalized
         .split(RegExp(r'[^\p{L}\p{N}_]+', unicode: true))
         .where((token) => token.isNotEmpty)
         .toList(growable: false);
-    if (tokens.isEmpty) return vector;
 
-    for (var i = 0; i < tokens.length; i++) {
-      final token = tokens[i];
-      final positionWeight = 1.0 + (i / math.max(1, tokens.length));
-      _accumulateFeature(vector, token, 1.0 * positionWeight);
-      for (final ngram in _characterNGrams(token, 3)) {
-        _accumulateFeature(vector, ngram, 0.6 * positionWeight);
-      }
-      for (final ngram in _characterNGrams(token, 4)) {
-        _accumulateFeature(vector, ngram, 0.45 * positionWeight);
-      }
-      if (i + 1 < tokens.length) {
-        final bigram = '${tokens[i]}_${tokens[i + 1]}';
-        _accumulateFeature(vector, bigram, 0.8 * positionWeight);
-      }
+    if (legacyTokens.isEmpty && unicodeTokens.isEmpty) return vector;
+
+    // Keep the historical ASCII feature path exactly unchanged so vectors
+    // already persisted on device remain comparable after this upgrade.
+    _accumulateTokenFeatures(vector, legacyTokens);
+
+    // Unicode-only additions improve accented/non-Latin text while retaining
+    // the legacy feature signal above for backward compatibility.
+    if (!_sameTokens(legacyTokens, unicodeTokens)) {
+      _accumulateTokenFeatures(
+        vector,
+        unicodeTokens,
+        scale: 0.65,
+      );
     }
 
     return _normalize(vector);
@@ -64,6 +67,38 @@ class WorkspaceEmbeddingService {
     }
     if (normA == 0 || normB == 0) return 0;
     return dot / (math.sqrt(normA) * math.sqrt(normB));
+  }
+
+  void _accumulateTokenFeatures(
+    List<double> vector,
+    List<String> tokens, {
+    double scale = 1.0,
+  }) {
+    if (tokens.isEmpty || scale <= 0) return;
+
+    for (var i = 0; i < tokens.length; i++) {
+      final token = tokens[i];
+      final positionWeight = 1.0 + (i / math.max(1, tokens.length));
+      _accumulateFeature(vector, token, 1.0 * positionWeight * scale);
+      for (final ngram in _characterNGrams(token, 3)) {
+        _accumulateFeature(vector, ngram, 0.6 * positionWeight * scale);
+      }
+      for (final ngram in _characterNGrams(token, 4)) {
+        _accumulateFeature(vector, ngram, 0.45 * positionWeight * scale);
+      }
+      if (i + 1 < tokens.length) {
+        final bigram = '${tokens[i]}_${tokens[i + 1]}';
+        _accumulateFeature(vector, bigram, 0.8 * positionWeight * scale);
+      }
+    }
+  }
+
+  bool _sameTokens(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   List<double> _normalize(List<double> vector) {
