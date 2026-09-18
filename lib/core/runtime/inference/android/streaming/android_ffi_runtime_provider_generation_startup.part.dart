@@ -287,10 +287,22 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log('[NATIVE_MODEL_LOAD_SUCCESS] path=$resolvedModelPath modelId=$modelId' ' session=$nativeSessionId');
     AndroidFfiRuntimeProvider._log('[NATIVE_CONTEXT_CREATE] path=$resolvedModelPath status=ok');
     AndroidFfiRuntimeProvider._logAi('native session ready');
+    final requestedMaxTokens = isForensicSelfTest
+        ? 4
+        : (request.maxTokens > 0
+            ? request.maxTokens
+            : AndroidFfiRuntimeProvider._defaultMaxTokens);
+    final maxTokens =
+        requestedMaxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens);
+
     final composedPrompt = _composePrompt(
       request,
       modelId: modelId,
       bypassNonessentialLayers: isForensicSelfTest,
+      exactTokenCounter: isForensicSelfTest
+          ? null
+          : (prompt) => bindings.countTokens(nativeSessionId, prompt),
+      requestedGenerationTokens: isForensicSelfTest ? null : maxTokens,
     );
     final samplingMetadata = SamplingMetadata.fromPrompt(composedPrompt);
     final prompt = samplingMetadata.stripFrom(composedPrompt);
@@ -328,12 +340,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log( '[CONTEXT_SIZE] session=$sessionId context_lines=${request.context.length} system_chars=${(request.systemPrompt ?? '').length} prompt_chars=${request.prompt.length} composed_prompt_chars=${prompt.length}', );
     AndroidFfiRuntimeProvider._log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate', );
-    final requestedMaxTokens = isForensicSelfTest
-    ? 4
-    : (request.maxTokens > 0
-        ? request.maxTokens
-        : AndroidFfiRuntimeProvider._defaultMaxTokens);
-    final maxTokens = requestedMaxTokens.clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens);
     final effectiveTemperature = isForensicSelfTest
         ? 0.1
         : (samplingMetadata.temperature ?? request.temperature);
