@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
@@ -40,7 +42,24 @@ class LocalPromptTemplates {
     required String prompt,
     String? systemPrompt,
     List<ChatTurn> context = const [],
+    bool enforceLegacyContextBound = true,
+    bool emitDiagnostics = true,
   }) {
+    if (!emitDiagnostics) {
+      return runZoned(
+        () => compose(
+          modelId: modelId,
+          prompt: prompt,
+          systemPrompt: systemPrompt,
+          context: context,
+          enforceLegacyContextBound: enforceLegacyContextBound,
+          emitDiagnostics: true,
+        ),
+        zoneValues: const <Object?, Object?>{
+          #suppressLocalPromptDiagnostics: true,
+        },
+      );
+    }
     final cleanedSystemPrompt = _clean(systemPrompt);
 
     final userPrompt = prompt.trim();
@@ -86,11 +105,13 @@ class LocalPromptTemplates {
         )
         .toList(growable: false);
 
-    final boundedContext = _boundContext(
-      cleanedContext,
-      maxChars: _maxContextChars,
-      maxTurns: _maxContextTurns,
-    );
+    final boundedContext = enforceLegacyContextBound
+        ? _boundContext(
+            cleanedContext,
+            maxChars: _maxContextChars,
+            maxTurns: _maxContextTurns,
+          )
+        : List<ChatTurn>.unmodifiable(cleanedContext);
 
     final template =
         LocalInferenceModelIds.resolveTemplate(modelId);
@@ -108,18 +129,18 @@ class LocalPromptTemplates {
     final webSystemPromptChars =
         enableWebSearch ? finalSystemPrompt.length : 0;
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_BEGIN] '
       'model=$modelId '
       'prompt_chars=${userPrompt.length}',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_SYSTEM_SIZE] '
       'chars=${finalSystemPrompt.length}',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_CONTEXT_SIZE] '
       'turns=${boundedContext.length} '
       'chars=$boundedContextChars '
@@ -127,19 +148,20 @@ class LocalPromptTemplates {
       'original_chars=$originalContextChars',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_CONTEXT_BOUND] '
       'applied=${boundedContext.length != cleanedContext.length || boundedContextChars != originalContextChars} '
-      'max_chars=$_maxContextChars '
-      'max_turns=$_maxContextTurns',
+      'mode=${enforceLegacyContextBound ? 'legacy_chars' : 'runtime_tokens'} '
+      'max_chars=${enforceLegacyContextBound ? _maxContextChars : 0} '
+      'max_turns=${enforceLegacyContextBound ? _maxContextTurns : cleanedContext.length}',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_WEB_RESULTS_SIZE] '
       'chars=$webSystemPromptChars',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_WEB_SEARCH] '
       'enabled=$enableWebSearch '
       'reason=${enableWebSearch ? 'dynamic_or_explicit_query' : 'ordinary_conversation'}',
@@ -549,7 +571,7 @@ class LocalPromptTemplates {
       userPrompt.length,
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_TEMPLATE_DEEPSEEK] '
       'bos=true '
       'reasoning_prompt=true '
@@ -705,7 +727,7 @@ class LocalPromptTemplates {
       userPrompt.length,
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_TEMPLATE_MISTRAL] '
       'bos=true '
       'inst=true '
@@ -840,20 +862,27 @@ class LocalPromptTemplates {
     return composed;
   }
 
+  static void _emit(String message) {
+    if (Zone.current[#suppressLocalPromptDiagnostics] == true) {
+      return;
+    }
+    RuntimeEventLog.instance.emit(message);
+  }
+
   static void _logFinalPromptMetrics(
     String composed,
     int userPromptChars,
   ) {
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_FINAL_SIZE] chars=${composed.length}',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_FINAL_TOKENS] '
       'estimate=${(composed.length / 4).ceil()}',
     );
 
-    RuntimeEventLog.instance.emit(
+    _emit(
       '[PROMPT_SENT] '
       'hash=${secureForensicHash(composed)} '
       'prompt_chars=$userPromptChars',

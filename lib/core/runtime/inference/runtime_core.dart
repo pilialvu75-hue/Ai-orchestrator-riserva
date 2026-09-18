@@ -12,6 +12,8 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/runtime/inference/android/native_token_context_budget.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/serial_inference_task.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_bindings.dart';
@@ -726,11 +728,17 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     InferenceRequest request, {
     required String modelId,
     bool bypassNonessentialLayers = false,
+    List<ChatTurn>? contextOverride,
+    bool enforceLegacyContextBound = true,
+    bool emitDiagnostics = true,
   }) =>
       _sessionStateIsolator.composePrompt(
         request,
         modelId: modelId,
         bypassNonessentialLayers: bypassNonessentialLayers,
+        contextOverride: contextOverride,
+        enforceLegacyContextBound: enforceLegacyContextBound,
+        emitDiagnostics: emitDiagnostics,
       );
 
   static String? _validateModelFileForRuntime(String modelPath) {
