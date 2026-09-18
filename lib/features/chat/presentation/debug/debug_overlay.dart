@@ -997,7 +997,7 @@ class _DebugOverlayState
             ),
             DropdownButtonFormField<
                 AssistantMessageTextSize>(
-              initialValue:
+              value:
                   widget
                       .assistantTextSize,
               isExpanded: true,
