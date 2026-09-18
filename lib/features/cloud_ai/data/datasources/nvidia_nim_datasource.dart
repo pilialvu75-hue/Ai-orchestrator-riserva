@@ -20,7 +20,7 @@ class NvidiaNimDataSource {
     http.Client? httpClient,
     this.model = 'nvidia/nemotron-3-ultra-550b-a55b',
   })  : _apiKeyProvider = apiKeyProvider ??
-            (() => CloudCredentialStore.instance.secretFor('nvidiaNim') ?? apiKey),
+            (() => CloudCredentialStore.instance.secretFor('nvidia') ?? apiKey),
         _client = httpClient ?? http.Client();
 
   static const String _chatCompletionsUrl =
@@ -54,21 +54,13 @@ class NvidiaNimDataSource {
       return AiResponseModel.fromOpenAiJson(json);
     }
 
-    throw CloudHttpException(
-      provider: 'nvidiaNim',
-      statusCode: response.statusCode,
-      message: response.body,
-      retryAfter: _retryAfter(response),
+    throw ServerException(
+      'NVIDIA NIM API error ${response.statusCode}: ${response.body}',
     );
   }
 
   String _modelFor(AiRequestModel request) {
     final requested = request.modelId?.trim();
     return requested != null && requested.isNotEmpty ? requested : model;
-  }
-
-  Duration? _retryAfter(http.Response response) {
-    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
-    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
   }
 }
