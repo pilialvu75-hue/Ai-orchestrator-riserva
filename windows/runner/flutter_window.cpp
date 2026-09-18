@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "flutter/generated_plugin_registrant.h"
+#include "dynamic_plugins.h"
 #include "startup_trace.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
@@ -21,14 +21,11 @@ bool FlutterWindow::OnCreate() {
 
   RECT frame = GetClientArea();
 
-  // The size here must match the window dimensions to avoid unnecessary surface
-  // creation / destruction in the startup path.
   startup_trace::Mark("23 before FlutterViewController constructor");
   flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
       frame.right - frame.left, frame.bottom - frame.top, project_);
   startup_trace::Mark("24 after FlutterViewController constructor");
 
-  // Ensure that basic setup of the controller was successful.
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     startup_trace::Mark("25 controller missing engine or view");
     return false;
@@ -36,11 +33,14 @@ bool FlutterWindow::OnCreate() {
   startup_trace::Mark("26 controller engine and view ready");
 
   if (skip_plugins_) {
-    startup_trace::Mark("27 diagnostic mode: RegisterPlugins skipped");
+    startup_trace::Mark("27 diagnostic mode: dynamic plugins skipped");
   } else {
-    startup_trace::Mark("27 before RegisterPlugins");
-    RegisterPlugins(flutter_controller_->engine());
-    startup_trace::Mark("28 after RegisterPlugins");
+    startup_trace::Mark("27 before dynamic plugin registration");
+    const bool all_plugins_ready =
+        RegisterDynamicPlugins(flutter_controller_->engine());
+    startup_trace::Mark(all_plugins_ready
+                            ? "28 dynamic plugins registered"
+                            : "28 dynamic plugin registration partial");
   }
 
   startup_trace::Mark("29 before SetChildContent");
@@ -54,9 +54,6 @@ bool FlutterWindow::OnCreate() {
   });
   startup_trace::Mark("32 after SetNextFrameCallback");
 
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
   startup_trace::Mark("33 before ForceRedraw");
   flutter_controller_->ForceRedraw();
   startup_trace::Mark("34 after ForceRedraw");
@@ -79,7 +76,6 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
