@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_linux_build_host_p
 final class WorkshopLocalToolchainDetectorConfiguration {
   const WorkshopLocalToolchainDetectorConfiguration({
     this.flutterExecutable = 'flutter',
+    this.dartExecutable,
     this.javaExecutable = 'java',
     this.androidSdkPath,
     this.environment = const <String, String>{},
@@ -19,6 +20,7 @@ final class WorkshopLocalToolchainDetectorConfiguration {
   });
 
   final String flutterExecutable;
+  final String? dartExecutable;
   final String javaExecutable;
   final String? androidSdkPath;
   final Map<String, String> environment;
@@ -214,8 +216,8 @@ final class WorkshopLocalToolchainDetector {
 
   Future<_CommandCheck> _checkDart() async {
     final result = await _run(
-      _configuration.flutterExecutable,
-      const <String>['dart', '--version'],
+      _resolveDartExecutable(),
+      const <String>['--version'],
     );
     if (!result.success) {
       return _CommandCheck.unavailable(message: result.message);
@@ -226,6 +228,29 @@ final class WorkshopLocalToolchainDetector {
       version: _firstLine(output),
       output: output,
     );
+  }
+
+  String _resolveDartExecutable() {
+    final configured = _configuration.dartExecutable?.trim();
+    if (configured != null && configured.isNotEmpty) {
+      return configured;
+    }
+
+    final flutterExecutable = _configuration.flutterExecutable.trim();
+    final flutterFile = File(flutterExecutable);
+    final hasExplicitPath = flutterFile.isAbsolute ||
+        flutterExecutable.contains(Platform.pathSeparator);
+    if (hasExplicitPath) {
+      final siblingName = Platform.isWindows ? 'dart.bat' : 'dart';
+      final sibling = File(
+        '${flutterFile.parent.path}${Platform.pathSeparator}$siblingName',
+      );
+      if (sibling.existsSync()) {
+        return sibling.path;
+      }
+    }
+
+    return 'dart';
   }
 
   Future<_CommandCheck> _checkJava() async {
