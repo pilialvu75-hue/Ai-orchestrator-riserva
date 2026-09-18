@@ -53,6 +53,14 @@ void main() {
         ChronologicalLongRecall.shouldAttempt('Spiegami meglio questo punto.'),
         isFalse,
       );
+      expect(
+        ChronologicalLongRecall.shouldAttempt('Riprendi quello di prima.'),
+        isFalse,
+      );
+      expect(
+        ChronologicalLongRecall.shouldAttempt('Ricordati che preferisco Phi.'),
+        isFalse,
+      );
     });
 
     test('semantic query removes recall boilerplate but keeps subject', () {
