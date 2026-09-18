@@ -214,6 +214,32 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     token.cancel();
   }
 
+  /// Cancels the currently running task and waits until the controller has
+  /// reached its terminal cancellation boundary.
+  ///
+  /// Project/conversation switching must never drop a live inference future
+  /// and immediately reuse the same production controller for another project.
+  /// The runner may surface an error while observing cancellation; that error is
+  /// intentionally swallowed here because the authoritative controller state
+  /// records cancellation and the caller is closing the project.
+  Future<void> cancelAndWait() async {
+    _ensureAvailable();
+
+    final activeRun = _activeRun;
+    if (activeRun == null) {
+      return;
+    }
+
+    cancel();
+
+    try {
+      await activeRun;
+    } catch (_) {
+      // Cancellation can surface through the provider as an error. The state
+      // transition performed by _execute remains authoritative.
+    }
+  }
+
   Future<WorkshopTaskInferenceResult> _execute(
     WorkshopProductionTaskHandle handle,
     CancellationToken token, {
