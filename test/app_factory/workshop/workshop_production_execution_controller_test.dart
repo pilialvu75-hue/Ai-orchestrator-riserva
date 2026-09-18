@@ -324,6 +324,32 @@ void main() {
     controller.dispose();
   });
 
+  test('abandon persists cancellation before forgetting the journal', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final controller = WorkshopProductionExecutionController(
+      runner: _ReadyRunner(_handle()),
+      executionStore: store,
+    );
+
+    await controller.start();
+    expect((await store.loadAll()).single.status,
+        WorkshopExecutionStatus.waitingApproval);
+
+    await controller.abandonCurrentExecution();
+
+    final cancelled = (await store.loadAll()).single;
+    expect(cancelled.status, WorkshopExecutionStatus.cancelled);
+    expect(cancelled.resumePhase, 'cancelled');
+    expect(controller.journalExecution, isNull);
+    expect(controller.executionJournalError, isNull);
+
+    controller.dispose();
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
