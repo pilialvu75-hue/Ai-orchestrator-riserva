@@ -53,21 +53,13 @@ class MistralDataSource {
       return AiResponseModel.fromOpenAiJson(json);
     }
 
-    throw CloudHttpException(
-      provider: 'mistral',
-      statusCode: response.statusCode,
-      message: response.body,
-      retryAfter: _retryAfter(response),
+    throw ServerException(
+      'Mistral API error ${response.statusCode}: ${response.body}',
     );
   }
 
   String _modelFor(AiRequestModel request) {
     final requested = request.modelId?.trim();
     return requested != null && requested.isNotEmpty ? requested : model;
-  }
-
-  Duration? _retryAfter(http.Response response) {
-    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
-    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
   }
 }
