@@ -61,12 +61,20 @@ class SemanticWorkspaceIndex {
     String? workspaceId,
     int topK = 6,
   }) async {
-    final rows = await _databaseHelper.getAllDocumentChunks(limit: 4000);
+    final normalizedWorkspaceId = workspaceId?.trim();
+    final rows = normalizedWorkspaceId != null &&
+            normalizedWorkspaceId.isNotEmpty
+        ? await _databaseHelper.getDocumentChunksByDocumentId(
+            normalizedWorkspaceId,
+            limit: 4000,
+          )
+        : await _databaseHelper.getAllDocumentChunks(limit: 4000);
+
     final out = <SemanticChunkMatch>[];
     for (final row in rows) {
-      if (workspaceId != null &&
-          workspaceId.trim().isNotEmpty &&
-          row[AppConstants.colDocumentId] != workspaceId) {
+      if (normalizedWorkspaceId != null &&
+          normalizedWorkspaceId.isNotEmpty &&
+          row[AppConstants.colDocumentId] != normalizedWorkspaceId) {
         continue;
       }
       final vectorJson = row[AppConstants.colVectorJson] as String? ?? '[]';
