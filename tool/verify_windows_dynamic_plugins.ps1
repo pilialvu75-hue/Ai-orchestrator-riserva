@@ -84,3 +84,30 @@ foreach ($spec in $pluginSpecs) {
 }
 
 Write-Host 'Windows dynamic-plugin linkage policy verified.'
+
+
+# Required Windows runtime companions. These are not linked into the runner, but
+# the full desktop feature set needs them after startup (voice/ONNX + sqlite).
+Write-Host ''
+Write-Host '[Required Windows runtime companions]'
+$runtimeCompanions = @(
+  'onnxruntime.dll',
+  'sherpa-onnx-c-api.dll',
+  'mp_audio_stream.dll',
+  'sqlite3.dll'
+)
+foreach ($dll in $runtimeCompanions) {
+  $path = Join-Path $ReleaseDir $dll
+  if (-not (Test-Path $path)) {
+    throw "Required Windows runtime companion missing from release bundle: $path"
+  }
+  Write-Host "PASS runtime companion: $dll"
+}
+
+# dartjni.dll is an Android/JVM bridge and is unused by the Windows AOT image.
+# Keeping it in the Win7 bundle makes loader diagnostics request jvm.dll.
+$dartJni = Join-Path $ReleaseDir 'dartjni.dll'
+if (Test-Path $dartJni) {
+  throw 'Unused dartjni.dll leaked into Windows bundle; exclude it to avoid a spurious jvm.dll dependency.'
+}
+Write-Host 'PASS unused dartjni.dll excluded from Windows bundle.'
