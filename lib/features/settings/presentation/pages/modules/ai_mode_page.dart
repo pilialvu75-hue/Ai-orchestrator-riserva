@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/features/settings/presentation/cloud_provider_access_summary.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/custom_cloud_providers_page.dart';
 
 class AiModePage extends StatefulWidget {
@@ -159,6 +160,9 @@ class _AiModePageState extends State<AiModePage> {
   CloudProviderDefinition get _definition =>
       CloudProviderCatalog.definitionFor(_provider)!;
 
+  CloudProviderAccessSummary get _accessSummary =>
+      CloudProviderAccessSummary.forProvider(_provider)!;
+
   String _spendingLabel(CloudSpendingMode mode) {
     switch (mode) {
       case CloudSpendingMode.freeOnly:
@@ -287,6 +291,8 @@ class _AiModePageState extends State<AiModePage> {
                           if (value != null) _selectProvider(value);
                         },
                 ),
+                const SizedBox(height: 10),
+                _ProviderAccessCard(summary: _accessSummary),
                 const SizedBox(height: 8),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
@@ -450,6 +456,43 @@ class _AiModePageState extends State<AiModePage> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _ProviderAccessCard extends StatelessWidget {
+  const _ProviderAccessCard({required this.summary});
+
+  final CloudProviderAccessSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('cloud_provider_access_summary'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171717),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            summary.accessLabel,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            summary.description,
+            style: const TextStyle(color: Colors.white60, height: 1.35),
+          ),
+        ],
+      ),
     );
   }
 }
