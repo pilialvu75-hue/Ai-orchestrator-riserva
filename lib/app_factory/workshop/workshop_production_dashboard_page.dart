@@ -4,12 +4,14 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.da
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_repair.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
 /// Production shell for the guarded Cantiere pipeline.
@@ -40,6 +42,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
 class _WorkshopProductionDashboardPageState
     extends State<WorkshopProductionDashboardPage> {
   late final WorkshopProductionTaskCoordinator _coordinator;
+  late final WorkshopBuildRepairPreparer _repairPreparer;
   WorkshopBuildResult? _buildResult;
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
@@ -49,6 +52,7 @@ class _WorkshopProductionDashboardPageState
   void initState() {
     super.initState();
     _coordinator = WorkshopProductionTaskCoordinator(bundle: widget.bundle);
+    _repairPreparer = WorkshopBuildRepairPreparer(bundle: widget.bundle);
     widget.bundle.dashboardController.addListener(_onLifecycleChanged);
     widget.executionController.addListener(_onLifecycleChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
@@ -102,7 +106,9 @@ class _WorkshopProductionDashboardPageState
     try {
       final result = retry
           ? await widget.executionController.retry()
-          : await widget.executionController.start();
+          : await widget.executionController.start(
+              isOffline: widget.executionController.state.isOffline,
+            );
       if (!mounted) return;
       if (!result.readyForApproval) {
         setState(() {
@@ -217,7 +223,7 @@ class _WorkshopProductionDashboardPageState
     try {
       await _coordinator.applyApproved(handle: handle);
       if (!mounted) return;
-      widget.executionController.reset();
+      widget.executionController.resetForNextTask();
 
       if (!_projectReadyForBuild) {
         final session = await widget.bundle.dashboardController.prepareNextTask();
@@ -261,6 +267,7 @@ class _WorkshopProductionDashboardPageState
 
       widget.bundle.dashboardController.cancelProduction();
       widget.bundle.dashboardController.forgetProduction();
+      widget.executionController.clearBuildRepairChain();
 
       if (!mounted) {
         return true;
@@ -288,46 +295,117 @@ class _WorkshopProductionDashboardPageState
 
   Future<void> _buildCompletedProject() async {
     if (_mutationBusy || !_projectReadyForBuild || _buildResult != null) return;
+    final failedPlan = _activePlan;
+    if (failedPlan == null) return;
+
     setState(() {
       _mutationBusy = true;
       _error = null;
     });
     try {
+      final isOffline = widget.executionController.state.isOffline;
       final result = await _coordinator.buildWorkspace(
         target: WorkshopBuildTarget.android,
+        mode: isOffline
+            ? WorkshopBuildExecutionMode.offlineLocal
+            : WorkshopBuildExecutionMode.automatic,
       );
       if (!mounted) return;
+
+      final planner = _repairPreparer.planner;
+      final assessment = planner.assess(result);
+      if (assessment.isVerifiedSuccess) {
+        widget.executionController.clearBuildRepairChain();
+        setState(() {
+          _buildResult = result;
+          _error = null;
+        });
+        return;
+      }
+
+      if (assessment.isRepairable) {
+        final rootProjectId =
+            widget.executionController.buildRepairRootProjectId ?? failedPlan.id;
+        final reservation = widget.executionController.reserveBuildRepairAttempt(
+          rootProjectId: rootProjectId,
+          failureSignature: planner.failureSignature(result),
+        );
+
+        if (reservation == WorkshopBuildRepairReservation.repeatedFailure) {
+          setState(() {
+            _buildResult = result;
+            _error =
+                'Build non riuscita: il repair ha prodotto lo stesso guasto '
+                'del tentativo precedente. Catena interrotta per evitare un loop.';
+          });
+          return;
+        }
+
+        if (reservation == WorkshopBuildRepairReservation.budgetExhausted) {
+          setState(() {
+            _buildResult = result;
+            _error =
+                'Build non riuscita e limite di riparazione automatica raggiunto '
+                '(${widget.executionController.policy.maxBuildRepairAttempts}).';
+          });
+          return;
+        }
+
+        final repairNumber = widget.executionController.buildRepairAttempts;
+        await _repairPreparer.prepare(
+          failedPlan: failedPlan,
+          failedBuild: result,
+          repairNumber: repairNumber,
+        );
+        if (!mounted) return;
+
+        widget.executionController.resetForNextTask();
+        setState(() {
+          _buildResult = null;
+          _error = null;
+        });
+        _scheduleAutoAdvance();
+        return;
+      }
+
+      widget.executionController.clearBuildRepairChain();
       setState(() {
         _buildResult = result;
-        if (!result.succeeded) {
-          _error =
-              'Build finale non riuscita: ${result.message ?? result.status.name}';
-        } else if (!result.hasArtifact) {
-          _error = 'Build completata senza un artifact verificabile.';
-        }
+        _error = assessment.disposition == WorkshopBuildDisposition.cancelled
+            ? 'Build finale annullata.'
+            : 'Build finale non riparabile automaticamente: '
+                '${assessment.reason ?? result.message ?? result.status.name}';
       });
     } catch (error) {
       if (mounted) {
         setState(() => _error = 'Build finale del progetto non riuscita: $error');
       }
     } finally {
-      if (mounted) setState(() => _mutationBusy = false);
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+        _scheduleAutoAdvance();
+      }
     }
   }
 
   String? get _activeTaskId =>
       widget.bundle.dashboardController.state.activeTaskId?.trim();
 
+  WorkshopProjectPlan? get _activePlan {
+    final requestId = widget.bundle.dashboardController.state.requestId?.trim();
+    if (requestId == null || requestId.isEmpty) return null;
+    return widget.bundle.dashboardController.engine.planOf(requestId);
+  }
+
   bool get _projectReadyForBuild {
     final state = widget.bundle.dashboardController.state;
-    final requestId = state.requestId?.trim();
     final activeTaskId = state.activeTaskId?.trim();
-    if (requestId == null ||
-        requestId.isEmpty ||
+    if (state.requestId == null ||
+        state.requestId!.trim().isEmpty ||
         (activeTaskId != null && activeTaskId.isNotEmpty)) {
       return false;
     }
-    final plan = widget.bundle.dashboardController.engine.planOf(requestId);
+    final plan = _activePlan;
     return plan != null &&
         plan.isComplete &&
         plan.tasks.isNotEmpty &&
@@ -345,6 +423,12 @@ class _WorkshopProductionDashboardPageState
 
   WorkshopTaskInferenceResult? get _currentInferenceResult =>
       _currentHandle == null ? null : widget.executionController.state.result;
+
+  bool get _hasVerifiedArtifact {
+    final result = _buildResult;
+    return result != null &&
+        _repairPreparer.planner.assess(result).isVerifiedSuccess;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -396,8 +480,7 @@ class _WorkshopProductionDashboardPageState
                     style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 8),
               ],
-              if (_buildResult?.succeeded == true &&
-                  _buildResult?.hasArtifact == true) ...<Widget>[
+              if (_hasVerifiedArtifact) ...<Widget>[
                 Text('Artifact pronto: ${_buildResult!.artifactPath}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

@@ -127,6 +127,22 @@ void main() {
     controller.dispose();
   });
 
+  test('resetForNextTask preserves explicit offline execution mode', () async {
+    final runner = _ImmediateRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+
+    await controller.start(isOffline: true);
+    controller.resetForNextTask();
+
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(controller.state.isOffline, isTrue);
+
+    controller.reset();
+    expect(controller.state.isOffline, isFalse);
+
+    controller.dispose();
+  });
+
   test('distinct task guard is bounded per project and resets for a new plan',
       () async {
     final runner = _ImmediateRunner(_handle());
@@ -151,6 +167,71 @@ void main() {
     );
     await controller.start();
     expect(controller.distinctTasksStartedInCurrentProject, 1);
+
+    controller.dispose();
+  });
+
+  test('build repair budget stops repeated failures before consuming a slot', () {
+    final runner = _ImmediateRunner(_handle());
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      policy: const WorkshopProductionExecutionPolicy(
+        maxBuildRepairAttempts: 2,
+      ),
+    );
+
+    expect(
+      controller.reserveBuildRepairAttempt(
+        rootProjectId: 'project:root',
+        failureSignature: 'failure-a',
+      ),
+      WorkshopBuildRepairReservation.reserved,
+    );
+    expect(controller.buildRepairAttempts, 1);
+    expect(controller.buildRepairRootProjectId, 'project:root');
+    expect(controller.lastBuildRepairFailureSignature, 'failure-a');
+
+    controller.resetForNextTask();
+    expect(
+      controller.reserveBuildRepairAttempt(
+        rootProjectId: 'project:root',
+        failureSignature: 'failure-a',
+      ),
+      WorkshopBuildRepairReservation.repeatedFailure,
+    );
+    expect(controller.buildRepairAttempts, 1);
+
+    expect(
+      controller.reserveBuildRepairAttempt(
+        rootProjectId: 'project:root',
+        failureSignature: 'failure-b',
+      ),
+      WorkshopBuildRepairReservation.reserved,
+    );
+    expect(controller.buildRepairAttempts, 2);
+    expect(
+      controller.reserveBuildRepairAttempt(
+        rootProjectId: 'project:root',
+        failureSignature: 'failure-c',
+      ),
+      WorkshopBuildRepairReservation.budgetExhausted,
+    );
+    expect(controller.buildRepairAttempts, 2);
+
+    expect(
+      controller.reserveBuildRepairAttempt(
+        rootProjectId: 'project:new-root',
+        failureSignature: 'failure-c',
+      ),
+      WorkshopBuildRepairReservation.reserved,
+    );
+    expect(controller.buildRepairAttempts, 1);
+    expect(controller.buildRepairRootProjectId, 'project:new-root');
+
+    controller.clearBuildRepairChain();
+    expect(controller.buildRepairAttempts, 0);
+    expect(controller.buildRepairRootProjectId, isNull);
+    expect(controller.lastBuildRepairFailureSignature, isNull);
 
     controller.dispose();
   });
