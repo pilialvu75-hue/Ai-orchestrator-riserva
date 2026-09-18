@@ -204,7 +204,7 @@ final class WorkshopLocalBuildProvider
           '--machine',
         ],
         environment: _configuration.environment,
-        runInShell: false,
+        runInShell: Platform.isWindows,
       ).timeout(_configuration.timeout);
 
       if (result.exitCode != 0) {
@@ -467,7 +467,7 @@ final class WorkshopLocalBuildProvider
       step.arguments,
       workingDirectory: request.projectPath,
       environment: environment,
-      runInShell: false,
+      runInShell: Platform.isWindows,
     );
 
     _runningProcesses[request.id] = process;
