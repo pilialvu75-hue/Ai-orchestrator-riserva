@@ -53,6 +53,82 @@ void main() {
     );
   });
 
+  testWidgets(
+      'new conversation cannot inherit an active project accidentally',
+      (tester) async {
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'project-conversation-boundary',
+    );
+    final dashboard = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+    );
+    addTearDown(chat.dispose);
+    addTearDown(dashboard.dispose);
+
+    dashboard.startProduction(
+      title: 'Vecchio progetto Wi-Fi',
+      instruction: 'Analizza la sicurezza Wi-Fi.',
+    );
+    chat.addSystemMessage('cronologia vecchia');
+
+    var closeCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          dashboardController: dashboard,
+          closeProjectForNewConversation: () async {
+            closeCalls += 1;
+            dashboard.cancelProduction();
+            dashboard.forgetProduction();
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Nuova conversazione'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Continua progetto'), findsOneWidget);
+    expect(find.text('Chiudi e nuova'), findsOneWidget);
+    expect(dashboard.state.hasProject, isTrue);
+    expect(
+      chat.messages.any((turn) => turn.content == 'cronologia vecchia'),
+      isTrue,
+    );
+
+    await tester.tap(find.text('Continua progetto'));
+    await tester.pumpAndSettle();
+
+    expect(closeCalls, 0);
+    expect(dashboard.state.hasProject, isTrue);
+    expect(
+      chat.messages.any((turn) => turn.content == 'cronologia vecchia'),
+      isTrue,
+    );
+
+    await tester.tap(find.byTooltip('Nuova conversazione'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chiudi e nuova'));
+    await tester.pumpAndSettle();
+
+    expect(closeCalls, 1);
+    expect(dashboard.state.hasProject, isFalse);
+    expect(
+      chat.messages.any((turn) => turn.content == 'cronologia vecchia'),
+      isFalse,
+    );
+    expect(
+      chat.messages.any((turn) => turn.content.startsWith('Ciao. Sono il Cantiere.')),
+      isTrue,
+    );
+  });
+
   testWidgets('approving a proposal does not trigger a second chat inference',
       (tester) async {
     final provider = _CapturingProvider();
