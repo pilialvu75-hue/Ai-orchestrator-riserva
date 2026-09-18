@@ -730,6 +730,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     bool bypassNonessentialLayers = false,
     List<ChatTurn>? contextOverride,
     bool enforceLegacyContextBound = true,
+    bool emitDiagnostics = true,
   }) =>
       _sessionStateIsolator.composePrompt(
         request,
@@ -737,6 +738,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         bypassNonessentialLayers: bypassNonessentialLayers,
         contextOverride: contextOverride,
         enforceLegacyContextBound: enforceLegacyContextBound,
+        emitDiagnostics: emitDiagnostics,
       );
 
   static String? _validateModelFileForRuntime(String modelPath) {
