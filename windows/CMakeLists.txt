@@ -40,13 +40,12 @@ add_subdirectory("compat")
 add_subdirectory("runner")
 add_subdirectory("diagnostics")
 
-# ENGINE-ONLY WIN7 DIAGNOSTIC CANDIDATE:
-# Intentionally do not include flutter/generated_plugins.cmake. The normal
-# generated file links every Windows plugin DLL into ai_orchestrator.exe, which
-# makes the loader initialize them before wWinMain. This branch is designed to
-# prove whether the Flutter engine can reach the first frame with absolutely no
-# native plugin DLL statically linked into the process.
-set(PLUGIN_BUNDLED_LIBRARIES "")
+# WINDOWS 7 DYNAMIC-PLUGIN CANDIDATE:
+# Build the generated plugin targets so their DLLs are available in the bundle,
+# but do not link their import libraries into ai_orchestrator.exe. The runner
+# loads and registers each DLL explicitly after wWinMain, eliminating plugin
+# static initialization from the process pre-main path.
+include(flutter/generated_plugins.cmake)
 
 # === Installation ===
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
@@ -82,6 +81,14 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}"
 install(FILES "${FLUTTER_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+# Keep native Flutter plugin DLLs beside the executable. They are intentionally
+# not linked into the runner; flutter_window.cpp loads them dynamically.
+foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
+  install(FILES "${bundled_library}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endforeach()
 
 # Native assets emitted by Dart/Flutter packages remain present because the Dart
 # application may reference them after startup. They are not linked into the
