@@ -88,10 +88,13 @@ class _WorkshopProductionDashboardPageState
     if (taskId != null && taskId.isNotEmpty) {
       if (execution.status == WorkshopProductionExecutionStatus.idle) {
         await _runPreparedTask();
-      } else if (execution.status ==
-              WorkshopProductionExecutionStatus.succeeded &&
-          _currentInferenceResult?.readyForApproval == true &&
-          _projectApprovalAuthorizesCurrentProject) {
+      } else if (WorkshopProductionAutonomyPolicy.canAutoApply(
+        projectApproved: _projectApprovalAuthorizesCurrentProject,
+        executionStatus: execution.status,
+        inferenceReadyForApproval:
+            _currentInferenceResult?.readyForApproval == true,
+        sessionStatus: _currentHandle?.session.status,
+      )) {
         await _approveAndApplyValidatedTask();
       }
       return;
@@ -575,6 +578,26 @@ class _WorkshopProductionDashboardPageState
         ),
       ),
     );
+  }
+}
+
+/// Pure guard for project-authorized autonomous continuation.
+///
+/// This predicate never mutates state. It intentionally requires all four
+/// independent facts before the UI can record a task-level approval:
+/// project owner authorization, successful execution, Reviewer/validation
+/// readiness and a WorkspaceSession still parked at the validation boundary.
+abstract final class WorkshopProductionAutonomyPolicy {
+  static bool canAutoApply({
+    required bool projectApproved,
+    required WorkshopProductionExecutionStatus executionStatus,
+    required bool inferenceReadyForApproval,
+    required WorkspaceSessionStatus? sessionStatus,
+  }) {
+    return projectApproved &&
+        executionStatus == WorkshopProductionExecutionStatus.succeeded &&
+        inferenceReadyForApproval &&
+        sessionStatus == WorkspaceSessionStatus.validation;
   }
 }
 
