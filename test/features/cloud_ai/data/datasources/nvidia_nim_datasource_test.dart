@@ -103,7 +103,7 @@ void main() {
       expect(called, isFalse);
     });
 
-    test('surfaces non-success NVIDIA responses as ServerException', () async {
+    test('surfaces non-success NVIDIA responses as CloudHttpException', () async {
       final client = MockClient(
         (request) async => http.Response('{"error":"quota"}', 429),
       );
@@ -115,11 +115,14 @@ void main() {
       expect(
         () => dataSource.complete(const AiRequestModel(prompt: 'hello')),
         throwsA(
-          isA<ServerException>().having(
-            (error) => error.message,
-            'message',
-            contains('NVIDIA NIM API error 429'),
-          ),
+          isA<CloudHttpException>()
+              .having((error) => error.provider, 'provider', 'nvidiaNim')
+              .having((error) => error.statusCode, 'statusCode', 429)
+              .having(
+                (error) => error.message,
+                'message',
+                contains('quota'),
+              ),
         ),
       );
     });
