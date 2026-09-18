@@ -32,6 +32,10 @@ class RuntimeBootstrap {
     const claudeApiKey = String.fromEnvironment('CLAUDE_API_KEY');
     const grokApiKey = String.fromEnvironment('GROK_API_KEY');
     const copilotApiKey = String.fromEnvironment('COPILOT_API_KEY');
+    const groqApiKey = String.fromEnvironment('GROQ_API_KEY');
+    const nvidiaNimApiKey = String.fromEnvironment('NVIDIA_NIM_API_KEY');
+    const mistralApiKey = String.fromEnvironment('MISTRAL_API_KEY');
+    const openRouterApiKey = String.fromEnvironment('OPENROUTER_API_KEY');
 
     // Custom provider metadata must be available before credential loading so
     // their encrypted API-key records are discovered by the same secure store
@@ -46,6 +50,10 @@ class RuntimeBootstrap {
         'claude': claudeApiKey,
         'grok': grokApiKey,
         'copilot': copilotApiKey,
+        'groq': groqApiKey,
+        'nvidiaNim': nvidiaNimApiKey,
+        'mistral': mistralApiKey,
+        'openRouter': openRouterApiKey,
       },
     );
 
