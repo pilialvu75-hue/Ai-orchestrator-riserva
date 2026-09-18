@@ -42,7 +42,12 @@ void main() {
 
       final loaded = await WorkshopModelAssignments.load();
 
-      expect(loaded, equals(WorkshopModelAssignments.defaults));
+      expect(
+        loaded,
+        equals(
+          WorkshopModelAssignments.defaultsForPlatform(defaultTargetPlatform),
+        ),
+      );
     });
 
     test('invalid persisted assignment falls back to defaults', () async {
@@ -64,7 +69,12 @@ void main() {
 
       final loaded = await WorkshopModelAssignments.load();
 
-      expect(loaded, equals(WorkshopModelAssignments.defaults));
+      expect(
+        loaded,
+        equals(
+          WorkshopModelAssignments.defaultsForPlatform(defaultTargetPlatform),
+        ),
+      );
     });
 
     test('Assistant role cannot be assigned inside Workshop', () {
