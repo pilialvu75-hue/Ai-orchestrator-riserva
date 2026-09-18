@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
@@ -91,6 +92,7 @@ class WorkshopModelAssignments {
   static const String _preferencesKey =
       'workshop.model.assignments.v1';
 
+  /// Historical multi-model defaults used on desktop-capable hosts.
   static const List<WorkshopModelAssignment> defaults =
       <WorkshopModelAssignment>[
     WorkshopModelAssignment(
@@ -110,6 +112,37 @@ class WorkshopModelAssignments {
       modelId: 'starcoder2_3b',
     ),
   ];
+
+  /// Phone-safe default: Qwen 2.5 3B can serve every Workshop role and is
+  /// the only default Cantiere model whose catalog artifact is Android-sized.
+  ///
+  /// Keeping one loaded GGUF also avoids repeated multi-gigabyte role swaps on
+  /// constrained phones while still preserving the four logical AI roles.
+  static const List<WorkshopModelAssignment> androidDefaults =
+      <WorkshopModelAssignment>[
+    WorkshopModelAssignment(
+      role: AppAiRole.workshopOrchestrator,
+      modelId: 'qwen2_5_3b_instruct',
+    ),
+    WorkshopModelAssignment(
+      role: AppAiRole.architect,
+      modelId: 'qwen2_5_3b_instruct',
+    ),
+    WorkshopModelAssignment(
+      role: AppAiRole.engineer,
+      modelId: 'qwen2_5_3b_instruct',
+    ),
+    WorkshopModelAssignment(
+      role: AppAiRole.reviewer,
+      modelId: 'qwen2_5_3b_instruct',
+    ),
+  ];
+
+  static List<WorkshopModelAssignment> defaultsForPlatform(
+    TargetPlatform platform,
+  ) {
+    return platform == TargetPlatform.android ? androidDefaults : defaults;
+  }
 
   static const List<AppAiRole> workshopRoles =
       <AppAiRole>[
@@ -292,8 +325,10 @@ class WorkshopModelAssignments {
       _preferencesKey,
     );
 
+    final platformDefaults = defaultsForPlatform(defaultTargetPlatform);
+
     if (raw == null || raw.trim().isEmpty) {
-      return defaults;
+      return platformDefaults;
     }
 
     try {
@@ -318,14 +353,23 @@ class WorkshopModelAssignments {
       }
 
       if (!isValid(loaded)) {
-        return defaults;
+        return platformDefaults;
+      }
+
+      // Migrate only the exact historical default set on Android. Explicit
+      // owner selections remain untouched, while existing installations that
+      // inherited desktop-oriented Architect/Engineer defaults stop requiring
+      // unavailable 6-7B models before the first phone project can progress.
+      if (defaultTargetPlatform == TargetPlatform.android &&
+          listEquals(loaded, defaults)) {
+        return androidDefaults;
       }
 
       return List<WorkshopModelAssignment>.unmodifiable(
         loaded,
       );
     } catch (_) {
-      return defaults;
+      return platformDefaults;
     }
   }
 
