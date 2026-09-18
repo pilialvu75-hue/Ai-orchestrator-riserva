@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'tool/cantiere_first_app_smoke.dart'
+      - 'tool/workshop_local_build_acceptance.dart'
       - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
       - 'lib/app_factory/**'
       - '.github/workflows/cantiere-first-app.yml'
@@ -52,6 +53,7 @@ jobs:
       - name: Analyze first-app acceptance smoke
         run: |
           dart analyze tool/cantiere_first_app_smoke.dart
+          dart analyze tool/workshop_local_build_acceptance.dart
           flutter analyze test/app_factory/workshop/cantiere_first_app_smoke_test.dart
 
       - name: Create deterministic Android starter workspace
@@ -83,24 +85,16 @@ jobs:
             --reporter expanded \
             2>&1 | tee "${RUNNER_TEMP}/cantiere-first-app.log"
 
-      - name: Validate generated app and build real APK
+      - name: Validate prepared app through offline local Build Lab
         shell: bash
+        env:
+          CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
+          CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
         run: |
           set -euo pipefail
-          cd "${{ steps.workspace.outputs.path }}"
-          {
-            echo '[FIRST_APP] stage=external_validation status=running'
-            dart format --output=none --set-exit-if-changed lib test
-            flutter analyze
-            flutter test --reporter expanded
-            echo '[FIRST_APP] stage=build status=running target=android'
-            flutter build apk --release
-            SOURCE="build/app/outputs/flutter-apk/app-release.apk"
-            test -s "$SOURCE"
-            BYTES="$(stat -c%s "$SOURCE")"
-            echo "[FIRST_APP] stage=artifact status=ready bytes=$BYTES"
-            echo "CANTIERE_FIRST_APP_APK=$PWD/$SOURCE"
-          } 2>&1 | tee -a "${RUNNER_TEMP}/cantiere-first-app.log"
+          test -x "$CANTIERE_FLUTTER_EXECUTABLE"
+          test -x "$CANTIERE_DART_EXECUTABLE"
+          "$CANTIERE_DART_EXECUTABLE" run             tool/workshop_local_build_acceptance.dart             "${{ steps.workspace.outputs.path }}"             2>&1 | tee -a "${RUNNER_TEMP}/cantiere-first-app.log"
 
       - name: Upload first-app diagnostics on failure
         if: ${{ failure() }}
