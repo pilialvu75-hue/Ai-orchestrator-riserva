@@ -37,15 +37,29 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("compat")
-add_subdirectory("runner")
-add_subdirectory("diagnostics")
 
 # WINDOWS 7 DYNAMIC-PLUGIN CANDIDATE:
-# Build the generated plugin targets so their DLLs are available in the bundle,
-# but do not link their import libraries into ai_orchestrator.exe. The runner
-# loads and registers each DLL explicitly after wWinMain, eliminating plugin
-# static initialization from the process pre-main path.
-include(flutter/generated_plugins.cmake)
+# Build plugin DLL targets explicitly, but do NOT include
+# flutter/generated_plugins.cmake because that file links every plugin import
+# library into ai_orchestrator.exe. Keeping those import libraries out of the
+# runner removes plugin static initialization from the process pre-main path.
+set(WIN7_PLUGIN_SYMLINK_DIR
+  "${FLUTTER_MANAGED_DIR}/ephemeral/.plugin_symlinks")
+add_subdirectory(
+  "${WIN7_PLUGIN_SYMLINK_DIR}/file_selector_windows/windows"
+  "${CMAKE_CURRENT_BINARY_DIR}/plugins/file_selector_windows")
+add_subdirectory(
+  "${WIN7_PLUGIN_SYMLINK_DIR}/flutter_secure_storage_windows/windows"
+  "${CMAKE_CURRENT_BINARY_DIR}/plugins/flutter_secure_storage_windows")
+add_subdirectory(
+  "${WIN7_PLUGIN_SYMLINK_DIR}/permission_handler_windows/windows"
+  "${CMAKE_CURRENT_BINARY_DIR}/plugins/permission_handler_windows")
+add_subdirectory(
+  "${WIN7_PLUGIN_SYMLINK_DIR}/record_windows/windows"
+  "${CMAKE_CURRENT_BINARY_DIR}/plugins/record_windows")
+
+add_subdirectory("runner")
+add_subdirectory("diagnostics")
 
 # === Installation ===
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
@@ -62,6 +76,10 @@ install(TARGETS
   ai_orchestrator_windows_probe
   ai_orchestrator_windows_graphics_probe
   ai_orchestrator_windows_bootstrap_probe
+  file_selector_windows_plugin
+  flutter_secure_storage_windows_plugin
+  permission_handler_windows_plugin
+  record_windows_plugin
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
@@ -82,13 +100,9 @@ install(FILES "${FLUTTER_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-# Keep native Flutter plugin DLLs beside the executable. They are intentionally
-# not linked into the runner; flutter_window.cpp loads them dynamically.
-foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
-  install(FILES "${bundled_library}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
-endforeach()
+# Plugin DLLs are installed above as runtime targets and are intentionally not
+# linked into the runner. flutter_window.cpp loads them dynamically only after
+# the Flutter engine is alive.
 
 # Native assets emitted by Dart/Flutter packages remain present because the Dart
 # application may reference them after startup. They are not linked into the
