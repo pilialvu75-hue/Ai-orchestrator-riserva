@@ -40,6 +40,7 @@ class LocalPromptTemplates {
     required String prompt,
     String? systemPrompt,
     List<ChatTurn> context = const [],
+    bool enforceLegacyContextBound = true,
   }) {
     final cleanedSystemPrompt = _clean(systemPrompt);
 
@@ -86,11 +87,13 @@ class LocalPromptTemplates {
         )
         .toList(growable: false);
 
-    final boundedContext = _boundContext(
-      cleanedContext,
-      maxChars: _maxContextChars,
-      maxTurns: _maxContextTurns,
-    );
+    final boundedContext = enforceLegacyContextBound
+        ? _boundContext(
+            cleanedContext,
+            maxChars: _maxContextChars,
+            maxTurns: _maxContextTurns,
+          )
+        : List<ChatTurn>.unmodifiable(cleanedContext);
 
     final template =
         LocalInferenceModelIds.resolveTemplate(modelId);
@@ -130,8 +133,9 @@ class LocalPromptTemplates {
     RuntimeEventLog.instance.emit(
       '[PROMPT_CONTEXT_BOUND] '
       'applied=${boundedContext.length != cleanedContext.length || boundedContextChars != originalContextChars} '
-      'max_chars=$_maxContextChars '
-      'max_turns=$_maxContextTurns',
+      'mode=${enforceLegacyContextBound ? 'legacy_chars' : 'runtime_tokens'} '
+      'max_chars=${enforceLegacyContextBound ? _maxContextChars : 0} '
+      'max_turns=${enforceLegacyContextBound ? _maxContextTurns : cleanedContext.length}',
     );
 
     RuntimeEventLog.instance.emit(
