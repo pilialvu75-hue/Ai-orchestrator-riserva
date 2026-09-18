@@ -52,6 +52,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
   String? _error;
   final Set<String> _curatorLoading = <String>{};
   List<ModuleCapabilityStatus> _items = const <ModuleCapabilityStatus>[];
+  DateTime? _lastUpdatedAt;
 
   @override
   void initState() {
@@ -111,6 +112,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       if (!mounted) return;
       setState(() {
         _items = items;
+        _lastUpdatedAt = DateTime.now();
         _connected = true;
         _loading = false;
       });
@@ -416,6 +418,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
     setState(() {
       _connected = false;
       _items = const <ModuleCapabilityStatus>[];
+      _lastUpdatedAt = null;
       _curatorLoading.clear();
       _healthLoading = false;
       _error = null;
@@ -476,10 +479,13 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       child: ListView.separated(
                         padding: const EdgeInsets.all(16),
                         physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: _items.length,
+                        itemCount: _items.length + 1,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
-                          final status = _items[index];
+                          if (index == 0) {
+                            return _LastUpdatedBanner(updatedAt: _lastUpdatedAt);
+                          }
+                          final status = _items[index - 1];
                           return _CapabilityCard(
                             status: status,
                             curatorLoading:
@@ -560,6 +566,37 @@ class _ConnectionView extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LastUpdatedBanner extends StatelessWidget {
+  const _LastUpdatedBanner({required this.updatedAt});
+
+  final DateTime? updatedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final updated = updatedAt;
+    final label = updated == null
+        ? 'Ultimo aggiornamento: non disponibile'
+        : 'Ultimo aggiornamento: '
+            '${updated.day.toString().padLeft(2, '0')}/'
+            '${updated.month.toString().padLeft(2, '0')}/'
+            '${updated.year} '
+            '${updated.hour.toString().padLeft(2, '0')}:'
+            '${updated.minute.toString().padLeft(2, '0')}';
+    return Semantics(
+      label: label,
+      child: Row(
+        children: [
+          const Icon(Icons.schedule_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ],
       ),
     );
   }
