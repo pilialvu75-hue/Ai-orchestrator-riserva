@@ -57,16 +57,19 @@ class WorkshopDashboardPage extends StatefulWidget {
     WorkshopAppEmissionController? emissionController,
     WorkshopDashboardController? dashboardController,
     WorkshopChatController? chatController,
+    Future<bool> Function()? closeProjectForNewConversation,
     List<WorkshopModelAssignment>? modelAssignments,
   })  : _emissionController = emissionController,
         _dashboardController = dashboardController,
         _chatController = chatController,
+        _closeProjectForNewConversation = closeProjectForNewConversation,
         _modelAssignments =
             modelAssignments ?? WorkshopModelAssignments.defaults;
 
   final WorkshopAppEmissionController? _emissionController;
   final WorkshopDashboardController? _dashboardController;
   final WorkshopChatController? _chatController;
+  final Future<bool> Function()? _closeProjectForNewConversation;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -394,9 +397,58 @@ class _WorkshopDashboardPageState
     );
   }
 
-  void _startNewConversation() {
+  Future<void> _startNewConversation() async {
     if (!mounted) {
       return;
+    }
+
+    final dashboardState = _dashboardController?.state;
+    if (dashboardState?.hasProject == true) {
+      final title = dashboardState?.projectTitle?.trim();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Nuova conversazione'),
+          content: Text(
+            'Il progetto corrente'
+            '${title == null || title.isEmpty ? '' : ' “$title”'} '
+            'è ancora collegato al Cantiere. Per evitare di mescolare '
+            'conversazioni, task ed esecuzioni, deve essere chiuso '
+            'esplicitamente prima di iniziarne uno nuovo.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Continua progetto'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Chiudi e nuova'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !mounted) {
+        return;
+      }
+
+      final closeProject = widget._closeProjectForNewConversation;
+      if (closeProject == null) {
+        _showError(
+          'Il progetto corrente non può essere chiuso da questa schermata.',
+        );
+        return;
+      }
+
+      final closed = await closeProject();
+      if (!closed || !mounted) {
+        _showError(
+          'Il progetto corrente non è stato chiuso. '
+          'La conversazione resta invariata.',
+        );
+        return;
+      }
     }
 
     setState(() {
