@@ -31,6 +31,10 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// reused, and changing the explicit offline/network contract creates a
 /// different resume key.
 final class WorkshopPreflightInferencePipeline {
+  static const String approvedProposalContextPrefix =
+      'WORKSHOP_APPROVED_PROPOSAL:';
+  static const int _maxApprovedProposalChars = 6000;
+
   WorkshopPreflightInferencePipeline({
     required WorkshopStageRoleInference inference,
     WorkshopReuseLibrary? reuseLibrary,
@@ -54,6 +58,30 @@ final class WorkshopPreflightInferencePipeline {
 
   WorkshopReuseLibrary? get reuseLibrary => _reuseLibrary;
 
+  /// Encodes the exact proposal the owner approved in the canonical
+  /// WorkshopRequest context. This lets production reuse the already-completed
+  /// Orchestrator conversation instead of immediately asking the same local
+  /// model to repeat equivalent work after approval.
+  ///
+  /// The Architect still receives the authoritative request and target build
+  /// contract and remains responsible for the implementation plan.
+  static String approvedProposalContextEntry(String proposal) {
+    final normalized = proposal.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(
+        proposal,
+        'proposal',
+        'Approved Workshop proposal cannot be empty.',
+      );
+    }
+
+    final bounded = normalized.length <= _maxApprovedProposalChars
+        ? normalized
+        : normalized.substring(0, _maxApprovedProposalChars);
+
+    return '$approvedProposalContextPrefix$bounded';
+  }
+
   Future<WorkshopPreflightInferenceResult> run({
     required WorkshopRequest request,
     bool isOffline = false,
@@ -73,6 +101,8 @@ final class WorkshopPreflightInferencePipeline {
     if (previous?.readyForImplementation == true) {
       return previous!;
     }
+
+    final approvedProposal = _approvedProposalFrom(request);
 
     final reuseDecision = previous?.analysisReady == true
         ? previous!.reuseDecision ??
@@ -99,6 +129,18 @@ final class WorkshopPreflightInferencePipeline {
 
     if (previous?.analysisReady == true) {
       analysis = previous!.analysis;
+    } else if (approvedProposal != null) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_PREFLIGHT_REUSE] request=${request.id} '
+        'stage=analysis source=approved_proposal',
+      );
+      analysis = WorkshopInferenceResult(
+        text: 'OWNER-APPROVED WORKSHOP PROPOSAL\n$approvedProposal',
+        model: 'workshop-approved-proposal',
+        runtimeNotice:
+            'Owner-approved Workshop proposal reused as Orchestrator analysis.',
+        terminalState: InferenceTerminalState.success,
+      );
     } else if (reuseDecision.shouldReuse && reuseDecision.asset != null) {
       analysis = WorkshopInferenceResult(
         text: _reuseAnalysis(
@@ -195,6 +237,25 @@ final class WorkshopPreflightInferencePipeline {
     }
 
     return result;
+  }
+
+  static String? _approvedProposalFrom(WorkshopRequest request) {
+    for (final entry in request.context) {
+      final normalized = entry.trim();
+      if (!normalized.startsWith(approvedProposalContextPrefix)) {
+        continue;
+      }
+
+      final proposal = normalized
+          .substring(approvedProposalContextPrefix.length)
+          .trim();
+
+      if (proposal.isNotEmpty) {
+        return proposal;
+      }
+    }
+
+    return null;
   }
 
   Future<WorkshopWebEvidencePack> _researchEvidence({
