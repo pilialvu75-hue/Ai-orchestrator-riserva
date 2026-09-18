@@ -9,6 +9,7 @@ class _AndroidFfiSessionStateIsolator {
     bool bypassNonessentialLayers = false,
     List<ChatTurn>? contextOverride,
     bool enforceLegacyContextBound = true,
+    bool emitDiagnostics = true,
   }) {
     if (bypassNonessentialLayers) {
       _log(
@@ -30,6 +31,7 @@ class _AndroidFfiSessionStateIsolator {
       systemPrompt: request.systemPrompt,
       context: contextOverride ?? request.context,
       enforceLegacyContextBound: enforceLegacyContextBound,
+      emitDiagnostics: emitDiagnostics,
     );
   }
 
