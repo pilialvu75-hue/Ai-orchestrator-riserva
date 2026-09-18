@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
@@ -179,6 +180,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final execution = WorkshopProductionExecutionController(
         runner: WorkshopProductionTaskExecutionRunner(
           coordinator: taskCoordinator,
+        ),
+        executionStore: WorkshopExecutionStore(
+          preferences: di.sl<PreferencesService>(),
         ),
       );
       final chat = WorkshopChatController(
