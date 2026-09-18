@@ -241,6 +241,51 @@ class _WorkshopProductionDashboardPageState
     }
   }
 
+  Future<bool> _closeProjectForNewConversation() async {
+    if (_mutationBusy) {
+      return false;
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      await widget.executionController.cancelAndWait();
+
+      if (widget.executionController.state.status !=
+          WorkshopProductionExecutionStatus.idle) {
+        widget.executionController.reset();
+      }
+
+      widget.bundle.dashboardController.cancelProduction();
+      widget.bundle.dashboardController.forgetProduction();
+
+      if (!mounted) {
+        return true;
+      }
+
+      setState(() {
+        _buildResult = null;
+        _error = null;
+      });
+
+      return true;
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Chiusura del progetto non riuscita: $error';
+        });
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
   Future<void> _buildCompletedProject() async {
     if (_mutationBusy || !_projectReadyForBuild || _buildResult != null) return;
     setState(() {
@@ -312,6 +357,7 @@ class _WorkshopProductionDashboardPageState
           child: WorkshopDashboardPage(
             dashboardController: widget.bundle.dashboardController,
             chatController: widget.chatController,
+            closeProjectForNewConversation: _closeProjectForNewConversation,
             modelAssignments: widget.modelAssignments,
           ),
         ),
