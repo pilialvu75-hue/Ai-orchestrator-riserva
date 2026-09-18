@@ -448,7 +448,8 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           resource: resource,
           metadata: <String, dynamic>{
             'surface': 'workshop-production',
-            'multiRole': !isOffline,
+            'multiRole': true,
+            'offline': isOffline,
           },
         );
       }
