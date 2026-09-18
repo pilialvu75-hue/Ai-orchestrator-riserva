@@ -308,6 +308,10 @@ void main() {
     final waiting = (await store.loadAll()).single;
     expect(waiting.status, WorkshopExecutionStatus.waitingApproval);
     expect(waiting.resumePhase, 'waitingApproval');
+    expect(waiting.resource, WorkshopTaskResource.hybridAi);
+    expect(waiting.providerId, isNull);
+    expect(waiting.modelId, isNull);
+    expect(waiting.accountId, isNull);
     expect(controller.journalExecution, isNotNull);
 
     await controller.markCurrentExecutionCompleted();
