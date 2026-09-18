@@ -99,7 +99,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("08 after command line parsing");
 
   bool skip_plugins = false;
-  bool legacy_renderer = false;
+  bool legacy_renderer = true;
   std::vector<std::string> dart_arguments;
   dart_arguments.reserve(command_line_arguments.size());
   for (const auto& argument : command_line_arguments) {
@@ -114,12 +114,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       startup_trace::Mark("08b Win7 legacy renderer mode requested");
       continue;
     }
+    if (argument == "--win7-default-renderer") {
+      legacy_renderer = false;
+      startup_trace::Mark("08b Flutter default renderer explicitly requested");
+      continue;
+    }
     dart_arguments.push_back(argument);
   }
 
   if (legacy_renderer) {
     // Conservative Windows renderer configuration for older Intel/ANGLE paths.
-    // Keep it opt-in so modern Windows retains Flutter's defaults.
+    // This Win7 candidate defaults to the conservative path; the normal
+    // cross-platform branch continues to use Flutter defaults.
     project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
     project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
     project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
