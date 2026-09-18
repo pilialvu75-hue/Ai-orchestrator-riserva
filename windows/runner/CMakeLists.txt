@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
 
-# ENGINE-ONLY WIN7 DIAGNOSTIC CANDIDATE. Do not compile the generated plugin
-# registrar here: excluding it together with generated_plugins.cmake prevents
-# plugin import libraries from becoming static PE imports of ai_orchestrator.exe.
+# WINDOWS 7 DYNAMIC-PLUGIN CANDIDATE. Do not compile the generated plugin
+# registrar and do not link plugin import libraries into the runner. Plugin DLL
+# targets are built by the top-level CMake and loaded explicitly at runtime.
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
@@ -22,7 +22,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
-target_compile_definitions(${BINARY_NAME} PRIVATE "AI_ORCHESTRATOR_ENGINE_ONLY=1")
+target_compile_definitions(${BINARY_NAME} PRIVATE "AI_ORCHESTRATOR_DYNAMIC_PLUGINS=1")
 
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
