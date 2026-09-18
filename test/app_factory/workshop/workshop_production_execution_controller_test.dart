@@ -265,6 +265,8 @@ void main() {
     expect(firstCurrent.resource, WorkshopTaskResource.local);
     expect(firstCurrent.providerId, isNull);
     expect(firstCurrent.modelId, isNull);
+    expect(firstCurrent.metadata['multiRole'], isTrue);
+    expect(firstCurrent.metadata['offline'], isTrue);
     expect(firstCurrent.metadata['failureType'], 'StateError');
     final stableExecutionId = firstCurrent.executionId;
     final firstAttemptId = firstCurrent.attemptId;
@@ -312,6 +314,8 @@ void main() {
     expect(waiting.providerId, isNull);
     expect(waiting.modelId, isNull);
     expect(waiting.accountId, isNull);
+    expect(waiting.metadata['multiRole'], isTrue);
+    expect(waiting.metadata['offline'], isFalse);
     expect(controller.journalExecution, isNotNull);
 
     await controller.markCurrentExecutionCompleted();
