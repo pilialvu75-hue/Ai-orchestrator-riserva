@@ -122,10 +122,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   if (disable_impeller) {
-    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    startup_trace::Mark("08c Impeller disabled; Skia requested");
+    // Flutter 3.29.x predates the Windows Impeller switch exposed by newer
+    // DartProject wrappers. The legacy Windows renderer is already the engine
+    // default here, so the diagnostic flag is intentionally a no-op.
+    startup_trace::Mark(
+        "08c Flutter 3.29 legacy renderer already active; no Impeller switch");
   } else {
-    startup_trace::Mark("08c renderer default retained");
+    startup_trace::Mark("08c Flutter 3.29 renderer default retained");
   }
 
   project.set_dart_entrypoint_arguments(std::move(dart_arguments));

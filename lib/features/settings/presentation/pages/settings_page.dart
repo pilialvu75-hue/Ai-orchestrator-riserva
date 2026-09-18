@@ -869,7 +869,7 @@ class _DeveloperModeCard extends StatelessWidget {
             Switch(
               value: enabled,
               onChanged: onChanged,
-              activeThumbColor: accent,
+              activeColor: accent,
             ),
           ],
         ),
