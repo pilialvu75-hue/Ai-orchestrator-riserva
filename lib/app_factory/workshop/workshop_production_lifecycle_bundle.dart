@@ -20,6 +20,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snaps
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_verified_local_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
@@ -164,14 +165,19 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
+    // Production Cantiere always has a real local/offline candidate. It is
+    // fail-closed and becomes selectable only when its authoritative toolchain
+    // inspection succeeds. Explicit remote providers stay preferred in
+    // automatic mode; the verified local provider is the deterministic fallback.
     final resolvedBuildLab = buildLab ??
-        (buildProviders.isEmpty
-            ? null
-            : WorkshopBuildLab(
-                providers: WorkshopBuildProviderPolicy.remotePreferred(
-                  buildProviders,
-                ),
-              ));
+        WorkshopBuildLab(
+          providers: WorkshopBuildProviderPolicy.remotePreferred(
+            <WorkshopBuildProvider>[
+              ...buildProviders,
+              WorkshopVerifiedLocalBuildProvider(),
+            ],
+          ),
+        );
 
     return create(
       projectExecutor: executor,
