@@ -49,6 +49,10 @@ import 'package:ai_orchestrator/features/cloud_ai/data/datasources/copilot_datas
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/claude_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/gemini_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/grok_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/groq_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/mistral_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/nvidia_nim_datasource.dart';
+import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openrouter_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/datasources/openai_datasource.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/repositories/ai_repository_impl.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
@@ -281,6 +285,10 @@ Future<void> initDependencies({
   sl.registerLazySingleton<ClaudeDataSource>(() => ClaudeDataSource(apiKey: claudeApiKey, httpClient: sl<http.Client>()));
   sl.registerLazySingleton<GrokDataSource>(() => GrokDataSource(apiKey: grokApiKey, httpClient: sl<http.Client>()));
   sl.registerLazySingleton<CopilotDataSource>(() => CopilotDataSource(apiKey: copilotApiKey, httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<GroqDataSource>(() => GroqDataSource(httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<NvidiaNimDataSource>(() => NvidiaNimDataSource(httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<MistralDataSource>(() => MistralDataSource(httpClient: sl<http.Client>()));
+  sl.registerLazySingleton<OpenRouterDataSource>(() => OpenRouterDataSource(httpClient: sl<http.Client>()));
 
   // ── Project memory ─────────────────────────────────────────────────────────
   sl.registerLazySingleton<ProjectMemoryLocalDataSource>(() => ProjectMemoryLocalDataSourceImpl(databaseHelper: sl<DatabaseHelper>()));
@@ -404,6 +412,10 @@ Future<void> initDependencies({
       claudeDataSource: sl<ClaudeDataSource>(),
       grokDataSource: sl<GrokDataSource>(),
       copilotDataSource: sl<CopilotDataSource>(),
+      groqDataSource: sl<GroqDataSource>(),
+      nvidiaNimDataSource: sl<NvidiaNimDataSource>(),
+      mistralDataSource: sl<MistralDataSource>(),
+      openRouterDataSource: sl<OpenRouterDataSource>(),
     )..setProvider(sl<AiRuntimeSettingsService>().activeProvider),
   );
   sl.registerLazySingleton<CloudRuntimeProvider>(
