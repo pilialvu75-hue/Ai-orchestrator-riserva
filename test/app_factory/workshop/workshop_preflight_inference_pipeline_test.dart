@@ -197,6 +197,61 @@ void main() {
       expect(architect.lastIsOffline, isTrue);
     });
 
+    test(
+        'reuses owner-approved proposal and skips duplicate Orchestrator inference',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final orchestrator = _RecordingGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: callOrder,
+        result: _success('must not run'),
+      );
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('implementation plan'),
+      );
+      final request = WorkshopRequest(
+        id: 'approved-counter-app',
+        title: 'Contatore',
+        instruction:
+            'Crea una semplice app contatore con pulsante +, pulsante - e Reset.',
+        operation: WorkshopOperation.create,
+        context: <String>[
+          WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+            'Proposta: app contatore con +, - e Reset.',
+          ),
+        ],
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator: orchestrator,
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: request);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.calls, 0);
+      expect(architect.calls, 1);
+      expect(callOrder, <AppAiRole>[AppAiRole.architect]);
+      expect(
+        result.analysis.text,
+        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+      );
+      expect(
+        result.analysis.text,
+        contains('app contatore con +, - e Reset'),
+      );
+      expect(architect.lastPrompt, contains('target: android'));
+      expect(
+        architect.lastPrompt,
+        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+      );
+    });
+
     test('stops before Architect when Orchestrator inference fails', () async {
       final callOrder = <AppAiRole>[];
       final orchestrator = _RecordingGateway(

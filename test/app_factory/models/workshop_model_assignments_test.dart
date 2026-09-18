@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -41,7 +42,12 @@ void main() {
 
       final loaded = await WorkshopModelAssignments.load();
 
-      expect(loaded, equals(WorkshopModelAssignments.defaults));
+      expect(
+        loaded,
+        equals(
+          WorkshopModelAssignments.defaultsForPlatform(defaultTargetPlatform),
+        ),
+      );
     });
 
     test('invalid persisted assignment falls back to defaults', () async {
@@ -63,7 +69,12 @@ void main() {
 
       final loaded = await WorkshopModelAssignments.load();
 
-      expect(loaded, equals(WorkshopModelAssignments.defaults));
+      expect(
+        loaded,
+        equals(
+          WorkshopModelAssignments.defaultsForPlatform(defaultTargetPlatform),
+        ),
+      );
     });
 
     test('Assistant role cannot be assigned inside Workshop', () {
@@ -74,6 +85,41 @@ void main() {
           'phi3_5_mini',
         ),
         throwsArgumentError,
+      );
+    });
+  });
+
+  group('WorkshopModelAssignments platform defaults', () {
+    test('Android defaults keep all Workshop roles on the phone-safe Qwen 3B',
+        () {
+      final assignments = WorkshopModelAssignments.defaultsForPlatform(
+        TargetPlatform.android,
+      );
+
+      expect(assignments, hasLength(4));
+      for (final role in WorkshopModelAssignments.workshopRoles) {
+        expect(
+          WorkshopModelAssignments.modelIdFor(
+            role,
+            assignments: assignments,
+          ),
+          'qwen2_5_3b_instruct',
+        );
+      }
+    });
+
+    test('desktop defaults preserve the dedicated role configuration', () {
+      final assignments = WorkshopModelAssignments.defaultsForPlatform(
+        TargetPlatform.linux,
+      );
+
+      expect(assignments, equals(WorkshopModelAssignments.defaults));
+      expect(
+        WorkshopModelAssignments.modelIdFor(
+          AppAiRole.architect,
+          assignments: assignments,
+        ),
+        'qwen2_5_coder_7b_instruct',
       );
     });
   });
