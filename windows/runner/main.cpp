@@ -70,17 +70,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Reset();
   startup_trace::Mark("01 wWinMain entered");
 
-  // Attach to console when present (e.g., 'flutter run') or create a
-  // temporary one when not present (e.g., within a debugger).
   if (!::AttachConsole(ATTACH_PARENT_PROCESS)) {
     ::AllocConsole();
     ::ShowWindow(::GetConsoleWindow(), SW_HIDE);
   }
   startup_trace::Mark("02 console initialized");
 
-  // Initialize COM, so that it is available for use in the library and/or
-  // plugins. Only balance CoInitializeEx with CoUninitialize when this call
-  // actually acquired a COM initialization reference.
   startup_trace::Mark("03 before CoInitializeEx");
   const HRESULT com_result =
       ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -104,7 +99,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("08 after command line parsing");
 
   bool skip_plugins = false;
-  bool disable_impeller = false;
+  bool legacy_renderer = true;
   std::vector<std::string> dart_arguments;
   dart_arguments.reserve(command_line_arguments.size());
   for (const auto& argument : command_line_arguments) {
@@ -113,17 +108,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       startup_trace::Mark("08a Win7 plugin-free diagnostic mode requested");
       continue;
     }
-    if (argument == "--win7-no-impeller") {
-      disable_impeller = true;
-      startup_trace::Mark("08b Win7 no-Impeller diagnostic mode requested");
+    if (argument == "--win7-no-impeller" ||
+        argument == "--win7-legacy-renderer") {
+      legacy_renderer = true;
+      startup_trace::Mark("08b Win7 legacy renderer mode requested");
+      continue;
+    }
+    if (argument == "--win7-default-renderer") {
+      legacy_renderer = false;
+      startup_trace::Mark("08b Flutter default renderer explicitly requested");
       continue;
     }
     dart_arguments.push_back(argument);
   }
 
-  if (disable_impeller) {
+  if (legacy_renderer) {
+    // Conservative Windows renderer configuration for older Intel/ANGLE paths.
+    // This Win7 candidate defaults to the conservative path; the normal
+    // cross-platform branch continues to use Flutter defaults.
     project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    startup_trace::Mark("08c Impeller disabled; Skia requested");
+    project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
+    project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
+    startup_trace::Mark(
+        "08c legacy renderer: Impeller off, low-power GPU, platform UI thread");
   } else {
     startup_trace::Mark("08c renderer default retained");
   }
