@@ -39,27 +39,14 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("compat")
 
 # WINDOWS 7 DYNAMIC-PLUGIN CANDIDATE:
-# Build plugin DLL targets explicitly, but do NOT include
-# flutter/generated_plugins.cmake because that file links every plugin import
-# library into ai_orchestrator.exe. Keeping those import libraries out of the
-# runner removes plugin static initialization from the process pre-main path.
-set(WIN7_PLUGIN_SYMLINK_DIR
-  "${FLUTTER_MANAGED_DIR}/ephemeral/.plugin_symlinks")
-add_subdirectory(
-  "${WIN7_PLUGIN_SYMLINK_DIR}/file_selector_windows/windows"
-  "${CMAKE_CURRENT_BINARY_DIR}/plugins/file_selector_windows")
-add_subdirectory(
-  "${WIN7_PLUGIN_SYMLINK_DIR}/flutter_secure_storage_windows/windows"
-  "${CMAKE_CURRENT_BINARY_DIR}/plugins/flutter_secure_storage_windows")
-add_subdirectory(
-  "${WIN7_PLUGIN_SYMLINK_DIR}/permission_handler_windows/windows"
-  "${CMAKE_CURRENT_BINARY_DIR}/plugins/permission_handler_windows")
-add_subdirectory(
-  "${WIN7_PLUGIN_SYMLINK_DIR}/record_windows/windows"
-  "${CMAKE_CURRENT_BINARY_DIR}/plugins/record_windows")
-
+# Let Flutter's generated plugin metadata build all plugin/FFI targets and
+# populate PLUGIN_BUNDLED_LIBRARIES. The runner itself does not compile the
+# generated registrant and references no plugin symbols, so MSVC does not add
+# plugin import libraries to the executable's PE dependency table. CI enforces
+# that property with dumpbin.
 add_subdirectory("runner")
 add_subdirectory("diagnostics")
+include(flutter/generated_plugins.cmake)
 
 # === Installation ===
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
@@ -100,9 +87,21 @@ install(FILES "${FLUTTER_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-# Plugin DLLs are installed above as runtime targets and are intentionally not
-# linked into the runner. flutter_window.cpp loads them dynamically only after
-# the Flutter engine is alive.
+# Keep generated plugin/FFI DLLs and their runtime companions beside the
+# executable. Nothing here is linked into ai_orchestrator.exe; the native
+# method-channel plugins are loaded explicitly after FlutterEngine startup.
+# dartjni.dll is an Android/JVM bridge pulled transitively by tooling. The
+# Windows AOT image and bundled DLLs contain no reference to it, and keeping it
+# causes a misleading jvm.dll loader popup on Windows 7 diagnostics.
+foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
+  if("${bundled_library}" MATCHES "[\\/]dartjni\\.dll$")
+    message(STATUS "Skipping unused Windows dartjni.dll bundle asset")
+    continue()
+  endif()
+  install(FILES "${bundled_library}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endforeach()
 
 # Native assets emitted by Dart/Flutter packages remain present because the Dart
 # application may reference them after startup. They are not linked into the
