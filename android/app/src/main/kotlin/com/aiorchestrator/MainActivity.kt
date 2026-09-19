@@ -140,10 +140,35 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
+                        // Cantiere artifacts live under the Flutter application
+                        // documents directory, which is not guaranteed to be a
+                        // <files-path> FileProvider root on every Android build.
+                        // Stage a byte-identical installer candidate in app cache,
+                        // which is explicitly exported through <cache-path>.
+                        val installDir = File(cacheDir, "apk-installer").apply {
+                            if (!exists() && !mkdirs()) {
+                                throw IllegalStateException(
+                                    "Unable to create APK installer cache directory"
+                                )
+                            }
+                        }
+                        val installerApk = File(installDir, "candidate.apk")
+                        if (apkFile.canonicalPath != installerApk.canonicalPath) {
+                            apkFile.copyTo(installerApk, overwrite = true)
+                        }
+                        if (!installerApk.exists() ||
+                            !installerApk.canRead() ||
+                            installerApk.length() != apkFile.length()
+                        ) {
+                            throw IllegalStateException(
+                                "APK installer cache copy is incomplete"
+                            )
+                        }
+
                         val apkUri = FileProvider.getUriForFile(
                             this,
                             "${packageName}.fileprovider",
-                            apkFile
+                            installerApk
                         )
                         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
                             setDataAndType(apkUri, "application/vnd.android.package-archive")
