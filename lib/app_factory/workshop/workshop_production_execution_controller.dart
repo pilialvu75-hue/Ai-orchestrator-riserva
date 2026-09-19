@@ -637,7 +637,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
     try {
       late final Future<WorkshopTaskInferenceResult> resultFuture;
-      if (isRetry) {
+      final canCreateSemanticAttempt =
+          isRetry && _executionStore != null && resumeSource != null;
+      if (canCreateSemanticAttempt) {
         await journalStart;
         final resumeContext = _buildSemanticResumeContext(
           handle: handle,
