@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controll
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
@@ -48,12 +49,21 @@ void main() {
 
       firstCoordinator.attach(firstController);
 
+      const approvedProposal =
+          'Proposta approvata: app Flutter con contatore, +, - e Reset.';
+
       firstController.startProduction(
         title: 'Recoverable Cantiere project',
         instruction: 'Create the requested application safely.',
         requirements: const <String>['Keep the existing workspace intact.'],
         technologies: const <String>['Flutter'],
+        context: <String>[
+          WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+            approvedProposal,
+          ),
+        ],
       );
+      final approval = firstController.approveCurrentProject();
 
       final originalRequestId = firstController.state.requestId;
       final originalProjectId = firstController.state.projectId;
@@ -92,8 +102,25 @@ void main() {
       expect(secondController.state.stage, WorkshopStage.implementation);
       expect(secondController.state.completedTasks, 0);
       expect(secondController.state.totalTasks, 1);
+      expect(secondController.state.isProjectApproved, isTrue);
+      expect(
+        secondController.state.projectApproval?.approvalId,
+        approval.approvalId,
+      );
 
-      final restoredPlan = secondController.engine.planOf(originalRequestId!);
+      final restoredRequest =
+          secondController.engine.requestOf(originalRequestId!);
+      expect(restoredRequest, isNotNull);
+      expect(
+        restoredRequest!.context,
+        contains(
+          WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+            approvedProposal,
+          ),
+        ),
+      );
+
+      final restoredPlan = secondController.engine.planOf(originalRequestId);
       expect(restoredPlan, isNotNull);
       expect(restoredPlan!.title, 'Recoverable Cantiere project');
       expect(
@@ -107,7 +134,8 @@ void main() {
       expect(restoredPlan.technologies, const <String>['Flutter']);
 
       // Recovery deliberately creates a fresh guarded WorkspaceSession. No
-      // staged diff or owner approval is fabricated after process death.
+      // staged diff or task-level apply approval is fabricated after process
+      // death. The already-explicit project-level authorization is preserved.
       expect(
         secondController.engine.stageOf(originalRequestId),
         WorkshopStage.implementation,

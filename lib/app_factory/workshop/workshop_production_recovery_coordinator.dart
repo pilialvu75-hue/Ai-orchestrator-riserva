@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_background_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
@@ -68,6 +69,7 @@ final class WorkshopProductionRecoveryCoordinator {
       request: snapshot.request,
       plan: snapshot.plan,
       activeTaskId: snapshot.activeTaskId,
+      projectApproval: snapshot.projectApproval,
     );
 
     // Re-save after recovery so any intentionally downgraded transient state
@@ -204,12 +206,14 @@ final class _WorkshopProductionSnapshot {
     required this.plan,
     required this.stage,
     this.activeTaskId,
+    this.projectApproval,
   });
 
   final WorkshopRequest request;
   final WorkshopProjectPlan plan;
   final WorkshopStage? stage;
   final String? activeTaskId;
+  final WorkshopProjectApprovalEvidence? projectApproval;
 
   static _WorkshopProductionSnapshot? capture(
     WorkshopDashboardController controller,
@@ -227,23 +231,18 @@ final class _WorkshopProductionSnapshot {
       return null;
     }
 
-    // Dashboard-created productions currently originate from the Cantiere and
-    // use create semantics. Persisting the complete plan keeps the recovery
-    // payload independent from Assistant configuration or memory.
-    final request = WorkshopRequest(
-      id: requestId,
-      title: plan.title,
-      instruction: plan.goal,
-      source: WorkshopRequestSource.workshop,
-      operation: WorkshopOperation.create,
-      constraints: plan.constraints,
-    );
+    final request = controller.engine.requestOf(requestId);
+
+    if (request == null) {
+      return null;
+    }
 
     return _WorkshopProductionSnapshot(
       request: request,
       plan: plan,
       stage: state.stage ?? controller.engine.stageOf(requestId),
       activeTaskId: state.activeTaskId,
+      projectApproval: state.projectApproval,
     );
   }
 
@@ -253,6 +252,7 @@ final class _WorkshopProductionSnapshot {
         'plan': _encodePlan(plan),
         'stage': stage?.name,
         'activeTaskId': activeTaskId,
+        'projectApproval': projectApproval?.toJson(),
       };
 
   static _WorkshopProductionSnapshot decode(
@@ -306,6 +306,17 @@ final class _WorkshopProductionSnapshot {
     final activeTaskId = _nullableString(
       root['activeTaskId'],
     );
+    final projectApproval = _decodeProjectApproval(
+      root['projectApproval'],
+    );
+
+    if (projectApproval != null &&
+        projectApproval.projectId.trim() != plan.id.trim()) {
+      throw FormatException(
+        'Recovered Workshop approval belongs to project '
+        '${projectApproval.projectId}, not ${plan.id}.',
+      );
+    }
 
     if (activeTaskId != null &&
         plan.taskById(activeTaskId) == null) {
@@ -322,6 +333,36 @@ final class _WorkshopProductionSnapshot {
         root['stage'],
       ),
       activeTaskId: activeTaskId,
+      projectApproval: projectApproval,
+    );
+  }
+
+  static WorkshopProjectApprovalEvidence? _decodeProjectApproval(
+    Object? raw,
+  ) {
+    if (raw == null) {
+      return null;
+    }
+
+    if (raw is! Map) {
+      throw const FormatException(
+        'Workshop production recovery project approval is invalid.',
+      );
+    }
+
+    final json = Map<String, dynamic>.from(raw);
+    final projectId = _requiredString(json, 'projectId');
+    final approvalId = _requiredString(json, 'approvalId');
+    final approvedBy = _requiredString(json, 'approvedBy');
+
+    return WorkshopProjectApprovalEvidence(
+      projectId: projectId,
+      approvalId: approvalId,
+      approvedAt: _date(
+        json['approvedAt'],
+        'projectApproval.approvedAt',
+      ),
+      approvedBy: approvedBy,
     );
   }
 

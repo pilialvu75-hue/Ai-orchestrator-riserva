@@ -225,6 +225,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
     required WorkshopRequest request,
     required WorkshopProjectPlan plan,
     String? activeTaskId,
+    WorkshopProjectApprovalEvidence? projectApproval,
   }) async {
     _ensureNotDisposed();
 
@@ -253,6 +254,14 @@ final class WorkshopDashboardController extends ChangeNotifier {
     if (plan.assumptions.isNotEmpty || plan.risks.isNotEmpty) {
       throw StateError(
         'The current Workshop engine cannot safely restore non-empty assumptions or risks.',
+      );
+    }
+
+    if (projectApproval != null &&
+        projectApproval.projectId.trim() != plan.id.trim()) {
+      throw StateError(
+        'Recovered Workshop project approval does not belong to '
+        'project "${plan.id}".',
       );
     }
 
@@ -337,6 +346,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
         totalTasks: restoredPlan.totalTasks,
         activeTaskId: restoredActiveTaskId,
         activeTaskTitle: restoredActiveTaskTitle,
+        projectApproval: projectApproval,
         lastMessage: restoredActiveTaskId == null
             ? 'Produzione del Cantiere recuperata dal checkpoint.'
             : 'Produzione recuperata: il task attivo è pronto per essere rieseguito in sicurezza.',
