@@ -326,6 +326,7 @@ final class WorkshopValidatedProposalSnapshotService {
     final configuredRoot = Directory(snapshotsRootPath).absolute.path;
     final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
     _ensureInside(snapshotRoot, configuredRoot);
+    await _ensureResolvedDirectoryInside(snapshotRoot, configuredRoot);
 
     final manifestFile = File(p.join(snapshotRoot, 'snapshot.json')).absolute;
     _ensureInside(manifestFile.path, snapshotRoot);
@@ -338,6 +339,7 @@ final class WorkshopValidatedProposalSnapshotService {
         'Validated proposal recovery manifest is unavailable or unsafe.',
       );
     }
+    await _ensureResolvedFileInside(manifestFile.path, snapshotRoot);
 
     final decoded = jsonDecode(await manifestFile.readAsString());
     if (decoded is! Map) {
@@ -429,6 +431,7 @@ final class WorkshopValidatedProposalSnapshotService {
           '$relative',
         );
       }
+      await _ensureResolvedFileInside(contentFile.path, snapshotRoot);
 
       final bytes = await contentFile.readAsBytes();
       if (bytes.length > maxFileSizeBytes) {
@@ -462,6 +465,14 @@ final class WorkshopValidatedProposalSnapshotService {
           type: type,
           afterContent: content,
         ),
+      );
+    }
+
+    final declaredTotalBytes = manifest['totalBytes'];
+    if (declaredTotalBytes is! num ||
+        declaredTotalBytes.toInt() != totalBytes) {
+      throw const FormatException(
+        'Validated proposal recovery total byte count mismatch.',
       );
     }
 
@@ -649,6 +660,36 @@ final class WorkshopValidatedProposalSnapshotService {
         'Validated proposal recovery path escapes its configured root.',
       );
     }
+  }
+
+  static Future<void> _ensureResolvedDirectoryInside(
+    String childPath,
+    String parentPath,
+  ) async {
+    final childType = await FileSystemEntity.type(
+      childPath,
+      followLinks: false,
+    );
+    if (childType != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery directory is unavailable or unsafe.',
+      );
+    }
+    final resolvedParent =
+        await Directory(parentPath).resolveSymbolicLinks();
+    final resolvedChild =
+        await Directory(childPath).resolveSymbolicLinks();
+    _ensureInside(resolvedChild, resolvedParent);
+  }
+
+  static Future<void> _ensureResolvedFileInside(
+    String filePath,
+    String parentPath,
+  ) async {
+    final resolvedParent =
+        await Directory(parentPath).resolveSymbolicLinks();
+    final resolvedFile = await File(filePath).resolveSymbolicLinks();
+    _ensureInside(resolvedFile, resolvedParent);
   }
 
   static String _normalizedAbsolute(String value) {
