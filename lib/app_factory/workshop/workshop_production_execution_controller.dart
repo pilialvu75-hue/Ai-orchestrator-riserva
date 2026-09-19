@@ -697,6 +697,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         isOffline ? WorkshopTaskResource.local : WorkshopTaskResource.hybridAi;
     try {
       final current = _journalExecution;
+      WorkshopExecution? supersededSnapshotExecution;
       WorkshopExecution execution;
       if (isRetry &&
           current != null &&
@@ -704,10 +705,16 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           current.taskId == handle.taskId) {
         final previousStatus = current.status.name;
         final previousResumePhase = current.resumePhase;
+        supersededSnapshotExecution = current;
         execution = await store.beginNextAttempt(
           execution: current,
           resource: resource,
         );
+
+        final nextMetadata = Map<String, dynamic>.from(execution.metadata)
+          ..remove('validatedProposalSnapshot');
+        execution = execution.copyWith(metadata: nextMetadata);
+
         if (isRestartResume) {
           execution = execution.copyWith(
             metadata: <String, dynamic>{
@@ -742,6 +749,12 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         _restartReplayPending = false;
       }
       _executionJournalError = null;
+
+      if (supersededSnapshotExecution != null) {
+        await _removeRecoverySnapshotForExecution(
+          supersededSnapshotExecution,
+        );
+      }
     } catch (error) {
       // The journal is observability/recovery infrastructure. It must never
       // bypass or duplicate the guarded production lifecycle if persistence is
@@ -838,6 +851,38 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
+  Future<void> _removeRecoverySnapshotForExecution(
+    WorkshopExecution execution,
+  ) async {
+    final service = _validatedProposalSnapshotService;
+    if (service == null ||
+        execution.metadata['validatedProposalSnapshot'] == null) {
+      return;
+    }
+
+    try {
+      final snapshot =
+          WorkshopValidatedProposalSnapshot.fromExecutionMetadata(
+        execution.metadata,
+      );
+      if (snapshot.executionId != execution.executionId ||
+          snapshot.attemptId != execution.attemptId ||
+          snapshot.projectId != execution.projectId ||
+          snapshot.taskId != execution.taskId) {
+        throw const FormatException(
+          'Validated proposal cleanup identity does not match the '
+          'authoritative Workshop execution.',
+        );
+      }
+      await service.remove(snapshot);
+      _recoverySnapshotError = null;
+    } catch (error) {
+      // Cleanup can leave only an orphaned local recovery artifact. It must
+      // never roll back a completed/cancelled execution or revive approval.
+      _recoverySnapshotError = error;
+    }
+  }
+
   /// Marks the current logical Execution complete only after the real guarded
   /// apply has succeeded. This never applies workspace changes by itself.
   Future<void> markCurrentExecutionCompleted() async {
@@ -846,7 +891,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       WorkshopExecutionStatus.completed,
       resumePhase: 'completed',
     );
-    if (_journalExecution?.status == WorkshopExecutionStatus.completed) {
+    final completed = _journalExecution;
+    if (completed?.status == WorkshopExecutionStatus.completed) {
+      await _removeRecoverySnapshotForExecution(completed!);
       _journalExecution = null;
       _restartReplayPending = false;
     }
@@ -872,6 +919,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     );
     try {
       await store.save(cancelled);
+      await _removeRecoverySnapshotForExecution(cancelled);
       _journalExecution = null;
       _restartReplayPending = false;
       _executionJournalError = null;
@@ -964,6 +1012,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _buildRepairAttempts = 0;
     _journalExecution = null;
     _executionJournalError = null;
+    _recoverySnapshotError = null;
     _restartReplayPending = false;
     super.dispose();
   }
