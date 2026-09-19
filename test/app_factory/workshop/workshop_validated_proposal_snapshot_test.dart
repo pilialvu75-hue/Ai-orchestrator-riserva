@@ -39,6 +39,7 @@ void main() {
         projectId: 'project:request-1',
         taskId: 'task-1',
         result: source,
+        baselineSnapshot: _baseline(),
       );
 
       expect(snapshot.executionId, 'execution-1');
