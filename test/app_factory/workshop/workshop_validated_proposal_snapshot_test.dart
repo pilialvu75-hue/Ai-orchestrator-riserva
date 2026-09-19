@@ -48,7 +48,10 @@ void main() {
       expect(await File(p.join(snapshot.rootPath, 'snapshot.json')).exists(),
           isTrue);
 
-      final restored = await service.restore(snapshot: snapshot);
+      final restored = await service.restore(
+          snapshot: snapshot,
+          currentBaselineSnapshot: _baseline(),
+        );
 
       expect(restored.readyForApproval, isTrue);
       expect(restored.review.approved, isTrue);
@@ -85,6 +88,7 @@ void main() {
         projectId: 'project:request-1',
         taskId: 'task-1',
         result: _validatedResult(),
+        baselineSnapshot: _baseline(),
       );
 
       final decoded =
@@ -109,6 +113,7 @@ void main() {
         projectId: 'project:request-1',
         taskId: 'task-1',
         result: _validatedResult(),
+        baselineSnapshot: _baseline(),
       );
 
       final target = File(
@@ -117,7 +122,10 @@ void main() {
       await target.writeAsString('tampered\n', flush: true);
 
       await expectLater(
-        service.restore(snapshot: snapshot),
+        service.restore(
+          snapshot: snapshot,
+          currentBaselineSnapshot: _baseline(),
+        ),
         throwsA(isA<FormatException>()),
       );
     });
@@ -152,6 +160,7 @@ void main() {
           projectId: 'project:request-1',
           taskId: 'task-1',
           result: unsafe,
+          baselineSnapshot: _baseline(),
         ),
         throwsA(isA<StateError>()),
       );
@@ -165,6 +174,30 @@ void main() {
       );
     });
 
+    test('changed live baseline blocks stale proposal recovery', () async {
+      final snapshot = await service.capture(
+        executionId: 'execution-1',
+        attemptId: 'attempt-1',
+        projectId: 'project:request-1',
+        taskId: 'task-1',
+        result: _validatedResult(),
+        baselineSnapshot: _baseline(),
+      );
+
+      final changedBaseline = <String, String>{
+        ..._baseline(),
+        'lib/existing.dart': 'int answer = 7;\n',
+      };
+
+      await expectLater(
+        service.restore(
+          snapshot: snapshot,
+          currentBaselineSnapshot: changedBaseline,
+        ),
+        throwsA(isA<WorkshopValidatedProposalBaselineConflict>()),
+      );
+    });
+
     test('manifest tampering is rejected before file restoration', () async {
       final snapshot = await service.capture(
         executionId: 'execution-1',
@@ -172,6 +205,7 @@ void main() {
         projectId: 'project:request-1',
         taskId: 'task-1',
         result: _validatedResult(),
+        baselineSnapshot: _baseline(),
       );
 
       final manifest = File(p.join(snapshot.rootPath, 'snapshot.json'));
@@ -182,12 +216,20 @@ void main() {
       );
 
       await expectLater(
-        service.restore(snapshot: snapshot),
+        service.restore(
+          snapshot: snapshot,
+          currentBaselineSnapshot: _baseline(),
+        ),
         throwsA(isA<FormatException>()),
       );
     });
   });
 }
+
+Map<String, String> _baseline() => <String, String>{
+      'lib/existing.dart': 'int answer = 0;\n',
+      'lib/old.dart': 'legacy\n',
+    };
 
 WorkshopTaskInferenceResult _validatedResult() {
   return const WorkshopTaskInferenceResult(
