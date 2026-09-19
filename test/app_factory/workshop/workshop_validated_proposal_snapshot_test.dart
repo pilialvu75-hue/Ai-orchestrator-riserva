@@ -237,7 +237,7 @@ void main() {
         taskId: 'task-1',
         requestId: 'request-1',
         rootPath: root.path,
-        manifestSha256: '0' * 64,
+        manifestSha256: List<String>.filled(64, '0').join(),
         createdAt: DateTime.utc(2026, 1, 1),
       );
 
