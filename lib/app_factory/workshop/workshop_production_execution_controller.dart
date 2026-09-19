@@ -856,18 +856,15 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
         final nextMetadata = Map<String, dynamic>.from(execution.metadata)
           ..remove('validatedProposalSnapshot');
-        execution = execution.copyWith(metadata: nextMetadata);
-
-        if (isRestartResume) {
-          execution = execution.copyWith(
-            metadata: <String, dynamic>{
-              ...execution.metadata,
-              'processRestartResume': true,
-              'previousStatus': previousStatus,
-              'previousResumePhase': previousResumePhase,
-            },
-          );
-        }
+        execution = execution.copyWith(
+          metadata: <String, dynamic>{
+            ...nextMetadata,
+            'semanticResume': true,
+            'previousStatus': previousStatus,
+            'previousResumePhase': previousResumePhase,
+            if (isRestartResume) 'processRestartResume': true,
+          },
+        );
       } else {
         execution = await store.create(
           projectId: handle.plan.id,
