@@ -26,6 +26,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_executi
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
@@ -153,6 +154,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
     final workspaceDirectory = Directory(workspaceRootPath);
     await workspaceDirectory.create(recursive: true);
+    final recoverySnapshotsRootPath = p.join(
+      applicationDirectory.path,
+      'ai_orchestrator_workshop_recovery',
+      'validated_proposals',
+    );
     final workshopAssignments = await WorkshopFactory.loadPersistedAssignments();
 
     final bundle = await WorkshopProductionLifecycleBundleFactory
@@ -185,6 +191,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           coordinator: taskCoordinator,
         ),
         executionStore: executionStore,
+        validatedProposalSnapshotService:
+            WorkshopValidatedProposalSnapshotService(
+          snapshotsRootPath: recoverySnapshotsRootPath,
+        ),
       );
 
       final recoveredTaskId =
