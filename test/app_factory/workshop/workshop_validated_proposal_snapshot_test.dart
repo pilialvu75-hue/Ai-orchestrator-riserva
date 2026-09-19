@@ -40,6 +40,7 @@ void main() {
         taskId: 'task-1',
         result: source,
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       expect(snapshot.executionId, 'execution-1');
@@ -90,6 +91,7 @@ void main() {
         taskId: 'task-1',
         result: _validatedResult(),
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       final decoded =
@@ -115,6 +117,7 @@ void main() {
         taskId: 'task-1',
         result: _validatedResult(),
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       final target = File(
@@ -162,6 +165,7 @@ void main() {
           taskId: 'task-1',
           result: unsafe,
           baselineSnapshot: _baseline(),
+          stagedSnapshot: _unsafeStaged(),
         ),
         throwsA(isA<StateError>()),
       );
@@ -183,6 +187,7 @@ void main() {
         taskId: 'task-1',
         result: _validatedResult(),
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       final changedBaseline = <String, String>{
@@ -209,6 +214,7 @@ void main() {
         taskId: 'task-1',
         result: _validatedResult(),
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       final target = File(
@@ -256,6 +262,7 @@ void main() {
         taskId: 'task-1',
         result: _validatedResult(),
         baselineSnapshot: _baseline(),
+        stagedSnapshot: _staged(),
       );
 
       final manifest = File(p.join(snapshot.rootPath, 'snapshot.json'));
