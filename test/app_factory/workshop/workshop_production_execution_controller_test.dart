@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +17,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_ga
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
@@ -512,6 +514,164 @@ void main() {
     controller.dispose();
   });
 
+  test(
+      'validated snapshot restores approval-ready state without rerunning AI',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final recoveryRoot = await Directory.systemTemp.createTemp(
+      'workshop-execution-resume-',
+    );
+    final snapshotService = WorkshopValidatedProposalSnapshotService(
+      snapshotsRootPath: recoveryRoot.path,
+    );
+
+    try {
+      final firstHandle = await _initializedSnapshotHandle();
+      final firstRunner = _SnapshotReadyRunner(firstHandle);
+      final firstController = WorkshopProductionExecutionController(
+        runner: firstRunner,
+        executionStore: store,
+        validatedProposalSnapshotService: snapshotService,
+      );
+
+      await firstController.start();
+
+      expect(firstRunner.runCount, 1);
+      final waiting = (await store.loadAll()).single;
+      expect(waiting.status, WorkshopExecutionStatus.waitingApproval);
+      final snapshot =
+          WorkshopValidatedProposalSnapshot.fromExecutionMetadata(
+        waiting.metadata,
+      );
+      expect(await Directory(snapshot.rootPath).exists(), isTrue);
+      expect(firstHandle.session.status, WorkspaceSessionStatus.validation);
+      expect(firstHandle.session.isApplyApproved, isFalse);
+      firstController.dispose();
+
+      final restoredHandle = await _initializedSnapshotHandle();
+      final restoredRunner = _ImmediateRunner(restoredHandle);
+      final restoredController = WorkshopProductionExecutionController(
+        runner: restoredRunner,
+        executionStore: store,
+        validatedProposalSnapshotService: snapshotService,
+      );
+
+      final recovery =
+          await restoredController.restorePersistentExecutionForPreparedTask();
+
+      expect(
+        recovery?.disposition,
+        WorkshopProductionExecutionRecoveryDisposition
+            .validatedApprovalRecovered,
+      );
+      expect(restoredRunner.runCount, 0);
+      expect(
+        restoredController.state.status,
+        WorkshopProductionExecutionStatus.succeeded,
+      );
+      expect(restoredController.state.result?.readyForApproval, isTrue);
+      expect(restoredController.restartReplayPending, isFalse);
+      expect(restoredController.recoverySnapshotError, isNull);
+      expect(restoredHandle.session.status, WorkspaceSessionStatus.validation);
+      expect(restoredHandle.session.isApplyApproved, isFalse);
+      expect(restoredHandle.session.workspace.read('lib/app.dart'),
+          'int answer = 42;\n');
+      expect(restoredHandle.session.workspace.read('lib/reused.dart'),
+          'String reused = "library";\n');
+      expect(
+        (await store.loadAttempts(waiting.executionId)),
+        hasLength(1),
+      );
+
+      restoredController.dispose();
+    } finally {
+      if (await recoveryRoot.exists()) {
+        await recoveryRoot.delete(recursive: true);
+      }
+    }
+  });
+
+  test(
+      'stale validated snapshot falls back to a new attempt and drops descriptor',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final recoveryRoot = await Directory.systemTemp.createTemp(
+      'workshop-execution-stale-resume-',
+    );
+    final snapshotService = WorkshopValidatedProposalSnapshotService(
+      snapshotsRootPath: recoveryRoot.path,
+    );
+
+    try {
+      final firstHandle = await _initializedSnapshotHandle();
+      final firstController = WorkshopProductionExecutionController(
+        runner: _SnapshotReadyRunner(firstHandle),
+        executionStore: store,
+        validatedProposalSnapshotService: snapshotService,
+      );
+      await firstController.start();
+
+      final waiting = (await store.loadAll()).single;
+      final oldSnapshot =
+          WorkshopValidatedProposalSnapshot.fromExecutionMetadata(
+        waiting.metadata,
+      );
+      firstController.dispose();
+
+      final changedHandle = await _initializedSnapshotHandle(
+        baseline: 'int answer = 7;\n',
+      );
+      final changedRunner = _ImmediateRunner(changedHandle);
+      final changedController = WorkshopProductionExecutionController(
+        runner: changedRunner,
+        executionStore: store,
+        validatedProposalSnapshotService: snapshotService,
+      );
+
+      final recovery =
+          await changedController.restorePersistentExecutionForPreparedTask();
+
+      expect(
+        recovery?.disposition,
+        WorkshopProductionExecutionRecoveryDisposition.safeReplayPending,
+      );
+      expect(
+        changedController.recoverySnapshotError,
+        isA<WorkshopValidatedProposalBaselineConflict>(),
+      );
+      expect(changedController.restartReplayPending, isTrue);
+      expect(changedController.state.status, WorkshopProductionExecutionStatus.idle);
+      expect(changedHandle.session.hasChanges, isFalse);
+
+      await changedController.start(
+        isOffline: changedController.state.isOffline,
+      );
+
+      final current = (await store.loadAll()).single;
+      final attempts = await store.loadAttempts(waiting.executionId);
+      expect(changedRunner.runCount, 1);
+      expect(current.executionId, waiting.executionId);
+      expect(current.attemptId, isNot(waiting.attemptId));
+      expect(current.metadata.containsKey('validatedProposalSnapshot'), isFalse);
+      expect(attempts, hasLength(2));
+      expect(await Directory(oldSnapshot.rootPath).exists(), isFalse);
+
+      changedController.dispose();
+    } finally {
+      if (await recoveryRoot.exists()) {
+        await recoveryRoot.delete(recursive: true);
+      }
+    }
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
@@ -599,6 +759,7 @@ final class _ImmediateRunner implements WorkshopProductionExecutionRunner {
   _ImmediateRunner(this.handle);
 
   WorkshopProductionTaskHandle handle;
+  int runCount = 0;
 
   @override
   WorkshopProductionTaskHandle preparedHandle() => handle;
@@ -609,7 +770,41 @@ final class _ImmediateRunner implements WorkshopProductionExecutionRunner {
     required CancellationToken cancellationToken,
     required bool isOffline,
   }) async {
+    runCount += 1;
     return _result();
+  }
+}
+
+final class _SnapshotReadyRunner
+    implements WorkshopProductionExecutionRunner {
+  _SnapshotReadyRunner(this.handle);
+
+  final WorkshopProductionTaskHandle handle;
+  int runCount = 0;
+
+  @override
+  WorkshopProductionTaskHandle preparedHandle() => handle;
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPrepared({
+    required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) async {
+    runCount += 1;
+    final session = handle.session;
+    session.beginImplementation();
+    session.workspace.write(
+      path: 'lib/app.dart',
+      content: 'int answer = 42;\n',
+    );
+    session.workspace.write(
+      path: 'lib/reused.dart',
+      content: 'String reused = "library";\n',
+    );
+    session.beginReview();
+    session.beginValidation();
+    return _snapshotReadyResult();
   }
 }
 
@@ -635,6 +830,58 @@ WorkshopProductionTaskHandle _handle({
     plan: plan,
     taskId: taskId,
     session: session,
+  );
+}
+
+Future<WorkshopProductionTaskHandle> _initializedSnapshotHandle({
+  String baseline = 'int answer = 0;\n',
+}) async {
+  const request = WorkshopRequest(
+    id: 'request-1',
+    title: 'Snapshot test',
+    instruction: 'Test validated proposal restart recovery.',
+  );
+  final plan = WorkshopProjectPlan(
+    id: 'project:request-1',
+    title: 'Snapshot test',
+    goal: 'Test validated proposal restart recovery.',
+  );
+  final session = WorkspaceSession(
+    request: request,
+    gateway: _MemoryGateway(<String, String>{
+      'lib/app.dart': baseline,
+    }),
+  );
+  await session.initialize();
+  return WorkshopProductionTaskHandle(
+    plan: plan,
+    taskId: 'task-1',
+    session: session,
+  );
+}
+
+WorkshopTaskInferenceResult _snapshotReadyResult() {
+  return const WorkshopTaskInferenceResult(
+    proposal: WorkshopChangeProposal(
+      requestId: 'request-1',
+      explanation: 'Validated snapshot proposal.',
+      changes: <WorkspaceFileChange>[
+        WorkspaceFileChange(
+          path: 'lib/app.dart',
+          type: WorkspaceChangeType.modification,
+          beforeContent: 'int answer = 0;\n',
+          afterContent: 'int answer = 42;\n',
+        ),
+      ],
+    ),
+    review: WorkshopReviewVerdict(
+      approved: true,
+      summary: 'Review passed.',
+    ),
+    validation: WorkshopValidationVerdict(
+      valid: true,
+      summary: 'Validation passed.',
+    ),
   );
 }
 
@@ -668,6 +915,64 @@ WorkshopTaskInferenceResult _result() {
       summary: 'Test verdict.',
     ),
   );
+}
+
+final class _MemoryGateway implements GitWorkspaceGateway {
+  _MemoryGateway(Map<String, String> files)
+      : _files = Map<String, String>.from(files);
+
+  final Map<String, String> _files;
+
+  @override
+  Future<String> commit(String message) async => 'commit';
+
+  @override
+  Future<void> createBranch(String branchName) async {}
+
+  @override
+  Future<String> createPullRequest({
+    required String title,
+    required String body,
+    required String headBranch,
+    required String baseBranch,
+  }) async =>
+      'pr';
+
+  @override
+  Future<void> deleteFile(String path) async {
+    _files.remove(path);
+  }
+
+  @override
+  Future<bool> fileExists(String path) async => _files.containsKey(path);
+
+  @override
+  Future<GitWorkspaceDiff> getDiff() async =>
+      const GitWorkspaceDiff(files: <GitWorkspaceFileChange>[]);
+
+  @override
+  Future<List<String>> listFiles({String? directory}) async =>
+      _files.keys.toList(growable: false);
+
+  @override
+  Future<GitWorkspaceInfo> openWorkspace() async => const GitWorkspaceInfo(
+        repository: 'test',
+        branch: 'main',
+      );
+
+  @override
+  Future<void> push() async {}
+
+  @override
+  Future<String?> readFile(String path) async => _files[path];
+
+  @override
+  Future<void> writeFile({
+    required String path,
+    required String content,
+  }) async {
+    _files[path] = content;
+  }
 }
 
 final class _FakeGateway implements GitWorkspaceGateway {
