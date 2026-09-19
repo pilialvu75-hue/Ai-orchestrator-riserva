@@ -21,6 +21,22 @@ enum WorkshopBuildRepairReservation {
   repeatedFailure,
 }
 
+enum WorkshopProductionExecutionRecoveryDisposition {
+  safeReplayPending,
+  retryAvailable,
+  cancelled,
+}
+
+final class WorkshopProductionExecutionRecovery {
+  const WorkshopProductionExecutionRecovery({
+    required this.execution,
+    required this.disposition,
+  });
+
+  final WorkshopExecution execution;
+  final WorkshopProductionExecutionRecoveryDisposition disposition;
+}
+
 final class WorkshopProductionExecutionPolicy {
   const WorkshopProductionExecutionPolicy({
     this.maxDistinctTasksPerProject = 64,
@@ -167,6 +183,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   int _buildRepairAttempts = 0;
   WorkshopExecution? _journalExecution;
   Object? _executionJournalError;
+  bool _restartReplayPending = false;
 
   WorkshopProductionExecutionState get state => _state;
 
@@ -177,6 +194,118 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       _lastBuildRepairFailureSignature;
   WorkshopExecution? get journalExecution => _journalExecution;
   Object? get executionJournalError => _executionJournalError;
+  bool get restartReplayPending => _restartReplayPending;
+
+  /// Reattaches the durable Execution/Attempt journal to the task that the
+  /// Dashboard has already restored from its production checkpoint.
+  ///
+  /// Ephemeral VirtualWorkspace state is deliberately not reconstructed here.
+  /// A pre-crash running/checkpointed/waiting-approval attempt therefore
+  /// becomes a safe replay of the same logical Execution using a new Attempt.
+  /// Failed/cancelled attempts remain explicit retry states. A completed
+  /// Execution paired with an active recovered task is rejected fail-closed:
+  /// replaying it could duplicate an already-applied mutation.
+  Future<WorkshopProductionExecutionRecovery?>
+      restorePersistentExecutionForPreparedTask() async {
+    _ensureAvailable();
+    if (_activeRun != null) {
+      throw StateError(
+        'Cannot restore Workshop execution identity while a task is running.',
+      );
+    }
+
+    final store = _executionStore;
+    if (store == null) return null;
+
+    final handle = _runner.preparedHandle();
+    final projectId = handle.plan.id.trim();
+    final taskId = handle.taskId.trim();
+    final expectedSessionId = 'production:$projectId:$taskId';
+    final executions = await store.loadForTask(taskId);
+
+    WorkshopExecution? recovered;
+    for (final execution in executions) {
+      if (execution.projectId == projectId &&
+          execution.sessionId == expectedSessionId) {
+        recovered = execution;
+        break;
+      }
+    }
+    if (recovered == null) return null;
+
+    if (recovered.status == WorkshopExecutionStatus.completed) {
+      throw StateError(
+        'Recovered Workshop execution "${recovered.executionId}" is already '
+        'completed while task "$taskId" is still active. Automatic replay is '
+        'blocked to prevent a duplicate guarded apply.',
+      );
+    }
+
+    _journalExecution = recovered;
+    _executionJournalError = null;
+    _activePlanId = projectId;
+    _startedTaskIds
+      ..clear()
+      ..addAll(
+        handle.plan.tasks
+            .where((task) => task.completed)
+            .map((task) => task.id.trim())
+            .where((id) => id.isNotEmpty),
+      )
+      ..add(taskId);
+
+    final isOffline = recovered.metadata['offline'] == true;
+
+    switch (recovered.status) {
+      case WorkshopExecutionStatus.created:
+      case WorkshopExecutionStatus.running:
+      case WorkshopExecutionStatus.checkpointed:
+      case WorkshopExecutionStatus.waitingApproval:
+        _restartReplayPending = true;
+        _setState(WorkshopProductionExecutionState(isOffline: isOffline));
+        return WorkshopProductionExecutionRecovery(
+          execution: recovered,
+          disposition:
+              WorkshopProductionExecutionRecoveryDisposition.safeReplayPending,
+        );
+      case WorkshopExecutionStatus.failed:
+        _restartReplayPending = false;
+        _setState(
+          WorkshopProductionExecutionState(
+            status: WorkshopProductionExecutionStatus.failed,
+            handle: handle,
+            startedAt: recovered.startedAt,
+            finishedAt: recovered.updatedAt,
+            isOffline: isOffline,
+          ),
+        );
+        return WorkshopProductionExecutionRecovery(
+          execution: recovered,
+          disposition:
+              WorkshopProductionExecutionRecoveryDisposition.retryAvailable,
+        );
+      case WorkshopExecutionStatus.cancelled:
+        _restartReplayPending = false;
+        _setState(
+          WorkshopProductionExecutionState(
+            status: WorkshopProductionExecutionStatus.cancelled,
+            handle: handle,
+            startedAt: recovered.startedAt,
+            finishedAt: recovered.updatedAt,
+            isOffline: isOffline,
+          ),
+        );
+        return WorkshopProductionExecutionRecovery(
+          execution: recovered,
+          disposition:
+              WorkshopProductionExecutionRecoveryDisposition.cancelled,
+        );
+      case WorkshopExecutionStatus.completed:
+        throw StateError(
+          'Completed Workshop execution reached an unreachable recovery path.',
+        );
+    }
+  }
 
   Future<WorkshopTaskInferenceResult> start({bool isOffline = false}) {
     return _start(isOffline: isOffline, isRetry: false);
@@ -208,11 +337,16 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       ),
     );
 
+    final isRestartResume = _restartReplayPending &&
+        _journalExecution?.projectId == handle.plan.id &&
+        _journalExecution?.taskId == handle.taskId;
+
     final run = _execute(
       handle,
       token,
       isOffline: isOffline,
-      isRetry: isRetry,
+      isRetry: isRetry || isRestartResume,
+      isRestartResume: isRestartResume,
     );
     _activeRun = run;
     return run;
@@ -341,6 +475,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     CancellationToken token, {
     required bool isOffline,
     required bool isRetry,
+    required bool isRestartResume,
   }) async {
     // Journaling is observability/recovery infrastructure and must never delay
     // the actual production runner. Start both operations immediately, then
@@ -351,6 +486,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       handle: handle,
       isOffline: isOffline,
       isRetry: isRetry,
+      isRestartResume: isRestartResume,
     );
 
     try {
@@ -435,6 +571,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     required WorkshopProductionTaskHandle handle,
     required bool isOffline,
     required bool isRetry,
+    required bool isRestartResume,
   }) async {
     final store = _executionStore;
     if (store == null) return;
@@ -448,10 +585,22 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           current != null &&
           current.projectId == handle.plan.id &&
           current.taskId == handle.taskId) {
+        final previousStatus = current.status.name;
+        final previousResumePhase = current.resumePhase;
         execution = await store.beginNextAttempt(
           execution: current,
           resource: resource,
         );
+        if (isRestartResume) {
+          execution = execution.copyWith(
+            metadata: <String, dynamic>{
+              ...execution.metadata,
+              'processRestartResume': true,
+              'previousStatus': previousStatus,
+              'previousResumePhase': previousResumePhase,
+            },
+          );
+        }
       } else {
         execution = await store.create(
           projectId: handle.plan.id,
@@ -472,6 +621,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       );
       await store.save(execution);
       _journalExecution = execution;
+      if (isRestartResume) {
+        _restartReplayPending = false;
+      }
       _executionJournalError = null;
     } catch (error) {
       // The journal is observability/recovery infrastructure. It must never
@@ -540,6 +692,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     );
     if (_journalExecution?.status == WorkshopExecutionStatus.completed) {
       _journalExecution = null;
+      _restartReplayPending = false;
     }
   }
 
@@ -564,6 +717,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     try {
       await store.save(cancelled);
       _journalExecution = null;
+      _restartReplayPending = false;
       _executionJournalError = null;
     } catch (error) {
       _executionJournalError = error;
@@ -608,6 +762,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'Cannot reset Workshop production execution while a task is running.',
       );
     }
+    _restartReplayPending = false;
     _setState(WorkshopProductionExecutionState(isOffline: _state.isOffline));
   }
 
@@ -620,6 +775,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'Cannot reset Workshop production execution while a task is running.',
       );
     }
+    _restartReplayPending = false;
     _setState(const WorkshopProductionExecutionState());
   }
 
@@ -652,6 +808,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     _buildRepairAttempts = 0;
     _journalExecution = null;
     _executionJournalError = null;
+    _restartReplayPending = false;
     super.dispose();
   }
 }
