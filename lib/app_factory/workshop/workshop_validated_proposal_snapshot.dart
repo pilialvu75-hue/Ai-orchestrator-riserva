@@ -199,7 +199,7 @@ final class WorkshopValidatedProposalSnapshotService {
       followLinks: false,
     );
     if (rootType != FileSystemEntityType.directory) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal recovery root is unavailable or unsafe.',
       );
     }
@@ -229,7 +229,7 @@ final class WorkshopValidatedProposalSnapshotService {
       followLinks: false,
     );
     if (tempType != FileSystemEntityType.notFound) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal temporary recovery directory already exists.',
       );
     }
@@ -367,7 +367,7 @@ final class WorkshopValidatedProposalSnapshotService {
       );
       if (finalType != FileSystemEntityType.notFound) {
         if (finalType != FileSystemEntityType.directory) {
-          throw const StateError(
+          throw StateError(
             'Validated proposal recovery destination is unsafe.',
           );
         }
@@ -419,7 +419,7 @@ final class WorkshopValidatedProposalSnapshotService {
       followLinks: false,
     );
     if (manifestType != FileSystemEntityType.file) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal recovery manifest is unavailable or unsafe.',
       );
     }
@@ -607,7 +607,7 @@ final class WorkshopValidatedProposalSnapshotService {
     );
     if (type == FileSystemEntityType.notFound) return;
     if (type != FileSystemEntityType.directory) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal recovery snapshot root is unsafe to remove.',
       );
     }
@@ -830,21 +830,11 @@ final class WorkshopValidatedProposalSnapshotService {
     if (type == FileSystemEntityType.notFound) {
       await directory.create();
     } else if (type != FileSystemEntityType.directory) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal recovery directory is unsafe.',
       );
     }
     await _ensureResolvedDirectoryInside(directory.path, parent.path);
-  }
-
-  static void _ensureInside(String childValue, String parentValue) {
-    final child = _normalizedAbsolute(childValue);
-    final parent = _normalizedAbsolute(parentValue);
-    if (child != parent && !child.startsWith('$parent/')) {
-      throw StateError(
-        'Validated proposal recovery path escapes its configured root.',
-      );
-    }
   }
 
   static void _ensureStrictlyInside(
@@ -870,7 +860,7 @@ final class WorkshopValidatedProposalSnapshotService {
       followLinks: false,
     );
     if (childType != FileSystemEntityType.directory) {
-      throw const StateError(
+      throw StateError(
         'Validated proposal recovery directory is unavailable or unsafe.',
       );
     }
