@@ -88,6 +88,14 @@ class _WorkshopProductionDashboardPageState
     if (taskId != null && taskId.isNotEmpty) {
       if (execution.status == WorkshopProductionExecutionStatus.idle) {
         await _runPreparedTask();
+      } else if (WorkshopProductionAutonomyPolicy.canAutoApply(
+        projectApproved: _projectApprovalAuthorizesCurrentProject,
+        executionStatus: execution.status,
+        inferenceReadyForApproval:
+            _currentInferenceResult?.readyForApproval == true,
+        sessionStatus: _currentHandle?.session.status,
+      )) {
+        await _approveAndApplyValidatedTask();
       }
       return;
     }
@@ -118,6 +126,42 @@ class _WorkshopProductionDashboardPageState
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = 'Esecuzione del task non riuscita: $error');
+    }
+  }
+
+  bool get _projectApprovalAuthorizesCurrentProject {
+    final state = widget.bundle.dashboardController.state;
+    return state.isProjectApproved;
+  }
+
+  /// Continues an already owner-authorized project without asking a
+  /// non-programmer to approve every generated file. This path is reachable
+  /// only after Engineer output has passed Reviewer + validation and therefore
+  /// preserves all existing workspace safety gates.
+  Future<void> _approveAndApplyValidatedTask() async {
+    final handle = _currentHandle;
+    final result = _currentInferenceResult;
+    if (_mutationBusy ||
+        handle == null ||
+        result == null ||
+        !result.readyForApproval ||
+        !_projectApprovalAuthorizesCurrentProject ||
+        handle.session.status != WorkspaceSessionStatus.validation) {
+      return;
+    }
+
+    try {
+      _coordinator.decide(
+        handle: handle,
+        decision: WorkshopApplyDecision.approve,
+      );
+      await _applyApprovedTask();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Continuazione autonoma del task non riuscita: $error';
+        });
+      }
     }
   }
 
@@ -534,6 +578,26 @@ class _WorkshopProductionDashboardPageState
         ),
       ),
     );
+  }
+}
+
+/// Pure guard for project-authorized autonomous continuation.
+///
+/// This predicate never mutates state. It intentionally requires all four
+/// independent facts before the UI can record a task-level approval:
+/// project owner authorization, successful execution, Reviewer/validation
+/// readiness and a WorkspaceSession still parked at the validation boundary.
+abstract final class WorkshopProductionAutonomyPolicy {
+  static bool canAutoApply({
+    required bool projectApproved,
+    required WorkshopProductionExecutionStatus executionStatus,
+    required bool inferenceReadyForApproval,
+    required WorkspaceSessionStatus? sessionStatus,
+  }) {
+    return projectApproved &&
+        executionStatus == WorkshopProductionExecutionStatus.succeeded &&
+        inferenceReadyForApproval &&
+        sessionStatus == WorkspaceSessionStatus.validation;
   }
 }
 

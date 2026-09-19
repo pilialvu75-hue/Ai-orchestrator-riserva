@@ -166,6 +166,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(provider.requests, hasLength(1));
+    expect(dashboard.state.isProjectApproved, isTrue);
+    expect(dashboard.state.projectApproval?.projectId, dashboard.state.projectId);
     expect(
       chat.messages.where((turn) => turn.role == ChatRole.user),
       hasLength(1),

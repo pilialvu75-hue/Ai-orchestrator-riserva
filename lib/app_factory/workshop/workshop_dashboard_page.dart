@@ -307,6 +307,7 @@ class _WorkshopDashboardPageState
                     .approvedProposalContextEntry(approvedProposal),
               ],
       );
+      controller.approveCurrentProject();
 
       _chatController.addSystemMessage(
         'Proposta approvata. '
