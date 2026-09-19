@@ -105,6 +105,16 @@ final class WorkshopValidatedProposalSnapshot {
   }
 }
 
+final class WorkshopValidatedProposalBaselineConflict implements Exception {
+  const WorkshopValidatedProposalBaselineConflict(this.path);
+
+  final String path;
+
+  @override
+  String toString() =>
+      'Validated proposal baseline changed after snapshot: $path';
+}
+
 /// Disk-backed recovery snapshot for a proposal that already passed Reviewer
 /// and validation but has not yet crossed the explicit owner approval/apply
 /// boundary.
@@ -143,6 +153,7 @@ final class WorkshopValidatedProposalSnapshotService {
     required String projectId,
     required String taskId,
     required WorkshopTaskInferenceResult result,
+    required Map<String, String> baselineSnapshot,
   }) async {
     _validateLimits();
 
@@ -205,12 +216,27 @@ final class WorkshopValidatedProposalSnapshotService {
           );
         }
 
+        final baselineContent = baselineSnapshot[relative];
+        final baselinePresent = baselineSnapshot.containsKey(relative);
+        if (change.isAddition && baselinePresent) {
+          throw WorkshopValidatedProposalBaselineConflict(relative);
+        }
+        if ((change.isModification || change.isDeletion) &&
+            !baselinePresent) {
+          throw WorkshopValidatedProposalBaselineConflict(relative);
+        }
+        final baselineSha256 = baselineContent == null
+            ? null
+            : sha256.convert(utf8.encode(baselineContent)).toString();
+
         if (change.isDeletion) {
           manifestChanges.add(<String, dynamic>{
             'path': relative,
             'type': WorkspaceChangeType.deletion.name,
             'bytes': 0,
             'sha256': null,
+            'baselinePresent': true,
+            'baselineSha256': baselineSha256,
           });
           continue;
         }
@@ -247,6 +273,8 @@ final class WorkshopValidatedProposalSnapshotService {
           'type': change.type.name,
           'bytes': bytes.length,
           'sha256': sha256.convert(bytes).toString(),
+          'baselinePresent': baselinePresent,
+          'baselineSha256': baselineSha256,
         });
       }
 
@@ -320,6 +348,7 @@ final class WorkshopValidatedProposalSnapshotService {
 
   Future<WorkshopTaskInferenceResult> restore({
     required WorkshopValidatedProposalSnapshot snapshot,
+    required Map<String, String> currentBaselineSnapshot,
   }) async {
     _validateLimits();
 
@@ -407,6 +436,12 @@ final class WorkshopValidatedProposalSnapshotService {
           'Validated proposal recovery type is invalid: $typeName',
         );
       }
+
+      _verifyBaselineEntry(
+        entry: entry,
+        path: relative,
+        currentBaselineSnapshot: currentBaselineSnapshot,
+      );
 
       if (type == WorkspaceChangeType.deletion) {
         changes.add(
@@ -504,6 +539,255 @@ final class WorkshopValidatedProposalSnapshotService {
         warnings: _validatedStrings(validation, 'warnings'),
       ),
     );
+  }
+
+  void _verifyBaselineEntry({
+    required Map<String, dynamic> entry,
+    required String path,
+    required Map<String, String> currentBaselineSnapshot,
+  }) {
+    final expectedPresent = entry['baselinePresent'];
+    if (expectedPresent is! bool) {
+      throw FormatException(
+        'Validated proposal recovery baseline presence is missing: $path',
+      );
+    }
+
+    final actualPresent = currentBaselineSnapshot.containsKey(path);
+    if (actualPresent != expectedPresent) {
+      throw WorkshopValidatedProposalBaselineConflict(path);
+    }
+
+    final expectedSha = entry['baselineSha256'];
+    if (!expectedPresent) {
+      if (expectedSha != null) {
+        throw FormatException(
+          'Validated proposal recovery baseline hash is invalid: $path',
+        );
+      }
+      return;
+    }
+
+    final normalizedExpectedSha =
+        expectedSha?.toString().trim().toLowerCase();
+    if (normalizedExpectedSha == null ||
+        !RegExp(r'^[a-f0-9]{64}
+    final configuredRoot = Directory(snapshotsRootPath).absolute.path;
+    final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
+    _ensureInside(snapshotRoot, configuredRoot);
+    final directory = Directory(snapshotRoot);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+  }
+
+  void _validateLimits() {
+    if (maxFileSizeBytes <= 0 ||
+        maxTotalBytes <= 0 ||
+        maxChanges <= 0 ||
+        maxTextChars <= 0 ||
+        maxTextItems <= 0) {
+      throw StateError('Validated proposal recovery limits must be positive.');
+    }
+  }
+
+  String _boundedText(String value, String field) {
+    final normalized = value.trim();
+    if (normalized.isEmpty || normalized.length > maxTextChars) {
+      throw StateError(
+        'Validated proposal $field exceeds the bounded recovery contract.',
+      );
+    }
+    return normalized;
+  }
+
+  List<String> _boundedStrings(List<String> values, String field) {
+    if (values.length > maxTextItems) {
+      throw StateError(
+        'Validated proposal $field exceeds the item limit.',
+      );
+    }
+    return List<String>.unmodifiable(
+      values.map((value) => _boundedText(value, field)),
+    );
+  }
+
+  String _validatedText(Map<String, dynamic> json, String key) {
+    final value = _required(json, key);
+    if (value.length > maxTextChars) {
+      throw FormatException(
+        'Validated proposal recovery $key exceeds the text limit.',
+      );
+    }
+    return value;
+  }
+
+  List<String> _validatedStrings(Map<String, dynamic> json, String key) {
+    final raw = json[key];
+    if (raw is! List || raw.length > maxTextItems) {
+      throw FormatException(
+        'Validated proposal recovery $key is invalid.',
+      );
+    }
+    final values = <String>[];
+    for (final item in raw) {
+      final value = item?.toString().trim() ?? '';
+      if (value.isEmpty || value.length > maxTextChars) {
+        throw FormatException(
+          'Validated proposal recovery $key contains invalid text.',
+        );
+      }
+      values.add(value);
+    }
+    return List<String>.unmodifiable(values);
+  }
+
+  static Map<String, dynamic> _map(
+    Map<String, dynamic> json,
+    String key,
+  ) {
+    final value = json[key];
+    if (value is! Map) {
+      throw FormatException(
+        'Validated proposal recovery $key is invalid.',
+      );
+    }
+    return Map<String, dynamic>.from(value);
+  }
+
+  static void _expect(
+    Map<String, dynamic> json,
+    String key,
+    String expected,
+  ) {
+    if (json[key]?.toString() != expected) {
+      throw FormatException(
+        'Validated proposal recovery $key does not match the journal.',
+      );
+    }
+  }
+
+  static String _required(Map<String, dynamic> json, String key) {
+    final value = json[key]?.toString().trim();
+    if (value == null || value.isEmpty) {
+      throw FormatException(
+        'Validated proposal recovery $key is missing.',
+      );
+    }
+    return value;
+  }
+
+  static String _identity(String value, String field) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(value, field, '$field cannot be empty.');
+    }
+    return normalized;
+  }
+
+  static String _normalizeRelative(String value) {
+    final normalized = value.trim().replaceAll('\\', '/');
+    if (normalized.isEmpty ||
+        normalized.startsWith('/') ||
+        RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
+      throw FormatException(
+        'Validated proposal recovery path must be relative: $value',
+      );
+    }
+    final segments = normalized.split('/');
+    if (segments.any(
+      (segment) =>
+          segment.isEmpty || segment == '.' || segment == '..',
+    )) {
+      throw FormatException(
+        'Validated proposal recovery path is unsafe: $value',
+      );
+    }
+    return segments.join('/');
+  }
+
+  static String _safeDirectoryName(String value) {
+    final normalized = value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
+        .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
+    if (normalized.isEmpty) {
+      return 'snapshot-${value.hashCode.abs()}';
+    }
+    return normalized.length > 96 ? normalized.substring(0, 96) : normalized;
+  }
+
+  static void _ensureInside(String childValue, String parentValue) {
+    final child = _normalizedAbsolute(childValue);
+    final parent = _normalizedAbsolute(parentValue);
+    if (child != parent && !child.startsWith('$parent/')) {
+      throw StateError(
+        'Validated proposal recovery path escapes its configured root.',
+      );
+    }
+  }
+
+  static Future<void> _ensureResolvedDirectoryInside(
+    String childPath,
+    String parentPath,
+  ) async {
+    final childType = await FileSystemEntity.type(
+      childPath,
+      followLinks: false,
+    );
+    if (childType != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery directory is unavailable or unsafe.',
+      );
+    }
+    final resolvedParent =
+        await Directory(parentPath).resolveSymbolicLinks();
+    final resolvedChild =
+        await Directory(childPath).resolveSymbolicLinks();
+    _ensureInside(resolvedChild, resolvedParent);
+  }
+
+  static Future<void> _ensureResolvedFileInside(
+    String filePath,
+    String parentPath,
+  ) async {
+    final resolvedParent =
+        await Directory(parentPath).resolveSymbolicLinks();
+    final resolvedFile = await File(filePath).resolveSymbolicLinks();
+    _ensureInside(resolvedFile, resolvedParent);
+  }
+
+  static String _normalizedAbsolute(String value) {
+    var normalized = p.normalize(value).replaceAll('\\', '/');
+    while (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    return Platform.isWindows ? normalized.toLowerCase() : normalized;
+  }
+}
+
+extension _FirstWhereOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    if (!iterator.moveNext()) return null;
+    return iterator.current;
+  }
+}
+).hasMatch(normalizedExpectedSha)) {
+      throw FormatException(
+        'Validated proposal recovery baseline hash is invalid: $path',
+      );
+    }
+
+    final currentContent = currentBaselineSnapshot[path];
+    if (currentContent == null) {
+      throw WorkshopValidatedProposalBaselineConflict(path);
+    }
+    final actualSha =
+        sha256.convert(utf8.encode(currentContent)).toString();
+    if (actualSha != normalizedExpectedSha) {
+      throw WorkshopValidatedProposalBaselineConflict(path);
+    }
   }
 
   Future<void> remove(WorkshopValidatedProposalSnapshot snapshot) async {
