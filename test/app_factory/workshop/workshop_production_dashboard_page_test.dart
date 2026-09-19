@@ -2,8 +2,63 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 
 void main() {
+  group('WorkshopProductionAutonomyPolicy', () {
+    test('auto apply requires project approval and all validation boundaries', () {
+      expect(
+        WorkshopProductionAutonomyPolicy.canAutoApply(
+          projectApproved: true,
+          executionStatus: WorkshopProductionExecutionStatus.succeeded,
+          inferenceReadyForApproval: true,
+          sessionStatus: WorkspaceSessionStatus.validation,
+        ),
+        isTrue,
+      );
+
+      expect(
+        WorkshopProductionAutonomyPolicy.canAutoApply(
+          projectApproved: false,
+          executionStatus: WorkshopProductionExecutionStatus.succeeded,
+          inferenceReadyForApproval: true,
+          sessionStatus: WorkspaceSessionStatus.validation,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopProductionAutonomyPolicy.canAutoApply(
+          projectApproved: true,
+          executionStatus: WorkshopProductionExecutionStatus.running,
+          inferenceReadyForApproval: true,
+          sessionStatus: WorkspaceSessionStatus.validation,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopProductionAutonomyPolicy.canAutoApply(
+          projectApproved: true,
+          executionStatus: WorkshopProductionExecutionStatus.succeeded,
+          inferenceReadyForApproval: false,
+          sessionStatus: WorkspaceSessionStatus.validation,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopProductionAutonomyPolicy.canAutoApply(
+          projectApproved: true,
+          executionStatus: WorkshopProductionExecutionStatus.succeeded,
+          inferenceReadyForApproval: true,
+          sessionStatus: WorkspaceSessionStatus.review,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('WorkshopProductionActionState', () {
     test('exposes run only after dashboard prepared a task', () {
       final none = WorkshopProductionActionState.resolve(
