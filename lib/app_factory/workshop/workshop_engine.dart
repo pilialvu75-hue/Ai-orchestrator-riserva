@@ -97,6 +97,14 @@ final class WorkshopEngine {
   WorkshopProjectPlan? planOf(String requestId) =>
       _plans[requestId];
 
+  /// Returns the canonical Workshop request registered for [requestId].
+  ///
+  /// Recovery uses this read-only view so it can persist the exact project
+  /// context (including an owner-approved proposal) instead of reconstructing
+  /// a lossy request from the project plan.
+  WorkshopRequest? requestOf(String requestId) =>
+      _requests[requestId];
+
   WorkshopResult? lastResultOf(
     String requestId,
   ) =>
