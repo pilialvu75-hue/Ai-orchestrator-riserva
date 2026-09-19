@@ -292,7 +292,7 @@ void main() {
     expect(runner.resumeContexts.single.phase, 'failed');
     expect(
       runner.resumeContexts.single.remainingWork,
-      contains('continue guarded task inference from semantic context'),
+      contains('re-establish implementation against the current workspace'),
     );
     expect(attempts, hasLength(2));
     expect(
@@ -436,14 +436,13 @@ void main() {
     expect(resume.projectId, handle.plan.id);
     expect(resume.taskId, handle.taskId);
     expect(resume.phase, 'waitingApproval');
-    expect(
-      resume.completedSteps,
-      <String>['implementation', 'review', 'validation'],
-    );
+    expect(resume.completedSteps, isEmpty);
+    expect(resume.verified, isEmpty);
     expect(
       resume.remainingWork,
-      contains('require fresh owner approval before apply'),
+      contains('re-establish implementation against the current workspace'),
     );
+    expect(resume.remainingWork, contains('owner approval'));
     expect(attempts, hasLength(2));
     expect(controller.restartReplayPending, isFalse);
 
