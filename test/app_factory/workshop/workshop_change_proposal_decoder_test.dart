@@ -59,6 +59,38 @@ void main() {
       );
     });
 
+    test('recovers one balanced JSON object surrounded by model prose', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-prose',
+        responseText: r'''
+Ecco la proposta strutturata:
+{
+  "summary": "Counter app",
+  "explanation": "Create the requested counter.",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "create",
+      "content": "void main() { print(\"{ok}\"); }"
+    }
+  ],
+  "validationNotes": [],
+  "warnings": []
+}
+Fine.
+''',
+      );
+
+      expect(proposal.requestId, 'request-prose');
+      expect(proposal.summary, 'Counter app');
+      expect(proposal.changeCount, 1);
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(
+        proposal.changes.single.afterContent,
+        'void main() { print("{ok}"); }',
+      );
+    });
+
     test('rejects duplicate paths', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(
