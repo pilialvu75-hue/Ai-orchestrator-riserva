@@ -416,6 +416,7 @@ void main() {
     expect(controller.distinctTasksStartedInCurrentProject, 1);
 
     final run = controller.start(isOffline: controller.state.isOffline);
+    await runner.started;
     expect(runner.runCount, 1);
     runner.complete(_result());
     await run;
@@ -720,9 +721,12 @@ final class _ControlledRunner
   final Completer<WorkshopTaskInferenceResult> _completer =
       Completer<WorkshopTaskInferenceResult>();
   final List<WorkshopResumeContext> resumeContexts = <WorkshopResumeContext>[];
+  final Completer<void> _started = Completer<void>();
   int runCount = 0;
   CancellationToken? token;
   bool? isOffline;
+
+  Future<void> get started => _started.future;
 
   @override
   WorkshopProductionTaskHandle preparedHandle() => handle;
@@ -760,6 +764,9 @@ final class _ControlledRunner
     runCount += 1;
     token = cancellationToken;
     this.isOffline = isOffline;
+    if (!_started.isCompleted) {
+      _started.complete();
+    }
     return _completer.future;
   }
 
