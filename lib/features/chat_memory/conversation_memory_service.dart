@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/features/chat_memory/chronological_long_recall.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
 import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
@@ -46,23 +47,38 @@ class ConversationMemoryService {
     String? systemPrompt,
     String? excludedMessageId,
   }) async {
-    // Semantic recall is intentionally not executed on the response hot path
-    // while RollingContextBuilder does not consume recalledContext. Running an
-    // embedding + database scan here added latency without changing the prompt
-    // sent to the model. The recall API and stored embeddings remain available
-    // for the later chronological relevance-aware memory policy.
-    const recalled = <ChatTurn>[];
-
     final result = _rollingContextBuilder.build(
       messages: messages,
       userPrompt: userPrompt,
       systemPrompt: systemPrompt,
       excludedMessageId: excludedMessageId,
-      recalledContext: recalled,
+      recalledContext: const <ChatTurn>[],
     );
 
+    var context = result.contextTurns;
+    var recallTurns = 0;
+    var recallPairs = 0;
+    var recallMode = 'not_requested';
+
+    final recallRequested = ChronologicalLongRecall.shouldAttempt(userPrompt);
+    if (recallRequested && result.trimmedLines <= 0) {
+      recallMode = 'not_needed';
+    } else if (recallRequested) {
+      final recalled = await _recallChronologicalContext(
+        sessionId: sessionId,
+        messages: messages,
+        userPrompt: userPrompt,
+        excludedMessageId: excludedMessageId,
+        recentContext: context,
+      );
+      context = recalled.contextTurns;
+      recallTurns = recalled.recalledTurns;
+      recallPairs = recalled.recalledPairs;
+      recallMode = recallTurns > 0 ? 'applied' : 'no_match';
+    }
+
     debugPrint(
-      '[MEMORY_WINDOW] session=$sessionId turns=${result.contextTurns.length} trimmed=${result.trimmedLines} total_chars=${result.totalChars}',
+      '[MEMORY_WINDOW] session=$sessionId turns=${context.length} trimmed=${result.trimmedLines} total_chars=${result.totalChars}',
     );
 
     if (result.trimmedLines > 0) {
@@ -76,10 +92,68 @@ class ConversationMemoryService {
     }
 
     debugPrint(
-      '[CONTEXT_REBUILD] session=$sessionId context_turns=${result.contextTurns.length} recall_turns=0 recall_mode=deferred',
+      '[CONTEXT_REBUILD] session=$sessionId context_turns=${context.length} recall_turns=$recallTurns recall_pairs=$recallPairs recall_mode=$recallMode',
     );
 
-    return result.contextTurns;
+    return context;
+  }
+
+  Future<ChronologicalRecallResult> _recallChronologicalContext({
+    required String sessionId,
+    required List<ChatMessage> messages,
+    required String userPrompt,
+    required String? excludedMessageId,
+    required List<ChatTurn> recentContext,
+  }) async {
+    try {
+      final semanticQuery = ChronologicalLongRecall.semanticQuery(userPrompt);
+      final queryVector = await _embeddingService.embedTextAsync(semanticQuery);
+      final matches = await _semanticWorkspaceIndex.search(
+        queryVector: queryVector,
+        workspaceId: _workspaceId(sessionId),
+        topK: 8,
+      );
+
+      final pathPrefix = 'chat://$sessionId/';
+      final recallMatches = <ChronologicalRecallMatch>[];
+
+      for (final match in matches) {
+        if (!match.documentPath.startsWith(pathPrefix)) continue;
+
+        final messageId = match.documentPath.substring(pathPrefix.length).trim();
+        if (messageId.isEmpty) continue;
+
+        recallMatches.add(
+          ChronologicalRecallMatch(
+            messageId: messageId,
+            score: match.score,
+          ),
+        );
+      }
+
+      final selected = ChronologicalLongRecall.merge(
+        messages: messages,
+        excludedMessageId: excludedMessageId,
+        recentContext: recentContext,
+        matches: recallMatches,
+      );
+
+      debugPrint(
+        '[MEMORY_LONG_RECALL] session=$sessionId semantic_matches=${matches.length} accepted_pairs=${selected.recalledPairs} recalled_turns=${selected.recalledTurns} dropped_recent_turns=${selected.droppedRecentTurns}',
+      );
+
+      return selected;
+    } catch (error) {
+      debugPrint(
+        '[MEMORY_LONG_RECALL_ERROR] session=$sessionId error=$error',
+      );
+      return ChronologicalRecallResult(
+        contextTurns: List<ChatTurn>.unmodifiable(recentContext),
+        recalledTurns: 0,
+        recalledPairs: 0,
+        droppedRecentTurns: 0,
+      );
+    }
   }
 
   /// Queues semantic indexing without delaying the response hot path.
