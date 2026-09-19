@@ -769,41 +769,28 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         .toList()
       ..sort();
 
+    // No stage is marked completed merely because the previous Attempt
+    // reached it. If a validated workspace snapshot was durable, P4.2 restores
+    // it before this path. Reaching semantic replay means that artifact was
+    // absent/rejected or the attempt failed, so implementation/review evidence
+    // must be re-established against the current workspace.
     final completedSteps = <String>[];
-    switch (previousPhase) {
-      case 'waitingApproval':
-        completedSteps.addAll(<String>[
-          'implementation',
-          'review',
-          'validation',
-        ]);
-        break;
-      case 'validation':
-        completedSteps.addAll(<String>['implementation', 'review']);
-        break;
-      case 'review':
-        completedSteps.add('implementation');
-        break;
-    }
-
-    final verified = <String>[
-      if (previous.metadata['reviewApproved'] == true) 'review approved',
-      if (previous.metadata['validationValid'] == true) 'validation valid',
-    ];
     final decisions = <String>[
       'Previous attempt status: ${previous.status.name}',
       'Previous resume phase: $previousPhase',
+      if (previous.metadata['reviewApproved'] == true)
+        'Previous attempt reported reviewApproved=true; revalidate current workspace',
+      if (previous.metadata['validationValid'] == true)
+        'Previous attempt reported validationValid=true; revalidate current workspace',
       if (previous.metadata['offline'] == true) 'Execution mode: offline',
     ];
-    final remainingWork = switch (previousPhase) {
-      'waitingApproval' => <String>[
-          'reconstruct proposal safely or continue only from verified state',
-          'require fresh owner approval before apply',
-        ],
-      'validation' => <String>['validation', 'owner approval', 'guarded apply'],
-      'review' => <String>['review', 'validation', 'owner approval', 'guarded apply'],
-      _ => <String>['continue guarded task inference from semantic context'],
-    };
+    final remainingWork = <String>[
+      're-establish implementation against the current workspace',
+      'review',
+      'validation',
+      'owner approval',
+      'guarded apply',
+    ];
 
     return WorkshopResumeContext(
       executionId: current.executionId,
@@ -820,7 +807,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       completedSteps: List<String>.unmodifiable(completedSteps),
       changedFiles: List<String>.unmodifiable(changedFiles),
       decisions: List<String>.unmodifiable(decisions),
-      verified: List<String>.unmodifiable(verified),
+      verified: const <String>[],
       remainingWork: List<String>.unmodifiable(remainingWork),
       nextStep: 'Continue task ${handle.taskId} on the new Attempt without '
           'assuming provider-side memory.',
