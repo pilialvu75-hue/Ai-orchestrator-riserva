@@ -60,6 +60,7 @@ final class WorkshopValidatedProposalSnapshot {
         'Validated proposal snapshot metadata is missing.',
       );
     }
+
     final json = Map<String, dynamic>.from(raw);
     if (json['schema'] != WorkshopValidatedProposalSnapshotService.schema) {
       throw const FormatException(
@@ -120,13 +121,14 @@ final class WorkshopValidatedProposalBaselineConflict implements Exception {
 /// boundary.
 ///
 /// Security properties:
-/// - snapshot root must be application-owned and separate from the live repo;
+/// - snapshot root is application-owned and separate from the live repository;
 /// - only the same source/text path allow-list used by verified reuse is stored;
-/// - symlinks are never followed when restoring;
+/// - symlinks are never accepted as snapshot directories/files;
 /// - file count/size/text fields are bounded;
-/// - every file and the manifest are SHA-256 verified before reconstruction;
-/// - restoring only reconstructs a [WorkshopTaskInferenceResult]; it never
-///   writes to the live repository or grants apply approval.
+/// - every stored file and the manifest are SHA-256 verified;
+/// - the live workspace baseline must still match the pre-crash baseline;
+/// - restoring reconstructs a proposal/result only: it never writes to the live
+///   repository and never grants owner apply approval.
 final class WorkshopValidatedProposalSnapshotService {
   WorkshopValidatedProposalSnapshotService({
     required String snapshotsRootPath,
@@ -179,24 +181,50 @@ final class WorkshopValidatedProposalSnapshotService {
     final normalizedProjectId = _identity(projectId, 'projectId');
     final normalizedTaskId = _identity(taskId, 'taskId');
     final requestId = _identity(result.proposal.requestId, 'requestId');
+    final baseline = _normalizedBaseline(baselineSnapshot);
 
     final root = Directory(snapshotsRootPath).absolute;
     await root.create(recursive: true);
+    final rootType = await FileSystemEntity.type(
+      root.path,
+      followLinks: false,
+    );
+    if (rootType != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery root is unavailable or unsafe.',
+      );
+    }
+
+    final executionDirectory = Directory(
+      p.join(root.path, _safeDirectoryName(normalizedExecutionId)),
+    ).absolute;
+    await _ensureOwnedDirectory(
+      directory: executionDirectory,
+      parent: root,
+    );
 
     final finalDirectory = Directory(
       p.join(
-        root.path,
-        _safeDirectoryName(normalizedExecutionId),
+        executionDirectory.path,
         _safeDirectoryName(normalizedAttemptId),
       ),
     ).absolute;
-    _ensureInside(finalDirectory.path, root.path);
+    _ensureStrictlyInside(finalDirectory.path, root.path);
 
     final tempDirectory = Directory(
       '${finalDirectory.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
     ).absolute;
-    _ensureInside(tempDirectory.path, root.path);
-    await tempDirectory.create(recursive: true);
+    _ensureStrictlyInside(tempDirectory.path, root.path);
+    final tempType = await FileSystemEntity.type(
+      tempDirectory.path,
+      followLinks: false,
+    );
+    if (tempType != FileSystemEntityType.notFound) {
+      throw const StateError(
+        'Validated proposal temporary recovery directory already exists.',
+      );
+    }
+    await tempDirectory.create();
 
     final manifestChanges = <Map<String, dynamic>>[];
     var totalBytes = 0;
@@ -216,8 +244,8 @@ final class WorkshopValidatedProposalSnapshotService {
           );
         }
 
-        final baselineContent = baselineSnapshot[relative];
-        final baselinePresent = baselineSnapshot.containsKey(relative);
+        final baselinePresent = baseline.containsKey(relative);
+        final baselineContent = baseline[relative];
         if (change.isAddition && baselinePresent) {
           throw WorkshopValidatedProposalBaselineConflict(relative);
         }
@@ -247,6 +275,7 @@ final class WorkshopValidatedProposalSnapshotService {
             'Validated proposal change "$relative" has no afterContent.',
           );
         }
+
         final bytes = utf8.encode(content);
         if (bytes.length > maxFileSizeBytes) {
           throw StateError(
@@ -264,7 +293,7 @@ final class WorkshopValidatedProposalSnapshotService {
         final destination = File(
           p.join(tempDirectory.path, 'files', relative),
         ).absolute;
-        _ensureInside(destination.path, tempDirectory.path);
+        _ensureStrictlyInside(destination.path, tempDirectory.path);
         await destination.parent.create(recursive: true);
         await destination.writeAsBytes(bytes, flush: true);
 
@@ -312,20 +341,33 @@ final class WorkshopValidatedProposalSnapshotService {
       };
 
       final canonical = jsonEncode(payload);
-      final manifestSha = sha256.convert(utf8.encode(canonical)).toString();
+      final manifestSha256 =
+          sha256.convert(utf8.encode(canonical)).toString();
       final manifestFile = File(p.join(tempDirectory.path, 'snapshot.json'));
       await manifestFile.writeAsString(
         jsonEncode(<String, dynamic>{
           ...payload,
-          'manifestSha256': manifestSha,
+          'manifestSha256': manifestSha256,
         }),
         flush: true,
       );
 
-      if (await finalDirectory.exists()) {
+      final finalType = await FileSystemEntity.type(
+        finalDirectory.path,
+        followLinks: false,
+      );
+      if (finalType != FileSystemEntityType.notFound) {
+        if (finalType != FileSystemEntityType.directory) {
+          throw const StateError(
+            'Validated proposal recovery destination is unsafe.',
+          );
+        }
+        await _ensureResolvedDirectoryInside(
+          finalDirectory.path,
+          root.path,
+        );
         await finalDirectory.delete(recursive: true);
       }
-      await finalDirectory.parent.create(recursive: true);
       await tempDirectory.rename(finalDirectory.path);
 
       return WorkshopValidatedProposalSnapshot(
@@ -335,11 +377,15 @@ final class WorkshopValidatedProposalSnapshotService {
         taskId: normalizedTaskId,
         requestId: requestId,
         rootPath: finalDirectory.path,
-        manifestSha256: manifestSha,
+        manifestSha256: manifestSha256,
         createdAt: createdAt,
       );
     } catch (_) {
-      if (await tempDirectory.exists()) {
+      final type = await FileSystemEntity.type(
+        tempDirectory.path,
+        followLinks: false,
+      );
+      if (type == FileSystemEntityType.directory) {
         await tempDirectory.delete(recursive: true);
       }
       rethrow;
@@ -354,11 +400,11 @@ final class WorkshopValidatedProposalSnapshotService {
 
     final configuredRoot = Directory(snapshotsRootPath).absolute.path;
     final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
-    _ensureInside(snapshotRoot, configuredRoot);
+    _ensureStrictlyInside(snapshotRoot, configuredRoot);
     await _ensureResolvedDirectoryInside(snapshotRoot, configuredRoot);
 
     final manifestFile = File(p.join(snapshotRoot, 'snapshot.json')).absolute;
-    _ensureInside(manifestFile.path, snapshotRoot);
+    _ensureStrictlyInside(manifestFile.path, snapshotRoot);
     final manifestType = await FileSystemEntity.type(
       manifestFile.path,
       followLinks: false,
@@ -377,14 +423,14 @@ final class WorkshopValidatedProposalSnapshotService {
       );
     }
     final manifest = Map<String, dynamic>.from(decoded);
-    final declaredSha =
+    final declaredManifestSha =
         manifest['manifestSha256']?.toString().trim().toLowerCase();
     final payload = Map<String, dynamic>.from(manifest)
       ..remove('manifestSha256');
-    final computedSha =
+    final computedManifestSha =
         sha256.convert(utf8.encode(jsonEncode(payload))).toString();
-    if (declaredSha != computedSha ||
-        computedSha != snapshot.manifestSha256.toLowerCase()) {
+    if (declaredManifestSha != computedManifestSha ||
+        computedManifestSha != snapshot.manifestSha256.toLowerCase()) {
       throw const FormatException(
         'Validated proposal recovery manifest SHA-256 mismatch.',
       );
@@ -409,9 +455,11 @@ final class WorkshopValidatedProposalSnapshotService {
       );
     }
 
+    final baseline = _normalizedBaseline(currentBaselineSnapshot);
     final changes = <WorkspaceFileChange>[];
     final seen = <String>{};
     var totalBytes = 0;
+
     for (final raw in rawChanges) {
       if (raw is! Map) {
         throw const FormatException(
@@ -427,23 +475,21 @@ final class WorkshopValidatedProposalSnapshotService {
         );
       }
 
-      final typeName = _required(entry, 'type');
-      final type = WorkspaceChangeType.values
-          .where((candidate) => candidate.name == typeName)
-          .firstOrNull;
-      if (type == null) {
-        throw FormatException(
-          'Validated proposal recovery type is invalid: $typeName',
-        );
-      }
-
+      final type = _decodeChangeType(_required(entry, 'type'));
       _verifyBaselineEntry(
         entry: entry,
         path: relative,
-        currentBaselineSnapshot: currentBaselineSnapshot,
+        currentBaselineSnapshot: baseline,
       );
 
       if (type == WorkspaceChangeType.deletion) {
+        if (entry['bytes'] is! num ||
+            (entry['bytes'] as num).toInt() != 0 ||
+            entry['sha256'] != null) {
+          throw FormatException(
+            'Validated proposal deletion descriptor is invalid: $relative',
+          );
+        }
         changes.add(
           WorkspaceFileChange(
             path: relative,
@@ -455,7 +501,7 @@ final class WorkshopValidatedProposalSnapshotService {
 
       final contentFile =
           File(p.join(snapshotRoot, 'files', relative)).absolute;
-      _ensureInside(contentFile.path, snapshotRoot);
+      _ensureStrictlyInside(contentFile.path, snapshotRoot);
       final entityType = await FileSystemEntity.type(
         contentFile.path,
         followLinks: false,
@@ -541,6 +587,26 @@ final class WorkshopValidatedProposalSnapshotService {
     );
   }
 
+  Future<void> remove(WorkshopValidatedProposalSnapshot snapshot) async {
+    final configuredRoot = Directory(snapshotsRootPath).absolute.path;
+    final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
+    _ensureStrictlyInside(snapshotRoot, configuredRoot);
+
+    final type = await FileSystemEntity.type(
+      snapshotRoot,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) return;
+    if (type != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery snapshot root is unsafe to remove.',
+      );
+    }
+
+    await _ensureResolvedDirectoryInside(snapshotRoot, configuredRoot);
+    await Directory(snapshotRoot).delete(recursive: true);
+  }
+
   void _verifyBaselineEntry({
     required Map<String, dynamic> entry,
     required String path,
@@ -571,209 +637,7 @@ final class WorkshopValidatedProposalSnapshotService {
     final normalizedExpectedSha =
         expectedSha?.toString().trim().toLowerCase();
     if (normalizedExpectedSha == null ||
-        !RegExp(r'^[a-f0-9]{64}
-    final configuredRoot = Directory(snapshotsRootPath).absolute.path;
-    final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
-    _ensureInside(snapshotRoot, configuredRoot);
-    final directory = Directory(snapshotRoot);
-    if (await directory.exists()) {
-      await directory.delete(recursive: true);
-    }
-  }
-
-  void _validateLimits() {
-    if (maxFileSizeBytes <= 0 ||
-        maxTotalBytes <= 0 ||
-        maxChanges <= 0 ||
-        maxTextChars <= 0 ||
-        maxTextItems <= 0) {
-      throw StateError('Validated proposal recovery limits must be positive.');
-    }
-  }
-
-  String _boundedText(String value, String field) {
-    final normalized = value.trim();
-    if (normalized.isEmpty || normalized.length > maxTextChars) {
-      throw StateError(
-        'Validated proposal $field exceeds the bounded recovery contract.',
-      );
-    }
-    return normalized;
-  }
-
-  List<String> _boundedStrings(List<String> values, String field) {
-    if (values.length > maxTextItems) {
-      throw StateError(
-        'Validated proposal $field exceeds the item limit.',
-      );
-    }
-    return List<String>.unmodifiable(
-      values.map((value) => _boundedText(value, field)),
-    );
-  }
-
-  String _validatedText(Map<String, dynamic> json, String key) {
-    final value = _required(json, key);
-    if (value.length > maxTextChars) {
-      throw FormatException(
-        'Validated proposal recovery $key exceeds the text limit.',
-      );
-    }
-    return value;
-  }
-
-  List<String> _validatedStrings(Map<String, dynamic> json, String key) {
-    final raw = json[key];
-    if (raw is! List || raw.length > maxTextItems) {
-      throw FormatException(
-        'Validated proposal recovery $key is invalid.',
-      );
-    }
-    final values = <String>[];
-    for (final item in raw) {
-      final value = item?.toString().trim() ?? '';
-      if (value.isEmpty || value.length > maxTextChars) {
-        throw FormatException(
-          'Validated proposal recovery $key contains invalid text.',
-        );
-      }
-      values.add(value);
-    }
-    return List<String>.unmodifiable(values);
-  }
-
-  static Map<String, dynamic> _map(
-    Map<String, dynamic> json,
-    String key,
-  ) {
-    final value = json[key];
-    if (value is! Map) {
-      throw FormatException(
-        'Validated proposal recovery $key is invalid.',
-      );
-    }
-    return Map<String, dynamic>.from(value);
-  }
-
-  static void _expect(
-    Map<String, dynamic> json,
-    String key,
-    String expected,
-  ) {
-    if (json[key]?.toString() != expected) {
-      throw FormatException(
-        'Validated proposal recovery $key does not match the journal.',
-      );
-    }
-  }
-
-  static String _required(Map<String, dynamic> json, String key) {
-    final value = json[key]?.toString().trim();
-    if (value == null || value.isEmpty) {
-      throw FormatException(
-        'Validated proposal recovery $key is missing.',
-      );
-    }
-    return value;
-  }
-
-  static String _identity(String value, String field) {
-    final normalized = value.trim();
-    if (normalized.isEmpty) {
-      throw ArgumentError.value(value, field, '$field cannot be empty.');
-    }
-    return normalized;
-  }
-
-  static String _normalizeRelative(String value) {
-    final normalized = value.trim().replaceAll('\\', '/');
-    if (normalized.isEmpty ||
-        normalized.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
-      throw FormatException(
-        'Validated proposal recovery path must be relative: $value',
-      );
-    }
-    final segments = normalized.split('/');
-    if (segments.any(
-      (segment) =>
-          segment.isEmpty || segment == '.' || segment == '..',
-    )) {
-      throw FormatException(
-        'Validated proposal recovery path is unsafe: $value',
-      );
-    }
-    return segments.join('/');
-  }
-
-  static String _safeDirectoryName(String value) {
-    final normalized = value
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
-        .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
-    if (normalized.isEmpty) {
-      return 'snapshot-${value.hashCode.abs()}';
-    }
-    return normalized.length > 96 ? normalized.substring(0, 96) : normalized;
-  }
-
-  static void _ensureInside(String childValue, String parentValue) {
-    final child = _normalizedAbsolute(childValue);
-    final parent = _normalizedAbsolute(parentValue);
-    if (child != parent && !child.startsWith('$parent/')) {
-      throw StateError(
-        'Validated proposal recovery path escapes its configured root.',
-      );
-    }
-  }
-
-  static Future<void> _ensureResolvedDirectoryInside(
-    String childPath,
-    String parentPath,
-  ) async {
-    final childType = await FileSystemEntity.type(
-      childPath,
-      followLinks: false,
-    );
-    if (childType != FileSystemEntityType.directory) {
-      throw const StateError(
-        'Validated proposal recovery directory is unavailable or unsafe.',
-      );
-    }
-    final resolvedParent =
-        await Directory(parentPath).resolveSymbolicLinks();
-    final resolvedChild =
-        await Directory(childPath).resolveSymbolicLinks();
-    _ensureInside(resolvedChild, resolvedParent);
-  }
-
-  static Future<void> _ensureResolvedFileInside(
-    String filePath,
-    String parentPath,
-  ) async {
-    final resolvedParent =
-        await Directory(parentPath).resolveSymbolicLinks();
-    final resolvedFile = await File(filePath).resolveSymbolicLinks();
-    _ensureInside(resolvedFile, resolvedParent);
-  }
-
-  static String _normalizedAbsolute(String value) {
-    var normalized = p.normalize(value).replaceAll('\\', '/');
-    while (normalized.length > 1 && normalized.endsWith('/')) {
-      normalized = normalized.substring(0, normalized.length - 1);
-    }
-    return Platform.isWindows ? normalized.toLowerCase() : normalized;
-  }
-}
-
-extension _FirstWhereOrNull<T> on Iterable<T> {
-  T? get firstOrNull {
-    final iterator = this.iterator;
-    if (!iterator.moveNext()) return null;
-    return iterator.current;
-  }
-}
-).hasMatch(normalizedExpectedSha)) {
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(normalizedExpectedSha)) {
       throw FormatException(
         'Validated proposal recovery baseline hash is invalid: $path',
       );
@@ -790,26 +654,6 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     }
   }
 
-  Future<void> remove(WorkshopValidatedProposalSnapshot snapshot) async {
-    final configuredRoot = Directory(snapshotsRootPath).absolute.path;
-    final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
-    _ensureInside(snapshotRoot, configuredRoot);
-
-    final type = await FileSystemEntity.type(
-      snapshotRoot,
-      followLinks: false,
-    );
-    if (type == FileSystemEntityType.notFound) return;
-    if (type != FileSystemEntityType.directory) {
-      throw const StateError(
-        'Validated proposal recovery snapshot root is unsafe to remove.',
-      );
-    }
-
-    await _ensureResolvedDirectoryInside(snapshotRoot, configuredRoot);
-    await Directory(snapshotRoot).delete(recursive: true);
-  }
-
   void _validateLimits() {
     if (maxFileSizeBytes <= 0 ||
         maxTotalBytes <= 0 ||
@@ -858,6 +702,7 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
         'Validated proposal recovery $key is invalid.',
       );
     }
+
     final values = <String>[];
     for (final item in raw) {
       final value = item?.toString().trim() ?? '';
@@ -869,6 +714,31 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
       values.add(value);
     }
     return List<String>.unmodifiable(values);
+  }
+
+  static Map<String, String> _normalizedBaseline(
+    Map<String, String> source,
+  ) {
+    final normalized = <String, String>{};
+    for (final entry in source.entries) {
+      final path = _normalizeRelative(entry.key);
+      if (normalized.containsKey(path)) {
+        throw StateError(
+          'Workspace baseline contains duplicate normalized path "$path".',
+        );
+      }
+      normalized[path] = entry.value;
+    }
+    return normalized;
+  }
+
+  static WorkspaceChangeType _decodeChangeType(String name) {
+    for (final type in WorkspaceChangeType.values) {
+      if (type.name == name) return type;
+    }
+    throw FormatException(
+      'Validated proposal recovery change type is invalid: $name',
+    );
   }
 
   static Map<String, dynamic> _map(
@@ -923,6 +793,7 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
         'Validated proposal recovery path must be relative: $value',
       );
     }
+
     final segments = normalized.split('/');
     if (segments.any(
       (segment) =>
@@ -935,15 +806,26 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     return segments.join('/');
   }
 
-  static String _safeDirectoryName(String value) {
-    final normalized = value
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
-        .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
-    if (normalized.isEmpty) {
-      return 'snapshot-${value.hashCode.abs()}';
+  static String _safeDirectoryName(String value) =>
+      sha256.convert(utf8.encode(value)).toString().substring(0, 32);
+
+  static Future<void> _ensureOwnedDirectory({
+    required Directory directory,
+    required Directory parent,
+  }) async {
+    _ensureStrictlyInside(directory.path, parent.path);
+    final type = await FileSystemEntity.type(
+      directory.path,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) {
+      await directory.create();
+    } else if (type != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery directory is unsafe.',
+      );
     }
-    return normalized.length > 96 ? normalized.substring(0, 96) : normalized;
+    await _ensureResolvedDirectoryInside(directory.path, parent.path);
   }
 
   static void _ensureInside(String childValue, String parentValue) {
@@ -952,6 +834,20 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     if (child != parent && !child.startsWith('$parent/')) {
       throw StateError(
         'Validated proposal recovery path escapes its configured root.',
+      );
+    }
+  }
+
+  static void _ensureStrictlyInside(
+    String childValue,
+    String parentValue,
+  ) {
+    final child = _normalizedAbsolute(childValue);
+    final parent = _normalizedAbsolute(parentValue);
+    if (child == parent || !child.startsWith('$parent/')) {
+      throw StateError(
+        'Validated proposal recovery snapshot must be inside, but not equal '
+        'to, its configured root.',
       );
     }
   }
@@ -969,11 +865,12 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
         'Validated proposal recovery directory is unavailable or unsafe.',
       );
     }
+
     final resolvedParent =
         await Directory(parentPath).resolveSymbolicLinks();
     final resolvedChild =
         await Directory(childPath).resolveSymbolicLinks();
-    _ensureInside(resolvedChild, resolvedParent);
+    _ensureStrictlyInside(resolvedChild, resolvedParent);
   }
 
   static Future<void> _ensureResolvedFileInside(
@@ -983,7 +880,7 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     final resolvedParent =
         await Directory(parentPath).resolveSymbolicLinks();
     final resolvedFile = await File(filePath).resolveSymbolicLinks();
-    _ensureInside(resolvedFile, resolvedParent);
+    _ensureStrictlyInside(resolvedFile, resolvedParent);
   }
 
   static String _normalizedAbsolute(String value) {
@@ -992,13 +889,5 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
       normalized = normalized.substring(0, normalized.length - 1);
     }
     return Platform.isWindows ? normalized.toLowerCase() : normalized;
-  }
-}
-
-extension _FirstWhereOrNull<T> on Iterable<T> {
-  T? get firstOrNull {
-    final iterator = this.iterator;
-    if (!iterator.moveNext()) return null;
-    return iterator.current;
   }
 }
