@@ -68,12 +68,12 @@ void main() {
             .map((change) => (change.path, change.type, change.afterContent))
             .toList(),
         <(String, WorkspaceChangeType, String?)>[
-          ('lib/new.dart', WorkspaceChangeType.addition, 'void main() {}\n'),
           (
             'lib/existing.dart',
             WorkspaceChangeType.modification,
             'int answer = 42;\n'
           ),
+          ('lib/new.dart', WorkspaceChangeType.addition, 'void main() {}\n'),
           ('lib/old.dart', WorkspaceChangeType.deletion, null),
         ],
       );
@@ -81,6 +81,37 @@ void main() {
       // Recovery reconstructs only the validated proposal/result. It has no
       // WorkspaceSession and therefore cannot approve or apply real changes.
       expect(restored.proposal.requestId, 'request-1');
+    });
+
+    test('captures the complete validated workspace diff, including reuse',
+        () async {
+      final staged = <String, String>{
+        ..._staged(),
+        'lib/reused.dart': 'String reused = "library";\n',
+      };
+      final snapshot = await service.capture(
+        executionId: 'execution-1',
+        attemptId: 'attempt-1',
+        projectId: 'project:request-1',
+        taskId: 'task-1',
+        result: _validatedResult(),
+        baselineSnapshot: _baseline(),
+        stagedSnapshot: staged,
+      );
+
+      final restored = await service.restore(
+        snapshot: snapshot,
+        currentBaselineSnapshot: _baseline(),
+      );
+
+      expect(
+        restored.proposal.changes.map((change) => change.path),
+        contains('lib/reused.dart'),
+      );
+      final reused = restored.proposal.changes
+          .singleWhere((change) => change.path == 'lib/reused.dart');
+      expect(reused.type, WorkspaceChangeType.addition);
+      expect(reused.afterContent, 'String reused = "library";\n');
     });
 
     test('descriptor round-trips through execution metadata', () async {
@@ -282,6 +313,16 @@ void main() {
     });
   });
 }
+
+Map<String, String> _staged() => <String, String>{
+      'lib/existing.dart': 'int answer = 42;\n',
+      'lib/new.dart': 'void main() {}\n',
+    };
+
+Map<String, String> _unsafeStaged() => <String, String>{
+      ..._baseline(),
+      '.env': 'SECRET=value\n',
+    };
 
 Map<String, String> _baseline() => <String, String>{
       'lib/existing.dart': 'int answer = 0;\n',
