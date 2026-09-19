@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
@@ -281,6 +282,18 @@ void main() {
     expect(secondCurrent.attemptId, isNot(firstAttemptId));
     expect(secondCurrent.status, WorkshopExecutionStatus.checkpointed);
     expect(secondCurrent.resumePhase, 'review');
+    expect(secondCurrent.metadata['semanticResume'], isTrue);
+    expect(secondCurrent.metadata['previousStatus'], 'failed');
+    expect(secondCurrent.metadata['previousResumePhase'], 'failed');
+    expect(runner.resumeContexts, hasLength(1));
+    expect(runner.resumeContexts.single.executionId, stableExecutionId);
+    expect(runner.resumeContexts.single.attemptId, secondCurrent.attemptId);
+    expect(runner.resumeContexts.single.taskId, 'task-1');
+    expect(runner.resumeContexts.single.phase, 'failed');
+    expect(
+      runner.resumeContexts.single.remainingWork,
+      contains('continue guarded task inference from semantic context'),
+    );
     expect(attempts, hasLength(2));
     expect(
       attempts.map((attempt) => attempt.executionId).toSet(),
@@ -412,9 +425,25 @@ void main() {
     expect(current.executionId, original.executionId);
     expect(current.attemptId, isNot(original.attemptId));
     expect(current.status, WorkshopExecutionStatus.checkpointed);
+    expect(current.metadata['semanticResume'], isTrue);
     expect(current.metadata['processRestartResume'], isTrue);
     expect(current.metadata['previousStatus'], 'waitingApproval');
     expect(current.metadata['previousResumePhase'], 'waitingApproval');
+    expect(runner.resumeContexts, hasLength(1));
+    final resume = runner.resumeContexts.single;
+    expect(resume.executionId, original.executionId);
+    expect(resume.attemptId, current.attemptId);
+    expect(resume.projectId, handle.plan.id);
+    expect(resume.taskId, handle.taskId);
+    expect(resume.phase, 'waitingApproval');
+    expect(
+      resume.completedSteps,
+      <String>['implementation', 'review', 'validation'],
+    );
+    expect(
+      resume.remainingWork,
+      contains('require fresh owner approval before apply'),
+    );
     expect(attempts, hasLength(2));
     expect(controller.restartReplayPending, isFalse);
 
@@ -682,12 +711,16 @@ void main() {
   });
 }
 
-final class _ControlledRunner implements WorkshopProductionExecutionRunner {
+final class _ControlledRunner
+    implements
+        WorkshopProductionExecutionRunner,
+        WorkshopProductionSemanticResumeRunner {
   _ControlledRunner(this.handle);
 
   final WorkshopProductionTaskHandle handle;
   final Completer<WorkshopTaskInferenceResult> _completer =
       Completer<WorkshopTaskInferenceResult>();
+  final List<WorkshopResumeContext> resumeContexts = <WorkshopResumeContext>[];
   int runCount = 0;
   CancellationToken? token;
   bool? isOffline;
@@ -698,6 +731,30 @@ final class _ControlledRunner implements WorkshopProductionExecutionRunner {
   @override
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) {
+    return _run(
+      cancellationToken: cancellationToken,
+      isOffline: isOffline,
+    );
+  }
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopResumeContext resumeContext,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) {
+    resumeContexts.add(resumeContext);
+    return _run(
+      cancellationToken: cancellationToken,
+      isOffline: isOffline,
+    );
+  }
+
+  Future<WorkshopTaskInferenceResult> _run({
     required CancellationToken cancellationToken,
     required bool isOffline,
   }) {
@@ -712,12 +769,16 @@ final class _ControlledRunner implements WorkshopProductionExecutionRunner {
   }
 }
 
-final class _RetryRunner implements WorkshopProductionExecutionRunner {
+final class _RetryRunner
+    implements
+        WorkshopProductionExecutionRunner,
+        WorkshopProductionSemanticResumeRunner {
   _RetryRunner(this.handle);
 
   final WorkshopProductionTaskHandle handle;
   int runCount = 0;
   final List<bool> offlineModes = <bool>[];
+  final List<WorkshopResumeContext> resumeContexts = <WorkshopResumeContext>[];
 
   @override
   WorkshopProductionTaskHandle preparedHandle() => handle;
@@ -726,6 +787,23 @@ final class _RetryRunner implements WorkshopProductionExecutionRunner {
   Future<WorkshopTaskInferenceResult> runPrepared({
     required WorkshopProductionTaskHandle handle,
     required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) {
+    return _run(isOffline: isOffline);
+  }
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopResumeContext resumeContext,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) {
+    resumeContexts.add(resumeContext);
+    return _run(isOffline: isOffline);
+  }
+
+  Future<WorkshopTaskInferenceResult> _run({
     required bool isOffline,
   }) async {
     runCount += 1;
