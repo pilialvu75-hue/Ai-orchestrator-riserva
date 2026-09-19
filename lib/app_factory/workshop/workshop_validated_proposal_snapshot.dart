@@ -156,20 +156,30 @@ final class WorkshopValidatedProposalSnapshotService {
     required String taskId,
     required WorkshopTaskInferenceResult result,
     required Map<String, String> baselineSnapshot,
+    required Map<String, String> stagedSnapshot,
   }) async {
     _validateLimits();
 
     if (!result.readyForApproval ||
         !result.review.approved ||
-        result.validation?.valid != true ||
-        result.proposal.isEmpty) {
+        result.validation?.valid != true) {
       throw StateError(
-        'Only a non-empty Workshop proposal that passed review and validation '
-        'can be captured for approval recovery.',
+        'Only a Workshop result that passed review and validation can be '
+        'captured for approval recovery.',
       );
     }
 
-    final changes = result.proposal.changes;
+    final baseline = _normalizedBaseline(baselineSnapshot);
+    final staged = _normalizedBaseline(stagedSnapshot);
+    final changes = WorkspaceDiff.compare(
+      before: baseline,
+      after: staged,
+    ).changes;
+    if (changes.isEmpty) {
+      throw StateError(
+        'Validated proposal recovery requires a non-empty staged workspace diff.',
+      );
+    }
     if (changes.length > maxChanges) {
       throw StateError(
         'Validated proposal exceeds the recovery change limit ($maxChanges).',
@@ -181,7 +191,6 @@ final class WorkshopValidatedProposalSnapshotService {
     final normalizedProjectId = _identity(projectId, 'projectId');
     final normalizedTaskId = _identity(taskId, 'taskId');
     final requestId = _identity(result.proposal.requestId, 'requestId');
-    final baseline = _normalizedBaseline(baselineSnapshot);
 
     final root = Directory(snapshotsRootPath).absolute;
     await root.create(recursive: true);
