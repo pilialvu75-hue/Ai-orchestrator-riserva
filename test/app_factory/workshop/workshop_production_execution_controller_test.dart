@@ -354,6 +354,164 @@ void main() {
     controller.dispose();
   });
 
+  test(
+      'restart reuses logical execution with a new attempt and safe replay',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final original = await store.create(
+      projectId: handle.plan.id,
+      taskId: handle.taskId,
+      sessionId: 'production:${handle.plan.id}:${handle.taskId}',
+      resource: WorkshopTaskResource.local,
+      metadata: const <String, dynamic>{
+        'surface': 'workshop-production',
+        'multiRole': true,
+        'offline': true,
+      },
+    );
+    final waiting = original.copyWith(
+      status: WorkshopExecutionStatus.waitingApproval,
+      resumePhase: 'waitingApproval',
+    );
+    await store.save(waiting);
+
+    final runner = _ControlledRunner(handle);
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      executionStore: store,
+    );
+
+    final recovery =
+        await controller.restorePersistentExecutionForPreparedTask();
+
+    expect(recovery, isNotNull);
+    expect(
+      recovery!.disposition,
+      WorkshopProductionExecutionRecoveryDisposition.safeReplayPending,
+    );
+    expect(recovery.execution.executionId, original.executionId);
+    expect(controller.restartReplayPending, isTrue);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(controller.state.isOffline, isTrue);
+    expect(controller.distinctTasksStartedInCurrentProject, 1);
+
+    final run = controller.start(isOffline: controller.state.isOffline);
+    expect(runner.runCount, 1);
+    runner.complete(_result());
+    await run;
+
+    final current = (await store.loadAll()).single;
+    final attempts = await store.loadAttempts(original.executionId);
+    expect(current.executionId, original.executionId);
+    expect(current.attemptId, isNot(original.attemptId));
+    expect(current.status, WorkshopExecutionStatus.checkpointed);
+    expect(current.metadata['processRestartResume'], isTrue);
+    expect(current.metadata['previousStatus'], 'waitingApproval');
+    expect(current.metadata['previousResumePhase'], 'waitingApproval');
+    expect(attempts, hasLength(2));
+    expect(controller.restartReplayPending, isFalse);
+
+    controller.dispose();
+  });
+
+  test('failed execution restores as explicit retry on the same execution',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final original = await store.create(
+      projectId: handle.plan.id,
+      taskId: handle.taskId,
+      sessionId: 'production:${handle.plan.id}:${handle.taskId}',
+      resource: WorkshopTaskResource.hybridAi,
+      metadata: const <String, dynamic>{
+        'surface': 'workshop-production',
+        'multiRole': true,
+        'offline': false,
+      },
+    );
+    await store.save(
+      original.copyWith(
+        status: WorkshopExecutionStatus.failed,
+        resumePhase: 'failed',
+      ),
+    );
+
+    final controller = WorkshopProductionExecutionController(
+      runner: _ImmediateRunner(handle),
+      executionStore: store,
+    );
+    final recovery =
+        await controller.restorePersistentExecutionForPreparedTask();
+
+    expect(
+      recovery?.disposition,
+      WorkshopProductionExecutionRecoveryDisposition.retryAvailable,
+    );
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(controller.state.canRetry, isTrue);
+    expect(controller.restartReplayPending, isFalse);
+
+    await controller.retry();
+
+    final current = (await store.loadAll()).single;
+    final attempts = await store.loadAttempts(original.executionId);
+    expect(current.executionId, original.executionId);
+    expect(current.attemptId, isNot(original.attemptId));
+    expect(attempts, hasLength(2));
+
+    controller.dispose();
+  });
+
+  test('completed execution plus active recovered task is blocked fail closed',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final original = await store.create(
+      projectId: handle.plan.id,
+      taskId: handle.taskId,
+      sessionId: 'production:${handle.plan.id}:${handle.taskId}',
+      resource: WorkshopTaskResource.hybridAi,
+      metadata: const <String, dynamic>{
+        'surface': 'workshop-production',
+        'multiRole': true,
+        'offline': false,
+      },
+    );
+    await store.save(
+      original.copyWith(
+        status: WorkshopExecutionStatus.completed,
+        resumePhase: 'completed',
+      ),
+    );
+
+    final controller = WorkshopProductionExecutionController(
+      runner: _ImmediateRunner(handle),
+      executionStore: store,
+    );
+
+    await expectLater(
+      controller.restorePersistentExecutionForPreparedTask(),
+      throwsA(isA<StateError>()),
+    );
+    expect(controller.journalExecution, isNull);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+
+    controller.dispose();
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
