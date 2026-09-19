@@ -60,6 +60,7 @@ class _WorkshopProductionDashboardPageState
     _repairPreparer = WorkshopBuildRepairPreparer(bundle: widget.bundle);
     _androidIntentHandler =
         widget._androidIntentHandler ?? AndroidIntentHandler();
+    _buildResult = widget.bundle.dashboardController.state.lastBuildResult;
     widget.bundle.dashboardController.addListener(_onLifecycleChanged);
     widget.executionController.addListener(_onLifecycleChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
@@ -74,7 +75,10 @@ class _WorkshopProductionDashboardPageState
 
   void _onLifecycleChanged() {
     if (!mounted) return;
-    setState(() {});
+    setState(() {
+      _buildResult =
+          widget.bundle.dashboardController.state.lastBuildResult;
+    });
     _scheduleAutoAdvance();
   }
 
@@ -88,9 +92,10 @@ class _WorkshopProductionDashboardPageState
   }
 
   Future<void> _autoAdvance() async {
-    if (_mutationBusy || widget.executionController.state.isRunning) return;
-    final taskId = _activeTaskId;
+    final dashboard = widget.bundle.dashboardController.state;
     final execution = widget.executionController.state;
+    if (_mutationBusy || execution.isRunning || dashboard.isBusy) return;
+    final taskId = _activeTaskId;
 
     if (taskId != null && taskId.isNotEmpty) {
       if (execution.status == WorkshopProductionExecutionStatus.idle) {
