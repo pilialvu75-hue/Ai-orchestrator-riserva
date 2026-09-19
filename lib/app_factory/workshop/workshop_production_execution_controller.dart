@@ -212,9 +212,10 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   /// Reattaches the durable Execution/Attempt journal to the task that the
   /// Dashboard has already restored from its production checkpoint.
   ///
-  /// Ephemeral VirtualWorkspace state is deliberately not reconstructed here.
-  /// A pre-crash running/checkpointed/waiting-approval attempt therefore
-  /// becomes a safe replay of the same logical Execution using a new Attempt.
+  /// An integrity-checked validated proposal snapshot can reconstruct the
+  /// approval-ready VirtualWorkspace without rerunning inference. Owner apply
+  /// approval is never restored. If the snapshot is absent, stale or invalid,
+  /// the same logical Execution falls back to safe replay using a new Attempt.
   /// Failed/cancelled attempts remain explicit retry states. A completed
   /// Execution paired with an active recovered task is rejected fail-closed:
   /// replaying it could duplicate an already-applied mutation.
@@ -892,8 +893,9 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       resumePhase: 'completed',
     );
     final completed = _journalExecution;
-    if (completed?.status == WorkshopExecutionStatus.completed) {
-      await _removeRecoverySnapshotForExecution(completed!);
+    if (completed != null &&
+        completed.status == WorkshopExecutionStatus.completed) {
+      await _removeRecoverySnapshotForExecution(completed);
       _journalExecution = null;
       _restartReplayPending = false;
     }
