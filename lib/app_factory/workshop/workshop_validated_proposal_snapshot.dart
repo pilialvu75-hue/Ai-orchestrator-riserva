@@ -794,10 +794,20 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     final configuredRoot = Directory(snapshotsRootPath).absolute.path;
     final snapshotRoot = Directory(snapshot.rootPath).absolute.path;
     _ensureInside(snapshotRoot, configuredRoot);
-    final directory = Directory(snapshotRoot);
-    if (await directory.exists()) {
-      await directory.delete(recursive: true);
+
+    final type = await FileSystemEntity.type(
+      snapshotRoot,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) return;
+    if (type != FileSystemEntityType.directory) {
+      throw const StateError(
+        'Validated proposal recovery snapshot root is unsafe to remove.',
+      );
     }
+
+    await _ensureResolvedDirectoryInside(snapshotRoot, configuredRoot);
+    await Directory(snapshotRoot).delete(recursive: true);
   }
 
   void _validateLimits() {
