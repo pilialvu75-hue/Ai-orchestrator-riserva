@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -22,6 +24,7 @@ enum WorkshopBuildRepairReservation {
 }
 
 enum WorkshopProductionExecutionRecoveryDisposition {
+  validatedApprovalRecovered,
   safeReplayPending,
   retryAvailable,
   cancelled,
@@ -164,12 +167,20 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     required WorkshopProductionExecutionRunner runner,
     this.policy = const WorkshopProductionExecutionPolicy(),
     WorkshopExecutionStore? executionStore,
+    WorkshopValidatedProposalSnapshotService? validatedProposalSnapshotService,
+    WorkshopWorkspaceProposalApplier proposalApplier =
+        const WorkshopWorkspaceProposalApplier(),
   })  : _runner = runner,
-        _executionStore = executionStore;
+        _executionStore = executionStore,
+        _validatedProposalSnapshotService = validatedProposalSnapshotService,
+        _proposalApplier = proposalApplier;
 
   final WorkshopProductionExecutionRunner _runner;
   final WorkshopProductionExecutionPolicy policy;
   final WorkshopExecutionStore? _executionStore;
+  final WorkshopValidatedProposalSnapshotService?
+      _validatedProposalSnapshotService;
+  final WorkshopWorkspaceProposalApplier _proposalApplier;
 
   WorkshopProductionExecutionState _state =
       const WorkshopProductionExecutionState();
@@ -183,6 +194,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   int _buildRepairAttempts = 0;
   WorkshopExecution? _journalExecution;
   Object? _executionJournalError;
+  Object? _recoverySnapshotError;
   bool _restartReplayPending = false;
 
   WorkshopProductionExecutionState get state => _state;
@@ -194,6 +206,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       _lastBuildRepairFailureSignature;
   WorkshopExecution? get journalExecution => _journalExecution;
   Object? get executionJournalError => _executionJournalError;
+  Object? get recoverySnapshotError => _recoverySnapshotError;
   bool get restartReplayPending => _restartReplayPending;
 
   /// Reattaches the durable Execution/Attempt journal to the task that the
@@ -256,6 +269,32 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
     final isOffline = recovered.metadata['offline'] == true;
 
+    if (recovered.status == WorkshopExecutionStatus.waitingApproval ||
+        recovered.status == WorkshopExecutionStatus.checkpointed) {
+      final restoredResult = await _tryRestoreValidatedApproval(
+        handle: handle,
+        execution: recovered,
+      );
+      if (restoredResult != null) {
+        _restartReplayPending = false;
+        _setState(
+          WorkshopProductionExecutionState(
+            status: WorkshopProductionExecutionStatus.succeeded,
+            handle: handle,
+            result: restoredResult,
+            startedAt: recovered.startedAt,
+            finishedAt: recovered.updatedAt,
+            isOffline: isOffline,
+          ),
+        );
+        return WorkshopProductionExecutionRecovery(
+          execution: recovered,
+          disposition: WorkshopProductionExecutionRecoveryDisposition
+              .validatedApprovalRecovered,
+        );
+      }
+    }
+
     switch (recovered.status) {
       case WorkshopExecutionStatus.created:
       case WorkshopExecutionStatus.running:
@@ -304,6 +343,81 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         throw StateError(
           'Completed Workshop execution reached an unreachable recovery path.',
         );
+    }
+  }
+
+  Future<WorkshopTaskInferenceResult?> _tryRestoreValidatedApproval({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopExecution execution,
+  }) async {
+    final service = _validatedProposalSnapshotService;
+    if (service == null ||
+        execution.metadata['validatedProposalSnapshot'] == null) {
+      return null;
+    }
+
+    try {
+      final snapshot =
+          WorkshopValidatedProposalSnapshot.fromExecutionMetadata(
+        execution.metadata,
+      );
+      final requestId = handle.session.context.request.id.trim();
+      if (snapshot.executionId != execution.executionId ||
+          snapshot.attemptId != execution.attemptId ||
+          snapshot.projectId != execution.projectId ||
+          snapshot.taskId != execution.taskId ||
+          snapshot.requestId != requestId) {
+        throw const FormatException(
+          'Validated proposal snapshot identity does not match the '
+          'authoritative Workshop execution.',
+        );
+      }
+
+      final result = await service.restore(
+        snapshot: snapshot,
+        currentBaselineSnapshot: handle.session.workspace.originalSnapshot,
+      );
+      if (!result.readyForApproval ||
+          !result.review.approved ||
+          result.validation?.valid != true ||
+          result.proposal.isEmpty) {
+        throw StateError(
+          'Recovered Workshop proposal is not approval-ready.',
+        );
+      }
+
+      try {
+        _proposalApplier.applyProposal(
+          session: handle.session,
+          proposal: result.proposal,
+        );
+        handle.session.beginReview();
+        handle.session.beginValidation();
+        if (handle.session.isApplyApproved) {
+          throw StateError(
+            'Recovered Workshop proposal must require fresh owner approval.',
+          );
+        }
+      } catch (_) {
+        if (handle.session.workspace.isInitialized) {
+          handle.session.revertAll();
+        }
+        rethrow;
+      }
+
+      _recoverySnapshotError = null;
+      return result;
+    } catch (error) {
+      if (handle.session.workspace.isInitialized &&
+          handle.session.hasChanges) {
+        try {
+          handle.session.revertAll();
+        } catch (_) {
+          // The snapshot is already rejected. Safe replay remains authoritative.
+        }
+      }
+      _recoverySnapshotError = error;
+      return null;
     }
   }
 
@@ -513,7 +627,10 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           ),
         );
       } else {
-        await _persistInferenceCheckpoint(result);
+        await _persistInferenceCheckpoint(
+          handle: handle,
+          result: result,
+        );
         _setState(
           _state.copyWith(
             status: WorkshopProductionExecutionStatus.succeeded,
@@ -633,12 +750,19 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistInferenceCheckpoint(
-    WorkshopTaskInferenceResult result,
-  ) async {
+  Future<void> _persistInferenceCheckpoint({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopTaskInferenceResult result,
+  }) async {
     final reviewApproved = result.review.approved;
     final validationValid = result.validation?.valid;
     final ready = result.readyForApproval;
+    final recoveryMetadata = ready
+        ? await _captureValidatedProposalSnapshot(
+            handle: handle,
+            result: result,
+          )
+        : const <String, dynamic>{};
     await _persistJournalStatus(
       ready
           ? WorkshopExecutionStatus.waitingApproval
@@ -652,8 +776,40 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'reviewApproved': reviewApproved,
         'validationValid': validationValid,
         'proposalChangeCount': result.proposal.changes.length,
+        'stagedChangeCount': handle.session.workspace.changeCount,
+        ...recoveryMetadata,
       },
     );
+  }
+
+  Future<Map<String, dynamic>> _captureValidatedProposalSnapshot({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopTaskInferenceResult result,
+  }) async {
+    final service = _validatedProposalSnapshotService;
+    final execution = _journalExecution;
+    if (service == null || execution == null || !result.readyForApproval) {
+      return const <String, dynamic>{};
+    }
+
+    try {
+      final snapshot = await service.capture(
+        executionId: execution.executionId,
+        attemptId: execution.attemptId,
+        projectId: execution.projectId,
+        taskId: execution.taskId,
+        result: result,
+        baselineSnapshot: handle.session.workspace.originalSnapshot,
+        stagedSnapshot: handle.session.workspace.snapshot,
+      );
+      _recoverySnapshotError = null;
+      return snapshot.toExecutionMetadata();
+    } catch (error) {
+      // Snapshot persistence augments recovery; it must never block a valid
+      // approval-ready task. Restart falls back to P4.1 safe replay.
+      _recoverySnapshotError = error;
+      return const <String, dynamic>{};
+    }
   }
 
   Future<void> _persistJournalStatus(
