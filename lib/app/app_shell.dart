@@ -177,14 +177,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
       recovery.attach(bundle.dashboardController);
       final taskCoordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+      final executionStore = WorkshopExecutionStore(
+        preferences: di.sl<PreferencesService>(),
+      );
       final execution = WorkshopProductionExecutionController(
         runner: WorkshopProductionTaskExecutionRunner(
           coordinator: taskCoordinator,
         ),
-        executionStore: WorkshopExecutionStore(
-          preferences: di.sl<PreferencesService>(),
-        ),
+        executionStore: executionStore,
       );
+
+      final recoveredTaskId =
+          bundle.dashboardController.state.activeTaskId?.trim();
+      if (recoveredTaskId != null && recoveredTaskId.isNotEmpty) {
+        await execution.restorePersistentExecutionForPreparedTask();
+      }
+
       final chat = WorkshopChatController(
         inferenceGateway: WorkshopFactory.createInferenceGateway(
           assignments: workshopAssignments,
