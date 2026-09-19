@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
@@ -13,6 +14,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecyc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 
 /// Production shell for the guarded Cantiere pipeline.
 ///
@@ -27,12 +29,14 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     required this.modelAssignments,
     required this.executionController,
     required this.chatController,
-  });
+    AndroidIntentHandler? androidIntentHandler,
+  }) : _androidIntentHandler = androidIntentHandler;
 
   final WorkshopProductionLifecycleBundle bundle;
   final List<WorkshopModelAssignment> modelAssignments;
   final WorkshopProductionExecutionController executionController;
   final WorkshopChatController chatController;
+  final AndroidIntentHandler? _androidIntentHandler;
 
   @override
   State<WorkshopProductionDashboardPage> createState() =>
@@ -43,6 +47,7 @@ class _WorkshopProductionDashboardPageState
     extends State<WorkshopProductionDashboardPage> {
   late final WorkshopProductionTaskCoordinator _coordinator;
   late final WorkshopBuildRepairPreparer _repairPreparer;
+  late final AndroidIntentHandler _androidIntentHandler;
   WorkshopBuildResult? _buildResult;
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
@@ -53,6 +58,8 @@ class _WorkshopProductionDashboardPageState
     super.initState();
     _coordinator = WorkshopProductionTaskCoordinator(bundle: widget.bundle);
     _repairPreparer = WorkshopBuildRepairPreparer(bundle: widget.bundle);
+    _androidIntentHandler =
+        widget._androidIntentHandler ?? AndroidIntentHandler();
     widget.bundle.dashboardController.addListener(_onLifecycleChanged);
     widget.executionController.addListener(_onLifecycleChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
@@ -435,6 +442,60 @@ class _WorkshopProductionDashboardPageState
     }
   }
 
+  Future<void> _installVerifiedArtifact() async {
+    final artifactPath = _buildResult?.artifactPath?.trim();
+    if (!_hasVerifiedArtifact ||
+        artifactPath == null ||
+        artifactPath.isEmpty ||
+        _mutationBusy) {
+      return;
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      final verification = await _androidIntentHandler.verifyApk(artifactPath);
+      final verificationError = verification.fold<String?>(
+        (failure) => failure.toString(),
+        (details) {
+          if (details['valid'] == true) {
+            return null;
+          }
+          final reason = details['reason']?.toString().trim();
+          return reason == null || reason.isEmpty
+              ? 'APK generato non valido.'
+              : 'APK generato non valido: $reason';
+        },
+      );
+
+      if (verificationError != null) {
+        if (mounted) {
+          setState(() => _error = verificationError);
+        }
+        return;
+      }
+
+      final opened = await _androidIntentHandler.openApkInstaller(artifactPath);
+      final installError = opened.fold<String?>(
+        (failure) => failure.toString(),
+        (didOpen) => didOpen
+            ? null
+            : 'Android non ha aperto il programma di installazione.',
+      );
+
+      if (installError != null && mounted) {
+        setState(() => _error = installError);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
   String? get _activeTaskId =>
       widget.bundle.dashboardController.state.activeTaskId?.trim();
 
@@ -528,10 +589,19 @@ class _WorkshopProductionDashboardPageState
                 const SizedBox(height: 8),
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
-                Text('Artifact pronto: ${_buildResult!.artifactPath}',
+                Text('APK verificato pronto: ${_buildResult!.artifactPath}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelMedium),
+                const SizedBox(height: 8),
+                if (!kIsWeb &&
+                    defaultTargetPlatform == TargetPlatform.android)
+                  OutlinedButton.icon(
+                    onPressed:
+                        _mutationBusy ? null : _installVerifiedArtifact,
+                    icon: const Icon(Icons.install_mobile_outlined),
+                    label: const Text('Installa APK'),
+                  ),
                 const SizedBox(height: 8),
               ],
               if (_mutationBusy)
