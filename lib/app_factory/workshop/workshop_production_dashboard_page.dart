@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
@@ -593,11 +594,13 @@ class _WorkshopProductionDashboardPageState
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelMedium),
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _mutationBusy ? null : _installVerifiedArtifact,
-                  icon: const Icon(Icons.install_mobile_outlined),
-                  label: const Text('Installa APK'),
-                ),
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+                  OutlinedButton.icon(
+                    onPressed:
+                        _mutationBusy ? null : _installVerifiedArtifact,
+                    icon: const Icon(Icons.install_mobile_outlined),
+                    label: const Text('Installa APK'),
+                  ),
                 const SizedBox(height: 8),
               ],
               if (_mutationBusy)
