@@ -199,6 +199,55 @@ void main() {
       );
     });
 
+    test('symlinked snapshot content is rejected', () async {
+      if (Platform.isWindows) return;
+
+      final snapshot = await service.capture(
+        executionId: 'execution-1',
+        attemptId: 'attempt-1',
+        projectId: 'project:request-1',
+        taskId: 'task-1',
+        result: _validatedResult(),
+        baselineSnapshot: _baseline(),
+      );
+
+      final target = File(
+        p.join(snapshot.rootPath, 'files', 'lib', 'new.dart'),
+      );
+      final outside = File(p.join(root.path, 'outside.dart'));
+      await outside.writeAsString('outside\n', flush: true);
+      await target.delete();
+      await Link(target.path).create(outside.path);
+
+      await expectLater(
+        service.restore(
+          snapshot: snapshot,
+          currentBaselineSnapshot: _baseline(),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('cleanup refuses a descriptor pointing at the configured root',
+        () async {
+      final forged = WorkshopValidatedProposalSnapshot(
+        executionId: 'execution-1',
+        attemptId: 'attempt-1',
+        projectId: 'project:request-1',
+        taskId: 'task-1',
+        requestId: 'request-1',
+        rootPath: root.path,
+        manifestSha256: '0' * 64,
+        createdAt: DateTime.utc(2026, 1, 1),
+      );
+
+      await expectLater(
+        service.remove(forged),
+        throwsA(isA<StateError>()),
+      );
+      expect(await root.exists(), isTrue);
+    });
+
     test('manifest tampering is rejected before file restoration', () async {
       final snapshot = await service.capture(
         executionId: 'execution-1',
