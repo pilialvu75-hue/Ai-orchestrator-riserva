@@ -806,7 +806,8 @@ void run_generation(
             return;
         }
 
-        llama_sampler_accept(sampler.get(), next_token);
+        // llama_sampler_sample already accepts the selected token into the chain.
+        // Accepting it again would halve the effective 64-token penalty history.
 
         if (llama_vocab_is_eog(vocab, next_token)) {
             if (!session->first_token_emitted.load(std::memory_order_acquire) &&
