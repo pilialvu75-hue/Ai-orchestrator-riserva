@@ -3,8 +3,8 @@ import 'dart:convert';
 /// Public export is a projection, never a redacted copy of arbitrary text.
 /// Unknown tags and all free-form payloads are discarded.
 String? publicLogProjection(String line) {
-  final timestamp =
-      RegExp(r'^\[(\d{4}-\d\d-\d\dT[\d:.+Z-]+)\]').firstMatch(line);
+  final timestamp = RegExp(r'^\[(\d{4}-\d\d-\d\dT[\d:.+Z-]+)\]')
+      .firstMatch(line);
   if (timestamp == null) return null;
   const events = <String>{
     'VOICE_ICON_TAP',
@@ -31,6 +31,9 @@ String? publicLogProjection(String line) {
     'STREAM_COMPLETE',
     'PUSH_REJECTED',
     'LOCAL_EXECUTION_CONFIG',
+    'RESOURCE_SAMPLE',
+    'RESOURCE_PROFILE',
+    'RESOURCE_GUARD',
     'INFERENCE_BEGIN',
     'INFERENCE_FINISHED',
     'GENERATION_END',
@@ -195,6 +198,53 @@ String? publicLogProjection(String line) {
       'event': isError ? 'FINAL_RESPONSE_ERROR' : 'FINAL_RESPONSE_SUCCESS',
       'is_final': true,
       'text_len': int.parse(finalResponse[3]!),
+    });
+  }
+
+  if (event == 'RESOURCE_SAMPLE') {
+    final m = RegExp(
+      r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
+      r'native_heap_bytes=(-?\d{1,15}) critical=(true|false) '
+      r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
+      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'available_bytes': int.parse(m[1]!),
+      'rss_bytes': int.parse(m[2]!),
+      'native_heap_bytes': int.parse(m[3]!),
+      'critical': m[4] == 'true',
+      'phase': m[5]!,
+      'gpu_layers': int.parse(m[6]!),
+      'decode_calls': int.parse(m[7]!),
+    });
+  }
+  if (event == 'RESOURCE_PROFILE') {
+    final m = RegExp(
+      r'^reason=(pressure|phi_conservative|baseline) n_ctx=(\d{1,6}) '
+      r'n_batch=(\d{1,6}) n_ubatch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'reason': m[1]!,
+      'n_ctx': int.parse(m[2]!),
+      'n_batch': int.parse(m[3]!),
+      'n_ubatch': int.parse(m[4]!),
+    });
+  }
+  if (event == 'RESOURCE_GUARD') {
+    final m = RegExp(r'^action=(defer|cancel) reason=critical_memory$')
+        .firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'action': m[1]!,
+      'reason': 'critical_memory',
     });
   }
 

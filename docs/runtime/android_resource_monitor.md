@@ -1,0 +1,72 @@
+# Android resource monitor
+
+The chat runtime menu now exposes system available/total RAM, process RSS,
+allocated native heap, memory pressure, native context/batch/microbatch,
+reported GPU layer assignment and successful native decode calls.
+
+Sampling runs every two seconds while inference or a visible panel owns a
+lease. It stops when both are inactive. A single platform request may remain
+in flight; unavailable/expired readings become unknown, never zero. History
+is capped at 60 samples. RESOURCE_SAMPLE/PROFILE/GUARD events use the existing
+bounded persistent RuntimeEventLog and strict public Diagnostics projection.
+There is no new network uploader, background service or permission.
+
+## Protection
+
+- Native session creation samples Android ActivityManager memory information.
+- Critical pressure defers creation; pressure during an active request triggers
+  the existing cancellation token and orderly off-UI session release.
+- Profile changes happen inside the serial queue, before native generation.
+- Phi-3.5 starts with context 2048, batch 128, microbatch 64.
+- Elevated pressure selects context 2048, batch 128, microbatch 32.
+- Other models keep context 4096, batch 512, microbatch 128 without pressure.
+- Existing smaller sessions are retained when pressure recovers, avoiding
+  repeated reloads. A session with larger limits is recreated under pressure.
+- Prompt and generation budgeting use the actual native context capacity.
+- UI_HIDDEN/background trim callbacks are not treated as critical RAM events.
+
+The low-memory boolean, running-critical trim signal and available RAM below
+Android's threshold are critical evidence. Elevated pressure includes running
+low/moderate signals and headroom less than 512 MiB above Android's threshold.
+These are conservative heuristics, not a prediction of the Android killer.
+Mmap-backed model pages, other apps and later decode allocation still matter.
+
+## GPU evidence and limits
+
+The compiled backend is displayed separately. The bridge captures llama.cpp's
+model-load `offloaded N/M layers to GPU` report for its pinned revision. This is the upstream placement report, not an independent hardware utilization counter. Missing
+reports remain unknown. CPU-only devices plus disabled operation/KV offload
+report zero layers. Decode counts show runtime progress, not GPU utilization.
+No portable GPU busy-percent or per-process GPU-memory sensor is implemented;
+the panel explicitly shows these as unavailable. GPU assignment is not
+increased automatically, and the existing CPU baseline remains in effect.
+
+## Device acceptance (not yet proven by desktop checks)
+
+1. Open the runtime menu; verify RAM values and updates every two seconds.
+2. Run Phi and inspect RESOURCE_PROFILE and actual context/batch/microbatch.
+3. Close the menu during generation; resource samples must continue.
+4. Run ten sequential prompts with Phi and Nemotron; compare load time, first
+   token, RSS and pressure. Confirm clean EOS and cancellation.
+5. Export Diagnostics manually and verify resource samples accompany the
+   Android process exit history after any unexpected termination.
+6. In a separately controlled GPU-enabled build, confirm reported assigned
+   layers. Do not equate backend availability or decode calls with GPU busy %.
+
+References:
+- https://developer.android.com/reference/android/app/ActivityManager.MemoryInfo
+- https://developer.android.com/reference/android/content/ComponentCallbacks2
+- third_party/llama.cpp/src/llama-model.cpp (pinned submodule)
+
+Remaining roadmap: device tuning, optional vendor-supported GPU counters,
+measured GPU profile selection, long-session validation, Voice/Live integration.
+
+## Implementation validation
+
+- 23 targeted Flutter tests passed (monitor ownership/pressure/missing readings,
+  extended native creation ABI, off-UI lifecycle, token budgets and Diagnostics).
+- Dart analysis of the changed runtime/UI/Diagnostics scope: no errors; an
+  existing unused-variable warning remains in generation startup.
+- Native aggregated entrypoint passed C++17 syntax checks against the exact
+  pinned llama.cpp headers with both CPU and GGML_USE_VULKAN configuration.
+- Android APK build and physical S24 FE measurements remain pending.

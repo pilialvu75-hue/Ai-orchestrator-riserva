@@ -22,6 +22,7 @@ class _AndroidFfiLifecycleSubsystem {
       );
       return;
     }
+    ResourceMonitor.instance.phase = status.name;
     final previous = _owner.monitor.state.status;
     final transitionReason =
         reason == AndroidFfiRuntimeProvider._autoTransitionReason

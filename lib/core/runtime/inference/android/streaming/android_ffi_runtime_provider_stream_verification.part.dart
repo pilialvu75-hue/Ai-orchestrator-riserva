@@ -18,6 +18,10 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
         );
         try {
           await _concurrencyManager.runInferenceSerially(() async {
+            final resources = ResourceMonitor.instance;
+            resources.retain();
+            resources.addCriticalListener(cancellationToken.cancel);
+            try {
             AndroidFfiRuntimeProvider._log(
               '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1693 | Function: streamVerificationInference() | BEFORE calling _runInVerificationScope()',
             );
@@ -71,9 +75,20 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                   // caller isolate. Do not route this through the production
                   // cache: this session is released in the verification
                   // finally block below.
+                  final sample = await resources.sample();
+                  if (sample?.critical == true || cancellationToken.isCancelled) {
+                    AndroidFfiRuntimeProvider._log('[RESOURCE_GUARD] action=defer reason=critical_memory');
+                    AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
+                        stage: 'verification_memory_guard', message: 'Verification deferred: memory pressure or cancellation.');
+                    return;
+                  }
+                  final profile = ResourceProfile.select(sample, phi: modelId == 'phi3_5_mini');
                   final verificationSessionId = await createNativeSessionOffUi(
                     modelPath,
                     nGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                    nCtx: profile.context,
+                    nBatch: profile.batch,
+                    nMicroBatch: profile.microBatch,
                   );
                   if (verificationSessionId <= 0) {
                     final err = AndroidFfiRuntimeProvider._safeLastError(bindings, verificationSessionId);
@@ -90,6 +105,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                     clearRuntimeVerification();
                     return;
                   }
+                  resources.readNative = () => bindings.sessionMetrics(verificationSessionId);
                   final tokenBufRaw = calloc<Uint8>(LlamaNativeDefaults.tokenBufferSize);
                   final tokenBuf = tokenBufRaw.cast<Utf8>();
                   var emittedTokens = 0;
@@ -106,6 +122,11 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                     }
                   }
                   try {
+                    if (cancellationToken.isCancelled) {
+                      AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
+                          stage: 'verification_cancelled', message: 'Verification cancelled before generation.');
+                      return;
+                    }
                     final startResult = bindings.startGeneration(
                       verificationSessionId,
                       verificationPromptPtr,
@@ -274,6 +295,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                       reason: 'verification_scope_cleanup',
                       modelPath: modelPath,
                     );
+                    resources.readNative = null;
                   }
                 } catch (e, st) {
                   // TERMINAL SINK INTERNO DI VERIFICA: Cattura, deidratazione e rimozione del leak degli oggetti
@@ -303,6 +325,10 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
             AndroidFfiRuntimeProvider._log(
               '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1922 | Function: streamVerificationInference() | AFTER calling _runInVerificationScope()',
             );
+            } finally {
+              resources.removeCriticalListener(cancellationToken.cancel);
+              resources.release();
+            }
           });
           AndroidFfiRuntimeProvider._log(
             '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1926 | Function: streamVerificationInference() | AFTER calling _runInferenceSerially()',

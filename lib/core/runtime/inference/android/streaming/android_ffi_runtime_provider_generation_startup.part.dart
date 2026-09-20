@@ -288,19 +288,23 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log('[NATIVE_CONTEXT_CREATE] path=$resolvedModelPath status=ok');
     AndroidFfiRuntimeProvider._logAi('native session ready');
 
+    final actualContext = bindings.sessionMetrics(nativeSessionId)['context']!;
+    if (actualContext <= LlamaNativeDefaults.promptTokenSafetyMargin) {
+      throw StateError('Invalid native context capacity.');
+    }
     final budgetRequestedMaxTokens = isForensicSelfTest
         ? 4
         : (request.maxTokens > 0
             ? request.maxTokens
             : AndroidFfiRuntimeProvider._defaultMaxTokens);
     final budgetGenerationReserve = budgetRequestedMaxTokens
-        .clamp(1, AndroidFfiRuntimeProvider._safeMaxTokens)
+        .clamp(1, minResourceGenerationLimit(actualContext))
         .toInt();
     final maxPromptTokens = (
-      LlamaNativeDefaults.nCtx -
+      actualContext -
       budgetGenerationReserve -
       LlamaNativeDefaults.promptTokenSafetyMargin
-    ).clamp(1, LlamaNativeDefaults.nCtx).toInt();
+    ).clamp(1, actualContext).toInt();
 
     String composePromptForBudget(List<ChatTurn> contextTurns) {
       final composed = _composePrompt(
@@ -412,8 +416,8 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       ' max_tokens=$maxTokens temperature=$effectiveTemperature'
       ' n_threads=${LlamaNativeDefaults.nThreads}'
       ' n_threads_batch=${LlamaNativeDefaults.nThreadsBatch}'
-      ' n_batch=${LlamaNativeDefaults.nBatch}'
-      ' n_ctx=${LlamaNativeDefaults.nCtx}'
+      " n_batch=${bindings.sessionMetrics(nativeSessionId)['batch']}"
+      ' n_ctx=$actualContext'
       ' top_k=$effectiveTopK'
       ' top_p=$effectiveTopP',
     );

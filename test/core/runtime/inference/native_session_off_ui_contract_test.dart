@@ -31,7 +31,7 @@ void main() {
 
       expect(source, contains('Future<int> createNativeSessionOffUi('));
       expect(source, contains('return Isolate.run(() {'));
-      expect(source, contains("'llb_create_session'"));
+      expect(source, contains("'llb_create_session_ex'"));
       expect(
         source,
         isNot(contains('.timeout(')),

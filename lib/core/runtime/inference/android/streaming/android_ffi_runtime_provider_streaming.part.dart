@@ -174,6 +174,17 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
 
           try {
             await _concurrencyManager.runInferenceSerially(() async {
+              final resources = ResourceMonitor.instance;
+              resources.retain();
+              var memoryCancellationSent = false;
+              void handleCriticalMemory() {
+                if (memoryCancellationSent) return;
+                memoryCancellationSent = true;
+                AndroidFfiRuntimeProvider._log('[RESOURCE_GUARD] action=cancel reason=critical_memory');
+                cancellationToken.cancel();
+              }
+              resources.addCriticalListener(handleCriticalMemory);
+              try {
               AndroidFfiRuntimeProvider._log(
                 '[ACTION_BODY_BEGIN] sessionId=${request.sessionId} '
                 'modelId=${request.modelId} '
@@ -368,6 +379,18 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 'first_ffi_completed=${flowState.firstFfiInvocationCompleted} '
                 'controller_closed=${controller.isClosed}',
               );
+              } finally {
+                resources.removeCriticalListener(handleCriticalMemory);
+                if (memoryCancellationSent && _bindings != null) {
+                  await _nativeSessionSubsystem.releaseAllNativeSessions(
+                      _bindings!, reason: 'critical_memory');
+                  resources.readNative = null;
+                  _updateRuntimeStatus(LocalRuntimeStatus.failed,
+                      message: 'Generazione fermata per pressione sulla memoria. Riprova quando la RAM è disponibile.');
+                }
+                resources.phase = 'idle';
+                resources.release();
+              }
             });
           } finally {
             if (slotClaimed && !pollingLoopEntered) {

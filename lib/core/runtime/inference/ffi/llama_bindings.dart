@@ -5,50 +5,67 @@ import 'package:ffi/ffi.dart';
 
 class LlamaBridgeBindings {
   LlamaBridgeBindings(DynamicLibrary lib)
-      : _initBackend =
-            lib.lookupFunction<LlbInitBackendNative, LlbInitBackendDart>(
-          'llb_init_backend',
-        ),
-        _gpuBackendName = lib.lookupFunction<
-            LlbGpuBackendNameNative,
-            LlbGpuBackendNameDart>('llb_gpu_backend_name'),
-        _gpuBackendReason = lib.lookupFunction<
-            LlbGpuBackendReasonNative,
-            LlbGpuBackendReasonDart>('llb_gpu_backend_reason'),
-        _createSession =
-            lib.lookupFunction<LlbCreateSessionNative, LlbCreateSessionDart>(
-          'llb_create_session',
-        ),
-        _sessionTokenCount = lib.lookupFunction<
-            LlbSessionTokenCountNative,
-            LlbSessionTokenCountDart>('llb_session_token_count'),
-        _sessionStartGen =
-            lib.lookupFunction<LlbSessionStartGenNative, LlbSessionStartGenDart>(
-          'llb_session_start_gen',
-        ),
-        _sessionPollToken =
-            lib.lookupFunction<LlbSessionPollTokenNative, LlbSessionPollTokenDart>(
-          'llb_session_poll_token',
-        ),
-        _sessionCancel =
-            lib.lookupFunction<LlbSessionCancelNative, LlbSessionCancelDart>(
-          'llb_session_cancel',
-        ),
-        _releaseSession =
-            lib.lookupFunction<LlbReleaseSessionNative, LlbReleaseSessionDart>(
-          'llb_release_session',
-        ),
-        _sessionIsActive =
-            lib.lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
-          'llb_session_is_active',
-        ),
-        _sessionIsGenerating =
-            lib.lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
-          'llb_session_is_generating',
-        ),
-        _sessionLastError = lib.lookupFunction<
-            LlbSessionLastErrorNative,
-            LlbSessionLastErrorDart>('llb_session_last_error');
+    : _initBackend = lib
+          .lookupFunction<LlbInitBackendNative, LlbInitBackendDart>(
+            'llb_init_backend',
+          ),
+      _gpuBackendName = lib
+          .lookupFunction<LlbGpuBackendNameNative, LlbGpuBackendNameDart>(
+            'llb_gpu_backend_name',
+          ),
+      _gpuBackendReason = lib
+          .lookupFunction<LlbGpuBackendReasonNative, LlbGpuBackendReasonDart>(
+            'llb_gpu_backend_reason',
+          ),
+      _createSession = lib
+          .lookupFunction<LlbCreateSessionNative, LlbCreateSessionDart>(
+            'llb_create_session',
+          ),
+      _sessionTokenCount = lib
+          .lookupFunction<LlbSessionTokenCountNative, LlbSessionTokenCountDart>(
+            'llb_session_token_count',
+          ),
+      _sessionStartGen = lib
+          .lookupFunction<LlbSessionStartGenNative, LlbSessionStartGenDart>(
+            'llb_session_start_gen',
+          ),
+      _sessionPollToken = lib
+          .lookupFunction<LlbSessionPollTokenNative, LlbSessionPollTokenDart>(
+            'llb_session_poll_token',
+          ),
+      _sessionCancel = lib
+          .lookupFunction<LlbSessionCancelNative, LlbSessionCancelDart>(
+            'llb_session_cancel',
+          ),
+      _releaseSession = lib
+          .lookupFunction<LlbReleaseSessionNative, LlbReleaseSessionDart>(
+            'llb_release_session',
+          ),
+      _sessionIsActive = lib
+          .lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
+            'llb_session_is_active',
+          ),
+      _sessionIsGenerating = lib
+          .lookupFunction<LlbSessionIsActiveNative, LlbSessionIsActiveDart>(
+            'llb_session_is_generating',
+          ),
+      _sessionLastError = lib
+          .lookupFunction<LlbSessionLastErrorNative, LlbSessionLastErrorDart>(
+            'llb_session_last_error',
+          ),
+      _sessionMetric = lib
+          .lookupFunction<Int64 Function(Int64, Int32), int Function(int, int)>(
+            'llb_session_metric',
+          );
+
+  final int Function(int, int) _sessionMetric;
+  Map<String, int> sessionMetrics(int session) => {
+    'context': _sessionMetric(session, 0),
+    'batch': _sessionMetric(session, 1),
+    'micro_batch': _sessionMetric(session, 2),
+    'gpu_layers': _sessionMetric(session, 3),
+    'decode_calls': _sessionMetric(session, 4),
+  };
 
   final LlbInitBackendDart _initBackend;
   final LlbGpuBackendNameDart _gpuBackendName;
@@ -149,8 +166,7 @@ class LlamaBridgeBindings {
 
     if (activeState != 1) {
       final lastError = _sessionLastError(sessionId).toDartString().trim();
-      final suffix =
-          lastError.isEmpty ? '' : ' Native error: $lastError';
+      final suffix = lastError.isEmpty ? '' : ' Native error: $lastError';
 
       throw StateError(
         'Native session is inactive before startGeneration '
@@ -158,20 +174,11 @@ class LlamaBridgeBindings {
       );
     }
 
-    return _sessionStartGen(
-      sessionId,
-      promptPtr,
-      maxTokens,
-      temperature,
-    );
+    return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
   }
 
   int pollToken(int sessionId, Pointer<Utf8> buf) =>
-      _sessionPollToken(
-        sessionId,
-        buf,
-        LlamaNativeDefaults.tokenBufferSize,
-      );
+      _sessionPollToken(sessionId, buf, LlamaNativeDefaults.tokenBufferSize);
 
   void cancelSession(int sessionId) => _sessionCancel(sessionId);
 
