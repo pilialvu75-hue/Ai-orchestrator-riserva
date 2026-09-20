@@ -168,6 +168,13 @@ class LocalPromptTemplates {
     );
 
     switch (template) {
+      case LocalInferenceModelIds.templateNemotron:
+        return _buildNemotronPrompt(
+          systemPrompt: finalSystemPrompt,
+          context: boundedContext,
+          userPrompt: userPrompt,
+        );
+
       case 'llama3':
         return _buildLlama3Prompt(
           systemPrompt: finalSystemPrompt,
@@ -399,6 +406,47 @@ class LocalPromptTemplates {
         p.contains('prix') ||
         p.contains('precio') ||
         p.contains('quotazione');
+  }
+
+
+  // Text-only branch of NVIDIA's official Nano 4B chat template:
+  // https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/blob/main/tokenizer_config.json
+  // Use enable_thinking=false for the interactive local assistant. This is a
+  // generation prefix, not Qwen's /no_think instruction.
+  static String _buildNemotronPrompt({
+    required String systemPrompt,
+    required List<ChatTurn> context,
+    required String userPrompt,
+  }) {
+    final buffer = StringBuffer();
+    void appendTurn(String role, String content) {
+      buffer.write('<|im_start|>$role\n$content<|im_end|>\n');
+    }
+
+    appendTurn('system', systemPrompt);
+    for (final turn in context) {
+      var content = turn.content;
+      if (turn.role == ChatRole.assistant) {
+        // All historical assistant turns precede the current user prompt.
+        // Keep final answers and omit completed historical reasoning.
+        final closingThink = content.lastIndexOf('</think>');
+        if (closingThink >= 0) {
+          content = content.substring(closingThink + '</think>'.length);
+        } else {
+          final openingThink = content.indexOf('<think>');
+          if (openingThink >= 0) {
+            content = content.substring(0, openingThink);
+          }
+        }
+        content = '<think></think>${content.trim()}';
+      }
+      appendTurn(_roleName(turn.role), content);
+    }
+    appendTurn('user', userPrompt);
+    buffer.write('<|im_start|>assistant\n<think></think>');
+    final composed = buffer.toString();
+    _logFinalPromptMetrics(composed, userPrompt.length);
+    return composed;
   }
 
   static String _buildLlama3Prompt({

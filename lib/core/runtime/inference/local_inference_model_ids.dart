@@ -61,6 +61,7 @@ class LocalInferenceModelIds {
   /// Non viene eliminato perché `llama_1b` identifica storicamente
   /// TinyLlama nel manifest Android.
   static const String templateZephyr = 'zephyr';
+  static const String templateNemotron = 'nemotron3_nano_4b_chatml';
 
   // ===========================================================================
   // MODELLI PER FAMIGLIA
@@ -162,6 +163,12 @@ class LocalInferenceModelIds {
   /// contiene "qwen" nel nome ma non deve essere trattato come Qwen3.
   static String resolveTemplate(String modelId) {
     final exactId = modelId.trim();
+    final nemotronId = exactId.toLowerCase();
+    if (nemotronId == nemotron3Nano4b ||
+        nemotronId.contains('nemotron3-nano-4b') ||
+        nemotronId.contains('nemotron-3-nano-4b')) {
+      return templateNemotron;
+    }
 
     // -------------------------------------------------------------------------
     // Match esatto
