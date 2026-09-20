@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_structured_json.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 
 /// Converts the Engineer model's structured response into a side-effect-free
@@ -21,7 +22,10 @@ final class WorkshopChangeProposalDecoder {
       throw const FormatException('Workshop request id cannot be empty.');
     }
 
-    final jsonText = _extractJson(responseText);
+    final jsonText = WorkshopStructuredJson.extractObjectText(
+      responseText,
+      emptyMessage: 'Workshop implementation response cannot be empty.',
+    );
     final decoded = jsonDecode(jsonText);
     if (decoded is! Map) {
       throw const FormatException(
@@ -114,93 +118,6 @@ final class WorkshopChangeProposalDecoder {
       validationNotes: validationNotes,
       warnings: warnings,
     );
-  }
-
-  static String _extractJson(String responseText) {
-    final normalized = responseText.trim();
-    if (normalized.isEmpty) {
-      throw const FormatException(
-        'Workshop implementation response cannot be empty.',
-      );
-    }
-
-    final fenced = RegExp(
-      r'```(?:json)?\s*([\s\S]*?)\s*```',
-      caseSensitive: false,
-    ).firstMatch(normalized);
-    final fencedBody = fenced?.group(1)?.trim();
-    if (fencedBody != null && fencedBody.isNotEmpty) {
-      return fencedBody;
-    }
-
-    // Small local models occasionally surround an otherwise valid structured
-    // response with one sentence of natural language despite the JSON-only
-    // system prompt. Recover only a balanced top-level JSON object; every
-    // decoded field/path still passes the normal strict proposal validation.
-    for (var start = normalized.indexOf('{');
-        start >= 0;
-        start = normalized.indexOf('{', start + 1)) {
-      final candidate = _balancedJsonObjectAt(normalized, start);
-      if (candidate == null) {
-        continue;
-      }
-
-      try {
-        final decoded = jsonDecode(candidate);
-        if (decoded is Map) {
-          return candidate;
-        }
-      } on FormatException {
-        // Keep scanning for a later complete object.
-      }
-    }
-
-    return normalized;
-  }
-
-  static String? _balancedJsonObjectAt(String text, int start) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var index = start; index < text.length; index++) {
-      final char = text[index];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (char == r'\\') {
-          escaped = true;
-          continue;
-        }
-        if (char == '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (char == '"') {
-        inString = true;
-        continue;
-      }
-      if (char == '{') {
-        depth += 1;
-        continue;
-      }
-      if (char == '}') {
-        depth -= 1;
-        if (depth == 0) {
-          return text.substring(start, index + 1);
-        }
-        if (depth < 0) {
-          return null;
-        }
-      }
-    }
-
-    return null;
   }
 
   static String _requiredString(
