@@ -35,7 +35,25 @@ class _AndroidFfiNativeSessionSubsystem {
           ' isolateHash=$isolateHash',
         );
       }
-      final existingSessionId = _owner._nativeSessionsByModel[modelPath];
+      final resources = ResourceMonitor.instance;
+      final sample = await resources.sample();
+      if (sample?.critical == true) {
+        _log('[RESOURCE_GUARD] action=defer reason=critical_memory');
+        throw StateError('Memoria insufficiente: attendi prima di avviare il modello locale.');
+      }
+      final profile = ResourceProfile.select(sample, phi: modelId == 'phi3_5_mini' || modelPath.toLowerCase().contains('phi-3.5'));
+      var existingSessionId = _owner._nativeSessionsByModel[modelPath];
+      if (existingSessionId != null && sample?.pressured == true &&
+          (bindings.sessionMetrics(existingSessionId)['context']! > profile.context ||
+           bindings.sessionMetrics(existingSessionId)['micro_batch']! > profile.microBatch)) {
+        // This runs inside the serial inference queue, before startGeneration.
+        await shutdownNativeSessionGracefully(bindings, existingSessionId,
+            reason: 'memory_pressure', modelPath: modelPath);
+        if (_owner._nativeSessionsByModel.containsKey(modelPath)) {
+          throw StateError('Previous local session has not stopped safely.');
+        }
+        existingSessionId = null;
+      }
       if (existingSessionId != null &&
           bindings.sessionIsActive(existingSessionId) == 1) {
         final reusedPointerHex =
@@ -43,6 +61,8 @@ class _AndroidFfiNativeSessionSubsystem {
         final reusedPointerAddress = existingSessionId > 0
             ? Pointer<Void>.fromAddress(existingSessionId).address
             : 0;
+        final monitoredSession = existingSessionId;
+        resources.readNative = () => bindings.sessionMetrics(monitoredSession);
         markSessionAsMostRecentlyUsed(modelPath);
         _owner._nativeSessionId = existingSessionId;
         _log(
@@ -118,16 +138,22 @@ class _AndroidFfiNativeSessionSubsystem {
       _log(
         '[NATIVE_SESSION_LOAD_OFF_UI_BEGIN] modelId=${modelId ?? 'unknown'} model_path=$modelPath',
       );
+      resources.readNative = null;
       const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      _log('[RESOURCE_PROFILE] reason=${profile.reason} '
+          'n_ctx=${profile.context} n_batch=${profile.batch} n_ubatch=${profile.microBatch}');
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       _log(
         '[LOCAL_EXECUTION_CONFIG] mode=cpu_baseline '
-        'gpu_layers=$desiredGpuLayers n_ctx=${LlamaNativeDefaults.nCtx} '
-        'n_batch=${LlamaNativeDefaults.nBatch}',
+        'gpu_layers=$desiredGpuLayers n_ctx=${profile.context} '
+        'n_batch=${profile.batch}',
       );
       int created = await createNativeSessionOffUi(
         modelPath,
         nGpuLayers: desiredGpuLayers,
+        nCtx: profile.context,
+        nBatch: profile.batch,
+        nMicroBatch: profile.microBatch,
       );
       _log(
         '[NATIVE_SESSION_LOAD_OFF_UI_END] modelId=${modelId ?? 'unknown'} model_path=$modelPath session=$created gpu_layers=$desiredGpuLayers',
@@ -161,6 +187,9 @@ class _AndroidFfiNativeSessionSubsystem {
         created = await createNativeSessionOffUi(
           modelPath,
           nGpuLayers: 0,
+          nCtx: profile.context,
+          nBatch: profile.batch,
+          nMicroBatch: profile.microBatch,
         );
         final fallbackPointerHex = '0x${created.toUnsigned(64).toRadixString(16)}';
         final fallbackPointerAddress =
@@ -191,6 +220,9 @@ class _AndroidFfiNativeSessionSubsystem {
         throw StateError('Native session inactive after create: $err');
       }
 
+      final monitoredSession = created;
+      resources.readNative = () => bindings.sessionMetrics(monitoredSession);
+      await resources.sample();
       _owner._nativeSessionId = created;
       _owner._nativeSessionsByModel[modelPath] = created;
       markSessionAsMostRecentlyUsed(modelPath);

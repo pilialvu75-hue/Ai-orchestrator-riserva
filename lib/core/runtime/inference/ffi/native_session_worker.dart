@@ -22,14 +22,17 @@ Future<int> createNativeSessionOffUi(
   required int nGpuLayers,
   int nCtx = LlamaNativeDefaults.nCtx,
   int? nThreads,
+  int nBatch = 512,
+  int nMicroBatch = 128,
   String libraryPath = 'libllama_bridge.so',
 }) {
   final effectiveThreads = nThreads ?? LlamaNativeDefaults.nThreads;
   return Isolate.run(() {
     final library = DynamicLibrary.open(libraryPath);
-    final create = library.lookupFunction<
-        LlbCreateSessionNative,
-        LlbCreateSessionDart>('llb_create_session');
+    final create = library
+        .lookupFunction<LlbCreateSessionExNative, LlbCreateSessionExDart>(
+          'llb_create_session_ex',
+        );
     final pathPtr = modelPath.toNativeUtf8(allocator: calloc);
     try {
       return create(
@@ -37,6 +40,8 @@ Future<int> createNativeSessionOffUi(
         nCtx,
         effectiveThreads,
         nGpuLayers,
+        nBatch,
+        nMicroBatch,
       );
     } finally {
       calloc.free(pathPtr);
@@ -50,10 +55,11 @@ Future<int> createNativeSessionOffUi(
 Future<void> releaseNativeSessionOffUi(
   int sessionId, {
   String libraryPath = 'libllama_bridge.so',
-}) =>
-    Isolate.run(() {
-      final library = DynamicLibrary.open(libraryPath);
-      final release = library.lookupFunction<Void Function(Int64),
-          void Function(int)>('llb_release_session');
-      release(sessionId);
-    });
+}) => Isolate.run(() {
+  final library = DynamicLibrary.open(libraryPath);
+  final release = library
+      .lookupFunction<Void Function(Int64), void Function(int)>(
+        'llb_release_session',
+      );
+  release(sessionId);
+});

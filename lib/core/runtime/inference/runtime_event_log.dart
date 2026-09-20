@@ -222,7 +222,7 @@ class RuntimeEventLog {
       return RuntimeEventCategory.voice;
     }
 
-    if (tag.startsWith('GPU') || tag.startsWith('HARDWARE')) {
+    if (tag.startsWith('GPU') || tag.startsWith('HARDWARE') || tag.startsWith('RESOURCE_')) {
       return RuntimeEventCategory.hardware;
     }
 

@@ -28,6 +28,8 @@ import io.flutter.plugin.common.MethodChannel
  */
 class MainActivity : FlutterActivity() {
 
+    private var resourceTelemetry: ResourceTelemetry? = null
+
     private val channelName = "com.aiorchestrator/android_intents"
     private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
     private val sherpaAsrEventsChannelName = "com.aiorchestrator/sherpa_onnx_asr_events"
@@ -57,6 +59,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        resourceTelemetry?.close()
+        resourceTelemetry = ResourceTelemetry(applicationContext, flutterEngine)
         ProcessExitDiagnostics.register(this, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
         registerIntentChannel(flutterEngine)
@@ -72,6 +76,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        resourceTelemetry?.close()
+        resourceTelemetry = null
         releaseVoiceAudioFocus()
         super.onDestroy()
     }

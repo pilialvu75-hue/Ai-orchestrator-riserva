@@ -11,6 +11,7 @@
 #include <cinttypes>
 #include <condition_variable>
 #include <cstring>
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <iomanip>
@@ -32,6 +33,19 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+
+// llama.cpp reports actual offloaded layer count during model loading.
+// Capture only on the loading thread; absent/unrecognised evidence stays -1.
+thread_local int loading_gpu_layers = -1;
+void telemetry_log(enum ggml_log_level level, const char* text, void*) {
+    if (text == nullptr) return;
+    const char* offloaded = std::strstr(text, "offloaded ");
+    int layers = -1, total = -1;
+    if (offloaded && std::sscanf(offloaded, "offloaded %d/%d layers to GPU", &layers, &total) == 2 &&
+        layers >= 0 && layers <= total) loading_gpu_layers = layers;
+    __android_log_write(level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO,
+                        LOG_TAG, text);
+}
 
 constexpr size_t kRingCapacity = 256;
 constexpr int32_t kMaxGeneratedTokens = 2048;
@@ -243,6 +257,9 @@ struct RuntimeSession {
     explicit RuntimeSession(int64_t id_in) : id(id_in) {}
 
     const int64_t id;
+    int telemetry_ctx = 0, telemetry_batch = 0, telemetry_ubatch = 0;
+    int telemetry_gpu_layers = -1;
+    std::atomic<int64_t> telemetry_decode_calls{0};
 
     mutable std::mutex generation_mutex;
     mutable std::mutex queue_mutex;
@@ -686,6 +703,7 @@ void run_generation(
              " stage=prefill batch_n_tokens=%d n_batch=%d n_ctx=%d offset=%d",
              session->id, owner_epoch, count, prefill_n_batch, n_ctx, offset);
         prefill_status = llama_decode(ctx, prefill_batch.batch);
+        if (prefill_status == 0) session->telemetry_decode_calls.fetch_add(1, std::memory_order_relaxed);
         if (session->cancel_requested.load(std::memory_order_acquire)) {
             set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_during_prefill");
             return;
@@ -934,6 +952,7 @@ void run_generation(
         step_batch.batch.n_tokens = 1;
 
         const int decode_status = llama_decode(ctx, step_batch.batch);
+        if (decode_status == 0) session->telemetry_decode_calls.fetch_add(1, std::memory_order_relaxed);
         if (session->cancel_requested.load(std::memory_order_acquire)) {
             set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_during_decode");
             return;
@@ -967,6 +986,7 @@ extern "C" {
 
 void llb_init_backend(void) {
     std::call_once(g_backend_init_once, []() {
+        llama_log_set(telemetry_log, nullptr);
         llama_backend_init();
         g_backend_initialized.store(true, std::memory_order_release);
         LOGI("[SESSION_CREATE_BEGIN] backend_initialized=true");
@@ -994,10 +1014,15 @@ const char* llb_gpu_backend_reason(void) {
 }
 
 int64_t llb_create_session(
-    const char* model_path,
-    int32_t n_ctx,
-    int32_t n_threads,
-    int32_t n_gpu_layers
+    const char* model_path, int32_t n_ctx, int32_t n_threads, int32_t n_gpu_layers
+) {
+    return llb_create_session_ex(model_path, n_ctx, n_threads, n_gpu_layers, 512,
+                                 n_gpu_layers > 0 ? 512 : 128);
+}
+
+int64_t llb_create_session_ex(
+    const char* model_path, int32_t n_ctx, int32_t n_threads,
+    int32_t n_gpu_layers, int32_t n_batch, int32_t n_ubatch
 ) {
     llb_init_backend();
     set_global_error("");
@@ -1073,7 +1098,9 @@ int64_t llb_create_session(
 
     {
         std::lock_guard<std::mutex> lock(session->native_mutex);
+        loading_gpu_layers = -1;
         session->model = llama_model_load_from_file(model_path, mparams);
+        session->telemetry_gpu_layers = gpu_enabled ? loading_gpu_layers : 0;
     }
 
     if (session->model == nullptr) {
@@ -1085,15 +1112,14 @@ int64_t llb_create_session(
     llama_context_params cparams = llama_context_default_params();
     const uint32_t effective_n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
     const int32_t effective_n_threads = n_threads > 0 ? n_threads : 2;
-    constexpr uint32_t kPrefillBatchSize = 512;
+    const uint32_t kPrefillBatchSize = static_cast<uint32_t>(std::clamp(n_batch, 32, 512));
     cparams.n_ctx = effective_n_ctx;
     cparams.n_threads = effective_n_threads;
     cparams.n_threads_batch = effective_n_threads;
     cparams.n_batch = kPrefillBatchSize;
     // Bound CPU compute workspace independently of the logical decode batch.
     // Keep context capacity and the prompt/token budget unchanged.
-    constexpr uint32_t kCpuMicroBatchSize = 128;
-    cparams.n_ubatch = gpu_enabled ? kPrefillBatchSize : kCpuMicroBatchSize;
+    cparams.n_ubatch = static_cast<uint32_t>(std::clamp(n_ubatch, 16, static_cast<int>(kPrefillBatchSize)));
     // RuntimeSession owns this atomic for the entire context lifetime. Release
     // joins the generation worker before freeing the context and its callback.
     cparams.abort_callback = [](void* data) -> bool {
@@ -1134,6 +1160,9 @@ int64_t llb_create_session(
         return -4;
     }
 
+    session->telemetry_ctx = static_cast<int>(llama_n_ctx(session->ctx));
+    session->telemetry_batch = static_cast<int>(llama_n_batch(session->ctx));
+    session->telemetry_ubatch = static_cast<int>(llama_n_ubatch(session->ctx));
     const llama_vocab* vocab = llama_model_get_vocab(session->model);
     const int ctx_size = llama_n_ctx(session->ctx);
     char model_desc[512] = {0};
@@ -1450,6 +1479,21 @@ const char* llb_session_last_error(int64_t session_id) {
 
     g_tls_error = session->get_error_copy();
     return g_tls_error.c_str();
+}
+
+// Immutable configuration and atomic progress only: never lock a running decode
+// or dereference a context that release could be destroying on another thread.
+int64_t llb_session_metric(int64_t session_id, int32_t metric) {
+    auto session = find_session(session_id);
+    if (!session) return -1;
+    switch (metric) {
+        case 0: return session->telemetry_ctx;
+        case 1: return session->telemetry_batch;
+        case 2: return session->telemetry_ubatch;
+        case 3: return session->telemetry_gpu_layers;
+        case 4: return session->telemetry_decode_calls.load(std::memory_order_relaxed);
+        default: return -1;
+    }
 }
 
 }  // extern "C"

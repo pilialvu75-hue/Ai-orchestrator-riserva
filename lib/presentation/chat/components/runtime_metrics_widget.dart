@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart
 import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/presentation/chat/components/resource_metrics_panel.dart';
 
 class RuntimeMetricsWidget extends StatelessWidget {
   const RuntimeMetricsWidget({
@@ -129,13 +130,12 @@ class RuntimeMetricsWidget extends StatelessWidget {
             ),
             Text(
               'Backend compilato: ${hardwareSnapshot.gpuBackend.toUpperCase()}',
-              style: TextStyle(
-                color: hardwareSnapshot.gpuAccelerationActive
-                    ? const Color(0xFF4ADE80)
-                    : Colors.white38,
+              style: const TextStyle(
+                color: Colors.white54,
                 fontSize: 11,
               ),
             ),
+            const ResourceMetricsPanel(),
             if (runtimeMessage != null && runtimeMessage.isNotEmpty) ...[
               const Divider(height: 16, thickness: 0.5),
               Text(

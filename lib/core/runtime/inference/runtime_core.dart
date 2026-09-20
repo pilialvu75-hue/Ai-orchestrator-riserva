@@ -6,6 +6,7 @@
 library runtime_core;
 
 import 'dart:async';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'dart:collection';
 import 'dart:ffi';
 import 'dart:io';
