@@ -38,6 +38,29 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+    test('recovers valid Reviewer JSON surrounded by harmless model prose',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _reviewSession(gateway);
+
+      final verdict = const WorkshopProposalReviewGate().evaluate(
+        session: session,
+        responseText: '''
+Ecco la verifica:
+{"approved":true,"summary":"Review passed","findings":[],"warnings":[]}
+Fine verifica.
+''',
+      );
+
+      expect(verdict.approved, isTrue);
+      expect(verdict.summary, 'Review passed');
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test('rejected Reviewer verdict blocks the session without applying changes',
         () async {
       final gateway = _RecordingGateway(

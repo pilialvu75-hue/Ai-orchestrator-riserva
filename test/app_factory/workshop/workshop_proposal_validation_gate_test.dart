@@ -38,6 +38,29 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+    test('recovers valid validation JSON surrounded by harmless model prose',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _validationSession(gateway);
+
+      final verdict = const WorkshopProposalValidationGate().evaluate(
+        session: session,
+        responseText: '''
+Risultato:
+{"valid":true,"summary":"Validation passed","checks":["ok"],"warnings":[]}
+Fine.
+''',
+      );
+
+      expect(verdict.valid, isTrue);
+      expect(verdict.summary, 'Validation passed');
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test('invalid verdict blocks the session without applying changes',
         () async {
       final gateway = _RecordingGateway(

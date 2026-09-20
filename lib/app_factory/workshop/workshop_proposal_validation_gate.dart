@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_structured_json.dart';
 
 /// Structured validation verdict for a staged Workshop proposal.
 ///
@@ -62,19 +63,12 @@ final class WorkshopProposalValidationGate {
   }
 
   WorkshopValidationVerdict _decode(String responseText) {
-    final normalized = responseText.trim();
-    if (normalized.isEmpty) {
-      throw const FormatException(
-        'Workshop validation response cannot be empty.',
-      );
-    }
+    final jsonText = WorkshopStructuredJson.extractObjectText(
+      responseText,
+      emptyMessage: 'Workshop validation response cannot be empty.',
+    );
 
-    final fenced = RegExp(
-      r'^```(?:json)?\s*([\s\S]*?)\s*```$',
-      caseSensitive: false,
-    ).firstMatch(normalized);
-
-    final decoded = jsonDecode((fenced?.group(1) ?? normalized).trim());
+    final decoded = jsonDecode(jsonText);
     if (decoded is! Map) {
       throw const FormatException(
         'Workshop validation response must be a JSON object.',
