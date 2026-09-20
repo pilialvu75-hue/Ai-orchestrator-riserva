@@ -52,6 +52,10 @@ final class WorkshopVerifiedLocalBuildProvider
                   flutterExecutable,
                   environment,
                 ),
+                dartExecutable: _resolveDartExecutable(
+                  flutterExecutable,
+                  environment,
+                ),
                 environment: environment,
                 timeout: buildTimeout,
               ),
