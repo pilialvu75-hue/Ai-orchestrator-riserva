@@ -224,6 +224,28 @@ void main() {
       expect(records, isEmpty);
     });
 
+
+    test('oversized persisted record is ignored on read', () async {
+      final persistence = _MemoryPersistence();
+      final store = AssistantDurableMemoryStore(persistence: persistence);
+      final oversized = List<String>.filled(
+        AssistantDurableMemoryPolicy.maxContentChars + 1,
+        'x',
+      ).join();
+
+      persistence.values[
+          'assistant.durable_memory.v1:project:Ai-orchestrator-riserva'] =
+          '[{"recordKey":"bad","scope":"project","scopeId":"Ai-orchestrator-riserva","kind":"fact","content":"$oversized","source":"verifiedTest","updatedAt":1,"status":"confirmed"}]';
+
+      expect(
+        await store.load(
+          scope: AssistantMemoryScope.project,
+          scopeId: 'Ai-orchestrator-riserva',
+        ),
+        isEmpty,
+      );
+    });
+
     test('remove deletes only the selected logical record', () async {
       final persistence = _MemoryPersistence();
       final store = AssistantDurableMemoryStore(persistence: persistence);
