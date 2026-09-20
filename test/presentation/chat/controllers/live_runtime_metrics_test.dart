@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
@@ -14,6 +15,18 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    const channel = MethodChannel('com.aiorchestrator/resources');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (_) async => <String, Object>{
+        'availableBytes': 3 << 30,
+        'totalBytes': 8 << 30,
+        'thresholdBytes': 256 << 20,
+        'lowMemory': false,
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
     final runtime = ValueNotifier(const ChatRuntimeSnapshot());
     final hardware = ValueNotifier(const HardwareSnapshot());
     final system =
@@ -40,6 +53,8 @@ void main() {
     expect(find.text('STREAMING • cloud'), findsOneWidget);
     expect(find.text('Backend compilato: VULKAN'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+    // Let the last bounded sensor request finish after the panel releases its lease.
+    await tester.pump(const Duration(seconds: 1));
     runtime.dispose();
     hardware.dispose();
     system.dispose();
