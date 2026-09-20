@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_structured_json.dart';
 
 /// Structured Reviewer verdict for a staged Workshop proposal.
 ///
@@ -64,17 +65,12 @@ final class WorkshopProposalReviewGate {
   }
 
   WorkshopReviewVerdict _decode(String responseText) {
-    final normalized = responseText.trim();
-    if (normalized.isEmpty) {
-      throw const FormatException('Workshop reviewer response cannot be empty.');
-    }
+    final jsonText = WorkshopStructuredJson.extractObjectText(
+      responseText,
+      emptyMessage: 'Workshop reviewer response cannot be empty.',
+    );
 
-    final fenced = RegExp(
-      r'^```(?:json)?\s*([\s\S]*?)\s*```$',
-      caseSensitive: false,
-    ).firstMatch(normalized);
-
-    final decoded = jsonDecode((fenced?.group(1) ?? normalized).trim());
+    final decoded = jsonDecode(jsonText);
     if (decoded is! Map) {
       throw const FormatException(
         'Workshop reviewer response must be a JSON object.',
