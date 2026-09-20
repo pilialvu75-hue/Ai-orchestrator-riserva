@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
+import 'package:ai_orchestrator/features/chat_memory/chronological_recall_policy.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
 import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
@@ -46,20 +48,48 @@ class ConversationMemoryService {
     String? systemPrompt,
     String? excludedMessageId,
   }) async {
-    // Semantic recall is intentionally not executed on the response hot path
-    // while RollingContextBuilder does not consume recalledContext. Running an
-    // embedding + database scan here added latency without changing the prompt
-    // sent to the model. The recall API and stored embeddings remain available
-    // for the later chronological relevance-aware memory policy.
-    const recalled = <ChatTurn>[];
-
-    final result = _rollingContextBuilder.build(
+    // First build the ordinary recent chronological window. This path never
+    // executes semantic search or query embeddings.
+    final recent = _rollingContextBuilder.build(
       messages: messages,
       userPrompt: userPrompt,
       systemPrompt: systemPrompt,
       excludedMessageId: excludedMessageId,
-      recalledContext: recalled,
     );
+
+    final recallIntent = ChronologicalRecallPolicy.shouldRecall(userPrompt);
+    var recallRequested = false;
+    List<ChatTurn> recalled = const <ChatTurn>[];
+
+    if (recallIntent) {
+      final normalizedHistory = _normalizedConversationTurns(
+        messages: messages,
+        excludedMessageId: excludedMessageId,
+      );
+      final portableRecent = _portableRecentTail(
+        normalizedHistory,
+        maxTurns: ConversationContextLimits.safeCrossRuntimeTurns,
+      );
+
+      recallRequested = portableRecent.length < normalizedHistory.length;
+      if (recallRequested) {
+        recalled = _selectChronologicalRecall(
+          history: normalizedHistory,
+          recentContext: portableRecent,
+          maxExchanges: ChronologicalRecallPolicy.maxRecalledExchanges,
+        );
+      }
+    }
+
+    final result = recalled.isEmpty
+        ? recent
+        : _rollingContextBuilder.build(
+            messages: messages,
+            userPrompt: userPrompt,
+            systemPrompt: systemPrompt,
+            excludedMessageId: excludedMessageId,
+            recalledContext: recalled,
+          );
 
     debugPrint(
       '[MEMORY_WINDOW] session=$sessionId turns=${result.contextTurns.length} trimmed=${result.trimmedLines} total_chars=${result.totalChars}',
@@ -76,11 +106,126 @@ class ConversationMemoryService {
     }
 
     debugPrint(
-      '[CONTEXT_REBUILD] session=$sessionId context_turns=${result.contextTurns.length} recall_turns=0 recall_mode=deferred',
+      '[CONTEXT_REBUILD] session=$sessionId '
+      'context_turns=${result.contextTurns.length} '
+      'recall_turns=${recalled.length} '
+      'recall_mode=${recalled.isEmpty ? 'recent_only' : 'chronological_conditional'} '
+      'recall_requested=$recallRequested',
     );
 
     return result.contextTurns;
   }
+
+  List<ChatTurn> _normalizedConversationTurns({
+    required List<ChatMessage> messages,
+    required String? excludedMessageId,
+  }) {
+    final turns = <ChatTurn>[];
+
+    for (final message in messages) {
+      if (excludedMessageId != null && message.id == excludedMessageId) {
+        continue;
+      }
+
+      final normalized = _normalizer.normalize(
+        ChatTurn(
+          role: ChatTurnNormalizer.roleFromText(message.role),
+          content: message.content,
+        ),
+      );
+
+      if (normalized.content.isEmpty || normalized.role == ChatRole.system) {
+        continue;
+      }
+      turns.add(normalized);
+    }
+
+    return List<ChatTurn>.unmodifiable(turns);
+  }
+
+  List<ChatTurn> _portableRecentTail(
+    List<ChatTurn> history, {
+    required int maxTurns,
+  }) {
+    if (maxTurns <= 0 || history.isEmpty) {
+      return const <ChatTurn>[];
+    }
+
+    var start = history.length > maxTurns ? history.length - maxTurns : 0;
+
+    while (start < history.length && history[start].role == ChatRole.assistant) {
+      start++;
+    }
+
+    if (start >= history.length) {
+      return const <ChatTurn>[];
+    }
+
+    return List<ChatTurn>.unmodifiable(history.sublist(start));
+  }
+
+  List<ChatTurn> _selectChronologicalRecall({
+    required List<ChatTurn> history,
+    required List<ChatTurn> recentContext,
+    required int maxExchanges,
+  }) {
+    if (maxExchanges <= 0 || history.isEmpty) {
+      return const <ChatTurn>[];
+    }
+
+    final recentKeys = recentContext.map(_turnKey).toSet();
+    final olderPairs = <List<ChatTurn>>[];
+    ChatTurn? pendingUser;
+
+    for (final turn in history) {
+      if (turn.role == ChatRole.user) {
+        pendingUser = turn;
+        continue;
+      }
+
+      final user = pendingUser;
+      if (user == null || turn.role != ChatRole.assistant) {
+        continue;
+      }
+      pendingUser = null;
+
+      final userKey = _turnKey(user);
+      final assistantKey = _turnKey(turn);
+
+      if (recentKeys.contains(userKey) || recentKeys.contains(assistantKey)) {
+        continue;
+      }
+
+      olderPairs.add(<ChatTurn>[user, turn]);
+    }
+
+    if (olderPairs.isEmpty) {
+      return const <ChatTurn>[];
+    }
+
+    final start = olderPairs.length > maxExchanges
+        ? olderPairs.length - maxExchanges
+        : 0;
+    final selected = <ChatTurn>[];
+    final seen = <String>{};
+
+    for (final pair in olderPairs.sublist(start)) {
+      final userKey = _turnKey(pair[0]);
+      final assistantKey = _turnKey(pair[1]);
+      if (seen.contains(userKey) || seen.contains(assistantKey)) {
+        continue;
+      }
+      seen
+        ..add(userKey)
+        ..add(assistantKey);
+      selected.addAll(pair);
+    }
+
+    return List<ChatTurn>.unmodifiable(selected);
+  }
+
+  String _turnKey(ChatTurn turn) =>
+      '${turn.role.name}:${turn.content.trim().toLowerCase()}';
 
   /// Queues semantic indexing without delaying the response hot path.
   ///

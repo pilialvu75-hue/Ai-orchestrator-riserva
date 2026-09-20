@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
+import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
@@ -53,7 +54,8 @@ class CloudProviderStatusSnapshot {
 }
 
 class CloudRuntimeProvider implements RuntimeInferenceProvider {
-  static const int _maxContextTurns = 24;
+  static const int _maxContextTurns =
+      ConversationContextLimits.safeCrossRuntimeTurns;
   static const int _maxCacheEntries = 40;
   static const Duration _rateLimitBackoff = Duration(minutes: 2);
   static const Duration _quotaBackoff = Duration(minutes: 15);
