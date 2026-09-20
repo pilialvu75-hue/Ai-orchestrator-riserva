@@ -163,7 +163,6 @@ class AssistantDurableMemoryStore {
     final key = record.recordKey.trim();
     final scopeId = record.scopeId.trim();
     final content = record.content.trim();
-    final source = record.source.trim();
     final before = _nullableTrim(record.before);
     final after = _nullableTrim(record.after);
     final reason = _nullableTrim(record.reason);
@@ -179,17 +178,18 @@ class AssistantDurableMemoryStore {
       content,
       AssistantDurableMemoryPolicy.maxContentChars,
     );
-    _requireBounded(
-      'source',
-      source,
-      AssistantDurableMemoryPolicy.maxSourceChars,
-    );
     _requireOptionalBounded('before', before);
     _requireOptionalBounded('after', after);
     _requireOptionalBounded('reason', reason);
 
     if (record.updatedAt < 0) {
       throw ArgumentError.value(record.updatedAt, 'updatedAt');
+    }
+    if (record.source == AssistantMemorySource.modelCandidate &&
+        record.status == AssistantMemoryStatus.confirmed) {
+      throw ArgumentError(
+        'modelCandidate memories cannot be persisted as confirmed',
+      );
     }
 
     return AssistantDurableMemoryRecord(
@@ -198,7 +198,7 @@ class AssistantDurableMemoryStore {
       scopeId: scopeId,
       kind: record.kind,
       content: content,
-      source: source,
+      source: record.source,
       updatedAt: record.updatedAt,
       status: record.status,
       before: before,
