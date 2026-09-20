@@ -646,11 +646,10 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           previous: resumeSource,
           current: _journalExecution,
         );
-        final semanticRunner =
-            _runner is WorkshopProductionSemanticResumeRunner
-                ? _runner as WorkshopProductionSemanticResumeRunner
-                : null;
-        if (resumeContext != null && semanticRunner != null) {
+        if (resumeContext != null &&
+            _runner is WorkshopProductionSemanticResumeRunner) {
+          final semanticRunner =
+              _runner as WorkshopProductionSemanticResumeRunner;
           resultFuture = semanticRunner.runPreparedWithResumeContext(
             handle: handle,
             resumeContext: resumeContext,
