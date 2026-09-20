@@ -119,3 +119,8 @@ Cancellation and native session release remain enabled, including Android trim
 level 15 even when available RAM exceeds the low-memory threshold. Local error
 timing keeps the resolved request model when the provider omits it. This change
 does not enable GPU offload or establish a device performance improvement.
+
+Competition-result questions (including an explicit year such as the 2026 World
+Cup) now request web evidence through the existing policy for both local models.
+Sports rules and personal-name recall do not trigger a public search. Existing
+offline and already-enriched-context safeguards remain in force.

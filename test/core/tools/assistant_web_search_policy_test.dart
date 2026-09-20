@@ -3,6 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AssistantWebSearchPolicy.shouldSearch', () {
+    test('sports results request evidence, sports rules stay local', () {
+      for (final prompt in ['Chi ha vinto il mondiale del 2026?',
+          'Who won the 2026 World Cup?', 'Risultati delle olimpiadi']) {
+        expect(AssistantWebSearchPolicy.shouldSearch(prompt), isTrue, reason: prompt);
+      }
+      expect(AssistantWebSearchPolicy.shouldSearch('Spiega le regole del mondiale'), isFalse);
+      expect(AssistantWebSearchPolicy.shouldSearch('Come mi chiamo?'), isFalse);
+    });
     test('present office-holder identity requires fresh evidence', () {
       for (final prompt in [
         'Chi è il presidente degli Stati Uniti?',

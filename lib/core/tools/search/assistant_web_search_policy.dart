@@ -18,7 +18,20 @@ abstract final class AssistantWebSearchPolicy {
     return _explicitWebIntent(value) ||
         _timeSensitiveIntent(value) ||
         isPresentOfficeHolderQuery(value) ||
+        isSportsResultQuery(value) ||
         _evidenceDrivenIntent(value);
+  }
+
+  /// Competition results need evidence even when a year is supplied.
+  static bool isSportsResultQuery(String prompt) {
+    final value = prompt.toLowerCase();
+    final competition = RegExp(
+      r'\b(?:mondiali?|world cup|champions league|olimpiadi|olympics|torneo|tournament|campionato|championship|super bowl)\b',
+    );
+    final result = RegExp(
+      r'\b(?:vinto|vincitore|vincitrice|risultato|risultati|won|winner|winners|score|results)\b',
+    );
+    return competition.hasMatch(value) && result.hasMatch(value);
   }
 
   /// Present-tense identity questions need fresh evidence even without "today".
