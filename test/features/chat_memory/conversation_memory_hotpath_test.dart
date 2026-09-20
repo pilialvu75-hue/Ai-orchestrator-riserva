@@ -75,12 +75,14 @@ class _RecordingSemanticIndex extends SemanticWorkspaceIndex {
 ConversationMemoryService _createService({
   required SemanticWorkspaceIndex semanticIndex,
   required WorkspaceEmbeddingService embeddingService,
+  MemoryWindowConfig? config,
 }) {
   return ConversationMemoryService(
     rollingContextBuilder: RollingContextBuilder(
       windowManager: MemoryWindowManager(
         tokenEstimator: const CharacterLengthEstimator(),
-        configProvider: () => MemoryWindowConfig.standard(isWeb: false),
+        configProvider: () =>
+            config ?? MemoryWindowConfig.standard(isWeb: false),
       ),
     ),
     semanticWorkspaceIndex: semanticIndex,
@@ -88,9 +90,22 @@ ConversationMemoryService _createService({
   );
 }
 
+List<ChatMessage> _completeExchanges(String sessionId, int count) {
+  return List<ChatMessage>.generate(count * 2, (index) {
+    final exchange = (index ~/ 2) + 1;
+    final user = index.isEven;
+    return ChatMessage(
+      id: '${user ? 'u' : 'a'}$exchange',
+      sessionId: sessionId,
+      role: user ? 'user' : 'assistant',
+      content: user ? 'question-$exchange' : 'answer-$exchange',
+      timestamp: index + 1,
+    );
+  });
+}
+
 void main() {
-  test('buildContext does not execute semantic recall that the builder ignores',
-      () async {
+  test('buildContext keeps semantic recall off the response hot path', () async {
     final service = _createService(
       semanticIndex: _FailIfQueriedSemanticIndex(),
       embeddingService: const _FailIfQueriedEmbeddingService(),
@@ -123,6 +138,63 @@ void main() {
         ChatTurn(role: ChatRole.user, content: 'prima domanda'),
         ChatTurn(role: ChatRole.assistant, content: 'prima risposta'),
       ],
+    );
+  });
+
+  test(
+      'contextual reference recalls at most two older exchanges in chronology '
+      'without semantic search', () async {
+    const sessionId = 'assistant-chronological';
+    final service = _createService(
+      semanticIndex: _FailIfQueriedSemanticIndex(),
+      embeddingService: const _FailIfQueriedEmbeddingService(),
+    );
+
+    final context = await service.buildContext(
+      sessionId: sessionId,
+      messages: _completeExchanges(sessionId, 15),
+      userPrompt: 'Come avevamo deciso?',
+    );
+
+    expect(context, hasLength(24));
+    expect(
+      context.take(4),
+      const <ChatTurn>[
+        ChatTurn(role: ChatRole.user, content: 'question-2'),
+        ChatTurn(role: ChatRole.assistant, content: 'answer-2'),
+        ChatTurn(role: ChatRole.user, content: 'question-3'),
+        ChatTurn(role: ChatRole.assistant, content: 'answer-3'),
+      ],
+    );
+    expect(context[4], const ChatTurn(role: ChatRole.user, content: 'question-6'));
+    expect(
+      context.last,
+      const ChatTurn(role: ChatRole.assistant, content: 'answer-15'),
+    );
+  });
+
+  test('ordinary chat preserves runtime-owned history and performs no recall',
+      () async {
+    const sessionId = 'assistant-recent-only';
+    final service = _createService(
+      semanticIndex: _FailIfQueriedSemanticIndex(),
+      embeddingService: const _FailIfQueriedEmbeddingService(),
+    );
+
+    final context = await service.buildContext(
+      sessionId: sessionId,
+      messages: _completeExchanges(sessionId, 15),
+      userPrompt: 'Spiegami la fotosintesi.',
+    );
+
+    expect(context, hasLength(30));
+    expect(
+      context.first,
+      const ChatTurn(role: ChatRole.user, content: 'question-1'),
+    );
+    expect(
+      context.last,
+      const ChatTurn(role: ChatRole.assistant, content: 'answer-15'),
     );
   });
 
