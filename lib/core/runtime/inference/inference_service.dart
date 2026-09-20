@@ -993,7 +993,9 @@ class InferenceService {
         }
 
         if (chunk.isFinal) {
-          final model = chunk.model ?? 'unknown';
+          final model = chunk.model ??
+              (runtimeMode == AiRuntimeMode.local ? localRequest?.modelId : null) ??
+              'unknown';
           final safeModel = RegExp(r'^[A-Za-z0-9_.-]{1,80}$').hasMatch(model)
               ? model : 'unknown';
           _log('[INFERENCE_TIMING] model=$safeModel mode=${runtimeMode.name} '

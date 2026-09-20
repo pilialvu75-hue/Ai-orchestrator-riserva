@@ -75,6 +75,50 @@ void main() {
   }
 
   group('InferenceService routing', () {
+    test('re-reads selected model for each request in the same chat', () async {
+      var selected = validModel.copyWith(id: 'phi3_5_mini',
+          localPath: '/tmp/phi.gguf');
+      final seenModels = <String?>[];
+      final seenPaths = <String?>[];
+      final service = InferenceService(
+        loadSelectedModel: () async => selected,
+        loadRuntimeMode: () async => AiRuntimeMode.local,
+        runtimeProvider: FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+          seenModels.add(request.modelId);
+          seenPaths.add(request.modelPath);
+          yield InferenceResponse.finalChunk(text: 'OK', tokensGenerated: 1,
+              model: request.modelId);
+        }),
+        cloudRuntimeProvider: buildCloudProvider(),
+        sessionManager: RuntimeSessionManager(),
+      );
+      await service.stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch')).toList();
+      selected = validModel.copyWith(id: 'nemotron3_nano_4b',
+          localPath: '/tmp/nemotron.gguf');
+      await service.stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch')).toList();
+      expect(seenModels, ['phi3_5_mini', 'nemotron3_nano_4b']);
+      expect(seenPaths, ['/tmp/phi.gguf', '/tmp/nemotron.gguf']);
+    });
+
+    test('local error timing retains the requested model', () async {
+      RuntimeEventLog.instance.clear();
+      final service = buildService(
+        mode: AiRuntimeMode.local, selectedModel: validModel,
+        localRuntimeProvider: FakeLocalRuntimeProvider(responses: [
+          InferenceResponse.error('Memory pressure'),
+        ]),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+      final responses = await service.stream(const InferenceRequest(
+          prompt: 'Ciao', sessionId: 'memory')).toList();
+      expect(responses.last.isError, isTrue);
+      final timing = RuntimeEventLog.instance.entries.map((e) => e.message)
+          .where((e) => e.startsWith('[INFERENCE_TIMING]')).single;
+      expect(timing, contains('model=gemma_2b mode=local'));
+      expect(timing, contains('first_content_ms=-1'));
+      expect(timing, contains('outcome=error'));
+    });
+
     test('local mode returns streamed final response', () async {
       RuntimeEventLog.instance.clear();
       final service = buildService(

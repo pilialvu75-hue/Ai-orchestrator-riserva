@@ -112,7 +112,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,
-            reason: 'poll_cancellation',
+            reason: flowState.memoryCancellationSent ? 'critical_memory' : 'poll_cancellation',
             boundary: 'poll_loop',
             cancellation: true,
           );
@@ -814,6 +814,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         runtimeResetReason: attemptState.runtimeResetReason,
         tokenBufRaw: tokenBufRaw,
         attemptState: attemptState,
+        memoryCancellationSent: flowState.memoryCancellationSent,
       );
       await _finalizeStreamingTerminalState(context);
     }

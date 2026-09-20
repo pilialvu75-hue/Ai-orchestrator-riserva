@@ -1,6 +1,9 @@
 part of '../../runtime_core.dart';
 
 class _StreamFlowControlState {
+  static const memoryPressureMessage =
+      'Generazione fermata per pressione sulla memoria. Riprova quando la RAM è disponibile.';
+  bool memoryCancellationSent = false;
   bool firstFfiInvocationAttempted = false;
   bool firstFfiInvocationCompleted = false;
 }
@@ -262,8 +265,11 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
         '[FFI_BRANCH] session=$sessionId name=cancelled_after_session_create native_session=$nativeSessionId',
       );
       _updateRuntimeStatus(
-        LocalRuntimeStatus.ready,
-        message: 'Model loaded; request cancelled before generation.',
+        flowState.memoryCancellationSent
+            ? LocalRuntimeStatus.failed : LocalRuntimeStatus.ready,
+        message: flowState.memoryCancellationSent
+            ? _StreamFlowControlState.memoryPressureMessage
+            : 'Model loaded; request cancelled before generation.',
       );
       if (!controller.isClosed) {
         await controller.close();
