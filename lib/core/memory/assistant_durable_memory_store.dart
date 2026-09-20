@@ -192,11 +192,15 @@ class AssistantDurableMemoryStore {
       throw ArgumentError.value(record.updatedAt, 'updatedAt');
     }
 
-    return record.copyWith(
+    return AssistantDurableMemoryRecord(
       recordKey: key,
+      scope: record.scope,
       scopeId: scopeId,
+      kind: record.kind,
       content: content,
       source: source,
+      updatedAt: record.updatedAt,
+      status: record.status,
       before: before,
       after: after,
       reason: reason,
