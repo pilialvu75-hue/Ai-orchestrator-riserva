@@ -489,6 +489,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
   /// changes applicable.
   WorkshopProjectApprovalEvidence approveCurrentProject({
     String approvedBy = 'owner',
+    String? derivedFromApprovalId,
   }) {
     _ensureNotDisposed();
 
@@ -505,11 +506,17 @@ final class WorkshopDashboardController extends ChangeNotifier {
     }
 
     final now = DateTime.now().toUtc();
+    final normalizedDerivedApprovalId = derivedFromApprovalId?.trim();
     final approval = WorkshopProjectApprovalEvidence(
       projectId: projectId,
       approvalId: 'approval:$projectId:${now.microsecondsSinceEpoch}',
       approvedAt: now,
       approvedBy: approvedBy.trim().isEmpty ? 'owner' : approvedBy.trim(),
+      derivedFromApprovalId:
+          normalizedDerivedApprovalId == null ||
+                  normalizedDerivedApprovalId.isEmpty
+              ? null
+              : normalizedDerivedApprovalId,
     );
 
     _updateState(
