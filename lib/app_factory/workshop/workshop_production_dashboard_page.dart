@@ -100,7 +100,9 @@ class _WorkshopProductionDashboardPageState
     if (taskId != null && taskId.isNotEmpty) {
       if (WorkshopProductionExecutionAffinity.isStaleForProject(
         projectId: dashboard.projectId,
-        execution: execution,
+        executionProjectId: execution.handle?.plan.id,
+        executionStatus: execution.status,
+        executionIsRunning: execution.isRunning,
       )) {
         await widget.executionController.abandonCurrentExecution();
         if (widget.executionController.state.status !=
@@ -700,24 +702,26 @@ class _WorkshopProductionDashboardPageState
 abstract final class WorkshopProductionExecutionAffinity {
   static bool isStaleForProject({
     required String? projectId,
-    required WorkshopProductionExecutionState execution,
+    required String? executionProjectId,
+    required WorkshopProductionExecutionStatus executionStatus,
+    required bool executionIsRunning,
   }) {
     final normalizedProjectId = projectId?.trim();
-    final executionProjectId = execution.handle?.plan.id.trim();
+    final normalizedExecutionProjectId = executionProjectId?.trim();
 
     if (normalizedProjectId == null ||
         normalizedProjectId.isEmpty ||
-        executionProjectId == null ||
-        executionProjectId.isEmpty) {
+        normalizedExecutionProjectId == null ||
+        normalizedExecutionProjectId.isEmpty) {
       return false;
     }
 
-    if (execution.isRunning ||
-        execution.status == WorkshopProductionExecutionStatus.idle) {
+    if (executionIsRunning ||
+        executionStatus == WorkshopProductionExecutionStatus.idle) {
       return false;
     }
 
-    return executionProjectId != normalizedProjectId;
+    return normalizedExecutionProjectId != normalizedProjectId;
   }
 }
 
