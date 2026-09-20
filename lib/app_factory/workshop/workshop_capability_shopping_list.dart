@@ -32,6 +32,7 @@ final class WorkshopProjectApprovalEvidence {
     required this.approvalId,
     required this.approvedAt,
     required this.approvedBy,
+    this.derivedFromApprovalId,
   });
 
   final String projectId;
@@ -39,11 +40,21 @@ final class WorkshopProjectApprovalEvidence {
   final DateTime approvedAt;
   final String approvedBy;
 
+  /// Optional provenance for a bounded follow-up project (for example a build
+  /// repair) that remains inside an already owner-approved production chain.
+  ///
+  /// This never widens the authorization scope by itself: the receiving
+  /// project still gets its own approval id and all Reviewer/validation/apply
+  /// gates remain mandatory.
+  final String? derivedFromApprovalId;
+
   Map<String, Object?> toJson() => <String, Object?>{
         'projectId': projectId,
         'approvalId': approvalId,
         'approvedAt': approvedAt.toUtc().toIso8601String(),
         'approvedBy': approvedBy,
+        if (derivedFromApprovalId != null)
+          'derivedFromApprovalId': derivedFromApprovalId,
       };
 }
 
