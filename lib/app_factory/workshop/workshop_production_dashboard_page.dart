@@ -411,12 +411,29 @@ class _WorkshopProductionDashboardPageState
         }
 
         final repairNumber = widget.executionController.buildRepairAttempts;
+        final sourceApproval =
+            widget.bundle.dashboardController.state.projectApproval;
+        final inheritsProjectAuthorization =
+            sourceApproval != null && sourceApproval.projectId == failedPlan.id;
+
         await _repairPreparer.prepare(
           failedPlan: failedPlan,
           failedBuild: result,
           repairNumber: repairNumber,
         );
         if (!mounted) return;
+
+        // A bounded repair is a continuation of the product the owner already
+        // authorized, not a new product request. Preserve that authorization
+        // only when the failed project itself carried valid project-scoped
+        // approval. The repair project still receives a distinct approval id
+        // and must pass Engineer -> Reviewer -> validation -> guarded apply.
+        if (inheritsProjectAuthorization) {
+          widget.bundle.dashboardController.approveCurrentProject(
+            approvedBy: sourceApproval.approvedBy,
+            derivedFromApprovalId: sourceApproval.approvalId,
+          );
+        }
 
         widget.executionController.resetForNextTask();
         setState(() {

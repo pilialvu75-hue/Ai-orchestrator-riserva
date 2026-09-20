@@ -363,6 +363,8 @@ final class _WorkshopProductionSnapshot {
         'projectApproval.approvedAt',
       ),
       approvedBy: approvedBy,
+      derivedFromApprovalId:
+          _nullableString(json['derivedFromApprovalId']),
     );
   }
 

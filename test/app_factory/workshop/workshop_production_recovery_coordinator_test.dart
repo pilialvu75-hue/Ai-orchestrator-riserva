@@ -63,7 +63,9 @@ void main() {
           ),
         ],
       );
-      final approval = firstController.approveCurrentProject();
+      final approval = firstController.approveCurrentProject(
+        derivedFromApprovalId: 'approval:root-project:42',
+      );
 
       final originalRequestId = firstController.state.requestId;
       final originalProjectId = firstController.state.projectId;
@@ -106,6 +108,10 @@ void main() {
       expect(
         secondController.state.projectApproval?.approvalId,
         approval.approvalId,
+      );
+      expect(
+        secondController.state.projectApproval?.derivedFromApprovalId,
+        'approval:root-project:42',
       );
 
       final restoredRequest =

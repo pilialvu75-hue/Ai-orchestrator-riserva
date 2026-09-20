@@ -30,6 +30,33 @@ void main() {
 
     expect(controller.state.isProjectApproved, isFalse);
   });
+  test('derived project approval keeps bounded repair provenance', () {
+    final controller = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+    );
+    addTearDown(controller.dispose);
+
+    controller.startProduction(
+      title: 'Repair contatore',
+      instruction: 'Correggi la build del progetto contatore.',
+    );
+
+    final approval = controller.approveCurrentProject(
+      approvedBy: 'owner',
+      derivedFromApprovalId: 'approval:project:root:123',
+    );
+
+    expect(controller.state.isProjectApproved, isTrue);
+    expect(
+      approval.derivedFromApprovalId,
+      'approval:project:root:123',
+    );
+    expect(
+      approval.toJson()['derivedFromApprovalId'],
+      'approval:project:root:123',
+    );
+  });
+
   test('recovery rejects project approval bound to another project', () async {
     final source = WorkshopDashboardController(
       engine: WorkshopEngine(),

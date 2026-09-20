@@ -22,16 +22,16 @@ abstract final class WorkshopLibraryCapabilityIds {
 /// Explicit proof that the project plan has crossed its owner/architecture
 /// approval boundary before reusable capabilities are selected.
 ///
-/// The current Workshop lifecycle does not yet persist a project-level
-/// approval object, so this evidence is intentionally passed into the pure
-/// shopping-list builder. The later production integration will create this
-/// object at the real approval boundary rather than making the builder guess.
+/// The Workshop lifecycle persists this evidence at the real project
+/// approval boundary. Reuse/shopping-list code receives the evidence explicitly
+/// and never infers authorization from project state or model output.
 final class WorkshopProjectApprovalEvidence {
   const WorkshopProjectApprovalEvidence({
     required this.projectId,
     required this.approvalId,
     required this.approvedAt,
     required this.approvedBy,
+    this.derivedFromApprovalId,
   });
 
   final String projectId;
@@ -39,11 +39,21 @@ final class WorkshopProjectApprovalEvidence {
   final DateTime approvedAt;
   final String approvedBy;
 
+  /// Optional provenance for a bounded follow-up project (for example a build
+  /// repair) that remains inside an already owner-approved production chain.
+  ///
+  /// This never widens the authorization scope by itself: the receiving
+  /// project still gets its own approval id and all Reviewer/validation/apply
+  /// gates remain mandatory.
+  final String? derivedFromApprovalId;
+
   Map<String, Object?> toJson() => <String, Object?>{
         'projectId': projectId,
         'approvalId': approvalId,
         'approvedAt': approvedAt.toUtc().toIso8601String(),
         'approvedBy': approvedBy,
+        if (derivedFromApprovalId != null)
+          'derivedFromApprovalId': derivedFromApprovalId,
       };
 }
 
