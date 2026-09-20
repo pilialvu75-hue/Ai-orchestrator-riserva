@@ -22,10 +22,9 @@ abstract final class WorkshopLibraryCapabilityIds {
 /// Explicit proof that the project plan has crossed its owner/architecture
 /// approval boundary before reusable capabilities are selected.
 ///
-/// The current Workshop lifecycle does not yet persist a project-level
-/// approval object, so this evidence is intentionally passed into the pure
-/// shopping-list builder. The later production integration will create this
-/// object at the real approval boundary rather than making the builder guess.
+/// The Workshop lifecycle persists this evidence at the real project
+/// approval boundary. Reuse/shopping-list code receives the evidence explicitly
+/// and never infers authorization from project state or model output.
 final class WorkshopProjectApprovalEvidence {
   const WorkshopProjectApprovalEvidence({
     required this.projectId,
