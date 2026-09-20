@@ -65,8 +65,16 @@ class AssistantDurableMemoryStore {
         for (final entry in item.entries)
           if (entry.key is String) entry.key as String: entry.value,
       };
-      final record = AssistantDurableMemoryRecord.tryFromJson(map);
-      if (record == null) continue;
+      final parsed = AssistantDurableMemoryRecord.tryFromJson(map);
+      if (parsed == null) continue;
+
+      AssistantDurableMemoryRecord record;
+      try {
+        record = _validateAndNormalize(parsed);
+      } on ArgumentError {
+        continue;
+      }
+
       if (record.scope != scope || record.scopeId != normalizedScopeId) continue;
       if (confirmedOnly && record.status != AssistantMemoryStatus.confirmed) {
         continue;
