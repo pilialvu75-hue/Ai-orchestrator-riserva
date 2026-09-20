@@ -18,6 +18,15 @@ enum AssistantMemoryStatus {
   confirmed,
 }
 
+enum AssistantMemorySource {
+  userExplicit,
+  appState,
+  verifiedTest,
+  projectEvent,
+  imported,
+  modelCandidate,
+}
+
 /// Compact durable fact/state retained above the model/provider layer.
 ///
 /// Durable memories are deliberately structured and bounded. Raw chat logs,
@@ -46,7 +55,7 @@ class AssistantDurableMemoryRecord {
 
   /// Closed or deterministic source label such as "user_explicit",
   /// "verified_test" or "app_state".
-  final String source;
+  final AssistantMemorySource source;
   final int updatedAt;
   final AssistantMemoryStatus status;
 
@@ -62,7 +71,7 @@ class AssistantDurableMemoryRecord {
     String? scopeId,
     AssistantMemoryKind? kind,
     String? content,
-    String? source,
+    AssistantMemorySource? source,
     int? updatedAt,
     AssistantMemoryStatus? status,
     String? before,
@@ -90,7 +99,7 @@ class AssistantDurableMemoryRecord {
         'scopeId': scopeId,
         'kind': kind.name,
         'content': content,
-        'source': source,
+        'source': source.name,
         'updatedAt': updatedAt,
         'status': status.name,
         if (before != null) 'before': before,
@@ -124,8 +133,9 @@ class AssistantDurableMemoryRecord {
     final scope = _enumByName(AssistantMemoryScope.values, scopeName);
     final kind = _enumByName(AssistantMemoryKind.values, kindName);
     final status = _enumByName(AssistantMemoryStatus.values, statusName);
+    final memorySource = _enumByName(AssistantMemorySource.values, source);
 
-    if (scope == null || kind == null || status == null) {
+    if (scope == null || kind == null || status == null || memorySource == null) {
       return null;
     }
 
@@ -135,7 +145,7 @@ class AssistantDurableMemoryRecord {
       scopeId: scopeId,
       kind: kind,
       content: content,
-      source: source,
+      source: memorySource,
       updatedAt: updatedAt.toInt(),
       status: status,
       before: json['before'] is String ? json['before']! as String : null,
@@ -159,7 +169,6 @@ abstract final class AssistantDurableMemoryPolicy {
   /// Durable memory stores compact facts, never whole logs/transcripts.
   static const int maxContentChars = 800;
   static const int maxTransitionFieldChars = 300;
-  static const int maxSourceChars = 64;
   static const int maxKeyChars = 160;
   static const int maxScopeIdChars = 160;
 }
