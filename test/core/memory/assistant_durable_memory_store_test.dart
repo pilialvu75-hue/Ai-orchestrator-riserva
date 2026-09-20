@@ -29,7 +29,7 @@ AssistantDurableMemoryRecord _record({
     scopeId: 'Ai-orchestrator-riserva',
     kind: AssistantMemoryKind.transition,
     content: content,
-    source: 'verified_test',
+    source: AssistantMemorySource.verifiedTest,
     updatedAt: updatedAt,
     status: status,
     before: before,
@@ -71,6 +71,21 @@ void main() {
       expect(confirmed, hasLength(1));
       expect(confirmed.single.status, AssistantMemoryStatus.confirmed);
       expect(confirmed.single.updatedAt, 2);
+    });
+
+
+    test('model candidate cannot self-promote to confirmed memory', () async {
+      final persistence = _MemoryPersistence();
+      final store = AssistantDurableMemoryStore(persistence: persistence);
+
+      final candidate = _record(
+        status: AssistantMemoryStatus.confirmed,
+      ).copyWith(source: AssistantMemorySource.modelCandidate);
+
+      await expectLater(
+        store.upsert(candidate),
+        throwsArgumentError,
+      );
     });
 
     test('same logical key replaces stale state instead of accumulating', () async {
