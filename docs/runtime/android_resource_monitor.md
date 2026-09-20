@@ -70,3 +70,20 @@ measured GPU profile selection, long-session validation, Voice/Live integration.
 - Native aggregated entrypoint passed C++17 syntax checks against the exact
   pinned llama.cpp headers with both CPU and GGML_USE_VULKAN configuration.
 - Android APK build and physical S24 FE measurements remain pending.
+
+## Live panel and diagnostic parity
+
+The open metrics popup subscribes to runtime, hardware and selected-mode
+controllers so its token count, elapsed time and status update without reopening.
+The resource panel shows the sample clock time and Android's memory threshold.
+Partial memory readings display unknown pressure rather than normal pressure.
+
+RESOURCE_SAMPLE now additionally records total/threshold RAM, pressure category,
+low-memory and trim signals, and actual context/batch/microbatch. The public
+projection accepts both legacy samples and the extended strict numeric schema.
+Logger or individual cancellation-listener failures cannot prevent other RAM
+guards from being notified. A disposed monitor cannot restart polling.
+
+These changes improve observability and guard resilience; they do not establish
+GPU utilization or measured inference speed gains. Validation is tracked in the
+associated pull request; device measurements remain required.

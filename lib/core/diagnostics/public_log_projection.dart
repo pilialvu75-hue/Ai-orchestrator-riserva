@@ -206,7 +206,10 @@ String? publicLogProjection(String line) {
       r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
       r'native_heap_bytes=(-?\d{1,15}) critical=(true|false) '
       r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
-      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12})$',
+      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12})'
+      r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
+      r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode({
@@ -219,6 +222,16 @@ String? publicLogProjection(String line) {
       'phase': m[5]!,
       'gpu_layers': int.parse(m[6]!),
       'decode_calls': int.parse(m[7]!),
+      if (m[8] != null) ...{
+        'total_bytes': int.parse(m[8]!),
+        'threshold_bytes': int.parse(m[9]!),
+        'pressure': m[10]!,
+        'low_memory': m[11] == 'true',
+        'trim_level': int.parse(m[12]!),
+        'n_ctx': int.parse(m[13]!),
+        'n_batch': int.parse(m[14]!),
+        'n_ubatch': int.parse(m[15]!),
+      },
     });
   }
   if (event == 'RESOURCE_PROFILE') {

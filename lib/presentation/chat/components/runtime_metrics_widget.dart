@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/runtime_state_controller.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/execution_hardware_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/system_indicators_controller.dart';
@@ -44,9 +46,10 @@ class RuntimeMetricsWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final runtimeMessage = runtimeState.message?.trim();
     final statusColor = _statusColor();
-    final isRuntimeReady = runtimeState.status != LocalRuntimeStatus.ffiMissing &&
-        runtimeState.status != LocalRuntimeStatus.modelMissing &&
-        runtimeState.status != LocalRuntimeStatus.runtimeUnavailable;
+    final isRuntimeReady =
+        runtimeState.status != LocalRuntimeStatus.ffiMissing &&
+            runtimeState.status != LocalRuntimeStatus.modelMissing &&
+            runtimeState.status != LocalRuntimeStatus.runtimeUnavailable;
 
     return Material(
       color: Colors.transparent,
@@ -66,23 +69,23 @@ class RuntimeMetricsWidget extends StatelessWidget {
           ],
         ),
         child: Column(
-  mainAxisSize: MainAxisSize.min,
-  crossAxisAlignment: CrossAxisAlignment.stretch,
-  children: <Widget>[
-    const Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            'RUNTIME METRICS',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 11,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'RUNTIME METRICS',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ),
-      ],
-    ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
@@ -154,4 +157,27 @@ class RuntimeMetricsWidget extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Popup routes must subscribe to controllers, not capture their opening state.
+class LiveRuntimeMetricsWidget extends StatelessWidget {
+  const LiveRuntimeMetricsWidget({
+    super.key,
+    required this.runtime,
+    required this.hardware,
+    required this.system,
+  });
+  final ValueListenable<ChatRuntimeSnapshot> runtime;
+  final ValueListenable<HardwareSnapshot> hardware;
+  final ValueListenable<SystemIndicatorsSnapshot> system;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([runtime, hardware, system]),
+        builder: (context, _) => RuntimeMetricsWidget(
+          runtimeState: runtime.value.state,
+          hardwareSnapshot: hardware.value,
+          systemIndicators: system.value,
+        ),
+      );
 }

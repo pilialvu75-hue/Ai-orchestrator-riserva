@@ -19,6 +19,22 @@ void main() {
       isNull,
     );
   });
+  test('extended samples export thresholds pressure and native profile safely',
+      () {
+    const suffix =
+        ' total_bytes=8000 threshold_bytes=500 pressure=high low_memory=false trim_level=10 n_ctx=2048 n_batch=128 n_ubatch=32';
+    final exported = jsonDecode(publicLogProjection('$prefix$payload$suffix')!);
+    expect(exported['total_bytes'], 8000);
+    expect(exported['threshold_bytes'], 500);
+    expect(exported['pressure'], 'high');
+    expect(exported['n_ubatch'], 32);
+    expect(
+        publicLogProjection('$prefix$payload$suffix prompt=private'), isNull);
+    expect(
+        publicLogProjection(
+            '$prefix$payload${suffix.replaceFirst('pressure=high', 'pressure=secret')}'),
+        isNull);
+  });
   test('guard export uses closed action vocabulary', () {
     const p = '[2026-09-20T14:45:17.000] [RESOURCE_GUARD] ';
     expect(
