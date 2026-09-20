@@ -60,6 +60,7 @@ void main() {
           scopeId: 'Ai-orchestrator-riserva',
           recordKey: 'project.pr514.status',
           confirmedAt: 2,
+          confirmedSource: AssistantMemorySource.verifiedTest,
         ),
         isTrue,
       );
@@ -86,6 +87,44 @@ void main() {
         store.upsert(candidate),
         throwsArgumentError,
       );
+    });
+
+
+    test('model candidate can only be promoted by an external source', () async {
+      final persistence = _MemoryPersistence();
+      final store = AssistantDurableMemoryStore(persistence: persistence);
+      final candidate = _record().copyWith(
+        source: AssistantMemorySource.modelCandidate,
+      );
+      await store.upsert(candidate);
+
+      await expectLater(
+        store.confirm(
+          scope: AssistantMemoryScope.project,
+          scopeId: 'Ai-orchestrator-riserva',
+          recordKey: candidate.recordKey,
+          confirmedAt: 2,
+          confirmedSource: AssistantMemorySource.modelCandidate,
+        ),
+        throwsArgumentError,
+      );
+
+      expect(
+        await store.confirm(
+          scope: AssistantMemoryScope.project,
+          scopeId: 'Ai-orchestrator-riserva',
+          recordKey: candidate.recordKey,
+          confirmedAt: 3,
+          confirmedSource: AssistantMemorySource.userExplicit,
+        ),
+        isTrue,
+      );
+
+      final confirmed = await store.load(
+        scope: AssistantMemoryScope.project,
+        scopeId: 'Ai-orchestrator-riserva',
+      );
+      expect(confirmed.single.source, AssistantMemorySource.userExplicit);
     });
 
     test('same logical key replaces stale state instead of accumulating', () async {
