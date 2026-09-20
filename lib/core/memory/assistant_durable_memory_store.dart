@@ -105,7 +105,14 @@ class AssistantDurableMemoryStore {
     required String scopeId,
     required String recordKey,
     required int confirmedAt,
+    required AssistantMemorySource confirmedSource,
   }) async {
+    if (confirmedSource == AssistantMemorySource.modelCandidate) {
+      throw ArgumentError(
+        'confirmedSource must represent an external confirmation',
+      );
+    }
+
     final records = await load(
       scope: scope,
       scopeId: scopeId,
@@ -118,6 +125,7 @@ class AssistantDurableMemoryStore {
     next[index] = _validateAndNormalize(
       next[index].copyWith(
         status: AssistantMemoryStatus.confirmed,
+        source: confirmedSource,
         updatedAt: confirmedAt,
       ),
     );
