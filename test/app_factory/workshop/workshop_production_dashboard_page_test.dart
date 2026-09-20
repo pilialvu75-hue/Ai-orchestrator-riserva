@@ -5,6 +5,50 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboa
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 
 void main() {
+  group('WorkshopProductionExecutionAffinity', () {
+    test('terminal execution from another project is stale', () {
+      expect(
+        WorkshopProductionExecutionAffinity.isStaleForProject(
+          projectId: 'project:new',
+          executionProjectId: 'project:old',
+          executionStatus: WorkshopProductionExecutionStatus.failed,
+          executionIsRunning: false,
+        ),
+        isTrue,
+      );
+
+      expect(
+        WorkshopProductionExecutionAffinity.isStaleForProject(
+          projectId: 'project:new',
+          executionProjectId: 'project:new',
+          executionStatus: WorkshopProductionExecutionStatus.failed,
+          executionIsRunning: false,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopProductionExecutionAffinity.isStaleForProject(
+          projectId: 'project:new',
+          executionProjectId: 'project:old',
+          executionStatus: WorkshopProductionExecutionStatus.running,
+          executionIsRunning: true,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopProductionExecutionAffinity.isStaleForProject(
+          projectId: 'project:new',
+          executionProjectId: 'project:old',
+          executionStatus: WorkshopProductionExecutionStatus.idle,
+          executionIsRunning: false,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('WorkshopProductionAutonomyPolicy', () {
     test('auto apply requires project approval and all validation boundaries', () {
       expect(
