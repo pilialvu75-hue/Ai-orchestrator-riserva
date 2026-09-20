@@ -233,7 +233,15 @@ class _WorkshopDashboardPageState
       return;
     }
 
+    if (!await _prepareForNewRequest()) {
+      return;
+    }
+
     _pendingConfirmation = false;
+    _pendingInstruction = message;
+    _pendingTitle =
+        _deriveProjectTitle(message);
+    _pendingApprovedProposal = null;
 
     _messageController.clear();
 
@@ -250,17 +258,81 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    _pendingInstruction ??= _firstUserInstruction();
-
-    _pendingTitle ??=
-        _deriveProjectTitle(
-      _pendingInstruction,
-    );
-
     _pendingApprovedProposal = result.content.trim();
     _pendingConfirmation = true;
 
     setState(() {});
+  }
+
+  /// A free-form composer submission starts a new proposal. It must therefore
+  /// never be allowed to inherit an already active Project/Task/Execution.
+  ///
+  /// The previous implementation let a second prompt run in the same chat
+  /// while the old production controller still held a failed execution. The
+  /// proposal looked new, but confirmation reused the first prompt/title and
+  /// the old terminal execution exposed only "Riprova task".
+  Future<bool> _prepareForNewRequest() async {
+    final dashboardState = _dashboardController?.state;
+    if (dashboardState?.hasProject != true) {
+      return true;
+    }
+
+    final title = dashboardState?.projectTitle?.trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Nuova richiesta'),
+        content: Text(
+          'Il progetto corrente'
+          '${title == null || title.isEmpty ? '' : ' “$title”'} '
+          'è ancora attivo. Per iniziare una richiesta diversa senza '
+          'mescolare conversazione ed esecuzione, chiudilo prima.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Continua progetto'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Chiudi e usa nuovo prompt'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return false;
+    }
+
+    final closeProject = widget._closeProjectForNewConversation;
+    if (closeProject == null) {
+      _showError(
+        'Il progetto corrente non può essere chiuso da questa schermata.',
+      );
+      return false;
+    }
+
+    final closed = await closeProject();
+    if (!closed || !mounted) {
+      _showError(
+        'Il progetto corrente non è stato chiuso. '
+        'Il nuovo prompt non è stato inviato.',
+      );
+      return false;
+    }
+
+    setState(() {
+      _pendingConfirmation = false;
+      _pendingInstruction = null;
+      _pendingTitle = null;
+      _pendingApprovedProposal = null;
+    });
+
+    _chatController.clearConversation();
+    _addWelcomeMessage();
+
+    return true;
   }
 
   Future<void> _confirmProposal() async {
@@ -330,7 +402,11 @@ class _WorkshopDashboardPageState
         return;
       }
 
-      setState(() {});
+      setState(() {
+        _pendingInstruction = null;
+        _pendingTitle = null;
+        _pendingApprovedProposal = null;
+      });
 
       _showMessage(
         'Produzione approvata e preparazione avviata.',
@@ -479,18 +555,6 @@ class _WorkshopDashboardPageState
     _showMessage(
       'Nuova conversazione del Cantiere.',
     );
-  }
-
-  String? _firstUserInstruction() {
-    for (final turn
-        in _chatController.messages) {
-      if (turn.role == ChatRole.user &&
-          turn.content.trim().isNotEmpty) {
-        return turn.content.trim();
-      }
-    }
-
-    return null;
   }
 
   String _deriveProjectTitle(

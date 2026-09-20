@@ -93,11 +93,25 @@ class _WorkshopProductionDashboardPageState
 
   Future<void> _autoAdvance() async {
     final dashboard = widget.bundle.dashboardController.state;
-    final execution = widget.executionController.state;
+    var execution = widget.executionController.state;
     if (_mutationBusy || execution.isRunning || dashboard.isBusy) return;
     final taskId = _activeTaskId;
 
     if (taskId != null && taskId.isNotEmpty) {
+      if (WorkshopProductionExecutionAffinity.isStaleForProject(
+        projectId: dashboard.projectId,
+        executionProjectId: execution.handle?.plan.id,
+        executionStatus: execution.status,
+        executionIsRunning: execution.isRunning,
+      )) {
+        await widget.executionController.abandonCurrentExecution();
+        if (widget.executionController.state.status !=
+            WorkshopProductionExecutionStatus.idle) {
+          widget.executionController.reset();
+        }
+        execution = widget.executionController.state;
+      }
+
       if (execution.status == WorkshopProductionExecutionStatus.idle) {
         await _runPreparedTask();
       } else if (WorkshopProductionAutonomyPolicy.canAutoApply(
@@ -679,6 +693,38 @@ class _WorkshopProductionDashboardPageState
 /// independent facts before the UI can record a task-level approval:
 /// project owner authorization, successful execution, Reviewer/validation
 /// readiness and a WorkspaceSession still parked at the validation boundary.
+/// Guards the boundary between a freshly prepared project and the long-lived
+/// execution controller owned above the Cantiere route.
+///
+/// A terminal execution from another project is stale UI/runtime state and must
+/// never turn a new approved project into a "Riprova task" action. A terminal
+/// execution belonging to the same project remains retryable and is preserved.
+abstract final class WorkshopProductionExecutionAffinity {
+  static bool isStaleForProject({
+    required String? projectId,
+    required String? executionProjectId,
+    required WorkshopProductionExecutionStatus executionStatus,
+    required bool executionIsRunning,
+  }) {
+    final normalizedProjectId = projectId?.trim();
+    final normalizedExecutionProjectId = executionProjectId?.trim();
+
+    if (normalizedProjectId == null ||
+        normalizedProjectId.isEmpty ||
+        normalizedExecutionProjectId == null ||
+        normalizedExecutionProjectId.isEmpty) {
+      return false;
+    }
+
+    if (executionIsRunning ||
+        executionStatus == WorkshopProductionExecutionStatus.idle) {
+      return false;
+    }
+
+    return normalizedExecutionProjectId != normalizedProjectId;
+  }
+}
+
 abstract final class WorkshopProductionAutonomyPolicy {
   static bool canAutoApply({
     required bool projectApproved,
