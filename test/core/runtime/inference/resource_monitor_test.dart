@@ -4,6 +4,19 @@ import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('8 GiB phones use a smaller non-Phi allocation before pressure', () {
+    final sample = ResourceSample({
+      'totalBytes': 7575265280, 'availableBytes': 2255867904,
+      'thresholdBytes': 408944640,
+    });
+    expect(sample.pressured, isFalse);
+    final profile = ResourceProfile.select(sample, phi: false);
+    expect(profile.context, 2048);
+    expect(profile.batch, 256);
+    expect(profile.microBatch, 64);
+    expect(ResourceProfile.select(ResourceSample({'totalBytes': 12 << 30}),
+        phi: false).context, 4096);
+  });
   test('logging and listener errors cannot prevent remaining RAM guards',
       () async {
     var guarded = false;

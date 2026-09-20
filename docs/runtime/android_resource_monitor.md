@@ -124,3 +124,10 @@ Competition-result questions (including an explicit year such as the 2026 World
 Cup) now request web evidence through the existing policy for both local models.
 Sports rules and personal-name recall do not trigger a public search. Existing
 offline and already-enriched-context safeguards remain in force.
+
+For known devices with at most 8 GiB total RAM, non-Phi sessions now choose
+2048 context / 256 batch / 64 microbatch before memory pressure occurs. This
+reduces configured KV/compute allocation relative to 4096 / 512 / 128; it does
+not reduce weight size or guarantee prevention of Android low-memory kills.
+Phi retains its existing conservative profile. The existing token budget uses
+the actual native context and trims conversation turns accordingly.

@@ -65,6 +65,12 @@ class ResourceProfile {
       return const ResourceProfile(2048, 128, 32, 'pressure');
     }
     if (phi) return const ResourceProfile(2048, 128, 64, 'phi_conservative');
+    // Keep a smaller KV/compute allocation on phones with at most 8 GiB.
+    // Free RAM alone can look healthy before weights become resident.
+    final total = sample?.totalBytes;
+    if (total != null && total > 0 && total <= 8 * 1024 * 1024 * 1024) {
+      return const ResourceProfile(2048, 256, 64, 'device_memory_budget');
+    }
     return const ResourceProfile(4096, 512, 128, 'baseline');
   }
 }
