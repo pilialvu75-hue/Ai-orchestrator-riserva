@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
@@ -127,8 +128,23 @@ abstract interface class WorkshopProductionExecutionRunner {
   });
 }
 
+/// Optional capability used only when the controller has created a new
+/// Attempt from an existing logical Execution. Legacy/custom runners can keep
+/// implementing [WorkshopProductionExecutionRunner] only and will continue
+/// through the historical full replay path.
+abstract interface class WorkshopProductionSemanticResumeRunner {
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopResumeContext resumeContext,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  });
+}
+
 final class WorkshopProductionTaskExecutionRunner
-    implements WorkshopProductionExecutionRunner {
+    implements
+        WorkshopProductionExecutionRunner,
+        WorkshopProductionSemanticResumeRunner {
   const WorkshopProductionTaskExecutionRunner({
     required WorkshopProductionTaskCoordinator coordinator,
   }) : _coordinator = coordinator;
@@ -147,6 +163,21 @@ final class WorkshopProductionTaskExecutionRunner
   }) {
     return _coordinator.runPrepared(
       handle: handle,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopResumeContext resumeContext,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) {
+    return _coordinator.runPreparedWithResumeContext(
+      handle: handle,
+      resumeContext: resumeContext,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -592,11 +623,11 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     required bool isRetry,
     required bool isRestartResume,
   }) async {
-    // Journaling is observability/recovery infrastructure and must never delay
-    // the actual production runner. Start both operations immediately, then
-    // join the journal boundary before persisting any terminal/checkpoint state.
-    // This also preserves the historical synchronous-start contract used by
-    // cancellation and single-flight callers.
+    // A brand-new execution keeps the historical low-latency behavior: journal
+    // creation and inference start concurrently. Semantic resume is different:
+    // the new Attempt identity must exist before it can be handed to a provider,
+    // so retries/restarts join that small persistence boundary first.
+    final resumeSource = isRetry ? _journalExecution : null;
     final journalStart = _beginJournalAttempt(
       handle: handle,
       isOffline: isOffline,
@@ -605,13 +636,42 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     );
 
     try {
-      final resultFuture = _runner.runPrepared(
-        handle: handle,
-        cancellationToken: token,
-        isOffline: isOffline,
-      );
-      final result = await resultFuture;
+      late final Future<WorkshopTaskInferenceResult> resultFuture;
+      final canCreateSemanticAttempt =
+          isRetry && _executionStore != null && resumeSource != null;
+      if (canCreateSemanticAttempt) {
+        await journalStart;
+        final resumeContext = _buildSemanticResumeContext(
+          handle: handle,
+          previous: resumeSource,
+          current: _journalExecution,
+        );
+        if (resumeContext != null &&
+            _runner is WorkshopProductionSemanticResumeRunner) {
+          final semanticRunner =
+              _runner as WorkshopProductionSemanticResumeRunner;
+          resultFuture = semanticRunner.runPreparedWithResumeContext(
+            handle: handle,
+            resumeContext: resumeContext,
+            cancellationToken: token,
+            isOffline: isOffline,
+          );
+        } else {
+          resultFuture = _runner.runPrepared(
+            handle: handle,
+            cancellationToken: token,
+            isOffline: isOffline,
+          );
+        }
+      } else {
+        resultFuture = _runner.runPrepared(
+          handle: handle,
+          cancellationToken: token,
+          isOffline: isOffline,
+        );
+      }
 
+      final result = await resultFuture;
       await journalStart;
 
       if (token.isCancelled) {
@@ -644,8 +704,6 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
       return result;
     } catch (error) {
-      // If inference fails before persistence has finished, still let the
-      // attempt creation settle before recording the failure/cancellation.
       await journalStart;
 
       if (token.isCancelled) {
@@ -685,6 +743,80 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
+  WorkshopResumeContext? _buildSemanticResumeContext({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopExecution? previous,
+    required WorkshopExecution? current,
+  }) {
+    if (previous == null ||
+        current == null ||
+        previous.executionId != current.executionId ||
+        previous.attemptId == current.attemptId ||
+        current.projectId != handle.plan.id ||
+        current.taskId != handle.taskId) {
+      return null;
+    }
+
+    final projectTask = handle.plan.taskById(handle.taskId);
+    final objective = projectTask?.description.trim().isNotEmpty == true
+        ? projectTask!.description.trim()
+        : handle.session.context.request.instruction.trim();
+    final previousPhase =
+        previous.resumePhase?.trim().isNotEmpty == true
+            ? previous.resumePhase!.trim()
+            : previous.status.name;
+    final changedFiles = handle.session.workspace.changes
+        .map((change) => change.path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
+    // No stage is marked completed merely because the previous Attempt
+    // reached it. If a validated workspace snapshot was durable, P4.2 restores
+    // it before this path. Reaching semantic replay means that artifact was
+    // absent/rejected or the attempt failed, so implementation/review evidence
+    // must be re-established against the current workspace.
+    final completedSteps = <String>[];
+    final decisions = <String>[
+      'Previous attempt status: ${previous.status.name}',
+      'Previous resume phase: $previousPhase',
+      if (previous.metadata['reviewApproved'] == true)
+        'Previous attempt reported reviewApproved=true; revalidate current workspace',
+      if (previous.metadata['validationValid'] == true)
+        'Previous attempt reported validationValid=true; revalidate current workspace',
+      if (previous.metadata['offline'] == true) 'Execution mode: offline',
+    ];
+    final remainingWork = <String>[
+      're-establish implementation against the current workspace',
+      'review',
+      'validation',
+      'owner approval',
+      'guarded apply',
+    ];
+
+    return WorkshopResumeContext(
+      executionId: current.executionId,
+      attemptId: current.attemptId,
+      projectId: current.projectId,
+      taskId: current.taskId,
+      sessionId: current.sessionId,
+      objective: objective,
+      phase: previousPhase,
+      checkpointId: previous.checkpointId,
+      constraints: List<String>.unmodifiable(
+        handle.session.context.request.constraints,
+      ),
+      completedSteps: List<String>.unmodifiable(completedSteps),
+      changedFiles: List<String>.unmodifiable(changedFiles),
+      decisions: List<String>.unmodifiable(decisions),
+      verified: const <String>[],
+      remainingWork: List<String>.unmodifiable(remainingWork),
+      nextStep: 'Continue task ${handle.taskId} on the new Attempt without '
+          'assuming provider-side memory.',
+    );
+  }
+
   Future<void> _beginJournalAttempt({
     required WorkshopProductionTaskHandle handle,
     required bool isOffline,
@@ -714,18 +846,15 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
 
         final nextMetadata = Map<String, dynamic>.from(execution.metadata)
           ..remove('validatedProposalSnapshot');
-        execution = execution.copyWith(metadata: nextMetadata);
-
-        if (isRestartResume) {
-          execution = execution.copyWith(
-            metadata: <String, dynamic>{
-              ...execution.metadata,
-              'processRestartResume': true,
-              'previousStatus': previousStatus,
-              'previousResumePhase': previousResumePhase,
-            },
-          );
-        }
+        execution = execution.copyWith(
+          metadata: <String, dynamic>{
+            ...nextMetadata,
+            'semanticResume': true,
+            'previousStatus': previousStatus,
+            'previousResumePhase': previousResumePhase,
+            if (isRestartResume) 'processRestartResume': true,
+          },
+        );
       } else {
         execution = await store.create(
           projectId: handle.plan.id,
