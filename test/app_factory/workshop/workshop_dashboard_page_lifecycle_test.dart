@@ -129,6 +129,88 @@ void main() {
     );
   });
 
+  testWidgets(
+      'new prompt closes old project and binds approval to current request',
+      (tester) async {
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'clean-new-request',
+    );
+    final dashboard = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+    );
+    addTearDown(chat.dispose);
+    addTearDown(dashboard.dispose);
+
+    dashboard.startProduction(
+      title: 'Vecchio contatore',
+      instruction: 'Vecchia richiesta contatore.',
+    );
+    chat.addSystemMessage('cronologia del vecchio progetto');
+
+    var closeCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          dashboardController: dashboard,
+          closeProjectForNewConversation: () async {
+            closeCalls += 1;
+            dashboard.cancelProduction();
+            dashboard.forgetProduction();
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    const newPrompt =
+        'Crea una nuova app note con aggiunta, modifica ed eliminazione.';
+
+    await tester.enterText(find.byType(TextField), newPrompt);
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nuova richiesta'), findsOneWidget);
+    expect(find.text('Chiudi e usa nuovo prompt'), findsOneWidget);
+    expect(provider.requests, isEmpty);
+
+    await tester.tap(find.text('Chiudi e usa nuovo prompt'));
+    await tester.pumpAndSettle();
+
+    expect(closeCalls, 1);
+    expect(provider.requests, hasLength(1));
+    expect(provider.requests.single.prompt, newPrompt);
+    expect(
+      chat.messages.any(
+        (turn) => turn.content == 'cronologia del vecchio progetto',
+      ),
+      isFalse,
+    );
+    expect(
+      chat.messages.any(
+        (turn) => turn.role == ChatRole.user && turn.content == newPrompt,
+      ),
+      isTrue,
+    );
+    expect(find.text('Sì, procedi'), findsOneWidget);
+
+    await tester.tap(find.text('Sì, procedi'));
+    await tester.pumpAndSettle();
+
+    final requestId = dashboard.state.requestId;
+    expect(requestId, isNotNull);
+    final request = dashboard.engine.requestOf(requestId!);
+    expect(request, isNotNull);
+    expect(request!.instruction, newPrompt);
+    expect(dashboard.state.projectTitle, startsWith('Crea una nuova app note'));
+    expect(dashboard.state.isProjectApproved, isTrue);
+    expect(provider.requests, hasLength(1));
+  });
+
   testWidgets('approving a proposal does not trigger a second chat inference',
       (tester) async {
     final provider = _CapturingProvider();
