@@ -177,11 +177,32 @@ final class _RecordingGateway implements GitWorkspaceGateway {
   int pullRequestCalls = 0;
 
   @override
-  Future<Map<String, String>> readRepositoryFiles() async =>
-      Map<String, String>.from(files);
+  Future<GitWorkspaceInfo> openWorkspace() async => const GitWorkspaceInfo(
+        repository: 'test/repository',
+        branch: 'main',
+        commitSha: 'test-sha',
+      );
 
   @override
-  Future<void> writeFile(String path, String content) async {
+  Future<String?> readFile(String path) async => files[path];
+
+  @override
+  Future<bool> fileExists(String path) async => files.containsKey(path);
+
+  @override
+  Future<List<String>> listFiles({String? directory}) async {
+    if (directory == null || directory.isEmpty) {
+      return files.keys.toList(growable: false);
+    }
+    final prefix = directory.endsWith('/') ? directory : '$directory/';
+    return files.keys.where((path) => path.startsWith(prefix)).toList(growable: false);
+  }
+
+  @override
+  Future<void> createBranch(String branchName) async {}
+
+  @override
+  Future<void> writeFile({required String path, required String content}) async {
     writeCalls++;
     files[path] = content;
   }
@@ -193,12 +214,25 @@ final class _RecordingGateway implements GitWorkspaceGateway {
   }
 
   @override
-  Future<void> commit(String message) async => commitCalls++;
+  Future<GitWorkspaceDiff> getDiff() async => const GitWorkspaceDiff(files: <GitWorkspaceFileChange>[]);
+
+  @override
+  Future<String> commit(String message) async {
+    commitCalls++;
+    return 'test-commit-sha';
+  }
 
   @override
   Future<void> push() async => pushCalls++;
 
   @override
-  Future<void> createPullRequest({required String title, required String body}) async =>
-      pullRequestCalls++;
+  Future<String> createPullRequest({
+    required String title,
+    required String body,
+    required String headBranch,
+    required String baseBranch,
+  }) async {
+    pullRequestCalls++;
+    return 'https://example.invalid/pr/1';
+  }
 }
