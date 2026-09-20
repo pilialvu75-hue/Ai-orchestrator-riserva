@@ -508,6 +508,7 @@ class _ChatPageState extends State<ChatPage>
                       _openSettings,
                   scrollToBottom:
                       _scrollToBottom,
+                  runtimeController: _runtimeStateController,
                   runtimeState:
                       _runtimeStateController
                           .value
@@ -540,6 +541,7 @@ class _ChatPageState extends State<ChatPage>
                       _openSettings,
                   scrollToBottom:
                       _scrollToBottom,
+                  runtimeController: _runtimeStateController,
                   runtimeState:
                       _runtimeStateController
                           .value
@@ -586,6 +588,7 @@ class _NarrowLayout
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.runtimeController,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -606,6 +609,8 @@ class _NarrowLayout
 
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
+
+  final RuntimeStateController runtimeController;
 
   final LocalRuntimeState
       runtimeState;
@@ -648,6 +653,7 @@ class _NarrowLayout
           onSettings,
       scrollToBottom:
           scrollToBottom,
+      runtimeController: runtimeController,
       runtimeState:
           runtimeState,
       runtimeModeName:
@@ -678,6 +684,7 @@ class _WideLayout
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.runtimeController,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -698,6 +705,8 @@ class _WideLayout
 
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
+
+  final RuntimeStateController runtimeController;
 
   final LocalRuntimeState
       runtimeState;
@@ -814,6 +823,7 @@ class _WideLayout
                 onSettings,
             scrollToBottom:
                 scrollToBottom,
+            runtimeController: runtimeController,
             runtimeState:
                 runtimeState,
             runtimeModeName:
@@ -848,6 +858,7 @@ class _ChatBody
     required this.onSettings,
     required this.scrollToBottom,
     required this.runtimeState,
+    required this.runtimeController,
     required this.runtimeModeName,
     required this.onStartLiveSession,
     required this.liveSessionEnabled,
@@ -870,6 +881,8 @@ class _ChatBody
 
   final VoidCallback onSettings;
   final VoidCallback scrollToBottom;
+
+  final RuntimeStateController runtimeController;
 
   final LocalRuntimeState
       runtimeState;
@@ -1756,18 +1769,10 @@ class _ChatBodyState
                   PopupMenuItem(
                     enabled: false,
                     child:
-                        RuntimeMetricsWidget(
-                      runtimeState:
-                          widget
-                              .runtimeState,
-                      hardwareSnapshot:
-                          widget
-                              .hardwareController
-                              .value,
-                      systemIndicators:
-                          widget
-                              .systemIndicatorsController
-                              .value,
+                        LiveRuntimeMetricsWidget(
+                      runtime: widget.runtimeController,
+                      hardware: widget.hardwareController,
+                      system: widget.systemIndicatorsController,
                     ),
                   ),
                 ],

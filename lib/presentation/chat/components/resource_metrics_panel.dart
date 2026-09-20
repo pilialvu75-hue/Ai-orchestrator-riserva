@@ -25,53 +25,58 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
       bytes == null ? 'n/d' : '${(bytes / 1048576).round()} MiB';
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: monitor,
-    builder: (context, _) {
-      final ram = monitor.latest;
-      final layers = monitor.native['gpu_layers'];
-      final gpu = layers == null || layers < 0
-          ? 'assegnazione n/d'
-          : layers == 0
-          ? '0 layer (CPU)'
-          : '$layers layer (report nativo)';
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children:
-            [
-                  const Divider(color: Colors.white24),
-        Text('Sessione nativa: ${monitor.native['context'] == null ? 'non rilevata' : 'caricata'}'),
-                  Text(
-                    'RAM libera: ${mib(ram?.availableBytes)} / ${mib(ram?.totalBytes)}',
-                  ),
-                  Text('App RSS: ${mib(ram?.rssBytes)}'),
-                  Text('Heap nativo: ${mib(ram?.nativeHeapBytes)}'),
-                  Text(
-                    'Pressione: ${ram == null
-                        ? 'n/d'
-                        : ram.critical
-                        ? 'CRITICA'
-                        : ram.pressured
-                        ? 'alta'
-                        : 'normale'}',
-                    style: TextStyle(
-                      color: ram?.critical == true
-                          ? Colors.redAccent
-                          : Colors.white70,
-                    ),
-                  ),
-                  Text('GPU: $gpu'),
-                  const Text('GPU utilizzo / memoria: n/d'),
-                  Text(
-                    'Decode completati: ${monitor.native['decode_calls'] ?? 'n/d'}',
-                  ),
-                  Text(
-                    'Contesto / batch / microbatch: '
-                    '${monitor.native['context'] ?? '-'} / '
-                    '${monitor.native['batch'] ?? '-'} / '
-                    '${monitor.native['micro_batch'] ?? '-'}',
-                  ),
-                  const Text('Campioni ogni 2 s • GPU % non esposta'),
-                ]
+        listenable: monitor,
+        builder: (context, _) {
+          final ram = monitor.latest;
+          final time = ram?.timestamp;
+          final sampleTime = time == null
+              ? 'n/d'
+              : '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+          final pressure = switch (ram?.pressure) {
+            'critical' => 'CRITICA',
+            'high' => 'alta',
+            'normal' => 'normale',
+            _ => 'n/d',
+          };
+          final layers = monitor.native['gpu_layers'];
+          final gpu = layers == null || layers < 0
+              ? 'assegnazione n/d'
+              : layers == 0
+                  ? '0 layer (CPU)'
+                  : '$layers layer (report nativo)';
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Divider(color: Colors.white24),
+              Text(
+                  'Sessione nativa: ${monitor.native['context'] == null ? 'non rilevata' : 'caricata'}'),
+              Text(
+                'RAM libera: ${mib(ram?.availableBytes)} / ${mib(ram?.totalBytes)}',
+              ),
+              Text('Soglia RAM Android: ${mib(ram?.thresholdBytes)}'),
+              Text('App RSS: ${mib(ram?.rssBytes)}'),
+              Text('Heap nativo: ${mib(ram?.nativeHeapBytes)}'),
+              Text(
+                'Pressione: $pressure',
+                style: TextStyle(
+                  color:
+                      ram?.critical == true ? Colors.redAccent : Colors.white70,
+                ),
+              ),
+              Text('GPU: $gpu'),
+              const Text('GPU utilizzo / memoria: n/d'),
+              Text(
+                'Decode completati: ${monitor.native['decode_calls'] ?? 'n/d'}',
+              ),
+              Text(
+                'Contesto / batch / microbatch: '
+                '${monitor.native['context'] ?? '-'} / '
+                '${monitor.native['batch'] ?? '-'} / '
+                '${monitor.native['micro_batch'] ?? '-'}',
+              ),
+              Text('Ultimo campione: $sampleTime'),
+              const Text('Campioni ogni 2 s • GPU % non esposta'),
+            ]
                 .map(
                   (child) => DefaultTextStyle(
                     style: const TextStyle(color: Colors.white70, fontSize: 10),
@@ -79,7 +84,7 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                   ),
                 )
                 .toList(),
+          );
+        },
       );
-    },
-  );
 }

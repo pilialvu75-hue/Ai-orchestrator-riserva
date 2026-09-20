@@ -4,6 +4,43 @@ import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('logging and listener errors cannot prevent remaining RAM guards',
+      () async {
+    var guarded = false;
+    final monitor = ResourceMonitor(
+      sampler: () async => {'lowMemory': true},
+      logger: (_) => throw StateError('log storage unavailable'),
+    );
+    monitor.addCriticalListener(() => throw StateError('failed handler'));
+    monitor.addCriticalListener(() => guarded = true);
+    final sample = await monitor.sample();
+    expect(sample?.critical, isTrue);
+    expect(guarded, isTrue);
+    monitor.dispose();
+  });
+  test('partial and non-finite samples do not claim normal memory', () {
+    expect(ResourceSample({}).pressure, 'unknown');
+    expect(ResourceSample({'availableBytes': double.infinity}).availableBytes,
+        isNull);
+    expect(
+        ResourceSample({'availableBytes': 2 << 30, 'thresholdBytes': 100})
+            .pressure,
+        'normal');
+    expect(ResourceSample({'lowMemory': true}).pressure, 'critical');
+  });
+  test('disposed monitor cannot restart platform polling', () async {
+    var calls = 0;
+    final monitor = ResourceMonitor(
+        sampler: () async {
+          calls++;
+          return {};
+        },
+        logger: (_) {});
+    monitor.dispose();
+    monitor.retain();
+    expect(await monitor.sample(), isNull);
+    expect(calls, 0);
+  });
   test('unknown memory stays unknown, UI hidden is not critical pressure', () {
     final sample = ResourceSample({'trimLevel': 20});
     expect(sample.availableBytes, isNull);

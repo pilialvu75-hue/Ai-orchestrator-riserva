@@ -10,14 +10,14 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 /// they must never be added together as an estimate of app memory.
 class ResourceSample {
   ResourceSample(Map<Object?, Object?> data, {DateTime? timestamp})
-    : timestamp = timestamp ?? DateTime.now(),
-      availableBytes = _number(data['availableBytes']),
-      totalBytes = _number(data['totalBytes']),
-      thresholdBytes = _number(data['thresholdBytes']),
-      rssBytes = _number(data['rssBytes']),
-      nativeHeapBytes = _number(data['nativeHeapBytes']),
-      lowMemory = data['lowMemory'] == true,
-      trimLevel = _number(data['trimLevel']) ?? 0;
+      : timestamp = timestamp ?? DateTime.now(),
+        availableBytes = _number(data['availableBytes']),
+        totalBytes = _number(data['totalBytes']),
+        thresholdBytes = _number(data['thresholdBytes']),
+        rssBytes = _number(data['rssBytes']),
+        nativeHeapBytes = _number(data['nativeHeapBytes']),
+        lowMemory = data['lowMemory'] == true,
+        trimLevel = _number(data['trimLevel']) ?? 0;
 
   final DateTime timestamp;
   final int? availableBytes,
@@ -28,7 +28,7 @@ class ResourceSample {
   final bool lowMemory;
   final int trimLevel;
   static int? _number(Object? value) =>
-      value is num && value >= 0 ? value.toInt() : null;
+      value is num && value.isFinite && value >= 0 ? value.toInt() : null;
 
   // UI_HIDDEN=20 and background levels are lifecycle signals, not evidence
   // of foreground RAM pressure. Android 14+ may omit trim notifications.
@@ -45,6 +45,13 @@ class ResourceSample {
       (availableBytes != null &&
           thresholdBytes != null &&
           availableBytes! < thresholdBytes! + 512 * 1024 * 1024);
+  String get pressure => critical
+      ? 'critical'
+      : pressured
+          ? 'high'
+          : availableBytes != null && thresholdBytes != null
+              ? 'normal'
+              : 'unknown';
 }
 
 int minResourceGenerationLimit(int context) => (context ~/ 2).clamp(1, 2048);
@@ -69,8 +76,8 @@ class ResourceMonitor extends ChangeNotifier {
   ResourceMonitor({
     Future<Map<Object?, Object?>?> Function()? sampler,
     void Function(String)? logger,
-  }) : _sampler = sampler ?? _platformSample,
-       _logger = logger ?? RuntimeEventLog.instance.emit;
+  })  : _sampler = sampler ?? _platformSample,
+        _logger = logger ?? RuntimeEventLog.instance.emit;
   static final instance = ResourceMonitor();
   static const _channel = MethodChannel('com.aiorchestrator/resources');
   final Future<Map<Object?, Object?>?> Function() _sampler;
@@ -98,6 +105,7 @@ class ResourceMonitor extends ChangeNotifier {
   }
 
   void retain() {
+    if (_disposed) return;
     _owners++;
     _timer ??= Timer.periodic(const Duration(seconds: 2), (_) {
       unawaited(sample());
@@ -113,17 +121,18 @@ class ResourceMonitor extends ChangeNotifier {
     }
   }
 
-  Future<ResourceSample?> sample() =>
-      _pending ??= _takeSample().whenComplete(() {
-        _pending = null;
-      });
+  Future<ResourceSample?> sample() => _disposed
+      ? Future.value(null)
+      : _pending ??= _takeSample().whenComplete(() {
+          _pending = null;
+        });
   Future<ResourceSample?> _takeSample() async {
     ResourceSample? reading;
     try {
       final pending = _sensorPending ??=
           Future<Map<Object?, Object?>?>.sync(_sampler).whenComplete(() {
-            _sensorPending = null;
-          });
+        _sensorPending = null;
+      });
       final data = await pending.timeout(const Duration(seconds: 1));
       if (data != null) reading = ResourceSample(data);
     } on Object {
@@ -140,16 +149,28 @@ class ResourceMonitor extends ChangeNotifier {
     if (reading != null) {
       if (_history.length >= 60) _history.removeFirst();
       _history.addLast(reading);
-      _logger(
-        '[RESOURCE_SAMPLE] available_bytes=${reading.availableBytes ?? -1} '
-        'rss_bytes=${reading.rssBytes ?? -1} native_heap_bytes=${reading.nativeHeapBytes ?? -1} '
-        'critical=${reading.critical} phase=$phase '
-        'gpu_layers=${native['gpu_layers'] ?? -1} '
-        'decode_calls=${native['decode_calls'] ?? -1}',
-      );
+      try {
+        _logger(
+          '[RESOURCE_SAMPLE] available_bytes=${reading.availableBytes ?? -1} '
+          'rss_bytes=${reading.rssBytes ?? -1} native_heap_bytes=${reading.nativeHeapBytes ?? -1} '
+          'critical=${reading.critical} phase=$phase '
+          'gpu_layers=${native['gpu_layers'] ?? -1} '
+          'decode_calls=${native['decode_calls'] ?? -1} '
+          'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
+          'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
+          'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
+          'n_ubatch=${native['micro_batch'] ?? -1}',
+        );
+      } on Object {
+        // Diagnostics must never disable the memory guard or sampling.
+      }
       if (reading.critical) {
         for (final listener in List<VoidCallback>.of(_criticalListeners)) {
-          listener();
+          try {
+            listener();
+          } on Object {
+            // Notify every owner even if another cancellation handler fails.
+          }
         }
       }
     }
@@ -161,6 +182,8 @@ class ResourceMonitor extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _criticalListeners.clear();
+    readNative = null;
     super.dispose();
   }
 }
