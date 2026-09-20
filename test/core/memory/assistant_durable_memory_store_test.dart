@@ -115,13 +115,13 @@ void main() {
       final persistence = _MemoryPersistence();
       final store = AssistantDurableMemoryStore(persistence: persistence);
 
-      expect(
-        () => store.upsert(
-          _record(
-            content:
-                'x' * (AssistantDurableMemoryPolicy.maxContentChars + 1),
-          ),
-        ),
+      final oversized = List<String>.filled(
+        AssistantDurableMemoryPolicy.maxContentChars + 1,
+        'x',
+      ).join();
+
+      await expectLater(
+        store.upsert(_record(content: oversized)),
         throwsArgumentError,
       );
     });
