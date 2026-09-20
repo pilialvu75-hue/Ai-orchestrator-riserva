@@ -282,6 +282,20 @@ void main() {
     expect(secondCurrent.attemptId, isNot(firstAttemptId));
     expect(secondCurrent.status, WorkshopExecutionStatus.checkpointed);
     expect(secondCurrent.resumePhase, 'review');
+    expect(secondCurrent.checkpointId, isNotNull);
+    final retryCheckpoint = WorkshopTaskCheckpoint.fromJson(
+      Map<String, dynamic>.from(
+        secondCurrent.metadata['taskCheckpoint'] as Map,
+      ),
+    );
+    expect(retryCheckpoint.id, secondCurrent.checkpointId);
+    expect(retryCheckpoint.phase, 'review');
+    expect(retryCheckpoint.completedSteps, isEmpty);
+    expect(retryCheckpoint.changedFiles, isEmpty);
+    expect(
+      retryCheckpoint.metadata['remainingWork'],
+      contains('re-establish implementation against the current workspace'),
+    );
     expect(secondCurrent.metadata['semanticResume'], isTrue);
     expect(secondCurrent.metadata['previousStatus'], 'failed');
     expect(secondCurrent.metadata['previousResumePhase'], 'failed');
@@ -325,6 +339,23 @@ void main() {
     final waiting = (await store.loadAll()).single;
     expect(waiting.status, WorkshopExecutionStatus.waitingApproval);
     expect(waiting.resumePhase, 'waitingApproval');
+    expect(waiting.checkpointId, isNotNull);
+    final waitingCheckpoint = WorkshopTaskCheckpoint.fromJson(
+      Map<String, dynamic>.from(
+        waiting.metadata['taskCheckpoint'] as Map,
+      ),
+    );
+    expect(waitingCheckpoint.id, waiting.checkpointId);
+    expect(waitingCheckpoint.phase, 'waitingApproval');
+    expect(waitingCheckpoint.completedSteps, isEmpty);
+    expect(waitingCheckpoint.changedFiles, isEmpty);
+    expect(
+      waitingCheckpoint.metadata['decisions'],
+      contains(
+        'Validated workspace snapshot was unavailable; replay must '
+        're-establish implementation, review and validation.',
+      ),
+    );
     expect(waiting.resource, WorkshopTaskResource.hybridAi);
     expect(waiting.providerId, isNull);
     expect(waiting.modelId, isNull);
@@ -575,6 +606,29 @@ void main() {
       final snapshot =
           WorkshopValidatedProposalSnapshot.fromExecutionMetadata(
         waiting.metadata,
+      );
+      final durableCheckpoint = WorkshopTaskCheckpoint.fromJson(
+        Map<String, dynamic>.from(
+          waiting.metadata['taskCheckpoint'] as Map,
+        ),
+      );
+      expect(waiting.checkpointId, durableCheckpoint.id);
+      expect(durableCheckpoint.phase, 'waitingApproval');
+      expect(
+        durableCheckpoint.completedSteps,
+        <String>['implementation', 'review', 'validation'],
+      );
+      expect(
+        durableCheckpoint.changedFiles,
+        <String>['lib/app.dart', 'lib/reused.dart'],
+      );
+      expect(
+        durableCheckpoint.metadata['remainingWork'],
+        <String>['owner approval', 'guarded apply'],
+      );
+      expect(
+        durableCheckpoint.metadata['artifacts'],
+        <String>['validated-proposal-snapshot'],
       );
       expect(await Directory(snapshot.rootPath).exists(), isTrue);
       expect(firstHandle.session.status, WorkspaceSessionStatus.validation);
