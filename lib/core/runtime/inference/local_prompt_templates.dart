@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
@@ -349,7 +350,8 @@ class LocalPromptTemplates {
      * "quanto", "quando", "dove" and "cos'è" must not force an Internet round
      * trip: the local model can answer stable knowledge directly.
      */
-    return p.contains('cerca online') ||
+    return AssistantWebSearchPolicy.isPresentOfficeHolderQuery(p) ||
+        p.contains('cerca online') ||
         p.contains('cerca sul web') ||
         p.contains('cerca su internet') ||
         p.contains('cercami online') ||

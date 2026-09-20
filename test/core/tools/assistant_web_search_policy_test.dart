@@ -3,6 +3,38 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AssistantWebSearchPolicy.shouldSearch', () {
+    test('present office-holder identity requires fresh evidence', () {
+      for (final prompt in [
+        'Chi è il presidente degli Stati Uniti?',
+        "Chi e' il presidente della Francia?",
+        'Qual è il sindaco di Roma?',
+        'Who is the president of the United States?',
+        'Who is the prime minister of Canada?',
+        'Qui est le président de la France ?',
+        'Qui est le premier ministre ?',
+        '¿Quién es el presidente de España?',
+        'Chi è il primo ministro?',
+        'Who is the CEO of Example?',
+      ]) {
+        expect(AssistantWebSearchPolicy.shouldSearch(prompt), isTrue,
+            reason: prompt);
+      }
+    });
+    test('historical offices and explanations do not force a lookup', () {
+      for (final prompt in [
+        'Chi era il presidente degli Stati Uniti?',
+        'Chi è stato il presidente degli Stati Uniti?',
+        'Chi è il primo presidente degli Stati Uniti?',
+        'Who is the first president of the United States?',
+        'Chi è il presidente degli Stati Uniti nel 1990?',
+        'Spiega il ruolo del presidente della Repubblica',
+        'Ciao, mi chiamo Roberto',
+      ]) {
+        expect(AssistantWebSearchPolicy.shouldSearch(prompt), isFalse,
+            reason: prompt);
+      }
+    });
+
     test('searches for Italian ranking and recommendation questions', () {
       expect(
         AssistantWebSearchPolicy.shouldSearch(

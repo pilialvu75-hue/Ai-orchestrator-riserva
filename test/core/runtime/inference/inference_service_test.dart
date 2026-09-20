@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
@@ -75,6 +76,7 @@ void main() {
 
   group('InferenceService routing', () {
     test('local mode returns streamed final response', () async {
+      RuntimeEventLog.instance.clear();
       final service = buildService(
         mode: AiRuntimeMode.local,
         selectedModel: validModel,
@@ -100,6 +102,12 @@ void main() {
       expect(response.text, 'Hello world');
       expect(response.model, 'gemma_2b');
       expect(response.tokensGenerated, 2);
+      final events = RuntimeEventLog.instance.entries.map((e) => e.message).toList();
+      expect(events, contains('[STREAM_TOKEN_COUNT] session=local-stream attempt=1 tokens=2 chunks=2'));
+      expect(events.where((e) => e.startsWith('[INFERENCE_TIMING]')).single,
+        allOf(contains('model=gemma_2b mode=local'),
+          contains('reported_tokens=2 text_chunks=2 outcome=success')));
+
     });
 
     test('cancel propagates to local runtime stream', () async {

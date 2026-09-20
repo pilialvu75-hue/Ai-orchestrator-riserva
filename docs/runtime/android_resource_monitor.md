@@ -87,3 +87,20 @@ guards from being notified. A disposed monitor cannot restart polling.
 These changes improve observability and guard resilience; they do not establish
 GPU utilization or measured inference speed gains. Validation is tracked in the
 associated pull request; device measurements remain required.
+
+## Per-attempt inference timing
+
+INFERENCE_TIMING records the response model, requested runtime mode, retry
+attempt, milliseconds to the first non-empty content, total attempt time,
+provider-reported token count and non-final text chunk count. It starts at
+routing, so it excludes preprocessing performed before routing. A missing
+first content is -1; provider counts are reported as supplied, not estimated
+from string chunks. The strict public projection omits prompt/response text.
+STREAM_TOKEN_COUNT now uses the terminal provider count rather than counting
+the final full-response chunk again.
+
+Present-tense office-holder identity questions request fresh web evidence even
+without words such as "today". Explicit historical years, first office-holders
+and past-tense questions retain the ordinary path. Existing offline and
+post-search continuation safeguards still apply. This does not establish the
+cause of the initial latency from a tail-only device log.

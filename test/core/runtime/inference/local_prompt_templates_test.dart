@@ -6,6 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LocalPromptTemplates', () {
+    test('Phi and Nemotron expose search for present office-holder queries', () {
+      for (final id in ['phi3_5_mini', 'nemotron3_nano_4b']) {
+        final prompt = LocalPromptTemplates.compose(
+          modelId: id, prompt: 'Chi è il presidente degli Stati Uniti?',
+        );
+        expect(prompt, contains('<search>query</search>'));
+      }
+    });
     test('Qwen 2.5 uses ChatML instead of a plain transcript', () {
       for (final id in ['qwen2_5_3b_instruct', 'Qwen2.5-3B-Instruct']) {
         final prompt = LocalPromptTemplates.compose(
