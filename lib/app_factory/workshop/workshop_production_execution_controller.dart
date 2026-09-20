@@ -900,27 +900,105 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     final reviewApproved = result.review.approved;
     final validationValid = result.validation?.valid;
     final ready = result.readyForApproval;
+    final phase = ready
+        ? 'waitingApproval'
+        : reviewApproved
+            ? 'validation'
+            : 'review';
     final recoveryMetadata = ready
         ? await _captureValidatedProposalSnapshot(
             handle: handle,
             result: result,
           )
         : const <String, dynamic>{};
+    final taskCheckpoint = _buildProductionTaskCheckpoint(
+      handle: handle,
+      result: result,
+      phase: phase,
+      recoveryMetadata: recoveryMetadata,
+    );
+
     await _persistJournalStatus(
       ready
           ? WorkshopExecutionStatus.waitingApproval
           : WorkshopExecutionStatus.checkpointed,
-      resumePhase: ready
-          ? 'waitingApproval'
-          : reviewApproved
-              ? 'validation'
-              : 'review',
+      resumePhase: phase,
+      checkpointId: taskCheckpoint?.id,
       metadata: <String, dynamic>{
         'reviewApproved': reviewApproved,
         'validationValid': validationValid,
         'proposalChangeCount': result.proposal.changes.length,
         'stagedChangeCount': handle.session.workspace.changeCount,
+        if (taskCheckpoint != null)
+          'taskCheckpoint': taskCheckpoint.toJson(),
         ...recoveryMetadata,
+      },
+    );
+  }
+
+  WorkshopTaskCheckpoint? _buildProductionTaskCheckpoint({
+    required WorkshopProductionTaskHandle handle,
+    required WorkshopTaskInferenceResult result,
+    required String phase,
+    required Map<String, dynamic> recoveryMetadata,
+  }) {
+    final execution = _journalExecution;
+    if (execution == null) return null;
+
+    final hasDurableValidatedSnapshot =
+        recoveryMetadata['validatedProposalSnapshot'] is Map;
+    final changedFiles = handle.session.workspace.changes
+        .map((change) => change.path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
+    final completedSteps = hasDurableValidatedSnapshot &&
+            result.readyForApproval
+        ? const <String>['implementation', 'review', 'validation']
+        : const <String>[];
+    final decisions = <String>[
+      if (result.review.approved) 'Reviewer approved the previous attempt.',
+      if (result.validation?.valid == true)
+        'Validation passed on the previous attempt.',
+      if (!hasDurableValidatedSnapshot && result.readyForApproval)
+        'Validated workspace snapshot was unavailable; replay must re-establish '
+            'implementation, review and validation.',
+    ];
+    final verified = <String>[
+      if (result.review.approved) 'review approved',
+      if (result.validation?.valid == true) 'validation valid',
+    ];
+    final remainingWork = hasDurableValidatedSnapshot &&
+            result.readyForApproval
+        ? const <String>['owner approval', 'guarded apply']
+        : const <String>[
+            're-establish implementation against the current workspace',
+            'review',
+            'validation',
+            'owner approval',
+            'guarded apply',
+          ];
+
+    return WorkshopTaskCheckpoint(
+      id: 'production:${execution.executionId}:${execution.attemptId}:$phase',
+      createdAt: DateTime.now().toUtc(),
+      phase: phase,
+      completedSteps: completedSteps,
+      changedFiles: hasDurableValidatedSnapshot
+          ? List<String>.unmodifiable(changedFiles)
+          : const <String>[],
+      metadata: <String, dynamic>{
+        'decisions': decisions,
+        'verified': verified,
+        'remainingWork': remainingWork,
+        'artifacts': hasDurableValidatedSnapshot
+            ? const <String>['validated-proposal-snapshot']
+            : const <String>[],
+        'nextStep': hasDurableValidatedSnapshot && result.readyForApproval
+            ? 'Require fresh owner approval before guarded apply.'
+            : 'Resume conservatively from the current real workspace.',
       },
     );
   }
@@ -958,6 +1036,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   Future<void> _persistJournalStatus(
     WorkshopExecutionStatus status, {
     String? resumePhase,
+    String? checkpointId,
     Map<String, dynamic> metadata = const <String, dynamic>{},
   }) async {
     final store = _executionStore;
@@ -968,6 +1047,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       final updated = current.copyWith(
         status: status,
         resumePhase: resumePhase,
+        checkpointId: checkpointId,
         metadata: <String, dynamic>{
           ...current.metadata,
           ...metadata,
