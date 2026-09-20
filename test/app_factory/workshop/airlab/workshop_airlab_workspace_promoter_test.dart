@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/airlab/workshop_airlab_staging_reader_io.dart';
 import 'package:ai_orchestrator/app_factory/workshop/airlab/workshop_airlab_workspace_promoter.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_executor.dart';
 
 void main() {
@@ -174,46 +175,30 @@ final class _RecordingGateway implements GitWorkspaceGateway {
   int commitCalls = 0;
   int pushCalls = 0;
   int pullRequestCalls = 0;
+
   @override
-  Future<GitWorkspaceInfo> openWorkspace() async => const GitWorkspaceInfo(
-      repository: 'test/repository', branch: 'main');
+  Future<Map<String, String>> readRepositoryFiles() async =>
+      Map<String, String>.from(files);
+
   @override
-  Future<String?> readFile(String path) async => files[path];
-  @override
-  Future<bool> fileExists(String path) async => files.containsKey(path);
-  @override
-  Future<List<String>> listFiles({String? directory}) async =>
-      files.keys.toList(growable: false);
-  @override
-  Future<void> createBranch(String branchName) async {}
-  @override
-  Future<void> writeFile({required String path, required String content}) async {
-    writeCalls += 1;
+  Future<void> writeFile(String path, String content) async {
+    writeCalls++;
     files[path] = content;
   }
+
   @override
   Future<void> deleteFile(String path) async {
-    deleteCalls += 1;
+    deleteCalls++;
     files.remove(path);
   }
+
   @override
-  Future<GitWorkspaceDiff> getDiff() async =>
-      const GitWorkspaceDiff(files: <GitWorkspaceFileChange>[]);
+  Future<void> commit(String message) async => commitCalls++;
+
   @override
-  Future<String> commit(String message) async {
-    commitCalls += 1;
-    return 'commit';
-  }
+  Future<void> push() async => pushCalls++;
+
   @override
-  Future<void> push() async => pushCalls += 1;
-  @override
-  Future<String> createPullRequest({
-    required String title,
-    required String body,
-    required String headBranch,
-    required String baseBranch,
-  }) async {
-    pullRequestCalls += 1;
-    return 'pr';
-  }
+  Future<void> createPullRequest({required String title, required String body}) async =>
+      pullRequestCalls++;
 }
