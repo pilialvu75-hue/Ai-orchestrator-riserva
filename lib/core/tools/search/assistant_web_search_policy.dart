@@ -17,7 +17,26 @@ abstract final class AssistantWebSearchPolicy {
 
     return _explicitWebIntent(value) ||
         _timeSensitiveIntent(value) ||
+        isPresentOfficeHolderQuery(value) ||
         _evidenceDrivenIntent(value);
+  }
+
+  /// Present-tense identity questions need fresh evidence even without "today".
+  /// Explicit historical dates/ordinals remain ordinary knowledge questions.
+  static bool isPresentOfficeHolderQuery(String prompt) {
+    final value = prompt.toLowerCase().replaceAll('’', "'");
+    if (RegExp(r'\b(?:1[0-9]{3}|20[0-9]{2})\b').hasMatch(value) ||
+        RegExp(r'\b(?:primo(?! ministro)|prima|first|premier(?! ministre)|première|primer|primero|primera|former|ex|era|stato|stata|was|était|fue)\b')
+            .hasMatch(value)) {
+      return false;
+    }
+    final identity = RegExp(
+      r"(?:\bchi\s+(?:è|e'|e)|\bqual\s+(?:è|e'|e)|\bwho\s+is|\bqui\s+est|\bquién\s+es|\bquien\s+es)\s+",
+    );
+    final office = RegExp(
+      r'\b(?:presidente|president|président|présidente|sindaco|sindaca|mayor|maire|alcalde|alcaldesa|ceo|cancelliere|chancellor|primo ministro|prime minister|premier ministre)\b',
+    );
+    return identity.hasMatch(value) && office.hasMatch(value);
   }
 
   /// Returns true when a previous Assistant layer already supplied either live

@@ -899,7 +899,9 @@ class InferenceService {
       var shouldRetry = false;
       var retryReason = '';
       var firstTokenLogged = false;
-      var streamedTokenCount = 0;
+      var streamedChunkCount = 0;
+      final attemptClock = Stopwatch()..start();
+      int? firstContentMs;
 
       final routedStream = _routeInference(
         runtimeMode: runtimeMode,
@@ -932,7 +934,7 @@ class InferenceService {
 
         if (chunk.text.trim().isNotEmpty) {
           emittedContent = true;
-          streamedTokenCount++;
+          firstContentMs ??= attemptClock.elapsedMilliseconds;
 
           if (!firstTokenLogged) {
             firstTokenLogged = true;
@@ -943,6 +945,10 @@ class InferenceService {
               'attempt=$attempt',
             );
           }
+        }
+
+        if (!chunk.isFinal && !chunk.isError && chunk.text.isNotEmpty) {
+          streamedChunkCount++;
         }
 
         if (chunk.isError &&
@@ -982,8 +988,19 @@ class InferenceService {
             '[STREAM_TOKEN_COUNT] '
             'session=${cloudRequest.sessionId} '
             'attempt=$attempt '
-            'tokens=$streamedTokenCount',
+            'tokens=${chunk.tokensGenerated} chunks=$streamedChunkCount',
           );
+        }
+
+        if (chunk.isFinal) {
+          final model = chunk.model ?? 'unknown';
+          final safeModel = RegExp(r'^[A-Za-z0-9_.-]{1,80}$').hasMatch(model)
+              ? model : 'unknown';
+          _log('[INFERENCE_TIMING] model=$safeModel mode=${runtimeMode.name} '
+              'attempt=$attempt first_content_ms=${firstContentMs ?? -1} '
+              'total_ms=${attemptClock.elapsedMilliseconds} '
+              'reported_tokens=${chunk.tokensGenerated} text_chunks=$streamedChunkCount '
+              'outcome=${chunk.isError ? 'error' : 'success'}');
         }
 
         _log(

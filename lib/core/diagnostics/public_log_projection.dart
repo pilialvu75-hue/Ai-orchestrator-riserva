@@ -32,6 +32,7 @@ String? publicLogProjection(String line) {
     'PUSH_REJECTED',
     'LOCAL_EXECUTION_CONFIG',
     'RESOURCE_SAMPLE',
+    'INFERENCE_TIMING',
     'RESOURCE_PROFILE',
     'RESOURCE_GUARD',
     'INFERENCE_BEGIN',
@@ -201,6 +202,20 @@ String? publicLogProjection(String line) {
     });
   }
 
+  if (event == 'INFERENCE_TIMING') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,80}) mode=(local|hybrid|cloud) '
+      r'attempt=(\d{1,3}) first_content_ms=(-?\d{1,12}) total_ms=(\d{1,12}) '
+      r'reported_tokens=(\d{1,12}) text_chunks=(\d{1,12}) outcome=(success|error)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!, 'event': event, 'model': m[1]!, 'mode': m[2]!,
+      'attempt': int.parse(m[3]!), 'first_content_ms': int.parse(m[4]!),
+      'total_ms': int.parse(m[5]!), 'reported_tokens': int.parse(m[6]!),
+      'text_chunks': int.parse(m[7]!), 'outcome': m[8]!,
+    });
+  }
   if (event == 'RESOURCE_SAMPLE') {
     final m = RegExp(
       r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '

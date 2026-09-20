@@ -4,6 +4,14 @@ import 'package:ai_orchestrator/core/diagnostics/public_log_projection.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('timing export preserves numeric latency and model without response text', () {
+    const line = '[2026-09-20T22:57:23.000] [INFERENCE_TIMING] model=phi3_5_mini mode=local attempt=1 first_content_ms=22440 total_ms=24253 reported_tokens=13 text_chunks=13 outcome=success';
+    final data = jsonDecode(publicLogProjection(line)!);
+    expect(data['first_content_ms'], 22440);
+    expect(data['model'], 'phi3_5_mini');
+    expect(publicLogProjection('$line response=private'), isNull);
+  });
+
   const prefix = '[2026-09-20T14:45:17.000] [RESOURCE_SAMPLE] ';
   const payload =
       'available_bytes=123 rss_bytes=456 native_heap_bytes=-1 critical=false phase=loading gpu_layers=0 decode_calls=0';
