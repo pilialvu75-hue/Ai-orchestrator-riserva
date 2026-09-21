@@ -758,7 +758,7 @@ class _WorkshopDashboardPageState
                       Icons.construction,
                       size: 42,
                     ),
-                    SizedBox(height: 10),
+                    SizedBox(height: 6),
                     Text(
                       'Cantiere',
                       style: TextStyle(
