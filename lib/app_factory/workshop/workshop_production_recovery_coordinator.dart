@@ -234,20 +234,20 @@ final class WorkshopProductionRecoveryCoordinator {
     final snapshot =
         _WorkshopProductionSnapshot.capture(controller);
 
-    final previous = _writeTail;
-    await previous;
-    await _persistSnapshot(snapshot);
+    await _runSerializedPersistence(
+      () => _persistSnapshot(snapshot),
+    );
   }
 
   Future<void> clear() async {
-    final previous = _writeTail;
-    await previous;
-    final checkpoints = await _checkpointStore.loadAll();
-    for (final checkpoint in checkpoints) {
-      if (_isProductionCheckpoint(checkpoint.jobId)) {
-        await _checkpointStore.remove(checkpoint.jobId);
+    await _runSerializedPersistence(() async {
+      final checkpoints = await _checkpointStore.loadAll();
+      for (final checkpoint in checkpoints) {
+        if (_isProductionCheckpoint(checkpoint.jobId)) {
+          await _checkpointStore.remove(checkpoint.jobId);
+        }
       }
-    }
+    });
   }
 
   Future<void> removeProject(String projectId) async {
@@ -256,24 +256,50 @@ final class WorkshopProductionRecoveryCoordinator {
       return;
     }
 
-    final previous = _writeTail;
-    await previous;
-    final checkpoints = await _checkpointStore.loadAll();
-    for (final checkpoint in checkpoints) {
-      if (!_isProductionCheckpoint(checkpoint.jobId)) {
-        continue;
-      }
-      try {
-        final snapshot = _WorkshopProductionSnapshot.decode(
-          checkpoint.message,
-          payloadPrefix: _payloadPrefix,
-        );
-        if (snapshot.plan.id == normalizedProjectId) {
-          await _checkpointStore.remove(checkpoint.jobId);
+    await _runSerializedPersistence(() async {
+      final checkpoints = await _checkpointStore.loadAll();
+      for (final checkpoint in checkpoints) {
+        if (!_isProductionCheckpoint(checkpoint.jobId)) {
+          continue;
         }
-      } on FormatException {
-        // Ignore unrelated damaged entries.
+        try {
+          final snapshot = _WorkshopProductionSnapshot.decode(
+            checkpoint.message,
+            payloadPrefix: _payloadPrefix,
+          );
+          if (snapshot.plan.id == normalizedProjectId) {
+            await _checkpointStore.remove(checkpoint.jobId);
+          }
+        } on FormatException {
+          // Ignore unrelated damaged entries.
+        }
       }
+    });
+  }
+
+  Future<void> _runSerializedPersistence(
+    Future<void> Function() operation,
+  ) async {
+    final previous = _writeTail;
+    final current = () async {
+      await previous;
+      await operation();
+    }();
+
+    // Keep the internal tail non-throwing so one failed persistence attempt
+    // cannot poison all later checkpoints. The caller still awaits [current]
+    // and therefore receives the original failure.
+    _writeTail = current.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+
+    try {
+      await current;
+      _lastPersistenceError = null;
+    } catch (error) {
+      _lastPersistenceError = error;
+      rethrow;
     }
   }
 
