@@ -114,7 +114,8 @@ void main() {
     expect(session.status, WorkspaceSessionStatus.ready);
     expect(session.context.request.targetFiles, <String>['candidate_workspace/**']);
     expect(session.context.request.constraints, contains('Never mutate the stable Library during implementation.'));
-    expect(session.context.request.context, contains('Forbidden scope: stable_library/**'));
+    expect(session.context.request.constraints, contains('Researcher read-only scope: library_baseline/** | research_knowledge/**'));
+    expect(session.context.request.constraints, contains('Researcher forbidden scope: stable_library/**'));
     expect(identical(executor.sessionForTask(task.id), session), isTrue);
     expect(session.hasChanges, isFalse);
     expect(gateway.writeCalls, 0);
