@@ -152,11 +152,15 @@ final class WorkshopResearchEvolutionProjectAdapter {
 
   void _validate(WorkshopTaskContract task) {
     if (!task.tags.contains('researcher-v2') ||
+        !task.tags.contains('module-evolution') ||
         task.metadata['mutationPolicy'] != 'isolated_candidate_no_library_mutation' ||
         task.metadata['sourceCodeTransferred'] != false) {
       throw const FormatException('Unsafe Researcher evolution task contract.');
     }
-    if (task.fileScope.allowed.isEmpty ||
+    if (task.fileScope.allowed.length != 1 ||
+        task.fileScope.allowed.single != 'candidate_workspace/**' ||
+        !task.fileScope.readOnly.contains('library_baseline/**') ||
+        !task.fileScope.readOnly.contains('research_knowledge/**') ||
         !task.fileScope.forbidden.contains('stable_library/**')) {
       throw const FormatException('Researcher evolution task must isolate writable scope from the stable Library.');
     }
