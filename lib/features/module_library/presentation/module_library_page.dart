@@ -507,8 +507,6 @@ class _ModuleIndexView extends StatelessWidget {
         final leftEmpty = left.presentCount == 0;
         final rightEmpty = right.presentCount == 0;
         if (leftEmpty != rightEmpty) return leftEmpty ? 1 : -1;
-        final byPresence = right.presentCount.compareTo(left.presentCount);
-        if (byPresence != 0) return byPresence;
         return left.title.toLowerCase().compareTo(right.title.toLowerCase());
       });
 
