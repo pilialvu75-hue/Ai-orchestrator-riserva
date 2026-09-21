@@ -41,7 +41,7 @@ final class WorkshopResearchLibraryHandoff {
         );
       }
       final relative = path.substring('candidate_workspace/'.length);
-      final content = change.newContent;
+      final content = change.afterContent;
       if (content == null) {
         return WorkshopLibrarySubmissionResult.reject(
           const <String>['research-candidate-missing-content'],
