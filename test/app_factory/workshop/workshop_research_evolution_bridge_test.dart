@@ -1,6 +1,17 @@
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -121,6 +132,78 @@ void main() {
     expect(gateway.writeCalls, 0);
     expect(gateway.deleteCalls, 0);
   });
+  test('Researcher validation runs Engineer and Reviewer without applying', () async {
+    final gateway = _ResearchIntakeGateway();
+    final executor = WorkshopProjectExecutor(gateway: gateway);
+    final engine = WorkshopEngine(projectExecutor: executor);
+    final calls = <AppAiRole>[];
+    final lifecycle = WorkshopPreparedTaskLifecycle(
+      inferenceRunner: WorkshopMultiRolePipelineFactory.createPreparedTaskRunner(
+        executor: executor,
+        gateways: _researchGateways(calls),
+      ),
+      approvalController: WorkshopTaskApprovalController(executor: executor),
+    );
+    final task = const WorkshopResearchEvolutionTaskAdapter().toTask(
+      const WorkshopResearchEvolutionRequest(
+        proposalId: 'proposal-validation', capabilityId: 'network.http',
+        knowledgeDelta: <String>['practice:retry_backoff'],
+        acceptanceGates: <String>['tests', 'security'],
+        mutationPolicy: 'isolated_candidate_no_library_mutation',
+      ),
+    );
+
+    final result = await WorkshopResearchEvolutionValidationRunner(
+      intake: WorkshopResearchEvolutionSessionIntake(engine: engine),
+      lifecycle: lifecycle,
+    ).prepareAndValidate(task: task);
+
+    expect(result.readyForApproval, isTrue);
+    expect(calls, <AppAiRole>[
+      AppAiRole.engineer, AppAiRole.reviewer, AppAiRole.reviewer,
+    ]);
+    final session = executor.sessionForTask(task.id)!;
+    expect(session.status, WorkspaceSessionStatus.validation);
+    expect(session.isApplyApproved, isFalse);
+    expect(gateway.writeCalls, 0);
+    expect(gateway.deleteCalls, 0);
+  });
+
+}
+
+const _researchProposal = '{"summary":"Candidate","explanation":"Improve candidate",'
+    '"changes":[{"path":"candidate_workspace/module.dart","type":"creation",'
+    '"content":"candidate"}],"validationNotes":[],"warnings":[]}';
+const _researchReview = '{"approved":true,"summary":"Review passed",'
+    '"findings":[],"warnings":[]}';
+const _researchValidation = '{"valid":true,"summary":"Validation passed",'
+    '"checks":["tests","security"],"warnings":[]}';
+
+Map<AppAiRole, WorkshopInferenceGateway> _researchGateways(List<AppAiRole> calls) =>
+    <AppAiRole, WorkshopInferenceGateway>{
+      AppAiRole.engineer: _ResearchQueueGateway(AppAiRole.engineer, calls, <String>[_researchProposal]),
+      AppAiRole.reviewer: _ResearchQueueGateway(AppAiRole.reviewer, calls, <String>[_researchReview, _researchValidation]),
+    };
+
+final class _ResearchQueueGateway extends WorkshopInferenceGateway {
+  _ResearchQueueGateway(this.role, this.calls, List<String> values)
+      : _values = List<String>.from(values), super(provider: _ResearchNoopProvider());
+  final AppAiRole role;
+  final List<AppAiRole> calls;
+  final List<String> _values;
+  @override
+  Future<WorkshopInferenceResult> complete({required String prompt, String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[], String sessionId = 'workshop',
+    bool isOffline = true, int? maxTokens, double? temperature, double topP = 0.9,
+    double repeatPenalty = 1.1, String? modelId, String? modelPath,
+    CancellationToken? cancellationToken}) async {
+    calls.add(role);
+    return WorkshopInferenceResult(text: _values.removeAt(0), terminalState: InferenceTerminalState.success);
+  }
+}
+final class _ResearchNoopProvider implements RuntimeInferenceProvider {
+  @override TokenStream streamInference({required InferenceRequest request,
+    required CancellationToken cancellationToken}) => const Stream.empty();
 }
 
 final class _ResearchIntakeGateway implements GitWorkspaceGateway {
