@@ -97,6 +97,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _parkAndDisposeWorkshopSession() async {
+    final execution = _workshopExecutionController;
+    final recovery = _workshopRecoveryCoordinator;
+    final bundle = _workshopBundle;
+
+    try {
+      if (execution != null) {
+        await execution.cancelAndWait();
+        await execution.abandonCurrentExecution();
+      }
+
+      if (recovery != null &&
+          bundle != null &&
+          bundle.dashboardController.state.hasProject) {
+        await recovery.saveCurrent(bundle.dashboardController);
+      }
+    } catch (error) {
+      debugPrint('Workshop project parking failed: $error');
+    } finally {
+      await _disposeWorkshopSession();
+    }
+  }
+
   Future<void> _disposeWorkshopSession() async {
     final execution = _workshopExecutionController;
     final chat = _workshopChatController;
@@ -174,8 +197,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
 
     try {
-      await recovery.restore(bundle.dashboardController);
-
+      // Cantiere entry is intentionally neutral. Durable projects remain in
+      // recovery storage until the owner explicitly selects one from Progetti.
       if (!mounted) {
         bundle.dashboardController.dispose();
         return;
@@ -196,12 +219,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           snapshotsRootPath: recoverySnapshotsRootPath,
         ),
       );
-
-      final recoveredTaskId =
-          bundle.dashboardController.state.activeTaskId?.trim();
-      if (recoveredTaskId != null && recoveredTaskId.isNotEmpty) {
-        await execution.restorePersistentExecutionForPreparedTask();
-      }
 
       final chat = WorkshopChatController(
         inferenceGateway: WorkshopFactory.createInferenceGateway(
@@ -256,9 +273,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             modelAssignments: workshopAssignments,
             executionController: executionController,
             chatController: chatController,
+            recoveryCoordinator: _workshopRecoveryCoordinator,
           ),
         ),
       ));
+      // Leaving the Cantiere parks the project instead of keeping its runtime
+      // attached to the next route opening. Reopening therefore starts clean.
+      await _parkAndDisposeWorkshopSession();
     } catch (error) {
       if (!mounted) return;
       messenger
