@@ -146,7 +146,7 @@ Future<void> initDependencies({
   // allows fully disabling remote telemetry without changing app code.
   const postHogProjectToken = String.fromEnvironment(
     'POSTHOG_PROJECT_TOKEN',
-    defaultValue: 'phc_wzjHnUpiN3mfyQspHndqJ2nzdcp6Fa6Teseu9aLw5PW8',
+    defaultValue: '',
   );
   const postHogTelemetryEnabled = bool.fromEnvironment(
     'POSTHOG_TELEMETRY_ENABLED',
