@@ -214,6 +214,69 @@ void main() {
       secondController.dispose();
     },
   );
+
+  test(
+    'parks multiple projects and keeps them recoverable from a neutral Cantiere',
+    () async {
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final coordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: preferences,
+        ),
+      );
+      final controller = _controllerFor(workspace.path);
+
+      controller.startProduction(
+        title: 'Progetto Alpha',
+        instruction: 'Build alpha safely.',
+      );
+      final alphaProjectId = controller.state.projectId!;
+      await coordinator.saveCurrent(controller);
+
+      controller.forgetProduction();
+      await coordinator.saveCurrent(controller);
+
+      controller.startProduction(
+        title: 'Progetto Beta',
+        instruction: 'Build beta safely.',
+      );
+      final betaProjectId = controller.state.projectId!;
+      await coordinator.saveCurrent(controller);
+
+      controller.forgetProduction();
+      await coordinator.saveCurrent(controller);
+
+      final parked = await coordinator.listSavedProjects();
+      expect(parked, hasLength(2));
+      expect(
+        parked.map((item) => item.projectId),
+        containsAll(<String>[alphaProjectId, betaProjectId]),
+      );
+      expect(
+        parked.map((item) => item.title),
+        containsAll(<String>['Progetto Alpha', 'Progetto Beta']),
+      );
+
+      final restoredController = _controllerFor(workspace.path);
+      final restored = await coordinator.restoreProject(
+        restoredController,
+        projectId: alphaProjectId,
+      );
+
+      expect(restored, isTrue);
+      expect(restoredController.state.projectId, alphaProjectId);
+      expect(restoredController.state.projectTitle, 'Progetto Alpha');
+
+      final stillParked = await coordinator.listSavedProjects();
+      expect(stillParked, hasLength(2));
+
+      restoredController.dispose();
+      controller.dispose();
+    },
+  );
+
 }
 
 WorkshopDashboardController _controllerFor(String workspaceRootPath) {

@@ -82,7 +82,6 @@ void main() {
           dashboardController: dashboard,
           closeProjectForNewConversation: () async {
             closeCalls += 1;
-            dashboard.cancelProduction();
             dashboard.forgetProduction();
             return true;
           },
@@ -95,7 +94,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Continua progetto'), findsOneWidget);
-    expect(find.text('Chiudi e nuova'), findsOneWidget);
+    expect(find.text('Parcheggia e nuova'), findsOneWidget);
     expect(dashboard.state.hasProject, isTrue);
     expect(
       chat.messages.any((turn) => turn.content == 'cronologia vecchia'),
@@ -114,7 +113,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Nuova conversazione'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Chiudi e nuova'));
+    await tester.tap(find.text('Parcheggia e nuova'));
     await tester.pumpAndSettle();
 
     expect(closeCalls, 1);
@@ -158,7 +157,6 @@ void main() {
           dashboardController: dashboard,
           closeProjectForNewConversation: () async {
             closeCalls += 1;
-            dashboard.cancelProduction();
             dashboard.forgetProduction();
             return true;
           },
@@ -175,10 +173,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Nuova richiesta'), findsOneWidget);
-    expect(find.text('Chiudi e usa nuovo prompt'), findsOneWidget);
+    expect(find.text('Parcheggia e usa nuovo prompt'), findsOneWidget);
     expect(provider.requests, isEmpty);
 
-    await tester.tap(find.text('Chiudi e usa nuovo prompt'));
+    await tester.tap(find.text('Parcheggia e usa nuovo prompt'));
     await tester.pumpAndSettle();
 
     expect(closeCalls, 1);
@@ -209,6 +207,39 @@ void main() {
     expect(dashboard.state.projectTitle, startsWith('Crea una nuova app note'));
     expect(dashboard.state.isProjectApproved, isTrue);
     expect(provider.requests, hasLength(1));
+  });
+
+  testWidgets('projects drawer delegates explicit project recovery', (tester) async {
+    var openProjectsCalls = 0;
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'projects-drawer-explicit-recovery',
+    );
+    addTearDown(chat.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          openProjects: () async {
+            openProjectsCalls += 1;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Progetti'), findsOneWidget);
+    expect(find.text('Riprendi un progetto salvato'), findsOneWidget);
+
+    await tester.tap(find.text('Progetti'));
+    await tester.pumpAndSettle();
+
+    expect(openProjectsCalls, 1);
   });
 
   testWidgets('approving a proposal does not trigger a second chat inference',
