@@ -211,10 +211,17 @@ void main() {
 
   testWidgets('projects drawer delegates explicit project recovery', (tester) async {
     var openProjectsCalls = 0;
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'projects-drawer-explicit-recovery',
+    );
+    addTearDown(chat.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
         home: WorkshopDashboardPage(
+          chatController: chat,
           openProjects: () async {
             openProjectsCalls += 1;
           },
