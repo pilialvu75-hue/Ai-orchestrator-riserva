@@ -1,0 +1,57 @@
+name: Researcher Evolution Intake
+
+on:
+  repository_dispatch:
+    types: [researcher_evolution_work]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: researcher-evolution-${{ github.event.client_payload.proposal_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate isolated evolution contract
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          payload = json.loads(os.environ["PAYLOAD"])
+          required = ("proposal_id", "capability_id", "knowledge_delta", "acceptance_gates", "mutation_policy")
+          missing = [key for key in required if not payload.get(key)]
+          if missing:
+              raise SystemExit(f"missing required fields: {', '.join(missing)}")
+          if payload["mutation_policy"] != "isolated_candidate_no_library_mutation":
+              raise SystemExit("unsafe mutation policy")
+          if not isinstance(payload["knowledge_delta"], list) or not payload["knowledge_delta"]:
+              raise SystemExit("knowledge_delta must be a non-empty list")
+          if not isinstance(payload["acceptance_gates"], list) or not payload["acceptance_gates"]:
+              raise SystemExit("acceptance_gates must be a non-empty list")
+          safe = {
+              "schema": "ai-orchestrator.researcher-evolution-intake.v1",
+              "proposal_id": payload["proposal_id"],
+              "capability_id": payload["capability_id"],
+              "knowledge_delta": payload["knowledge_delta"],
+              "acceptance_gates": payload["acceptance_gates"],
+              "mutation_policy": payload["mutation_policy"],
+              "source_code_transferred": False,
+          }
+          with open("researcher-evolution-work.json", "w", encoding="utf-8") as handle:
+              json.dump(safe, handle, indent=2, sort_keys=True)
+          PY
+      - name: Upload validated Cantiere intake
+        uses: actions/upload-artifact@v4
+        with:
+          name: researcher-evolution-${{ github.event.client_payload.proposal_id }}
+          path: researcher-evolution-work.json
+          if-no-files-found: error
+          retention-days: 14
