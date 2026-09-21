@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.da
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
@@ -29,6 +30,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     required this.modelAssignments,
     required this.executionController,
     required this.chatController,
+    this.recoveryCoordinator,
     AndroidIntentHandler? androidIntentHandler,
   }) : _androidIntentHandler = androidIntentHandler;
 
@@ -36,6 +38,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
   final List<WorkshopModelAssignment> modelAssignments;
   final WorkshopProductionExecutionController executionController;
   final WorkshopChatController chatController;
+  final WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
   final AndroidIntentHandler? _androidIntentHandler;
 
   @override
@@ -330,16 +333,21 @@ class _WorkshopProductionDashboardPageState
 
     try {
       await widget.executionController.cancelAndWait();
-
       await widget.executionController.abandonCurrentExecution();
+
+      final dashboardController = widget.bundle.dashboardController;
+      final recovery = widget.recoveryCoordinator;
+      if (recovery != null && dashboardController.state.hasProject) {
+        // "Nuova conversazione" parks the project; it does not destroy it.
+        await recovery.saveCurrent(dashboardController);
+      }
 
       if (widget.executionController.state.status !=
           WorkshopProductionExecutionStatus.idle) {
         widget.executionController.reset();
       }
 
-      widget.bundle.dashboardController.cancelProduction();
-      widget.bundle.dashboardController.forgetProduction();
+      dashboardController.forgetProduction();
       widget.executionController.clearBuildRepairChain();
 
       if (!mounted) {
@@ -355,13 +363,157 @@ class _WorkshopProductionDashboardPageState
     } catch (error) {
       if (mounted) {
         setState(() {
-          _error = 'Chiusura del progetto non riuscita: $error';
+          _error = 'Parcheggio del progetto non riuscito: $error';
         });
       }
       return false;
     } finally {
       if (mounted) {
         setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
+  Future<void> _openSavedProjects() async {
+    final recovery = widget.recoveryCoordinator;
+    if (recovery == null || _mutationBusy) {
+      return;
+    }
+
+    final projects = await recovery.listSavedProjects();
+    if (!mounted) {
+      return;
+    }
+
+    if (projects.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Non ci sono progetti salvati.')),
+        );
+      return;
+    }
+
+    final selectedProjectId = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+            itemCount: projects.length + 1,
+            separatorBuilder: (_, index) =>
+                index == 0 ? const Divider() : const SizedBox(height: 4),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    'Progetti',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  subtitle: const Text(
+                    'Scegli un progetto salvato da riprendere nel Cantiere.',
+                  ),
+                );
+              }
+
+              final project = projects[index - 1];
+              final percent = (project.progress * 100).round();
+              final updated = project.updatedAt.toLocal();
+              final updatedLabel =
+                  '${updated.day.toString().padLeft(2, '0')}/'
+                  '${updated.month.toString().padLeft(2, '0')}/'
+                  '${updated.year} '
+                  '${updated.hour.toString().padLeft(2, '0')}:'
+                  '${updated.minute.toString().padLeft(2, '0')}';
+
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.folder_open_outlined),
+                  title: Text(
+                    project.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${project.status.name} · $percent% · $updatedLabel',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(project.projectId),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    if (selectedProjectId == null || !mounted) {
+      return;
+    }
+
+    final dashboardController = widget.bundle.dashboardController;
+    final currentProjectId = dashboardController.state.projectId?.trim();
+    if (currentProjectId == selectedProjectId) {
+      return;
+    }
+
+    if (dashboardController.state.hasProject) {
+      final parked = await _closeProjectForNewConversation();
+      if (!parked || !mounted) {
+        return;
+      }
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      final restored = await recovery.restoreProject(
+        dashboardController,
+        projectId: selectedProjectId,
+      );
+      if (!restored) {
+        throw StateError('Il progetto selezionato non è più disponibile.');
+      }
+
+      final recoveredTaskId = dashboardController.state.activeTaskId?.trim();
+      if (recoveredTaskId != null && recoveredTaskId.isNotEmpty) {
+        await widget.executionController
+            .restorePersistentExecutionForPreparedTask();
+      }
+
+      widget.chatController
+        ..clearConversation()
+        ..addSystemMessage(
+          'Progetto “${dashboardController.state.projectTitle ?? selectedProjectId}” '
+          'recuperato dal menu Progetti.',
+        );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _buildResult = dashboardController.state.lastBuildResult;
+        _error = null;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Recupero del progetto non riuscito: $error';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+        _scheduleAutoAdvance();
       }
     }
   }
@@ -586,6 +738,7 @@ class _WorkshopProductionDashboardPageState
             dashboardController: widget.bundle.dashboardController,
             chatController: widget.chatController,
             closeProjectForNewConversation: _closeProjectForNewConversation,
+            openProjects: _openSavedProjects,
             modelAssignments: widget.modelAssignments,
           ),
         ),
