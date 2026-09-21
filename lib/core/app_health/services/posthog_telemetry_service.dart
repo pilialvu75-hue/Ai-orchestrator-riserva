@@ -288,7 +288,7 @@ class _PostHogPerformanceTrace implements PerformanceTrace {
     if (_stopped) return;
     _stopped = true;
     final elapsedMs = DateTime.now().difference(_start).inMilliseconds;
-    debugPrint('$_tag TRACE $_name elapsed=${elapsedMs}ms');
+    debugPrint('${PostHogTelemetryService._tag} TRACE $_name elapsed=${elapsedMs}ms');
     unawaited(_telemetry._captureTrace(_name, elapsedMs));
   }
 }
