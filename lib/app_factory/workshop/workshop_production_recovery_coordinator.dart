@@ -19,12 +19,33 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 /// If the app process dies while a task is staged/reviewing, recovery reopens
 /// the same task against the real workspace and requires the inference/review
 /// cycle to run again instead of pretending that an in-memory diff survived.
+final class WorkshopSavedProjectSummary {
+  const WorkshopSavedProjectSummary({
+    required this.projectId,
+    required this.requestId,
+    required this.title,
+    required this.status,
+    required this.progress,
+    required this.updatedAt,
+    this.activeTaskId,
+  });
+
+  final String projectId;
+  final String requestId;
+  final String title;
+  final WorkshopProjectStatus status;
+  final double progress;
+  final DateTime updatedAt;
+  final String? activeTaskId;
+}
+
 final class WorkshopProductionRecoveryCoordinator {
   WorkshopProductionRecoveryCoordinator({
     required WorkshopCheckpointStore checkpointStore,
   }) : _checkpointStore = checkpointStore;
 
-  static const String _jobId = 'workshop-production:active:v1';
+  static const String _legacyJobId = 'workshop-production:active:v1';
+  static const String _projectJobPrefix = 'workshop-production:project:v2:';
   static const String _payloadPrefix = 'workshop-production-state-v1:';
 
   final WorkshopCheckpointStore _checkpointStore;
@@ -37,47 +58,120 @@ final class WorkshopProductionRecoveryCoordinator {
 
   Object? get lastPersistenceError => _lastPersistenceError;
 
-  /// Restores the latest durable production checkpoint, if one exists.
+  /// Lists durable Cantiere projects without attaching any of them to the UI.
   ///
-  /// Corrupt/incompatible payloads are discarded. Operational restoration
-  /// failures (for example an unavailable workspace) are rethrown and the
-  /// checkpoint is kept, so a transient device problem cannot erase recovery
-  /// data.
+  /// Opening the Cantiere must always start from a neutral workspace. Recovery
+  /// is therefore an explicit user action performed from the Projects menu.
+  Future<List<WorkshopSavedProjectSummary>> listSavedProjects() async {
+    final checkpoints = await _checkpointStore.loadAll();
+    final byProject = <String, WorkshopSavedProjectSummary>{};
+
+    for (final checkpoint in checkpoints) {
+      if (!_isProductionCheckpoint(checkpoint.jobId) ||
+          checkpoint.status == WorkshopBackgroundStatus.cancelled) {
+        continue;
+      }
+
+      try {
+        final snapshot = _WorkshopProductionSnapshot.decode(
+          checkpoint.message,
+          payloadPrefix: _payloadPrefix,
+        );
+        if (snapshot.plan.status == WorkshopProjectStatus.cancelled) {
+          continue;
+        }
+
+        final candidate = WorkshopSavedProjectSummary(
+          projectId: snapshot.plan.id,
+          requestId: snapshot.request.id,
+          title: snapshot.plan.title,
+          status: snapshot.plan.status,
+          progress: snapshot.plan.progress,
+          updatedAt: checkpoint.updatedAt.toUtc(),
+          activeTaskId: snapshot.activeTaskId,
+        );
+        final previous = byProject[candidate.projectId];
+        if (previous == null ||
+            candidate.updatedAt.isAfter(previous.updatedAt)) {
+          byProject[candidate.projectId] = candidate;
+        }
+      } on FormatException {
+        // One damaged project must not hide the remaining recoverable projects.
+      }
+    }
+
+    final result = byProject.values.toList(growable: false)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return List<WorkshopSavedProjectSummary>.unmodifiable(result);
+  }
+
+  /// Backward-compatible explicit restore of the most recently saved project.
+  ///
+  /// AppShell deliberately does not call this during Cantiere startup.
   Future<bool> restore(
     WorkshopDashboardController controller,
   ) async {
-    final checkpoint = await _checkpointStore.load(_jobId);
-
-    if (checkpoint == null ||
-        checkpoint.status == WorkshopBackgroundStatus.cancelled) {
+    final projects = await listSavedProjects();
+    if (projects.isEmpty) {
       return false;
     }
-
-    late final _WorkshopProductionSnapshot snapshot;
-
-    try {
-      snapshot = _WorkshopProductionSnapshot.decode(
-        checkpoint.message,
-        payloadPrefix: _payloadPrefix,
-      );
-    } on FormatException {
-      await _checkpointStore.remove(_jobId);
-      return false;
-    }
-
-    await controller.restoreProduction(
-      request: snapshot.request,
-      plan: snapshot.plan,
-      activeTaskId: snapshot.activeTaskId,
-      projectApproval: snapshot.projectApproval,
+    return restoreProject(
+      controller,
+      projectId: projects.first.projectId,
     );
+  }
 
-    // Re-save after recovery so any intentionally downgraded transient state
-    // (for example review -> implementation after losing an in-memory diff)
-    // becomes the new durable truth.
-    await saveCurrent(controller);
+  /// Restores exactly the project selected by the owner.
+  Future<bool> restoreProject(
+    WorkshopDashboardController controller, {
+    required String projectId,
+  }) async {
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) {
+      return false;
+    }
 
-    return true;
+    final checkpoints = await _checkpointStore.loadAll();
+    final candidates = checkpoints
+        .where((checkpoint) =>
+            _isProductionCheckpoint(checkpoint.jobId) &&
+            checkpoint.status != WorkshopBackgroundStatus.cancelled)
+        .toList(growable: false)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+    for (final checkpoint in candidates) {
+      late final _WorkshopProductionSnapshot snapshot;
+      try {
+        snapshot = _WorkshopProductionSnapshot.decode(
+          checkpoint.message,
+          payloadPrefix: _payloadPrefix,
+        );
+      } on FormatException {
+        continue;
+      }
+
+      if (snapshot.plan.id != normalizedProjectId ||
+          snapshot.plan.status == WorkshopProjectStatus.cancelled) {
+        continue;
+      }
+
+      await controller.restoreProduction(
+        request: snapshot.request,
+        plan: snapshot.plan,
+        activeTaskId: snapshot.activeTaskId,
+        projectApproval: snapshot.projectApproval,
+      );
+
+      // Migrate legacy single-slot recovery transparently to the project-scoped
+      // catalogue the first time the owner explicitly resumes it.
+      await saveCurrent(controller);
+      if (checkpoint.jobId == _legacyJobId) {
+        await _checkpointStore.remove(_legacyJobId);
+      }
+      return true;
+    }
+
+    return false;
   }
 
   /// Starts observing one production controller.
@@ -148,7 +242,39 @@ final class WorkshopProductionRecoveryCoordinator {
   Future<void> clear() async {
     final previous = _writeTail;
     await previous;
-    await _checkpointStore.remove(_jobId);
+    final checkpoints = await _checkpointStore.loadAll();
+    for (final checkpoint in checkpoints) {
+      if (_isProductionCheckpoint(checkpoint.jobId)) {
+        await _checkpointStore.remove(checkpoint.jobId);
+      }
+    }
+  }
+
+  Future<void> removeProject(String projectId) async {
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) {
+      return;
+    }
+
+    final previous = _writeTail;
+    await previous;
+    final checkpoints = await _checkpointStore.loadAll();
+    for (final checkpoint in checkpoints) {
+      if (!_isProductionCheckpoint(checkpoint.jobId)) {
+        continue;
+      }
+      try {
+        final snapshot = _WorkshopProductionSnapshot.decode(
+          checkpoint.message,
+          payloadPrefix: _payloadPrefix,
+        );
+        if (snapshot.plan.id == normalizedProjectId) {
+          await _checkpointStore.remove(checkpoint.jobId);
+        }
+      } on FormatException {
+        // Ignore unrelated damaged entries.
+      }
+    }
   }
 
   void _queueSnapshot(
@@ -173,9 +299,16 @@ final class WorkshopProductionRecoveryCoordinator {
   Future<void> _persistSnapshot(
     _WorkshopProductionSnapshot? snapshot,
   ) async {
-    if (snapshot == null ||
-        snapshot.plan.status == WorkshopProjectStatus.cancelled) {
-      await _checkpointStore.remove(_jobId);
+    // A neutral Cantiere view is not a request to delete parked projects.
+    if (snapshot == null) {
+      return;
+    }
+
+    final jobId = _jobIdForProject(snapshot.plan.id);
+
+    if (snapshot.plan.status == WorkshopProjectStatus.cancelled) {
+      await _checkpointStore.remove(jobId);
+      await _removeMatchingLegacyCheckpoint(snapshot.plan.id);
       return;
     }
 
@@ -185,7 +318,7 @@ final class WorkshopProductionRecoveryCoordinator {
 
     await _checkpointStore.save(
       WorkshopBackgroundCheckpoint(
-        jobId: _jobId,
+        jobId: jobId,
         requestId: snapshot.request.id,
         status: status,
         updatedAt: DateTime.now().toUtc(),
@@ -197,7 +330,36 @@ final class WorkshopProductionRecoveryCoordinator {
             '$_payloadPrefix${jsonEncode(snapshot.toJson())}',
       ),
     );
+
+    await _removeMatchingLegacyCheckpoint(snapshot.plan.id);
   }
+
+  String _jobIdForProject(String projectId) =>
+      '$_projectJobPrefix${Uri.encodeComponent(projectId)}';
+
+  bool _isProductionCheckpoint(String jobId) =>
+      jobId == _legacyJobId || jobId.startsWith(_projectJobPrefix);
+
+  Future<void> _removeMatchingLegacyCheckpoint(String projectId) async {
+    final legacy = await _checkpointStore.load(_legacyJobId);
+    if (legacy == null) {
+      return;
+    }
+
+    try {
+      final snapshot = _WorkshopProductionSnapshot.decode(
+        legacy.message,
+        payloadPrefix: _payloadPrefix,
+      );
+      if (snapshot.plan.id == projectId) {
+        await _checkpointStore.remove(_legacyJobId);
+      }
+    } on FormatException {
+      // A corrupt legacy slot is safe to discard once v2 persistence is active.
+      await _checkpointStore.remove(_legacyJobId);
+    }
+  }
+
 }
 
 final class _WorkshopProductionSnapshot {
