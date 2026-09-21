@@ -104,7 +104,7 @@ import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_remote_config_service.dart';
-import 'package:ai_orchestrator/core/app_health/services/mock_telemetry_service.dart';
+import 'package:ai_orchestrator/core/app_health/services/posthog_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/default_feature_flags_service.dart';
 import 'package:ai_orchestrator/core/app_health/services/noop_remote_config_service.dart';
 
@@ -142,7 +142,21 @@ Future<void> initDependencies({
   sl.registerSingleton<LanguageService>(languageService);
 
   // ── App Health / Observability Foundation ────────────────────────────────
-  sl.registerLazySingleton<AbstractTelemetryService>(() => const MockTelemetryService());
+  // PostHog's project token is a public client token. The compile-time flag
+  // allows fully disabling remote telemetry without changing app code.
+  const postHogProjectToken = String.fromEnvironment(
+    'POSTHOG_PROJECT_TOKEN',
+    defaultValue: 'phc_wzjHnUpiN3mfyQspHndqJ2nzdcp6Fa6Teseu9aLw5PW8',
+  );
+  const postHogTelemetryEnabled = bool.fromEnvironment(
+    'POSTHOG_TELEMETRY_ENABLED',
+    defaultValue: true,
+  );
+  final telemetryService = await PostHogTelemetryService.create(
+    projectToken: postHogProjectToken,
+    enabled: postHogTelemetryEnabled,
+  );
+  sl.registerSingleton<AbstractTelemetryService>(telemetryService);
   sl.registerLazySingleton<AbstractFeatureFlagsService>(() => const DefaultFeatureFlagsService());
   sl.registerLazySingleton<AbstractRemoteConfigService>(() => const NoopRemoteConfigService());
 
