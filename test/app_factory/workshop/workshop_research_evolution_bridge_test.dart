@@ -45,4 +45,50 @@ void main() {
       throwsFormatException,
     );
   });
+
+
+  test('Researcher task maps to one isolated Cantiere project task', () {
+    const request = WorkshopResearchEvolutionRequest(
+      proposalId: 'proposal-42',
+      capabilityId: 'ai.model_storage',
+      knowledgeDelta: <String>['practice:tests_present'],
+      acceptanceGates: <String>['tests', 'license'],
+      mutationPolicy: 'isolated_candidate_no_library_mutation',
+    );
+    final task = const WorkshopResearchEvolutionTaskAdapter().toTask(request);
+    final plan = const WorkshopResearchEvolutionProjectAdapter().toProject(task);
+
+    expect(plan.tasks, hasLength(1));
+    expect(plan.tasks.single.id, task.id);
+    expect(plan.tasks.single.affectedPaths, <String>['candidate_workspace/**']);
+    expect(plan.validationCriteria, hasLength(2));
+    expect(plan.constraints, contains('Never mutate the stable Library during implementation.'));
+    expect(plan.status, WorkshopProjectStatus.planned);
+  });
+
+  test('Researcher project adapter rejects a contract without isolation evidence', () {
+    final unsafe = WorkshopTaskContract(
+      id: 'research-evolution:unsafe',
+      title: 'Unsafe',
+      objective: 'Unsafe task',
+      kind: WorkshopTaskKind.codeModification,
+      mode: WorkshopTaskMode.hybrid,
+      preferredResource: WorkshopTaskResource.local,
+      acceptanceCriteria: const <WorkshopTaskAcceptanceCriterion>[
+        WorkshopTaskAcceptanceCriterion(id: 'tests', description: 'tests'),
+      ],
+      fileScope: const WorkshopTaskFileScope(allowed: <String>['candidate_workspace/**']),
+      tags: const <String>['researcher-v2'],
+      metadata: const <String, dynamic>{
+        'mutationPolicy': 'isolated_candidate_no_library_mutation',
+        'sourceCodeTransferred': false,
+      },
+    );
+
+    expect(
+      () => const WorkshopResearchEvolutionProjectAdapter().toProject(unsafe),
+      throwsFormatException,
+    );
+  });
+
 }
