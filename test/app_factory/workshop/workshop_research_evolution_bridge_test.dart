@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_research_evolution_bridge.dart';
