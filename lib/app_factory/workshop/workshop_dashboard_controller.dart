@@ -179,6 +179,18 @@ final class WorkshopDashboardControllerState {
 /// È il punto di integrazione progressivo tra la UI del Cantiere
 /// e la toolchain reale.
 final class WorkshopDashboardController extends ChangeNotifier {
+  static int _lastRequestIdentityMicros = 0;
+
+  static int _nextRequestIdentityMicros() {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    if (now > _lastRequestIdentityMicros) {
+      _lastRequestIdentityMicros = now;
+    } else {
+      _lastRequestIdentityMicros += 1;
+    }
+    return _lastRequestIdentityMicros;
+  }
+
   WorkshopDashboardController({
     required WorkshopEngine engine,
     WorkshopLocalToolchainService? localToolchainService,
@@ -400,8 +412,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       );
     }
 
-    final requestId =
-        'dashboard:${DateTime.now().microsecondsSinceEpoch}';
+    final requestId = 'dashboard:${_nextRequestIdentityMicros()}';
 
     final request = WorkshopRequest(
       id: requestId,
