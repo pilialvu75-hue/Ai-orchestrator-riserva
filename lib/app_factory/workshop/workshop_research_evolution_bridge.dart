@@ -2,6 +2,9 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 final class WorkshopResearchEvolutionRequest {
@@ -216,5 +219,39 @@ final class WorkshopResearchEvolutionSessionIntake {
       throw StateError('Research evolution intake must register exactly one authoritative task.');
     }
     return _engine.prepareProjectTask(requestId, task.id);
+  }
+}
+
+
+/// Runs one validated Researcher evolution contract through the existing
+/// productive Cantiere inference lifecycle. Preparation remains authoritative
+/// and successful inference stops before owner approval/apply, so this bridge
+/// cannot mutate the stable Library by itself.
+final class WorkshopResearchEvolutionValidationLifecycle {
+  const WorkshopResearchEvolutionValidationLifecycle({
+    required WorkshopResearchEvolutionSessionIntake intake,
+    required WorkshopPreparedTaskLifecycle preparedLifecycle,
+  })  : _intake = intake,
+        _preparedLifecycle = preparedLifecycle;
+
+  final WorkshopResearchEvolutionSessionIntake _intake;
+  final WorkshopPreparedTaskLifecycle _preparedLifecycle;
+
+  Future<WorkshopTaskInferenceResult> prepareAndValidate({
+    required WorkshopTaskContract task,
+    bool isOffline = false,
+    CancellationToken? cancellationToken,
+  }) async {
+    final session = await _intake.prepare(task);
+    if (session.taskId != task.id) {
+      throw StateError(
+        'Research evolution intake returned a non-authoritative task session.',
+      );
+    }
+    return _preparedLifecycle.runPrepared(
+      taskId: task.id,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
   }
 }
