@@ -59,11 +59,13 @@ class WorkshopDashboardPage extends StatefulWidget {
     WorkshopDashboardController? dashboardController,
     WorkshopChatController? chatController,
     Future<bool> Function()? closeProjectForNewConversation,
+    Future<void> Function()? openProjects,
     List<WorkshopModelAssignment>? modelAssignments,
   })  : _emissionController = emissionController,
         _dashboardController = dashboardController,
         _chatController = chatController,
         _closeProjectForNewConversation = closeProjectForNewConversation,
+        _openProjects = openProjects,
         _modelAssignments =
             modelAssignments ?? WorkshopModelAssignments.defaults;
 
@@ -71,6 +73,7 @@ class WorkshopDashboardPage extends StatefulWidget {
   final WorkshopDashboardController? _dashboardController;
   final WorkshopChatController? _chatController;
   final Future<bool> Function()? _closeProjectForNewConversation;
+  final Future<void> Function()? _openProjects;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -286,7 +289,7 @@ class _WorkshopDashboardPageState
           'Il progetto corrente'
           '${title == null || title.isEmpty ? '' : ' “$title”'} '
           'è ancora attivo. Per iniziare una richiesta diversa senza '
-          'mescolare conversazione ed esecuzione, chiudilo prima.',
+          'mescolare conversazione ed esecuzione, parcheggialo prima.',
         ),
         actions: <Widget>[
           TextButton(
@@ -295,7 +298,7 @@ class _WorkshopDashboardPageState
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Chiudi e usa nuovo prompt'),
+            child: const Text('Parcheggia e usa nuovo prompt'),
           ),
         ],
       ),
@@ -308,7 +311,7 @@ class _WorkshopDashboardPageState
     final closeProject = widget._closeProjectForNewConversation;
     if (closeProject == null) {
       _showError(
-        'Il progetto corrente non può essere chiuso da questa schermata.',
+        'Il progetto corrente non può essere parcheggiato da questa schermata.',
       );
       return false;
     }
@@ -316,7 +319,7 @@ class _WorkshopDashboardPageState
     final closed = await closeProject();
     if (!closed || !mounted) {
       _showError(
-        'Il progetto corrente non è stato chiuso. '
+        'Il progetto corrente non è stato parcheggiato. '
         'Il nuovo prompt non è stato inviato.',
       );
       return false;
@@ -502,7 +505,7 @@ class _WorkshopDashboardPageState
             'Il progetto corrente'
             '${title == null || title.isEmpty ? '' : ' “$title”'} '
             'è ancora collegato al Cantiere. Per evitare di mescolare '
-            'conversazioni, task ed esecuzioni, deve essere chiuso '
+            'conversazioni, task ed esecuzioni, deve essere parcheggiato '
             'esplicitamente prima di iniziarne uno nuovo.',
           ),
           actions: <Widget>[
@@ -512,7 +515,7 @@ class _WorkshopDashboardPageState
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Chiudi e nuova'),
+              child: const Text('Parcheggia e nuova'),
             ),
           ],
         ),
@@ -525,7 +528,7 @@ class _WorkshopDashboardPageState
       final closeProject = widget._closeProjectForNewConversation;
       if (closeProject == null) {
         _showError(
-          'Il progetto corrente non può essere chiuso da questa schermata.',
+          'Il progetto corrente non può essere parcheggiato da questa schermata.',
         );
         return;
       }
@@ -533,7 +536,7 @@ class _WorkshopDashboardPageState
       final closed = await closeProject();
       if (!closed || !mounted) {
         _showError(
-          'Il progetto corrente non è stato chiuso. '
+          'Il progetto corrente non è stato parcheggiato. '
           'La conversazione resta invariata.',
         );
         return;
@@ -784,6 +787,27 @@ class _WorkshopDashboardPageState
                   Navigator.of(
                     context,
                   ).pop();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(
+                  Icons.folder_copy_outlined,
+                ),
+                title:
+                    const Text(
+                  'Progetti',
+                ),
+                subtitle:
+                    const Text(
+                  'Riprendi un progetto salvato',
+                ),
+                onTap: () {
+                  Navigator.of(
+                    context,
+                  ).pop();
+
+                  widget._openProjects?.call();
                 },
               ),
               ListTile(
