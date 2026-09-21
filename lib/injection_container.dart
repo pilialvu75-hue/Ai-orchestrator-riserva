@@ -144,9 +144,12 @@ Future<void> initDependencies({
   // ── App Health / Observability Foundation ────────────────────────────────
   // PostHog's project token is a public client token. The compile-time flag
   // allows fully disabling remote telemetry without changing app code.
+  // PostHog project tokens are public client identifiers intended to ship
+  // inside client applications. This default binds release builds to the
+  // AI-Orchestrator EU project while still allowing build-time override.
   const postHogProjectToken = String.fromEnvironment(
     'POSTHOG_PROJECT_TOKEN',
-    defaultValue: '',
+    defaultValue: 'phc_wzjHnUpiN3mfyQspHndqJ2nzdcp6Fa6Teseu9aLw5PW8',
   );
   const postHogTelemetryEnabled = bool.fromEnvironment(
     'POSTHOG_TELEMETRY_ENABLED',
