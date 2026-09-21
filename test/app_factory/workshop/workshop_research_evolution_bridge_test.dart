@@ -181,8 +181,14 @@ const _researchValidation = '{"valid":true,"summary":"Validation passed",'
 
 Map<AppAiRole, WorkshopInferenceGateway> _researchGateways(List<AppAiRole> calls) =>
     <AppAiRole, WorkshopInferenceGateway>{
-      AppAiRole.engineer: _ResearchQueueGateway(AppAiRole.engineer, calls, <String>[_researchProposal]),
-      AppAiRole.reviewer: _ResearchQueueGateway(AppAiRole.reviewer, calls, <String>[_researchReview, _researchValidation]),
+      AppAiRole.workshopOrchestrator: _ResearchQueueGateway(
+        AppAiRole.workshopOrchestrator, calls, <String>['{}']),
+      AppAiRole.architect: _ResearchQueueGateway(
+        AppAiRole.architect, calls, <String>['{}']),
+      AppAiRole.engineer: _ResearchQueueGateway(
+        AppAiRole.engineer, calls, <String>[_researchProposal]),
+      AppAiRole.reviewer: _ResearchQueueGateway(
+        AppAiRole.reviewer, calls, <String>[_researchReview, _researchValidation]),
     };
 
 final class _ResearchQueueGateway extends WorkshopInferenceGateway {
