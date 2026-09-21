@@ -243,6 +243,7 @@ void main() {
         instruction: 'Build beta safely.',
       );
       final betaProjectId = controller.state.projectId!;
+      expect(betaProjectId, isNot(alphaProjectId));
       await coordinator.saveCurrent(controller);
 
       controller.forgetProduction();
