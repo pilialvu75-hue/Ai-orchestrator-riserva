@@ -2,6 +2,9 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 final class WorkshopResearchEvolutionRequest {
@@ -216,5 +219,34 @@ final class WorkshopResearchEvolutionSessionIntake {
       throw StateError('Research evolution intake must register exactly one authoritative task.');
     }
     return _engine.prepareProjectTask(requestId, task.id);
+  }
+}
+
+
+/// Runs a validated Researcher task through the existing authoritative
+/// Engineer -> Reviewer -> validation lifecycle. It deliberately stops before
+/// owner/policy approval and before apply, so stable Library mutation remains
+/// impossible at this boundary.
+final class WorkshopResearchEvolutionValidationRunner {
+  const WorkshopResearchEvolutionValidationRunner({
+    required WorkshopResearchEvolutionSessionIntake intake,
+    required WorkshopPreparedTaskLifecycle lifecycle,
+  })  : _intake = intake,
+        _lifecycle = lifecycle;
+
+  final WorkshopResearchEvolutionSessionIntake _intake;
+  final WorkshopPreparedTaskLifecycle _lifecycle;
+
+  Future<WorkshopTaskInferenceResult> prepareAndValidate({
+    required WorkshopTaskContract task,
+    bool isOffline = false,
+    CancellationToken? cancellationToken,
+  }) async {
+    await _intake.prepare(task);
+    return _lifecycle.runPrepared(
+      taskId: task.id,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
   }
 }
