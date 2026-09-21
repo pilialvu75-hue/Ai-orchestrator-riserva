@@ -17,17 +17,11 @@ import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_ser
 ///
 /// The PostHog project token is a public client token, not a secret API key.
 class PostHogTelemetryService implements AbstractTelemetryService {
-  PostHogTelemetryService._({
-    required bool remoteRequested,
-    required bool supportedPlatform,
-  })  : _remoteRequested = remoteRequested,
-        _supportedPlatform = supportedPlatform;
+  PostHogTelemetryService._();
 
   static const String defaultHost = 'https://eu.i.posthog.com';
   static const String _tag = '[Telemetry/PostHog]';
 
-  final bool _remoteRequested;
-  final bool _supportedPlatform;
   bool _ready = false;
 
   bool get remoteEnabled => _ready;
@@ -46,10 +40,7 @@ class PostHogTelemetryService implements AbstractTelemetryService {
   }) async {
     final requested = enabled && projectToken.trim().isNotEmpty;
     final supported = _isSupportedPlatform;
-    final service = PostHogTelemetryService._(
-      remoteRequested: requested,
-      supportedPlatform: supported,
-    );
+    final service = PostHogTelemetryService._();
 
     if (!requested || !supported) {
       debugPrint(
