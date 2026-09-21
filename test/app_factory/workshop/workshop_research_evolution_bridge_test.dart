@@ -25,6 +25,8 @@ void main() {
     expect(task.fileScope.forbidden, contains('stable_library/**'));
     expect(task.metadata['researcherProposalId'], 'p-42');
     expect(task.metadata['sourceCodeTransferred'], isFalse);
+    expect(task.acceptanceCriteria, hasLength(2));
+    expect(task.requiredCheckpoints, contains('validation_completed'));
     expect(task.isAgentReady, isTrue);
   });
 
