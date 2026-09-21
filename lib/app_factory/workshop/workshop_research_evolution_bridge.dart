@@ -1,5 +1,5 @@
-import 'workshop_project_plan.dart';
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 final class WorkshopResearchEvolutionRequest {
   const WorkshopResearchEvolutionRequest({
