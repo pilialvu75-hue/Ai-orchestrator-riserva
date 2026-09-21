@@ -133,17 +133,105 @@ final class DiagnosticsTelemetryPolicy {
     'ANDROID_PROCESS_EXIT_UNAVAILABLE',
   };
 
-  static const Set<String> _safeEnumKeys = <String>{
-    'action',
-    'backend',
-    'cost',
-    'decision',
-    'mode',
-    'phase',
-    'provider',
-    'reason',
-    'status',
-    'target',
+  static const Map<String, Set<String>> _safeEnumValues =
+      <String, Set<String>>{
+    'action': <String>{
+      'attempt',
+      'fallback',
+      'search',
+      'skip',
+      'success',
+    },
+    'backend': <String>{
+      'cpu',
+      'vulkan',
+      'gpu',
+      'unknown',
+    },
+    'cost': <String>{
+      'free',
+      'free_tier',
+      'paid',
+      'unknown',
+    },
+    'decision': <String>{
+      'attempt',
+      'failure',
+      'fallback',
+      'skip',
+      'success',
+    },
+    'mode': <String>{
+      'cloud',
+      'hybrid',
+      'local',
+      'offline',
+      'online',
+    },
+    'phase': <String>{
+      'idle',
+      'loading',
+      'running',
+      'streaming',
+      'completed',
+      'failed',
+    },
+    'provider': <String>{
+      'claude',
+      'copilot',
+      'custom',
+      'duckduckgo',
+      'duckduckgo_lite',
+      'gemini',
+      'groq',
+      'grok',
+      'mistral',
+      'nvidia_nim',
+      'openai',
+      'openrouter',
+      'other',
+    },
+    'reason': <String>{
+      'authentication',
+      'completed',
+      'dispatch',
+      'empty_output',
+      'incomplete_output',
+      'network',
+      'other',
+      'primary_error',
+      'provider_unavailable',
+      'quota',
+      'rate_limit',
+      'timeout',
+      'unsupported',
+    },
+    'status': <String>{
+      'cancelled',
+      'completed',
+      'error',
+      'failed',
+      'failure',
+      'ffi_missing',
+      'model_missing',
+      'ready',
+      'runtime_unavailable',
+      'stalled',
+      'success',
+      'timed_out',
+      'timeout',
+      'unavailable',
+    },
+    'target': <String>{
+      'assistant',
+      'cantiere',
+      'cloud',
+      'local',
+      'runtime',
+      'search',
+      'voice',
+      'web',
+    },
   };
 
   static const Set<String> _safeNumericKeys = <String>{
@@ -161,8 +249,6 @@ final class DiagnosticsTelemetryPolicy {
   static final RegExp _keyValueRegExp = RegExp(
     r'(?:^|\s)([a-zA-Z][a-zA-Z0-9_]*)=([^\s]+)',
   );
-
-  static final RegExp _safeEnumValueRegExp = RegExp(r'^[a-zA-Z0-9_.:-]{1,48}$');
 
   static final RegExp _problemTagRegExp = RegExp(
     r'(?:ERROR|FAIL|FAILED|FAILURE|TIMEOUT|STALL|CRASH|BLOCKED|UNAVAILABLE|OOM)',
@@ -289,9 +375,14 @@ final class DiagnosticsTelemetryPolicy {
         continue;
       }
 
-      if (_safeEnumKeys.contains(key) &&
-          _safeEnumValueRegExp.hasMatch(rawValue)) {
-        safe[key] = _normalizeEnum(rawValue);
+      final allowedValues = _safeEnumValues[key];
+      if (allowedValues != null) {
+        final normalized = _normalizeEnum(rawValue);
+        if (allowedValues.contains(normalized)) {
+          safe[key] = normalized;
+        } else if (key == 'provider') {
+          safe[key] = 'other';
+        }
       }
     }
     return safe;
