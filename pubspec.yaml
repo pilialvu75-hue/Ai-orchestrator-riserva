@@ -31,6 +31,8 @@ dependencies:
   crypto: ^3.0.3
 
   package_info_plus: ^8.0.0
+  # Last release compatible with the current Dart >=3.4 / Flutter >=3.22 baseline.
+  posthog_flutter: 5.16.0
 
   shared_preferences: ^2.3.2
   flutter_secure_storage: ^10.3.1
