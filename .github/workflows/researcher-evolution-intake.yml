@@ -48,10 +48,84 @@ jobs:
           with open("researcher-evolution-work.json", "w", encoding="utf-8") as handle:
               json.dump(safe, handle, indent=2, sort_keys=True)
           PY
+      - name: Materialize Cantiere task contract
+        run: |
+          python - <<'PY'
+          import json
+
+          with open("researcher-evolution-work.json", encoding="utf-8") as handle:
+              work = json.load(handle)
+
+          proposal_id = str(work["proposal_id"]).strip()
+          capability_id = str(work["capability_id"]).strip()
+          deltas = [str(value).strip() for value in work["knowledge_delta"] if str(value).strip()]
+          gates = [str(value).strip() for value in work["acceptance_gates"] if str(value).strip()]
+
+          task = {
+              "id": f"research-evolution:{proposal_id}",
+              "title": f"Evolve {capability_id}",
+              "objective": (
+                  f"Create or improve our independently maintained module for {capability_id} "
+                  "using only the normalized Researcher knowledge delta. Produce an isolated "
+                  "candidate; do not mutate the stable Library."
+              ),
+              "kind": "codeModification",
+              "mode": "hybrid",
+              "preferredResource": "local",
+              "fallbackResources": ["githubAgent", "githubActions", "hybridAi"],
+              "priority": "normal",
+              "status": "planned",
+              "instructions": [
+                  "Use the current in-house module as the baseline when one exists.",
+                  "Apply only technically useful knowledge deltas.",
+                  "Prefer the best correct implementation; do not introduce artificial differences.",
+                  "Do not copy research-only upstream source code.",
+                  "Create a candidate version in an isolated workspace.",
+                  "Run the required validation gates before requesting promotion.",
+                  *[f"Knowledge delta: {delta}" for delta in deltas],
+              ],
+              "constraints": [
+                  "Never mutate the stable Library during implementation.",
+                  "Never bypass license, security, regression, or Library contract gates.",
+                  "Never execute untrusted discovered source code as part of synthesis.",
+              ],
+              "acceptanceCriteria": [
+                  {"id": gate, "description": f"Researcher gate {gate} must pass.", "required": True}
+                  for gate in gates
+              ],
+              "fileScope": {
+                  "allowed": ["candidate_workspace/**"],
+                  "readOnly": ["library_baseline/**", "research_knowledge/**"],
+                  "forbidden": ["stable_library/**"],
+              },
+              "budget": {
+                  "maxCredits": 0,
+                  "reservedCredits": 0,
+                  "minimumReserveCredits": 0,
+                  "estimatedCredits": 0,
+                  "allowOverrun": False,
+              },
+              "requiredCheckpoints": ["candidate_created", "tests_completed", "validation_completed"],
+              "checkpoint": None,
+              "parentTaskId": None,
+              "dependsOn": [],
+              "tags": ["researcher-v2", "module-evolution", capability_id],
+              "metadata": {
+                  "researcherProposalId": proposal_id,
+                  "capabilityId": capability_id,
+                  "mutationPolicy": work["mutation_policy"],
+                  "sourceCodeTransferred": False,
+              },
+          }
+          with open("workshop-task-contract.json", "w", encoding="utf-8") as handle:
+              json.dump(task, handle, indent=2, sort_keys=True)
+          PY
       - name: Upload validated Cantiere intake
         uses: actions/upload-artifact@v4
         with:
           name: researcher-evolution-${{ github.event.client_payload.proposal_id }}
-          path: researcher-evolution-work.json
+          path: |
+            researcher-evolution-work.json
+            workshop-task-contract.json
           if-no-files-found: error
           retention-days: 14
