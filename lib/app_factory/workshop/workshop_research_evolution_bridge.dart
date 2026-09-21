@@ -2,6 +2,9 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 final class WorkshopResearchEvolutionRequest {
@@ -149,11 +152,15 @@ final class WorkshopResearchEvolutionProjectAdapter {
 
   void _validate(WorkshopTaskContract task) {
     if (!task.tags.contains('researcher-v2') ||
+        !task.tags.contains('module-evolution') ||
         task.metadata['mutationPolicy'] != 'isolated_candidate_no_library_mutation' ||
         task.metadata['sourceCodeTransferred'] != false) {
       throw const FormatException('Unsafe Researcher evolution task contract.');
     }
-    if (task.fileScope.allowed.isEmpty ||
+    if (task.fileScope.allowed.length != 1 ||
+        task.fileScope.allowed.single != 'candidate_workspace/**' ||
+        !task.fileScope.readOnly.contains('library_baseline/**') ||
+        !task.fileScope.readOnly.contains('research_knowledge/**') ||
         !task.fileScope.forbidden.contains('stable_library/**')) {
       throw const FormatException('Researcher evolution task must isolate writable scope from the stable Library.');
     }
@@ -216,5 +223,34 @@ final class WorkshopResearchEvolutionSessionIntake {
       throw StateError('Research evolution intake must register exactly one authoritative task.');
     }
     return _engine.prepareProjectTask(requestId, task.id);
+  }
+}
+
+
+/// Runs a validated Researcher task through the existing authoritative
+/// Engineer -> Reviewer -> validation lifecycle. It deliberately stops before
+/// owner/policy approval and before apply, so stable Library mutation remains
+/// impossible at this boundary.
+final class WorkshopResearchEvolutionValidationRunner {
+  const WorkshopResearchEvolutionValidationRunner({
+    required WorkshopResearchEvolutionSessionIntake intake,
+    required WorkshopPreparedTaskLifecycle lifecycle,
+  })  : _intake = intake,
+        _lifecycle = lifecycle;
+
+  final WorkshopResearchEvolutionSessionIntake _intake;
+  final WorkshopPreparedTaskLifecycle _lifecycle;
+
+  Future<WorkshopTaskInferenceResult> prepareAndValidate({
+    required WorkshopTaskContract task,
+    bool isOffline = false,
+    CancellationToken? cancellationToken,
+  }) async {
+    await _intake.prepare(task);
+    return _lifecycle.runPrepared(
+      taskId: task.id,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
   }
 }
