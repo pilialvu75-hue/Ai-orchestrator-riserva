@@ -85,6 +85,7 @@ final class WorkshopProjectExecutor {
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
+        ...plan.constraints,
       ],
       context: <String>[
         'Project: ${plan.title}',
@@ -161,6 +162,7 @@ final class WorkshopProjectExecutor {
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
+        ...plan.constraints,
       ],
       context: <String>[
         'Project: ${plan.title}',

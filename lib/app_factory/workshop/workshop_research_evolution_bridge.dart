@@ -1,3 +1,6 @@
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
@@ -157,5 +160,61 @@ final class WorkshopResearchEvolutionProjectAdapter {
     if (task.acceptanceCriteria.isEmpty) {
       throw const FormatException('Researcher evolution task requires validation criteria.');
     }
+  }
+}
+
+
+/// Registers a validated Researcher contract in the authoritative Cantiere
+/// engine and prepares the exact task through WorkshopProjectExecutor.
+/// This stops at WorkspaceSession preparation: it never approves or applies.
+final class WorkshopResearchEvolutionSessionIntake {
+  const WorkshopResearchEvolutionSessionIntake({
+    required WorkshopEngine engine,
+    this.projectAdapter = const WorkshopResearchEvolutionProjectAdapter(),
+  }) : _engine = engine;
+
+  final WorkshopEngine _engine;
+  final WorkshopResearchEvolutionProjectAdapter projectAdapter;
+
+  Future<WorkspaceSession> prepare(WorkshopTaskContract task) async {
+    final mapped = projectAdapter.toProject(task);
+    final requestId = 'research-intake:${task.id}';
+    final request = WorkshopRequest(
+      id: requestId,
+      title: mapped.title,
+      instruction: mapped.goal,
+      source: WorkshopRequestSource.workshop,
+      operation: WorkshopOperation.modify,
+      targetFiles: task.fileScope.allowed,
+      constraints: mapped.constraints,
+      context: <String>[
+        'Researcher proposal: ${task.metadata['researcherProposalId']}',
+        'Capability: ${task.metadata['capabilityId']}',
+        'Mutation policy: ${task.metadata['mutationPolicy']}',
+        'Read-only scope: ${task.fileScope.readOnly.join(' | ')}',
+        'Forbidden scope: ${task.fileScope.forbidden.join(' | ')}',
+      ],
+    );
+
+    final registered = _engine.createProjectPlan(
+      request,
+      domain: mapped.domain,
+      phases: mapped.phases,
+      tasks: mapped.tasks,
+      requirements: mapped.requirements,
+      constraints: <String>[
+        ...mapped.constraints,
+        'Researcher read-only scope: ${task.fileScope.readOnly.join(' | ')}',
+        'Researcher forbidden scope: ${task.fileScope.forbidden.join(' | ')}',
+      ],
+      technologies: mapped.technologies,
+      hardware: mapped.hardware,
+      deliverables: mapped.deliverables,
+      validationCriteria: mapped.validationCriteria,
+    );
+    if (registered.tasks.length != 1 || registered.tasks.single.id != task.id) {
+      throw StateError('Research evolution intake must register exactly one authoritative task.');
+    }
+    return _engine.prepareProjectTask(requestId, task.id);
   }
 }
