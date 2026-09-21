@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/app/runtime_bootstrap.dart';
 import 'package:ai_orchestrator/app/splash_screen.dart';
 import 'package:ai_orchestrator/app/startup_transition_controller.dart';
 import 'package:ai_orchestrator/core/app_legal/app_legal_initializer.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/app_legal/services/eula_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
@@ -45,6 +46,16 @@ void _emitForensicException(
       'stack=\n$stackTrace';
   debugPrint(message);
   RuntimeEventLog.instance.emit(message);
+
+  // The telemetry backend is registered during RuntimeBootstrap. Before that
+  // point the existing local forensic log remains the source of truth.
+  if (di.sl.isRegistered<AbstractTelemetryService>()) {
+    di.sl<AbstractTelemetryService>().logCrash(
+      error,
+      stackTrace: stackTrace,
+      context: source,
+    );
+  }
 }
 
 Future<void> main() async {
