@@ -202,7 +202,11 @@ final class WorkshopResearchEvolutionSessionIntake {
       phases: mapped.phases,
       tasks: mapped.tasks,
       requirements: mapped.requirements,
-      constraints: mapped.constraints,
+      constraints: <String>[
+        ...mapped.constraints,
+        'Researcher read-only scope: ${task.fileScope.readOnly.join(' | ')}',
+        'Researcher forbidden scope: ${task.fileScope.forbidden.join(' | ')}',
+      ],
       technologies: mapped.technologies,
       hardware: mapped.hardware,
       deliverables: mapped.deliverables,
