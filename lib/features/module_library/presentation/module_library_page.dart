@@ -474,29 +474,118 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       onRetry: _refresh,
                       onReconnect: _externalRepository ? null : _connect,
                     )
-                  : RefreshIndicator(
+                  : _ModuleIndexView(
+                      items: _items,
+                      updatedAt: _lastUpdatedAt,
                       onRefresh: _refresh,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: _items.length + 1,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            return _LastUpdatedBanner(updatedAt: _lastUpdatedAt);
-                          }
-                          final status = _items[index - 1];
-                          return _CapabilityCard(
-                            status: status,
-                            curatorLoading:
-                                _curatorLoading.contains(status.capabilityId),
-                            onCurator: () => unawaited(
-                              _runCuratorForCapability(status),
-                            ),
-                          );
-                        },
-                      ),
+                      curatorLoading: _curatorLoading,
+                      onCurator: _runCuratorForCapability,
                     ),
+    );
+  }
+}
+
+class _ModuleIndexView extends StatelessWidget {
+  const _ModuleIndexView({
+    required this.items,
+    required this.updatedAt,
+    required this.onRefresh,
+    required this.curatorLoading,
+    required this.onCurator,
+  });
+
+  final List<ModuleCapabilityStatus> items;
+  final DateTime? updatedAt;
+  final Future<void> Function() onRefresh;
+  final Set<String> curatorLoading;
+  final Future<void> Function(ModuleCapabilityStatus) onCurator;
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = List<ModuleCapabilityStatus>.of(items)
+      ..sort((left, right) {
+        final leftEmpty = left.presentCount == 0;
+        final rightEmpty = right.presentCount == 0;
+        if (leftEmpty != rightEmpty) return leftEmpty ? 1 : -1;
+        final byPresence = right.presentCount.compareTo(left.presentCount);
+        if (byPresence != 0) return byPresence;
+        return left.title.toLowerCase().compareTo(right.title.toLowerCase());
+      });
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: sorted.length + 1,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          if (index == 0) return _LastUpdatedBanner(updatedAt: updatedAt);
+          final status = sorted[index - 1];
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 6),
+            title: Text('${status.title} (${status.progressLabel})'),
+            subtitle: Text('Funzione: ${_briefFunction(status)}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => _ModuleCapabilityDetailPage(
+                    status: status,
+                    curatorLoading: curatorLoading.contains(status.capabilityId),
+                    onCurator: () => unawaited(onCurator(status)),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  String _briefFunction(ModuleCapabilityStatus status) {
+    const descriptions = <String, String>{
+      'ai.acceleration_backend': 'Accelera l’inferenza AI su CPU/GPU e backend disponibili.',
+      'ai.local_inference': 'Esegue i modelli AI direttamente sul dispositivo.',
+      'ai.model_storage': 'Gestisce archiviazione e disponibilità dei modelli AI.',
+      'diagnostics.logging': 'Raccoglie log e diagnostica del sistema.',
+      'network.http': 'Gestisce richieste e comunicazioni HTTP.',
+      'storage.local_db': 'Gestisce dati persistenti nel database locale.',
+      'storage.secrets': 'Conserva credenziali e segreti in modo protetto.',
+      'voice.stt': 'Converte la voce in testo.',
+      'voice.tts': 'Converte il testo in voce.',
+    };
+    return descriptions[status.capabilityId] ??
+        'Fornisce la capacità ${status.title.toLowerCase()}.';
+  }
+}
+
+class _ModuleCapabilityDetailPage extends StatelessWidget {
+  const _ModuleCapabilityDetailPage({
+    required this.status,
+    required this.curatorLoading,
+    required this.onCurator,
+  });
+
+  final ModuleCapabilityStatus status;
+  final bool curatorLoading;
+  final VoidCallback onCurator;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(status.title)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _CapabilityCard(
+            status: status,
+            curatorLoading: curatorLoading,
+            onCurator: onCurator,
+          ),
+        ],
+      ),
     );
   }
 }
