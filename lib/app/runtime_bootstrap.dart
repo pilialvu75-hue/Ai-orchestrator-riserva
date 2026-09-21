@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -68,6 +69,13 @@ class RuntimeBootstrap {
     await configurePlatformUpdateServices(
       di.sl,
       currentVersion: appVersion,
+    );
+
+    di.sl<AbstractTelemetryService>().logEvent(
+      'app_bootstrap_ready',
+      parameters: <String, Object>{
+        'app_version': appVersion,
+      },
     );
 
     await CloudRoutingBootstrap.configure(di.sl);
