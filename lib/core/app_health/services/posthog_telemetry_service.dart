@@ -54,6 +54,15 @@ class PostHogTelemetryService implements AbstractTelemetryService {
       final config = PostHogConfig(projectToken.trim());
       config.host = host;
       config.debug = false;
+
+      // Minimal, privacy-first observability baseline. We only send events
+      // explicitly routed through AbstractTelemetryService.
+      config.captureApplicationLifecycleEvents = false;
+      config.sessionReplay = false;
+      config.surveys = false;
+      config.sendFeatureFlagEvents = false;
+      config.preloadFeatureFlags = false;
+      config.personProfiles = PostHogPersonProfiles.never;
       await Posthog().setup(config);
       service._ready = true;
       debugPrint('$_tag remote telemetry ready host=$host');
