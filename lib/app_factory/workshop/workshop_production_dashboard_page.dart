@@ -332,8 +332,7 @@ class _WorkshopProductionDashboardPageState
     });
 
     try {
-      await widget.executionController.cancelAndWait();
-      await widget.executionController.abandonCurrentExecution();
+      await widget.executionController.parkCurrentExecution();
 
       final dashboardController = widget.bundle.dashboardController;
       final recovery = widget.recoveryCoordinator;
@@ -342,10 +341,10 @@ class _WorkshopProductionDashboardPageState
         await recovery.saveCurrent(dashboardController);
       }
 
-      if (widget.executionController.state.status !=
-          WorkshopProductionExecutionStatus.idle) {
-        widget.executionController.reset();
-      }
+      // A new conversation must not inherit execution mode or terminal UI
+      // state from the parked project. Its durable execution remains in the
+      // store and will restore its own mode if explicitly reopened later.
+      widget.executionController.reset();
 
       dashboardController.forgetProduction();
       widget.executionController.clearBuildRepairChain();

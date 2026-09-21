@@ -374,6 +374,114 @@ void main() {
     controller.dispose();
   });
 
+  test(
+      'parking a running execution stops the provider but restores as safe replay',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final runner = _ControlledRunner(handle);
+    final controller = WorkshopProductionExecutionController(
+      runner: runner,
+      executionStore: store,
+    );
+
+    final run = controller.start(isOffline: true);
+    await runner.started;
+
+    final parking = controller.parkCurrentExecution();
+    expect(
+      controller.state.status,
+      WorkshopProductionExecutionStatus.cancelling,
+    );
+    expect(runner.token?.isCancelled, isTrue);
+
+    runner.complete(_result());
+    await parking;
+    await run;
+
+    final parked = (await store.loadAll()).single;
+    expect(parked.status, WorkshopExecutionStatus.checkpointed);
+    expect(parked.resumePhase, 'parked');
+    expect(parked.metadata['parked'], isTrue);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(controller.state.canRetry, isFalse);
+    expect(controller.journalExecution, isNull);
+
+    controller.dispose();
+
+    final restored = WorkshopProductionExecutionController(
+      runner: _ImmediateRunner(handle),
+      executionStore: store,
+    );
+    final recovery =
+        await restored.restorePersistentExecutionForPreparedTask();
+
+    expect(
+      recovery?.disposition,
+      WorkshopProductionExecutionRecoveryDisposition.safeReplayPending,
+    );
+    expect(restored.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(restored.state.canRetry, isFalse);
+    expect(restored.restartReplayPending, isTrue);
+    expect(restored.state.isOffline, isTrue);
+
+    restored.dispose();
+  });
+
+  test(
+      'parking approval-ready work preserves waiting approval instead of cancelling',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final controller = WorkshopProductionExecutionController(
+      runner: _ReadyRunner(handle),
+      executionStore: store,
+    );
+
+    await controller.start();
+
+    final beforeParking = (await store.loadAll()).single;
+    expect(beforeParking.status, WorkshopExecutionStatus.waitingApproval);
+    expect(beforeParking.resumePhase, 'waitingApproval');
+
+    await controller.parkCurrentExecution();
+
+    final parked = (await store.loadAll()).single;
+    expect(parked.executionId, beforeParking.executionId);
+    expect(parked.attemptId, beforeParking.attemptId);
+    expect(parked.status, WorkshopExecutionStatus.waitingApproval);
+    expect(parked.resumePhase, 'waitingApproval');
+    expect(controller.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(controller.state.canRetry, isFalse);
+    expect(controller.journalExecution, isNull);
+
+    controller.dispose();
+
+    final restored = WorkshopProductionExecutionController(
+      runner: _ImmediateRunner(handle),
+      executionStore: store,
+    );
+    final recovery =
+        await restored.restorePersistentExecutionForPreparedTask();
+
+    expect(
+      recovery?.disposition,
+      WorkshopProductionExecutionRecoveryDisposition.safeReplayPending,
+    );
+    expect(restored.state.status, WorkshopProductionExecutionStatus.idle);
+    expect(restored.state.canRetry, isFalse);
+
+    restored.dispose();
+  });
+
   test('abandon persists cancellation before forgetting the journal', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(

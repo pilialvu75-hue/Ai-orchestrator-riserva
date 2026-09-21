@@ -104,8 +104,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
     try {
       if (execution != null) {
-        await execution.cancelAndWait();
-        await execution.abandonCurrentExecution();
+        await execution.parkCurrentExecution();
       }
 
       if (recovery != null &&
