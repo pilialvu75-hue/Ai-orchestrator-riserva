@@ -172,7 +172,7 @@ void main() {
 }
 
 const _researchProposal = '{"summary":"Candidate","explanation":"Improve candidate",'
-    '"changes":[{"path":"candidate_workspace/module.dart","type":"creation",'
+    '"changes":[{"path":"candidate_workspace/module.dart","type":"addition",'
     '"content":"candidate"}],"validationNotes":[],"warnings":[]}';
 const _researchReview = '{"approved":true,"summary":"Review passed",'
     '"findings":[],"warnings":[]}';
