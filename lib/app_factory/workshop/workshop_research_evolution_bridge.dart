@@ -1,4 +1,5 @@
-import 'workshop_task_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_contract.dart';
 
 final class WorkshopResearchEvolutionRequest {
   const WorkshopResearchEvolutionRequest({
@@ -89,5 +90,72 @@ final class WorkshopResearchEvolutionTaskAdapter {
         'sourceCodeTransferred': false,
       },
     );
+  }
+}
+
+
+/// Deterministic bridge from a validated Researcher task contract to the
+/// authoritative Cantiere project model. It does not run inference, approve,
+/// apply, or mutate the stable Library.
+final class WorkshopResearchEvolutionProjectAdapter {
+  const WorkshopResearchEvolutionProjectAdapter();
+
+  WorkshopProjectPlan toProject(WorkshopTaskContract task) {
+    _validate(task);
+    const phaseId = 'phase:research-evolution';
+    final criteria = task.acceptanceCriteria
+        .map((item) => item.description.trim().isEmpty ? item.id : item.description.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    final description = <String>[
+      task.objective.trim(),
+      ...task.instructions.map((item) => item.trim()).where((item) => item.isNotEmpty),
+    ].join('\n');
+
+    return WorkshopProjectPlan(
+      id: 'project:${task.id}',
+      title: task.title,
+      goal: task.objective,
+      domain: WorkshopProjectDomain.software,
+      status: WorkshopProjectStatus.planned,
+      requirements: task.instructions,
+      constraints: task.constraints,
+      deliverables: const <String>['isolated candidate workspace'],
+      validationCriteria: criteria,
+      phases: <WorkshopProjectPhase>[
+        WorkshopProjectPhase(
+          id: phaseId,
+          title: 'Research evolution',
+          description: 'Implement and validate one isolated Researcher evolution candidate.',
+          taskIds: <String>[task.id],
+          validationCriteria: criteria,
+        ),
+      ],
+      tasks: <WorkshopProjectTask>[
+        WorkshopProjectTask(
+          id: task.id,
+          title: task.title,
+          description: description,
+          phaseId: phaseId,
+          affectedPaths: task.fileScope.allowed,
+          validationCriteria: criteria,
+        ),
+      ],
+    );
+  }
+
+  void _validate(WorkshopTaskContract task) {
+    if (!task.tags.contains('researcher-v2') ||
+        task.metadata['mutationPolicy'] != 'isolated_candidate_no_library_mutation' ||
+        task.metadata['sourceCodeTransferred'] != false) {
+      throw const FormatException('Unsafe Researcher evolution task contract.');
+    }
+    if (task.fileScope.allowed.isEmpty ||
+        !task.fileScope.forbidden.contains('stable_library/**')) {
+      throw const FormatException('Researcher evolution task must isolate writable scope from the stable Library.');
+    }
+    if (task.acceptanceCriteria.isEmpty) {
+      throw const FormatException('Researcher evolution task requires validation criteria.');
+    }
   }
 }
