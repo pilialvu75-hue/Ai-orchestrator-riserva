@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/diagnostics/diagnostics_telemetry_bridge.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
@@ -76,6 +77,12 @@ class RuntimeBootstrap {
       parameters: <String, Object>{
         'app_version': appVersion,
       },
+    );
+
+    // Diagnostics remains the local/offline source of truth. From this point
+    // onward only privacy-filtered health signals are mirrored to telemetry.
+    DiagnosticsTelemetryBridge.instance.start(
+      telemetry: di.sl<AbstractTelemetryService>(),
     );
 
     await CloudRoutingBootstrap.configure(di.sl);
