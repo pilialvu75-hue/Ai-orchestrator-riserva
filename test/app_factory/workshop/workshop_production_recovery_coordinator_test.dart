@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -278,6 +279,50 @@ void main() {
     },
   );
 
+
+  test(
+    'serializes concurrent explicit checkpoint saves without losing projects',
+    () async {
+      final store = _BlockingWorkshopCheckpointStore();
+      final coordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: store,
+      );
+      final controller = _controllerFor(workspace.path);
+
+      controller.startProduction(
+        title: 'Concurrent Alpha',
+        instruction: 'Persist alpha safely.',
+      );
+      final alphaProjectId = controller.state.projectId!;
+      final alphaSave = coordinator.saveCurrent(controller);
+
+      await store.firstSaveStarted.future;
+
+      controller.forgetProduction();
+      controller.startProduction(
+        title: 'Concurrent Beta',
+        instruction: 'Persist beta safely.',
+      );
+      final betaProjectId = controller.state.projectId!;
+      final betaSave = coordinator.saveCurrent(controller);
+
+      await Future<void>.delayed(Duration.zero);
+      expect(store.maxConcurrentSaves, 1);
+
+      store.releaseFirstSave.complete();
+      await Future.wait(<Future<void>>[alphaSave, betaSave]);
+
+      final parked = await coordinator.listSavedProjects();
+      expect(parked, hasLength(2));
+      expect(
+        parked.map((item) => item.projectId),
+        containsAll(<String>[alphaProjectId, betaProjectId]),
+      );
+
+      controller.dispose();
+    },
+  );
+
 }
 
 WorkshopDashboardController _controllerFor(String workspaceRootPath) {
@@ -290,4 +335,50 @@ WorkshopDashboardController _controllerFor(String workspaceRootPath) {
       projectExecutor: executor,
     ),
   );
+}
+
+
+final class _BlockingWorkshopCheckpointStore
+    implements WorkshopCheckpointStore {
+  final Map<String, WorkshopBackgroundCheckpoint> _items =
+      <String, WorkshopBackgroundCheckpoint>{};
+
+  final Completer<void> firstSaveStarted = Completer<void>();
+  final Completer<void> releaseFirstSave = Completer<void>();
+
+  bool _blockedFirstSave = false;
+  int _activeSaves = 0;
+  int maxConcurrentSaves = 0;
+
+  @override
+  Future<void> save(WorkshopBackgroundCheckpoint checkpoint) async {
+    _activeSaves += 1;
+    if (_activeSaves > maxConcurrentSaves) {
+      maxConcurrentSaves = _activeSaves;
+    }
+
+    try {
+      if (!_blockedFirstSave) {
+        _blockedFirstSave = true;
+        firstSaveStarted.complete();
+        await releaseFirstSave.future;
+      }
+      _items[checkpoint.jobId] = checkpoint;
+    } finally {
+      _activeSaves -= 1;
+    }
+  }
+
+  @override
+  Future<WorkshopBackgroundCheckpoint?> load(String jobId) async =>
+      _items[jobId];
+
+  @override
+  Future<List<WorkshopBackgroundCheckpoint>> loadAll() async =>
+      List<WorkshopBackgroundCheckpoint>.unmodifiable(_items.values);
+
+  @override
+  Future<void> remove(String jobId) async {
+    _items.remove(jobId);
+  }
 }
