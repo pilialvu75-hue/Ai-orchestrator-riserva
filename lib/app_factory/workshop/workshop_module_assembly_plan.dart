@@ -76,6 +76,8 @@ final class WorkshopReusableModulePackage {
     required this.contracts,
     required this.files,
     this.requirements = const <WorkshopAssemblyRequirement>[],
+    this.availability = WorkshopLibraryCandidateAvailability.active,
+    this.manifestDigest,
     this.artifactDigest,
   });
 
@@ -85,8 +87,14 @@ final class WorkshopReusableModulePackage {
   final List<String> contracts;
   final List<WorkshopReusableModuleFile> files;
   final List<WorkshopAssemblyRequirement> requirements;
+  final WorkshopLibraryCandidateAvailability availability;
 
-  /// Integrity digest verified by the future Cantiere <-> Library bridge.
+  /// Digest of the exact certified manifest selected by the verified Library
+  /// snapshot. Production package readers populate it only after cross-checking
+  /// the package envelope against that snapshot.
+  final String? manifestDigest;
+
+  /// Integrity digest of the exact certified module tree.
   /// Assembly keeps it for traceability but does not pretend to verify remote
   /// bytes itself.
   final String? artifactDigest;

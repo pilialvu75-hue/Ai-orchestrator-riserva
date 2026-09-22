@@ -20,10 +20,12 @@ final class WorkshopLibraryPackageReader {
     required String envelopeJson,
     required String expectedPin,
     required String expectedPackageSha256,
+    required String expectedManifestSha256,
     required String expectedModuleTreeSha256,
   }) {
     final normalizedExpectedPin = expectedPin.trim();
     final normalizedPackageSha = expectedPackageSha256.trim().toLowerCase();
+    final normalizedManifestSha = expectedManifestSha256.trim().toLowerCase();
     final normalizedTreeSha = expectedModuleTreeSha256.trim().toLowerCase();
 
     if (normalizedExpectedPin.isEmpty || !normalizedExpectedPin.contains('@')) {
@@ -31,6 +33,9 @@ final class WorkshopLibraryPackageReader {
     }
     if (!_sha256.hasMatch(normalizedPackageSha)) {
       throw const FormatException('Expected package SHA-256 is invalid.');
+    }
+    if (!_sha256.hasMatch(normalizedManifestSha)) {
+      throw const FormatException('Expected manifest SHA-256 is invalid.');
     }
     if (!_sha256.hasMatch(normalizedTreeSha)) {
       throw const FormatException('Expected module tree SHA-256 is invalid.');
@@ -75,20 +80,27 @@ final class WorkshopLibraryPackageReader {
       throw const FormatException('Library package pin differs from selected pin.');
     }
 
-    final availability = package['availability']?.toString().trim() ?? '';
-    if (availability == 'revoked') {
-      throw const FormatException('Revoked Library packages cannot be consumed.');
-    }
-    if (availability != 'active' && availability != 'deprecated') {
-      throw const FormatException('Invalid Library package availability.');
-    }
+    final availability = switch (
+        package['availability']?.toString().trim() ?? '') {
+      'active' => WorkshopLibraryCandidateAvailability.active,
+      'deprecated' => WorkshopLibraryCandidateAvailability.deprecated,
+      'revoked' => throw const FormatException(
+          'Revoked Library packages cannot be consumed.'),
+      _ => throw const FormatException('Invalid Library package availability.'),
+    };
 
     final integrity = package['integrity'];
     if (integrity is! Map<String, dynamic>) {
       throw const FormatException('Library package integrity metadata is missing.');
     }
+    final manifestSha =
+        integrity['manifest_sha256']?.toString().trim().toLowerCase() ?? '';
     final moduleTreeSha =
         integrity['module_tree_sha256']?.toString().trim().toLowerCase() ?? '';
+    if (!_sha256.hasMatch(manifestSha) ||
+        manifestSha != normalizedManifestSha) {
+      throw const FormatException('Library manifest SHA-256 mismatch.');
+    }
     if (!_sha256.hasMatch(moduleTreeSha) || moduleTreeSha != normalizedTreeSha) {
       throw const FormatException('Library module tree SHA-256 mismatch.');
     }
@@ -171,6 +183,8 @@ final class WorkshopLibraryPackageReader {
       contracts: List<String>.unmodifiable(contracts),
       files: List<WorkshopReusableModuleFile>.unmodifiable(files),
       requirements: List<WorkshopAssemblyRequirement>.unmodifiable(requirements),
+      availability: availability,
+      manifestDigest: manifestSha,
       artifactDigest: moduleTreeSha,
     );
   }

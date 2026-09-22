@@ -119,6 +119,7 @@ final class WorkshopLibraryRemoteClient {
       envelopeJson: envelopeJson,
       expectedPin: normalizedPin,
       expectedPackageSha256: indexEntry.packageSha256,
+      expectedManifestSha256: asset.manifestSha256,
       expectedModuleTreeSha256: asset.moduleTreeSha256,
     );
   }
