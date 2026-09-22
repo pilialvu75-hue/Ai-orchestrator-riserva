@@ -361,9 +361,7 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln('projectPath: ${request.projectPath ?? ''}')
       ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
       ..writeln('constraints: ${request.constraints.join(' | ')}')
-      ..writeln(
-        'context: ${_architectureContext(request).join(' | ')}',
-      )
+      ..writeln('context: ${request.context.join(' | ')}')
       ..writeln();
 
     _appendTargetBuildContract(buffer, target);
@@ -434,7 +432,9 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln('instruction: ${request.instruction}')
       ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
       ..writeln('constraints: ${request.constraints.join(' | ')}')
-      ..writeln('context: ${request.context.join(' | ')}')
+      ..writeln(
+        'context: ${_architectureContext(request).join(' | ')}',
+      )
       ..writeln();
 
     _appendTargetBuildContract(buffer, target);
