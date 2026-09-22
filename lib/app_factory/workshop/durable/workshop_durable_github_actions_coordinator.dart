@@ -144,17 +144,11 @@ final class WorkshopDurableGitHubActionsCoordinator {
       );
     }
 
-    snapshot = await _orchestrator.startTask(
-      projectId: projectId,
-      taskId: taskId,
-      reason: WorkshopDurableEventTypes.taskStarted,
-      operationIdempotencyKey: operationIdempotencyKey,
-    );
-
     final now = _clock().toUtc();
-    snapshot = await _orchestrator.waitForExternal(
+    snapshot = await _orchestrator.startTaskAndWaitForExternal(
       projectId: projectId,
       taskId: taskId,
+      operationIdempotencyKey: operationIdempotencyKey,
       wait: WorkshopDurableExternalWait(
         eventType: WorkshopDurableEventTypes.ciStarted,
         externalId: _identity(
@@ -165,7 +159,8 @@ final class WorkshopDurableGitHubActionsCoordinator {
         timeoutAt: now.add(runDiscoveryTimeout),
         successState: WorkshopDurableState.running,
       ),
-      reason: 'github.dispatch.persisted_before_side_effect',
+      startReason: WorkshopDurableEventTypes.taskStarted,
+      waitReason: 'github.dispatch.persisted_before_side_effect',
     );
 
     try {
