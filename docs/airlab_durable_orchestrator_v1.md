@@ -231,17 +231,20 @@ Tests cover:
 
 1. Durable core is merged (#549).
 2. AIrLab A6 production runner is merged (#558).
-3. Researcher repository_dispatch intake now materializes canonical Cantiere
-   and Durable Orchestrator contracts (#559).
-4. Connect the durable READY task to a real deployed execution worker; the
-   current AIrLab `/v1/tasks` Cloudflare surface still uses the deterministic
+3. Direct Researcher -> Cantiere repository_dispatch is retired. Researcher
+   evolution work must cross the Module Library quarantine/certification
+   boundary before Cantiere can execute or validate it.
+4. Reuse the canonical Researcher/Cantiere adapters only behind a future
+   Library-approved handoff contract; no raw Researcher dispatch is executable.
+5. Connect Library-approved durable work to a real deployed execution worker;
+   the current AIrLab `/v1/tasks` Cloudflare surface still uses the deterministic
    mock engine.
-5. Add GitHub Actions/external-event reconciliation:
+6. Add GitHub Actions/external-event reconciliation:
    dispatch -> durable run id -> WAITING_EXTERNAL -> completion event.
-6. Add watchdog/reconciliation invocation from a durable scheduler/webhook
+7. Add watchdog/reconciliation invocation from a durable scheduler/webhook
    surface.
-7. Add atomic distributed orchestration storage before enabling multiple
+8. Add atomic distributed orchestration storage before enabling multiple
    concurrent server workers for the same project.
-8. Prove the requested end-to-end path:
+9. Prove the requested end-to-end path:
    REQUEST -> PROJECT -> TASK -> COMMIT -> CI -> WAITING_EXTERNAL -> RESUME ->
    FIX/RETRY if needed -> VALIDATION -> ARTIFACT READY -> COMPLETED.
