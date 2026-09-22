@@ -4,6 +4,12 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_remote_client.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_snapshot.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
@@ -212,6 +218,215 @@ void main() {
     expect(engineer.lastPrompt, contains('baseline tests passed'));
     expect(engineer.lastPrompt, contains('update lib/app.dart'));
   });
+
+  test('production coordinator prefers certified remote Library reuse',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: _gateways(calls),
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Certified reuse test',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadStateCalls, 1);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot['lib/certified_storage.dart'],
+      'class CertifiedStorage {}\n',
+    );
+    expect(workspaceGateway.files.containsKey('lib/certified_storage.dart'), isFalse);
+    expect(workspaceGateway.writeCalls, 0);
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ],
+    );
+  });
+
+  test('remote Library failure is a reuse miss and normal AI path continues',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(),
+      failLoadState: true,
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: _gateways(calls),
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Remote fallback test',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadStateCalls, 1);
+    expect(libraryClient.loadPackageCalls, 0);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ],
+    );
+  });
+}
+
+WorkshopLibraryRemoteState _certifiedLibraryState() {
+  final manifestSha = List<String>.filled(64, 'a').join();
+  final treeSha = List<String>.filled(64, 'b').join();
+  final packageSha = List<String>.filled(64, 'c').join();
+  final snapshotSha = List<String>.filled(64, 'd').join();
+  const pin = 'storage.local_db.certified@1.0.0';
+
+  return WorkshopLibraryRemoteState(
+    snapshot: WorkshopLibrarySnapshot(
+      libraryId: 'ai-orchestrator-module-library',
+      catalogVersion: 'test-1',
+      snapshotSha256: snapshotSha,
+      assets: <WorkshopLibrarySnapshotAsset>[
+        WorkshopLibrarySnapshotAsset(
+          candidate: WorkshopLibraryCandidate(
+            assetId: 'storage.local_db.certified',
+            version: '1.0.0',
+            capabilities: <String>['storage.local_db'],
+            contracts: <String>['storage.local_db.v1'],
+            targets: <String>['android'],
+            availability: WorkshopLibraryCandidateAvailability.active,
+            validationScore: 1,
+            resolutionScore: 1,
+            integrationEffort: WorkshopLibraryIntegrationEffort.trivial,
+            observedSuccessRate: 1,
+            evidenceCount: 5,
+          ),
+          manifestSha256: manifestSha,
+          moduleTreeSha256: treeSha,
+        ),
+      ],
+    ),
+    packageIndex: <String, WorkshopLibraryPackageIndexEntry>{
+      pin: WorkshopLibraryPackageIndexEntry(
+        pin: pin,
+        path: 'packages/storage.local_db.certified/1.0.0/package.json',
+        packageSha256: packageSha,
+        moduleTreeSha256: treeSha,
+      ),
+    },
+  );
+}
+
+WorkshopReusableModulePackage _certifiedStoragePackage() {
+  final manifestSha = List<String>.filled(64, 'a').join();
+  final treeSha = List<String>.filled(64, 'b').join();
+
+  return WorkshopReusableModulePackage(
+    assetId: 'storage.local_db.certified',
+    version: '1.0.0',
+    capabilities: const <String>['storage.local_db'],
+    contracts: const <String>['storage.local_db.v1'],
+    files: const <WorkshopReusableModuleFile>[
+      WorkshopReusableModuleFile(
+        sourcePath: 'lib/certified_storage.dart',
+        targetPath: 'lib/certified_storage.dart',
+        content: 'class CertifiedStorage {}\n',
+      ),
+    ],
+    manifestDigest: manifestSha,
+    artifactDigest: treeSha,
+  );
+}
+
+final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
+  _FakeLibraryReadClient({
+    required this.state,
+    required this.package,
+    this.failLoadState = false,
+  });
+
+  final WorkshopLibraryRemoteState state;
+  final WorkshopReusableModulePackage package;
+  final bool failLoadState;
+  int loadStateCalls = 0;
+  int loadPackageCalls = 0;
+
+  @override
+  Future<WorkshopLibraryRemoteState> loadState() async {
+    loadStateCalls += 1;
+    if (failLoadState) {
+      throw StateError('simulated Library outage');
+    }
+    return state;
+  }
+
+  @override
+  Future<WorkshopReusableModulePackage> loadPackage({
+    required WorkshopLibraryRemoteState state,
+    required String pin,
+  }) async {
+    loadPackageCalls += 1;
+    if (pin != package.pin) {
+      throw StateError('unexpected Library pin: $pin');
+    }
+    return package;
+  }
 }
 
 const String _proposalJson =
