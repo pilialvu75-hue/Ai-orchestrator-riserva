@@ -152,6 +152,8 @@ final class WorkshopLibraryReuseService {
         reason: 'library-unavailable-or-unverified',
       );
     }
+  }
+
   String _verifiedReuseIdentity({
     required WorkshopLibraryRemoteState remote,
     required List<String> pins,
@@ -163,7 +165,5 @@ final class WorkshopLibraryReuseService {
         '$pin:${remote.packageIndex[pin]?.packageSha256 ?? ''}',
     ];
     return components.join('|');
-  }
-
   }
 }
