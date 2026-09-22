@@ -416,6 +416,77 @@ void main() {
       );
     });
 
+    test('project identity is idempotent only for the same correlation',
+        () async {
+      final first = await orchestrator.createProject(
+        projectId: 'project-correlation',
+        correlationId: 'corr-a',
+        tasks: <WorkshopDurableTask>[task('work')],
+      );
+      final replay = await orchestrator.createProject(
+        projectId: 'project-correlation',
+        correlationId: 'corr-a',
+        tasks: <WorkshopDurableTask>[task('ignored-on-idempotent-replay')],
+      );
+
+      expect(replay.correlationId, first.correlationId);
+      expect(replay.tasks.keys, first.tasks.keys);
+
+      expect(
+        () => orchestrator.createProject(
+          projectId: 'project-correlation',
+          correlationId: 'corr-b',
+          tasks: <WorkshopDurableTask>[task('work')],
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('cancellation is durable and records task/project transitions',
+        () async {
+      await orchestrator.createProject(
+        projectId: 'project-cancel',
+        correlationId: 'corr-cancel',
+        tasks: <WorkshopDurableTask>[
+          task('running-task'),
+          task('ready-task'),
+        ],
+      );
+      await orchestrator.markProjectReady('project-cancel');
+      await orchestrator.startTask(
+        projectId: 'project-cancel',
+        taskId: 'running-task',
+      );
+
+      final cancelled = await orchestrator.cancelProject('project-cancel');
+
+      expect(cancelled.state, WorkshopDurableState.cancelled);
+      expect(
+        cancelled.tasks.values.every(
+          (item) => item.state == WorkshopDurableState.cancelled,
+        ),
+        isTrue,
+      );
+      expect(
+        cancelled.transitions.where(
+          (transition) =>
+              transition.nextState == WorkshopDurableState.cancelled,
+        ),
+        hasLength(3),
+      );
+
+      final restarted = WorkshopDurableOrchestrator(
+        store: WorkshopCheckpointDurableOrchestrationStore(
+          checkpointStore: checkpointStore,
+        ),
+        clock: () => now,
+      );
+      expect(
+        (await restarted.loadProject('project-cancel'))!.state,
+        WorkshopDurableState.cancelled,
+      );
+    });
+
     test('operation idempotency prevents a duplicate external start',
         () async {
       await orchestrator.createProject(
