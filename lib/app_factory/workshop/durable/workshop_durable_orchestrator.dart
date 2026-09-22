@@ -974,12 +974,13 @@ final class WorkshopDurableOrchestrator {
 
       final task = next.tasks[event.taskId];
       final wait = task?.externalWait;
-      final matched = task != null &&
+      var matched = false;
+
+      if (task != null &&
           task.state == WorkshopDurableState.waitingExternal &&
           wait != null &&
-          wait.matches(event);
-
-      if (matched) {
+          wait.matches(event)) {
+        matched = true;
         if (event.success) {
           final artifacts =
               <String>{...task.artifactIds, ...event.artifactIds}.toList()
@@ -1291,6 +1292,15 @@ final class WorkshopDurableOrchestrator {
     }
     if (tasks.any((task) => task.state == WorkshopDurableState.retrying)) {
       return _projectTransition(snapshot, WorkshopDurableState.retrying, reason, now);
+    }
+    if (tasks.any(
+      (task) =>
+          task.state == WorkshopDurableState.ready &&
+          _dependenciesCompleted(snapshot, task),
+    )) {
+      // An external wait must never freeze the whole project while independent
+      // work is runnable.
+      return _projectTransition(snapshot, WorkshopDurableState.ready, reason, now);
     }
     if (tasks.any((task) => task.state == WorkshopDurableState.waitingExternal)) {
       return _projectTransition(
