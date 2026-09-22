@@ -78,6 +78,74 @@ void main() {
     expect(library.findById('invoice-template')?.reuseCount, 3);
   });
 
+  test('certified remote selection suppresses even a strong local reuse candidate',
+      () async {
+    final calls = <AppAiRole>[];
+    final orchestrator = _RecordingGateway(
+      role: AppAiRole.workshopOrchestrator,
+      callOrder: calls,
+      result: _success('fresh analysis after remote selection'),
+    );
+    final architect = _RecordingGateway(
+      role: AppAiRole.architect,
+      callOrder: calls,
+      result: _success('plan around certified remote workspace content'),
+    );
+    final library = WorkshopReuseLibrary(
+      initialAssets: <WorkshopReusableAsset>[
+        WorkshopReusableAsset(
+          id: 'invoice-template',
+          name: 'Invoice billing application',
+          kind: WorkshopReusableAssetKind.projectTemplate,
+          origin: WorkshopReusableAssetOrigin.completedProject,
+          description:
+              'Invoice billing application for customers and invoices',
+          tags: const <String>['invoice', 'billing', 'customers'],
+          capabilities: const <String>['customers', 'invoices'],
+          target: 'android',
+          validationScore: 1,
+          reuseCount: 4,
+        ),
+      ],
+    );
+
+    final result = await WorkshopPreflightInferencePipeline(
+      inference: _stageInference(
+        orchestrator: orchestrator,
+        architect: architect,
+        calls: calls,
+      ),
+      reuseLibrary: library,
+    ).run(
+      request: const WorkshopRequest(
+        id: 'invoice-remote-selected',
+        title: 'Invoice billing application',
+        instruction: 'Create invoice billing application for customers.',
+      ),
+      allowLocalReuse: false,
+      requiredCapabilities: const <String>['customers', 'invoices'],
+      target: 'android',
+    );
+
+    expect(result.readyForImplementation, isTrue);
+    expect(result.reusedLocalKnowledge, isFalse);
+    expect(
+      result.reuseDecision?.reason,
+      'local-reuse-suppressed-by-certified-remote-library',
+    );
+    expect(result.reusedAsset, isNull);
+    expect(orchestrator.calls, 1);
+    expect(architect.calls, 1);
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+      ],
+    );
+    expect(library.findById('invoice-template')?.reuseCount, 4);
+  });
+
   test('weak local candidate preserves normal two-call preflight', () async {
     final calls = <AppAiRole>[];
     final orchestrator = _RecordingGateway(
