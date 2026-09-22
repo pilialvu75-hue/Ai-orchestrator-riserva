@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 /// Direct inference boundary for the Workshop/Cantiere.
@@ -266,7 +267,22 @@ class WorkshopInferenceGateway {
       }
 
       if (response.text.isNotEmpty) {
-        buffer.write(response.text);
+        final currentText = buffer.toString();
+        final incomingText = response.text;
+
+        final merged = response.isFinal
+            ? mergeStreamedText(
+                currentText: currentText,
+                incomingText: incomingText,
+                isFinalChunk: true,
+              )
+            : incomingText.startsWith(currentText) && currentText.isNotEmpty
+                ? incomingText
+                : '$currentText$incomingText';
+
+        buffer
+          ..clear()
+          ..write(merged);
       }
 
       if (response.isFinal) {

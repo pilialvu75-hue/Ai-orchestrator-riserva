@@ -16,7 +16,7 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   group('Workshop preflight resume', () {
-    test('reuses successful Orchestrator analysis after Architect failure',
+    test('retries transient Architect failure inside the same preflight',
         () async {
       final orchestrator = _SequenceGateway(
         role: AppAiRole.workshopOrchestrator,
@@ -40,19 +40,71 @@ void main() {
         architect: architect,
       );
 
-      final first = await pipeline.run(request: _request);
-      expect(first.analysisReady, isTrue);
-      expect(first.architectureReady, isFalse);
-      expect(first.readyForImplementation, isFalse);
-      expect(orchestrator.calls, 1);
-      expect(architect.calls, 1);
+      final result = await pipeline.run(request: _request);
 
-      final second = await pipeline.run(request: _request);
-      expect(second.readyForImplementation, isTrue);
-      expect(second.analysis.text, 'scope analysis');
-      expect(second.architecture?.text, 'implementation plan');
+      expect(result.analysisReady, isTrue);
+      expect(result.architectureReady, isTrue);
+      expect(result.readyForImplementation, isTrue);
+      expect(result.analysis.text, 'scope analysis');
+      expect(result.architecture?.text, 'implementation plan');
       expect(orchestrator.calls, 1);
       expect(architect.calls, 2);
+      expect(
+        architect.sessionIds,
+        <String>[
+          'workshop:resume-preflight-request:preflight:planning',
+          'workshop:resume-preflight-request:preflight:planning:retry-1',
+        ],
+      );
+    });
+
+    test('approved proposal is not duplicated in Architect prompt', () async {
+      const marker = 'UNIQUE_APPROVED_PROPOSAL_MARKER';
+      final orchestrator = _SequenceGateway(
+        role: AppAiRole.workshopOrchestrator,
+        results: <WorkshopInferenceResult>[
+          _success('unused analysis'),
+        ],
+      );
+      final architect = _SequenceGateway(
+        role: AppAiRole.architect,
+        results: <WorkshopInferenceResult>[
+          _success('implementation plan'),
+        ],
+      );
+      final pipeline = _pipeline(
+        orchestrator: orchestrator,
+        architect: architect,
+      );
+      final request = WorkshopRequest(
+        id: 'approved-proposal-dedup',
+        title: 'Build approved app',
+        instruction: 'Build the app from the approved proposal.',
+        operation: WorkshopOperation.create,
+        projectPath: '/workspace',
+        constraints: const <String>['Keep scope bounded'],
+        context: <String>[
+          WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+            'Complete proposal $marker',
+          ),
+          'Independent context',
+        ],
+      );
+
+      final result = await pipeline.run(request: request);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.calls, 0);
+      expect(architect.calls, 1);
+      final prompt = architect.prompts.single;
+      expect(RegExp(marker).allMatches(prompt), hasLength(1));
+      expect(prompt, contains('Independent context'));
+      expect(
+        prompt,
+        isNot(contains(
+          WorkshopPreflightInferencePipeline.approvedProposalContextPrefix,
+        )),
+      );
     });
 
     test('certified Library identity invalidates stale preflight resume',
@@ -125,7 +177,17 @@ void main() {
           WorkshopInferenceResult(
             text: '',
             terminalState: InferenceTerminalState.failed,
+            errorMessage: 'online architect retry stalled',
+          ),
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
             errorMessage: 'offline architect stalled',
+          ),
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage: 'offline architect retry stalled',
           ),
         ],
       );
@@ -144,7 +206,10 @@ void main() {
       expect(offline.analysis.text, 'offline analysis');
       expect(orchestrator.calls, 2);
       expect(orchestrator.offlineValues, <bool>[false, true]);
-      expect(architect.offlineValues, <bool>[false, true]);
+      expect(
+        architect.offlineValues,
+        <bool>[false, false, true, true],
+      );
     });
   });
 }
@@ -204,6 +269,8 @@ final class _SequenceGateway extends WorkshopInferenceGateway {
   final AppAiRole role;
   final List<WorkshopInferenceResult> _results;
   final List<bool> offlineValues = <bool>[];
+  final List<String> prompts = <String>[];
+  final List<String> sessionIds = <String>[];
   int calls = 0;
 
   @override
@@ -222,6 +289,8 @@ final class _SequenceGateway extends WorkshopInferenceGateway {
     CancellationToken? cancellationToken,
   }) async {
     offlineValues.add(isOffline);
+    prompts.add(prompt);
+    sessionIds.add(sessionId);
     final index = calls;
     calls += 1;
     if (index >= _results.length) {

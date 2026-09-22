@@ -42,6 +42,92 @@ void main() {
 
     controller.dispose();
   });
+
+  test('Workshop clarification is not marked ready for approval',
+      () async {
+    final provider = _SingleReplyProvider(
+      'CLARIFY: Qual è la funzione principale?',
+    );
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('fammi una app');
+
+    expect(result, isNotNull);
+    expect(result!.content, 'Qual è la funzione principale?');
+    expect(
+      controller.lastReplyKind,
+      WorkshopChatReplyKind.clarification,
+    );
+    expect(controller.lastResponseReadyForApproval, isFalse);
+
+    controller.dispose();
+  });
+
+  test('Workshop collector does not duplicate cumulative final snapshot',
+      () async {
+    final provider = _CumulativeSnapshotProvider();
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('costruisci app');
+
+    expect(result, isNotNull);
+    expect(result!.content, 'Hello world');
+    expect(
+      controller.messages
+          .where((turn) => turn.role == ChatRole.assistant)
+          .map((turn) => turn.content)
+          .toList(),
+      <String>['Hello world'],
+    );
+
+    controller.dispose();
+  });
+
+}
+
+
+final class _SingleReplyProvider implements RuntimeInferenceProvider {
+  _SingleReplyProvider(this.reply);
+
+  final String reply;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    yield InferenceResponse.finalChunk(
+      text: reply,
+      tokensGenerated: 4,
+      model: 'fake-workshop',
+    );
+  }
+}
+
+final class _CumulativeSnapshotProvider implements RuntimeInferenceProvider {
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    yield InferenceResponse.token(
+      text: 'Hello ',
+      model: 'fake-workshop',
+    );
+    yield InferenceResponse.token(
+      text: 'world',
+      model: 'fake-workshop',
+    );
+    yield InferenceResponse.finalChunk(
+      text: 'Hello world',
+      tokensGenerated: 2,
+      model: 'fake-workshop',
+    );
+  }
 }
 
 final class _CapturingProvider implements RuntimeInferenceProvider {

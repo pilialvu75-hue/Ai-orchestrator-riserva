@@ -241,9 +241,9 @@ class _WorkshopDashboardPageState
     }
 
     _pendingConfirmation = false;
-    _pendingInstruction = message;
-    _pendingTitle =
-        _deriveProjectTitle(message);
+    _pendingInstruction ??= message;
+    _pendingTitle ??=
+        _deriveProjectTitle(_pendingInstruction);
     _pendingApprovedProposal = null;
 
     _messageController.clear();
@@ -261,8 +261,13 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    _pendingApprovedProposal = result.content.trim();
-    _pendingConfirmation = true;
+    if (_chatController.lastResponseReadyForApproval) {
+      _pendingApprovedProposal = result.content.trim();
+      _pendingConfirmation = true;
+    } else {
+      _pendingApprovedProposal = null;
+      _pendingConfirmation = false;
+    }
 
     setState(() {});
   }
