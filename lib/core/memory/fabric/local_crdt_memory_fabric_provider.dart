@@ -137,6 +137,54 @@ final class LocalCrdtMemoryFabricProvider implements MemoryFabricProvider {
     }
   }
 
+  static SyncConflictResolution _resolveRemoteConflict(
+    CrdtRecord? existing,
+    CrdtRecord incoming,
+  ) {
+    if (incoming.isTombstone) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    final incomingRecord = _decodeCrdtRecord(incoming);
+    if (incomingRecord == null || !incomingRecord.checksumValid) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    if (existing == null) {
+      return SyncConflictResolution.preferIncoming;
+    }
+
+    final existingRecord = _decodeCrdtRecord(existing);
+    if (existingRecord == null || !existingRecord.checksumValid) {
+      return SyncConflictResolution.preferIncoming;
+    }
+
+    if (incomingRecord.version > existingRecord.version) {
+      return SyncConflictResolution.preferIncoming;
+    }
+    if (incomingRecord.version < existingRecord.version) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    if (incomingRecord.checksum != existingRecord.checksum) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    return SyncConflictResolution.useDefaultLww;
+  }
+
+  static MemoryFabricRecord? _decodeCrdtRecord(CrdtRecord record) {
+    final raw = record.decodedValue;
+    if (raw == null) return null;
+    try {
+      return MemoryFabricRecord.fromJson(
+        Map<String, Object?>.from(raw),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
   MemoryFabricRecord? _decode(Map<String, dynamic> raw) {
     try {
       return MemoryFabricRecord.fromJson(
