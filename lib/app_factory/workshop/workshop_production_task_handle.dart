@@ -151,6 +151,7 @@ final class WorkshopProductionTaskCoordinator {
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
+      allowLocalReuse: !remoteLibraryReused,
       cancellationToken: cancellationToken,
     );
 
@@ -209,6 +210,7 @@ final class WorkshopProductionTaskCoordinator {
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
+      allowLocalReuse: !remoteLibraryReused,
       cancellationToken: cancellationToken,
     );
 
