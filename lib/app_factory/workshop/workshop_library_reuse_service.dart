@@ -19,6 +19,11 @@ final class WorkshopLibraryReuseResult {
   final String? reason;
 
   bool get staged => stagedPaths.isNotEmpty;
+
+  /// True when the certified remote Library was selected successfully for the
+  /// prepared project, including idempotent resume cases where every package
+  /// file is already present with identical content and no new path is staged.
+  bool get reused => reusedPins.isNotEmpty && reason == null;
 }
 
 /// Production bridge from an approved Cantiere plan to certified Module Library
