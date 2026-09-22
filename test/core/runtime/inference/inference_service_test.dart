@@ -437,6 +437,98 @@ Top results:
       expect(streamInvocations, 2);
       expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
+
+    test('offline local search tags never execute the web tool and recover locally',
+        () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'This result must never be used.',
+          success: true,
+        ),
+      );
+      var streamInvocations = 0;
+      final seenSessionIds = <String>[];
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: const AiModel(
+          id: 'phi3_5_mini',
+          displayName: 'Phi-3.5 Mini Instruct',
+          fileName: 'phi3.gguf',
+          downloadUrl: 'https://example.com/model.gguf',
+          version: '1.0.0',
+          sizeBytes: 123,
+          description: 'Test model',
+          isDownloaded: true,
+          localPath: '/tmp/phi3.gguf',
+          validationStatus: ModelValidationStatus.validatedOk,
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, cancellationToken) async* {
+            streamInvocations += 1;
+            seenSessionIds.add(request.sessionId);
+            expect(request.isOffline, isTrue);
+            expect(cancellationToken.isCancelled, isFalse);
+
+            if (streamInvocations == 1) {
+              yield InferenceResponse.token(
+                text: '<search>latest weather in Rome</search>',
+                model: 'phi3_5_mini',
+              );
+              return;
+            }
+
+            expect(
+              request.sessionId,
+              'offline-search-s1::offline-search-recovery',
+            );
+            expect(
+              request.prompt,
+              contains('local/project knowledge only'),
+            );
+            expect(
+              request.systemPrompt,
+              contains('[OFFLINE HARD BOUNDARY]'),
+            );
+            expect(
+              request.systemPrompt,
+              contains('What is the latest weather in Rome?'),
+            );
+
+            yield InferenceResponse.finalChunk(
+              text: 'I cannot verify live weather while offline.',
+              tokensGenerated: 7,
+              model: 'phi3_5_mini',
+            );
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+        webSearchTool: searchTool,
+      );
+
+      final response = await service.infer(
+        const InferenceRequest(
+          sessionId: 'offline-search-s1',
+          prompt: 'What is the latest weather in Rome?',
+          isOffline: true,
+        ),
+      );
+
+      expect(response.isError, isFalse);
+      expect(
+        response.text,
+        'I cannot verify live weather while offline.',
+      );
+      expect(searchTool.calls, 0);
+      expect(streamInvocations, 2);
+      expect(
+        seenSessionIds,
+        <String>[
+          'offline-search-s1',
+          'offline-search-s1::offline-search-recovery',
+        ],
+      );
+    });
   });
 }
 
