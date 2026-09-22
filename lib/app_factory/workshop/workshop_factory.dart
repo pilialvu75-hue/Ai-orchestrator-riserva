@@ -11,6 +11,10 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider_adapter.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_service_factory.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_transport.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_research_library_handoff.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 
 /// Composition root del Cantiere.
@@ -92,6 +96,24 @@ final class WorkshopFactory {
       rootPath: normalizedPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+    );
+  }
+
+  /// Crea il boundary di produzione che pubblica esclusivamente candidati
+  /// Researcher gia validati nell'intake della Module Library canonica.
+  ///
+  /// Il transport conserva l'autorita dei gate esistenti: nessuna scrittura
+  /// diretta a main/modules e nessuna certificazione lato Cantiere.
+  static WorkshopResearchLibraryHandoff createResearchLibraryHandoff({
+    WorkshopLibraryGitHubCredentialStore? credentialStore,
+  }) {
+    final transport = WorkshopLibraryGitHubTransport(
+      credentialStore: credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
+    );
+    return WorkshopResearchLibraryHandoff(
+      submissionService: WorkshopLibrarySubmissionService(
+        submitBundle: transport.submit,
+      ),
     );
   }
 
