@@ -110,7 +110,13 @@ void main() {
       final requestedHosts = <String>[];
       final client = _FakeHttpClient((request) async {
         requestedHosts.add(request.url.host);
-        expect(request.url.queryParameters['q'], 'best recipe apps features');
+        expect(request.method, 'POST');
+        expect(request.url.query, isEmpty);
+        expect(request, isA<http.Request>());
+        expect(
+          (request as http.Request).bodyFields['q'],
+          'best recipe apps features',
+        );
 
         return http.Response(
           '''
