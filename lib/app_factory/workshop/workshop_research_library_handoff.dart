@@ -49,7 +49,7 @@ final class WorkshopResearchLibraryHandoff {
       }
       files.add(WorkshopLibraryIntakePayloadFile(
         path: relative,
-        bytes: content.codeUnits,
+        bytes: List<int>.unmodifiable(content.codeUnits),
       ));
     }
 
