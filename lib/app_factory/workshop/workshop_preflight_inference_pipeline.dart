@@ -86,6 +86,7 @@ final class WorkshopPreflightInferencePipeline {
     required WorkshopRequest request,
     bool isOffline = false,
     bool allowLocalReuse = true,
+    String? certifiedLibraryReuseIdentity,
     List<String> requiredCapabilities = const <String>[],
     String? target,
     CancellationToken? cancellationToken,
@@ -95,6 +96,7 @@ final class WorkshopPreflightInferencePipeline {
       request: request,
       isOffline: isOffline,
       allowLocalReuse: allowLocalReuse,
+      certifiedLibraryReuseIdentity: certifiedLibraryReuseIdentity,
       requiredCapabilities: requiredCapabilities,
       target: resolvedTarget,
     );
@@ -309,6 +311,7 @@ final class WorkshopPreflightInferencePipeline {
     required WorkshopRequest request,
     required bool isOffline,
     required bool allowLocalReuse,
+    required String? certifiedLibraryReuseIdentity,
     required List<String> requiredCapabilities,
     required String? target,
   }) {
@@ -323,6 +326,7 @@ final class WorkshopPreflightInferencePipeline {
       request.context.join('\u001e'),
       isOffline ? 'offline' : 'network-capable',
       allowLocalReuse ? 'local-reuse-enabled' : 'local-reuse-suppressed',
+      certifiedLibraryReuseIdentity?.trim() ?? '',
       target?.trim() ?? '',
       requiredCapabilities.join('\u001e'),
     ].join('\u001f');
