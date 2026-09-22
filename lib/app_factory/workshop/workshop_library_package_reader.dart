@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'workshop_capability_reuse_planner.dart';
 import 'workshop_module_assembly_plan.dart';
 
 /// Fail-closed decoder for the physical certified package emitted by the
