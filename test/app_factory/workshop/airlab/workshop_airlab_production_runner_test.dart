@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_ha
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -498,7 +499,7 @@ final class _HistoricalRunner
   @override
   Future<WorkshopTaskInferenceResult> runPreparedWithResumeContext({
     required WorkshopProductionTaskHandle handle,
-    required dynamic resumeContext,
+    required WorkshopResumeContext resumeContext,
     required CancellationToken cancellationToken,
     required bool isOffline,
   }) {
