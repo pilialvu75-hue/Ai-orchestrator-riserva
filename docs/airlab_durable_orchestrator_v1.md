@@ -1,8 +1,8 @@
 # AIRLAB Durable Orchestrator V1
 
-Status: **implementation ring / PR #549**
+Status: **merged / converged through PR #559**
 Baseline date: **2026-09-22**
-Parent baseline: `Ai-orchestrator-riserva@8e112c9bfdd9ff14efa460e33d6696882f93e3db`
+Parent baseline: `Ai-orchestrator-riserva@77df0b55d855763911c61e9a697d738a9e0c89d5`
 AIrLab architecture baseline: `Ai_orchestrator-prova@f3d52d2c91c437e437e12872030495dd719d2ed6`
 
 ## Purpose
@@ -41,9 +41,9 @@ capability/provider/build adapters
 | `WorkshopProductionRecoveryCoordinator` | project-scoped persistent recovery exists | REUSE as project authority |
 | `WorkshopCheckpointStore` | canonical checkpoint persistence abstraction exists | REUSE as Durable V1 storage adapter |
 | `CloudBackgroundExecutionJournal` | detects interrupted Cloud requests and forbids blind replay | CONFIRM safety rule; durable external replay requires idempotency |
-| PR #545 parking semantics | open, based on an older main | REUSE concept after convergence; do not copy stale branch blindly |
+| PR #545 parking semantics | historical branch predating current main | SUPERSEDED by current-main durable scheduling semantics; do not revive blindly |
 | AIrLab A1-A5 / PR #548 | controlled AIrLab execution through Reviewer/validation exists | REUSE |
-| AIrLab issue #11 / A6 | explicit production runner still open | DEPENDENCY for production AIrLab execution wiring |
+| AIrLab issue #11 / A6 | completed by PR #558 on current main | REUSE explicit opt-in production runner; historical runner remains unchanged when disabled |
 | GitHub Actions | existing build infrastructure | first intended WAITING_EXTERNAL adapter |
 
 ## V1 durable states
@@ -211,7 +211,7 @@ validation progression do not require a "continue" message.
 | Busy-wait for GitHub Actions | historical operational anti-pattern | REJECTED | use WAITING_EXTERNAL + event/reconciliation |
 | Park project as cancelled | PR #545 identifies this as wrong | SUPERSEDED conceptually | parking must remain resumable |
 | Merge stale #545 blindly | branch predates #546-#548 | REJECTED | converge on current main first |
-| Wire AIrLab production before A6 | A6 issue #11 open | DEFERRED | preserve canonical production runner boundary |
+| Wire AIrLab production through A6 | completed by PR #558 | CONFIRMED | explicit runner preserves canonical production boundary and fails closed |
 
 ## MVP evidence implemented in PR #549
 
@@ -229,15 +229,19 @@ Tests cover:
 
 ## Next convergence rings
 
-1. Get PR #549 green and merge the durable core.
-2. Converge current-main parking semantics from PR #545 without regressing A4/A5.
-3. Complete/consume AIrLab A6 production runner.
-4. Add a GitHub Actions adapter:
+1. Durable core is merged (#549).
+2. AIrLab A6 production runner is merged (#558).
+3. Researcher repository_dispatch intake now materializes canonical Cantiere
+   and Durable Orchestrator contracts (#559).
+4. Connect the durable READY task to a real deployed execution worker; the
+   current AIrLab `/v1/tasks` Cloudflare surface still uses the deterministic
+   mock engine.
+5. Add GitHub Actions/external-event reconciliation:
    dispatch -> durable run id -> WAITING_EXTERNAL -> completion event.
-5. Add watchdog/reconciliation invocation from a durable scheduler/webhook
+6. Add watchdog/reconciliation invocation from a durable scheduler/webhook
    surface.
-6. Add atomic distributed orchestration storage before enabling multiple
+7. Add atomic distributed orchestration storage before enabling multiple
    concurrent server workers for the same project.
-7. Prove the requested end-to-end path:
+8. Prove the requested end-to-end path:
    REQUEST -> PROJECT -> TASK -> COMMIT -> CI -> WAITING_EXTERNAL -> RESUME ->
    FIX/RETRY if needed -> VALIDATION -> ARTIFACT READY -> COMPLETED.
