@@ -1,5 +1,5 @@
-import 'memory_fabric_provider.dart';
-import 'memory_fabric_record.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_provider.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
 
 final class MemoryFabricPolicyException implements Exception {
   const MemoryFabricPolicyException(this.message);
