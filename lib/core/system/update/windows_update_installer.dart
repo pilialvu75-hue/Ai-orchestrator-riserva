@@ -84,36 +84,66 @@ class WindowsUpdateInstaller implements WindowsUpdateInstallerPort {
 
     final partialFile = File(partialPath);
     await partialFile.parent.create(recursive: true);
-    final existingPartialBytes =
+
+    var existingPartialBytes =
         await partialFile.exists() ? await partialFile.length() : 0;
-    final headers = <String, dynamic>{};
-    if (existingPartialBytes > 0) {
-      headers[HttpHeaders.rangeHeader] = 'bytes=$existingPartialBytes-';
+    if (existingPartialBytes >= expectedSizeBytes) {
+      // A partial file at or beyond the advertised final size is not safe to
+      // append to. A complete valid installer would already have been moved to
+      // [finalPath], so restart this download from byte zero.
+      await partialFile.delete();
+      existingPartialBytes = 0;
     }
 
-    final response = await _dio.get<ResponseBody>(
-      url,
-      options: Options(
-        responseType: ResponseType.stream,
-        followRedirects: true,
-        receiveTimeout: _downloadTimeout,
-        headers: headers,
-        validateStatus: (status) =>
-            status != null &&
-            (status == HttpStatus.ok || status == HttpStatus.partialContent),
-      ),
+    var response = await _requestDownload(
+      url: url,
+      rangeStart: existingPartialBytes > 0 ? existingPartialBytes : null,
     );
 
-    final supportsResume = existingPartialBytes > 0 &&
-        response.statusCode == HttpStatus.partialContent;
+    var supportsResume = false;
+    if (existingPartialBytes > 0 &&
+        response.statusCode == HttpStatus.partialContent) {
+      supportsResume = _isValidResumeResponse(
+        response: response,
+        requestedStart: existingPartialBytes,
+        expectedSizeBytes: expectedSizeBytes,
+      );
+
+      if (!supportsResume) {
+        // Never append a 206 response unless Content-Range proves that it
+        // starts exactly where our local .part file ends and targets the same
+        // artifact size. Some proxies/CDNs can return stale or malformed range
+        // responses; silently appending those bytes would corrupt the file.
+        await _discardResponseBody(response);
+        if (await partialFile.exists()) {
+          await partialFile.delete();
+        }
+        existingPartialBytes = 0;
+        response = await _requestDownload(url: url);
+      }
+    } else if (existingPartialBytes > 0 &&
+        response.statusCode == HttpStatus.ok) {
+      // Server ignored Range. This is safe as long as we overwrite the .part
+      // file instead of appending to it.
+      existingPartialBytes = 0;
+    }
+
+    if (!supportsResume &&
+        response.statusCode == HttpStatus.partialContent &&
+        !_isValidFullRangeResponse(
+          response: response,
+          expectedSizeBytes: expectedSizeBytes,
+        )) {
+      await _discardResponseBody(response);
+      throw StateError(
+        'Windows installer server returned an invalid Content-Range for a '
+        'full download.',
+      );
+    }
+
     final sink = partialFile.openWrite(
       mode: supportsResume ? FileMode.append : FileMode.write,
     );
-    final reportedLength =
-        int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
-    final totalBytes = supportsResume
-        ? existingPartialBytes + (reportedLength ?? 0)
-        : (reportedLength ?? expectedSizeBytes);
     var receivedBytes = supportsResume ? existingPartialBytes : 0;
 
     try {
@@ -124,11 +154,24 @@ class WindowsUpdateInstaller implements WindowsUpdateInstallerPort {
       await for (final chunk in stream) {
         sink.add(chunk);
         receivedBytes += chunk.length;
-        onProgress(receivedBytes, totalBytes > 0 ? totalBytes : expectedSizeBytes);
+        if (receivedBytes > expectedSizeBytes) {
+          throw StateError(
+            'Windows installer exceeded advertised size: '
+            'expected=$expectedSizeBytes received=$receivedBytes',
+          );
+        }
+        onProgress(receivedBytes, expectedSizeBytes);
       }
     } finally {
       await sink.flush();
       await sink.close();
+    }
+
+    if (receivedBytes != expectedSizeBytes) {
+      throw StateError(
+        'Windows installer download ended at an unexpected size: '
+        'expected=$expectedSizeBytes received=$receivedBytes',
+      );
     }
 
     if (await finalFile.exists()) {
@@ -152,6 +195,96 @@ class WindowsUpdateInstaller implements WindowsUpdateInstallerPort {
     }
     onProgress(verification.sizeBytes, expectedSizeBytes);
     return finalPath;
+  }
+
+  Future<Response<ResponseBody>> _requestDownload({
+    required String url,
+    int? rangeStart,
+  }) {
+    final headers = <String, dynamic>{};
+    if (rangeStart != null && rangeStart > 0) {
+      headers[HttpHeaders.rangeHeader] = 'bytes=$rangeStart-';
+    }
+    return _dio.get<ResponseBody>(
+      url,
+      options: Options(
+        responseType: ResponseType.stream,
+        followRedirects: true,
+        receiveTimeout: _downloadTimeout,
+        headers: headers,
+        validateStatus: (status) =>
+            status != null &&
+            (status == HttpStatus.ok || status == HttpStatus.partialContent),
+      ),
+    );
+  }
+
+  bool _isValidResumeResponse({
+    required Response<ResponseBody> response,
+    required int requestedStart,
+    required int expectedSizeBytes,
+  }) {
+    if (response.statusCode != HttpStatus.partialContent) return false;
+    final range = _parseContentRange(
+      response.headers.value(HttpHeaders.contentRangeHeader),
+    );
+    if (range == null ||
+        range.start != requestedStart ||
+        range.end != expectedSizeBytes - 1 ||
+        range.total != expectedSizeBytes) {
+      return false;
+    }
+
+    final contentLength = int.tryParse(
+      response.headers.value(Headers.contentLengthHeader) ?? '',
+    );
+    return contentLength == null || contentLength == range.length;
+  }
+
+  bool _isValidFullRangeResponse({
+    required Response<ResponseBody> response,
+    required int expectedSizeBytes,
+  }) {
+    if (response.statusCode != HttpStatus.partialContent) return true;
+    final range = _parseContentRange(
+      response.headers.value(HttpHeaders.contentRangeHeader),
+    );
+    if (range == null ||
+        range.start != 0 ||
+        range.end != expectedSizeBytes - 1 ||
+        range.total != expectedSizeBytes) {
+      return false;
+    }
+    final contentLength = int.tryParse(
+      response.headers.value(Headers.contentLengthHeader) ?? '',
+    );
+    return contentLength == null || contentLength == range.length;
+  }
+
+  _ContentRange? _parseContentRange(String? raw) {
+    if (raw == null) return null;
+    final match = RegExp(r'^bytes\s+(\d+)-(\d+)/(\d+)$')
+        .firstMatch(raw.trim().toLowerCase());
+    if (match == null) return null;
+    final start = int.tryParse(match.group(1)!);
+    final end = int.tryParse(match.group(2)!);
+    final total = int.tryParse(match.group(3)!);
+    if (start == null ||
+        end == null ||
+        total == null ||
+        start < 0 ||
+        end < start ||
+        total <= end) {
+      return null;
+    }
+    return _ContentRange(start: start, end: end, total: total);
+  }
+
+  Future<void> _discardResponseBody(Response<ResponseBody> response) async {
+    final stream = response.data?.stream;
+    if (stream == null) return;
+    final subscription = stream.listen((_) {});
+    await subscription.cancel();
   }
 
   @override
@@ -271,4 +404,18 @@ class WindowsUpdateInstaller implements WindowsUpdateInstallerPort {
       );
     }
   }
+}
+
+class _ContentRange {
+  const _ContentRange({
+    required this.start,
+    required this.end,
+    required this.total,
+  });
+
+  final int start;
+  final int end;
+  final int total;
+
+  int get length => end - start + 1;
 }

@@ -1,8 +1,52 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/system/update/windows_update_installer.dart';
+
+class _DownloadResponse {
+  const _DownloadResponse({
+    required this.bytes,
+    required this.statusCode,
+    this.headers = const <String, List<String>>{},
+  });
+
+  final List<int> bytes;
+  final int statusCode;
+  final Map<String, List<String>> headers;
+}
+
+class _SequenceDownloadAdapter implements HttpClientAdapter {
+  _SequenceDownloadAdapter(this.responses);
+
+  final List<_DownloadResponse> responses;
+  final List<String?> ranges = <String?>[];
+  var calls = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    ranges.add(options.headers[HttpHeaders.rangeHeader]?.toString());
+    if (calls >= responses.length) {
+      throw StateError('No synthetic response left for call ${calls + 1}.');
+    }
+    final response = responses[calls++];
+    return ResponseBody.fromBytes(
+      response.bytes,
+      response.statusCode,
+      headers: response.headers,
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
 
 void main() {
   late Directory tempDirectory;
@@ -88,5 +132,124 @@ void main() {
 
     expect(launched, isTrue);
     expect(launchedPath, path);
+  });
+
+  test('resume appends only when Content-Range matches local offset', () async {
+    final complete = List<int>.generate(8, (index) => index + 1);
+    final partial = complete.sublist(0, 4);
+    final remainder = complete.sublist(4);
+    final finalPath =
+        '${tempDirectory.path}${Platform.pathSeparator}AI-Orchestrator-Setup-x64.exe';
+    final partialPath = '$finalPath.part';
+    await File(partialPath).writeAsBytes(partial, flush: true);
+
+    final adapter = _SequenceDownloadAdapter(<_DownloadResponse>[
+      _DownloadResponse(
+        bytes: remainder,
+        statusCode: HttpStatus.partialContent,
+        headers: const <String, List<String>>{
+          HttpHeaders.contentRangeHeader: <String>['bytes 4-7/8'],
+          HttpHeaders.contentLengthHeader: <String>['4'],
+        },
+      ),
+    ]);
+    final dio = Dio()..httpClientAdapter = adapter;
+    final installer = WindowsUpdateInstaller(dio: dio);
+
+    final downloaded = await installer.download(
+      url: 'https://example.invalid/AI-Orchestrator-Setup-x64.exe',
+      fileName: 'AI-Orchestrator-Setup-x64.exe',
+      finalPath: finalPath,
+      partialPath: partialPath,
+      expectedSizeBytes: complete.length,
+      expectedSha256: sha256.convert(complete).toString(),
+      onProgress: (_, __) {},
+    );
+
+    expect(downloaded, finalPath);
+    expect(adapter.calls, 1);
+    expect(adapter.ranges, <String?>['bytes=4-']);
+    expect(await File(finalPath).readAsBytes(), complete);
+    expect(await File(partialPath).exists(), isFalse);
+  });
+
+  test('malformed resume response is discarded and restarted from byte zero',
+      () async {
+    final complete = List<int>.generate(8, (index) => 20 + index);
+    final partial = complete.sublist(0, 4);
+    final finalPath =
+        '${tempDirectory.path}${Platform.pathSeparator}AI-Orchestrator-Setup-x64.exe';
+    final partialPath = '$finalPath.part';
+    await File(partialPath).writeAsBytes(partial, flush: true);
+
+    final adapter = _SequenceDownloadAdapter(<_DownloadResponse>[
+      const _DownloadResponse(
+        bytes: <int>[99, 98, 97, 96],
+        statusCode: HttpStatus.partialContent,
+        headers: <String, List<String>>{
+          HttpHeaders.contentRangeHeader: <String>['bytes 0-3/8'],
+          HttpHeaders.contentLengthHeader: <String>['4'],
+        },
+      ),
+      _DownloadResponse(
+        bytes: complete,
+        statusCode: HttpStatus.ok,
+        headers: const <String, List<String>>{
+          HttpHeaders.contentLengthHeader: <String>['8'],
+        },
+      ),
+    ]);
+    final dio = Dio()..httpClientAdapter = adapter;
+    final installer = WindowsUpdateInstaller(dio: dio);
+
+    final downloaded = await installer.download(
+      url: 'https://example.invalid/AI-Orchestrator-Setup-x64.exe',
+      fileName: 'AI-Orchestrator-Setup-x64.exe',
+      finalPath: finalPath,
+      partialPath: partialPath,
+      expectedSizeBytes: complete.length,
+      expectedSha256: sha256.convert(complete).toString(),
+      onProgress: (_, __) {},
+    );
+
+    expect(downloaded, finalPath);
+    expect(adapter.calls, 2);
+    expect(adapter.ranges, <String?>['bytes=4-', null]);
+    expect(await File(finalPath).readAsBytes(), complete);
+  });
+
+  test('download stops immediately when server exceeds advertised size',
+      () async {
+    final expected = List<int>.generate(8, (index) => index);
+    final oversized = <int>[...expected, 99];
+    final finalPath =
+        '${tempDirectory.path}${Platform.pathSeparator}AI-Orchestrator-Setup-x64.exe';
+    final partialPath = '$finalPath.part';
+
+    final adapter = _SequenceDownloadAdapter(<_DownloadResponse>[
+      _DownloadResponse(
+        bytes: oversized,
+        statusCode: HttpStatus.ok,
+        headers: const <String, List<String>>{
+          HttpHeaders.contentLengthHeader: <String>['9'],
+        },
+      ),
+    ]);
+    final dio = Dio()..httpClientAdapter = adapter;
+    final installer = WindowsUpdateInstaller(dio: dio);
+
+    await expectLater(
+      installer.download(
+        url: 'https://example.invalid/AI-Orchestrator-Setup-x64.exe',
+        fileName: 'AI-Orchestrator-Setup-x64.exe',
+        finalPath: finalPath,
+        partialPath: partialPath,
+        expectedSizeBytes: expected.length,
+        expectedSha256: sha256.convert(expected).toString(),
+        onProgress: (_, __) {},
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(await File(finalPath).exists(), isFalse);
   });
 }
