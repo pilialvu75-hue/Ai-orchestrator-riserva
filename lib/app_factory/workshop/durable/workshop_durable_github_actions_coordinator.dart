@@ -391,16 +391,20 @@ final class WorkshopDurableGitHubActionsCoordinator {
           );
           return _stateResult(failed, runId: runId);
         }
-        return WorkshopDurableGitHubReconcileResult(
+        return _waitingOrTimeout(
           snapshot: snapshot,
-          disposition:
+          task: task,
+          wait: wait,
+          waiting:
               WorkshopDurableGitHubReconcileDisposition.waitingForCompletion,
           runId: runId,
         );
       } catch (_) {
-        return WorkshopDurableGitHubReconcileResult(
+        return _waitingOrTimeout(
           snapshot: snapshot,
-          disposition:
+          task: task,
+          wait: wait,
+          waiting:
               WorkshopDurableGitHubReconcileDisposition.waitingForCompletion,
           runId: runId,
         );
