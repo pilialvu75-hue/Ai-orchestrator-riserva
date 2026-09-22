@@ -93,8 +93,8 @@ void main() {
         source: 'test',
         privacyLevel: privacy,
       );
-      expect(
-        () => fabric.write(record),
+      await expectLater(
+        fabric.write(record),
         throwsA(isA<MemoryFabricPolicyException>()),
       );
     }
