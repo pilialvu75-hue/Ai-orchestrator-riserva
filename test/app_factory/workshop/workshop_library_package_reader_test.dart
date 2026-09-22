@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_package_reader.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
 import 'package:crypto/crypto.dart';
@@ -9,6 +10,7 @@ void main() {
   group('WorkshopLibraryPackageReader', () {
     const reader = WorkshopLibraryPackageReader();
     final treeSha = List<String>.filled(64, 'a').join();
+    final manifestSha = List<String>.filled(64, 'd').join();
 
     test('decodes exact verified certified package for assembly', () {
       final fixture = _envelope(treeSha: treeSha);
@@ -16,11 +18,17 @@ void main() {
         envelopeJson: fixture.json,
         expectedPin: 'demo.asset@1.0.0',
         expectedPackageSha256: fixture.packageSha,
+        expectedManifestSha256: manifestSha,
         expectedModuleTreeSha256: treeSha,
       );
 
       expect(package.pin, 'demo.asset@1.0.0');
+      expect(package.manifestDigest, manifestSha);
       expect(package.artifactDigest, treeSha);
+      expect(
+        package.availability,
+        WorkshopLibraryCandidateAvailability.active,
+      );
       expect(package.capabilities, <String>['demo.capability']);
       expect(package.contracts, <String>['demo.capability.v1']);
       expect(package.files, hasLength(1));
@@ -41,6 +49,22 @@ void main() {
           envelopeJson: fixture.json,
           expectedPin: 'demo.asset@1.0.0',
           expectedPackageSha256: wrong,
+          expectedManifestSha256: manifestSha,
+          expectedModuleTreeSha256: treeSha,
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('fails closed when certified manifest digest differs', () {
+      final fixture = _envelope(treeSha: treeSha);
+      final wrong = List<String>.filled(64, 'e').join();
+      expect(
+        () => reader.decode(
+          envelopeJson: fixture.json,
+          expectedPin: 'demo.asset@1.0.0',
+          expectedPackageSha256: fixture.packageSha,
+          expectedManifestSha256: wrong,
           expectedModuleTreeSha256: treeSha,
         ),
         throwsFormatException,
@@ -55,6 +79,7 @@ void main() {
           envelopeJson: fixture.json,
           expectedPin: 'demo.asset@1.0.0',
           expectedPackageSha256: fixture.packageSha,
+          expectedManifestSha256: manifestSha,
           expectedModuleTreeSha256: wrong,
         ),
         throwsFormatException,
@@ -68,6 +93,7 @@ void main() {
           envelopeJson: fixture.json,
           expectedPin: 'other.asset@1.0.0',
           expectedPackageSha256: fixture.packageSha,
+          expectedManifestSha256: manifestSha,
           expectedModuleTreeSha256: treeSha,
         ),
         throwsFormatException,
@@ -79,6 +105,7 @@ void main() {
           envelopeJson: revoked.json,
           expectedPin: 'demo.asset@1.0.0',
           expectedPackageSha256: revoked.packageSha,
+          expectedManifestSha256: manifestSha,
           expectedModuleTreeSha256: treeSha,
         ),
         throwsFormatException,
@@ -97,6 +124,7 @@ void main() {
             envelopeJson: fixture.json,
             expectedPin: 'demo.asset@1.0.0',
             expectedPackageSha256: fixture.packageSha,
+            expectedManifestSha256: manifestSha,
             expectedModuleTreeSha256: treeSha,
           ),
           throwsFormatException,
@@ -110,6 +138,7 @@ void main() {
           envelopeJson: duplicate.json,
           expectedPin: 'demo.asset@1.0.0',
           expectedPackageSha256: duplicate.packageSha,
+          expectedManifestSha256: manifestSha,
           expectedModuleTreeSha256: treeSha,
         ),
         throwsFormatException,
@@ -133,6 +162,7 @@ void main() {
         envelopeJson: fixture.json,
         expectedPin: 'demo.asset@1.0.0',
         expectedPackageSha256: fixture.packageSha,
+        expectedManifestSha256: manifestSha,
         expectedModuleTreeSha256: treeSha,
       );
       expect(package.files, isEmpty);

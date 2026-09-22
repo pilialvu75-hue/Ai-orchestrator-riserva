@@ -248,3 +248,34 @@ Tests cover:
 9. Prove the requested end-to-end path:
    REQUEST -> PROJECT -> TASK -> COMMIT -> CI -> WAITING_EXTERNAL -> RESUME ->
    FIX/RETRY if needed -> VALIDATION -> ARTIFACT READY -> COMPLETED.
+
+
+## Library-approved durable handoff
+
+Researcher discovery is never executable Cantiere input.
+
+The only supported route for reusable Researcher output is:
+
+```text
+Researcher discovery
+  -> Module Library intake/quarantine
+  -> normalization + immutable validation + security/license/provenance gates
+  -> certified active Library asset
+  -> verified Library snapshot + package envelope
+  -> WorkshopLibraryApprovedHandoffService
+  -> PLANNED WorkshopTaskContract
+  -> normal project authorization
+  -> Durable scheduling
+  -> Cantiere Reviewer + validation + owner/apply boundary
+```
+
+The handoff is fail-closed. It binds the exact `asset@version` pin to the
+Library snapshot digest, certified manifest digest, module-tree digest and
+package-envelope digest. The requested capability, Lego contract and target
+must match the certified snapshot, and package target files must remain inside
+the file scope already authorized by the owning Cantiere project.
+
+Library certification does **not** mark a Cantiere task ready and never grants
+apply authority. The produced task starts in `planned` with
+`requiresProjectAuthorization=true`. Raw Researcher payloads and retired
+Researcher -> Cantiere repository dispatch remain forbidden.
