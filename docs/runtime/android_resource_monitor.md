@@ -104,3 +104,30 @@ without words such as "today". Explicit historical years, first office-holders
 and past-tense questions retain the ordinary path. Existing offline and
 post-search continuation safeguards still apply. This does not establish the
 cause of the initial latency from a tail-only device log.
+
+## Selection consistency and memory termination
+
+Background model-update results merge into the latest model-list state, so they
+cannot restore a selection captured before an asynchronous check. Selection
+writes run in order and failed preference writes are surfaced instead of showing
+an unsaved selection. Inference continues to resolve the selected model for each
+request; regression coverage switches models in the same chat.
+
+Critical memory signals now emit a `critical_memory` terminal error immediately,
+before closing the stream, and retain a failed monitor state during cleanup.
+Cancellation and native session release remain enabled, including Android trim
+level 15 even when available RAM exceeds the low-memory threshold. Local error
+timing keeps the resolved request model when the provider omits it. This change
+does not enable GPU offload or establish a device performance improvement.
+
+Competition-result questions (including an explicit year such as the 2026 World
+Cup) now request web evidence through the existing policy for both local models.
+Sports rules and personal-name recall do not trigger a public search. Existing
+offline and already-enriched-context safeguards remain in force.
+
+For known devices with at most 8 GiB total RAM, non-Phi sessions now choose
+2048 context / 256 batch / 64 microbatch before memory pressure occurs. This
+reduces configured KV/compute allocation relative to 4096 / 512 / 128; it does
+not reduce weight size or guarantee prevention of Android low-memory kills.
+Phi retains its existing conservative profile. The existing token budget uses
+the actual native context and trims conversation turns accordingly.
