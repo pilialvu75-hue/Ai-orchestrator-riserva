@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
@@ -22,79 +23,104 @@ final class PersistentWorkshopCheckpointStore
 
   final PreferencesService _preferences;
 
+  // All instances write the same PreferencesService key. Serializing only per
+  // coordinator is insufficient once project recovery and the durable
+  // scheduling overlay can persist concurrently in the same isolate.
+  static Future<void> _mutationTail = Future<void>.value();
+
   static const String _storageKey =
       'workshop.background.checkpoints.v1';
 
   @override
   Future<void> save(
     WorkshopBackgroundCheckpoint checkpoint,
-  ) async {
-    final items = await _readAll();
+  ) {
+    return _serialize(() async {
+      final items = await _readAll();
 
-    items[checkpoint.jobId] =
-        _CheckpointCodec.encode(checkpoint);
+      items[checkpoint.jobId] =
+          _CheckpointCodec.encode(checkpoint);
 
-    await _writeAll(items);
+      await _writeAll(items);
+    });
   }
 
   @override
   Future<WorkshopBackgroundCheckpoint?> load(
     String jobId,
-  ) async {
-    final items = await _readAll();
+  ) {
+    return _serialize(() async {
+      final items = await _readAll();
 
-    final encoded = items[jobId];
+      final encoded = items[jobId];
 
-    if (encoded == null) {
-      return null;
-    }
+      if (encoded == null) {
+        return null;
+      }
 
-    try {
-      return _CheckpointCodec.decode(encoded);
-    } catch (_) {
-      // Un checkpoint corrotto non deve impedire all'app di
-      // avviarsi o di recuperare gli altri job.
-      return null;
-    }
+      try {
+        return _CheckpointCodec.decode(encoded);
+      } catch (_) {
+        // Un checkpoint corrotto non deve impedire all'app di
+        // avviarsi o di recuperare gli altri job.
+        return null;
+      }
+    });
   }
 
   @override
-  Future<List<WorkshopBackgroundCheckpoint>> loadAll() async {
-    final items = await _readAll();
+  Future<List<WorkshopBackgroundCheckpoint>> loadAll() {
+    return _serialize(() async {
+      final items = await _readAll();
 
-    final checkpoints =
-        <WorkshopBackgroundCheckpoint>[];
+      final checkpoints =
+          <WorkshopBackgroundCheckpoint>[];
 
-    for (final encoded in items.values) {
-      try {
-        checkpoints.add(
-          _CheckpointCodec.decode(encoded),
-        );
-      } catch (_) {
-        // Ignora solamente il checkpoint corrotto.
+      for (final encoded in items.values) {
+        try {
+          checkpoints.add(
+            _CheckpointCodec.decode(encoded),
+          );
+        } catch (_) {
+          // Ignora solamente il checkpoint corrotto.
+        }
       }
-    }
 
-    checkpoints.sort(
-      (a, b) => b.updatedAt.compareTo(a.updatedAt),
-    );
+      checkpoints.sort(
+        (a, b) => b.updatedAt.compareTo(a.updatedAt),
+      );
 
-    return List.unmodifiable(checkpoints);
+      return List.unmodifiable(checkpoints);
+    });
   }
 
   @override
   Future<void> remove(
     String jobId,
-  ) async {
-    final items = await _readAll();
+  ) {
+    return _serialize(() async {
+      final items = await _readAll();
 
-    if (!items.containsKey(jobId)) {
-      return;
-    }
+      if (!items.containsKey(jobId)) {
+        return;
+      }
 
-    items.remove(jobId);
+      items.remove(jobId);
 
-    await _writeAll(items);
+      await _writeAll(items);
+    });
+  }
+
+  Future<T> _serialize<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _mutationTail = _mutationTail.then((_) async {
+      try {
+        completer.complete(await action());
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
   }
 
   Future<Map<String, String>> _readAll() async {
