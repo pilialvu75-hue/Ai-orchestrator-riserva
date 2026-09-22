@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_provider.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
+import 'package:ai_orchestrator/core/sync/crdt/crdt_record.dart';
 import 'package:ai_orchestrator/core/sync/sync_manager.dart';
 
 /// Local/offline Memory Fabric node backed by the existing SQLite CRDT journal.
@@ -19,7 +20,12 @@ final class LocalCrdtMemoryFabricProvider implements MemoryFabricProvider {
             MemoryFabricPrivacyLevel.values,
           ),
           durable: true,
-        );
+        ) {
+    _syncManager.registerCollectionConflictResolver(
+      collection,
+      _resolveRemoteConflict,
+    );
+  }
 
   static const String collection = 'memory_fabric_v1';
 
