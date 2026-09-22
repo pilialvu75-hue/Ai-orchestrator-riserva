@@ -27,7 +27,10 @@ class ModelDownloadBloc
     on<StartLocalModelImport>(_onStartLocalModelImport);
     on<StartCustomUrlDownload>(_onStartCustomUrlDownload);
     on<CancelModelDownload>(_onCancelModelDownload);
-    on<SelectActiveModel>(_onSelectActiveModel);
+    on<SelectActiveModel>(
+      _onSelectActiveModel,
+      transformer: (events, mapper) => events.asyncExpand(mapper),
+    );
     on<CheckModelUpdates>(_onCheckModelUpdates);
     on<ModelDownloadProgressUpdated>(_onProgressUpdated);
   }
@@ -263,15 +266,13 @@ class ModelDownloadBloc
       CheckModelUpdates event, Emitter<ModelDownloadState> emit) async {
     // Only run when a model list is already loaded.
     if (state is! ModelsLoaded) return;
-    final current = state as ModelsLoaded;
-
     final result = await checkForUpdates(const NoParams());
     result.fold(
       (_) {},
       (updates) {
-        if (updates.isNotEmpty) {
-          // Keep the current model list visible; add update metadata alongside it.
-          emit(current.copyWith(updatableModels: updates));
+        if (updates.isNotEmpty && state is ModelsLoaded) {
+          // A selection or download may have changed while the check awaited.
+          emit((state as ModelsLoaded).copyWith(updatableModels: updates));
         }
       },
     );
