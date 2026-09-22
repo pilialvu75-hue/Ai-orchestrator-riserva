@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
@@ -47,6 +49,9 @@ abstract final class CloudRoutingBootstrap {
 
     final assistantSystemPromptService = AssistantSystemPromptService(
       configRepository: sl<ConfigRepository>(),
+    );
+    final durableMemoryContextService = AssistantDurableMemoryContextService(
+      memoryService: sl<AssistantDurableMemoryService>(),
     );
     final migratedLegacyPrompt =
         await assistantSystemPromptService.migrateLegacyDefaultIfNeeded();
@@ -142,6 +147,7 @@ abstract final class CloudRoutingBootstrap {
     sl.registerLazySingleton<ChatRepository>(
       () => PromptResolvingChatRepository(
         systemPromptService: assistantSystemPromptService,
+        durableMemoryContextService: durableMemoryContextService,
         delegate: CloudWebEnrichingChatRepository(
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
           webSearchTool: assistantWebSearchTool,

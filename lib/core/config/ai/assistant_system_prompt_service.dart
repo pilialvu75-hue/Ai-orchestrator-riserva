@@ -36,16 +36,19 @@ class AssistantSystemPromptService {
   /// Any bundled stock prompt (current or historical), null or blank marks an
   /// ordinary Assistant request. Any other prompt is an explicit specialization
   /// and is preserved unchanged.
+  bool isOrdinaryAssistantRequest(String? incomingPrompt) {
+    final incoming = incomingPrompt?.trim();
+    return incoming == null ||
+        incoming.isEmpty ||
+        SystemPromptConfig.isBundledDefault(incoming);
+  }
+
   String resolveForIncoming(String? incomingPrompt) {
     final incoming = incomingPrompt?.trim();
-
-    if (incoming == null ||
-        incoming.isEmpty ||
-        SystemPromptConfig.isBundledDefault(incoming)) {
+    if (isOrdinaryAssistantRequest(incoming)) {
       return currentPrompt;
     }
-
-    return incoming;
+    return incoming!;
   }
 
   /// Upgrades only exact historical stock prompts. User-authored prompts are
