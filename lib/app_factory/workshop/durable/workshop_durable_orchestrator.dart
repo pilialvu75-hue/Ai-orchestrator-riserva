@@ -830,6 +830,88 @@ final class WorkshopDurableOrchestrator {
     });
   }
 
+  /// Atomically starts a task and persists its external wait before the
+  /// caller performs the remote side effect.
+  ///
+  /// This closes the crash window between "task started" and
+  /// "WAITING_EXTERNAL persisted". The operation idempotency key is committed
+  /// in the same store mutation.
+  Future<WorkshopDurableProjectSnapshot> startTaskAndWaitForExternal({
+    required String projectId,
+    required String taskId,
+    required String operationIdempotencyKey,
+    required WorkshopDurableExternalWait wait,
+    String startReason = WorkshopDurableEventTypes.taskStarted,
+    String waitReason = 'external.wait.persisted_before_side_effect',
+  }) {
+    return _mutate(projectId, (snapshot, now) {
+      final operationKey =
+          _identity(operationIdempotencyKey, 'operationIdempotencyKey');
+      final task = _requiredTask(snapshot, taskId);
+
+      if (snapshot.claimedOperationKeys.contains(operationKey)) {
+        if (task.state == WorkshopDurableState.waitingExternal &&
+            task.externalWait != null) {
+          return snapshot;
+        }
+        throw StateError(
+          'Durable operation key is already claimed without an external wait.',
+        );
+      }
+
+      if (!_dependenciesCompleted(snapshot, task)) {
+        throw StateError('Task dependencies are incomplete: ' + task.taskId);
+      }
+      if (task.state != WorkshopDurableState.ready &&
+          task.state != WorkshopDurableState.retrying) {
+        throw StateError(
+          'Atomic external start requires READY/RETRYING task, got ' +
+              task.state.name,
+        );
+      }
+      if (task.retryNotBefore != null &&
+          now.isBefore(task.retryNotBefore!.toUtc())) {
+        throw StateError('Task retry delay has not elapsed: ' + task.taskId);
+      }
+
+      var next = _taskTransition(
+        snapshot,
+        task.copyWith(
+          attemptsStarted: task.attemptsStarted + 1,
+          clearRetryNotBefore: true,
+          clearExternalWait: true,
+          clearBlockedReason: true,
+          updatedAt: now,
+        ),
+        WorkshopDurableState.running,
+        startReason,
+        now,
+      );
+
+      next = next.copyWith(
+        claimedOperationKeys: <String>{
+          ...next.claimedOperationKeys,
+          operationKey,
+        },
+        updatedAt: now,
+      );
+
+      final runningTask = next.tasks[task.taskId]!;
+      next = _taskTransition(
+        next,
+        runningTask.copyWith(
+          externalWait: wait,
+          updatedAt: now,
+        ),
+        WorkshopDurableState.waitingExternal,
+        waitReason,
+        now,
+      );
+
+      return _recomputeProjectState(next, now, waitReason);
+    });
+  }
+
   Future<WorkshopDurableProjectSnapshot> completeTask({
     required String projectId,
     required String taskId,
