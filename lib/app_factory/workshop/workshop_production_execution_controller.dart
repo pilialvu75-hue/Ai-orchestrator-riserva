@@ -1110,6 +1110,57 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     }
   }
 
+  /// Detaches the current execution because the project is being parked.
+  ///
+  /// Parking is not an owner cancellation. A live provider call is stopped
+  /// first, but its durable execution is converted back to a resumable
+  /// checkpoint instead of being left terminally cancelled. An already
+  /// checkpointed or waiting-approval execution is left untouched so validated
+  /// recovery evidence remains available when the owner explicitly resumes the
+  /// project from Progetti.
+  Future<void> parkCurrentExecution() async {
+    _ensureAvailable();
+
+    final wasRunning = _activeRun != null;
+    final isOffline = _state.isOffline;
+    if (wasRunning) {
+      await cancelAndWait();
+    }
+
+    final store = _executionStore;
+    final current = _journalExecution;
+
+    if (wasRunning &&
+        store != null &&
+        current != null &&
+        current.status == WorkshopExecutionStatus.cancelled) {
+      final parked = current.copyWith(
+        status: WorkshopExecutionStatus.checkpointed,
+        resumePhase: 'parked',
+        metadata: <String, dynamic>{
+          ...current.metadata,
+          'parked': true,
+        },
+      );
+      try {
+        await store.save(parked);
+        _journalExecution = parked;
+        _executionJournalError = null;
+      } catch (error) {
+        _executionJournalError = error;
+        rethrow;
+      }
+    }
+
+    // The durable record belongs to the parked project. Detach it from this
+    // in-memory controller before the Cantiere starts or restores another
+    // project, while preserving the selected offline mode only for this UI
+    // lifecycle until the caller performs its normal reset.
+    _journalExecution = null;
+    _restartReplayPending = false;
+    _setState(WorkshopProductionExecutionState(isOffline: isOffline));
+  }
+
   /// Cancels a non-terminal logical Execution when the owner explicitly closes
   /// the project. Process death does not call this method: a running record is
   /// intentionally left resumable for P4 recovery.
