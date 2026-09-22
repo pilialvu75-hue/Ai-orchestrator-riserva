@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 final class WorkshopLocalBuildConfiguration {
   const WorkshopLocalBuildConfiguration({
     required this.flutterExecutable,
+    this.dartExecutable,
     this.environment = const <String, String>{},
     this.timeout = const Duration(minutes: 30),
   });
@@ -31,6 +32,11 @@ final class WorkshopLocalBuildConfiguration {
   ///   percorso della toolchain locale eventualmente installata
   ///   dal futuro LocalToolchainManager.
   final String flutterExecutable;
+
+  /// Optional Dart executable. When omitted, the provider first looks for the
+  /// Dart binary next to the configured Flutter executable, then falls back to
+  /// the host PATH.
+  final String? dartExecutable;
 
   final Map<String, String> environment;
 
@@ -115,7 +121,7 @@ final class WorkshopLocalBuildProvider
           '--machine',
         ],
         environment: _configuration.environment,
-        runInShell: false,
+        runInShell: Platform.isWindows,
       ).timeout(_configuration.timeout);
 
       if (result.exitCode != 0) {
@@ -219,12 +225,27 @@ final class WorkshopLocalBuildProvider
     }
 
     final steps = <_BuildStep>[
+      if (request.cleanBuild)
+        const _BuildStep(
+          name: 'clean',
+          arguments: <String>['clean'],
+        ),
+      const _BuildStep(
+        name: 'pub_get_offline',
+        arguments: <String>[
+          'pub',
+          'get',
+          '--offline',
+        ],
+      ),
       if (request.runFormatter)
         const _BuildStep(
           name: 'format',
+          tool: _BuildTool.dart,
           arguments: <String>[
             'format',
             '--output=none',
+            '--set-exit-if-changed',
             '.',
           ],
         ),
@@ -279,6 +300,11 @@ final class WorkshopLocalBuildProvider
         );
       }
 
+      stdoutBuffer.writeln(
+        '[LOCAL_BUILD] request=${request.id} step=${step.name} '
+        'tool=${step.tool.name} status=starting',
+      );
+
       final result = await _runStep(
         request: request,
         step: step,
@@ -286,6 +312,10 @@ final class WorkshopLocalBuildProvider
 
       stdoutBuffer.write(result.stdout);
       stderrBuffer.write(result.stderr);
+      stdoutBuffer.writeln(
+        '[LOCAL_BUILD] request=${request.id} step=${step.name} '
+        'status=completed exit_code=${result.exitCode}',
+      );
 
       if (step.name == 'format') {
         formatPassed = result.exitCode == 0;
@@ -383,12 +413,16 @@ final class WorkshopLocalBuildProvider
       ...request.environment,
     };
 
+    final executable = step.tool == _BuildTool.dart
+        ? _resolveDartExecutable()
+        : _configuration.flutterExecutable;
+
     final process = await Process.start(
-      _configuration.flutterExecutable,
+      executable,
       step.arguments,
       workingDirectory: request.projectPath,
       environment: environment,
-      runInShell: false,
+      runInShell: Platform.isWindows,
     );
 
     _runningProcesses[request.id] = process;
@@ -399,10 +433,15 @@ final class WorkshopLocalBuildProvider
     final stdoutSubscription = process.stdout
         .transform(utf8.decoder)
         .listen(stdoutBuffer.write);
-
     final stderrSubscription = process.stderr
         .transform(utf8.decoder)
         .listen(stderrBuffer.write);
+
+    // Register stream completion futures immediately. Waiting until after
+    // process.exitCode can miss an already-delivered onDone event for very
+    // short commands, leaving build() suspended with no live event source.
+    final stdoutDone = stdoutSubscription.asFuture<void>();
+    final stderrDone = stderrSubscription.asFuture<void>();
 
     try {
       final exitCode =
@@ -416,8 +455,10 @@ final class WorkshopLocalBuildProvider
         },
       );
 
-      await stdoutSubscription.asFuture<void>();
-      await stderrSubscription.asFuture<void>();
+      await Future.wait<void>(<Future<void>>[
+        stdoutDone,
+        stderrDone,
+      ]);
 
       return _ProcessResult(
         exitCode: exitCode,
@@ -437,6 +478,29 @@ final class WorkshopLocalBuildProvider
 
       _runningProcesses.remove(request.id);
     }
+  }
+
+  String _resolveDartExecutable() {
+    final configured = _configuration.dartExecutable?.trim();
+    if (configured != null && configured.isNotEmpty) {
+      return configured;
+    }
+
+    final flutterExecutable = _configuration.flutterExecutable.trim();
+    final flutterFile = File(flutterExecutable);
+    final hasExplicitPath = flutterFile.isAbsolute ||
+        flutterExecutable.contains(Platform.pathSeparator);
+    if (hasExplicitPath) {
+      final siblingName = Platform.isWindows ? 'dart.bat' : 'dart';
+      final sibling = File(
+        '${flutterFile.parent.path}${Platform.pathSeparator}$siblingName',
+      );
+      if (sibling.existsSync()) {
+        return sibling.path;
+      }
+    }
+
+    return 'dart';
   }
 
   Future<String?> _findArtifact(
@@ -598,14 +662,21 @@ final class WorkshopLocalBuildProvider
   }
 }
 
+enum _BuildTool {
+  flutter,
+  dart,
+}
+
 final class _BuildStep {
   const _BuildStep({
     required this.name,
     required this.arguments,
+    this.tool = _BuildTool.flutter,
   });
 
   final String name;
   final List<String> arguments;
+  final _BuildTool tool;
 }
 
 final class _ProcessResult {
