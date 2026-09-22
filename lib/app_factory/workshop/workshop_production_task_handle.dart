@@ -143,7 +143,10 @@ final class WorkshopProductionTaskCoordinator {
     CancellationToken? cancellationToken,
   }) async {
     final remoteLibraryReused =
-        await _stageCertifiedLibraryReuseIfAvailable(handle: handle);
+        await _stageCertifiedLibraryReuseIfAvailable(
+          handle: handle,
+          isOffline: isOffline,
+        );
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
@@ -353,7 +356,12 @@ final class WorkshopProductionTaskCoordinator {
 
   Future<bool> _stageCertifiedLibraryReuseIfAvailable({
     required WorkshopProductionTaskHandle handle,
+    required bool isOffline,
   }) async {
+    if (isOffline) {
+      return false;
+    }
+
     final service = _bundle.libraryReuseService;
     final approval = _bundle.dashboardController.state.projectApproval;
 
