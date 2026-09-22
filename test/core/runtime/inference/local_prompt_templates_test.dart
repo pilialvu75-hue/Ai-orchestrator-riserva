@@ -6,6 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LocalPromptTemplates', () {
+    test('sports result lookup is available for both local models', () {
+      for (final id in ['phi3_5_mini', 'nemotron3_nano_4b']) {
+        expect(LocalPromptTemplates.compose(modelId: id,
+            prompt: 'Chi ha vinto il mondiale del 2026?'),
+            contains('<search>query</search>'));
+      }
+    });
     test('Phi and Nemotron expose search for present office-holder queries', () {
       for (final id in ['phi3_5_mini', 'nemotron3_nano_4b']) {
         final prompt = LocalPromptTemplates.compose(

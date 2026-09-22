@@ -1254,10 +1254,13 @@ class ModelDownloadService {
     final prefs =
         await SharedPreferences.getInstance();
 
-    await prefs.setString(
+    final saved = await prefs.setString(
       AppConstants.prefSelectedModel,
       modelId,
     );
+    if (!saved) {
+      throw StateError('Impossibile salvare il modello selezionato. Riprova.');
+    }
   }
 
   Future<String?> loadSelectedModelId() async {

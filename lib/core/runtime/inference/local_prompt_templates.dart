@@ -351,6 +351,7 @@ class LocalPromptTemplates {
      * trip: the local model can answer stable knowledge directly.
      */
     return AssistantWebSearchPolicy.isPresentOfficeHolderQuery(p) ||
+        AssistantWebSearchPolicy.isSportsResultQuery(p) ||
         p.contains('cerca online') ||
         p.contains('cerca sul web') ||
         p.contains('cerca su internet') ||
