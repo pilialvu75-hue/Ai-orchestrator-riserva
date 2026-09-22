@@ -232,6 +232,17 @@ jobs:
           deb="$(find build/linux/package -maxdepth 1 -name 'AI-Orchestrator_*_amd64.deb' -print -quit)"
           test -n "$deb"
           test -s "$deb"
+          sha_file="$deb.sha256"
+          test -s "$sha_file"
+          (
+            cd "$(dirname "$deb")"
+            sha256sum -c "$(basename "$sha_file")"
+          )
+          if grep -Fq "$RUNNER_TEMP" "$sha_file" || grep -Fq "$GITHUB_WORKSPACE" "$sha_file"; then
+            echo 'Debian checksum sidecar contains a runner-specific path' >&2
+            cat "$sha_file" >&2
+            exit 1
+          fi
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb" | tee linux-deb-contents.log
           grep -F './usr/bin/ai-orchestrator' linux-deb-contents.log
