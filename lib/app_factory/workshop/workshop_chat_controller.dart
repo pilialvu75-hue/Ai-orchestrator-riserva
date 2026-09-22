@@ -33,16 +33,34 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.
 ///
 /// La scelta del modello rimane responsabilità del livello
 /// di inferenza/configurazione del Cantiere.
+enum WorkshopChatReplyKind {
+  clarification,
+  proposal,
+}
+
+final class _WorkshopParsedReply {
+  const _WorkshopParsedReply({
+    required this.kind,
+    required this.content,
+  });
+
+  final WorkshopChatReplyKind kind;
+  final String content;
+}
+
 final class WorkshopChatController extends ChangeNotifier {
   WorkshopChatController({
     required WorkshopInferenceGateway inferenceGateway,
     String sessionId = 'workshop',
     String systemPrompt =
         'Sei il Cantiere, un ambiente indipendente di progettazione e costruzione. '
-        'Dialoga con l\'utente, comprendi cosa vuole realizzare, proponi una soluzione '
-        'chiara e chiedi conferma prima di iniziare la costruzione. '
-        'Non dichiarare mai che qualcosa è stato costruito, testato o compilato '
-        'se non è realmente avvenuto.',
+        'Dialoga con l\'utente e comprendi cosa vuole realizzare. Se manca un '
+        'dato davvero necessario, rispondi iniziando esattamente con "CLARIFY:" '
+        'e fai solo le domande indispensabili. Quando hai informazioni sufficienti, '
+        'rispondi iniziando esattamente con "PROPOSAL:" e fornisci una proposta '
+        'completa e operativa. Non chiedere conferma nella risposta: la conferma '
+        'è gestita dall\'interfaccia del Cantiere. Non dichiarare mai che qualcosa '
+        'è stato costruito, testato o compilato se non è realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'
@@ -61,6 +79,7 @@ final class WorkshopChatController extends ChangeNotifier {
   String? _lastError;
   String? _lastRuntimeNotice;
   String? _lastModel;
+  WorkshopChatReplyKind? _lastReplyKind;
 
   /// Conversazione corrente del Cantiere.
   ///
@@ -82,6 +101,11 @@ final class WorkshopChatController extends ChangeNotifier {
       _lastRuntimeNotice;
 
   String? get lastModel => _lastModel;
+
+  WorkshopChatReplyKind? get lastReplyKind => _lastReplyKind;
+
+  bool get lastResponseReadyForApproval =>
+      _lastReplyKind == WorkshopChatReplyKind.proposal;
 
   String get sessionId => _sessionId;
 
@@ -125,6 +149,7 @@ final class WorkshopChatController extends ChangeNotifier {
 
     _lastError = null;
     _lastRuntimeNotice = null;
+    _lastReplyKind = null;
 
     final userTurn = ChatTurn(
       role: ChatRole.user,
@@ -203,9 +228,12 @@ final class WorkshopChatController extends ChangeNotifier {
         return null;
       }
 
+      final parsed = _parseReply(result.text);
+      _lastReplyKind = parsed.kind;
+
       final assistantTurn = ChatTurn(
         role: ChatRole.assistant,
-        content: result.text.trim(),
+        content: parsed.content,
       );
 
       _messages.add(assistantTurn);
@@ -221,6 +249,42 @@ final class WorkshopChatController extends ChangeNotifier {
     } finally {
       _setBusy(false);
     }
+  }
+
+  static _WorkshopParsedReply _parseReply(String rawText) {
+    final normalized = rawText.trim();
+    final upper = normalized.toUpperCase();
+
+    const clarifyPrefix = 'CLARIFY:';
+    const proposalPrefix = 'PROPOSAL:';
+
+    if (upper.startsWith(clarifyPrefix)) {
+      final content = normalized.substring(clarifyPrefix.length).trim();
+      return _WorkshopParsedReply(
+        kind: WorkshopChatReplyKind.clarification,
+        content: content.isEmpty ? normalized : content,
+      );
+    }
+
+    if (upper.startsWith(proposalPrefix)) {
+      final content = normalized.substring(proposalPrefix.length).trim();
+      return _WorkshopParsedReply(
+        kind: content.isEmpty
+            ? WorkshopChatReplyKind.clarification
+            : WorkshopChatReplyKind.proposal,
+        content: content.isEmpty ? normalized : content,
+      );
+    }
+
+    // Conservative compatibility fallback for models/builds that do not yet
+    // obey the explicit reply prefix. A response ending as a direct question
+    // is not safe to treat as an owner-approvable production proposal.
+    return _WorkshopParsedReply(
+      kind: normalized.endsWith('?')
+          ? WorkshopChatReplyKind.clarification
+          : WorkshopChatReplyKind.proposal,
+      content: normalized,
+    );
   }
 
   static bool _isTechnicalRuntimeError(String? rawError) {
@@ -304,6 +368,7 @@ final class WorkshopChatController extends ChangeNotifier {
     _lastError = null;
     _lastRuntimeNotice = null;
     _lastModel = null;
+    _lastReplyKind = null;
 
     notifyListeners();
   }
@@ -320,6 +385,7 @@ final class WorkshopChatController extends ChangeNotifier {
       _messages.removeLast();
     }
 
+    _lastReplyKind = null;
     notifyListeners();
   }
 
