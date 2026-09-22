@@ -1,7 +1,7 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:uuid/uuid.dart';
 
-import 'memory_fabric_record.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
 
 /// Pure compatibility codec for the durable Assistant memory that already
 /// exists in AI-Orchestrator.
