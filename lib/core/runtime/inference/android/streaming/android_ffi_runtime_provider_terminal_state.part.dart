@@ -13,6 +13,7 @@ class _TerminalStateContext {
     required this.runtimeResetReason,
     required this.tokenBufRaw,
     required this.attemptState,
+    required this.memoryCancellationSent,
   });
 
   final StreamController<InferenceResponse> controller;
@@ -26,6 +27,7 @@ class _TerminalStateContext {
   final String? runtimeResetReason;
   final Pointer<Uint8> tokenBufRaw;
   final _FirstTokenAttemptState attemptState;
+  final bool memoryCancellationSent;
 }
 
 extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
@@ -74,7 +76,10 @@ extension AndroidFfiRuntimeTerminalStateExtension on AndroidFfiRuntimeProvider {
       ' elapsed_ms=${now.difference(context.startedAt).inMilliseconds}'
       ' first_token=${context.firstTokenAt != null} ffi_phase=$_currentFfiPhase',
     );
-    if (terminalState == LocalRuntimeStatus.loading ||
+    if (context.memoryCancellationSent) {
+      _updateRuntimeStatus(LocalRuntimeStatus.failed,
+          message: _StreamFlowControlState.memoryPressureMessage);
+    } else if (terminalState == LocalRuntimeStatus.loading ||
         terminalState == LocalRuntimeStatus.tokenizing ||
         terminalState == LocalRuntimeStatus.inferencing ||
         terminalState == LocalRuntimeStatus.streaming) {
