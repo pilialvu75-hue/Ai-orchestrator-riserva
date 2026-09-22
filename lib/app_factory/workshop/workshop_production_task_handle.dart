@@ -142,16 +142,18 @@ final class WorkshopProductionTaskCoordinator {
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
-    final remoteLibraryReused =
+    final remoteLibraryReuseIdentity =
         await _stageCertifiedLibraryReuseIfAvailable(
           handle: handle,
           isOffline: isOffline,
         );
+    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
       allowLocalReuse: !remoteLibraryReused,
+      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
     );
 
@@ -201,16 +203,18 @@ final class WorkshopProductionTaskCoordinator {
       );
     }
 
-    final remoteLibraryReused =
+    final remoteLibraryReuseIdentity =
         await _stageCertifiedLibraryReuseIfAvailable(
           handle: handle,
           isOffline: isOffline,
         );
+    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
       allowLocalReuse: !remoteLibraryReused,
+      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
     );
 
@@ -359,12 +363,12 @@ final class WorkshopProductionTaskCoordinator {
     return result;
   }
 
-  Future<bool> _stageCertifiedLibraryReuseIfAvailable({
+  Future<String?> _stageCertifiedLibraryReuseIfAvailable({
     required WorkshopProductionTaskHandle handle,
     required bool isOffline,
   }) async {
     if (isOffline) {
-      return false;
+      return null;
     }
 
     final service = _bundle.libraryReuseService;
@@ -373,7 +377,7 @@ final class WorkshopProductionTaskCoordinator {
     if (service == null ||
         approval == null ||
         approval.projectId.trim() != handle.plan.id.trim()) {
-      return false;
+      return null;
     }
 
     final result = await service.stageForPreparedTask(
@@ -382,7 +386,7 @@ final class WorkshopProductionTaskCoordinator {
       approval: approval,
     );
 
-    return result.reused;
+    return result.reused ? result.reuseIdentity : null;
   }
 
   Future<void> _stageReusableSourceIfAvailable({
