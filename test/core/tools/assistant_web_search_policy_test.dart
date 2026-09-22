@@ -97,6 +97,24 @@ void main() {
       );
     });
 
+    test('explicit no-web intent overrides dynamic and explicit search words', () {
+      for (final prompt in <String>[
+        'Non usare internet: dimmi cosa sai delle notizie di oggi.',
+        'Non cercare sul web, rispondi solo con quello che sai.',
+        'Senza internet, qual è il prezzo che ricordi?',
+        'Do not search the web for the latest news.',
+        "Don't use internet; answer from local knowledge.",
+        "N'utilise pas internet pour les actualités d'aujourd'hui.",
+        'No busques en internet el precio actual.',
+      ]) {
+        expect(
+          AssistantWebSearchPolicy.shouldSearch(prompt),
+          isFalse,
+          reason: prompt,
+        );
+      }
+    });
+
     test('preserves explicit and time-sensitive web decisions', () {
       expect(
         AssistantWebSearchPolicy.shouldSearch('Cerca sul web Flutter 4'),
