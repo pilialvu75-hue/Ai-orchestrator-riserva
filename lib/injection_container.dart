@@ -7,6 +7,8 @@ import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
@@ -152,6 +154,18 @@ Future<void> initDependencies({
 
   // ── Core ──────────────────────────────────────────────────────────────────
   sl.registerSingleton<DatabaseHelper>(DatabaseHelper.instance);
+  sl.registerLazySingleton<AssistantDurableMemoryStore>(
+    () => AssistantDurableMemoryStore(
+      persistence: SqliteAssistantDurableMemoryPersistence(
+        databaseHelper: sl<DatabaseHelper>(),
+      ),
+    ),
+  );
+  sl.registerLazySingleton<AssistantDurableMemoryService>(
+    () => AssistantDurableMemoryService(
+      store: sl<AssistantDurableMemoryStore>(),
+    ),
+  );
   sl.registerLazySingleton<LocalDocumentIndexService>(
     () => LocalDocumentIndexService(databaseHelper: sl<DatabaseHelper>()),
   );
