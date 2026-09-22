@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_remote_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
