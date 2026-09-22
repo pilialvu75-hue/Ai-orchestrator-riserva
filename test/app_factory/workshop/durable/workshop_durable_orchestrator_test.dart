@@ -158,6 +158,11 @@ void main() {
         parked!.tasks['ci']!.state,
         WorkshopDurableState.waitingExternal,
       );
+      expect(
+        parked.state,
+        WorkshopDurableState.ready,
+        reason: 'Independent runnable work must prevent a global external wait.',
+      );
     });
 
     test('CI event resumes once and duplicate delivery is idempotent',
