@@ -685,7 +685,14 @@ final class WorkshopDurableOrchestrator {
       final id = _identity(projectId, 'projectId');
       final correlation = _identity(correlationId, 'correlationId');
       final existing = await _store.load(id);
-      if (existing != null) return existing;
+      if (existing != null) {
+        if (existing.correlationId != correlation) {
+          throw StateError(
+            'Durable project id collision: existing correlation does not match.',
+          );
+        }
+        return existing;
+      }
 
       final byId = <String, WorkshopDurableTask>{};
       for (final task in tasks) {
@@ -907,6 +914,76 @@ final class WorkshopDurableOrchestrator {
     return _mutate(projectId, (snapshot, now) {
       final task = _requiredTask(snapshot, taskId);
       return _applyFailure(snapshot, task, failureClass, reason, now);
+    });
+  }
+
+  Future<WorkshopDurableProjectSnapshot> cancelTask({
+    required String projectId,
+    required String taskId,
+    String reason = 'task.cancelled',
+  }) {
+    return _mutate(projectId, (snapshot, now) {
+      final task = _requiredTask(snapshot, taskId);
+      if (task.state == WorkshopDurableState.cancelled) return snapshot;
+      if (task.state == WorkshopDurableState.completed ||
+          task.state == WorkshopDurableState.failed) {
+        throw StateError(
+          'Terminal task cannot be cancelled from state: ' + task.state.name,
+        );
+      }
+
+      final next = _taskTransition(
+        snapshot,
+        task.copyWith(
+          clearExternalWait: true,
+          clearRetryNotBefore: true,
+          clearBlockedReason: true,
+          updatedAt: now,
+        ),
+        WorkshopDurableState.cancelled,
+        reason,
+        now,
+      );
+      return _recomputeProjectState(next, now, reason);
+    });
+  }
+
+  Future<WorkshopDurableProjectSnapshot> cancelProject(
+    String projectId, {
+    String reason = 'project.cancelled',
+  }) {
+    return _mutate(projectId, (snapshot, now) {
+      if (snapshot.state == WorkshopDurableState.cancelled) return snapshot;
+      if (snapshot.state == WorkshopDurableState.completed ||
+          snapshot.state == WorkshopDurableState.failed) {
+        throw StateError(
+          'Terminal project cannot be cancelled from state: ' +
+              snapshot.state.name,
+        );
+      }
+
+      var next = snapshot;
+      for (final task in snapshot.tasks.values) {
+        if (task.isTerminal) continue;
+        next = _taskTransition(
+          next,
+          task.copyWith(
+            clearExternalWait: true,
+            clearRetryNotBefore: true,
+            clearBlockedReason: true,
+            updatedAt: now,
+          ),
+          WorkshopDurableState.cancelled,
+          reason,
+          now,
+        );
+      }
+      return _projectTransition(
+        next,
+        WorkshopDurableState.cancelled,
+        reason,
+        now,
+      );
     });
   }
 
@@ -1297,6 +1374,24 @@ final class WorkshopDurableOrchestrator {
         reason,
         now,
       );
+    }
+    if (tasks.isNotEmpty && tasks.every((task) => task.isTerminal)) {
+      if (tasks.any((task) => task.state == WorkshopDurableState.failed)) {
+        return _projectTransition(
+          snapshot,
+          WorkshopDurableState.failed,
+          reason,
+          now,
+        );
+      }
+      if (tasks.any((task) => task.state == WorkshopDurableState.cancelled)) {
+        return _projectTransition(
+          snapshot,
+          WorkshopDurableState.cancelled,
+          reason,
+          now,
+        );
+      }
     }
     if (tasks.any((task) => task.state == WorkshopDurableState.running)) {
       return _projectTransition(snapshot, WorkshopDurableState.running, reason, now);
