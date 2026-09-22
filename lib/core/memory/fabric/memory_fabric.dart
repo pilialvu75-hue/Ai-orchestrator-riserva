@@ -10,6 +10,53 @@ final class MemoryFabricPolicyException implements Exception {
   String toString() => 'MemoryFabricPolicyException: $message';
 }
 
+final class MemoryFabricRoutingPolicy {
+  const MemoryFabricRoutingPolicy({
+    this.allowPrivateOnCloud = true,
+    this.allowSecretOnLan = false,
+    this.allowSecretOnCloud = false,
+  });
+
+  /// PRIVATE remains cloud-capable by default because shared authenticated
+  /// backends are part of V1. It can be disabled without changing providers.
+  final bool allowPrivateOnCloud;
+
+  /// SECRET is device-only by default. Future trusted/encrypted LAN or cloud
+  /// nodes require an explicit opt-in here; adapters cannot grant it alone.
+  final bool allowSecretOnLan;
+  final bool allowSecretOnCloud;
+
+  bool allows({
+    required MemoryFabricPrivacyLevel privacy,
+    required String location,
+  }) {
+    return switch (privacy) {
+      MemoryFabricPrivacyLevel.public => true,
+      MemoryFabricPrivacyLevel.project => true,
+      MemoryFabricPrivacyLevel.private =>
+        location != 'cloud' || allowPrivateOnCloud,
+      MemoryFabricPrivacyLevel.deviceOnly => location == 'device',
+      MemoryFabricPrivacyLevel.secret => switch (location) {
+          'device' => true,
+          'lan' => allowSecretOnLan,
+          'cloud' => allowSecretOnCloud,
+          _ => false,
+        },
+    };
+  }
+
+  bool allowsNode(
+    MemoryFabricNode node,
+    MemoryFabricPrivacyLevel privacy,
+  ) {
+    return node.accepts(privacy) &&
+        allows(
+          privacy: privacy,
+          location: node.provider.descriptor.location,
+        );
+  }
+}
+
 final class MemoryFabricNode {
   MemoryFabricNode({
     required this.provider,
@@ -40,8 +87,12 @@ final class MemoryFabricNode {
 /// memory PRs own their current wiring; this class is the shared contract that
 /// future local/Supabase/NAS adapters can converge on without duplicating them.
 final class MemoryFabric {
-  MemoryFabric(Iterable<MemoryFabricNode> nodes)
-      : _nodes = List<MemoryFabricNode>.of(nodes)
+  MemoryFabric(
+    Iterable<MemoryFabricNode> nodes, {
+    MemoryFabricRoutingPolicy routingPolicy =
+        const MemoryFabricRoutingPolicy(),
+  })  : _routingPolicy = routingPolicy,
+        _nodes = List<MemoryFabricNode>.of(nodes)
           ..sort((left, right) {
             final role = _roleRank(left.role).compareTo(_roleRank(right.role));
             if (role != 0) return role;
@@ -55,6 +106,7 @@ final class MemoryFabric {
     }
   }
 
+  final MemoryFabricRoutingPolicy _routingPolicy;
   final List<MemoryFabricNode> _nodes;
 
   Future<MemoryFabricRecord> write(MemoryFabricRecord record) async {
@@ -62,7 +114,7 @@ final class MemoryFabric {
         .where(
           (node) =>
               node.role != MemoryFabricNodeRole.readOnly &&
-              node.accepts(record.privacyLevel),
+              _routingPolicy.allowsNode(node, record.privacyLevel),
         )
         .toList(growable: false);
 
@@ -120,7 +172,10 @@ final class MemoryFabric {
     for (final node in _nodes) {
       try {
         final record = await node.provider.read(recordId);
-        if (record == null || record.isExpired() || !record.checksumValid) {
+        if (record == null ||
+            record.isExpired() ||
+            !record.checksumValid ||
+            !_routingPolicy.allowsNode(node, record.privacyLevel)) {
           continue;
         }
         return record;
@@ -144,7 +199,8 @@ final class MemoryFabric {
 
       for (final record in records) {
         if ((!query.includeExpired && record.isExpired()) ||
-            !record.checksumValid) {
+            !record.checksumValid ||
+            !_routingPolicy.allowsNode(node, record.privacyLevel)) {
           continue;
         }
         final existing = winners[record.id];
@@ -219,7 +275,9 @@ final class MemoryFabric {
       }
       try {
         final candidate = await node.provider.read(recordId);
-        if (candidate != null && candidate.checksumValid) {
+        if (candidate != null &&
+            candidate.checksumValid &&
+            _routingPolicy.allowsNode(node, candidate.privacyLevel)) {
           source = candidate;
           resolvedSourceProviderId = providerId;
           break;
@@ -248,7 +306,7 @@ final class MemoryFabric {
       final providerId = node.provider.descriptor.providerId;
       if (providerId == resolvedSourceProviderId ||
           node.role == MemoryFabricNodeRole.readOnly ||
-          !node.accepts(source.privacyLevel)) {
+          !_routingPolicy.allowsNode(node, source.privacyLevel)) {
         continue;
       }
 
