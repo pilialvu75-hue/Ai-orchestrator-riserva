@@ -25,7 +25,7 @@ final class DuckDuckGoLiteProvider implements SearchProvider {
   final Duration timeout;
 
   /// When false, exception text is not copied into RuntimeEventLog because an
-  /// HTTP exception can contain the query-bearing request URI.
+  /// HTTP exception can contain the request URI.
   final bool includeErrorDetailsInDiagnostics;
 
   @override
@@ -37,29 +37,39 @@ final class DuckDuckGoLiteProvider implements SearchProvider {
     if (normalizedQuery.isEmpty) return const <SearchResult>[];
 
     final clampedLimit = limit.clamp(1, searchResultsLimit);
-    final uri = Uri.https(
-      'lite.duckduckgo.com',
-      '/lite/',
-      <String, String>{'q': normalizedQuery},
-    );
+    // DuckDuckGo Lite's search form is submitted with POST. Keeping the query
+    // in the form body also prevents it from being copied into request URIs and
+    // URI-bearing HTTP exception messages.
+    final uri = Uri.https('lite.duckduckgo.com', '/lite/');
 
     RuntimeEventLog.instance.emit(
       '[WEBSEARCH_PROVIDER_SELECTED] provider=duckduckgo_lite '
       'limit=$clampedLimit',
     );
     RuntimeEventLog.instance.emit(
-      '[WEBSEARCH_HTTP_BEGIN] host=${uri.host} path=${uri.path}',
+      '[WEBSEARCH_HTTP_BEGIN] host=${uri.host} path=${uri.path} method=POST',
     );
 
     final stopwatch = Stopwatch()..start();
     try {
       final response = await _client
-          .get(
+          .post(
             uri,
             headers: const <String, String>{
               'Accept': 'text/html,application/xhtml+xml',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Referer': 'https://lite.duckduckgo.com/',
+              'Sec-Fetch-Dest': 'document',
+              'Sec-Fetch-Mode': 'navigate',
+              'Sec-Fetch-Site': 'same-origin',
+              'Sec-Fetch-User': '?1',
               'User-Agent':
-                  'Mozilla/5.0 (compatible; AI-Orchestrator/1.0; +https://github.com/pilialvu75-hue/Ai-orchestrator-riserva)',
+                  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36',
+            },
+            body: <String, String>{
+              'q': normalizedQuery,
+              'b': '',
             },
           )
           .timeout(
