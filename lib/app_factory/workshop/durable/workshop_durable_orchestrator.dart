@@ -1029,8 +1029,9 @@ final class WorkshopDurableOrchestrator {
   }
 
   Future<WorkshopDurableEventResult> handleExternalEvent(
-    WorkshopDurableExternalEvent event,
-  ) {
+    WorkshopDurableExternalEvent event, {
+    WorkshopDurableExternalWait? nextWait,
+  }) {
     return _serialize(() async {
       final snapshot = await _requiredProject(event.projectId);
       final key = _identity(event.idempotencyKey, 'idempotencyKey');
@@ -1081,14 +1082,24 @@ final class WorkshopDurableOrchestrator {
           final artifacts =
               <String>{...task.artifactIds, ...event.artifactIds}.toList()
                 ..sort();
+          var advancedTask = task.copyWith(
+            artifactIds: artifacts,
+            clearExternalWait: true,
+            updatedAt: now,
+          );
+          final advancedState = nextWait == null
+              ? wait.successState
+              : WorkshopDurableState.waitingExternal;
+          if (nextWait != null) {
+            advancedTask = advancedTask.copyWith(
+              externalWait: nextWait,
+              updatedAt: now,
+            );
+          }
           next = _taskTransition(
             next,
-            task.copyWith(
-              artifactIds: artifacts,
-              clearExternalWait: true,
-              updatedAt: now,
-            ),
-            wait.successState,
+            advancedTask,
+            advancedState,
             event.type,
             now,
           );
