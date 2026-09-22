@@ -51,7 +51,9 @@ jobs:
           INTAKE_DIR: ${{ runner.temp }}/researcher-evolution-intake
         run: |
           set -euo pipefail
-          dart run tool/researcher_evolution_intake.dart             "${PAYLOAD_FILE}"             "${INTAKE_DIR}"
+          flutter test \
+            test/app_factory/workshop/researcher_evolution_intake_workflow_test.dart \
+            --reporter expanded
 
       - name: Verify fail-closed handoff invariants
         env:
