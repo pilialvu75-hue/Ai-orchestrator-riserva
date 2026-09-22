@@ -201,7 +201,10 @@ final class WorkshopProductionTaskCoordinator {
     }
 
     final remoteLibraryReused =
-        await _stageCertifiedLibraryReuseIfAvailable(handle: handle);
+        await _stageCertifiedLibraryReuseIfAvailable(
+          handle: handle,
+          isOffline: isOffline,
+        );
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
