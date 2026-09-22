@@ -85,6 +85,8 @@ final class WorkshopPreflightInferencePipeline {
   Future<WorkshopPreflightInferenceResult> run({
     required WorkshopRequest request,
     bool isOffline = false,
+    bool allowLocalReuse = true,
+    String? certifiedLibraryReuseIdentity,
     List<String> requiredCapabilities = const <String>[],
     String? target,
     CancellationToken? cancellationToken,
@@ -93,6 +95,8 @@ final class WorkshopPreflightInferencePipeline {
     final resumeKey = _resumeKey(
       request: request,
       isOffline: isOffline,
+      allowLocalReuse: allowLocalReuse,
+      certifiedLibraryReuseIdentity: certifiedLibraryReuseIdentity,
       requiredCapabilities: requiredCapabilities,
       target: resolvedTarget,
     );
@@ -104,17 +108,21 @@ final class WorkshopPreflightInferencePipeline {
 
     final approvedProposal = _approvedProposalFrom(request);
 
-    final reuseDecision = previous?.analysisReady == true
-        ? previous!.reuseDecision ??
-            _reuseDecision(
-              request: request,
-              requiredCapabilities: requiredCapabilities,
-              target: resolvedTarget,
-            )
-        : _reuseDecision(
-            request: request,
-            requiredCapabilities: requiredCapabilities,
-            target: resolvedTarget,
+    final reuseDecision = allowLocalReuse
+        ? previous?.analysisReady == true
+            ? previous!.reuseDecision ??
+                _reuseDecision(
+                  request: request,
+                  requiredCapabilities: requiredCapabilities,
+                  target: resolvedTarget,
+                )
+            : _reuseDecision(
+                request: request,
+                requiredCapabilities: requiredCapabilities,
+                target: resolvedTarget,
+              )
+        : WorkshopReuseDecision.generate(
+            'local-reuse-suppressed-by-certified-remote-library',
           );
 
     final webEvidence = previous?.analysisReady == true
@@ -302,6 +310,8 @@ final class WorkshopPreflightInferencePipeline {
   static String _resumeKey({
     required WorkshopRequest request,
     required bool isOffline,
+    required bool allowLocalReuse,
+    required String? certifiedLibraryReuseIdentity,
     required List<String> requiredCapabilities,
     required String? target,
   }) {
@@ -315,6 +325,8 @@ final class WorkshopPreflightInferencePipeline {
       request.constraints.join('\u001e'),
       request.context.join('\u001e'),
       isOffline ? 'offline' : 'network-capable',
+      allowLocalReuse ? 'local-reuse-enabled' : 'local-reuse-suppressed',
+      certifiedLibraryReuseIdentity?.trim() ?? '',
       target?.trim() ?? '',
       requiredCapabilities.join('\u001e'),
     ].join('\u001f');

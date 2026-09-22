@@ -123,13 +123,16 @@ final class WorkshopProductionTaskCoordinator {
   /// [handle]: Orchestrator -> Architect -> Engineer -> Reviewer review ->
   /// Reviewer validation. No approval or real apply happens here.
   ///
-  /// If preflight selected verified reusable production knowledge and a safe
-  /// source snapshot exists for that asset, the snapshot is staged into the
-  /// same authoritative VirtualWorkspace before Engineer inference. Existing
-  /// project files are never overwritten by this automatic reuse staging.
+  /// Certified Module Library reuse is attempted first when the project has
+  /// explicit owner approval. Only verified, conflict-free, addition-only
+  /// package content can be staged into the authoritative VirtualWorkspace.
   ///
-  /// A missing or stale optional snapshot is treated as a cache miss: the
-  /// normal AI path continues instead of blocking production.
+  /// If no certified remote reuse is selected, the historical verified local
+  /// reuse snapshot remains the fallback. Existing project files are never
+  /// overwritten by either automatic reuse path.
+  ///
+  /// A missing, offline, unverified or non-applicable Library/cache entry is a
+  /// reuse miss: the normal AI path continues instead of blocking production.
   ///
   /// The production UI follows the configured Local / Cloud / Hybrid runtime
   /// by default. Offline execution remains available only when a caller
@@ -139,16 +142,27 @@ final class WorkshopProductionTaskCoordinator {
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
+    final remoteLibraryReuseIdentity =
+        await _stageCertifiedLibraryReuseIfAvailable(
+          handle: handle,
+          isOffline: isOffline,
+        );
+    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
+
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
+      allowLocalReuse: !remoteLibraryReused,
+      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
     );
 
-    await _stageReusableSourceIfAvailable(
-      handle: handle,
-      assetId: preflight.reusedAsset?.id,
-    );
+    if (!remoteLibraryReused) {
+      await _stageReusableSourceIfAvailable(
+        handle: handle,
+        assetId: preflight.reusedAsset?.id,
+      );
+    }
 
     return _bundle.taskLifecycle.runPrepared(
       taskId: handle.taskId,
@@ -189,16 +203,27 @@ final class WorkshopProductionTaskCoordinator {
       );
     }
 
+    final remoteLibraryReuseIdentity =
+        await _stageCertifiedLibraryReuseIfAvailable(
+          handle: handle,
+          isOffline: isOffline,
+        );
+    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
+
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
+      allowLocalReuse: !remoteLibraryReused,
+      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
     );
 
-    await _stageReusableSourceIfAvailable(
-      handle: handle,
-      assetId: preflight.reusedAsset?.id,
-    );
+    if (!remoteLibraryReused) {
+      await _stageReusableSourceIfAvailable(
+        handle: handle,
+        assetId: preflight.reusedAsset?.id,
+      );
+    }
 
     return _bundle.taskLifecycle.runPreparedWithResumeContext(
       taskId: handle.taskId,
@@ -336,6 +361,32 @@ final class WorkshopProductionTaskCoordinator {
     }
 
     return result;
+  }
+
+  Future<String?> _stageCertifiedLibraryReuseIfAvailable({
+    required WorkshopProductionTaskHandle handle,
+    required bool isOffline,
+  }) async {
+    if (isOffline) {
+      return null;
+    }
+
+    final service = _bundle.libraryReuseService;
+    final approval = _bundle.dashboardController.state.projectApproval;
+
+    if (service == null ||
+        approval == null ||
+        approval.projectId.trim() != handle.plan.id.trim()) {
+      return null;
+    }
+
+    final result = await service.stageForPreparedTask(
+      plan: handle.plan,
+      session: handle.session,
+      approval: approval,
+    );
+
+    return result.reused ? result.reuseIdentity : null;
   }
 
   Future<void> _stageReusableSourceIfAvailable({

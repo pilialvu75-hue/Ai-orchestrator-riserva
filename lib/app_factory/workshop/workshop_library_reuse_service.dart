@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_remote_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
@@ -10,15 +11,32 @@ final class WorkshopLibraryReuseResult {
     required this.attempted,
     required this.reusedPins,
     required this.stagedPaths,
+    this.reuseIdentity,
     this.reason,
   });
 
   final bool attempted;
   final List<String> reusedPins;
   final List<String> stagedPaths;
+
+  /// Deterministic identity of the verified remote export actually selected
+  /// for reuse. It binds the snapshot SHA, exact pins and package-envelope
+  /// digests so preflight resume cannot silently reuse a plan for different
+  /// certified Library bytes.
+  final String? reuseIdentity;
+
   final String? reason;
 
   bool get staged => stagedPaths.isNotEmpty;
+
+  /// True when the certified remote Library was selected successfully for the
+  /// prepared project, including idempotent resume cases where every package
+  /// file is already present with identical content and no new path is staged.
+  bool get reused =>
+      reusedPins.isNotEmpty &&
+      reuseIdentity != null &&
+      reuseIdentity!.isNotEmpty &&
+      reason == null;
 }
 
 /// Production bridge from an approved Cantiere plan to certified Module Library
@@ -122,6 +140,10 @@ final class WorkshopLibraryReuseService {
         attempted: true,
         reusedPins: List<String>.unmodifiable(assembly.pins),
         stagedPaths: List<String>.unmodifiable(staged),
+        reuseIdentity: _verifiedReuseIdentity(
+          remote: remote,
+          pins: assembly.pins,
+        ),
       );
     } catch (_) {
       return const WorkshopLibraryReuseResult(
@@ -131,5 +153,18 @@ final class WorkshopLibraryReuseService {
         reason: 'library-unavailable-or-unverified',
       );
     }
+  }
+
+  String _verifiedReuseIdentity({
+    required WorkshopLibraryRemoteState remote,
+    required List<String> pins,
+  }) {
+    final sortedPins = pins.toSet().toList(growable: false)..sort();
+    final components = <String>[
+      remote.snapshot.snapshotSha256,
+      for (final pin in sortedPins)
+        '$pin:${remote.packageIndex[pin]?.packageSha256 ?? ''}',
+    ];
+    return components.join('|');
   }
 }
