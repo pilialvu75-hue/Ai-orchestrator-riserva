@@ -176,12 +176,21 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
             await _concurrencyManager.runInferenceSerially(() async {
               final resources = ResourceMonitor.instance;
               resources.retain();
-              var memoryCancellationSent = false;
               void handleCriticalMemory() {
-                if (memoryCancellationSent) return;
-                memoryCancellationSent = true;
+                if (flowState.memoryCancellationSent || controller.isClosed ||
+                    cancellationToken.isCancelled) return;
+                flowState.memoryCancellationSent = true;
+                _updateRuntimeStatus(LocalRuntimeStatus.failed,
+                    message: _StreamFlowControlState.memoryPressureMessage);
                 AndroidFfiRuntimeProvider._log('[RESOURCE_GUARD] action=cancel reason=critical_memory');
                 cancellationToken.cancel();
+                if (!controller.isClosed) {
+                  AndroidFfiRuntimeProvider._finishWithRuntimeError(
+                    controller,
+                    stage: 'critical_memory',
+                    message: _StreamFlowControlState.memoryPressureMessage,
+                  );
+                }
               }
               resources.addCriticalListener(handleCriticalMemory);
               try {
@@ -333,6 +342,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                   startup.bindings,
                   startup.nativeSessionId,
                 );
+                startup.freePromptNativePtr();
 
                 AndroidFfiRuntimeProvider._log(
                   '[FFI_FLOW_EXIT] '
@@ -381,12 +391,12 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               );
               } finally {
                 resources.removeCriticalListener(handleCriticalMemory);
-                if (memoryCancellationSent && _bindings != null) {
+                if (flowState.memoryCancellationSent && _bindings != null) {
                   await _nativeSessionSubsystem.releaseAllNativeSessions(
                       _bindings!, reason: 'critical_memory');
                   resources.readNative = null;
                   _updateRuntimeStatus(LocalRuntimeStatus.failed,
-                      message: 'Generazione fermata per pressione sulla memoria. Riprova quando la RAM è disponibile.');
+                      message: _StreamFlowControlState.memoryPressureMessage);
                 }
                 resources.phase = 'idle';
                 resources.release();
