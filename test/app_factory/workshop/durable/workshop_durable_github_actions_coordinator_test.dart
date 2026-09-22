@@ -124,6 +124,42 @@ void main() {
       );
     });
 
+    test('parked execution rejects mismatched resume identity', () async {
+      await createReadyProject();
+
+      await coordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:identity',
+        dispatchCorrelationId: 'remote-identity',
+        request: request('request-identity'),
+      );
+
+      expect(
+        () => coordinator.dispatchAndPark(
+          projectId: 'project-1',
+          taskId: 'build-android',
+          operationIdempotencyKey: 'github-build:different',
+          dispatchCorrelationId: 'remote-identity',
+          request: request('request-identity'),
+        ),
+        throwsStateError,
+      );
+
+      expect(
+        () => coordinator.dispatchAndPark(
+          projectId: 'project-1',
+          taskId: 'build-android',
+          operationIdempotencyKey: 'github-build:identity',
+          dispatchCorrelationId: 'remote-different',
+          request: request('request-identity'),
+        ),
+        throwsStateError,
+      );
+
+      expect(gateway.dispatchCalls, 1);
+    });
+
     test('ambiguous dispatch remains parked for later discovery', () async {
       await createReadyProject();
       gateway.dispatchOutcome =
