@@ -274,6 +274,53 @@ void main() {
     );
   });
 
+  test('strict offline production never touches the remote Module Library',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: _gateways(calls),
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Offline reuse boundary test',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(
+      handle: handle,
+      isOffline: true,
+    );
+
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadStateCalls, 0);
+    expect(libraryClient.loadPackageCalls, 0);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
   test('remote Library failure is a reuse miss and normal AI path continues',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
