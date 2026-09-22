@@ -228,6 +228,68 @@ void main() {
       expect(completed!.state, WorkshopDurableState.completed);
     });
 
+    test('early CI completion stays in the durable inbox until wait is registered',
+        () async {
+      await orchestrator.createProject(
+        projectId: 'project-early-event',
+        correlationId: 'corr-early-event',
+        tasks: <WorkshopDurableTask>[
+          task('ci', capability: 'build.android'),
+        ],
+      );
+      await orchestrator.markProjectReady('project-early-event');
+      await orchestrator.startTask(
+        projectId: 'project-early-event',
+        taskId: 'ci',
+      );
+
+      final event = WorkshopDurableExternalEvent(
+        type: WorkshopDurableEventTypes.ciCompleted,
+        projectId: 'project-early-event',
+        taskId: 'ci',
+        correlationId: 'corr-early-event',
+        idempotencyKey: 'early-run:completed',
+        occurredAt: now,
+        success: true,
+        externalId: 'early-run',
+      );
+
+      final early = await orchestrator.handleExternalEvent(event);
+      expect(early.matchedTask, isFalse);
+      expect(
+        early.snapshot.receivedEventKeys,
+        contains('early-run:completed'),
+      );
+      expect(
+        early.snapshot.processedIdempotencyKeys,
+        isNot(contains('early-run:completed')),
+      );
+      expect(early.snapshot.events, hasLength(1));
+
+      await orchestrator.waitForExternal(
+        projectId: 'project-early-event',
+        taskId: 'ci',
+        wait: WorkshopDurableExternalWait(
+          eventType: WorkshopDurableEventTypes.ciCompleted,
+          externalId: 'early-run',
+          startedAt: now,
+        ),
+      );
+
+      final reconciled = await orchestrator.handleExternalEvent(event);
+      expect(reconciled.duplicate, isTrue);
+      expect(reconciled.matchedTask, isTrue);
+      expect(reconciled.snapshot.events, hasLength(1));
+      expect(
+        reconciled.snapshot.processedIdempotencyKeys,
+        contains('early-run:completed'),
+      );
+      expect(
+        reconciled.snapshot.tasks['ci']!.state,
+        WorkshopDurableState.validating,
+      );
+    });
+
     test('retry policy distinguishes retryable and terminal failures',
         () async {
       await orchestrator.createProject(
