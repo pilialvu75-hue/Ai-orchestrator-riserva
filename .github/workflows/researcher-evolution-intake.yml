@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: researcher-evolution-${{ github.event.client_payload.proposal_id }}
   cancel-in-progress: false
@@ -14,118 +17,86 @@ concurrency:
 jobs:
   validate-intake:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: Validate isolated evolution contract
+      - name: Checkout Cantiere main contract
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Cantiere dependencies
+        run: flutter pub get
+
+      - name: Persist repository dispatch payload
         env:
           PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          PAYLOAD_FILE: ${{ runner.temp }}/researcher-evolution-payload.json
         run: |
           python - <<'PY'
           import json
           import os
-          import sys
 
           payload = json.loads(os.environ["PAYLOAD"])
-          required = ("proposal_id", "capability_id", "knowledge_delta", "acceptance_gates", "mutation_policy")
-          missing = [key for key in required if not payload.get(key)]
-          if missing:
-              raise SystemExit(f"missing required fields: {', '.join(missing)}")
-          if payload["mutation_policy"] != "isolated_candidate_no_library_mutation":
-              raise SystemExit("unsafe mutation policy")
-          if not isinstance(payload["knowledge_delta"], list) or not payload["knowledge_delta"]:
-              raise SystemExit("knowledge_delta must be a non-empty list")
-          if not isinstance(payload["acceptance_gates"], list) or not payload["acceptance_gates"]:
-              raise SystemExit("acceptance_gates must be a non-empty list")
-          safe = {
-              "schema": "ai-orchestrator.researcher-evolution-intake.v1",
-              "proposal_id": payload["proposal_id"],
-              "capability_id": payload["capability_id"],
-              "knowledge_delta": payload["knowledge_delta"],
-              "acceptance_gates": payload["acceptance_gates"],
-              "mutation_policy": payload["mutation_policy"],
-              "source_code_transferred": False,
-          }
-          with open("researcher-evolution-work.json", "w", encoding="utf-8") as handle:
-              json.dump(safe, handle, indent=2, sort_keys=True)
+          with open(os.environ["PAYLOAD_FILE"], "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2, sort_keys=True)
           PY
-      - name: Materialize Cantiere task contract
+
+      - name: Materialize canonical Cantiere and durable contracts
+        env:
+          PAYLOAD_FILE: ${{ runner.temp }}/researcher-evolution-payload.json
+          INTAKE_DIR: ${{ runner.temp }}/researcher-evolution-intake
+        run: |
+          set -euo pipefail
+          dart run tool/researcher_evolution_intake.dart             "${PAYLOAD_FILE}"             "${INTAKE_DIR}"
+
+      - name: Verify fail-closed handoff invariants
+        env:
+          INTAKE_DIR: ${{ runner.temp }}/researcher-evolution-intake
         run: |
           python - <<'PY'
           import json
+          import os
+          from pathlib import Path
 
-          with open("researcher-evolution-work.json", encoding="utf-8") as handle:
+          root = Path(os.environ["INTAKE_DIR"])
+          with (root / "researcher-evolution-work.json").open(encoding="utf-8") as handle:
               work = json.load(handle)
+          with (root / "workshop-task-contract.json").open(encoding="utf-8") as handle:
+              task = json.load(handle)
+          with (root / "workshop-durable-project.json").open(encoding="utf-8") as handle:
+              durable = json.load(handle)
 
-          proposal_id = str(work["proposal_id"]).strip()
-          capability_id = str(work["capability_id"]).strip()
-          deltas = [str(value).strip() for value in work["knowledge_delta"] if str(value).strip()]
-          gates = [str(value).strip() for value in work["acceptance_gates"] if str(value).strip()]
-
-          task = {
-              "id": f"research-evolution:{proposal_id}",
-              "title": f"Evolve {capability_id}",
-              "objective": (
-                  f"Create or improve our independently maintained module for {capability_id} "
-                  "using only the normalized Researcher knowledge delta. Produce an isolated "
-                  "candidate; do not mutate the stable Library."
-              ),
-              "kind": "codeModification",
-              "mode": "hybrid",
-              "preferredResource": "local",
-              "fallbackResources": ["githubAgent", "githubActions", "hybridAi"],
-              "priority": "normal",
-              "status": "planned",
-              "instructions": [
-                  "Use the current in-house module as the baseline when one exists.",
-                  "Apply only technically useful knowledge deltas.",
-                  "Prefer the best correct implementation; do not introduce artificial differences.",
-                  "Do not copy research-only upstream source code.",
-                  "Create a candidate version in an isolated workspace.",
-                  "Run the required validation gates before requesting promotion.",
-                  *[f"Knowledge delta: {delta}" for delta in deltas],
-              ],
-              "constraints": [
-                  "Never mutate the stable Library during implementation.",
-                  "Never bypass license, security, regression, or Library contract gates.",
-                  "Never execute untrusted discovered source code as part of synthesis.",
-              ],
-              "acceptanceCriteria": [
-                  {"id": gate, "description": f"Researcher gate {gate} must pass.", "required": True}
-                  for gate in gates
-              ],
-              "fileScope": {
-                  "allowed": ["candidate_workspace/**"],
-                  "readOnly": ["library_baseline/**", "research_knowledge/**"],
-                  "forbidden": ["stable_library/**"],
-              },
-              "budget": {
-                  "maxCredits": 0,
-                  "reservedCredits": 0,
-                  "minimumReserveCredits": 0,
-                  "estimatedCredits": 0,
-                  "allowOverrun": False,
-              },
-              "requiredCheckpoints": ["candidate_created", "tests_completed", "validation_completed"],
-              "checkpoint": None,
-              "parentTaskId": None,
-              "dependsOn": [],
-              "tags": ["researcher-v2", "module-evolution", capability_id],
-              "metadata": {
-                  "researcherProposalId": proposal_id,
-                  "capabilityId": capability_id,
-                  "mutationPolicy": work["mutation_policy"],
-                  "sourceCodeTransferred": False,
-              },
-          }
-          with open("workshop-task-contract.json", "w", encoding="utf-8") as handle:
-              json.dump(task, handle, indent=2, sort_keys=True)
+          if work.get("source_code_transferred") is not False:
+              raise SystemExit("Researcher intake must never transfer source code")
+          if task.get("metadata", {}).get("sourceCodeTransferred") is not False:
+              raise SystemExit("Cantiere contract lost the no-source-transfer invariant")
+          if task.get("metadata", {}).get("mutationPolicy") != "isolated_candidate_no_library_mutation":
+              raise SystemExit("unsafe Researcher mutation policy")
+          scope = task.get("fileScope", {})
+          if scope.get("allowed") != ["candidate_workspace/**"]:
+              raise SystemExit("Researcher task writable scope is not isolated")
+          if "stable_library/**" not in scope.get("forbidden", []):
+              raise SystemExit("stable Library is not explicitly forbidden")
+          if durable.get("state") != "ready":
+              raise SystemExit("durable Researcher project is not ready")
+          tasks = durable.get("tasks", {})
+          if len(tasks) != 1:
+              raise SystemExit("durable Researcher intake must contain exactly one task")
+          durable_task = next(iter(tasks.values()))
+          if durable_task.get("state") != "ready":
+              raise SystemExit("durable Researcher task is not ready")
+          if durable_task.get("capability") != "coding.module_evolution":
+              raise SystemExit("unexpected durable capability")
           PY
+
       - name: Upload validated Cantiere intake
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: researcher-evolution-${{ github.event.client_payload.proposal_id }}
-          path: |
-            researcher-evolution-work.json
-            workshop-task-contract.json
+          path: ${{ runner.temp }}/researcher-evolution-intake/
           if-no-files-found: error
           retention-days: 14
