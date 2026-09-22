@@ -900,6 +900,7 @@ class InferenceService {
       var retryReason = '';
       var firstTokenLogged = false;
       var streamedChunkCount = 0;
+      var terminalChunkSeen = false;
       final attemptClock = Stopwatch()..start();
       int? firstContentMs;
 
@@ -917,6 +918,15 @@ class InferenceService {
         cancellationToken: cancellationToken,
         attempt: attempt,
       )) {
+        // Once a terminal response has been delivered to the consumer, keep
+        // draining the upstream stream until its natural close. Returning from
+        // this await-for immediately would cancel the upstream subscription.
+        // On Android that cancellation propagates to the cached native llama
+        // session and can poison the very next same-model inference.
+        if (terminalChunkSeen) {
+          continue;
+        }
+
         if (chunk.runtimeNotice != null &&
             chunk.runtimeNotice!
                 .trim()
@@ -1017,8 +1027,12 @@ class InferenceService {
         yield chunk;
 
         if (chunk.isFinal) {
-          return;
+          terminalChunkSeen = true;
         }
+      }
+
+      if (terminalChunkSeen) {
+        return;
       }
 
       if (!shouldRetry ||
