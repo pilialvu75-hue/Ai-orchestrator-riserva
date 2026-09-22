@@ -129,10 +129,25 @@ final class WorkshopDurableGitHubActionsCoordinator {
     var task = _requiredTask(snapshot, taskId);
 
     if (task.state == WorkshopDurableState.waitingExternal) {
+      final operationKey =
+          _identity(operationIdempotencyKey, 'operationIdempotencyKey');
+      if (!snapshot.claimedOperationKeys.contains(operationKey)) {
+        throw StateError(
+          'Existing GitHub wait belongs to a different durable operation.',
+        );
+      }
+      final wait = task.externalWait;
+      if (wait?.eventType == WorkshopDurableEventTypes.ciStarted &&
+          wait?.externalId !=
+              _identity(dispatchCorrelationId, 'dispatchCorrelationId')) {
+        throw StateError(
+          'Existing GitHub run-discovery wait has a different correlation id.',
+        );
+      }
       return WorkshopDurableGitHubReconcileResult(
         snapshot: snapshot,
-        disposition: _waitingDisposition(task.externalWait),
-        runId: _runId(task.externalWait),
+        disposition: _waitingDisposition(wait),
+        runId: _runId(wait),
       );
     }
 
