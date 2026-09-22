@@ -441,6 +441,25 @@ class DatabaseHelper {
     );
   }
 
+  Future<List<Map<String, dynamic>>> getDocumentChunksByDocumentId(
+    String documentId, {
+    int? limit,
+  }) async {
+    final normalized = documentId.trim();
+    if (normalized.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final db = await database;
+    return db.query(
+      AppConstants.tableDocumentChunks,
+      where: '${AppConstants.colDocumentId} = ?',
+      whereArgs: <Object?>[normalized],
+      orderBy: '${AppConstants.colTimestamp} DESC',
+      limit: limit,
+    );
+  }
+
   // ── user_preferences CRUD ───────────────────────────────────────────────────
 
   Future<void> setPreference(String key, String value) async {
