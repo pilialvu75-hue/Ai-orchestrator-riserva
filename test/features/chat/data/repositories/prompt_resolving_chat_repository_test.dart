@@ -3,6 +3,10 @@ import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
@@ -55,6 +59,20 @@ void main() {
       );
     });
 
+    test('classifies ordinary and specialized Assistant prompts', () async {
+      final fixture = await createService(const <String, Object>{});
+
+      expect(fixture.service.isOrdinaryAssistantRequest(null), isTrue);
+      expect(
+        fixture.service.isOrdinaryAssistantRequest(SystemPromptConfig.defaultPrompt),
+        isTrue,
+      );
+      expect(
+        fixture.service.isOrdinaryAssistantRequest('Specialized system prompt.'),
+        isFalse,
+      );
+    });
+
     test('preserves a user-authored prompt', () async {
       const customPrompt = 'Be terse, technical, and answer in Italian.';
       final fixture = await createService(<String, Object>{
@@ -80,6 +98,7 @@ void main() {
       final repository = PromptResolvingChatRepository(
         delegate: delegate,
         systemPromptService: fixture.service,
+        durableMemoryContextService: _emptyMemoryContext(),
       );
 
       await repository.sendMessage(
@@ -101,6 +120,7 @@ void main() {
       final repository = PromptResolvingChatRepository(
         delegate: delegate,
         systemPromptService: fixture.service,
+        durableMemoryContextService: _emptyMemoryContext(),
       );
 
       await repository.sendMessage(
@@ -112,6 +132,42 @@ void main() {
       expect(delegate.lastSystemPrompt, SystemPromptConfig.defaultPrompt);
     });
 
+    test('ordinary Assistant chat receives relevant confirmed durable memory',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final persistence = _PromptMemoryPersistence();
+      final memoryService = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: persistence),
+      );
+      await memoryService.recordConfirmed(
+        recordKey: 'bike.current',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.state,
+        content: 'La bici attuale è quella nuova.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 10,
+      );
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memoryService,
+        ),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'assistant-session',
+        userPrompt: 'Qual è la mia bici attuale?',
+        systemPrompt: SystemPromptConfig.defaultPrompt,
+      );
+
+      expect(delegate.lastSystemPrompt, contains(SystemPromptConfig.defaultPrompt));
+      expect(delegate.lastSystemPrompt, contains('CONFIRMED DURABLE MEMORY'));
+      expect(delegate.lastSystemPrompt, contains('La bici attuale è quella nuova.'));
+    });
+
     test('preserves explicit specialized system prompt', () async {
       final fixture = await createService(<String, Object>{
         AppConstants.prefDirectionalPrompt: 'Custom assistant identity.',
@@ -120,6 +176,7 @@ void main() {
       final repository = PromptResolvingChatRepository(
         delegate: delegate,
         systemPromptService: fixture.service,
+        durableMemoryContextService: _emptyMemoryContext(),
       );
 
       await repository.sendMessage(
@@ -129,6 +186,7 @@ void main() {
       );
 
       expect(delegate.lastSystemPrompt, 'Specialized system prompt.');
+      expect(delegate.lastSystemPrompt, isNot(contains('DURABLE MEMORY')));
     });
   });
 }
@@ -171,4 +229,26 @@ class _RecordingChatRepository implements ChatRepository {
 
   @override
   Future<int> deleteMessagesFrom(String sessionId, String messageId) async => 0;
+}
+
+AssistantDurableMemoryContextService _emptyMemoryContext() {
+  return AssistantDurableMemoryContextService(
+    memoryService: AssistantDurableMemoryService(
+      store: AssistantDurableMemoryStore(
+        persistence: _PromptMemoryPersistence(),
+      ),
+    ),
+  );
+}
+
+class _PromptMemoryPersistence implements AssistantDurableMemoryPersistence {
+  final Map<String, String> values = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    values[key] = value;
+  }
 }
