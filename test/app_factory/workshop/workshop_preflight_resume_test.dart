@@ -55,6 +55,56 @@ void main() {
       expect(architect.calls, 2);
     });
 
+    test('certified Library identity invalidates stale preflight resume',
+        () async {
+      final orchestrator = _SequenceGateway(
+        role: AppAiRole.workshopOrchestrator,
+        results: <WorkshopInferenceResult>[
+          _success('analysis for certified export A'),
+          _success('analysis for certified export B'),
+        ],
+      );
+      final architect = _SequenceGateway(
+        role: AppAiRole.architect,
+        results: <WorkshopInferenceResult>[
+          _success('plan for certified export A'),
+          _success('plan for certified export B'),
+        ],
+      );
+      final pipeline = _pipeline(
+        orchestrator: orchestrator,
+        architect: architect,
+      );
+
+      final first = await pipeline.run(
+        request: _request,
+        allowLocalReuse: false,
+        certifiedLibraryReuseIdentity: 'snapshot-a|asset@1:package-a',
+      );
+      expect(first.readyForImplementation, isTrue);
+      expect(orchestrator.calls, 1);
+      expect(architect.calls, 1);
+
+      final sameExport = await pipeline.run(
+        request: _request,
+        allowLocalReuse: false,
+        certifiedLibraryReuseIdentity: 'snapshot-a|asset@1:package-a',
+      );
+      expect(sameExport.analysis.text, 'analysis for certified export A');
+      expect(orchestrator.calls, 1);
+      expect(architect.calls, 1);
+
+      final changedExport = await pipeline.run(
+        request: _request,
+        allowLocalReuse: false,
+        certifiedLibraryReuseIdentity: 'snapshot-b|asset@2:package-b',
+      );
+      expect(changedExport.analysis.text, 'analysis for certified export B');
+      expect(changedExport.architecture?.text, 'plan for certified export B');
+      expect(orchestrator.calls, 2);
+      expect(architect.calls, 2);
+    });
+
     test('does not reuse online analysis for an explicit offline retry',
         () async {
       final orchestrator = _SequenceGateway(
