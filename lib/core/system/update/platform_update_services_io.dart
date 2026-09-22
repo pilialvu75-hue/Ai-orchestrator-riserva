@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/system/update/linux_update_manager.dart';
+import 'package:ai_orchestrator/core/system/update/macos_update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_checker.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
@@ -17,7 +18,7 @@ Future<void> configurePlatformUpdateServices(
   GetIt sl, {
   required String currentVersion,
 }) async {
-  if (!Platform.isWindows && !Platform.isLinux) return;
+  if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) return;
 
   if (sl.isRegistered<UpdateManager>()) {
     await sl.unregister<UpdateManager>();
@@ -28,7 +29,9 @@ Future<void> configurePlatformUpdateServices(
 
   final targetPlatform = Platform.isWindows
       ? UpdateTargetPlatform.windows
-      : UpdateTargetPlatform.linux;
+      : Platform.isMacOS
+          ? UpdateTargetPlatform.macos
+          : UpdateTargetPlatform.linux;
 
   sl.registerLazySingleton<UpdateChecker>(
     () => UpdateChecker(
@@ -45,6 +48,19 @@ Future<void> configurePlatformUpdateServices(
   if (Platform.isWindows) {
     sl.registerLazySingleton<UpdateManager>(
       () => WindowsUpdateManager(
+        updateChecker: sl<UpdateChecker>(),
+        comparator: sl<VersionComparator>(),
+        preferences: sl<SharedPreferences>(),
+        intentHandler: sl<AndroidIntentHandler>(),
+        currentVersion: currentVersion,
+      ),
+    );
+    return;
+  }
+
+  if (Platform.isMacOS) {
+    sl.registerLazySingleton<UpdateManager>(
+      () => MacosUpdateManager(
         updateChecker: sl<UpdateChecker>(),
         comparator: sl<VersionComparator>(),
         preferences: sl<SharedPreferences>(),
