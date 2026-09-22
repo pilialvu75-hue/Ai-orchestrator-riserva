@@ -1,4 +1,4 @@
-import 'memory_fabric_record.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
 
 final class MemoryFabricProviderDescriptor {
   MemoryFabricProviderDescriptor({
