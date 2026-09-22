@@ -375,6 +375,7 @@ final class WorkshopDurableProjectSnapshot {
     required this.updatedAt,
     required this.tasks,
     this.transitions = const <WorkshopDurableTransition>[],
+    this.receivedEventKeys = const <String>{},
     this.processedIdempotencyKeys = const <String>{},
     this.claimedOperationKeys = const <String>{},
     this.events = const <WorkshopDurableExternalEvent>[],
@@ -389,6 +390,7 @@ final class WorkshopDurableProjectSnapshot {
   final DateTime updatedAt;
   final Map<String, WorkshopDurableTask> tasks;
   final List<WorkshopDurableTransition> transitions;
+  final Set<String> receivedEventKeys;
   final Set<String> processedIdempotencyKeys;
   final Set<String> claimedOperationKeys;
   final List<WorkshopDurableExternalEvent> events;
@@ -398,6 +400,7 @@ final class WorkshopDurableProjectSnapshot {
     DateTime? updatedAt,
     Map<String, WorkshopDurableTask>? tasks,
     List<WorkshopDurableTransition>? transitions,
+    Set<String>? receivedEventKeys,
     Set<String>? processedIdempotencyKeys,
     Set<String>? claimedOperationKeys,
     List<WorkshopDurableExternalEvent>? events,
@@ -412,6 +415,9 @@ final class WorkshopDurableProjectSnapshot {
       tasks: Map<String, WorkshopDurableTask>.unmodifiable(tasks ?? this.tasks),
       transitions: List<WorkshopDurableTransition>.unmodifiable(
         transitions ?? this.transitions,
+      ),
+      receivedEventKeys: Set<String>.unmodifiable(
+        receivedEventKeys ?? this.receivedEventKeys,
       ),
       processedIdempotencyKeys: Set<String>.unmodifiable(
         processedIdempotencyKeys ?? this.processedIdempotencyKeys,
@@ -437,6 +443,7 @@ final class WorkshopDurableProjectSnapshot {
         },
         'transitions':
             transitions.map((item) => item.toJson()).toList(growable: false),
+        'receivedEventKeys': receivedEventKeys.toList(growable: false),
         'processedIdempotencyKeys':
             processedIdempotencyKeys.toList(growable: false),
         'claimedOperationKeys': claimedOperationKeys.toList(growable: false),
@@ -494,6 +501,8 @@ final class WorkshopDurableProjectSnapshot {
       updatedAt: _requiredDate(json, 'updatedAt'),
       tasks: Map<String, WorkshopDurableTask>.unmodifiable(tasks),
       transitions: List<WorkshopDurableTransition>.unmodifiable(transitions),
+      receivedEventKeys:
+          Set<String>.unmodifiable(_strings(json['receivedEventKeys'])),
       processedIdempotencyKeys:
           Set<String>.unmodifiable(_strings(json['processedIdempotencyKeys'])),
       claimedOperationKeys:
@@ -960,17 +969,20 @@ final class WorkshopDurableOrchestrator {
       }
 
       final now = _clock().toUtc();
-      var next = snapshot.copyWith(
-        processedIdempotencyKeys: <String>{
-          ...snapshot.processedIdempotencyKeys,
-          key,
-        },
-        events: <WorkshopDurableExternalEvent>[
-          ...snapshot.events,
-          event,
-        ],
-        updatedAt: now,
-      );
+      final wasAlreadyReceived = snapshot.receivedEventKeys.contains(key);
+      var next = wasAlreadyReceived
+          ? snapshot
+          : snapshot.copyWith(
+              receivedEventKeys: <String>{
+                ...snapshot.receivedEventKeys,
+                key,
+              },
+              events: <WorkshopDurableExternalEvent>[
+                ...snapshot.events,
+                event,
+              ],
+              updatedAt: now,
+            );
 
       final task = next.tasks[event.taskId];
       final wait = task?.externalWait;
@@ -981,6 +993,13 @@ final class WorkshopDurableOrchestrator {
           wait != null &&
           wait.matches(event)) {
         matched = true;
+        next = next.copyWith(
+          processedIdempotencyKeys: <String>{
+            ...next.processedIdempotencyKeys,
+            key,
+          },
+          updatedAt: now,
+        );
         if (event.success) {
           final artifacts =
               <String>{...task.artifactIds, ...event.artifactIds}.toList()
@@ -1011,7 +1030,7 @@ final class WorkshopDurableOrchestrator {
       await _store.save(next);
       return WorkshopDurableEventResult(
         snapshot: next,
-        duplicate: false,
+        duplicate: wasAlreadyReceived,
         matchedTask: matched,
       );
     });
