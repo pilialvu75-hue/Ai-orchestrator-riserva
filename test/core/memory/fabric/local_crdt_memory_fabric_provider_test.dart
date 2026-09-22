@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/fabric/local_crdt_memory_fabric_provider.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
@@ -169,6 +171,127 @@ void main() {
     );
 
     expect(results.map((record) => record.id), <String>['memory-4']);
+  });
+
+  test('remote lower logical version cannot win with a newer HLC', () async {
+    final sync = SyncManager(
+      databaseHelper: database,
+      nodeId: 'device-a',
+    );
+    final local = LocalCrdtMemoryFabricProvider(syncManager: sync);
+    final versionOne = MemoryFabricRecord.create(
+      id: 'memory-remote-1',
+      namespace: 'project',
+      type: MemoryFabricType.project,
+      subject: 'state',
+      content: 'running',
+      source: 'cantiere',
+      now: DateTime.utc(2026, 9, 22, 8),
+    );
+    final versionTwo = versionOne.nextVersion(
+      content: 'blocked',
+      now: DateTime.utc(2026, 9, 22, 8, 1),
+    );
+    await local.write(versionTwo);
+
+    final applied = await sync.applyRemoteChangeset(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'remote-stale',
+        'collection': LocalCrdtMemoryFabricProvider.collection,
+        'key': versionOne.id,
+        'value': jsonEncode(versionOne.toJson()),
+        'hlc': '9999999999999999-000001-remote-node',
+        'nodeId': 'remote-node',
+      },
+    ]);
+
+    expect(applied, 0);
+    final recovered = await local.read(versionOne.id);
+    expect(recovered?.version, 2);
+    expect(recovered?.content, 'blocked');
+  });
+
+  test('remote higher logical version is rebased when HLC is older', () async {
+    final sync = SyncManager(
+      databaseHelper: database,
+      nodeId: 'device-a',
+    );
+    final local = LocalCrdtMemoryFabricProvider(syncManager: sync);
+    final versionOne = MemoryFabricRecord.create(
+      id: 'memory-remote-2',
+      namespace: 'project',
+      type: MemoryFabricType.project,
+      subject: 'state',
+      content: 'running',
+      source: 'cantiere',
+      now: DateTime.utc(2026, 9, 22, 8),
+    );
+    final versionTwo = versionOne.nextVersion(
+      content: 'validating',
+      now: DateTime.utc(2026, 9, 22, 8, 1),
+    );
+    await local.write(versionOne);
+
+    final applied = await sync.applyRemoteChangeset(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'remote-newer-version',
+        'collection': LocalCrdtMemoryFabricProvider.collection,
+        'key': versionOne.id,
+        'value': jsonEncode(versionTwo.toJson()),
+        'hlc': '0000000000000001-000000-remote-node',
+        'nodeId': 'remote-node',
+      },
+    ]);
+
+    expect(applied, 1);
+    final recovered = await local.read(versionOne.id);
+    expect(recovered?.version, 2);
+    expect(recovered?.content, 'validating');
+    expect(rows.last['node_id'], 'device-a');
+  });
+
+  test('remote same-version different-checksum conflict is rejected', () async {
+    final sync = SyncManager(
+      databaseHelper: database,
+      nodeId: 'device-a',
+    );
+    final local = LocalCrdtMemoryFabricProvider(syncManager: sync);
+    final base = MemoryFabricRecord.create(
+      id: 'memory-remote-3',
+      namespace: 'project',
+      type: MemoryFabricType.project,
+      subject: 'state',
+      content: 'running',
+      source: 'cantiere',
+      now: DateTime.utc(2026, 9, 22, 8),
+    );
+    final localVersion = base.nextVersion(
+      content: 'blocked',
+      now: DateTime.utc(2026, 9, 22, 8, 1),
+    );
+    final conflictingVersion = base.nextVersion(
+      content: 'completed',
+      now: DateTime.utc(2026, 9, 22, 8, 1),
+    );
+    expect(conflictingVersion.version, localVersion.version);
+    expect(conflictingVersion.checksum, isNot(localVersion.checksum));
+    await local.write(localVersion);
+
+    final applied = await sync.applyRemoteChangeset(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'remote-conflict',
+        'collection': LocalCrdtMemoryFabricProvider.collection,
+        'key': localVersion.id,
+        'value': jsonEncode(conflictingVersion.toJson()),
+        'hlc': '9999999999999999-000002-remote-node',
+        'nodeId': 'remote-node',
+      },
+    ]);
+
+    expect(applied, 0);
+    final recovered = await local.read(localVersion.id);
+    expect(recovered?.content, 'blocked');
+    expect(recovered?.checksum, localVersion.checksum);
   });
 
   test('health and sync expose existing CRDT state without network', () async {
