@@ -26,7 +26,7 @@ abstract final class AssistantWebSearchPolicy {
   static bool isSportsResultQuery(String prompt) {
     final value = prompt.toLowerCase();
     final competition = RegExp(
-      r'\b(?:mondiali?|world cup|champions league|olimpiadi|olympics|torneo|tournament|campionato|championship|super bowl)\b',
+      r'\b(?:mondial[ei]|world cup|champions league|olimpiadi|olympics|torneo|tournament|campionato|championship|super bowl)\b',
     );
     final result = RegExp(
       r'\b(?:vinto|vincitore|vincitrice|risultato|risultati|won|winner|winners|score|results)\b',
