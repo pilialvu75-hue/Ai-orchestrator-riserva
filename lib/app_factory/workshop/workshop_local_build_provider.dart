@@ -433,10 +433,15 @@ final class WorkshopLocalBuildProvider
     final stdoutSubscription = process.stdout
         .transform(utf8.decoder)
         .listen(stdoutBuffer.write);
-
     final stderrSubscription = process.stderr
         .transform(utf8.decoder)
         .listen(stderrBuffer.write);
+
+    // Register stream completion futures immediately. Waiting until after
+    // process.exitCode can miss an already-delivered onDone event for very
+    // short commands, leaving build() suspended with no live event source.
+    final stdoutDone = stdoutSubscription.asFuture<void>();
+    final stderrDone = stderrSubscription.asFuture<void>();
 
     try {
       final exitCode =
@@ -450,8 +455,10 @@ final class WorkshopLocalBuildProvider
         },
       );
 
-      await stdoutSubscription.asFuture<void>();
-      await stderrSubscription.asFuture<void>();
+      await Future.wait<void>(<Future<void>>[
+        stdoutDone,
+        stderrDone,
+      ]);
 
       return _ProcessResult(
         exitCode: exitCode,
