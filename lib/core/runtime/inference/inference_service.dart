@@ -715,18 +715,32 @@ class InferenceService {
             detectedQuery == null) {
           detectedQuery = query;
 
-          _log(
-            '[INTERCEPTOR] '
-            'Detected internet search tool-call. '
-            'Query: "$detectedQuery"',
-          );
+          if (localRequest.isOffline) {
+            _log(
+              '[TOOL_EXECUTION_SKIPPED] '
+              'tool=web_search '
+              'session=${localRequest.sessionId} '
+              'reason=offline_hard_boundary',
+            );
 
-          yield InferenceResponse.notice(
-            '\n\n'
-            '🔍 *Searching the web for: '
-            '"$detectedQuery"...*'
-            '\n\n',
-          );
+            yield InferenceResponse.notice(
+              'Offline mode: web search was blocked. '
+              'Continuing with local knowledge only.',
+            );
+          } else {
+            _log(
+              '[INTERCEPTOR] '
+              'Detected internet search tool-call. '
+              'Query: "$detectedQuery"',
+            );
+
+            yield InferenceResponse.notice(
+              '\n\n'
+              '🔍 *Searching the web for: '
+              '"$detectedQuery"...*'
+              '\n\n',
+            );
+          }
 
           firstGenerationToken.cancel();
 
@@ -802,6 +816,14 @@ class InferenceService {
 
     if (detectedQuery != null &&
         detectedQuery.isNotEmpty) {
+      if (localRequest.isOffline) {
+        yield* _recoverOfflineSearchWithoutTools(
+          localRequest: localRequest,
+          cancellationToken: cancellationToken,
+        );
+        return;
+      }
+
       try {
         final searchTool =
             _webSearchTool ?? WebSearchTool();
@@ -884,6 +906,79 @@ class InferenceService {
       'emittedLocalToken=$emittedLocalToken '
       'chunks=$localChunkCount',
     );
+  }
+
+  TokenStream _recoverOfflineSearchWithoutTools({
+    required InferenceRequest localRequest,
+    required CancellationToken cancellationToken,
+  }) async* {
+    final recoveryToken = CancellationToken();
+    cancellationToken.onCancel(recoveryToken.cancel);
+
+    final sections = <String>[];
+    final baseSystemPrompt = localRequest.systemPrompt?.trim();
+    if (baseSystemPrompt != null && baseSystemPrompt.isNotEmpty) {
+      sections.add(baseSystemPrompt);
+    }
+
+    final originalPrompt = localRequest.prompt.trim();
+    if (originalPrompt.isNotEmpty) {
+      sections.add('Original user request:\n$originalPrompt');
+    }
+
+    sections.add(
+      '[OFFLINE HARD BOUNDARY]\n'
+      'This turn is explicitly offline. External tools and network lookups are '
+      'forbidden. Answer the original user request only from local/project '
+      'knowledge. If a fact may have changed, say that it cannot be verified '
+      'live while offline. Do not emit tool-call tags.',
+    );
+
+    final recoveryRequest = localRequest.copyWith(
+      sessionId: '${localRequest.sessionId}::offline-search-recovery',
+      prompt:
+          'Answer the original user request now using local/project knowledge '
+          'only. Do not request or invoke any external tool.',
+      systemPrompt: sections.join('\n\n'),
+    );
+
+    _log(
+      '[OFFLINE_SEARCH_RECOVERY] '
+      'session=${localRequest.sessionId} '
+      'action=local_retry_no_tools',
+    );
+
+    final recoveryStream = _runtimeProvider
+        .streamInference(
+          request: recoveryRequest,
+          cancellationToken: recoveryToken,
+        )
+        .transform(ToolInterceptorTransformer());
+
+    await for (final chunk in recoveryStream) {
+      final notice = chunk.runtimeNotice;
+      if (notice != null && notice.startsWith(_searchNoticePrefix)) {
+        _log(
+          '[TOOL_EXECUTION_SKIPPED] '
+          'tool=web_search '
+          'session=${localRequest.sessionId} '
+          'reason=offline_recovery_repeated_tool_call',
+        );
+        recoveryToken.cancel();
+
+        yield InferenceResponse.finalChunk(
+          text:
+              'Live information cannot be verified while offline. '
+              'The model attempted to request an external lookup again, '
+              'so the request was stopped without network access.',
+          tokensGenerated: 0,
+          model: localRequest.modelId ?? 'unknown',
+        );
+        return;
+      }
+
+      yield chunk;
+    }
   }
 
   TokenStream _streamWithRetryAndGuards({
