@@ -43,6 +43,28 @@ void main() {
     controller.dispose();
   });
 
+  test('Workshop clarification is not marked ready for approval',
+      () async {
+    final provider = _SingleReplyProvider(
+      'CLARIFY: Qual è la funzione principale?',
+    );
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('fammi una app');
+
+    expect(result, isNotNull);
+    expect(result!.content, 'Qual è la funzione principale?');
+    expect(
+      controller.lastReplyKind,
+      WorkshopChatReplyKind.clarification,
+    );
+    expect(controller.lastResponseReadyForApproval, isFalse);
+
+    controller.dispose();
+  });
+
   test('Workshop collector does not duplicate cumulative final snapshot',
       () async {
     final provider = _CumulativeSnapshotProvider();
@@ -67,6 +89,24 @@ void main() {
 
 }
 
+
+final class _SingleReplyProvider implements RuntimeInferenceProvider {
+  _SingleReplyProvider(this.reply);
+
+  final String reply;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    yield InferenceResponse.finalChunk(
+      text: reply,
+      tokensGenerated: 4,
+      model: 'fake-workshop',
+    );
+  }
+}
 
 final class _CumulativeSnapshotProvider implements RuntimeInferenceProvider {
   @override
