@@ -189,7 +189,7 @@ void main() {
       expect(first.last.text, 'response-1');
       expect(second.last.isFinal, isTrue);
       expect(second.last.text, 'response-2');
-      expect(localProvider.cancelCalls, 0);
+      expect(localProvider.prematureCancelCalls, 0);
       expect(localProvider.requests, 2);
     });
 
@@ -482,7 +482,7 @@ Top results:
 class _FinalThenNaturalCloseProvider extends FakeLocalRuntimeProvider {
   _FinalThenNaturalCloseProvider();
 
-  int cancelCalls = 0;
+  int prematureCancelCalls = 0;
   int requests = 0;
 
   @override
@@ -490,9 +490,13 @@ class _FinalThenNaturalCloseProvider extends FakeLocalRuntimeProvider {
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
+    var naturalCloseStarted = false;
+
     final controller = StreamController<InferenceResponse>(
       onCancel: () {
-        cancelCalls += 1;
+        if (!naturalCloseStarted) {
+          prematureCancelCalls += 1;
+        }
       },
     );
 
@@ -510,6 +514,7 @@ class _FinalThenNaturalCloseProvider extends FakeLocalRuntimeProvider {
       Future<void>.delayed(
         const Duration(milliseconds: 5),
         () async {
+          naturalCloseStarted = true;
           if (!controller.isClosed) {
             await controller.close();
           }
