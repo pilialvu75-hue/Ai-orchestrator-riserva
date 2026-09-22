@@ -209,6 +209,70 @@ void main() {
     expect(provider.requests, hasLength(1));
   });
 
+  testWidgets(
+      'clarification stays conversational and approval keeps original request',
+      (tester) async {
+    final provider = _SequenceProvider(<String>[
+      'CLARIFY: Qual è la funzione principale?',
+      'PROPOSAL: App per camminate con tracciamento percorso e distanza.',
+    ]);
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'clarification-then-proposal',
+    );
+    final dashboard = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+    );
+    addTearDown(chat.dispose);
+    addTearDown(dashboard.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          dashboardController: dashboard,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    const initialRequest =
+        'Fammi una app per accompagnare e registrare una camminata.';
+
+    await tester.enterText(find.byType(TextField), initialRequest);
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Qual è la funzione principale?'), findsOneWidget);
+    expect(find.text('Sì, procedi'), findsNothing);
+
+    await tester.enterText(
+      find.byType(TextField),
+      'Tracciare il percorso e la distanza.',
+    );
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('App per camminate con tracciamento percorso e distanza.'),
+      findsOneWidget,
+    );
+    expect(find.text('Sì, procedi'), findsOneWidget);
+
+    await tester.tap(find.text('Sì, procedi'));
+    await tester.pumpAndSettle();
+
+    final requestId = dashboard.state.requestId;
+    expect(requestId, isNotNull);
+    final request = dashboard.engine.requestOf(requestId!);
+    expect(request, isNotNull);
+    expect(request!.instruction, initialRequest);
+    expect(
+      request.context.single,
+      contains('App per camminate con tracciamento percorso e distanza.'),
+    );
+  });
+
   testWidgets('projects drawer delegates explicit project recovery', (tester) async {
     var openProjectsCalls = 0;
     final provider = _CapturingProvider();
@@ -294,6 +358,31 @@ void main() {
       isTrue,
     );
   });
+}
+
+final class _SequenceProvider implements RuntimeInferenceProvider {
+  _SequenceProvider(this.replies);
+
+  final List<String> replies;
+  int _index = 0;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    if (_index >= replies.length) {
+      throw StateError('Unexpected extra Workshop chat request.');
+    }
+
+    final reply = replies[_index++];
+
+    yield InferenceResponse.finalChunk(
+      text: reply,
+      tokensGenerated: 8,
+      model: 'fake-workshop',
+    );
+  }
 }
 
 final class _CapturingProvider implements RuntimeInferenceProvider {
