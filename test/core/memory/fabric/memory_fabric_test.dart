@@ -64,7 +64,7 @@ void main() {
     expect((await fabric.read(record.id))?.id, record.id);
   });
 
-  test('cloud-only provider cannot accept device-only or secret records', () {
+  test('cloud-only provider cannot accept device-only or secret records', () async {
     final cloud = _MapProvider(
       'cloud',
       location: 'cloud',
