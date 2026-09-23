@@ -9,6 +9,9 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_provider.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric.dart';
+import 'package:ai_orchestrator/core/memory/fabric/local_crdt_memory_fabric_provider.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
@@ -272,6 +275,21 @@ Future<void> initDependencies({
     SyncManager(
       databaseHelper: sl<DatabaseHelper>(),
       nodeId: _resolveNodeId(sharedPreferences),
+    ),
+  );
+  sl.registerLazySingleton<LocalCrdtMemoryFabricProvider>(
+    () => LocalCrdtMemoryFabricProvider(
+      syncManager: sl<SyncManager>(),
+    ),
+  );
+  sl.registerLazySingleton<MemoryFabric>(
+    () => MemoryFabric(
+      <MemoryFabricNode>[
+        MemoryFabricNode(
+          provider: sl<LocalCrdtMemoryFabricProvider>(),
+          role: MemoryFabricNodeRole.primary,
+        ),
+      ],
     ),
   );
   sl.registerLazySingleton<LocalSyncServer>(
