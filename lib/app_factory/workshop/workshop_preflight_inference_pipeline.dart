@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_certified_library_evidence.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_decision_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
@@ -87,16 +88,37 @@ final class WorkshopPreflightInferencePipeline {
     bool isOffline = false,
     bool allowLocalReuse = true,
     String? certifiedLibraryReuseIdentity,
+    WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence,
     List<String> requiredCapabilities = const <String>[],
     String? target,
     CancellationToken? cancellationToken,
   }) async {
-    final resolvedTarget = _resolveTarget(request: request, explicitTarget: target);
+    final resolvedTarget =
+        _resolveTarget(request: request, explicitTarget: target);
+    final evidenceIdentity = certifiedLibraryEvidence?.reuseIdentity.trim();
+    final explicitIdentity = certifiedLibraryReuseIdentity?.trim();
+    if (evidenceIdentity != null &&
+        evidenceIdentity.isNotEmpty &&
+        explicitIdentity != null &&
+        explicitIdentity.isNotEmpty &&
+        evidenceIdentity != explicitIdentity) {
+      throw StateError(
+        'Certified Library evidence identity does not match the supplied '
+        'remote reuse identity.',
+      );
+    }
+    final resolvedCertifiedIdentity =
+        evidenceIdentity != null && evidenceIdentity.isNotEmpty
+            ? evidenceIdentity
+            : explicitIdentity;
+    final effectiveAllowLocalReuse =
+        allowLocalReuse && certifiedLibraryEvidence == null;
+
     final resumeKey = _resumeKey(
       request: request,
       isOffline: isOffline,
-      allowLocalReuse: allowLocalReuse,
-      certifiedLibraryReuseIdentity: certifiedLibraryReuseIdentity,
+      allowLocalReuse: effectiveAllowLocalReuse,
+      certifiedLibraryReuseIdentity: resolvedCertifiedIdentity,
       requiredCapabilities: requiredCapabilities,
       target: resolvedTarget,
     );
@@ -108,7 +130,7 @@ final class WorkshopPreflightInferencePipeline {
 
     final approvedProposal = _approvedProposalFrom(request);
 
-    final reuseDecision = allowLocalReuse
+    final reuseDecision = effectiveAllowLocalReuse
         ? previous?.analysisReady == true
             ? previous!.reuseDecision ??
                 _reuseDecision(
@@ -165,6 +187,7 @@ final class WorkshopPreflightInferencePipeline {
         prompt: _analysisPrompt(
           request,
           target: resolvedTarget,
+          certifiedLibraryEvidence: certifiedLibraryEvidence,
           webEvidence: webEvidence,
         ),
         systemPrompt:
@@ -185,6 +208,7 @@ final class WorkshopPreflightInferencePipeline {
       final result = WorkshopPreflightInferenceResult(
         analysis: analysis,
         reuseDecision: reuseDecision,
+        certifiedLibraryEvidence: certifiedLibraryEvidence,
         webEvidence: webEvidence,
       );
       _resumeByKey[resumeKey] = result;
@@ -198,14 +222,18 @@ final class WorkshopPreflightInferencePipeline {
         analysis: analysis.text,
         target: resolvedTarget,
         reusedAsset: reuseDecision.asset,
+        certifiedLibraryEvidence: certifiedLibraryEvidence,
         webEvidence: webEvidence,
       ),
       systemPrompt: _architectSystemPrompt(
         reusedLocalKnowledge: reuseDecision.shouldReuse,
+        certifiedLibraryEvidence: certifiedLibraryEvidence,
       ),
-      sessionId: reuseDecision.shouldReuse
-          ? 'workshop:${request.id}:preflight:planning:reuse'
-          : 'workshop:${request.id}:preflight:planning',
+      sessionId: certifiedLibraryEvidence != null
+          ? 'workshop:${request.id}:preflight:planning:certified-library'
+          : reuseDecision.shouldReuse
+              ? 'workshop:${request.id}:preflight:planning:reuse'
+              : 'workshop:${request.id}:preflight:planning',
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -227,6 +255,7 @@ final class WorkshopPreflightInferencePipeline {
           analysis: analysis.text,
           target: resolvedTarget,
           reusedAsset: reuseDecision.asset,
+          certifiedLibraryEvidence: certifiedLibraryEvidence,
         ),
         systemPrompt:
             'You are the Cantiere Architect retrying a planning step after a '
@@ -234,7 +263,9 @@ final class WorkshopPreflightInferencePipeline {
             'plan only: target stack, files/areas to change, ordered steps, '
             'risks and validation criteria. Preserve every supplied constraint. '
             'Do not write files, approve/apply changes, or use Assistant state.',
-        sessionId: 'workshop:${request.id}:preflight:planning:retry-1',
+        sessionId: certifiedLibraryEvidence != null
+            ? 'workshop:${request.id}:preflight:planning:certified-library:retry-1'
+            : 'workshop:${request.id}:preflight:planning:retry-1',
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
@@ -244,6 +275,7 @@ final class WorkshopPreflightInferencePipeline {
       analysis: analysis,
       architecture: architecture,
       reuseDecision: reuseDecision,
+      certifiedLibraryEvidence: certifiedLibraryEvidence,
       webEvidence: webEvidence,
     );
     _resumeByKey[resumeKey] = result;
@@ -350,6 +382,7 @@ final class WorkshopPreflightInferencePipeline {
   static String _analysisPrompt(
     WorkshopRequest request, {
     String? target,
+    WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence,
     WorkshopWebEvidencePack webEvidence = const WorkshopWebEvidencePack(),
   }) {
     final buffer = StringBuffer()
@@ -365,6 +398,13 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln();
 
     _appendTargetBuildContract(buffer, target);
+
+    final certifiedContext = certifiedLibraryEvidence?.toPromptContext() ?? '';
+    if (certifiedContext.isNotEmpty) {
+      buffer
+        ..writeln(certifiedContext)
+        ..writeln();
+    }
 
     final webContext = webEvidence.toPromptContext();
     if (webContext.isNotEmpty) {
@@ -423,6 +463,7 @@ final class WorkshopPreflightInferencePipeline {
     required String analysis,
     String? target,
     WorkshopReusableAsset? reusedAsset,
+    WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence,
     WorkshopWebEvidencePack webEvidence = const WorkshopWebEvidencePack(),
   }) {
     final buffer = StringBuffer()
@@ -439,12 +480,30 @@ final class WorkshopPreflightInferencePipeline {
 
     _appendTargetBuildContract(buffer, target);
 
+    final certifiedContext = certifiedLibraryEvidence?.toPromptContext() ?? '';
+    if (certifiedContext.isNotEmpty) {
+      buffer
+        ..writeln(certifiedContext)
+        ..writeln();
+    }
+
     buffer
       ..writeln(
         reusedAsset == null ? 'ORCHESTRATOR ANALYSIS' : 'VERIFIED REUSE ANALYSIS',
       )
       ..writeln(analysis.trim())
       ..writeln();
+
+    if (certifiedLibraryEvidence != null) {
+      buffer
+        ..writeln('CERTIFIED LIBRARY RULE')
+        ..writeln(
+          'Preserve exact pins and satisfy every required integration item. '
+          'Do not regenerate already staged equivalent module files unless a '
+          'project-specific adaptation is required.',
+        )
+        ..writeln();
+    }
 
     if (reusedAsset != null) {
       buffer
@@ -476,7 +535,17 @@ final class WorkshopPreflightInferencePipeline {
 
   static String _architectSystemPrompt({
     required bool reusedLocalKnowledge,
+    WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence,
   }) {
+    if (certifiedLibraryEvidence != null) {
+      return 'You are the Cantiere Architect. Exact certified Module Library '
+          'evidence has already been selected for this project. Treat it as '
+          'verified provenance and integration evidence, never as project '
+          'authorization. Use only the exact pinned versions, respect explicit '
+          'integration requirements, and assume only the listed staged paths '
+          'are present in the VirtualWorkspace. Do not widen scope, substitute '
+          'packages, write files, approve/apply changes, or use Assistant state.';
+    }
     return reusedLocalKnowledge
         ? 'You are the Cantiere Architect. A previously verified local '
             'Workshop asset has been selected as reusable evidence. Adapt '
@@ -528,6 +597,7 @@ final class WorkshopPreflightInferencePipeline {
     required String analysis,
     String? target,
     WorkshopReusableAsset? reusedAsset,
+    WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence,
   }) {
     const maxAnalysisChars = 3600;
     final normalizedAnalysis = analysis.trim();
@@ -545,6 +615,19 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln();
 
     _appendTargetBuildContract(buffer, target);
+
+    final certifiedContext = certifiedLibraryEvidence?.toPromptContext() ?? '';
+    if (certifiedContext.isNotEmpty) {
+      buffer
+        ..writeln(certifiedContext)
+        ..writeln()
+        ..writeln('CERTIFIED LIBRARY RETRY RULE')
+        ..writeln(
+          'Preserve exact pins and every explicit integration requirement '
+          'while producing the compact retry plan.',
+        )
+        ..writeln();
+    }
 
     if (reusedAsset != null) {
       buffer
@@ -633,12 +716,14 @@ final class WorkshopPreflightInferenceResult {
     required this.analysis,
     this.architecture,
     this.reuseDecision,
+    this.certifiedLibraryEvidence,
     this.webEvidence = const WorkshopWebEvidencePack(),
   });
 
   final WorkshopInferenceResult analysis;
   final WorkshopInferenceResult? architecture;
   final WorkshopReuseDecision? reuseDecision;
+  final WorkshopCertifiedLibraryEvidencePack? certifiedLibraryEvidence;
   final WorkshopWebEvidencePack webEvidence;
 
   bool get analysisReady => analysis.isSuccessful && analysis.hasText;
@@ -649,6 +734,8 @@ final class WorkshopPreflightInferenceResult {
   bool get readyForImplementation => analysisReady && architectureReady;
 
   bool get reusedLocalKnowledge => reuseDecision?.shouldReuse == true;
+
+  bool get usedCertifiedLibraryEvidence => certifiedLibraryEvidence != null;
 
   bool get usedWebEvidence => webEvidence.hasEvidence;
 
