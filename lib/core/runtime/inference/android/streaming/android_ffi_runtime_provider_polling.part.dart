@@ -717,7 +717,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           if (state.consecutiveIdlePolls % 120 == 0) {
             _throttledLoopLog(
               '[TOKEN_STREAM] idle polling continues: idle_polls=${state.consecutiveIdlePolls} '
-              'idle_ms=${DateTime.now().difference(state.lastTokenProgressAt).inMilliseconds}',
+              'idle_ms=${state.lifecycleClock.sinceLastProgress.inMilliseconds}',
             );
           }
           
