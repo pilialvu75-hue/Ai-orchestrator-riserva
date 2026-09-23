@@ -91,7 +91,8 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // CPU baseline while investigating native aborts during Vulkan prefill.
-  // Keep context, batching and sampling unchanged for a controlled comparison.
-  static const int nGpuLayers = 0;
+  // Conservative physical-test candidate after native prefill/cancellation
+  // hardening. Keep most weights on CPU while exercising Vulkan meaningfully.
+  // Session creation still falls back safely if the GPU backend is unavailable.
+  static const int nGpuLayers = 10;
 }
