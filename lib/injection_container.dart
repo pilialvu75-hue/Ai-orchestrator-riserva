@@ -78,6 +78,7 @@ import 'package:ai_orchestrator/features/local_ai/domain/usecases/local_ai_useca
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
+import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
 import 'package:ai_orchestrator/features/onboarding/presentation/bloc/onboarding_bloc.dart';
@@ -425,6 +426,9 @@ Future<void> initDependencies({
 
   // ── Multimodal ────────────────────────────────────────────────────────────
   sl.registerLazySingleton<ImageService>(() => ImageService());
+  sl.registerLazySingleton<ScreenVisionService>(
+    () => ScreenVisionService(imageService: sl<ImageService>()),
+  );
   sl.registerLazySingleton<FileAttachmentService>(() => FileAttachmentService());
 
   // ── Orchestrator components ───────────────────────────────────────────────
