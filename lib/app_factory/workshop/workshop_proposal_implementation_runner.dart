@@ -37,6 +37,7 @@ final class WorkshopProposalImplementationRunner {
 
   static const int _primaryMaxTokens = 640;
   static const int _retryMaxTokens = 512;
+  static const int _malformedOutputRetryMaxTokens = 768;
   static const int _primaryArchitectChars = 900;
   static const int _retryArchitectChars = 600;
   static const int _primaryWorkspaceChars = 1800;
@@ -70,14 +71,16 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     );
 
+    var didRetry = false;
     if (_shouldRetryEngineer(
       result,
       cancellationToken: cancellationToken,
     )) {
+      didRetry = true;
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
-        'attempt=2 terminal=${result.terminalState?.name ?? 'none'}',
+        'attempt=2 reason=runtime terminal=${result.terminalState?.name ?? 'none'}',
       );
 
       result = await _inference.complete(
@@ -95,7 +98,39 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
-    return _stageResult(session: session, result: result);
+    try {
+      return _stageResult(session: session, result: result);
+    } on FormatException catch (error) {
+      if (didRetry ||
+          cancellationToken?.isCancelled == true ||
+          !_isJsonSyntaxFormatException(error)) {
+        rethrow;
+      }
+
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_RETRY] '
+        'request=${session.context.request.id} '
+        'attempt=2 reason=malformed_output '
+        'terminal=${result.terminalState?.name ?? 'none'} '
+        'chars=${result.text.length}',
+      );
+
+      final recovered = await _inference.complete(
+        stage: WorkshopStage.implementation,
+        prompt: _buildPrompt(
+          session,
+          preflight: preflight,
+          compact: true,
+        ),
+        systemPrompt: _malformedOutputRetrySystemPrompt,
+        sessionId: '$sessionId:retry-malformed-1',
+        isOffline: isOffline,
+        maxTokens: _malformedOutputRetryMaxTokens,
+        cancellationToken: cancellationToken,
+      );
+
+      return _stageResult(session: session, result: recovered);
+    }
   }
 
   /// Runs the Engineer from an authoritative Cantiere semantic checkpoint.
@@ -140,15 +175,17 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     );
 
+    var didRetry = false;
     if (_shouldRetryEngineer(
       result,
       cancellationToken: cancellationToken,
     )) {
+      didRetry = true;
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
         'execution=${resumeContext.executionId} '
-        'attempt=2 terminal=${result.terminalState?.name ?? 'none'}',
+        'attempt=2 reason=runtime terminal=${result.terminalState?.name ?? 'none'}',
       );
 
       result = await _inference.completeWithIdentity(
@@ -173,7 +210,47 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
-    return _stageResult(session: session, result: result);
+    try {
+      return _stageResult(session: session, result: result);
+    } on FormatException catch (error) {
+      if (didRetry ||
+          cancellationToken?.isCancelled == true ||
+          !_isJsonSyntaxFormatException(error)) {
+        rethrow;
+      }
+
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_RETRY] '
+        'request=${session.context.request.id} '
+        'execution=${resumeContext.executionId} '
+        'attempt=2 reason=malformed_output '
+        'terminal=${result.terminalState?.name ?? 'none'} '
+        'chars=${result.text.length}',
+      );
+
+      final recovered = await _inference.completeWithIdentity(
+        stage: WorkshopStage.implementation,
+        prompt: _buildPrompt(
+          session,
+          preflight: preflight,
+          resumeContext: resumeContext,
+          compact: true,
+        ),
+        systemPrompt: _malformedOutputRetrySystemPrompt,
+        sessionId: '${resumeContext.sessionId}:engineer-retry-malformed-1',
+        isOffline: isOffline,
+        maxTokens: _malformedOutputRetryMaxTokens,
+        requestId: session.context.request.id,
+        projectId: resumeContext.projectId,
+        taskId: resumeContext.taskId,
+        executionId: resumeContext.executionId,
+        attemptId: resumeContext.attemptId,
+        checkpointId: resumeContext.checkpointId,
+        cancellationToken: cancellationToken,
+      );
+
+      return _stageResult(session: session, result: recovered);
+    }
   }
 
   void _validateSession(
@@ -409,6 +486,10 @@ JSON. Do not review, approve or apply.
     };
   }
 
+  static bool _isJsonSyntaxFormatException(FormatException error) {
+    return error.source != null || error.offset != null;
+  }
+
   static bool _shouldRetryEngineer(
     WorkshopInferenceResult result, {
     CancellationToken? cancellationToken,
@@ -460,4 +541,13 @@ JSON. Do not review, approve or apply.
       'Use only the compact bounded input. Make the smallest valid change that '
       'satisfies the Architect plan. Return only the requested JSON object. '
       'Do not review, approve, apply, or use Assistant state.';
+
+  static const String _malformedOutputRetrySystemPrompt =
+      'You are the Cantiere Engineer retrying because the previous structured '
+      'response was incomplete or invalid JSON. Use only the compact bounded '
+      'input and satisfy the core required behavior from the Architect plan. '
+      'Produce the smallest complete compilable change, preferably one concise '
+      'file when possible. Finish valid JSON before optional features or UI '
+      'polish. Escape all file content as valid JSON strings. Do not review, '
+      'approve, apply, or use Assistant state.';
 }
