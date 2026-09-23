@@ -371,6 +371,8 @@ Return ONLY JSON:
 
 For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
+Every path must be workspace-relative like "lib/main.dart": never prefix it
+with "./", never use "../", and never use an absolute path.
 Use only workspaceFiles as existing file content. Follow architectPlan. No
 markdown, review, approval or apply. For deletion omit content. Every content
 value must be a valid JSON string with line breaks, double quotes and
@@ -391,6 +393,8 @@ Return ONLY JSON:
 
 For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
+Every path must be workspace-relative like "lib/main.dart": never prefix it
+with "./", never use "../", and never use an absolute path.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
