@@ -60,11 +60,21 @@ enum InferenceLifecycleTerminalReason {
 /// The clock tracks first useful content separately from arbitrary stream
 /// notices. This prevents a notice from disabling the first-content deadline.
 final class InferenceLifecycleClock {
-  InferenceLifecycleClock({
+  factory InferenceLifecycleClock({
     DateTime Function()? now,
-  })  : _now = now ?? DateTime.now,
-        startedAt = (now ?? DateTime.now)(),
-        lastProgressAt = (now ?? DateTime.now)();
+  }) {
+    final clock = now ?? DateTime.now;
+    final startedAt = clock();
+    return InferenceLifecycleClock._(
+      clock,
+      startedAt,
+    );
+  }
+
+  InferenceLifecycleClock._(
+    this._now,
+    this.startedAt,
+  ) : lastProgressAt = startedAt;
 
   final DateTime Function() _now;
   final DateTime startedAt;
