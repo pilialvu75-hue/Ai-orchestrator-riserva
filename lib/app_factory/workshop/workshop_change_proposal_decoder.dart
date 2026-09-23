@@ -215,7 +215,12 @@ final class WorkshopChangeProposalDecoder {
   }
 
   static String _normalizeRelativePath(String path) {
-    final normalized = path.replaceAll('\\', '/').trim();
+    var normalized = path.replaceAll('\\', '/').trim();
+
+    while (normalized.startsWith('./')) {
+      normalized = normalized.substring(2);
+    }
+
     if (normalized.isEmpty ||
         normalized.startsWith('/') ||
         RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
