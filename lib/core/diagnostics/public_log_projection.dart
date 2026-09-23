@@ -64,6 +64,8 @@ String? publicLogProjection(String line) {
     'MODEL_DOWNLOAD_BEGIN',
     'MODEL_DOWNLOAD_COMPLETE',
     'MODEL_DOWNLOAD_FAILED',
+    'WORKSHOP_ENGINEER_PROMPT',
+    'WORKSHOP_ENGINEER_RETRY',
   };
   // Only contiguous leading tags are eligible; a prompt may contain [TTS_FAIL].
   var rest = line.substring(timestamp.end).trimLeft();
@@ -166,6 +168,39 @@ String? publicLogProjection(String line) {
     }
 
     return null;
+  }
+
+  if (event == 'WORKSHOP_ENGINEER_PROMPT') {
+    final m = RegExp(
+      r'^request=[A-Za-z0-9._:-]{1,120} '
+      r'compact=(true|false) chars=(\d{1,9}) '
+      r'workspace_files=(\d{1,6}) architect_chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'compact': m[1] == 'true',
+      'chars': int.parse(m[2]!),
+      'workspace_files': int.parse(m[3]!),
+      'architect_chars': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_ENGINEER_RETRY') {
+    final m = RegExp(
+      r'^request=[A-Za-z0-9._:-]{1,120} '
+      r'(?:execution=[A-Za-z0-9._:-]{1,120} )?'
+      r'attempt=(\d{1,3}) '
+      r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'attempt': int.parse(m[1]!),
+      'terminal': m[2]!,
+    });
   }
 
   // TOKEN_STREAM is exported only for the exact Cloud-provider notice. Token
