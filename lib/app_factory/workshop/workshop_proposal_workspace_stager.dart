@@ -27,6 +27,7 @@ final class WorkshopProposalWorkspaceStager {
     final proposal = WorkshopChangeProposalDecoder.decode(
       requestId: session.context.request.id,
       responseText: responseText,
+      existingPaths: session.workspace.paths.toSet(),
     );
 
     _applier.applyProposal(
