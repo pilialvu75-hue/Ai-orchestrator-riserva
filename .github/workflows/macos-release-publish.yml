@@ -45,6 +45,8 @@ jobs:
           set -euo pipefail
           test -f native/macos/build_llama_cli.sh
           test -f native/macos/package_dmg.sh
+          test -f native/macos/sign_notarize_release.sh
+          bash -n native/macos/sign_notarize_release.sh
           test -f macos/Runner/Release.entitlements
           command -v hdiutil >/dev/null
           command -v codesign >/dev/null
@@ -62,7 +64,33 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      - name: Check production signing availability
+        id: signing
+        shell: bash
+        env:
+          SIGNING_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$SIGNING_P12" ]] || missing+=("MACOS_DEVELOPER_ID_P12_BASE64")
+          [[ -n "$SIGNING_PASSWORD" ]] || missing+=("MACOS_DEVELOPER_ID_P12_PASSWORD")
+          [[ -n "$NOTARY_KEY" ]] || missing+=("APPLE_NOTARY_KEY_BASE64")
+          [[ -n "$NOTARY_KEY_ID" ]] || missing+=("APPLE_NOTARY_KEY_ID")
+          [[ -n "$NOTARY_ISSUER_ID" ]] || missing+=("APPLE_NOTARY_ISSUER_ID")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=macOS production publisher skipped::Developer ID/notarization credentials are not configured: ${missing[*]}. Ordinary PR macOS CI remains available with ad-hoc signing."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout exact Android release commit
+        if: steps.signing.outputs.ready == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -70,15 +98,18 @@ jobs:
           submodules: recursive
 
       - name: Setup Flutter
+        if: steps.signing.outputs.ready == 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
       - name: Enable macOS desktop
+        if: steps.signing.outputs.ready == 'true'
         run: flutter config --enable-macos-desktop
 
       - name: Resolve coordinated release version
+        if: steps.signing.outputs.ready == 'true'
         id: version
         shell: bash
         run: |
@@ -125,18 +156,23 @@ jobs:
           echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
 
       - name: Resolve Flutter dependencies
+        if: steps.signing.outputs.ready == 'true'
         run: flutter pub get
 
       - name: Validate versioned Xcode project
+        if: steps.signing.outputs.ready == 'true'
         run: xcodebuild -project macos/Runner.xcodeproj -list
 
       - name: Build bundled llama.cpp runtime
+        if: steps.signing.outputs.ready == 'true'
         run: bash native/macos/build_llama_cli.sh
 
       - name: Build coordinated macOS release
+        if: steps.signing.outputs.ready == 'true'
         run: flutter build macos --release
 
-      - name: Embed and sign macOS runtime
+      - name: Embed macOS runtime
+        if: steps.signing.outputs.ready == 'true'
         id: app
         shell: bash
         run: |
@@ -170,12 +206,6 @@ jobs:
             exit 1
           fi
 
-          codesign --force --sign - --timestamp=none "$helper_target"
-          codesign --force --sign - --timestamp=none \
-            --entitlements "$PWD/macos/Runner/Release.entitlements" \
-            "$app_path"
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-
           short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
           build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Contents/Info.plist")"
           if [[ "$short_version" != '${{ steps.version.outputs.version_name }}' ]]; then
@@ -189,24 +219,74 @@ jobs:
 
           echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
           echo "helper_path=$helper_target" >> "$GITHUB_OUTPUT"
-          echo "macOS app ready: $app_path"
+          echo "macOS app embedded and ready for Developer ID signing: $app_path"
 
-      - name: Build verified DMG
+      - name: Developer ID sign, notarize, staple and build verified DMG
+        if: steps.signing.outputs.ready == 'true'
         id: dmg
         shell: bash
+        env:
+          SIGNING_P12: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+
+          keychain="$RUNNER_TEMP/ai-orchestrator-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          p12_path="$RUNNER_TEMP/developer-id.p12"
+          notary_key_path="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
           output_dir="$PWD/build/macos/release-publish"
           dmg_path="$output_dir/AI-Orchestrator-macOS.dmg"
           mkdir -p "$output_dir"
 
-          bash native/macos/package_dmg.sh \
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$p12_path" "$notary_key_path"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$SIGNING_P12" | base64 -D > "$p12_path"
+          printf '%s' "$NOTARY_KEY" | base64 -D > "$notary_key_path"
+          chmod 600 "$p12_path" "$notary_key_path"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12_path" \
+            -k "$keychain" \
+            -P "$SIGNING_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain"
+
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' \
+            | head -n 1)"
+          if [[ -z "$identity" ]]; then
+            echo "No Developer ID Application identity was imported." >&2
+            exit 1
+          fi
+
+          bash native/macos/sign_notarize_release.sh \
             '${{ steps.app.outputs.app_path }}' \
-            "$dmg_path"
+            "$dmg_path" \
+            "$identity" \
+            "$notary_key_path" \
+            "$NOTARY_KEY_ID" \
+            "$NOTARY_ISSUER_ID" \
+            "$PWD/macos/Runner/Release.entitlements"
 
           hash_path="$dmg_path.sha256"
           if [[ ! -s "$dmg_path" || ! -s "$hash_path" ]]; then
-            echo 'Verified DMG packager did not produce the expected files.' >&2
+            echo "Notarized publisher did not produce the expected DMG and digest." >&2
             exit 1
           fi
 
@@ -214,7 +294,7 @@ jobs:
           dmg_sha256="$(shasum -a 256 "$dmg_path" | awk '{print tolower($1)}')"
           expected_sha256="$(awk '{print tolower($1)}' "$hash_path")"
           if [[ "$dmg_sha256" != "$expected_sha256" ]]; then
-            echo 'Generated DMG does not match its SHA-256 sidecar.' >&2
+            echo "Final post-stapling DMG digest does not match sidecar." >&2
             exit 1
           fi
 
@@ -222,10 +302,11 @@ jobs:
           echo "hash_path=$hash_path" >> "$GITHUB_OUTPUT"
           echo "dmg_size=$dmg_size" >> "$GITHUB_OUTPUT"
           echo "dmg_sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
-          echo "macOS DMG: $dmg_path ($dmg_size bytes)"
+          echo "Notarized macOS DMG: $dmg_path ($dmg_size bytes)"
           echo "SHA256: $dmg_sha256"
 
       - name: Verify matching Android release exists
+        if: steps.signing.outputs.ready == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -236,6 +317,7 @@ jobs:
             --json tagName,publishedAt >/dev/null
 
       - name: Publish macOS DMG into matching GitHub Release
+        if: steps.signing.outputs.ready == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -248,6 +330,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY"
 
       - name: Verify published macOS release assets and digest
+        if: steps.signing.outputs.ready == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -274,6 +357,7 @@ jobs:
           echo "macOS release assets verified on $tag: $published_digest"
 
       - name: Preserve published DMG artifact
+        if: steps.signing.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ai-orchestrator-macos-release-${{ steps.version.outputs.release_version }}
