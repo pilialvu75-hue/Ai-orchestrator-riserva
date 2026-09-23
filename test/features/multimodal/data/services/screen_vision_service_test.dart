@@ -36,6 +36,30 @@ void main() {
     expect(calls, <String>['requestProjection']);
   });
 
+  test('native service startup failure is surfaced with its error code', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'requestProjection') {
+        throw PlatformException(
+          code: 'SCREEN_VISION_START_FAILED',
+          message: 'foreground service failed',
+        );
+      }
+      return null;
+    });
+
+    await expectLater(
+      service().requestProjection(),
+      throwsA(
+        isA<ScreenVisionException>().having(
+          (error) => error.code,
+          'code',
+          'SCREEN_VISION_START_FAILED',
+        ),
+      ),
+    );
+  });
+
   test('capture before start surfaces the native lifecycle error', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
