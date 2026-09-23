@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_certified_library_evidence.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
@@ -142,18 +143,18 @@ final class WorkshopProductionTaskCoordinator {
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
-    final remoteLibraryReuseIdentity =
+    final remoteLibraryEvidence =
         await _stageCertifiedLibraryReuseIfAvailable(
           handle: handle,
           isOffline: isOffline,
         );
-    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
+    final remoteLibraryReused = remoteLibraryEvidence != null;
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
       allowLocalReuse: !remoteLibraryReused,
-      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
+      certifiedLibraryEvidence: remoteLibraryEvidence,
       cancellationToken: cancellationToken,
     );
 
@@ -203,18 +204,18 @@ final class WorkshopProductionTaskCoordinator {
       );
     }
 
-    final remoteLibraryReuseIdentity =
+    final remoteLibraryEvidence =
         await _stageCertifiedLibraryReuseIfAvailable(
           handle: handle,
           isOffline: isOffline,
         );
-    final remoteLibraryReused = remoteLibraryReuseIdentity != null;
+    final remoteLibraryReused = remoteLibraryEvidence != null;
 
     final preflight = await _bundle.preflight.run(
       request: handle.session.context.request,
       isOffline: isOffline,
       allowLocalReuse: !remoteLibraryReused,
-      certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
+      certifiedLibraryEvidence: remoteLibraryEvidence,
       cancellationToken: cancellationToken,
     );
 
@@ -363,7 +364,8 @@ final class WorkshopProductionTaskCoordinator {
     return result;
   }
 
-  Future<String?> _stageCertifiedLibraryReuseIfAvailable({
+  Future<WorkshopCertifiedLibraryEvidencePack?>
+      _stageCertifiedLibraryReuseIfAvailable({
     required WorkshopProductionTaskHandle handle,
     required bool isOffline,
   }) async {
@@ -386,7 +388,7 @@ final class WorkshopProductionTaskCoordinator {
       approval: approval,
     );
 
-    return result.reused ? result.reuseIdentity : null;
+    return result.reused ? result.evidence : null;
   }
 
   Future<void> _stageReusableSourceIfAvailable({
