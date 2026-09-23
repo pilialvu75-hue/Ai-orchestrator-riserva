@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_provider.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
+import 'package:ai_orchestrator/core/sync/crdt/crdt_record.dart';
 import 'package:ai_orchestrator/core/sync/sync_manager.dart';
 
 /// Local/offline Memory Fabric node backed by the existing SQLite CRDT journal.
@@ -19,7 +20,12 @@ final class LocalCrdtMemoryFabricProvider implements MemoryFabricProvider {
             MemoryFabricPrivacyLevel.values,
           ),
           durable: true,
-        );
+        ) {
+    _syncManager.registerCollectionConflictResolver(
+      collection,
+      _resolveRemoteConflict,
+    );
+  }
 
   static const String collection = 'memory_fabric_v1';
 
@@ -128,6 +134,54 @@ final class LocalCrdtMemoryFabricProvider implements MemoryFabricProvider {
         checkedAt: checkedAt,
         details: <String, Object?>{'error': error.toString()},
       );
+    }
+  }
+
+  static SyncConflictResolution _resolveRemoteConflict(
+    CrdtRecord? existing,
+    CrdtRecord incoming,
+  ) {
+    if (incoming.isTombstone) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    final incomingRecord = _decodeCrdtRecord(incoming);
+    if (incomingRecord == null || !incomingRecord.checksumValid) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    if (existing == null) {
+      return SyncConflictResolution.preferIncoming;
+    }
+
+    final existingRecord = _decodeCrdtRecord(existing);
+    if (existingRecord == null || !existingRecord.checksumValid) {
+      return SyncConflictResolution.preferIncoming;
+    }
+
+    if (incomingRecord.version > existingRecord.version) {
+      return SyncConflictResolution.preferIncoming;
+    }
+    if (incomingRecord.version < existingRecord.version) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    if (incomingRecord.checksum != existingRecord.checksum) {
+      return SyncConflictResolution.keepExisting;
+    }
+
+    return SyncConflictResolution.useDefaultLww;
+  }
+
+  static MemoryFabricRecord? _decodeCrdtRecord(CrdtRecord record) {
+    final raw = record.decodedValue;
+    if (raw == null) return null;
+    try {
+      return MemoryFabricRecord.fromJson(
+        Map<String, Object?>.from(raw),
+      );
+    } on Object {
+      return null;
     }
   }
 

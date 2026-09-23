@@ -7,6 +7,24 @@ import 'package:ai_orchestrator/core/sync/crdt/crdt_record.dart';
 import 'package:ai_orchestrator/core/sync/crdt/hlc.dart';
 import 'package:uuid/uuid.dart';
 
+/// Optional collection-specific conflict policy layered on top of CRDT/HLC.
+///
+/// [useDefaultLww] preserves the historical SyncManager behavior.
+/// [keepExisting] rejects the incoming logical value even when its HLC is newer.
+/// [preferIncoming] accepts the incoming logical value; when its HLC is not
+/// newer, SyncManager rebases that value with a fresh local HLC so it becomes
+/// the current CRDT winner without discarding the collection-specific policy.
+enum SyncConflictResolution {
+  useDefaultLww,
+  keepExisting,
+  preferIncoming,
+}
+
+typedef SyncCollectionConflictResolver = SyncConflictResolution Function(
+  CrdtRecord? existing,
+  CrdtRecord incoming,
+);
+
 /// High-level coordinator for the local-first CRDT sync layer.
 ///
 /// [SyncManager] bridges the in-memory [CrdtDocument] and the SQLite
@@ -34,11 +52,29 @@ class SyncManager {
   final String _nodeId;
   final CrdtDocument _document;
   final _uuid = const Uuid();
+  final Map<String, SyncCollectionConflictResolver> _conflictResolvers =
+      <String, SyncCollectionConflictResolver>{};
 
   bool _loaded = false;
 
   /// Unique identifier for this device / installation.
   String get nodeId => _nodeId;
+
+  /// Registers a logical conflict policy for one CRDT collection.
+  ///
+  /// Collections without a resolver keep the existing HLC/LWW behavior.
+  /// Registering the same collection again replaces its previous resolver.
+  void registerCollectionConflictResolver(
+    String collection,
+    SyncCollectionConflictResolver resolver,
+  ) {
+    final normalized = collection.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(collection, 'collection', 'is required');
+    }
+    _conflictResolvers[normalized] = resolver;
+  }
+
 
   // ── Initialization ────────────────────────────────────────────────────────
 
@@ -101,15 +137,41 @@ class SyncManager {
 
   /// Applies a list of CRDT records received from a remote peer.
   ///
-  /// Merges them into the in-memory document (LWW conflict resolution) and
-  /// persists any records that are newer than what we already have.
+  /// Merges them into the in-memory document. Collections use historical
+  /// HLC/LWW resolution unless they explicitly register a logical policy.
   Future<int> applyRemoteChangeset(List<Map<String, dynamic>> changeset) async {
     await _ensureLoaded();
     var applied = 0;
     for (final json in changeset) {
       final record = CrdtRecord.fromJson(json);
       final existing = _document.get(record.collection, record.key);
-      // Only persist if this record wins the LWW race.
+      final resolver = _conflictResolvers[record.collection];
+      final resolution = resolver?.call(existing, record) ??
+          SyncConflictResolution.useDefaultLww;
+
+      if (resolution == SyncConflictResolution.keepExisting) {
+        continue;
+      }
+
+      if (resolution == SyncConflictResolution.preferIncoming) {
+        if (existing == null ||
+            record.hlc.compareCausalTo(existing.hlc) > 0) {
+          _document.merge([record]);
+          await _persistRecord(record);
+        } else {
+          final rebased = _document.put(
+            record.collection,
+            record.key,
+            record.value,
+            _uuid.v4(),
+          );
+          await _persistRecord(rebased);
+        }
+        applied++;
+        continue;
+      }
+
+      // Historical default: only persist if the incoming record wins LWW.
       if (existing == null ||
           record.hlc.compareCausalTo(existing.hlc) > 0) {
         _document.merge([record]);
