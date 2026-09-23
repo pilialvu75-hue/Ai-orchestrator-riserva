@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
@@ -152,6 +154,43 @@ void main() {
         allOf(contains('model=gemma_2b mode=local'),
           contains('reported_tokens=2 text_chunks=2 outcome=success')));
 
+    });
+
+    test(
+        'terminal local response drains upstream without cancelling cached runtime',
+        () async {
+      final localProvider = _FinalThenNaturalCloseProvider();
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
+        localRuntimeProvider: localProvider,
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+
+      final first = await service
+          .stream(
+            const InferenceRequest(
+              sessionId: 'handoff-role-a',
+              prompt: 'first role',
+            ),
+          )
+          .toList();
+
+      final second = await service
+          .stream(
+            const InferenceRequest(
+              sessionId: 'handoff-role-b',
+              prompt: 'second role',
+            ),
+          )
+          .toList();
+
+      expect(first.last.isFinal, isTrue);
+      expect(first.last.text, 'response-1');
+      expect(second.last.isFinal, isTrue);
+      expect(second.last.text, 'response-2');
+      expect(localProvider.prematureCancelCalls, 0);
+      expect(localProvider.requests, 2);
     });
 
     test('cancel propagates to local runtime stream', () async {
@@ -438,6 +477,53 @@ Top results:
       expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
   });
+}
+
+class _FinalThenNaturalCloseProvider extends FakeLocalRuntimeProvider {
+  _FinalThenNaturalCloseProvider();
+
+  int prematureCancelCalls = 0;
+  int requests = 0;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    var naturalCloseStarted = false;
+
+    final controller = StreamController<InferenceResponse>(
+      onCancel: () {
+        if (!naturalCloseStarted) {
+          prematureCancelCalls += 1;
+        }
+      },
+    );
+
+    controller.onListen = () {
+      requests += 1;
+      final requestNumber = requests;
+      controller.add(
+        InferenceResponse.finalChunk(
+          text: 'response-$requestNumber',
+          tokensGenerated: 1,
+          model: request.modelId,
+        ),
+      );
+
+      Future<void>.delayed(
+        const Duration(milliseconds: 5),
+        () async {
+          naturalCloseStarted = true;
+          if (!controller.isClosed) {
+            await controller.close();
+          }
+        },
+      );
+    };
+
+    return controller.stream;
+  }
 }
 
 class FakeLocalRuntimeProvider extends LocalRuntimeProvider {

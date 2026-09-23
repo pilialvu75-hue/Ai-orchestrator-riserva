@@ -9,6 +9,8 @@ on:
       - 'tool/cantiere_local_build_smoke.dart'
       - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
       - 'lib/app_factory/**'
+      - 'lib/core/runtime/inference/**'
+      - 'test/core/runtime/inference/**'
       - '.github/workflows/cantiere-first-app.yml'
   workflow_dispatch:
 
