@@ -24,6 +24,7 @@ import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.da
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_lifecycle_policy.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -97,18 +98,16 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 2048;  // tetto assoluto di sicurezza nativa
   static const int _defaultMaxTokens = 1024; // default operativo per modelli 1B
-  // Keep local mobile generations bounded so stalled native loops surface
-  // quickly and the UI can return partial text instead of hanging indefinitely.
-  static const Duration _generationTimeout = Duration(seconds: 90);
-  static const Duration _sessionShutdownTimeout = Duration(seconds: 5);
-  // If native polling produces no token at all within this window, treat the
-  // run as stalled rather than waiting for the full timeout budget.
-  // Keep this aligned with native/android/llama_bridge.cpp kNoTokenStallMillis.
-  static const Duration _stalledInferenceTimeoutRelease = Duration(seconds: 45);
-  static const Duration _stalledInferenceTimeoutDebug = Duration(seconds: 120);
-  static const Duration _verificationFirstTokenTimeout = Duration(seconds: 5);
-  static const Duration _noTokenProgressTimeout = Duration(seconds: 35);
-  static const Duration _startGenerationTimeout = Duration(seconds: 60);
+  // Lifecycle durations are owned by one policy. Provider-local aliases are
+  // retained only to keep the part files compact; no duration is defined here.
+  static const Duration _sessionShutdownTimeout =
+      InferenceLifecyclePolicy.androidSessionShutdownTimeout;
+  static const Duration _verificationFirstTokenTimeout =
+      InferenceLifecyclePolicy.androidVerificationFirstTokenTimeout;
+  static const Duration _noTokenProgressTimeout =
+      InferenceLifecyclePolicy.androidNoTokenProgressTimeout;
+  static const Duration _startGenerationTimeout =
+      InferenceLifecyclePolicy.androidStartGenerationTimeout;
   static const int _maxRepeatedTokenLoop = 96;
   static const int _maxConsecutiveInvalidTokens = 24;
   static const String _warmupPrompt = 'Reply with the single word: OK';
@@ -243,7 +242,7 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
       _AndroidFfiRuntimePollingController(this);
 
   static Duration get _firstTokenTimeout =>
-      kDebugMode ? _stalledInferenceTimeoutDebug : _stalledInferenceTimeoutRelease;
+      InferenceLifecyclePolicy.androidFirstTokenTimeout();
 
   @override
   int get activeLifecycleTransitionId => _activeTransitionId;
