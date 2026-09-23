@@ -1275,9 +1275,12 @@ class InferenceService {
     required AiRuntimeMode runtimeMode,
   }) async* {
     final lifecycleClock = InferenceLifecycleClock();
-    final streamIdleTimeout = runtimeMode == AiRuntimeMode.local
-        ? InferenceLifecyclePolicy.outerLocalStreamIdleTimeout
-        : _streamIdleTimeout;
+    // Hybrid may route LOCAL first or fall back to LOCAL inside the same
+    // stream. Only cloud-only mode can safely use the shorter generic idle
+    // guard without racing Android's provider-owned first-token deadline.
+    final streamIdleTimeout = runtimeMode == AiRuntimeMode.cloud
+        ? _streamIdleTimeout
+        : InferenceLifecyclePolicy.outerLocalStreamIdleTimeout;
     var chunkCount = 0;
 
     await for (final chunk
