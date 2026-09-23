@@ -129,6 +129,66 @@ void main() {
       );
     });
 
+    test('resolves add-or-modify from authoritative workspace paths', () {
+      final added = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-ambiguous-add',
+        responseText: r'''
+{
+  "explanation": "Create main",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition|modification",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      final modified = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-ambiguous-modify',
+        responseText: r'''
+{
+  "explanation": "Update main",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition|modification",
+      "content": "void main() { print('walk'); }"
+    }
+  ]
+}
+''',
+        existingPaths: const <String>{'lib/main.dart'},
+      );
+
+      expect(added.changes.single.isAddition, isTrue);
+      expect(modified.changes.single.isModification, isTrue);
+    });
+
+    test('does not normalize unsafe composite change types', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-ambiguous-delete',
+          responseText: r'''
+{
+  "explanation": "Ambiguous delete",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition|deletion",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+          existingPaths: const <String>{'lib/main.dart'},
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('rejects duplicate paths', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(

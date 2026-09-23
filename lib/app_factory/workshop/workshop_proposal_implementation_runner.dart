@@ -367,8 +367,10 @@ Implement the task from this compact Cantiere input:
 $encoded
 
 Return ONLY JSON:
-{"explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content"}],"validationNotes":[],"warnings":[]}
+{"explanation":"required","changes":[{"path":"relative/path","type":"addition","content":"full content"}],"validationNotes":[],"warnings":[]}
 
+For every change, type MUST be exactly one string: "addition", "modification",
+or "deletion". Never copy a list or combine values with "|" or "/".
 Use only workspaceFiles as existing file content. Follow architectPlan. No
 markdown, review, approval or apply. For deletion omit content. Every content
 value must be a valid JSON string with line breaks, double quotes and
@@ -385,8 +387,10 @@ INPUT:
 $encoded
 
 Return ONLY JSON:
-{"summary":"short","explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content for addition/modification"}],"validationNotes":[],"warnings":[]}
+{"summary":"short","explanation":"required","changes":[{"path":"relative/path","type":"addition","content":"full content for addition or modification"}],"validationNotes":[],"warnings":[]}
 
+For every change, type MUST be exactly one string: "addition", "modification",
+or "deletion". Never copy a list or combine values with "|" or "/".
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
@@ -548,6 +552,7 @@ JSON. Do not review, approve or apply.
       'input and satisfy the core required behavior from the Architect plan. '
       'Produce the smallest complete compilable change, preferably one concise '
       'file when possible. Finish valid JSON before optional features or UI '
-      'polish. Escape all file content as valid JSON strings. Do not review, '
-      'approve, apply, or use Assistant state.';
+      'polish. Every change type must be exactly addition, modification, or '
+      'deletion; never combine enum values. Escape all file content as valid '
+      'JSON strings. Do not review, approve, apply, or use Assistant state.';
 }

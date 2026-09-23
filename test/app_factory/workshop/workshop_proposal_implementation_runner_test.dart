@@ -162,7 +162,7 @@ void main() {
           ),
           const WorkshopInferenceResult(
             text:
-                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"void main() {\\n  print(\\\"walk\\\");\\n}"}]}',
+                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"addition|modification","content":"void main() {\\n  print(\\\"walk\\\");\\n}"}]}',
             terminalState: InferenceTerminalState.success,
             model: 'engineer-model',
           ),
@@ -191,6 +191,7 @@ void main() {
       );
 
       expect(proposal.changes.single.path, 'lib/app.dart');
+      expect(proposal.changes.single.isModification, isTrue);
       expect(
         session.workspace.read('lib/app.dart'),
         'void main() {\n  print("walk");\n}',
