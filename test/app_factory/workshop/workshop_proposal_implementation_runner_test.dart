@@ -150,6 +150,64 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('retries syntactically truncated Engineer JSON with larger compact budget',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"partial","changes":[{"path":"lib/app.dart","type":"modification","content":"void main() {\\n  print(\"walk\");',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"void main() {\\n  print(\\\"walk\\\");\\n}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+      final preflight = WorkshopPreflightInferenceResult(
+        analysis: const WorkshopInferenceResult(
+          text: 'analysis',
+          terminalState: InferenceTerminalState.success,
+        ),
+        architecture: const WorkshopInferenceResult(
+          text: 'Implement a minimal walking app safely.',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        preflight: preflight,
+      );
+
+      expect(proposal.changes.single.path, 'lib/app.dart');
+      expect(
+        session.workspace.read('lib/app.dart'),
+        'void main() {\n  print("walk");\n}',
+      );
+      expect(engineer.calls, 2);
+      expect(
+        engineer.sessionIds,
+        <String>[
+          'workshop:implementation:implementation-runner-request',
+          'workshop:implementation:implementation-runner-request:retry-malformed-1',
+        ],
+      );
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('cancelled Engineer inference is not retried', () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -261,6 +319,7 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.ready);
       expect(session.hasChanges, isFalse);
       expect(session.workspace.read('lib/app.dart'), 'old');
+      expect(engineer.calls, 1);
       expect(workspaceGateway.writeCalls, 0);
       expect(workspaceGateway.deleteCalls, 0);
     });
