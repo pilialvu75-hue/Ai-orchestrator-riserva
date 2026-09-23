@@ -59,6 +59,7 @@ final class WorkshopProjectExecutor {
   /// - tutte le dipendenze rimanenti sono bloccate.
   Future<WorkspaceSession?> prepareNextTask(
     WorkshopProjectPlan plan, {
+    WorkshopRequest? projectRequest,
     WorkshopBrief? brief,
   }) async {
     final task = plan.nextAvailableTask;
@@ -88,6 +89,7 @@ final class WorkshopProjectExecutor {
         ...plan.constraints,
       ],
       context: <String>[
+        ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
         'Project domain: ${plan.domain.name}',
@@ -121,6 +123,7 @@ final class WorkshopProjectExecutor {
   Future<WorkspaceSession> prepareTask(
     WorkshopProjectPlan plan,
     String taskId, {
+    WorkshopRequest? projectRequest,
     WorkshopBrief? brief,
   }) async {
     final task = plan.taskById(taskId);
@@ -165,6 +168,7 @@ final class WorkshopProjectExecutor {
         ...plan.constraints,
       ],
       context: <String>[
+        ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
         'Project domain: ${plan.domain.name}',
