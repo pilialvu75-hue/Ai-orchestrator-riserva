@@ -13,7 +13,6 @@ import 'package:flutter/foundation.dart';
 /// starts. Productive generation remains bounded by max tokens, cancellation,
 /// repetition/resource guards and the no-progress watchdog.
 abstract final class InferenceLifecyclePolicy {
-  static const Duration outerFirstContentTimeout = Duration(minutes: 4);
   static const Duration outerStreamIdleTimeout = Duration(seconds: 75);
 
   static const Duration androidStartGenerationTimeout = Duration(seconds: 60);
@@ -47,7 +46,6 @@ enum InferenceLifecycleTerminalReason {
   firstTokenTimeout('first_token_timeout'),
   noProgressTimeout('no_progress_timeout'),
   outerStreamIdleTimeout('outer_stream_idle_timeout'),
-  outerFirstContentTimeout('outer_first_content_timeout'),
   streamChunkLimit('stream_chunk_limit');
 
   const InferenceLifecycleTerminalReason(this.wireName);
