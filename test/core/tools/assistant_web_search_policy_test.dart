@@ -148,6 +148,39 @@ void main() {
         isFalse,
       );
     });
+
+    test('generic technical words do not trigger unnecessary web search', () {
+      for (final prompt in <String>[
+        'Qual è il risultato di 2 + 2?',
+        'Prendi l\'ultimo elemento della lista.',
+        'What is the current index in this loop?',
+        'Spiegami cos\'è il prezzo in economia.',
+        'Come calcolo il prezzo medio in Dart?',
+      ]) {
+        expect(
+          AssistantWebSearchPolicy.shouldSearch(prompt),
+          isFalse,
+          reason: prompt,
+        );
+      }
+    });
+
+    test('fresh versions markets and live sports still request web evidence', () {
+      for (final prompt in <String>[
+        'Qual è l\'ultima versione di Flutter?',
+        'What is the latest release of Dart?',
+        'Qual è il prezzo attuale del Bitcoin?',
+        'Quanto costa oggi un iPhone 16?',
+        'Qual è il risultato della partita di Champions?',
+        'Quando gioca la prossima partita di Champions?',
+      ]) {
+        expect(
+          AssistantWebSearchPolicy.shouldSearch(prompt),
+          isTrue,
+          reason: prompt,
+        );
+      }
+    });
   });
 
   test('extractQuery still removes explicit search prefixes', () {
