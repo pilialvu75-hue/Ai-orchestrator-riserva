@@ -35,7 +35,7 @@ class AssistantDurableMemoryStore {
     required AssistantDurableMemoryPersistence persistence,
   }) : _persistence = persistence;
 
-  static const String _storagePrefix = 'assistant.durable_memory.v1:';
+  static const String storagePrefix = 'assistant.durable_memory.v1:';
 
   final AssistantDurableMemoryPersistence _persistence;
 
@@ -246,5 +246,5 @@ class AssistantDurableMemoryStore {
   }
 
   String _storageKey(AssistantMemoryScope scope, String scopeId) =>
-      '$_storagePrefix${scope.name}:${Uri.encodeComponent(scopeId)}';
+      '$storagePrefix${scope.name}:${Uri.encodeComponent(scopeId)}';
 }
