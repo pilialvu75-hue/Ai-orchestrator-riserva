@@ -51,16 +51,8 @@ class ScreenVisionForegroundService : Service() {
             }
 
         fun requestStop(context: Context) {
-            val service = activeService
-            if (service != null) {
-                service.mainHandler.post { service.stopProjectionAndSelf() }
-                return
-            }
-            context.startService(
-                Intent(context, ScreenVisionForegroundService::class.java).apply {
-                    action = ACTION_STOP
-                },
-            )
+            val service = activeService ?: return
+            service.mainHandler.post { service.stopProjectionAndSelf() }
         }
 
         fun isProjectionActive(): Boolean =
