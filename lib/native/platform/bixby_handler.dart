@@ -1,17 +1,26 @@
 // lib/native/platform/bixby_handler.dart
 import 'package:dartz/dartz.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
 
+import 'package:ai_orchestrator/core/config/runtime/platform_capabilities.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 
-/// Handler per Bixby (solo Android)
+/// Handler per Bixby (solo Android).
+///
+/// Platform availability is obtained from the shared capability boundary so
+/// feature logic does not need raw Platform.isX checks.
 class BixbyHandler {
-  const BixbyHandler();
+  const BixbyHandler({
+    AppPlatformCapabilities? capabilities,
+  }) : _capabilities = capabilities;
 
-  bool get _isAndroid => !kIsWeb && Platform.isAndroid;
+  final AppPlatformCapabilities? _capabilities;
 
-  // Tutte le funzioni restituiscono errore su piattaforme non-Android
+  AppPlatformCapabilities get _platform =>
+      _capabilities ?? AppPlatformCapabilities.current();
+
+  bool get _isAndroid => _platform.supportsAndroidIntents;
+
+  // Tutte le funzioni restituiscono errore su piattaforme non-Android.
   Future<Either<Failure, bool>> setAlarm({
     required String label,
     required int hour,
@@ -46,7 +55,9 @@ class BixbyHandler {
 
   Future<Either<Failure, String>> parseAndExecute(String command) async {
     if (!_isAndroid) {
-      return const Left(IntentFailure('Bixby non supportato su questa piattaforma (Windows / iOS / macOS / Linux)'));
+      return Left(
+        IntentFailure('Bixby non supportato su ' + _platform.label),
+      );
     }
     return const Left(IntentFailure('Bixby non configurato'));
   }
