@@ -256,6 +256,15 @@ class DatabaseHelper {
     );
   }
 
+  /// Deletes all persisted Assistant chat messages.
+  ///
+  /// Semantic vectors are intentionally a separate category so Settings can
+  /// report partial failures and let the user choose exactly what is erased.
+  Future<int> deleteAllChatMessages() async {
+    final db = await database;
+    return db.delete(AppConstants.tableChatHistory);
+  }
+
   Future<int> deleteChatMessagesBeyondLimit(int maxRows) async {
     final db = await database;
     final count = await countChatMessages();
@@ -387,7 +396,7 @@ class DatabaseHelper {
       await txn.delete(
         AppConstants.tableDocumentChunks,
         where: '${AppConstants.colDocumentId} = ?',
-        whereArgs: [sessionId],
+        whereArgs: ['chat_memory:$sessionId'],
       );
 
       // 2. Rimuove la cronologia dei messaggi di testo.
@@ -427,6 +436,18 @@ class DatabaseHelper {
       AppConstants.tableDocumentChunks,
       where: '${AppConstants.colDocumentPath} = ?',
       whereArgs: [documentPath],
+    );
+  }
+
+  /// Deletes only semantic vectors derived from Assistant conversations.
+  ///
+  /// Document/project indexes use different document ids and are preserved.
+  Future<int> deleteAllChatSemanticMemory() async {
+    final db = await database;
+    return db.delete(
+      AppConstants.tableDocumentChunks,
+      where: '${AppConstants.colDocumentId} LIKE ?',
+      whereArgs: const <Object?>['chat_memory:%'],
     );
   }
 
@@ -499,6 +520,24 @@ class DatabaseHelper {
         r[AppConstants.colPrefKey] as String:
             r[AppConstants.colPrefValue] as String,
     };
+  }
+
+  /// Deletes only preference rows whose key starts with [prefix].
+  ///
+  /// Used by the Assistant memory Danger Zone so provider credentials,
+  /// runtime settings and unrelated preferences remain untouched.
+  Future<int> deletePreferencesWithPrefix(String prefix) async {
+    final normalized = prefix.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(prefix, 'prefix', 'must not be empty');
+    }
+
+    final db = await database;
+    return db.delete(
+      AppConstants.tableUserPreferences,
+      where: '${AppConstants.colPrefKey} LIKE ?',
+      whereArgs: <Object?>['$normalized%'],
+    );
   }
 
   // ── sync_changes CRUD ───────────────────────────────────────────────────────
