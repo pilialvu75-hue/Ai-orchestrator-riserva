@@ -91,6 +91,44 @@ Fine.
       );
     });
 
+    test('repairs raw Dart content without weakening proposal schema', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-loose-content',
+        responseText: '''
+{
+  "summary": "Walking app",
+  "explanation": "Create the requested screen.",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MaterialApp(home: Text("Walk")));
+}
+"
+    }
+  ],
+  "validationNotes": [],
+  "warnings": []
+}
+''',
+      );
+
+      expect(proposal.changeCount, 1);
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(
+        proposal.changes.single.afterContent,
+        contains("import 'package:flutter/material.dart';"),
+      );
+      expect(
+        proposal.changes.single.afterContent,
+        contains('Text("Walk")'),
+      );
+    });
+
     test('rejects duplicate paths', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(
