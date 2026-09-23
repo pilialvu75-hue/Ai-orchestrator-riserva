@@ -492,13 +492,32 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     } catch (error) {
       startupWatch.stop();
       freePromptNativePtr();
-      _classifyFirstTokenTermination( flowState: flowState, reason: error is TimeoutException ? 'start_generation_timeout' : 'start_generation_exception', boundary: 'start_generation', exception: true, runtimeReset: true, );
+      _classifyFirstTokenTermination( flowState: flowState, reason: error is TimeoutException
+          ? InferenceLifecycleTerminalReason.startGenerationTimeout.wireName
+          : 'start_generation_exception', boundary: 'start_generation', exception: true, runtimeReset: true, );
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
       _setPhase(RuntimePhase.failed);
-      await _safeResetRuntime(bindings, reason: 'start_generation_exception');
-      _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Native start_generation timed out.' : 'Native start_generation failed: $error', );
+      final terminalReason = error is TimeoutException
+          ? InferenceLifecycleTerminalReason.startGenerationTimeout.wireName
+          : 'start_generation_exception';
+      await _safeResetRuntime(bindings, reason: terminalReason);
+      _updateRuntimeStatus(
+        error is TimeoutException
+            ? LocalRuntimeStatus.timedOut
+            : LocalRuntimeStatus.failed,
+        message: error is TimeoutException
+            ? 'Native start_generation timed out.'
+            : 'Native start_generation failed: $error',
+      );
       if (error is TimeoutException) {
-        AndroidFfiRuntimeProvider._log( '[FFI_TIMEOUT] session=$sessionId stage=start_generation' ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}', );
+        AndroidFfiRuntimeProvider._log(
+          '[FFI_TIMEOUT] session=$sessionId stage=start_generation'
+          ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}',
+        );
+        AndroidFfiRuntimeProvider._log(
+          '[TERMINAL_STATE] state=timedOut reason=$terminalReason'
+          ' boundary=start_generation',
+        );
       }
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: error is TimeoutException ? 'Native generation start timed out.' : 'Native generation start failed.', details: error.toString(), );
       return null;
@@ -506,12 +525,12 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     startupWatch.stop();
     AndroidFfiRuntimeProvider._log('[MODEL_EXECUTION] llb_session_start_gen returned: $startResult');
     if (startupWatch.elapsed > AndroidFfiRuntimeProvider._startGenerationTimeout) {
-      _classifyFirstTokenTermination( flowState: flowState, reason: 'start_generation_timeout', boundary: 'start_generation_postcheck', runtimeReset: true, );
+      _classifyFirstTokenTermination( flowState: flowState, reason: InferenceLifecycleTerminalReason.startGenerationTimeout.wireName, boundary: 'start_generation_postcheck', runtimeReset: true, );
       AndroidFfiRuntimeProvider._log( '[FFI_TIMEOUT] session=$sessionId stage=start_generation_postcheck' ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}', );
       freePromptNativePtr();
       _safeCancel(bindings, nativeSessionId);
       _setPhase(RuntimePhase.stalled);
-      await _safeResetRuntime(bindings, reason: 'start_generation_timeout');
+      await _safeResetRuntime(bindings, reason: InferenceLifecycleTerminalReason.startGenerationTimeout.wireName);
       _updateRuntimeStatus( LocalRuntimeStatus.timedOut, message: 'Inference startup timed out after ${AndroidFfiRuntimeProvider._startGenerationTimeout.inSeconds}s.', );
       AndroidFfiRuntimeProvider._logAi('inference timeout');
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: 'Inference startup timed out after ${AndroidFfiRuntimeProvider._startGenerationTimeout.inSeconds}s.', );
