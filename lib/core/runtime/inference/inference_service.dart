@@ -1013,6 +1013,7 @@ class InferenceService {
         sessionId: cloudRequest.sessionId,
         cancellationToken: cancellationToken,
         attempt: attempt,
+        runtimeMode: runtimeMode,
       )) {
         // Once a terminal response has been delivered to the consumer, keep
         // draining the upstream stream until its natural close. Returning from
@@ -1271,13 +1272,17 @@ class InferenceService {
     required String sessionId,
     required CancellationToken cancellationToken,
     required int attempt,
+    required AiRuntimeMode runtimeMode,
   }) async* {
     final lifecycleClock = InferenceLifecycleClock();
+    final streamIdleTimeout = runtimeMode == AiRuntimeMode.local
+        ? InferenceLifecyclePolicy.outerLocalStreamIdleTimeout
+        : _streamIdleTimeout;
     var chunkCount = 0;
 
     await for (final chunk
         in stream.timeout(
-      _streamIdleTimeout,
+      streamIdleTimeout,
       onTimeout: (sink) {
         cancellationToken.cancel();
 
