@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
+import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
@@ -53,6 +54,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final List<ChatAttachment> _attachments = <ChatAttachment>[];
 
   late final ImageService _imageService;
+  late final ScreenVisionService _screenVisionService;
   late final FileAttachmentService _fileAttachmentService;
   late final VoiceInputService _voiceInputService;
 
@@ -66,6 +68,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     super.initState();
 
     _imageService = di.sl<ImageService>();
+    _screenVisionService = di.sl<ScreenVisionService>();
     _fileAttachmentService = di.sl<FileAttachmentService>();
     _voiceInputService = di.sl<VoiceInputService>();
 
@@ -282,6 +285,44 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         break;
 
+      case _AttachmentPickerAction.screen:
+        var projectionStarted = false;
+        try {
+          final granted = await _screenVisionService.requestProjection();
+          if (!granted) break;
+          projectionStarted = true;
+
+          final file = await _screenVisionService.captureToFile();
+          if (mounted) {
+            _addAttachment(
+              _buildImageAttachment(
+                file,
+                mimeType: 'image/png',
+              ),
+            );
+          }
+        } on ScreenVisionException catch (error) {
+          RuntimeEventLog.instance.emit(
+            '[SCREEN_VISION_UI_ERROR] code=${error.code} message=${error.message}',
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(error.message)),
+            );
+          }
+        } finally {
+          if (projectionStarted) {
+            try {
+              await _screenVisionService.stopProjection();
+            } on ScreenVisionException catch (error) {
+              RuntimeEventLog.instance.emit(
+                '[SCREEN_VISION_STOP_ERROR] code=${error.code} message=${error.message}',
+              );
+            }
+          }
+        }
+        break;
+
       case _AttachmentPickerAction.file:
         final file =
             await _fileAttachmentService.pickDocument();
@@ -324,7 +365,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  ChatAttachment _buildImageAttachment(File file) {
+  ChatAttachment _buildImageAttachment(
+    File file, {
+    String? mimeType,
+  }) {
     final stat = file.statSync();
     final name = p.basename(file.path);
 
@@ -333,6 +377,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       type: ChatAttachmentType.image,
       path: file.path,
       name: name,
+      mimeType: mimeType,
       sizeBytes: stat.size,
       thumbnailPath: file.path,
       uploadState:
@@ -366,6 +411,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       builder: (context) {
         return _AttachmentPickerSheet(
           onSelected: _pickAttachment,
+          screenVisionEnabled: _screenVisionService.isSupported,
         );
       },
     );
@@ -970,6 +1016,7 @@ class _FallbackAttachmentIcon
 enum _AttachmentPickerAction {
   image,
   camera,
+  screen,
   file,
   video,
 }
@@ -978,10 +1025,12 @@ class _AttachmentPickerSheet
     extends StatelessWidget {
   const _AttachmentPickerSheet({
     required this.onSelected,
+    required this.screenVisionEnabled,
   });
 
   final ValueChanged<
       _AttachmentPickerAction> onSelected;
+  final bool screenVisionEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1076,6 +1125,16 @@ class _AttachmentPickerSheet
                       .camera,
                 ),
               ),
+              if (screenVisionEnabled)
+                _AttachmentActionTile(
+                  icon: Icons.screen_search_desktop_rounded,
+                  label: 'Screen',
+                  onTap: () =>
+                      onSelected(
+                    _AttachmentPickerAction
+                        .screen,
+                  ),
+                ),
               _AttachmentActionTile(
                 icon: Icons
                     .insert_drive_file_outlined,
