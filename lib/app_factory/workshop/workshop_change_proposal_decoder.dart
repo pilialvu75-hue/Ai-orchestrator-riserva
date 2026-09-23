@@ -16,6 +16,7 @@ final class WorkshopChangeProposalDecoder {
   static WorkshopChangeProposal decode({
     required String requestId,
     required String responseText,
+    Set<String> existingPaths = const <String>{},
   }) {
     final normalizedRequestId = requestId.trim();
     if (normalizedRequestId.isEmpty) {
@@ -79,7 +80,11 @@ final class WorkshopChangeProposalDecoder {
         );
       }
 
-      final typeName = _requiredString(change, 'type').toLowerCase();
+      final typeName = _normalizeChangeType(
+        _requiredString(change, 'type').toLowerCase(),
+        path: path,
+        existingPaths: existingPaths,
+      );
       switch (typeName) {
         case 'addition':
         case 'add':
@@ -129,6 +134,23 @@ final class WorkshopChangeProposalDecoder {
       validationNotes: validationNotes,
       warnings: warnings,
     );
+  }
+
+  static String _normalizeChangeType(
+    String rawType, {
+    required String path,
+    required Set<String> existingPaths,
+  }) {
+    final normalized = rawType.trim().toLowerCase();
+    switch (normalized) {
+      case 'addition|modification':
+      case 'modification|addition':
+      case 'addition/modification':
+      case 'modification/addition':
+        return existingPaths.contains(path) ? 'modification' : 'addition';
+      default:
+        return normalized;
+    }
   }
 
   static String _requiredString(
