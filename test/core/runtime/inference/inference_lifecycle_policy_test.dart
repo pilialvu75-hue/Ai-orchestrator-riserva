@@ -46,6 +46,14 @@ void main() {
         InferenceLifecyclePolicy.outerLocalStreamIdleTimeout,
         const Duration(minutes: 4),
       );
+      expect(
+        InferenceLifecyclePolicy.outerIdleTimeoutFor(cloudOnly: true),
+        const Duration(seconds: 75),
+      );
+      expect(
+        InferenceLifecyclePolicy.outerIdleTimeoutFor(cloudOnly: false),
+        const Duration(minutes: 4),
+      );
     });
   });
 
