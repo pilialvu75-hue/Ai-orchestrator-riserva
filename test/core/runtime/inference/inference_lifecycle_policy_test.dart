@@ -42,6 +42,10 @@ void main() {
         InferenceLifecyclePolicy.outerStreamIdleTimeout,
         const Duration(seconds: 75),
       );
+      expect(
+        InferenceLifecyclePolicy.outerLocalStreamIdleTimeout,
+        const Duration(seconds: 120),
+      );
     });
   });
 
