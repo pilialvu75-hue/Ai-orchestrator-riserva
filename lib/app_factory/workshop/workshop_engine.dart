@@ -461,9 +461,13 @@ final class WorkshopEngine {
     final plan = _requirePlan(
       requestId,
     );
+    final request = _requireRequest(
+      requestId,
+    );
 
     final session = await executor.prepareNextTask(
       plan,
+      projectRequest: request,
       brief: brief,
     );
 
@@ -474,10 +478,6 @@ final class WorkshopEngine {
 
       return null;
     }
-
-    final request = _requireRequest(
-      requestId,
-    );
 
     _setStage(
       request,
@@ -498,6 +498,9 @@ final class WorkshopEngine {
     final plan = _requirePlan(
       requestId,
     );
+    final request = _requireRequest(
+      requestId,
+    );
 
     final normalizedTaskId = taskId.trim();
 
@@ -512,11 +515,8 @@ final class WorkshopEngine {
     final session = await executor.prepareTask(
       plan,
       normalizedTaskId,
+      projectRequest: request,
       brief: brief,
-    );
-
-    final request = _requireRequest(
-      requestId,
     );
 
     _setStage(
