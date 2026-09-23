@@ -69,13 +69,12 @@ class ScreenVisionForegroundService : Service() {
             }
         }
 
-        @Suppress("DEPRECATION")
         private fun projectionData(intent: Intent): Intent? =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                intent.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
+            IntentCompat.getParcelableExtra(
+                intent,
+                EXTRA_RESULT_DATA,
+                Intent::class.java,
+            )
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -155,12 +154,7 @@ class ScreenVisionForegroundService : Service() {
                 },
         )
 
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, NOTIFICATION_CHANNEL)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("AI Orchestrator Screen Vision")
             .setContentText("Screen capture is active")
@@ -329,11 +323,9 @@ class ScreenVisionForegroundService : Service() {
     }
 
     private fun stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        ServiceCompat.stopForeground(
+            this,
+            ServiceCompat.STOP_FOREGROUND_REMOVE,
+        )
     }
 }
