@@ -250,6 +250,47 @@ Tests cover:
    FIX/RETRY if needed -> VALIDATION -> ARTIFACT READY -> COMPLETED.
 
 
+## GitHub Actions durable reconciliation ring
+
+Implementation branch: `feat/durable-github-actions-v1`
+
+This ring removes the orchestration dependency on a live polling Future without
+yet changing the historical `WorkshopBuildProvider.build()` contract.
+
+The new durable coordinator models GitHub Actions as two persisted external
+waits:
+
+```text
+READY
+  -> atomic task start + operation idempotency claim + WAITING_EXTERNAL
+  -> dispatch side effect
+  -> ci.started / run discovery
+  -> atomic chained WAITING_EXTERNAL(run_id)
+  -> ci.completed
+  -> VALIDATING / RETRYING / FAILED
+```
+
+Important guarantees in this ring:
+
+- `WAITING_EXTERNAL` is persisted before dispatch;
+- an ambiguous dispatch transport result does not trigger immediate redispatch;
+- run discovery and run observation are one-shot operations only;
+- no `while`, background timer or `Future.delayed` is required by the
+  coordinator;
+- transition from run discovery to completion wait is atomic, so the run id is
+  never held only in process memory;
+- repeated dispatch calls are idempotent only when both operation identity and
+  correlation identity match;
+- artifact observation remains subject to the same durable completion timeout;
+- restart recovery is covered using a fresh orchestrator instance over the same
+  persisted checkpoint store.
+
+The current private GitHub build provider still contains its historical polling
+implementation. It is the next migration target: expose bounded one-shot
+stage/dispatch/discover/observe/finalize operations behind the durable gateway,
+then switch production composition to the durable coordinator. The old polling
+path must remain available until that migration is proven green.
+
 ## Library-approved durable handoff
 
 Researcher discovery is never executable Cantiere input.
