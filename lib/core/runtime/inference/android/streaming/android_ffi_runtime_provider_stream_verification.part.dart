@@ -153,7 +153,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                       RuntimeVerificationPhase.running,
                       message: 'Verification inference running.',
                     );
-                    final startedAt = DateTime.now();
+                    final lifecycleClock = InferenceLifecycleClock();
                     var verificationFirstTokenReceived = false;
                     while (true) {
                       if (cancellationToken.isCancelled || controller.isClosed) {
@@ -173,20 +173,53 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                         );
                         return;
                       }
-                      final elapsed = DateTime.now().difference(startedAt);
-                      if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
+                      if (!verificationFirstTokenReceived &&
+                          lifecycleClock.firstContentTimedOut(
+                            AndroidFfiRuntimeProvider._verificationFirstTokenTimeout,
+                          )) {
                         freeVerificationPromptPtr();
                         _setPhase(RuntimePhase.stalled);
                         _safeCancel(bindings, verificationSessionId);
+                        AndroidFfiRuntimeProvider._log(
+                          '[TERMINAL_STATE] state=timedOut '
+                          'reason=${InferenceLifecycleTerminalReason.firstTokenTimeout.wireName} '
+                          'scope=verification elapsed_ms=${lifecycleClock.elapsed.inMilliseconds}',
+                        );
                         AndroidFfiRuntimeProvider._finishWithRuntimeError(
                           controller,
-                          stage: 'verification_timeout',
-                          message: 'Runtime verification timed out.',
+                          stage: 'verification_first_token_timeout',
+                          message: 'Runtime verification produced no first token.',
                           state: InferenceTerminalState.timeout,
                         );
                         verificationMonitor.update(
                           RuntimeVerificationPhase.failed,
-                          message: 'Runtime verification timed out.',
+                          message: 'Verification first-token deadline exceeded.',
+                        );
+                        clearRuntimeVerification();
+                        return;
+                      }
+
+                      if (verificationFirstTokenReceived &&
+                          lifecycleClock.progressTimedOut(
+                            AndroidFfiRuntimeProvider._noTokenProgressTimeout,
+                          )) {
+                        freeVerificationPromptPtr();
+                        _setPhase(RuntimePhase.stalled);
+                        _safeCancel(bindings, verificationSessionId);
+                        AndroidFfiRuntimeProvider._log(
+                          '[TERMINAL_STATE] state=stalled '
+                          'reason=${InferenceLifecycleTerminalReason.noProgressTimeout.wireName} '
+                          'scope=verification idle_ms=${lifecycleClock.sinceLastProgress.inMilliseconds}',
+                        );
+                        AndroidFfiRuntimeProvider._finishWithRuntimeError(
+                          controller,
+                          stage: 'verification_no_progress_timeout',
+                          message: 'Runtime verification token stream stalled.',
+                          state: InferenceTerminalState.timeout,
+                        );
+                        verificationMonitor.update(
+                          RuntimeVerificationPhase.failed,
+                          message: 'Verification token progress stalled.',
                         );
                         clearRuntimeVerification();
                         return;
@@ -199,6 +232,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1817 | Function: streamVerificationInference() | AFTER verification pollToken loop iteration status=$status',
                       );
                       if (status == 1) {
+                        lifecycleClock.markProgress();
                         final piece = tokenBuf.toDartString();
                         final trimmedPiece = piece.trim();
                         if (_shouldIgnoreToken(trimmedPiece)) {
@@ -208,6 +242,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                         if (sanitizedPiece.trim().isEmpty) {
                           continue;
                         }
+                        lifecycleClock.markProgress(content: true);
                         if (_isDeveloperMode) {
                           AndroidFfiRuntimeProvider._log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
                           AndroidFfiRuntimeProvider._log('SANITIZED_TOKEN: "${sanitizedPiece.replaceAll('\n', r'\n')}"');
