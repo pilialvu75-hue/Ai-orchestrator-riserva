@@ -207,11 +207,33 @@ void main() {
       );
     });
 
+    test('normalizes a benign leading dot path only', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-leading-dot',
+        responseText: r'''
+{
+  "explanation": "Create main",
+  "changes": [
+    {
+      "path": "./lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(proposal.changes.single.isAddition, isTrue);
+    });
+
     test('rejects absolute and traversal paths', () {
       for (final path in <String>[
         '/tmp/a.dart',
         '../a.dart',
         'lib/../a.dart',
+        'lib/./a.dart',
         r'C:\temp\a.dart',
       ]) {
         expect(
