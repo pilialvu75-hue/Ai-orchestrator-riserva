@@ -6,18 +6,16 @@
 part of '../../runtime_core.dart';
 
 class _PollingState {
-  _PollingState()
-      : startedAt = DateTime.now(),
-        lastTokenProgressAt = DateTime.now(),
-        lastNativeActivityAt = DateTime.now();
+  _PollingState() : lifecycleClock = InferenceLifecycleClock();
 
-  final DateTime startedAt;
+  final InferenceLifecycleClock lifecycleClock;
+
+  DateTime get startedAt => lifecycleClock.startedAt;
+
   int repeatedTokenCount = 0;
   int consecutiveInvalidTokens = 0;
   String? lastPiece;
   final StringBuffer fullText = StringBuffer();
-  DateTime lastTokenProgressAt;
-  DateTime lastNativeActivityAt;
   int consecutiveIdlePolls = 0;
   bool firstPollBoundaryLogged = false;
   bool firstPollBoundaryFinished = false;
@@ -84,7 +82,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         final sinceFirstToken = attemptState.firstTokenAt == null
             ? null
             : now.difference(attemptState.firstTokenAt!);
-        final sinceLastTokenProgress = now.difference(state.lastTokenProgressAt);
+        final sinceLastTokenProgress = state.lifecycleClock.sinceLastProgress;
         
         _throttledLoopLog(
           '[TOKEN_STREAM] poll iteration=${attemptState.pollIterations} tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}'
@@ -136,78 +134,21 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 2: Absolute deadline before the first token.
-        // Once streaming starts, WATCHDOG 4 detects lack of progress. A slow
-        // but productive device must not lose its answer after 90 seconds.
-        // The native output-token limit still bounds productive generation.
+        // WATCHDOG 2: Primo token
+        //
+        // This is the single pre-output deadline. The former overlapping
+        // 90-second generation watchdog has been removed; the centralized
+        // policy preserves the same earliest effective timeout per build mode.
         // ---------------------------------------------------------------------
-        if (attemptState.firstTokenAt == null &&
-            elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
-          _classifyFirstTokenTermination(
-            flowState: flowState,
-            attemptState: attemptState,
-            reason: attemptState.firstTokenAt == null
-                ? 'generation_timeout_no_first_token'
-                : 'generation_timeout',
-            boundary: 'poll_loop',
-            runtimeReset: true,
-          );
-          _setPhase(RuntimePhase.stalled);
-          AndroidFfiRuntimeProvider._log(
-            '[FFI_TIMEOUT] session=$sessionId stage=generation_timeout'
-            ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}',
-          );
-          _safeCancel(bindings, nativeSessionId);
-          clearRuntimeVerification();
-          _setPhase(RuntimePhase.failed);
-          attemptState.runtimeNeedsReset = true;
-          attemptState.runtimeResetReason = 'generation_timeout';
-          
-          if (attemptState.firstTokenAt == null) {
-            AndroidFfiRuntimeProvider._log(
-              '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-              ' sessionId=$sessionId reason=generation_timeout_no_first_token'
-              ' elapsed_ms=${elapsed.inMilliseconds}'
-              ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}'
-              ' poll_iterations=${attemptState.pollIterations}',
-            );
-          }
-          AndroidFfiRuntimeProvider._log(
-            '[TERMINAL_STATE] state=timedOut reason=generation_timeout'
-            ' generated_tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.timedOut,
-            message: 'Timed out',
-            tokensGenerated: attemptState.estimatedTokens,
-            elapsed: elapsed,
-            startedAt: state.startedAt,
-          );
-          AndroidFfiRuntimeProvider._logAi('inference timeout');
-          final partialText = _flushStructuralTemplateOutput(state.fullText);
-          await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
-            controller,
-            stage: 'timeout',
-            message: 'Local generation timed out.',
-            modelId: modelId,
-            fullText: partialText,
-            tokensGenerated: attemptState.estimatedTokens,
-            notice: 'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
-            partialTerminalState: InferenceTerminalState.timeout,
-          );
-          break;
-        }
-        
+
         // ---------------------------------------------------------------------
-        // WATCHDOG 3: Latenza di Risposta sul Primo Token (Hot-Path)
-        // ---------------------------------------------------------------------
-        final firstTokenWaitElapsed = now.difference(state.lastNativeActivityAt);
+        final firstTokenWaitElapsed = state.lifecycleClock.elapsed;
         if (attemptState.firstTokenAt == null &&
             firstTokenWaitElapsed.inMilliseconds > firstTokenDeadline.inMilliseconds) {
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,
-            reason: 'first_token_watchdog',
+            reason: InferenceLifecycleTerminalReason.firstTokenTimeout.wireName,
             boundary: 'poll_loop',
             runtimeReset: true,
           );
@@ -229,14 +170,14 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 4: Assenza di Avanzamento del Flusso di Token Nativi
+        // WATCHDOG 3: Assenza di Avanzamento del Flusso di Token Nativi
         // ---------------------------------------------------------------------
         if (attemptState.firstTokenAt != null &&
             sinceLastTokenProgress > AndroidFfiRuntimeProvider._noTokenProgressTimeout) {
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,
-            reason: 'token_progress_watchdog',
+            reason: InferenceLifecycleTerminalReason.noProgressTimeout.wireName,
             boundary: 'poll_loop',
             runtimeReset: true,
           );
@@ -244,17 +185,17 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           _safeCancel(bindings, nativeSessionId);
           clearRuntimeVerification();
           attemptState.runtimeNeedsReset = true;
-          attemptState.runtimeResetReason = 'token_progress_watchdog';
+          attemptState.runtimeResetReason = InferenceLifecycleTerminalReason.noProgressTimeout.wireName;
           
           AndroidFfiRuntimeProvider._log(
-            '[STALL] reason=token_progress_watchdog'
+            '[STALL] reason=${InferenceLifecycleTerminalReason.noProgressTimeout.wireName}'
             ' generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${elapsed.inMilliseconds}'
             ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}'
             ' session=$sessionId',
           );
           AndroidFfiRuntimeProvider._log(
-            '[TERMINAL_STATE] state=stalled reason=token_progress_watchdog'
+            '[TERMINAL_STATE] state=stalled reason=${InferenceLifecycleTerminalReason.noProgressTimeout.wireName}'
             ' generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${elapsed.inMilliseconds}'
             ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
@@ -282,7 +223,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 5: Raggiungimento Limite Iterazioni Polling a Vuoto (Hard Cap)
+        // WATCHDOG 4: Raggiungimento Limite Iterazioni Polling a Vuoto (Hard Cap)
         // ---------------------------------------------------------------------
         if (_pollingController.isIdleLimitReached(state.consecutiveIdlePolls)) {
           debugPrint(
@@ -461,16 +402,12 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
           
           final trimmedPiece = piece.trim();
-          final tokenObservedAt = DateTime.now();
-          state.lastNativeActivityAt = tokenObservedAt;
-          
-          // --- CORREZIONE CRITICA HOT-PATH ---
-          // Il motore nativo ha appena risposto con successo (status == 1).
-          // Dobbiamo resettare SUBITO i contatori di stallo e inattività PRIMA
-          // di qualsiasi filtraggio o sanitizzazione! Altrimenti, se il token viene
-          // ignorato dai continue sottostanti, il watchdog accuserà falsamente
-          // un blocco e ucciderà la risposta a metà!
-          state.lastTokenProgressAt = tokenObservedAt;
+
+          // Native status=1 is progress even when a structural token is later
+          // filtered from visible output. Update the shared lifecycle clock
+          // before sanitization so ignored control tokens cannot cause a false
+          // no-progress timeout.
+          state.lifecycleClock.markProgress();
           state.consecutiveIdlePolls = 0;
           state.consecutiveInvalidTokens = 0;
           // -----------------------------------
@@ -484,6 +421,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           if (trimmedSanitizedPiece.isEmpty) {
             continue;
           }
+          state.lifecycleClock.markProgress(content: true);
           
           if (_isDeveloperMode) {
             AndroidFfiRuntimeProvider._log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
