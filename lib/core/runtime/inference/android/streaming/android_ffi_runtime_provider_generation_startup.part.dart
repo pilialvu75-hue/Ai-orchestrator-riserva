@@ -497,10 +497,27 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
           : 'start_generation_exception', boundary: 'start_generation', exception: true, runtimeReset: true, );
       AndroidFfiRuntimeProvider._log('[FFI_EXCEPTION] session=$sessionId stage=start_generation error=$error');
       _setPhase(RuntimePhase.failed);
-      await _safeResetRuntime(bindings, reason: 'start_generation_exception');
-      _updateRuntimeStatus( error is TimeoutException ? LocalRuntimeStatus.timedOut : LocalRuntimeStatus.failed, message: error is TimeoutException ? 'Native start_generation timed out.' : 'Native start_generation failed: $error', );
+      final terminalReason = error is TimeoutException
+          ? InferenceLifecycleTerminalReason.startGenerationTimeout.wireName
+          : 'start_generation_exception';
+      await _safeResetRuntime(bindings, reason: terminalReason);
+      _updateRuntimeStatus(
+        error is TimeoutException
+            ? LocalRuntimeStatus.timedOut
+            : LocalRuntimeStatus.failed,
+        message: error is TimeoutException
+            ? 'Native start_generation timed out.'
+            : 'Native start_generation failed: $error',
+      );
       if (error is TimeoutException) {
-        AndroidFfiRuntimeProvider._log( '[FFI_TIMEOUT] session=$sessionId stage=start_generation' ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}', );
+        AndroidFfiRuntimeProvider._log(
+          '[FFI_TIMEOUT] session=$sessionId stage=start_generation'
+          ' timeout_ms=${AndroidFfiRuntimeProvider._startGenerationTimeout.inMilliseconds}',
+        );
+        AndroidFfiRuntimeProvider._log(
+          '[TERMINAL_STATE] state=timedOut reason=$terminalReason'
+          ' boundary=start_generation',
+        );
       }
       AndroidFfiRuntimeProvider._finishWithRuntimeError( controller, stage: 'start_generation', message: error is TimeoutException ? 'Native generation start timed out.' : 'Native generation start failed.', details: error.toString(), );
       return null;
