@@ -78,6 +78,7 @@ void main() {
     expect(provider.lastRequest!.executionId, 'execution-stable');
     expect(provider.lastRequest!.attemptId, 'attempt-2');
     expect(provider.lastRequest!.checkpointId, 'checkpoint-3');
+    expect(provider.lastRequest!.maxTokens, 640);
     expect(
       provider.lastRequest!.prompt,
       contains('inspected existing implementation'),

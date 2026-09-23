@@ -61,12 +61,14 @@ void main() {
       expect(engineer.lastPrompt, contains('"lib/app.dart":"old"'));
       expect(
         engineer.lastPrompt,
-        contains('scope analysis from Orchestrator'),
+        isNot(contains('scope analysis from Orchestrator')),
       );
       expect(
         engineer.lastPrompt,
         contains('bounded implementation plan from Architect'),
       );
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(engineer.lastPrompt!.length, lessThan(6000));
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
       expect(gateways[AppAiRole.architect]!.calls, 0);
       expect(gateways[AppAiRole.reviewer]!.calls, 0);
@@ -75,6 +77,102 @@ void main() {
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);
+    });
+
+    test('retries a local Engineer first-token stall with compact prompt',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=stalled|message=Local model stalled during inference.',
+          ),
+          const WorkshopInferenceResult(
+            text: '''
+{"summary":"Recovered","explanation":"Retry succeeded","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}
+''',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/app.dart': 'old',
+          'lib/unrelated.dart': List<String>.filled(3000, 'x').join(),
+        },
+      );
+      final session = await _session(workspaceGateway);
+      final preflight = WorkshopPreflightInferenceResult(
+        analysis: const WorkshopInferenceResult(
+          text: 'large orchestrator analysis that Engineer should not need',
+          terminalState: InferenceTerminalState.success,
+        ),
+        architecture: const WorkshopInferenceResult(
+          text: 'Modify lib/app.dart only and validate the result.',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        preflight: preflight,
+      );
+
+      expect(proposal.changes.single.path, 'lib/app.dart');
+      expect(session.workspace.read('lib/app.dart'), 'new');
+      expect(engineer.calls, 2);
+      expect(
+        engineer.sessionIds,
+        <String>[
+          'workshop:implementation:implementation-runner-request',
+          'workshop:implementation:implementation-runner-request:retry-1',
+        ],
+      );
+      expect(engineer.maxTokensValues, <int?>[640, 512]);
+      expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
+      expect(
+        engineer.prompts.every(
+          (prompt) => !prompt.contains('large orchestrator analysis'),
+        ),
+        isTrue,
+      );
+      expect(
+        engineer.prompts.every(
+          (prompt) => !prompt.contains(List<String>.filled(128, 'x').join()),
+        ),
+        isTrue,
+      );
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+    test('cancelled Engineer inference is not retried', () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '',
+          terminalState: InferenceTerminalState.cancelled,
+          errorMessage: 'cancelled by caller',
+        ),
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+
+      await expectLater(
+        WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(engineer.calls, 1);
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(session.workspace.read('lib/app.dart'), 'old');
     });
 
     test('rejects incomplete preflight before Engineer inference', () async {
@@ -210,11 +308,25 @@ Future<WorkspaceSession> _session(_RecordingWorkspaceGateway gateway) async {
 }
 
 final class _StaticGateway extends WorkshopInferenceGateway {
-  _StaticGateway({required this.result}) : super(provider: _NoopProvider());
+  _StaticGateway({
+    WorkshopInferenceResult? result,
+    List<WorkshopInferenceResult>? results,
+  })  : _results = results ??
+            <WorkshopInferenceResult>[
+              if (result != null) result,
+            ],
+        super(provider: _NoopProvider()) {
+    if (_results.isEmpty) {
+      throw ArgumentError('At least one inference result is required.');
+    }
+  }
 
-  final WorkshopInferenceResult result;
+  final List<WorkshopInferenceResult> _results;
   int calls = 0;
   String? lastPrompt;
+  final List<String> prompts = <String>[];
+  final List<String> sessionIds = <String>[];
+  final List<int?> maxTokensValues = <int?>[];
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -231,9 +343,16 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     String? modelPath,
     CancellationToken? cancellationToken,
   }) async {
+    final index = calls;
     calls += 1;
     lastPrompt = prompt;
-    return result;
+    prompts.add(prompt);
+    sessionIds.add(sessionId);
+    maxTokensValues.add(maxTokens);
+    if (index >= _results.length) {
+      throw StateError('Unexpected extra Engineer inference call.');
+    }
+    return _results[index];
   }
 }
 

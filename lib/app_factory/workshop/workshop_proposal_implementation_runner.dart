@@ -9,6 +9,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runs the Cantiere Engineer against an initialized Workshop workspace and
 /// stages the resulting structured proposal in the existing VirtualWorkspace.
@@ -33,6 +35,17 @@ final class WorkshopProposalImplementationRunner {
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalWorkspaceStager _stager;
 
+  static const int _primaryMaxTokens = 640;
+  static const int _retryMaxTokens = 512;
+  static const int _primaryArchitectChars = 900;
+  static const int _retryArchitectChars = 600;
+  static const int _primaryWorkspaceChars = 1800;
+  static const int _retryWorkspaceChars = 900;
+  static const int _primaryContextChars = 360;
+  static const int _retryContextChars = 220;
+  static const int _primaryConstraintChars = 360;
+  static const int _retryConstraintChars = 220;
+
   Future<WorkshopChangeProposal> run({
     required WorkspaceSession session,
     WorkshopPreflightInferenceResult? preflight,
@@ -41,14 +54,46 @@ final class WorkshopProposalImplementationRunner {
   }) async {
     _validateSession(session, preflight: preflight);
 
-    final result = await _inference.complete(
+    final sessionId =
+        'workshop:implementation:${session.context.request.id}';
+
+    var result = await _inference.complete(
       stage: WorkshopStage.implementation,
-      prompt: _buildPrompt(session, preflight: preflight),
+      prompt: _buildPrompt(
+        session,
+        preflight: preflight,
+      ),
       systemPrompt: _systemPrompt,
-      sessionId: 'workshop:implementation:${session.context.request.id}',
+      sessionId: sessionId,
       isOffline: isOffline,
+      maxTokens: _primaryMaxTokens,
       cancellationToken: cancellationToken,
     );
+
+    if (_shouldRetryEngineer(
+      result,
+      cancellationToken: cancellationToken,
+    )) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_RETRY] '
+        'request=${session.context.request.id} '
+        'attempt=2 terminal=${result.terminalState?.name ?? 'none'}',
+      );
+
+      result = await _inference.complete(
+        stage: WorkshopStage.implementation,
+        prompt: _buildPrompt(
+          session,
+          preflight: preflight,
+          compact: true,
+        ),
+        systemPrompt: _retrySystemPrompt,
+        sessionId: '$sessionId:retry-1',
+        isOffline: isOffline,
+        maxTokens: _retryMaxTokens,
+        cancellationToken: cancellationToken,
+      );
+    }
 
     return _stageResult(session: session, result: result);
   }
@@ -75,7 +120,7 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
-    final result = await _inference.completeWithIdentity(
+    var result = await _inference.completeWithIdentity(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
         session,
@@ -85,6 +130,7 @@ final class WorkshopProposalImplementationRunner {
       systemPrompt: _systemPrompt,
       sessionId: resumeContext.sessionId,
       isOffline: isOffline,
+      maxTokens: _primaryMaxTokens,
       requestId: session.context.request.id,
       projectId: resumeContext.projectId,
       taskId: resumeContext.taskId,
@@ -93,6 +139,39 @@ final class WorkshopProposalImplementationRunner {
       checkpointId: resumeContext.checkpointId,
       cancellationToken: cancellationToken,
     );
+
+    if (_shouldRetryEngineer(
+      result,
+      cancellationToken: cancellationToken,
+    )) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_RETRY] '
+        'request=${session.context.request.id} '
+        'execution=${resumeContext.executionId} '
+        'attempt=2 terminal=${result.terminalState?.name ?? 'none'}',
+      );
+
+      result = await _inference.completeWithIdentity(
+        stage: WorkshopStage.implementation,
+        prompt: _buildPrompt(
+          session,
+          preflight: preflight,
+          resumeContext: resumeContext,
+          compact: true,
+        ),
+        systemPrompt: _retrySystemPrompt,
+        sessionId: '${resumeContext.sessionId}:engineer-retry-1',
+        isOffline: isOffline,
+        maxTokens: _retryMaxTokens,
+        requestId: session.context.request.id,
+        projectId: resumeContext.projectId,
+        taskId: resumeContext.taskId,
+        executionId: resumeContext.executionId,
+        attemptId: resumeContext.attemptId,
+        checkpointId: resumeContext.checkpointId,
+        cancellationToken: cancellationToken,
+      );
+    }
 
     return _stageResult(session: session, result: result);
   }
@@ -150,69 +229,231 @@ final class WorkshopProposalImplementationRunner {
     WorkspaceSession session, {
     WorkshopPreflightInferenceResult? preflight,
     WorkshopResumeContext? resumeContext,
+    bool compact = false,
   }) {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
 
-    final payload = <String, Object?>{
-      'requestId': request.id,
-      'title': request.title,
-      'instruction': request.instruction,
-      'operation': request.operation.name,
-      'targetFiles': request.targetFiles,
-      'constraints': request.constraints,
-      'context': request.context,
-      if (preflight != null)
-        'preflight': <String, String>{
-          'orchestratorAnalysis': preflight.analysis.text.trim(),
-          'architectPlan': preflight.architecture!.text.trim(),
-        },
-      if (resumeContext != null) 'resume': resumeContext.toMetadata(),
-      'workspaceFiles': <String, String>{
-        for (final path in snapshot.keys.toList()..sort()) path: snapshot[path]!,
-      },
-    };
+    final architectPlan = _boundedText(
+      preflight?.architecture?.text ?? '',
+      compact ? _retryArchitectChars : _primaryArchitectChars,
+    );
+    final context = _boundedJoined(
+      request.context,
+      compact ? _retryContextChars : _primaryContextChars,
+    );
+    final constraints = _boundedJoined(
+      request.constraints,
+      compact ? _retryConstraintChars : _primaryConstraintChars,
+    );
+    final workspaceFiles = _selectWorkspaceFiles(
+      snapshot: snapshot,
+      targetFiles: request.targetFiles,
+      maxChars:
+          compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
+    );
 
-    return '''
-Implement the Workshop task using only the supplied request, Cantiere preflight
-when present, authoritative Cantiere resume state when present, and workspace
-snapshot. Treat the Architect plan as bounded implementation guidance. When a
-resume state is supplied, continue from its completed steps, decisions,
-verification state and next step instead of restarting the task. Preserve all
-supplied constraints. Return a structured change proposal; do not claim that
-files were already written and do not perform review, validation or approval.
+    final manifest = snapshot.keys.toList()..sort();
+    final payload = compact
+        ? <String, Object?>{
+            'request': <String, Object?>{
+              'title': _boundedText(request.title, 120),
+              'instruction': _boundedText(request.instruction, 320),
+              'targetFiles': request.targetFiles,
+              if (constraints.isNotEmpty) 'constraints': constraints,
+            },
+            if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
+            if (resumeContext != null)
+              'resume': _compactResumeMetadata(resumeContext),
+            'workspaceFiles': workspaceFiles,
+          }
+        : <String, Object?>{
+            'request': <String, Object?>{
+              'id': request.id,
+              'title': _boundedText(request.title, 160),
+              'instruction': _boundedText(request.instruction, 560),
+              'operation': request.operation.name,
+              'targetFiles': request.targetFiles,
+              if (constraints.isNotEmpty) 'constraints': constraints,
+              if (context.isNotEmpty) 'context': context,
+            },
+            if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
+            if (resumeContext != null) 'resume': resumeContext.toMetadata(),
+            'workspaceManifest': manifest.take(28).toList(),
+            'workspaceFiles': workspaceFiles,
+          };
 
-Workshop input JSON:
-${jsonEncode(payload)}
+    final encoded = jsonEncode(payload);
+    final prompt = compact
+        ? '''
+Implement the task from this compact Cantiere input:
+$encoded
 
-Return ONLY one JSON object with this exact contract:
-{
-  "summary": "optional short summary",
-  "explanation": "required non-empty explanation",
-  "analysis": "optional implementation analysis",
-  "changes": [
-    {
-      "path": "workspace/relative/path",
-      "type": "addition|modification|deletion",
-      "content": "required full file content for addition/modification"
-    }
-  ],
-  "validationNotes": ["optional validation note"],
-  "warnings": ["optional warning"]
-}
+Return ONLY JSON:
+{"explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content"}],"validationNotes":[],"warnings":[]}
 
-For deletion omit content. Paths must be workspace-relative. Return full file
-content for every addition or modification. Do not return markdown fences or
-any text outside the JSON object.
+Use only workspaceFiles as existing file content. Follow architectPlan. No
+markdown, review, approval or apply. For deletion omit content.
+'''.trim()
+        : '''
+Implement exactly one Cantiere task from the bounded input below.
+The Architect plan is the authoritative implementation guidance.
+Only current file contents included in workspaceFiles may be modified.
+Files listed only in workspaceManifest are informational; do not rewrite them.
+New files may be added only when required by the task or Architect plan.
+
+INPUT:
+$encoded
+
+Return ONLY JSON:
+{"summary":"short","explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content for addition/modification"}],"validationNotes":[],"warnings":[]}
+
+Do not use markdown. For deletion omit content. Every addition/modification must
+contain the complete resulting file content. Do not review, approve or apply.
 '''.trim();
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_ENGINEER_PROMPT] '
+      'request=${request.id} compact=$compact chars=${prompt.length} '
+      'workspace_files=${workspaceFiles.length} '
+      'architect_chars=${architectPlan.length}',
+    );
+
+    return prompt;
+  }
+
+  Map<String, String> _selectWorkspaceFiles({
+    required Map<String, String> snapshot,
+    required List<String> targetFiles,
+    required int maxChars,
+  }) {
+    final ordered = <String>[];
+    final seen = <String>{};
+
+    void addPath(String raw) {
+      final path = raw.trim();
+      if (path.isEmpty || !snapshot.containsKey(path) || !seen.add(path)) {
+        return;
+      }
+      ordered.add(path);
+    }
+
+    for (final path in targetFiles) {
+      addPath(path);
+    }
+
+    for (final path in const <String>[
+      'pubspec.yaml',
+      'lib/main.dart',
+      'android/app/src/main/AndroidManifest.xml',
+      'android/app/build.gradle.kts',
+      'android/app/build.gradle',
+    ]) {
+      addPath(path);
+    }
+
+    final remainingPaths = snapshot.keys
+        .where((path) => !seen.contains(path))
+        .toList()
+      ..sort((left, right) {
+        final leftLib = left.startsWith('lib/') ? 0 : 1;
+        final rightLib = right.startsWith('lib/') ? 0 : 1;
+        final byPriority = leftLib.compareTo(rightLib);
+        return byPriority != 0 ? byPriority : left.compareTo(right);
+      });
+    for (final path in remainingPaths) {
+      addPath(path);
+    }
+
+    var used = 0;
+    final selected = <String, String>{};
+    for (final path in ordered) {
+      final content = snapshot[path] ?? '';
+      final cost = path.length + content.length;
+      if (selected.isNotEmpty && used + cost > maxChars) {
+        continue;
+      }
+      if (content.length > maxChars && targetFiles.contains(path)) {
+        throw StateError(
+          'Workshop Engineer target file "$path" exceeds the local prompt '
+          'budget; split the task before implementation.',
+        );
+      }
+      if (used + cost > maxChars) {
+        continue;
+      }
+      selected[path] = content;
+      used += cost;
+    }
+    return selected;
+  }
+
+  static Map<String, Object?> _compactResumeMetadata(
+    WorkshopResumeContext resume,
+  ) {
+    return <String, Object?>{
+      'objective': _boundedText(resume.objective, 180),
+      'phase': resume.phase,
+      if (resume.completedSteps.isNotEmpty)
+        'completedSteps': resume.completedSteps.take(4).toList(),
+      if (resume.remainingWork.isNotEmpty)
+        'remainingWork': resume.remainingWork.take(4).toList(),
+      if (resume.nextStep != null && resume.nextStep!.trim().isNotEmpty)
+        'nextStep': _boundedText(resume.nextStep!, 180),
+      if (resume.verified.isNotEmpty)
+        'verified': resume.verified.take(4).toList(),
+    };
+  }
+
+  static bool _shouldRetryEngineer(
+    WorkshopInferenceResult result, {
+    CancellationToken? cancellationToken,
+  }) {
+    if (result.isSuccessful && result.hasText) {
+      return false;
+    }
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
+        result.terminalState == InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+
+    if (result.terminalState == InferenceTerminalState.timeout) {
+      return true;
+    }
+
+    final error = (result.errorMessage ?? '').toLowerCase();
+    return error.contains('stalled') ||
+        error.contains('timeout') ||
+        error.contains('timed out');
+  }
+
+  static String _boundedText(String raw, int maxChars) {
+    final value = raw.trim();
+    if (value.length <= maxChars) {
+      return value;
+    }
+    return '${value.substring(0, maxChars)}…';
+  }
+
+  static String _boundedJoined(Iterable<String> values, int maxChars) {
+    final normalized = values
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join(' | ');
+    return _boundedText(normalized, maxChars);
   }
 
   static const String _systemPrompt =
-      'You are the Engineer brain of the Cantiere. Implement only the supplied '
-      'Workshop task using the workspace snapshot and, when present, the '
-      'supplied Cantiere preflight guidance and authoritative semantic resume '
-      'state. Continue from verified prior work instead of restarting it. Do '
-      'not use or assume Assistant chat memory, configuration or model '
-      'selection. Return only the required structured change proposal and '
-      'never mutate the real repository directly.';
+      'You are the Engineer brain of the Cantiere. Implement only the bounded '
+      'task input and exact workspace file contents supplied. The Architect '
+      'plan is authoritative. Do not use Assistant memory or hidden project '
+      'state. Return only the requested structured JSON proposal and never '
+      'mutate the real repository directly.';
+
+  static const String _retrySystemPrompt =
+      'You are the Cantiere Engineer retrying after a local first-token stall. '
+      'Use only the compact bounded input. Make the smallest valid change that '
+      'satisfies the Architect plan. Return only the requested JSON object. '
+      'Do not review, approve, apply, or use Assistant state.';
 }
