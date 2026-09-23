@@ -34,12 +34,26 @@ final class ScreenVisionException implements Exception {
   String toString() => 'ScreenVisionException($code): $message';
 }
 
+abstract interface class ScreenVisionCaptureService {
+  bool get isSupported;
+
+  Future<bool> requestProjection();
+
+  Future<Uint8List> capturePng();
+
+  Future<File> captureToFile();
+
+  Future<void> stopProjection();
+
+  Future<ScreenVisionStatus> status();
+}
+
 /// Android MediaProjection adapter for the existing multimodal attachment flow.
 ///
 /// The Android system dialog remains the authority for projection consent.
 /// Captured PNG bytes are persisted only when [captureToFile] is called, and
 /// the caller remains responsible for stopping the projection session.
-final class ScreenVisionService {
+final class ScreenVisionService implements ScreenVisionCaptureService {
   ScreenVisionService({
     required ImageService imageService,
     MethodChannel? channel,
@@ -54,10 +68,12 @@ final class ScreenVisionService {
   final MethodChannel _channel;
   final TargetPlatform? _platformOverride;
 
+  @override
   bool get isSupported =>
       !kIsWeb &&
       (_platformOverride ?? defaultTargetPlatform) == TargetPlatform.android;
 
+  @override
   Future<bool> requestProjection() async {
     _requireSupported();
     try {
@@ -70,6 +86,7 @@ final class ScreenVisionService {
     }
   }
 
+  @override
   Future<Uint8List> capturePng() async {
     _requireSupported();
     try {
@@ -89,6 +106,7 @@ final class ScreenVisionService {
     }
   }
 
+  @override
   Future<File> captureToFile() async {
     final bytes = await capturePng();
     return _imageService.savePngBytes(
@@ -97,6 +115,7 @@ final class ScreenVisionService {
     );
   }
 
+  @override
   Future<void> stopProjection() async {
     if (!isSupported) return;
     try {
@@ -109,6 +128,7 @@ final class ScreenVisionService {
     }
   }
 
+  @override
   Future<ScreenVisionStatus> status() async {
     if (!isSupported) {
       return const ScreenVisionStatus(
