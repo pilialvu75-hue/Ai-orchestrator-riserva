@@ -136,70 +136,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 2: Absolute deadline before the first token.
-        // Once streaming starts, WATCHDOG 4 detects lack of progress. A slow
-        // but productive device must not lose its answer after 90 seconds.
-        // The native output-token limit still bounds productive generation.
-        // ---------------------------------------------------------------------
-        if (attemptState.firstTokenAt == null &&
-            elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
-          _classifyFirstTokenTermination(
-            flowState: flowState,
-            attemptState: attemptState,
-            reason: attemptState.firstTokenAt == null
-                ? 'generation_timeout_no_first_token'
-                : 'generation_timeout',
-            boundary: 'poll_loop',
-            runtimeReset: true,
-          );
-          _setPhase(RuntimePhase.stalled);
-          AndroidFfiRuntimeProvider._log(
-            '[FFI_TIMEOUT] session=$sessionId stage=generation_timeout'
-            ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}',
-          );
-          _safeCancel(bindings, nativeSessionId);
-          clearRuntimeVerification();
-          _setPhase(RuntimePhase.failed);
-          attemptState.runtimeNeedsReset = true;
-          attemptState.runtimeResetReason = 'generation_timeout';
-          
-          if (attemptState.firstTokenAt == null) {
-            AndroidFfiRuntimeProvider._log(
-              '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-              ' sessionId=$sessionId reason=generation_timeout_no_first_token'
-              ' elapsed_ms=${elapsed.inMilliseconds}'
-              ' timeout_ms=${AndroidFfiRuntimeProvider._generationTimeout.inMilliseconds}'
-              ' poll_iterations=${attemptState.pollIterations}',
-            );
-          }
-          AndroidFfiRuntimeProvider._log(
-            '[TERMINAL_STATE] state=timedOut reason=generation_timeout'
-            ' generated_tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}',
-          );
-          _updateRuntimeStatus(
-            LocalRuntimeStatus.timedOut,
-            message: 'Timed out',
-            tokensGenerated: attemptState.estimatedTokens,
-            elapsed: elapsed,
-            startedAt: state.startedAt,
-          );
-          AndroidFfiRuntimeProvider._logAi('inference timeout');
-          final partialText = _flushStructuralTemplateOutput(state.fullText);
-          await AndroidFfiRuntimeProvider._finishWithPartialOrRuntimeError(
-            controller,
-            stage: 'timeout',
-            message: 'Local generation timed out.',
-            modelId: modelId,
-            fullText: partialText,
-            tokensGenerated: attemptState.estimatedTokens,
-            notice: 'Local model timed out after ${elapsed.inSeconds}s. Returning partial response.',
-            partialTerminalState: InferenceTerminalState.timeout,
-          );
-          break;
-        }
-        
-        // ---------------------------------------------------------------------
-        // WATCHDOG 3: Latenza di Risposta sul Primo Token (Hot-Path)
+        // WATCHDOG 2: Latenza di Risposta sul Primo Token (Hot-Path)
         // ---------------------------------------------------------------------
         final firstTokenWaitElapsed = now.difference(state.lastNativeActivityAt);
         if (attemptState.firstTokenAt == null &&
@@ -229,7 +166,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         }
         
         // ---------------------------------------------------------------------
-        // WATCHDOG 4: Assenza di Avanzamento del Flusso di Token Nativi
+        // WATCHDOG 3: Assenza di Avanzamento del Flusso di Token Nativi
         // ---------------------------------------------------------------------
         if (attemptState.firstTokenAt != null &&
             sinceLastTokenProgress > AndroidFfiRuntimeProvider._noTokenProgressTimeout) {
