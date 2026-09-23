@@ -165,6 +165,219 @@ void main() {
     expect(report.succeeded, <String>['nas']);
     expect(nas.rows[record.id]?.checksum, record.checksum);
   });
+
+
+  test('device-only write never leaves device even if cloud is misconfigured', () async {
+    final cloud = _MapProvider(
+      'cloud',
+      location: 'cloud',
+      allowedPrivacy: Set<MemoryFabricPrivacyLevel>.of(
+        MemoryFabricPrivacyLevel.values,
+      ),
+    );
+    final local = _MapProvider('local', location: 'device');
+    final fabric = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.primary,
+      ),
+      MemoryFabricNode(
+        provider: local,
+        role: MemoryFabricNodeRole.secondary,
+      ),
+    ]);
+
+    final record = MemoryFabricRecord.create(
+      namespace: 'private',
+      type: MemoryFabricType.longTermFact,
+      subject: 'device-only',
+      content: 'never replicate remotely',
+      source: 'test',
+      privacyLevel: MemoryFabricPrivacyLevel.deviceOnly,
+    );
+
+    final written = await fabric.write(record);
+
+    expect(local.rows.containsKey(record.id), isTrue);
+    expect(cloud.rows, isEmpty);
+    expect(written.replicationState['local'], 'synced');
+    expect(written.replicationState.containsKey('cloud'), isFalse);
+  });
+
+  test('read ignores forbidden remote copy and falls back to local', () async {
+    final cloud = _MapProvider(
+      'cloud',
+      location: 'cloud',
+      allowedPrivacy: Set<MemoryFabricPrivacyLevel>.of(
+        MemoryFabricPrivacyLevel.values,
+      ),
+    );
+    final local = _MapProvider('local', location: 'device');
+    final fabric = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.primary,
+      ),
+      MemoryFabricNode(
+        provider: local,
+        role: MemoryFabricNodeRole.secondary,
+      ),
+    ]);
+
+    final localRecord = MemoryFabricRecord.create(
+      id: 'device-record',
+      namespace: 'private',
+      type: MemoryFabricType.longTermFact,
+      subject: 'device-only',
+      content: 'local truth',
+      source: 'test',
+      now: DateTime.utc(2026, 9, 22, 8),
+      privacyLevel: MemoryFabricPrivacyLevel.deviceOnly,
+    );
+    final cloudRecord = localRecord.nextVersion(
+      content: 'remote copy must be ignored',
+      now: DateTime.utc(2026, 9, 22, 8, 1),
+    );
+    cloud.rows[localRecord.id] = cloudRecord;
+    local.rows[localRecord.id] = localRecord;
+
+    final recovered = await fabric.read(localRecord.id);
+
+    expect(recovered, isNotNull);
+    expect(recovered!.version, 1);
+    expect(recovered.content, 'local truth');
+  });
+
+  test('secret defaults to device-only but trusted LAN requires opt-in', () async {
+    final nas = _MapProvider(
+      'nas',
+      location: 'lan',
+      allowedPrivacy: Set<MemoryFabricPrivacyLevel>.of(
+        MemoryFabricPrivacyLevel.values,
+      ),
+    );
+    final secret = MemoryFabricRecord.create(
+      namespace: 'secrets',
+      type: MemoryFabricType.longTermFact,
+      subject: 'credential-reference',
+      content: 'encrypted reference',
+      source: 'test',
+      privacyLevel: MemoryFabricPrivacyLevel.secret,
+    );
+
+    final defaultFabric = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: nas,
+        role: MemoryFabricNodeRole.primary,
+      ),
+    ]);
+    await expectLater(
+      defaultFabric.write(secret),
+      throwsA(isA<MemoryFabricPolicyException>()),
+    );
+    expect(nas.rows, isEmpty);
+
+    final trustedLanFabric = MemoryFabric(
+      <MemoryFabricNode>[
+        MemoryFabricNode(
+          provider: nas,
+          role: MemoryFabricNodeRole.primary,
+        ),
+      ],
+      routingPolicy: const MemoryFabricRoutingPolicy(
+        allowSecretOnLan: true,
+      ),
+    );
+    await trustedLanFabric.write(secret);
+    expect(nas.rows.containsKey(secret.id), isTrue);
+  });
+
+  test('private cloud routing can be disabled centrally', () async {
+    final cloud = _MapProvider(
+      'cloud',
+      location: 'cloud',
+      allowedPrivacy: const <MemoryFabricPrivacyLevel>{
+        MemoryFabricPrivacyLevel.public,
+        MemoryFabricPrivacyLevel.project,
+        MemoryFabricPrivacyLevel.private,
+      },
+    );
+    final record = MemoryFabricRecord.create(
+      namespace: 'private',
+      type: MemoryFabricType.userPreference,
+      subject: 'preference',
+      content: 'compact answers',
+      source: 'test',
+      privacyLevel: MemoryFabricPrivacyLevel.private,
+    );
+
+    final normal = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.primary,
+      ),
+    ]);
+    await normal.write(record);
+    expect(cloud.rows.containsKey(record.id), isTrue);
+
+    cloud.rows.clear();
+    final localOnlyPrivate = MemoryFabric(
+      <MemoryFabricNode>[
+        MemoryFabricNode(
+          provider: cloud,
+          role: MemoryFabricNodeRole.primary,
+        ),
+      ],
+      routingPolicy: const MemoryFabricRoutingPolicy(
+        allowPrivateOnCloud: false,
+      ),
+    );
+    await expectLater(
+      localOnlyPrivate.write(record),
+      throwsA(isA<MemoryFabricPolicyException>()),
+    );
+    expect(cloud.rows, isEmpty);
+  });
+
+  test('replication policy cannot copy device-only record to cloud', () async {
+    final local = _MapProvider('local', location: 'device');
+    final cloud = _MapProvider(
+      'cloud',
+      location: 'cloud',
+      allowedPrivacy: Set<MemoryFabricPrivacyLevel>.of(
+        MemoryFabricPrivacyLevel.values,
+      ),
+    );
+    final fabric = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: local,
+        role: MemoryFabricNodeRole.primary,
+      ),
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.secondary,
+      ),
+    ]);
+    final record = MemoryFabricRecord.create(
+      namespace: 'private',
+      type: MemoryFabricType.longTermFact,
+      subject: 'device-only',
+      content: 'local',
+      source: 'test',
+      privacyLevel: MemoryFabricPrivacyLevel.deviceOnly,
+    );
+    local.rows[record.id] = record;
+
+    final report = await fabric.replicate(
+      record.id,
+      sourceProviderId: 'local',
+    );
+
+    expect(report.attempted, isEmpty);
+    expect(report.succeeded, isEmpty);
+    expect(cloud.rows, isEmpty);
+  });
+
 }
 
 final class _MapProvider implements MemoryFabricProvider {
