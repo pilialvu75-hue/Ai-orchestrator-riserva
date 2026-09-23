@@ -31,6 +31,9 @@ abstract final class InferenceLifecyclePolicy {
   static const Duration androidNoTokenProgressTimeout = Duration(seconds: 35);
   static const Duration androidSessionShutdownTimeout = Duration(seconds: 5);
 
+  static Duration outerIdleTimeoutFor({required bool cloudOnly}) =>
+      cloudOnly ? outerStreamIdleTimeout : outerLocalStreamIdleTimeout;
+
   static Duration androidFirstTokenTimeout({
     bool verification = false,
     bool? debugMode,
