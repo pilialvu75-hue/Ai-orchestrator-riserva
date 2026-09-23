@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_certified_library_evidence.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_remote_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
@@ -12,6 +13,7 @@ final class WorkshopLibraryReuseResult {
     required this.reusedPins,
     required this.stagedPaths,
     this.reuseIdentity,
+    this.evidence,
     this.reason,
   });
 
@@ -25,6 +27,10 @@ final class WorkshopLibraryReuseResult {
   /// certified Library bytes.
   final String? reuseIdentity;
 
+  /// Verified read-only provenance and integration evidence for the exact
+  /// certified bytes selected by this attempt.
+  final WorkshopCertifiedLibraryEvidencePack? evidence;
+
   final String? reason;
 
   bool get staged => stagedPaths.isNotEmpty;
@@ -34,18 +40,21 @@ final class WorkshopLibraryReuseResult {
   /// file is already present with identical content and no new path is staged.
   bool get reused =>
       reusedPins.isNotEmpty &&
+      evidence != null &&
       reuseIdentity != null &&
       reuseIdentity!.isNotEmpty &&
+      evidence!.reuseIdentity == reuseIdentity &&
       reason == null;
 }
 
 /// Production bridge from an approved Cantiere plan to certified Module Library
 /// packages. It is deliberately best-effort: a missing/offline Library or any
-/// integrity/adaptation/conflict condition falls back to the normal AI path.
+/// integrity/conflict condition falls back to the normal local/AI path.
 ///
-/// Safe automatic reuse is limited to addition-only, conflict-free packages
-/// with no required adaptation work. Files are written only to VirtualWorkspace;
-/// the existing Reviewer -> owner approval -> apply gates remain authoritative.
+/// Safe automatic file reuse remains addition-only and conflict-free. Required
+/// dependency/configuration/native adaptation is preserved as certified
+/// evidence for Architect/Engineer and stays inside the normal
+/// Reviewer -> validation -> owner approval -> guarded apply lifecycle.
 final class WorkshopLibraryReuseService {
   const WorkshopLibraryReuseService({
     required this.client,
@@ -108,14 +117,12 @@ final class WorkshopLibraryReuseService {
         workspaceSnapshot: session.workspace.snapshot,
       );
 
-      if (assembly.hasBlockingConflicts || assembly.requiresAdaptation) {
+      if (assembly.hasBlockingConflicts) {
         return WorkshopLibraryReuseResult(
           attempted: true,
           reusedPins: List<String>.unmodifiable(assembly.pins),
           stagedPaths: const <String>[],
-          reason: assembly.hasBlockingConflicts
-              ? 'assembly-conflict'
-              : 'required-adaptation',
+          reason: 'assembly-conflict',
         );
       }
 
@@ -129,21 +136,40 @@ final class WorkshopLibraryReuseService {
             reason: 'unsafe-non-additive-assembly',
           );
         }
-        session.workspace.write(
-          path: change.path,
-          content: change.afterContent!,
-        );
         staged.add(change.path);
       }
       staged.sort();
+
+      final evidence = _buildEvidence(
+        remote: remote,
+        reuseDecisions: reuseDecisions,
+        packages: packages,
+        assembly: assembly,
+        stagedPaths: staged,
+      );
+
+      final written = <String>[];
+      try {
+        for (final change in assembly.changes) {
+          session.workspace.write(
+            path: change.path,
+            content: change.afterContent!,
+          );
+          written.add(change.path);
+        }
+      } catch (_) {
+        for (final path in written.reversed) {
+          session.workspace.revert(path);
+        }
+        rethrow;
+      }
+
       return WorkshopLibraryReuseResult(
         attempted: true,
         reusedPins: List<String>.unmodifiable(assembly.pins),
         stagedPaths: List<String>.unmodifiable(staged),
-        reuseIdentity: _verifiedReuseIdentity(
-          remote: remote,
-          pins: assembly.pins,
-        ),
+        reuseIdentity: evidence.reuseIdentity,
+        evidence: evidence,
       );
     } catch (_) {
       return const WorkshopLibraryReuseResult(
@@ -153,6 +179,137 @@ final class WorkshopLibraryReuseService {
         reason: 'library-unavailable-or-unverified',
       );
     }
+  }
+
+  WorkshopCertifiedLibraryEvidencePack _buildEvidence({
+    required WorkshopLibraryRemoteState remote,
+    required List<WorkshopCapabilityReuseDecision> reuseDecisions,
+    required Map<String, WorkshopReusableModulePackage> packages,
+    required WorkshopModuleAssemblyPlan assembly,
+    required List<String> stagedPaths,
+  }) {
+    final reuseIdentity = _verifiedReuseIdentity(
+      remote: remote,
+      pins: assembly.pins,
+    );
+
+    final selections = <WorkshopCertifiedLibrarySelectionEvidence>[];
+    for (final decision in reuseDecisions) {
+      final candidate = decision.candidate;
+      if (candidate == null || candidate.pin.trim().isEmpty) {
+        throw StateError(
+          'Certified reuse decision is missing its exact selected pin.',
+        );
+      }
+      final targets = decision.need.targets.toSet().toList(growable: false)
+        ..sort();
+      selections.add(
+        WorkshopCertifiedLibrarySelectionEvidence(
+          pin: candidate.pin,
+          capabilityId: decision.need.capabilityId,
+          contractId: decision.need.preferredContractId,
+          targets: List<String>.unmodifiable(targets),
+        ),
+      );
+    }
+    selections.sort((left, right) {
+      var value = left.capabilityId.compareTo(right.capabilityId);
+      if (value != 0) return value;
+      value = left.contractId.compareTo(right.contractId);
+      if (value != 0) return value;
+      return left.pin.compareTo(right.pin);
+    });
+
+    final assets = <WorkshopCertifiedLibraryAssetEvidence>[];
+    final pins = assembly.pins.toSet().toList(growable: false)..sort();
+    for (final pin in pins) {
+      final snapshotAsset = remote.snapshot.assetByPin(pin);
+      final indexEntry = remote.packageIndex[pin];
+      final package = packages[pin];
+      if (snapshotAsset == null || indexEntry == null || package == null) {
+        throw StateError(
+          'Certified reuse evidence is incomplete for selected pin "' +
+              pin +
+              '".',
+        );
+      }
+      if (package.pin != pin ||
+          package.manifestDigest != snapshotAsset.manifestSha256 ||
+          package.artifactDigest != snapshotAsset.moduleTreeSha256 ||
+          indexEntry.moduleTreeSha256 != snapshotAsset.moduleTreeSha256) {
+        throw StateError(
+          'Certified reuse package no longer matches verified snapshot "' +
+              pin +
+              '".',
+        );
+      }
+
+      final candidate = snapshotAsset.candidate;
+      final capabilities =
+          candidate.capabilities.toSet().toList(growable: false)..sort();
+      final contracts =
+          candidate.contracts.toSet().toList(growable: false)..sort();
+      final targets = candidate.targets.toSet().toList(growable: false)..sort();
+
+      assets.add(
+        WorkshopCertifiedLibraryAssetEvidence(
+          pin: pin,
+          manifestSha256: snapshotAsset.manifestSha256,
+          moduleTreeSha256: snapshotAsset.moduleTreeSha256,
+          packageSha256: indexEntry.packageSha256,
+          validationScore: candidate.validationScore,
+          capabilities: List<String>.unmodifiable(capabilities),
+          contracts: List<String>.unmodifiable(contracts),
+          targets: List<String>.unmodifiable(targets),
+        ),
+      );
+    }
+
+    final requirements = assembly.requirements
+        .map(
+          (item) => WorkshopCertifiedLibraryRequirementEvidence(
+            kind: item.kind.name,
+            description: item.description.trim(),
+            required: item.required,
+          ),
+        )
+        .toList(growable: false)
+      ..sort((left, right) {
+        var value = left.kind.compareTo(right.kind);
+        if (value != 0) return value;
+        value = left.required == right.required
+            ? 0
+            : left.required
+                ? -1
+                : 1;
+        if (value != 0) return value;
+        return left.description.compareTo(right.description);
+      });
+
+    final identical =
+        assembly.identicalExistingPaths.toSet().toList(growable: false)
+          ..sort();
+
+    return WorkshopCertifiedLibraryEvidencePack(
+      libraryId: remote.snapshot.libraryId,
+      catalogVersion: remote.snapshot.catalogVersion,
+      snapshotSha256: remote.snapshot.snapshotSha256,
+      reuseIdentity: reuseIdentity,
+      disposition: assembly.requiresAdaptation
+          ? WorkshopCertifiedLibraryEvidenceDisposition.adaptationRequired
+          : WorkshopCertifiedLibraryEvidenceDisposition.staged,
+      selections:
+          List<WorkshopCertifiedLibrarySelectionEvidence>.unmodifiable(
+        selections,
+      ),
+      assets: List<WorkshopCertifiedLibraryAssetEvidence>.unmodifiable(assets),
+      requirements:
+          List<WorkshopCertifiedLibraryRequirementEvidence>.unmodifiable(
+        requirements,
+      ),
+      stagedPaths: List<String>.unmodifiable(stagedPaths),
+      identicalExistingPaths: List<String>.unmodifiable(identical),
+    );
   }
 
   String _verifiedReuseIdentity({
