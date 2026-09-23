@@ -293,7 +293,9 @@ Return ONLY JSON:
 {"explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content"}],"validationNotes":[],"warnings":[]}
 
 Use only workspaceFiles as existing file content. Follow architectPlan. No
-markdown, review, approval or apply. For deletion omit content.
+markdown, review, approval or apply. For deletion omit content. Every content
+value must be a valid JSON string with line breaks, double quotes and
+backslashes escaped according to JSON.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
@@ -309,7 +311,9 @@ Return ONLY JSON:
 {"summary":"short","explanation":"required","changes":[{"path":"relative/path","type":"addition|modification|deletion","content":"full content for addition/modification"}],"validationNotes":[],"warnings":[]}
 
 Do not use markdown. For deletion omit content. Every addition/modification must
-contain the complete resulting file content. Do not review, approve or apply.
+contain the complete resulting file content. Every content value must be a valid
+JSON string with line breaks, double quotes and backslashes escaped according to
+JSON. Do not review, approve or apply.
 '''.trim();
 
     RuntimeEventLog.instance.emit(

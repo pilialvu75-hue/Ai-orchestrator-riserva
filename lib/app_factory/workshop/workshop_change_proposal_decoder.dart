@@ -26,7 +26,18 @@ final class WorkshopChangeProposalDecoder {
       responseText,
       emptyMessage: 'Workshop implementation response cannot be empty.',
     );
-    final decoded = jsonDecode(jsonText);
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(jsonText);
+    } on FormatException {
+      final repaired =
+          WorkshopStructuredJson.repairMalformedContentStrings(jsonText);
+      if (repaired == null) {
+        rethrow;
+      }
+      decoded = jsonDecode(repaired);
+    }
+
     if (decoded is! Map) {
       throw const FormatException(
         'Workshop proposal must be a JSON object.',
