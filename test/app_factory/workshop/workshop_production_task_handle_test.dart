@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_serv
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_snapshot.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_module_assembly_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
@@ -93,6 +94,75 @@ void main() {
       bundle.dashboardController.engine.stageOf(requestId!),
       WorkshopStage.completed,
     );
+  });
+
+  test(
+      'approved conversation proposal reaches task preflight without duplicate Orchestrator',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: <AppAiRole, WorkshopInferenceGateway>{
+        AppAiRole.workshopOrchestrator: _QueueGateway(
+          role: AppAiRole.workshopOrchestrator,
+          calls: calls,
+          results: <WorkshopInferenceResult>[],
+        ),
+        AppAiRole.architect: _QueueGateway(
+          role: AppAiRole.architect,
+          calls: calls,
+          results: <WorkshopInferenceResult>[_success('{}')],
+        ),
+        AppAiRole.engineer: _QueueGateway(
+          role: AppAiRole.engineer,
+          calls: calls,
+          results: <WorkshopInferenceResult>[_success(_proposalJson)],
+        ),
+        AppAiRole.reviewer: _QueueGateway(
+          role: AppAiRole.reviewer,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_approvedReviewJson),
+            _success(_validValidationJson),
+          ],
+        ),
+      },
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final approvedProposal =
+        WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+      'Create the requested step counter app with the agreed scope.',
+    );
+
+    bundle.dashboardController.startProduction(
+      title: 'Step counter',
+      instruction: 'Create an app for counting steps.',
+      context: <String>[approvedProposal],
+    );
+    bundle.dashboardController.approveCurrentProject();
+    final session = await bundle.dashboardController.prepareNextTask();
+
+    expect(session, isNotNull);
+    expect(session!.context.request.context, contains(approvedProposal));
+
+    final handle = coordinator.preparedHandle();
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ],
+    );
+    expect(workspaceGateway.writeCalls, 0);
   });
 
   test('coordinator recovers the exact task already prepared by dashboard',
