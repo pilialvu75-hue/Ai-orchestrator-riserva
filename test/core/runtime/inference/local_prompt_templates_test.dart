@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -151,4 +152,39 @@ void main() {
       expect(prompt, contains('turn-17'));
     });
   });
+
+  test('does not expose search protocol when user explicitly forbids web use', () {
+    final result = LocalPromptTemplates.compose(
+      modelId: 'phi3_5_mini',
+      prompt: 'Non usare internet: dimmi le notizie di oggi.',
+      systemPrompt: 'BASE',
+    );
+
+    expect(result, isNot(contains('<search>query</search>')));
+    expect(result, isNot(contains('Hai accesso a Internet tramite il tag')));
+  });
+
+  test('does not re-inject search protocol after web evidence is already present', () {
+    final result = LocalPromptTemplates.compose(
+      modelId: 'phi3_5_mini',
+      prompt: 'Quali sono le notizie di oggi?',
+      systemPrompt: 'BASE\n\n[WEB SEARCH RESULTS]\nEvidence already supplied.',
+    );
+
+    expect(result, isNot(contains('<search>query</search>')));
+    expect(result, isNot(contains('Hai accesso a Internet tramite il tag')));
+  });
+
+  test('does not expose search protocol for an offline-only marked turn', () {
+    final result = LocalPromptTemplates.compose(
+      modelId: 'phi3_5_mini',
+      prompt: 'Quali sono le notizie di oggi?',
+      systemPrompt:
+          'BASE\n\n${AssistantWebSearchPolicy.offlineOnlyMarker}',
+    );
+
+    expect(result, isNot(contains('<search>query</search>')));
+    expect(result, isNot(contains('Hai accesso a Internet tramite il tag')));
+  });
+
 }

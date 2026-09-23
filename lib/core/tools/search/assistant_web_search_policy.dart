@@ -15,6 +15,10 @@ abstract final class AssistantWebSearchPolicy {
     final value = prompt.trim().toLowerCase();
     if (value.isEmpty) return false;
 
+    if (_explicitNoWebIntent(value)) {
+      return false;
+    }
+
     return _explicitWebIntent(value) ||
         _timeSensitiveIntent(value) ||
         isPresentOfficeHolderQuery(value) ||
@@ -121,6 +125,56 @@ abstract final class AssistantWebSearchPolicy {
     }
 
     return query;
+  }
+
+  static bool _explicitNoWebIntent(String value) {
+    final normalized = value.replaceAll('’', "'");
+
+    const phrases = <String>[
+      // Italian.
+      'non usare internet',
+      'non usare il web',
+      'non usare web',
+      'non cercare online',
+      'non cercare sul web',
+      'non cercare su internet',
+      'senza internet',
+      'senza usare internet',
+      'rispondi offline',
+      'solo offline',
+
+      // English.
+      'do not use internet',
+      "don't use internet",
+      'do not use the web',
+      "don't use the web",
+      'do not search online',
+      "don't search online",
+      'do not search the web',
+      "don't search the web",
+      'without internet',
+      'offline only',
+
+      // French.
+      "n'utilise pas internet",
+      "n'utilise pas le web",
+      'ne cherche pas en ligne',
+      'ne cherche pas sur internet',
+      'sans internet',
+      'hors ligne uniquement',
+
+      // Spanish.
+      'no uses internet',
+      'no uses la web',
+      'no busques online',
+      'no busques en internet',
+      'no busques en la web',
+      'sin internet',
+      'solo sin conexión',
+      'solo sin conexion',
+    ];
+
+    return phrases.any(normalized.contains);
   }
 
   static bool _explicitWebIntent(String value) {

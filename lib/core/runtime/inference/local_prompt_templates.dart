@@ -74,7 +74,13 @@ class LocalPromptTemplates {
      * Search is reserved for explicit web intent or information whose value is
      * expected to change with time.
      */
-    final enableWebSearch = _isFactualQuery(userPrompt);
+    final enableWebSearch =
+        !AssistantWebSearchPolicy.isOfflineOnly(cleanedSystemPrompt) &&
+        !AssistantWebSearchPolicy.hasInjectedContext(
+          prompt: userPrompt,
+          systemPrompt: cleanedSystemPrompt,
+        ) &&
+        AssistantWebSearchPolicy.shouldSearch(userPrompt);
 
     final baseSystemPrompt =
         cleanedSystemPrompt ?? _completeSystemPrompt;
@@ -336,81 +342,6 @@ class LocalPromptTemplates {
 
     return trimmed.isEmpty ? null : trimmed;
   }
-
-  static bool _isFactualQuery(String prompt) {
-    final p = prompt.trim().toLowerCase();
-
-    if (p.isEmpty) {
-      return false;
-    }
-
-    /*
-     * Search only when the user explicitly asks for web lookup or when the
-     * information is inherently time-sensitive. Generic factual forms such as
-     * "quanto", "quando", "dove" and "cos'è" must not force an Internet round
-     * trip: the local model can answer stable knowledge directly.
-     */
-    return AssistantWebSearchPolicy.isPresentOfficeHolderQuery(p) ||
-        AssistantWebSearchPolicy.isSportsResultQuery(p) ||
-        p.contains('cerca online') ||
-        p.contains('cerca sul web') ||
-        p.contains('cerca su internet') ||
-        p.contains('cercami online') ||
-        p.contains('ricerca online') ||
-        p.contains('ricerca sul web') ||
-        p.contains('search online') ||
-        p.contains('search the web') ||
-        p.contains('look up online') ||
-        p.contains('cherche en ligne') ||
-        p.contains('recherche en ligne') ||
-        p.contains('busca online') ||
-        p.contains('buscar online') ||
-        p.contains('internet') ||
-        p.contains(' sul web') ||
-        p.startsWith('web ') ||
-        p.contains('meteo') ||
-        p.contains('weather') ||
-        p.contains('météo') ||
-        p.contains('notizie') ||
-        p.contains('news') ||
-        p.contains('actualités') ||
-        p.contains('actualites') ||
-        p.contains('noticias') ||
-        p.contains('oggi') ||
-        p.contains('today') ||
-        p.contains("aujourd'hui") ||
-        p.contains('hoy') ||
-        p.contains('attuale') ||
-        p.contains('attualmente') ||
-        p.contains('current') ||
-        p.contains('latest') ||
-        p.contains('ultimo') ||
-        p.contains('ultima') ||
-        p.contains('ultime') ||
-        p.contains('récent') ||
-        p.contains('recent') ||
-        p.contains('reciente') ||
-        p.contains('in tempo reale') ||
-        p.contains('real time') ||
-        p.contains('en temps réel') ||
-        p.contains('tiempo real') ||
-        p.contains('stasera') ||
-        p.contains('tonight') ||
-        p.contains('ce soir') ||
-        p.contains('esta noche') ||
-        p.contains('chi gioca') ||
-        p.contains('quando gioca') ||
-        p.contains('risultato') ||
-        p.contains('classifica') ||
-        p.contains('standings') ||
-        p.contains('score') ||
-        p.contains('prezzo') ||
-        p.contains('price') ||
-        p.contains('prix') ||
-        p.contains('precio') ||
-        p.contains('quotazione');
-  }
-
 
   // Text-only branch of NVIDIA's official Nano 4B chat template:
   // https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/blob/main/tokenizer_config.json
