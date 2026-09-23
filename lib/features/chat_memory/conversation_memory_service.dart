@@ -41,6 +41,37 @@ class ConversationMemoryService {
   /// Coalesces concurrent clear requests for the same session.
   final Map<String, Future<void>> _clearOperations = <String, Future<void>>{};
 
+  /// Global barrier used by the Settings Danger Zone.
+  ///
+  /// While active, semantic writes and recalls are rejected. Existing indexing
+  /// tails and per-session clear operations are drained before the destructive
+  /// operation runs so a delayed embedding cannot recreate memory after reset.
+  bool _globalResetInProgress = false;
+
+  bool get globalResetInProgress => _globalResetInProgress;
+
+  Future<T> runWithGlobalResetBarrier<T>(
+    Future<T> Function() operation,
+  ) async {
+    if (_globalResetInProgress) {
+      throw StateError('Assistant memory reset is already in progress.');
+    }
+
+    _globalResetInProgress = true;
+    try {
+      final pending = <Future<void>>[
+        ..._indexingTails.values,
+        ..._clearOperations.values,
+      ];
+      if (pending.isNotEmpty) {
+        await Future.wait(pending);
+      }
+      return await operation();
+    } finally {
+      _globalResetInProgress = false;
+    }
+  }
+
   Future<List<ChatTurn>> buildContext({
     required String sessionId,
     required List<ChatMessage> messages,
@@ -264,6 +295,13 @@ class ConversationMemoryService {
 
     if (normalized.isEmpty) return;
 
+    if (_globalResetInProgress) {
+      debugPrint(
+        '[EMBEDDING_STORE_SKIPPED] session=$sessionId message=$messageId reason=global_memory_reset',
+      );
+      return;
+    }
+
     if (_clearingSessions.contains(sessionId)) {
       debugPrint(
         '[EMBEDDING_STORE_SKIPPED] session=$sessionId message=$messageId reason=session_clearing',
@@ -335,7 +373,7 @@ class ConversationMemoryService {
   }) async {
     final normalized = query.trim();
 
-    if (normalized.isEmpty) {
+    if (normalized.isEmpty || _globalResetInProgress) {
       return const <ChatTurn>[];
     }
 
@@ -427,7 +465,8 @@ class ConversationMemoryService {
   }
 
   bool _isIndexWriteStale(String sessionId, int expectedEpoch) {
-    return _clearingSessions.contains(sessionId) ||
+    return _globalResetInProgress ||
+        _clearingSessions.contains(sessionId) ||
         (_indexEpochs[sessionId] ?? 0) != expectedEpoch;
   }
 
