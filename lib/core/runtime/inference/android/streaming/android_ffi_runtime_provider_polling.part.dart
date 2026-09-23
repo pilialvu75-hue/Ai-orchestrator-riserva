@@ -6,18 +6,16 @@
 part of '../../runtime_core.dart';
 
 class _PollingState {
-  _PollingState()
-      : startedAt = DateTime.now(),
-        lastTokenProgressAt = DateTime.now(),
-        lastNativeActivityAt = DateTime.now();
+  _PollingState() : lifecycleClock = InferenceLifecycleClock();
 
-  final DateTime startedAt;
+  final InferenceLifecycleClock lifecycleClock;
+
+  DateTime get startedAt => lifecycleClock.startedAt;
+
   int repeatedTokenCount = 0;
   int consecutiveInvalidTokens = 0;
   String? lastPiece;
   final StringBuffer fullText = StringBuffer();
-  DateTime lastTokenProgressAt;
-  DateTime lastNativeActivityAt;
   int consecutiveIdlePolls = 0;
   bool firstPollBoundaryLogged = false;
   bool firstPollBoundaryFinished = false;
@@ -84,7 +82,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         final sinceFirstToken = attemptState.firstTokenAt == null
             ? null
             : now.difference(attemptState.firstTokenAt!);
-        final sinceLastTokenProgress = now.difference(state.lastTokenProgressAt);
+        final sinceLastTokenProgress = state.lifecycleClock.sinceLastProgress;
         
         _throttledLoopLog(
           '[TOKEN_STREAM] poll iteration=${attemptState.pollIterations} tokens=${attemptState.estimatedTokens} elapsed_ms=${elapsed.inMilliseconds}'
@@ -144,7 +142,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         // ---------------------------------------------------------------------
 
         // ---------------------------------------------------------------------
-        final firstTokenWaitElapsed = now.difference(state.lastNativeActivityAt);
+        final firstTokenWaitElapsed = state.lifecycleClock.elapsed;
         if (attemptState.firstTokenAt == null &&
             firstTokenWaitElapsed.inMilliseconds > firstTokenDeadline.inMilliseconds) {
           _classifyFirstTokenTermination(
@@ -187,17 +185,17 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           _safeCancel(bindings, nativeSessionId);
           clearRuntimeVerification();
           attemptState.runtimeNeedsReset = true;
-          attemptState.runtimeResetReason = 'token_progress_watchdog';
+          attemptState.runtimeResetReason = InferenceLifecycleTerminalReason.noProgressTimeout.wireName;
           
           AndroidFfiRuntimeProvider._log(
-            '[STALL] reason=token_progress_watchdog'
+            '[STALL] reason=${InferenceLifecycleTerminalReason.noProgressTimeout.wireName}'
             ' generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${elapsed.inMilliseconds}'
             ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}'
             ' session=$sessionId',
           );
           AndroidFfiRuntimeProvider._log(
-            '[TERMINAL_STATE] state=stalled reason=token_progress_watchdog'
+            '[TERMINAL_STATE] state=stalled reason=${InferenceLifecycleTerminalReason.noProgressTimeout.wireName}'
             ' generated_tokens=${attemptState.estimatedTokens}'
             ' elapsed_ms=${elapsed.inMilliseconds}'
             ' since_last_token_ms=${sinceLastTokenProgress.inMilliseconds}',
@@ -404,16 +402,12 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           }
           
           final trimmedPiece = piece.trim();
-          final tokenObservedAt = DateTime.now();
-          state.lastNativeActivityAt = tokenObservedAt;
-          
-          // --- CORREZIONE CRITICA HOT-PATH ---
-          // Il motore nativo ha appena risposto con successo (status == 1).
-          // Dobbiamo resettare SUBITO i contatori di stallo e inattività PRIMA
-          // di qualsiasi filtraggio o sanitizzazione! Altrimenti, se il token viene
-          // ignorato dai continue sottostanti, il watchdog accuserà falsamente
-          // un blocco e ucciderà la risposta a metà!
-          state.lastTokenProgressAt = tokenObservedAt;
+
+          // Native status=1 is progress even when a structural token is later
+          // filtered from visible output. Update the shared lifecycle clock
+          // before sanitization so ignored control tokens cannot cause a false
+          // no-progress timeout.
+          state.lifecycleClock.markProgress();
           state.consecutiveIdlePolls = 0;
           state.consecutiveInvalidTokens = 0;
           // -----------------------------------
@@ -427,6 +421,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
           if (trimmedSanitizedPiece.isEmpty) {
             continue;
           }
+          state.lifecycleClock.markProgress(content: true);
           
           if (_isDeveloperMode) {
             AndroidFfiRuntimeProvider._log('RAW_TOKEN: "${piece.replaceAll('\n', r'\n')}"');
