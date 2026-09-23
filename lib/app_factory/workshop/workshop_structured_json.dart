@@ -67,14 +67,9 @@ abstract final class WorkshopStructuredJson {
     return normalized;
   }
 
-
-  /// Repairs only malformed JSON string escaping inside Engineer file-content
-  /// values. Every other field remains strict JSON and is validated later by
-  /// the normal Workshop proposal decoder.
-  ///
-  /// This exists for small local models that sometimes emit raw line breaks or
-  /// unescaped double quotes inside a "content" value even while the surrounding
-  /// proposal structure is otherwise valid.
+  /// Repairs only malformed JSON escaping inside Engineer file-content values.
+  /// Every other field remains strict JSON and is validated by the normal
+  /// Workshop proposal decoder.
   static String? repairMalformedContentStrings(String responseText) {
     final normalized = responseText.trim();
     if (normalized.isEmpty || normalized.length > 65536) {
@@ -258,53 +253,7 @@ abstract final class WorkshopStructuredJson {
   }
 
   static bool _isHex4(String value) =>
-      RegExp(r'^[0-9A-Fa-f]{4}
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var index = start; index < text.length; index++) {
-      final char = text[index];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (char == r'\\') {
-          escaped = true;
-          continue;
-        }
-        if (char == '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (char == '"') {
-        inString = true;
-        continue;
-      }
-      if (char == '{') {
-        depth += 1;
-        continue;
-      }
-      if (char == '}') {
-        depth -= 1;
-        if (depth == 0) {
-          return text.substring(start, index + 1);
-        }
-        if (depth < 0) {
-          return null;
-        }
-      }
-    }
-
-    return null;
-  }
-}
-).hasMatch(value);
-
+      RegExp(r'^[0-9A-Fa-f]{4}$').hasMatch(value);
   static String? _balancedObjectAt(String text, int start) {
     var depth = 0;
     var inString = false;
@@ -350,7 +299,6 @@ abstract final class WorkshopStructuredJson {
     return null;
   }
 }
-
 
 final class _WorkshopJsonRepairBudget {
   _WorkshopJsonRepairBudget(this.remaining);
