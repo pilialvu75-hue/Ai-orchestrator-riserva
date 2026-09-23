@@ -175,6 +175,65 @@ void main() {
       isNull,
     );
   });
+  test('exports safe bounded Cantiere Engineer prompt metrics', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_ENGINEER_PROMPT] '
+      'request=private-project-id compact=true chars=1432 '
+      'workspace_files=3 architect_chars=600',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_PROMPT',
+        'compact': true,
+        'chars': 1432,
+        'workspace_files': 3,
+        'architect_chars': 600,
+      },
+    );
+    expect(line, isNot(contains('private-project-id')));
+  });
+
+  test('exports Engineer retry outcome without request or execution IDs', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_ENGINEER_RETRY] '
+      'request=private-request execution=private-execution '
+      'attempt=2 terminal=failed',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_RETRY',
+        'attempt': 2,
+        'terminal': 'failed',
+      },
+    );
+    expect(line, isNot(contains('private-request')));
+    expect(line, isNot(contains('private-execution')));
+  });
+
+  test('rejects malformed Cantiere Engineer telemetry', () {
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_ENGINEER_PROMPT] '
+        'request=req compact=true chars=10 workspace_files=1 '
+        'architect_chars=10 prompt=private',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_ENGINEER_RETRY] '
+        'request=req attempt=2 terminal=secret',
+      ),
+      isNull,
+    );
+  });
+
   test('exports TTS worker lifecycle without arbitrary payload', () {
     final line = publicLogProjection(
       '$time [VOICE_ENGINE] [TTS_WORKER_BEGIN] '
