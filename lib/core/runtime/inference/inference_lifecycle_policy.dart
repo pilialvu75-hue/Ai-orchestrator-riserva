@@ -14,6 +14,9 @@ import 'package:flutter/foundation.dart';
 /// repetition/resource guards and the no-progress watchdog.
 abstract final class InferenceLifecyclePolicy {
   static const Duration outerStreamIdleTimeout = Duration(seconds: 75);
+  // LOCAL owns stricter provider-level first-token/no-progress watchdogs.
+  // Keep the generic stream guard wider so it cannot win the same race.
+  static const Duration outerLocalStreamIdleTimeout = Duration(seconds: 120);
 
   static const Duration androidStartGenerationTimeout = Duration(seconds: 60);
   static const Duration androidFirstTokenReleaseTimeout = Duration(seconds: 45);
