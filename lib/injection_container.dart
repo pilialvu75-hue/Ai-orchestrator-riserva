@@ -9,7 +9,7 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
-import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_provider.dart';
+import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric.dart';
 import 'package:ai_orchestrator/core/memory/fabric/local_crdt_memory_fabric_provider.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
