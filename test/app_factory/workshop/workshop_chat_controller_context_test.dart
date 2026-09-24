@@ -22,6 +22,14 @@ void main() {
     expect(provider.requests, hasLength(1));
     expect(provider.requests.single.prompt, 'prima richiesta');
     expect(provider.requests.single.context, isEmpty);
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('piu piccolo MVP realmente costruibile'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('Non aggiungere funzionalita'),
+    );
 
     await controller.send('seconda richiesta');
 
