@@ -148,8 +148,18 @@ class _WorkshopProductionDashboardPageState
             );
       if (!mounted) return;
       if (!result.readyForApproval) {
+        final rawSummary = result.review.approved
+            ? result.validation?.summary.trim()
+            : result.review.summary.trim();
+        final summary = rawSummary == null || rawSummary.isEmpty
+            ? null
+            : rawSummary.length <= 240
+                ? rawSummary
+                : '${rawSummary.substring(0, 240)}…';
         setState(() {
-          _error = 'Il task è stato elaborato ma non ha superato la revisione.';
+          _error = summary == null
+              ? 'Il task è stato elaborato ma non ha superato la revisione.'
+              : 'Il task non ha superato i gate: $summary';
         });
       }
     } catch (error) {
