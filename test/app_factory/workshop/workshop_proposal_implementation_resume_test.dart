@@ -90,6 +90,76 @@ void main() {
     expect(session.status, WorkspaceSessionStatus.review);
     expect(workspaceGateway.writeCalls, 0);
   });
+
+  test('resume path retries once when Engineer omits explanation', () async {
+    final provider = _RetryRecordingProvider();
+    final stageInference = WorkshopStageRoleInference(
+      executor: WorkshopRoleInferenceExecutor(
+        router: WorkshopRoleInferenceRouter(
+          gateways: <AppAiRole, WorkshopInferenceGateway>{
+            for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+              role: WorkshopInferenceGateway(provider: provider),
+          },
+        ),
+      ),
+    );
+    final workspaceGateway = _MemoryWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final session = WorkspaceSession(
+      request: const WorkshopRequest(
+        id: 'request-resume-schema',
+        title: 'Repair walking MVP',
+        instruction: 'Finish the bounded walking MVP',
+        targetFiles: <String>['lib/app.dart'],
+      ),
+      gateway: workspaceGateway,
+    );
+    await session.initialize();
+
+    const resume = WorkshopResumeContext(
+      executionId: 'execution-schema',
+      attemptId: 'attempt-schema',
+      projectId: 'project-schema',
+      taskId: 'task-schema',
+      sessionId: 'session-schema',
+      objective: 'Repair the staged proposal',
+      phase: 'implementation',
+    );
+
+    final proposal = await WorkshopProposalImplementationRunner(
+      inference: stageInference,
+    ).runWithResumeContext(
+      session: session,
+      resumeContext: resume,
+      revisionFeedback: 'Reviewer requested a complete bounded implementation.',
+      revisionAttempt: 1,
+    );
+
+    expect(proposal.explanation, 'Repair completed');
+    expect(session.workspace.read('lib/app.dart'), 'repaired');
+    expect(provider.requests, hasLength(2));
+    expect(
+      provider.requests.map((request) => request.sessionId).toList(),
+      <String>[
+        'session-schema:revision-1',
+        'session-schema:revision-1:engineer-retry-malformed-1',
+      ],
+    );
+    expect(
+      provider.requests.map((request) => request.maxTokens).toList(),
+      <int?>[640, 768],
+    );
+    expect(
+      provider.requests.every((request) => request.executionId == 'execution-schema'),
+      isTrue,
+    );
+    expect(
+      provider.requests.every((request) => request.taskId == 'task-schema'),
+      isTrue,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+  });
 }
 
 final class _RecordingProvider implements RuntimeInferenceProvider {
@@ -109,6 +179,33 @@ final class _RecordingProvider implements RuntimeInferenceProvider {
           timestamp: 1,
         ),
         InferenceResponse(
+          text: '',
+          timestamp: 2,
+          isFinal: true,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ],
+    );
+  }
+}
+
+final class _RetryRecordingProvider implements RuntimeInferenceProvider {
+  final List<InferenceRequest> requests = <InferenceRequest>[];
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    final index = requests.length;
+    requests.add(request);
+    final text = index == 0
+        ? '{"summary":"Repair","changes":[{"path":"lib/app.dart","type":"modification","content":"repaired"}],"validationNotes":[],"warnings":[]}'
+        : '{"summary":"Repair","explanation":"Repair completed","changes":[{"path":"lib/app.dart","type":"modification","content":"repaired"}],"validationNotes":[],"warnings":[]}';
+    return Stream<InferenceResponse>.fromIterable(
+      <InferenceResponse>[
+        InferenceResponse(text: text, timestamp: 1),
+        const InferenceResponse(
           text: '',
           timestamp: 2,
           isFinal: true,
