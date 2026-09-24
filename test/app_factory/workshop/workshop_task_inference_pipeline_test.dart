@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
@@ -45,10 +46,23 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(realGateway);
+      const preflight = WorkshopPreflightInferenceResult(
+        analysis: WorkshopInferenceResult(
+          text: 'owner-approved scope',
+          terminalState: InferenceTerminalState.success,
+        ),
+        architecture: WorkshopInferenceResult(
+          text: 'Architect bounded task plan',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
 
       final result = await WorkshopTaskInferencePipeline(
         inference: _stageInference(gateways),
-      ).run(session: session);
+      ).run(
+        session: session,
+        preflight: preflight,
+      );
 
       expect(result.readyForApproval, isTrue);
       expect(result.review.approved, isTrue);
@@ -66,6 +80,11 @@ void main() {
       );
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
       expect(gateways[AppAiRole.architect]!.calls, 0);
+      expect(reviewer.prompts, hasLength(2));
+      expect(
+        reviewer.prompts,
+        everyElement(contains('Architect bounded task plan')),
+      );
       expect(realGateway.writeCalls, 0);
       expect(realGateway.deleteCalls, 0);
       expect(realGateway.commitCalls, 0);
@@ -251,6 +270,7 @@ final class _QueueGateway extends WorkshopInferenceGateway {
   final AppAiRole role;
   final List<AppAiRole> callOrder;
   final List<WorkshopInferenceResult> _results;
+  final List<String> prompts = <String>[];
   int calls = 0;
 
   @override
@@ -269,6 +289,7 @@ final class _QueueGateway extends WorkshopInferenceGateway {
     CancellationToken? cancellationToken,
   }) async {
     calls += 1;
+    prompts.add(prompt);
     callOrder.add(role);
     if (_results.isEmpty) {
       throw StateError('No queued result for ${role.id}.');
