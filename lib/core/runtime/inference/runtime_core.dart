@@ -97,9 +97,10 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 2048;  // tetto assoluto di sicurezza nativa
   static const int _defaultMaxTokens = 1024; // default operativo per modelli 1B
-  // Keep local mobile generations bounded so stalled native loops surface
-  // quickly and the UI can return partial text instead of hanging indefinitely.
-  static const Duration _generationTimeout = Duration(seconds: 90);
+  // Isolated verification owns a total timeout independent from production
+  // streaming. Normal Assistant inference uses exactly one pre-first-token
+  // deadline plus the post-first-token no-progress watchdog.
+  static const Duration _verificationTotalTimeout = Duration(seconds: 90);
   static const Duration _sessionShutdownTimeout = Duration(seconds: 5);
   // If native polling produces no token at all within this window, treat the
   // run as stalled rather than waiting for the full timeout budget.
