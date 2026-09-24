@@ -31,11 +31,17 @@ void main() {
       final gateways = _gateways(reviewer);
       final session = await _reviewSession();
 
+      final longPlan = [
+        'Architect bounded task plan: implement walking tracking.',
+        List<String>.filled(1200, 'middle').join(' '),
+        'ACCEPTANCE: show visible user feedback for walking progress.',
+      ].join('\n');
+
       final verdict = await WorkshopProposalReviewRunner(
         inference: _stageInference(gateways),
       ).run(
         session: session,
-        implementationPlan: 'Architect bounded task plan',
+        implementationPlan: longPlan,
       );
 
       expect(verdict.approved, isTrue);
@@ -57,6 +63,10 @@ void main() {
       );
       expect(reviewer.lastPrompt, contains('Project goal: walking app'));
       expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
+      expect(
+        reviewer.lastPrompt,
+        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
+      );
       expect(reviewer.lastPrompt, isNot(contains('true|false')));
       expect(reviewer.lastPrompt, contains('"approved" field MUST'));
       expect(
