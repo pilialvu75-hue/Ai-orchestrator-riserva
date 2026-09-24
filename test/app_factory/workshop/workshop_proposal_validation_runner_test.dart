@@ -111,7 +111,7 @@ void main() {
         inference: _stageInference(_gateways(reviewer)),
       ).run(
         session: session,
-        implementationPlan: 'Architect plan ' * 220,
+        implementationPlan: List<String>.filled(220, 'Architect plan').join(' '),
       );
 
       expect(verdict.valid, isTrue);
