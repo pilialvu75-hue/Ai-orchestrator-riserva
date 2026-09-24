@@ -85,6 +85,47 @@ void main() {
       expect(reviewer.calls, 1);
     });
 
+    test('retries one transient validation runtime failure with compact bounds',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '',
+          terminalState: InferenceTerminalState.failed,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"valid":true,"summary":"Retry passed","checks":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'reviewer-model',
+          ),
+        ],
+      );
+      final session = await _validationSession();
+
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(
+        session: session,
+        implementationPlan: 'Architect plan ' * 220,
+      );
+
+      expect(verdict.valid, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.calls, 2);
+      expect(reviewer.maxTokensSeen, <int?>[256, 192]);
+      expect(reviewer.sessionIdsSeen.last, endsWith(':retry-1'));
+      expect(reviewer.promptsSeen, hasLength(2));
+      expect(
+        reviewer.promptsSeen.last.length,
+        lessThan(reviewer.promptsSeen.first.length),
+      );
+    });
+
     test('failed validation inference leaves session in validation', () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -160,11 +201,18 @@ Future<WorkspaceSession> _validationSession() async {
 }
 
 final class _StaticGateway extends WorkshopInferenceGateway {
-  _StaticGateway({required this.result}) : super(provider: _NoopProvider());
+  _StaticGateway({
+    required this.result,
+    this.sequence = const <WorkshopInferenceResult>[],
+  }) : super(provider: _NoopProvider());
 
   final WorkshopInferenceResult result;
+  final List<WorkshopInferenceResult> sequence;
   int calls = 0;
   String? lastPrompt;
+  final List<String> promptsSeen = <String>[];
+  final List<int?> maxTokensSeen = <int?>[];
+  final List<String> sessionIdsSeen = <String>[];
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -181,8 +229,15 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     String? modelPath,
     CancellationToken? cancellationToken,
   }) async {
+    final index = calls;
     calls += 1;
     lastPrompt = prompt;
+    promptsSeen.add(prompt);
+    maxTokensSeen.add(maxTokens);
+    sessionIdsSeen.add(sessionId);
+    if (sequence.isNotEmpty) {
+      return sequence[index < sequence.length ? index : sequence.length - 1];
+    }
     return result;
   }
 }
