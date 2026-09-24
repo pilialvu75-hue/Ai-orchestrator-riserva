@@ -33,7 +33,10 @@ void main() {
 
       final verdict = await WorkshopProposalReviewRunner(
         inference: _stageInference(gateways),
-      ).run(session: session);
+      ).run(
+        session: session,
+        implementationPlan: 'Architect bounded task plan',
+      );
 
       expect(verdict.approved, isTrue);
       expect(verdict.summary, 'Review passed');
@@ -53,6 +56,7 @@ void main() {
         isNot(contains('future oxygen tracking')),
       );
       expect(reviewer.lastPrompt, contains('Project goal: walking app'));
+      expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
       expect(
         gateways[AppAiRole.workshopOrchestrator]!.calls,
         0,
