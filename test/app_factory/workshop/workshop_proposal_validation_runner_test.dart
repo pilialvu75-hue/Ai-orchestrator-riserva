@@ -154,7 +154,7 @@ void main() {
         inference: _stageInference(_gateways(reviewer)),
       ).run(
         session: session,
-        implementationPlan: 'Architect bounded task plan',
+        implementationPlan: List<String>.filled(220, 'Architect plan').join(' '),
       );
 
       expect(verdict.valid, isTrue);
