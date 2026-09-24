@@ -145,7 +145,7 @@ WorkshopStageRoleInference _stageInference(
 }
 
 Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
-  final idleResult = const WorkshopInferenceResult(
+  const idleResult = WorkshopInferenceResult(
     text: '{}',
     terminalState: InferenceTerminalState.success,
   );
