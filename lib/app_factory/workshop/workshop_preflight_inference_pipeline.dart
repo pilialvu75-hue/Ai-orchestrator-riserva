@@ -34,6 +34,8 @@ final class WorkshopPreflightInferencePipeline {
   static const String approvedProposalContextPrefix =
       'WORKSHOP_APPROVED_PROPOSAL:';
   static const int _maxApprovedProposalChars = 6000;
+  static const int _architectProposalBackgroundChars = 1200;
+  static const int _architectRetryProposalBackgroundChars = 600;
 
   WorkshopPreflightInferencePipeline({
     required WorkshopStageRoleInference inference,
@@ -143,10 +145,13 @@ final class WorkshopPreflightInferencePipeline {
         'stage=analysis source=approved_proposal',
       );
       analysis = WorkshopInferenceResult(
-        text: 'OWNER-APPROVED WORKSHOP PROPOSAL\n$approvedProposal',
+        text:
+            'OWNER-APPROVED PROJECT VISION AVAILABLE AS BACKGROUND. '
+            'CURRENT TASK AUTHORITY: ${request.instruction}',
         model: 'workshop-approved-proposal',
         runtimeNotice:
-            'Owner-approved Workshop proposal reused as Orchestrator analysis.',
+            'Owner-approved Workshop proposal retained as project background; '
+            'duplicate Orchestrator inference skipped.',
         terminalState: InferenceTerminalState.success,
       );
     } else if (reuseDecision.shouldReuse && reuseDecision.asset != null) {
@@ -199,6 +204,7 @@ final class WorkshopPreflightInferencePipeline {
         target: resolvedTarget,
         reusedAsset: reuseDecision.asset,
         webEvidence: webEvidence,
+        approvedProposal: approvedProposal,
       ),
       systemPrompt: _architectSystemPrompt(
         reusedLocalKnowledge: reuseDecision.shouldReuse,
@@ -227,6 +233,7 @@ final class WorkshopPreflightInferencePipeline {
           analysis: analysis.text,
           target: resolvedTarget,
           reusedAsset: reuseDecision.asset,
+          approvedProposal: approvedProposal,
         ),
         systemPrompt:
             'You are the Cantiere Architect retrying a planning step after a '
@@ -424,6 +431,7 @@ final class WorkshopPreflightInferencePipeline {
     String? target,
     WorkshopReusableAsset? reusedAsset,
     WorkshopWebEvidencePack webEvidence = const WorkshopWebEvidencePack(),
+    String? approvedProposal,
   }) {
     final buffer = StringBuffer()
       ..writeln('WORKSHOP REQUEST')
@@ -438,6 +446,26 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln();
 
     _appendTargetBuildContract(buffer, target);
+
+    final proposalBackground = _boundedProposalBackground(
+      approvedProposal,
+      _architectProposalBackgroundChars,
+    );
+    if (proposalBackground.isNotEmpty) {
+      buffer
+        ..writeln('CURRENT TASK SCOPE RULE')
+        ..writeln(
+          'The request instruction is authoritative for this task. The '
+          'owner-approved project vision below is background for later '
+          'increments, not a requirement to implement every feature now. '
+          'Plan the smallest runnable increment that directly satisfies the '
+          'current request and can be reviewed and built on this device.',
+        )
+        ..writeln()
+        ..writeln('OWNER-APPROVED PROJECT VISION (BACKGROUND)')
+        ..writeln(proposalBackground)
+        ..writeln();
+    }
 
     buffer
       ..writeln(
@@ -464,8 +492,11 @@ final class WorkshopPreflightInferencePipeline {
     }
 
     buffer.writeln(
-      'Produce the smallest safe implementation plan for the Engineer, '
-      'including files/areas to inspect and validation criteria. If Web '
+      'Produce the smallest safe implementation plan for the Engineer for '
+      'THIS CURRENT TASK ONLY, including files/areas to inspect and validation '
+      'criteria that the Engineer can actually implement in this increment. '
+      'Do not promote project-vision background into current-task requirements. '
+      'If Web '
       'evidence suggests useful features or content, express them as explicit '
       'requirements with provenance/licensing checks rather than copied '
       'material. Do not modify anything.',
@@ -528,6 +559,7 @@ final class WorkshopPreflightInferencePipeline {
     required String analysis,
     String? target,
     WorkshopReusableAsset? reusedAsset,
+    String? approvedProposal,
   }) {
     const maxAnalysisChars = 3600;
     final normalizedAnalysis = analysis.trim();
@@ -554,6 +586,23 @@ final class WorkshopPreflightInferencePipeline {
         ..writeln();
     }
 
+    final proposalBackground = _boundedProposalBackground(
+      approvedProposal,
+      _architectRetryProposalBackgroundChars,
+    );
+    if (proposalBackground.isNotEmpty) {
+      buffer
+        ..writeln('CURRENT TASK SCOPE RULE')
+        ..writeln(
+          'Treat the owner-approved project vision as background only. Plan '
+          'the smallest runnable increment for the current request; do not '
+          'require all project features in this task.',
+        )
+        ..writeln('PROJECT VISION BACKGROUND')
+        ..writeln(proposalBackground)
+        ..writeln();
+    }
+
     buffer
       ..writeln('AUTHORITATIVE ANALYSIS')
       ..writeln(boundedAnalysis)
@@ -565,6 +614,24 @@ final class WorkshopPreflightInferencePipeline {
       );
 
     return buffer.toString();
+  }
+
+  static String _boundedProposalBackground(
+    String? value,
+    int maxChars,
+  ) {
+    final normalized = value?.trim() ?? '';
+    if (normalized.isEmpty || normalized.length <= maxChars) {
+      return normalized;
+    }
+
+    const marker = '\n...[project vision middle omitted]...\n';
+    final remaining = maxChars - marker.length;
+    final headChars = (remaining * 3) ~/ 5;
+    final tailChars = remaining - headChars;
+    return normalized.substring(0, headChars) +
+        marker +
+        normalized.substring(normalized.length - tailChars);
   }
 
   static String? _resolveTarget({
