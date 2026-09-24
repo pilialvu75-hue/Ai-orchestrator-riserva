@@ -66,6 +66,13 @@ String? publicLogProjection(String line) {
     'MODEL_DOWNLOAD_FAILED',
     'WORKSHOP_ENGINEER_PROMPT',
     'WORKSHOP_ENGINEER_RETRY',
+    'WORKSHOP_REVIEW_PROMPT',
+    'WORKSHOP_REVIEW_RETRY',
+    'WORKSHOP_REVIEW_VERDICT',
+    'WORKSHOP_VALIDATION_PROMPT',
+    'WORKSHOP_VALIDATION_RETRY',
+    'WORKSHOP_VALIDATION_VERDICT',
+    'WORKSHOP_GATE_REPAIR',
   };
   // Only contiguous leading tags are eligible; a prompt may contain [TTS_FAIL].
   var rest = line.substring(timestamp.end).trimLeft();
@@ -192,7 +199,44 @@ String? publicLogProjection(String line) {
       r'^request=[A-Za-z0-9._:-]{1,120} '
       r'(?:execution=[A-Za-z0-9._:-]{1,120} )?'
       r'attempt=(\d{1,3}) '
-      r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none)$',
+      r'(?:reason=(runtime|malformed_output) )?'
+      r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none)'
+      r'(?: chars=(\d{1,9}))?$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'attempt': int.parse(m[1]!),
+      if (m[2] != null) 'reason': m[2]!,
+      'terminal': m[3]!,
+      if (m[4] != null) 'chars': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_REVIEW_PROMPT' ||
+      event == 'WORKSHOP_VALIDATION_PROMPT') {
+    final m = RegExp(
+      r'^compact=(true|false) chars=(\d{1,9}) files=(\d{1,6}) '
+      r'plan_chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'compact': m[1] == 'true',
+      'chars': int.parse(m[2]!),
+      'files': int.parse(m[3]!),
+      'plan_chars': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_REVIEW_RETRY' ||
+      event == 'WORKSHOP_VALIDATION_RETRY') {
+    final m = RegExp(
+      r'^attempt=(\d{1,3}) '
+      r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none) '
+      r'chars=(\d{1,9})$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
@@ -200,6 +244,56 @@ String? publicLogProjection(String line) {
       'event': event,
       'attempt': int.parse(m[1]!),
       'terminal': m[2]!,
+      'chars': int.parse(m[3]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_REVIEW_VERDICT') {
+    final m = RegExp(
+      r'^approved=(true|false) summary_chars=(\d{1,9}) '
+      r'findings=(\d{1,6}) warnings=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'approved': m[1] == 'true',
+      'summary_chars': int.parse(m[2]!),
+      'findings': int.parse(m[3]!),
+      'warnings': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_VALIDATION_VERDICT') {
+    final m = RegExp(
+      r'^valid=(true|false) summary_chars=(\d{1,9}) '
+      r'checks=(\d{1,6}) warnings=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'valid': m[1] == 'true',
+      'summary_chars': int.parse(m[2]!),
+      'checks': int.parse(m[3]!),
+      'warnings': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_GATE_REPAIR') {
+    final m = RegExp(
+      r'^source=(review|validation) attempt=(\d{1,3}) '
+      r'summary_chars=(\d{1,9}) issues=(\d{1,6}) warnings=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'source': m[1]!,
+      'attempt': int.parse(m[2]!),
+      'summary_chars': int.parse(m[3]!),
+      'issues': int.parse(m[4]!),
+      'warnings': int.parse(m[5]!),
     });
   }
 
