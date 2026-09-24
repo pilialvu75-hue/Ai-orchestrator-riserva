@@ -110,7 +110,7 @@ final class WorkshopProposalImplementationRunner {
     } on FormatException catch (error) {
       if (didRetry ||
           cancellationToken?.isCancelled == true ||
-          !_isJsonSyntaxFormatException(error)) {
+          !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
 
@@ -228,7 +228,7 @@ final class WorkshopProposalImplementationRunner {
     } on FormatException catch (error) {
       if (didRetry ||
           cancellationToken?.isCancelled == true ||
-          !_isJsonSyntaxFormatException(error)) {
+          !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
 
@@ -521,8 +521,14 @@ JSON. Do not review, approve or apply.
     };
   }
 
-  static bool _isJsonSyntaxFormatException(FormatException error) {
-    return error.source != null || error.offset != null;
+  static bool _isRetryableProposalFormatException(FormatException error) {
+    if (error.source != null || error.offset != null) {
+      return true;
+    }
+
+    final message = error.message.toString();
+    return message == 'Workshop proposal field "explanation" is required.' ||
+        message == 'Workshop proposal field "explanation" must be text.';
   }
 
   static bool _shouldRetryEngineer(
@@ -579,8 +585,10 @@ JSON. Do not review, approve or apply.
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
-      'response was incomplete or invalid JSON. Use only the compact bounded '
-      'input and satisfy the core required behavior from the Architect plan. '
+      'response was incomplete, invalid JSON, or omitted a required proposal '
+      'field. Use only the compact bounded input and satisfy the core required '
+      'behavior from the Architect plan. Return one complete JSON object with '
+      'a non-empty string field "explanation" and a non-empty "changes" array. '
       'Produce the smallest complete compilable change, preferably one concise '
       'file when possible. Finish valid JSON before optional features or UI '
       'polish. Every change type must be exactly addition, modification, or '
