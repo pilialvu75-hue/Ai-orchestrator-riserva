@@ -58,9 +58,15 @@ final class WorkshopChatController extends ChangeNotifier {
         'dato davvero necessario, rispondi iniziando esattamente con "CLARIFY:" '
         'e fai solo le domande indispensabili. Quando hai informazioni sufficienti, '
         'rispondi iniziando esattamente con "PROPOSAL:" e fornisci una proposta '
-        'completa e operativa. Non chiedere conferma nella risposta: la conferma '
-        'è gestita dall\'interfaccia del Cantiere. Non dichiarare mai che qualcosa '
-        'è stato costruito, testato o compilato se non è realmente avvenuto.',
+        'completa e operativa per il piu piccolo MVP realmente costruibile. '
+        'Non aggiungere funzionalita, sensori, servizi, permessi, API, cloud o '
+        'integrazioni che l\'utente non ha richiesto esplicitamente. Non assumere '
+        'capacita hardware del dispositivo che non sono state verificate. Se la '
+        'richiesta e ampia, limita la proposta approvabile al primo incremento '
+        'funzionante; eventuali evoluzioni future non fanno parte dei requisiti '
+        'del task corrente. Non chiedere conferma nella risposta: la conferma '
+        'e gestita dall\'interfaccia del Cantiere. Non dichiarare mai che qualcosa '
+        'e stato costruito, testato o compilato se non e realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'
