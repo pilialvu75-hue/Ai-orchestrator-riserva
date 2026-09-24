@@ -58,7 +58,8 @@ void main() {
       );
     });
 
-    test('approved proposal is not duplicated in Architect prompt', () async {
+    test('approved project vision stays out of Architect current-task prompt',
+        () async {
       const marker = 'UNIQUE_APPROVED_PROPOSAL_MARKER';
       final orchestrator = _SequenceGateway(
         role: AppAiRole.workshopOrchestrator,
@@ -97,8 +98,10 @@ void main() {
       expect(orchestrator.calls, 0);
       expect(architect.calls, 1);
       final prompt = architect.prompts.single;
-      expect(RegExp(marker).allMatches(prompt), hasLength(1));
+      expect(RegExp(marker).allMatches(prompt), isEmpty);
+      expect(result.analysis.text, isNot(contains(marker)));
       expect(prompt, contains('Independent context'));
+      expect(prompt, contains('CURRENT TASK SCOPE RULE'));
       expect(
         prompt,
         isNot(contains(
