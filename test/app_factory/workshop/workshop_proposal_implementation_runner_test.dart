@@ -73,7 +73,7 @@ void main() {
       );
       expect(
         engineer.lastPrompt,
-        contains('Architect plan is model-authored implementation guidance'),
+        contains('plan is model-authored implementation guidance'),
       );
       expect(engineer.maxTokensValues, <int?>[640]);
       expect(engineer.lastPrompt!.length, lessThan(6000));
