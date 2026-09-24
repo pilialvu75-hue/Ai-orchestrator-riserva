@@ -35,13 +35,18 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(workspaceGateway);
+      final longPlan = [
+        'bounded implementation plan from Architect: implement walking tracking.',
+        List<String>.filled(1200, 'middle').join(' '),
+        'ACCEPTANCE: show visible user feedback for walking progress.',
+      ].join('\n');
       final preflight = WorkshopPreflightInferenceResult(
         analysis: const WorkshopInferenceResult(
           text: 'scope analysis from Orchestrator',
           terminalState: InferenceTerminalState.success,
         ),
-        architecture: const WorkshopInferenceResult(
-          text: 'bounded implementation plan from Architect',
+        architecture: WorkshopInferenceResult(
+          text: longPlan,
           terminalState: InferenceTerminalState.success,
         ),
       );
@@ -66,6 +71,10 @@ void main() {
       expect(
         engineer.lastPrompt,
         contains('bounded implementation plan from Architect'),
+      );
+      expect(
+        engineer.lastPrompt,
+        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
       );
       expect(engineer.maxTokensValues, <int?>[640]);
       expect(engineer.lastPrompt!.length, lessThan(6000));

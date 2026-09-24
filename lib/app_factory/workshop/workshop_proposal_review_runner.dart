@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -34,8 +35,6 @@ final class WorkshopProposalReviewRunner {
 
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
-  static const int _primaryPlanChars = 1200;
-  static const int _retryPlanChars = 700;
   static const int _primaryFileChars = 2400;
   static const int _retryFileChars = 1200;
   static const int _primaryContextChars = 320;
@@ -163,12 +162,10 @@ final class WorkshopProposalReviewRunner {
         .take(compact ? 2 : 4)
         .toList(growable: false);
 
-    final normalizedPlan = implementationPlan?.trim();
-    final planBudget = compact ? _retryPlanChars : _primaryPlanChars;
-    final boundedPlan =
-        normalizedPlan == null || normalizedPlan.isEmpty
-            ? null
-            : _boundedText(normalizedPlan, planBudget);
+    final projectedPlan = WorkshopTaskPlanProjection.project(
+      implementationPlan,
+    );
+    final boundedPlan = projectedPlan.isEmpty ? null : projectedPlan;
 
     final payload = <String, Object?>{
       'requestId': request.id,
@@ -187,11 +184,13 @@ requirement compliance and unsafe or incomplete edits.
 
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
-targetFiles and constraints. The implementationPlan is the Architect's bounded
-plan for this task and is authoritative for the expected increment. The context
-field is project background, not a demand to finish future project features in
-this task. Do not reject a correct bounded increment solely because later
-project capabilities are not implemented yet.
+targetFiles and constraints. The implementationPlan is the exact bounded Architect contract supplied to
+the Engineer and is authoritative for the expected increment. Judge only
+requirements present in this projected contract; do not infer requirements from
+an omitted middle section or from the unavailable full Architect response. The
+context field is project background, not a demand to finish future project
+features in this task. Do not reject a correct bounded increment solely because
+later project capabilities are not implemented yet.
 
 Workshop input JSON:
 ${jsonEncode(payload)}

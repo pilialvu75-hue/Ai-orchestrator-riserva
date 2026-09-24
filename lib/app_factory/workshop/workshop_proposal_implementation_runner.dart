@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inferenc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace_stager.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -38,8 +39,6 @@ final class WorkshopProposalImplementationRunner {
   static const int _primaryMaxTokens = 640;
   static const int _retryMaxTokens = 512;
   static const int _malformedOutputRetryMaxTokens = 768;
-  static const int _primaryArchitectChars = 900;
-  static const int _retryArchitectChars = 600;
   static const int _primaryWorkspaceChars = 1800;
   static const int _retryWorkspaceChars = 900;
   static const int _primaryContextChars = 360;
@@ -326,9 +325,8 @@ final class WorkshopProposalImplementationRunner {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
 
-    final architectPlan = _boundedText(
-      preflight?.architecture?.text ?? '',
-      compact ? _retryArchitectChars : _primaryArchitectChars,
+    final architectPlan = WorkshopTaskPlanProjection.project(
+      preflight?.architecture?.text,
     );
     final context = _boundedJoined(
       request.context,

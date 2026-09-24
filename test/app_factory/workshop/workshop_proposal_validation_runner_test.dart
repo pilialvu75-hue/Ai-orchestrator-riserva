@@ -31,11 +31,17 @@ void main() {
       final gateways = _gateways(reviewer);
       final session = await _validationSession();
 
+      final longPlan = [
+        'Architect bounded task plan: implement walking tracking.',
+        List<String>.filled(1200, 'middle').join(' '),
+        'ACCEPTANCE: show visible user feedback for walking progress.',
+      ].join('\n');
+
       final verdict = await WorkshopProposalValidationRunner(
         inference: _stageInference(gateways),
       ).run(
         session: session,
-        implementationPlan: 'Architect bounded task plan',
+        implementationPlan: longPlan,
       );
 
       expect(verdict.valid, isTrue);
@@ -59,6 +65,10 @@ void main() {
       );
       expect(reviewer.lastPrompt, contains('Project goal: walking app'));
       expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
+      expect(
+        reviewer.lastPrompt,
+        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
+      );
       expect(reviewer.lastPrompt, isNot(contains('true|false')));
       expect(reviewer.lastPrompt, contains('"valid" field MUST'));
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
@@ -113,7 +123,11 @@ void main() {
         inference: _stageInference(_gateways(reviewer)),
       ).run(
         session: session,
-        implementationPlan: List<String>.filled(220, 'Architect plan').join(' '),
+        implementationPlan: <String>[
+          'Architect retry contract: implement walking tracking.',
+          List<String>.filled(220, 'Architect plan').join(' '),
+          'ACCEPTANCE: visible user feedback remains required.',
+        ].join('\n'),
       );
 
       expect(verdict.valid, isTrue);
@@ -124,7 +138,17 @@ void main() {
       expect(reviewer.promptsSeen, hasLength(2));
       expect(
         reviewer.promptsSeen.last.length,
-        lessThan(reviewer.promptsSeen.first.length),
+        lessThanOrEqualTo(reviewer.promptsSeen.first.length),
+      );
+      expect(
+        reviewer.promptsSeen,
+        everyElement(
+          contains('ACCEPTANCE: visible user feedback remains required.'),
+        ),
+      );
+      expect(
+        reviewer.promptsSeen,
+        everyElement(contains('[bounded middle omitted]')),
       );
     });
 
