@@ -47,6 +47,19 @@ void main() {
       expect(reviewer.lastPrompt, contains('"before":"old"'));
       expect(reviewer.lastPrompt, contains('"after":"new"'));
       expect(reviewer.lastPrompt, contains('SCOPE RULE:'));
+      expect(reviewer.lastPrompt, contains('CONTRACT PRECEDENCE:'));
+      expect(
+        reviewer.lastPrompt,
+        contains('"targetFilesPolicy":"unspecified_for_initial_create_task"'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('explicit task instruction and explicit constraints are authoritative'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('does NOT mean "no files are allowed"'),
+      );
       expect(
         reviewer.lastPrompt,
         isNot(contains('WORKSHOP_APPROVED_PROPOSAL:')),
