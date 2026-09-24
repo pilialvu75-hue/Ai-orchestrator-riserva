@@ -234,6 +234,77 @@ void main() {
     );
   });
 
+  test('exports current Engineer retry reason without private IDs', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_ENGINEER_RETRY] request=private-request '
+      'execution=private-execution attempt=2 reason=malformed_output '
+      'terminal=success chars=731',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_RETRY',
+        'attempt': 2,
+        'reason': 'malformed_output',
+        'terminal': 'success',
+        'chars': 731,
+      },
+    );
+    expect(line, isNot(contains('private-request')));
+    expect(line, isNot(contains('private-execution')));
+  });
+
+  test('exports bounded Reviewer and Validation telemetry', () {
+    final reviewPrompt = publicLogProjection(
+      '$time [WORKSHOP_REVIEW_PROMPT] compact=false chars=2150 '
+      'files=1 plan_chars=680',
+    );
+    final reviewRetry = publicLogProjection(
+      '$time [WORKSHOP_REVIEW_RETRY] attempt=2 terminal=failed chars=0',
+    );
+    final reviewVerdict = publicLogProjection(
+      '$time [WORKSHOP_REVIEW_VERDICT] approved=false summary_chars=42 '
+      'findings=1 warnings=0',
+    );
+    final validationVerdict = publicLogProjection(
+      '$time [WORKSHOP_VALIDATION_VERDICT] valid=true summary_chars=33 '
+      'checks=2 warnings=1',
+    );
+    final repair = publicLogProjection(
+      '$time [WORKSHOP_GATE_REPAIR] source=review attempt=1 '
+      'summary_chars=42 issues=1 warnings=0',
+    );
+
+    expect(jsonDecode(reviewPrompt!)['event'], 'WORKSHOP_REVIEW_PROMPT');
+    expect(jsonDecode(reviewPrompt)['files'], 1);
+    expect(jsonDecode(reviewRetry!)['terminal'], 'failed');
+    expect(jsonDecode(reviewVerdict!)['approved'], isFalse);
+    expect(jsonDecode(reviewVerdict)['findings'], 1);
+    expect(jsonDecode(validationVerdict!)['valid'], isTrue);
+    expect(jsonDecode(validationVerdict)['checks'], 2);
+    expect(jsonDecode(repair!)['source'], 'review');
+    expect(jsonDecode(repair)['attempt'], 1);
+  });
+
+  test('rejects extended Reviewer telemetry that could carry private text', () {
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_REVIEW_VERDICT] approved=false summary_chars=42 '
+        'findings=1 warnings=0 summary=private',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_GATE_REPAIR] source=review attempt=1 '
+        'summary_chars=42 issues=1 warnings=0 feedback=private',
+      ),
+      isNull,
+    );
+  });
+
   test('exports TTS worker lifecycle without arbitrary payload', () {
     final line = publicLogProjection(
       '$time [VOICE_ENGINE] [TTS_WORKER_BEGIN] '
