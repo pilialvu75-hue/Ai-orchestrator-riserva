@@ -198,8 +198,7 @@ Return ONLY one JSON object with this exact contract:
   "warnings": ["optional warning"]
 }
 
-The "valid" field MUST be one JSON boolean: true or false. Never output
-"true|false", a string, or multiple alternatives.
+The "valid" field MUST be one JSON boolean: true or false. Never output a string, an alternatives list, or values joined by a separator.
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
 
