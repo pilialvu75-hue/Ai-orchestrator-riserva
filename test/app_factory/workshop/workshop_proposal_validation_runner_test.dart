@@ -128,6 +128,110 @@ void main() {
       );
     });
 
+    test('retries once when validation summary is missing', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":true,"checks":["diff checked"],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'reviewer-model',
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"valid":true,"summary":"Validation retry passed","checks":["diff checked"],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'reviewer-model',
+          ),
+        ],
+      );
+      final session = await _validationSession();
+
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(
+        session: session,
+        implementationPlan: 'Architect bounded task plan',
+      );
+
+      expect(verdict.valid, isTrue);
+      expect(verdict.summary, 'Validation retry passed');
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+      expect(reviewer.calls, 2);
+      expect(reviewer.maxTokensSeen, <int?>[256, 192]);
+      expect(reviewer.sessionIdsSeen.last, endsWith(':retry-format-1'));
+      expect(
+        reviewer.promptsSeen.last.length,
+        lessThan(reviewer.promptsSeen.first.length),
+      );
+    });
+
+    test('format retry keeps valid false authoritative', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":false,"checks":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"valid":false,"summary":"Validation still failed","checks":[],"warnings":["fix required"]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession();
+
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.valid, isFalse);
+      expect(verdict.summary, 'Validation still failed');
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+      expect(reviewer.calls, 2);
+    });
+
+    test('runtime retry consumes the only validation retry budget', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '',
+          terminalState: InferenceTerminalState.failed,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":true,"checks":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession();
+
+      await expectLater(
+        WorkshopProposalValidationRunner(
+          inference: _stageInference(_gateways(reviewer)),
+        ).run(session: session),
+        throwsA(isA<FormatException>()),
+      );
+
+      expect(reviewer.calls, 2);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+    });
+
     test('failed validation inference leaves session in validation', () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
