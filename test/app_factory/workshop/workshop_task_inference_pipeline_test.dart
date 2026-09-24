@@ -92,7 +92,7 @@ void main() {
       expect(realGateway.pullRequestCalls, 0);
     });
 
-    test('Reviewer rejection blocks before validation and never writes',
+    test('Reviewer rejection triggers one Engineer revision and re-review',
         () async {
       final callOrder = <AppAiRole>[];
       final engineer = _QueueGateway(
@@ -100,6 +100,7 @@ void main() {
         callOrder: callOrder,
         results: <WorkshopInferenceResult>[
           _success(_proposalJson),
+          _success(_repairedProposalJson),
         ],
       );
       final reviewer = _QueueGateway(
@@ -107,7 +108,66 @@ void main() {
         callOrder: callOrder,
         results: <WorkshopInferenceResult>[
           _success(_rejectedReviewJson),
+          _success(_approvedReviewJson),
           _success(_validValidationJson),
+        ],
+      );
+      final realGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(realGateway);
+      session.workspace.write(path: 'lib/reuse.dart', content: 'reused');
+
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(
+          _gateways(
+            engineer: engineer,
+            reviewer: reviewer,
+            callOrder: callOrder,
+          ),
+        ),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isTrue);
+      expect(result.review.approved, isTrue);
+      expect(result.validation?.valid, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.workspace.read('lib/app.dart'), 'repaired');
+      expect(session.workspace.read('lib/reuse.dart'), 'reused');
+      expect(engineer.calls, 2);
+      expect(engineer.prompts[1], contains('gateFeedback'));
+      expect(engineer.prompts[1], contains('regression'));
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.reviewer,
+        ],
+      );
+      expect(realGateway.writeCalls, 0);
+      expect(realGateway.deleteCalls, 0);
+    });
+
+    test('second Reviewer rejection remains authoritative and blocked',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(_proposalJson),
+          _success(_repairedProposalJson),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(_rejectedReviewJson),
+          _success(_rejectedReviewJson),
         ],
       );
       final realGateway = _RecordingWorkspaceGateway(
@@ -129,22 +189,30 @@ void main() {
       expect(result.review.approved, isFalse);
       expect(result.validation, isNull);
       expect(session.status, WorkspaceSessionStatus.blocked);
-      expect(reviewer.calls, 1);
+      expect(engineer.calls, 2);
+      expect(reviewer.calls, 2);
       expect(
         callOrder,
-        <AppAiRole>[AppAiRole.engineer, AppAiRole.reviewer],
+        <AppAiRole>[
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+        ],
       );
       expect(realGateway.writeCalls, 0);
       expect(realGateway.deleteCalls, 0);
     });
 
-    test('failed validation blocks and never approves or applies', () async {
+    test('failed validation gets one Engineer revision and repeats both gates',
+        () async {
       final callOrder = <AppAiRole>[];
       final engineer = _QueueGateway(
         role: AppAiRole.engineer,
         callOrder: callOrder,
         results: <WorkshopInferenceResult>[
           _success(_proposalJson),
+          _success(_repairedProposalJson),
         ],
       );
       final reviewer = _QueueGateway(
@@ -153,6 +221,8 @@ void main() {
         results: <WorkshopInferenceResult>[
           _success(_approvedReviewJson),
           _success(_invalidValidationJson),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
         ],
       );
       final realGateway = _RecordingWorkspaceGateway(
@@ -170,12 +240,26 @@ void main() {
         ),
       ).run(session: session);
 
-      expect(result.readyForApproval, isFalse);
+      expect(result.readyForApproval, isTrue);
       expect(result.review.approved, isTrue);
-      expect(result.validation?.valid, isFalse);
-      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(result.validation?.valid, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
       expect(session.isApplyApproved, isFalse);
-      expect(reviewer.calls, 2);
+      expect(session.workspace.read('lib/app.dart'), 'repaired');
+      expect(engineer.calls, 2);
+      expect(engineer.prompts[1], contains('gateFeedback'));
+      expect(engineer.prompts[1], contains('unsafe'));
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.reviewer,
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.reviewer,
+        ],
+      );
       expect(realGateway.writeCalls, 0);
       expect(realGateway.deleteCalls, 0);
       expect(realGateway.commitCalls, 0);
@@ -189,6 +273,11 @@ const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
     '"changes":[{"path":"lib/app.dart","type":"modification",'
     '"content":"new"}],"validationNotes":[],"warnings":[]}';
+
+const String _repairedProposalJson =
+    '{"summary":"Repair app","explanation":"Correct rejected change",'
+    '"changes":[{"path":"lib/app.dart","type":"modification",'
+    '"content":"repaired"}],"validationNotes":[],"warnings":[]}';
 
 const String _approvedReviewJson =
     '{"approved":true,"summary":"Review passed","findings":[],"warnings":[]}';
