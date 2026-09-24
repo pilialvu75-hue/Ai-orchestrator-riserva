@@ -394,23 +394,34 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. Follow architectPlan. When
+Use only workspaceFiles as existing file content. The explicit task instruction
+and constraints are authoritative; architectPlan is implementation guidance and
+must not override them. An empty request.targetFiles list on an initial create
+task means paths were not preselected, not that no file may be changed. When
 gateFeedback is present, it is authoritative feedback about the previously
-rejected staged proposal: revise the implementation instead of repeating that
-proposal. No markdown, review, approval or apply. For deletion omit content.
+rejected staged proposal. If that feedback identifies a mismatch between the
+Architect plan/target files and the explicit task, correct the implementation
+toward the explicit task instead of repeating the mistaken plan. No markdown,
+review, approval or apply. For deletion omit content.
 Every content
 value must be a valid JSON string with line breaks, double quotes and
 backslashes escaped according to JSON.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
-The Architect plan is the authoritative implementation guidance.
-Only current file contents included in workspaceFiles may be modified.
+The explicit task instruction and constraints are authoritative. The Architect
+plan is model-authored implementation guidance and must not override or
+contradict the explicit task. If request.targetFiles is empty for an initial
+create task, paths were not preselected; it does not mean no file may be
+changed. Only current file contents included in workspaceFiles may be modified.
 Files listed only in workspaceManifest are informational; do not rewrite them.
 New files may be added only when required by the task or Architect plan. When
 gateFeedback is present, it is authoritative Reviewer/Validation feedback about
 the previous rejected staged proposal. Correct that concrete issue while keeping
-the current task bounded; do not treat the previous proposal as approved.
+the current task bounded. If the feedback says the Architect plan or target
+files do not match the explicit task, follow the explicit instruction and
+constraints rather than repeating the mismatched plan. Do not treat the
+previous proposal as approved.
 
 INPUT:
 $encoded
