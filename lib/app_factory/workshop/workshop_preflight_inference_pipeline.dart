@@ -141,7 +141,7 @@ final class WorkshopPreflightInferencePipeline {
     } else if (approvedProposal != null) {
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_PREFLIGHT_REUSE] request=${request.id} '
-        'stage=analysis source=approved_proposal',
+        'stage=analysis source=approved_request_scope',
       );
       analysis = WorkshopInferenceResult(
         text: _approvedRequestScopeAnalysis(request),
@@ -234,8 +234,13 @@ final class WorkshopPreflightInferencePipeline {
             'You are the Cantiere Architect retrying a planning step after a '
             'transient incomplete inference. Produce a concise implementation '
             'plan only: target stack, files/areas to change, ordered steps, '
-            'risks and validation criteria. Preserve every supplied constraint. '
-            'Do not write files, approve/apply changes, or use Assistant state.',
+            'risks and validation criteria. The explicit current user request '
+            'and constraints are authoritative; model-authored project vision '
+            'is not a current-task requirement. For broad create requests use '
+            'the smallest interactive offline MVP and do not infer sensors, '
+            'GPS, background tracking, cloud or permissions unless explicitly '
+            'requested. Preserve every supplied constraint. Do not write files, '
+            'approve/apply changes, or use Assistant state.',
         sessionId: 'workshop:${request.id}:preflight:planning:retry-1',
         isOffline: isOffline,
         cancellationToken: cancellationToken,
