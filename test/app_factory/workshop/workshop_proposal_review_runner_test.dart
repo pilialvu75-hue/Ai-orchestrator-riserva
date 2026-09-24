@@ -57,12 +57,55 @@ void main() {
       );
       expect(reviewer.lastPrompt, contains('Project goal: walking app'));
       expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
+      expect(reviewer.lastPrompt, isNot(contains('true|false')));
+      expect(reviewer.lastPrompt, contains('"approved" field MUST'));
       expect(
         gateways[AppAiRole.workshopOrchestrator]!.calls,
         0,
       );
       expect(gateways[AppAiRole.architect]!.calls, 0);
       expect(gateways[AppAiRole.engineer]!.calls, 0);
+    });
+
+    test('retries one transient Reviewer runtime failure with compact bounds',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '',
+          terminalState: InferenceTerminalState.failed,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Retry passed","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'reviewer-model',
+          ),
+        ],
+      );
+      final session = await _reviewSession();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(
+        session: session,
+        implementationPlan: List<String>.filled(220, 'Architect plan').join(' '),
+      );
+
+      expect(verdict.approved, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.calls, 2);
+      expect(reviewer.maxTokensSeen, <int?>[256, 192]);
+      expect(reviewer.sessionIdsSeen.last, endsWith(':retry-1'));
+      expect(reviewer.promptsSeen, hasLength(2));
+      expect(
+        reviewer.promptsSeen.last.length,
+        lessThan(reviewer.promptsSeen.first.length),
+      );
     });
 
     test('failed Reviewer inference leaves staged workspace in review',
@@ -86,7 +129,7 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.review);
       expect(session.hasChanges, isTrue);
       expect(session.isApplyApproved, isFalse);
-      expect(reviewer.calls, 1);
+      expect(reviewer.calls, 2);
     });
   });
 }
@@ -102,7 +145,7 @@ WorkshopStageRoleInference _stageInference(
 }
 
 Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
-  final idleResult = const WorkshopInferenceResult(
+  const idleResult = WorkshopInferenceResult(
     text: '{}',
     terminalState: InferenceTerminalState.success,
   );
@@ -140,11 +183,18 @@ Future<WorkspaceSession> _reviewSession() async {
 }
 
 final class _StaticGateway extends WorkshopInferenceGateway {
-  _StaticGateway({required this.result}) : super(provider: _NoopProvider());
+  _StaticGateway({
+    required this.result,
+    this.sequence = const <WorkshopInferenceResult>[],
+  }) : super(provider: _NoopProvider());
 
   final WorkshopInferenceResult result;
+  final List<WorkshopInferenceResult> sequence;
   int calls = 0;
   String? lastPrompt;
+  final List<String> promptsSeen = <String>[];
+  final List<int?> maxTokensSeen = <int?>[];
+  final List<String> sessionIdsSeen = <String>[];
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -161,8 +211,15 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     String? modelPath,
     CancellationToken? cancellationToken,
   }) async {
+    final index = calls;
     calls += 1;
     lastPrompt = prompt;
+    promptsSeen.add(prompt);
+    maxTokensSeen.add(maxTokens);
+    sessionIdsSeen.add(sessionId);
+    if (sequence.isNotEmpty) {
+      return sequence[index < sequence.length ? index : sequence.length - 1];
+    }
     return result;
   }
 }

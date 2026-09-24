@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runs the Cantiere Reviewer against the current staged VirtualWorkspace.
@@ -30,6 +32,15 @@ final class WorkshopProposalReviewRunner {
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalReviewGate _gate;
 
+  static const int _primaryMaxTokens = 256;
+  static const int _retryMaxTokens = 192;
+  static const int _primaryPlanChars = 1200;
+  static const int _retryPlanChars = 700;
+  static const int _primaryFileChars = 2400;
+  static const int _retryFileChars = 1200;
+  static const int _primaryContextChars = 320;
+  static const int _retryContextChars = 160;
+
   Future<WorkshopReviewVerdict> run({
     required WorkspaceSession session,
     String? implementationPlan,
@@ -49,17 +60,44 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
-    final result = await _inference.complete(
+    final sessionId = 'workshop:review:${session.context.request.id}';
+    var result = await _inference.complete(
       stage: WorkshopStage.review,
       prompt: _buildPrompt(
         session,
         implementationPlan: implementationPlan,
       ),
       systemPrompt: _systemPrompt,
-      sessionId: 'workshop:review:${session.context.request.id}',
+      sessionId: sessionId,
       isOffline: isOffline,
+      maxTokens: _primaryMaxTokens,
       cancellationToken: cancellationToken,
     );
+
+    if (_shouldRetryReviewer(
+      result,
+      cancellationToken: cancellationToken,
+    )) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_RETRY] '
+        'attempt=2 terminal=${result.terminalState?.name ?? 'none'} '
+        'chars=${result.text.length}',
+      );
+
+      result = await _inference.complete(
+        stage: WorkshopStage.review,
+        prompt: _buildPrompt(
+          session,
+          implementationPlan: implementationPlan,
+          compact: true,
+        ),
+        systemPrompt: _retrySystemPrompt,
+        sessionId: '$sessionId:retry-1',
+        isOffline: isOffline,
+        maxTokens: _retryMaxTokens,
+        cancellationToken: cancellationToken,
+      );
+    }
 
     if (!result.isSuccessful) {
       final detail = result.errorMessage?.trim();
@@ -95,21 +133,25 @@ final class WorkshopProposalReviewRunner {
   String _buildPrompt(
     WorkspaceSession session, {
     String? implementationPlan,
+    bool compact = false,
   }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
 
+    final fileChars = compact ? _retryFileChars : _primaryFileChars;
     final changes = <Map<String, Object?>>[
-      for (final change in session.diff.files)
+      for (final change in session.diff.files.take(compact ? 2 : 4))
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
-          'before': original[change.path],
-          'after': current[change.path],
+          'before': _boundedNullable(original[change.path], fileChars),
+          'after': _boundedNullable(current[change.path], fileChars),
         },
     ];
 
+    final contextBudget =
+        compact ? _retryContextChars : _primaryContextChars;
     final taskContext = request.context
         .map((item) => item.trim())
         .where(
@@ -117,15 +159,16 @@ final class WorkshopProposalReviewRunner {
               item.isNotEmpty &&
               !item.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
         )
+        .map((item) => _boundedText(item, contextBudget))
+        .take(compact ? 2 : 4)
         .toList(growable: false);
 
     final normalizedPlan = implementationPlan?.trim();
+    final planBudget = compact ? _retryPlanChars : _primaryPlanChars;
     final boundedPlan =
         normalizedPlan == null || normalizedPlan.isEmpty
             ? null
-            : normalizedPlan.length <= 4000
-                ? normalizedPlan
-                : normalizedPlan.substring(0, 4000);
+            : _boundedText(normalizedPlan, planBudget);
 
     final payload = <String, Object?>{
       'requestId': request.id,
@@ -138,7 +181,7 @@ final class WorkshopProposalReviewRunner {
       'changes': changes,
     };
 
-    return '''
+    final prompt = '''
 Review the staged Workshop change set below for correctness, regressions,
 requirement compliance and unsafe or incomplete edits.
 
@@ -155,14 +198,63 @@ ${jsonEncode(payload)}
 
 Return ONLY one JSON object with this exact contract:
 {
-  "approved": true|false,
+  "approved": true,
   "summary": "non-empty review summary",
   "findings": ["optional finding"],
   "warnings": ["optional warning"]
 }
 
+The "approved" field MUST be one JSON boolean: true or false. Never output a string, an alternatives list, or values joined by a separator.
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_PROMPT] '
+      'compact=$compact chars=${prompt.length} files=${changes.length} '
+      'plan_chars=${boundedPlan?.length ?? 0}',
+    );
+    return prompt;
+  }
+
+  static bool _shouldRetryReviewer(
+    WorkshopInferenceResult result, {
+    CancellationToken? cancellationToken,
+  }) {
+    if (result.isSuccessful && result.hasText) {
+      return false;
+    }
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
+        result.terminalState == InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+    if (result.terminalState == InferenceTerminalState.timeout ||
+        result.terminalState == InferenceTerminalState.failed) {
+      return true;
+    }
+    final error = (result.errorMessage ?? '').toLowerCase();
+    if (error.contains('stall') ||
+        error.contains('timeout') ||
+        error.contains('timed out') ||
+        error.contains('generation')) {
+      return true;
+    }
+    return !result.isSuccessful || !result.hasText;
+  }
+
+  static String _boundedText(String value, int maxChars) {
+    final normalized = value.trim();
+    if (normalized.length <= maxChars) {
+      return normalized;
+    }
+    return '${normalized.substring(0, maxChars)}…';
+  }
+
+  static String? _boundedNullable(String? value, int maxChars) {
+    if (value == null) {
+      return null;
+    }
+    return _boundedText(value, maxChars);
   }
 
   static const String _systemPrompt =
@@ -170,4 +262,10 @@ Do not return markdown fences or any text outside the JSON object.
       'Workshop request and staged workspace diff. Do not use or assume '
       'Assistant chat memory or configuration. Return the required JSON '
       'verdict only.';
+
+  static const String _retrySystemPrompt =
+      'You are the Cantiere Reviewer retrying after a local runtime failure. '
+      'Use only the compact bounded task and diff supplied. Decide only whether '
+      'this current increment is correct and safe. Return the required JSON '
+      'verdict only; do not use project-wide future requirements.';
 }

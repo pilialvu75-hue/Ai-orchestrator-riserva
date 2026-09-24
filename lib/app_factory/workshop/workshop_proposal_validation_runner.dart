@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runs the Cantiere validation stage against the current staged workspace.
@@ -27,6 +29,15 @@ final class WorkshopProposalValidationRunner {
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalValidationGate _gate;
 
+  static const int _primaryMaxTokens = 256;
+  static const int _retryMaxTokens = 192;
+  static const int _primaryPlanChars = 1200;
+  static const int _retryPlanChars = 700;
+  static const int _primaryFileChars = 2400;
+  static const int _retryFileChars = 1200;
+  static const int _primaryContextChars = 320;
+  static const int _retryContextChars = 160;
+
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
     String? implementationPlan,
@@ -44,17 +55,44 @@ final class WorkshopProposalValidationRunner {
       throw StateError('Workshop validation requires staged workspace changes.');
     }
 
-    final result = await _inference.complete(
+    final sessionId = 'workshop:validation:${session.context.request.id}';
+    var result = await _inference.complete(
       stage: WorkshopStage.validation,
       prompt: _buildPrompt(
         session,
         implementationPlan: implementationPlan,
       ),
       systemPrompt: _systemPrompt,
-      sessionId: 'workshop:validation:${session.context.request.id}',
+      sessionId: sessionId,
       isOffline: isOffline,
+      maxTokens: _primaryMaxTokens,
       cancellationToken: cancellationToken,
     );
+
+    if (_shouldRetryValidation(
+      result,
+      cancellationToken: cancellationToken,
+    )) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_VALIDATION_RETRY] '
+        'attempt=2 terminal=${result.terminalState?.name ?? 'none'} '
+        'chars=${result.text.length}',
+      );
+
+      result = await _inference.complete(
+        stage: WorkshopStage.validation,
+        prompt: _buildPrompt(
+          session,
+          implementationPlan: implementationPlan,
+          compact: true,
+        ),
+        systemPrompt: _retrySystemPrompt,
+        sessionId: '$sessionId:retry-1',
+        isOffline: isOffline,
+        maxTokens: _retryMaxTokens,
+        cancellationToken: cancellationToken,
+      );
+    }
 
     if (!result.isSuccessful) {
       final detail = result.errorMessage?.trim();
@@ -88,21 +126,25 @@ final class WorkshopProposalValidationRunner {
   String _buildPrompt(
     WorkspaceSession session, {
     String? implementationPlan,
+    bool compact = false,
   }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
 
+    final fileChars = compact ? _retryFileChars : _primaryFileChars;
     final changes = <Map<String, Object?>>[
-      for (final change in session.diff.files)
+      for (final change in session.diff.files.take(compact ? 2 : 4))
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
-          'before': original[change.path],
-          'after': current[change.path],
+          'before': _boundedNullable(original[change.path], fileChars),
+          'after': _boundedNullable(current[change.path], fileChars),
         },
     ];
 
+    final contextBudget =
+        compact ? _retryContextChars : _primaryContextChars;
     final taskContext = request.context
         .map((item) => item.trim())
         .where(
@@ -110,15 +152,16 @@ final class WorkshopProposalValidationRunner {
               item.isNotEmpty &&
               !item.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
         )
+        .map((item) => _boundedText(item, contextBudget))
+        .take(compact ? 2 : 4)
         .toList(growable: false);
 
     final normalizedPlan = implementationPlan?.trim();
+    final planBudget = compact ? _retryPlanChars : _primaryPlanChars;
     final boundedPlan =
         normalizedPlan == null || normalizedPlan.isEmpty
             ? null
-            : normalizedPlan.length <= 4000
-                ? normalizedPlan
-                : normalizedPlan.substring(0, 4000);
+            : _boundedText(normalizedPlan, planBudget);
 
     final payload = <String, Object?>{
       'requestId': request.id,
@@ -131,7 +174,7 @@ final class WorkshopProposalValidationRunner {
       'changes': changes,
     };
 
-    return '''
+    final prompt = '''
 Validate the staged Workshop change set below before apply approval.
 Check requirement compliance, internal consistency, regressions and whether
 all staged edits are safe to hand to the explicit approval/apply gate.
@@ -149,14 +192,63 @@ ${jsonEncode(payload)}
 
 Return ONLY one JSON object with this exact contract:
 {
-  "valid": true|false,
+  "valid": true,
   "summary": "non-empty validation summary",
   "checks": ["optional completed check"],
   "warnings": ["optional warning"]
 }
 
+The "valid" field MUST be one JSON boolean: true or false. Never output a string, an alternatives list, or values joined by a separator.
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_VALIDATION_PROMPT] '
+      'compact=$compact chars=${prompt.length} files=${changes.length} '
+      'plan_chars=${boundedPlan?.length ?? 0}',
+    );
+    return prompt;
+  }
+
+  static bool _shouldRetryValidation(
+    WorkshopInferenceResult result, {
+    CancellationToken? cancellationToken,
+  }) {
+    if (result.isSuccessful && result.hasText) {
+      return false;
+    }
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
+        result.terminalState == InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+    if (result.terminalState == InferenceTerminalState.timeout ||
+        result.terminalState == InferenceTerminalState.failed) {
+      return true;
+    }
+    final error = (result.errorMessage ?? '').toLowerCase();
+    if (error.contains('stall') ||
+        error.contains('timeout') ||
+        error.contains('timed out') ||
+        error.contains('generation')) {
+      return true;
+    }
+    return !result.isSuccessful || !result.hasText;
+  }
+
+  static String _boundedText(String value, int maxChars) {
+    final normalized = value.trim();
+    if (normalized.length <= maxChars) {
+      return normalized;
+    }
+    return '${normalized.substring(0, maxChars)}…';
+  }
+
+  static String? _boundedNullable(String? value, int maxChars) {
+    if (value == null) {
+      return null;
+    }
+    return _boundedText(value, maxChars);
   }
 
   static const String _systemPrompt =
@@ -164,4 +256,10 @@ Do not return markdown fences or any text outside the JSON object.
       'the supplied Workshop request and staged workspace diff. Do not use or '
       'assume Assistant chat memory or configuration. Return the required JSON '
       'verdict only. Never approve apply or mutate files.';
+
+  static const String _retrySystemPrompt =
+      'You are the Cantiere validation reviewer retrying after a local runtime '
+      'failure. Use only the compact bounded task and diff supplied. Validate '
+      'only this current increment. Return the required JSON verdict only; '
+      'never approve apply or mutate files.';
 }
