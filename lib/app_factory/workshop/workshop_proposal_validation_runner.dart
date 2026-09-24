@@ -29,6 +29,7 @@ final class WorkshopProposalValidationRunner {
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
+    String? implementationPlan,
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
@@ -45,7 +46,10 @@ final class WorkshopProposalValidationRunner {
 
     final result = await _inference.complete(
       stage: WorkshopStage.validation,
-      prompt: _buildPrompt(session),
+      prompt: _buildPrompt(
+        session,
+        implementationPlan: implementationPlan,
+      ),
       systemPrompt: _systemPrompt,
       sessionId: 'workshop:validation:${session.context.request.id}',
       isOffline: isOffline,
@@ -81,7 +85,10 @@ final class WorkshopProposalValidationRunner {
     return verdict;
   }
 
-  String _buildPrompt(WorkspaceSession session) {
+  String _buildPrompt(
+    WorkspaceSession session, {
+    String? implementationPlan,
+  }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
@@ -105,10 +112,19 @@ final class WorkshopProposalValidationRunner {
         )
         .toList(growable: false);
 
+    final normalizedPlan = implementationPlan?.trim();
+    final boundedPlan =
+        normalizedPlan == null || normalizedPlan.isEmpty
+            ? null
+            : normalizedPlan.length <= 4000
+                ? normalizedPlan
+                : normalizedPlan.substring(0, 4000);
+
     final payload = <String, Object?>{
       'requestId': request.id,
       'title': request.title,
       'instruction': request.instruction,
+      'implementationPlan': boundedPlan,
       'targetFiles': request.targetFiles,
       'constraints': request.constraints,
       'context': taskContext,
@@ -121,8 +137,10 @@ Check requirement compliance, internal consistency, regressions and whether
 all staged edits are safe to hand to the explicit approval/apply gate.
 
 SCOPE RULE:
-Validate ONLY the current task described by title, instruction, targetFiles and
-constraints. The context field is project background. Missing future project
+Validate ONLY the current task described by title, instruction,
+implementationPlan, targetFiles and constraints. The implementationPlan is the
+Architect's bounded plan for this task and is authoritative for the expected
+increment. The context field is project background. Missing future project
 features must not invalidate a correct bounded increment unless they are
 explicit requirements of this current task.
 
