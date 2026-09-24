@@ -192,12 +192,14 @@ ${jsonEncode(payload)}
 
 Return ONLY one JSON object with this exact contract:
 {
-  "valid": true|false,
+  "valid": true,
   "summary": "non-empty validation summary",
   "checks": ["optional completed check"],
   "warnings": ["optional warning"]
 }
 
+The "valid" field MUST be one JSON boolean: true or false. Never output
+"true|false", a string, or multiple alternatives.
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
 
@@ -226,10 +228,13 @@ Do not return markdown fences or any text outside the JSON object.
       return true;
     }
     final error = (result.errorMessage ?? '').toLowerCase();
-    return error.contains('stall') ||
+    if (error.contains('stall') ||
         error.contains('timeout') ||
         error.contains('timed out') ||
-        error.contains('generation');
+        error.contains('generation')) {
+      return true;
+    }
+    return !result.isSuccessful || !result.hasText;
   }
 
   static String _boundedText(String value, int maxChars) {
