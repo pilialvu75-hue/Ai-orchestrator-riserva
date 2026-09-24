@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validatio
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Result of one Cantiere task inference cycle up to the explicit apply gate.
 ///
@@ -61,12 +62,16 @@ final class WorkshopTaskInferencePipeline {
   final WorkshopProposalReviewRunner _reviewRunner;
   final WorkshopProposalValidationRunner _validationRunner;
 
+  static const int _maxGateRepairAttempts = 1;
+
   Future<WorkshopTaskInferenceResult> run({
     required WorkspaceSession session,
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
+    final revisionBaseline =
+        Map<String, String>.from(session.workspace.snapshot);
     final proposal = await _implementationRunner.run(
       session: session,
       preflight: preflight,
@@ -77,6 +82,7 @@ final class WorkshopTaskInferencePipeline {
     return _reviewAndValidate(
       session: session,
       proposal: proposal,
+      revisionBaseline: revisionBaseline,
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
@@ -97,6 +103,8 @@ final class WorkshopTaskInferencePipeline {
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
+    final revisionBaseline =
+        Map<String, String>.from(session.workspace.snapshot);
     final proposal = await _implementationRunner.runWithResumeContext(
       session: session,
       resumeContext: resumeContext,
@@ -108,7 +116,9 @@ final class WorkshopTaskInferencePipeline {
     return _reviewAndValidate(
       session: session,
       proposal: proposal,
+      revisionBaseline: revisionBaseline,
       preflight: preflight,
+      resumeContext: resumeContext,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -117,37 +127,157 @@ final class WorkshopTaskInferencePipeline {
   Future<WorkshopTaskInferenceResult> _reviewAndValidate({
     required WorkspaceSession session,
     required WorkshopChangeProposal proposal,
+    required Map<String, String> revisionBaseline,
     WorkshopPreflightInferenceResult? preflight,
+    WorkshopResumeContext? resumeContext,
     required bool isOffline,
     CancellationToken? cancellationToken,
   }) async {
     final implementationPlan = preflight?.architecture?.text;
+    var currentProposal = proposal;
+    var repairAttempts = 0;
 
-    final review = await _reviewRunner.run(
-      session: session,
-      implementationPlan: implementationPlan,
-      isOffline: isOffline,
-      cancellationToken: cancellationToken,
-    );
+    while (true) {
+      final review = await _reviewRunner.run(
+        session: session,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
 
-    if (!review.approved) {
-      return WorkshopTaskInferenceResult(
-        proposal: proposal,
-        review: review,
+      if (!review.approved) {
+        if (repairAttempts >= _maxGateRepairAttempts ||
+            cancellationToken?.isCancelled == true) {
+          return WorkshopTaskInferenceResult(
+            proposal: currentProposal,
+            review: review,
+          );
+        }
+
+        repairAttempts += 1;
+        _emitGateRepair(
+          source: 'review',
+          attempt: repairAttempts,
+          summaryChars: review.summary.length,
+          issues: review.findings.length,
+          warnings: review.warnings.length,
+        );
+        session.prepareRevisionAfterRejectedProposal(
+          baselineSnapshot: revisionBaseline,
+          proposalPaths: currentProposal.affectedPaths,
+        );
+        currentProposal = await _runRevision(
+          session: session,
+          preflight: preflight,
+          resumeContext: resumeContext,
+          feedback: _reviewFeedback(review),
+          attempt: repairAttempts,
+          isOffline: isOffline,
+          cancellationToken: cancellationToken,
+        );
+        continue;
+      }
+
+      final validation = await _validationRunner.run(
+        session: session,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+
+      if (validation.valid ||
+          repairAttempts >= _maxGateRepairAttempts ||
+          cancellationToken?.isCancelled == true) {
+        return WorkshopTaskInferenceResult(
+          proposal: currentProposal,
+          review: review,
+          validation: validation,
+        );
+      }
+
+      repairAttempts += 1;
+      _emitGateRepair(
+        source: 'validation',
+        attempt: repairAttempts,
+        summaryChars: validation.summary.length,
+        issues: validation.checks.length,
+        warnings: validation.warnings.length,
+      );
+      session.prepareRevisionAfterRejectedProposal(
+        baselineSnapshot: revisionBaseline,
+        proposalPaths: currentProposal.affectedPaths,
+      );
+      currentProposal = await _runRevision(
+        session: session,
+        preflight: preflight,
+        resumeContext: resumeContext,
+        feedback: _validationFeedback(validation),
+        attempt: repairAttempts,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+    }
+  }
+
+  Future<WorkshopChangeProposal> _runRevision({
+    required WorkspaceSession session,
+    required WorkshopPreflightInferenceResult? preflight,
+    required WorkshopResumeContext? resumeContext,
+    required String feedback,
+    required int attempt,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) {
+    if (resumeContext != null) {
+      return _implementationRunner.runWithResumeContext(
+        session: session,
+        resumeContext: resumeContext,
+        preflight: preflight,
+        revisionFeedback: feedback,
+        revisionAttempt: attempt,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
       );
     }
 
-    final validation = await _validationRunner.run(
+    return _implementationRunner.run(
       session: session,
-      implementationPlan: implementationPlan,
+      preflight: preflight,
+      revisionFeedback: feedback,
+      revisionAttempt: attempt,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
+  }
 
-    return WorkshopTaskInferenceResult(
-      proposal: proposal,
-      review: review,
-      validation: validation,
+  static String _reviewFeedback(WorkshopReviewVerdict verdict) {
+    return <String>[
+      'Reviewer rejected the previous staged proposal.',
+      verdict.summary,
+      ...verdict.findings.map((finding) => 'Finding: $finding'),
+      ...verdict.warnings.map((warning) => 'Warning: $warning'),
+    ].join(' ');
+  }
+
+  static String _validationFeedback(WorkshopValidationVerdict verdict) {
+    return <String>[
+      'Validation rejected the previous staged proposal.',
+      verdict.summary,
+      ...verdict.checks.map((check) => 'Check: $check'),
+      ...verdict.warnings.map((warning) => 'Warning: $warning'),
+    ].join(' ');
+  }
+
+  static void _emitGateRepair({
+    required String source,
+    required int attempt,
+    required int summaryChars,
+    required int issues,
+    required int warnings,
+  }) {
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_GATE_REPAIR] source=$source attempt=$attempt '
+      'summary_chars=$summaryChars issues=$issues warnings=$warnings',
     );
   }
 }
