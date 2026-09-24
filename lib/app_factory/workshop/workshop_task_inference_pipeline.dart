@@ -77,6 +77,7 @@ final class WorkshopTaskInferencePipeline {
     return _reviewAndValidate(
       session: session,
       proposal: proposal,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -107,6 +108,7 @@ final class WorkshopTaskInferencePipeline {
     return _reviewAndValidate(
       session: session,
       proposal: proposal,
+      preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -115,11 +117,15 @@ final class WorkshopTaskInferencePipeline {
   Future<WorkshopTaskInferenceResult> _reviewAndValidate({
     required WorkspaceSession session,
     required WorkshopChangeProposal proposal,
+    WorkshopPreflightInferenceResult? preflight,
     required bool isOffline,
     CancellationToken? cancellationToken,
   }) async {
+    final implementationPlan = preflight?.architecture?.text;
+
     final review = await _reviewRunner.run(
       session: session,
+      implementationPlan: implementationPlan,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
@@ -133,6 +139,7 @@ final class WorkshopTaskInferencePipeline {
 
     final validation = await _validationRunner.run(
       session: session,
+      implementationPlan: implementationPlan,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
     );
