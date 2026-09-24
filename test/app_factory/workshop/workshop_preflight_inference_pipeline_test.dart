@@ -198,7 +198,7 @@ void main() {
     });
 
     test(
-        'reuses owner-approved proposal and skips duplicate Orchestrator inference',
+        'keeps model-authored approved proposal out of the current task contract',
         () async {
       final callOrder = <AppAiRole>[];
       final orchestrator = _RecordingGateway(
@@ -212,15 +212,17 @@ void main() {
         result: _success('implementation plan'),
       );
       final request = WorkshopRequest(
-        id: 'approved-counter-app',
-        title: 'Contatore',
-        instruction:
-            'Crea una semplice app contatore con pulsante +, pulsante - e Reset.',
+        id: 'approved-walking-app',
+        title: 'App per camminare',
+        instruction: 'fai un app per camminare',
         operation: WorkshopOperation.create,
+        constraints: const <String>['Keep the first increment buildable'],
         context: <String>[
           WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
-            'Proposta: app contatore con +, - e Reset.',
+            'Add GPS walking tracking, step sensors, weekly goals, calories, '
+            'cloud sync and mandatory user feedback criteria for Android/iOS.',
           ),
+          'Explicit user context: keep the first version simple.',
         ],
       );
 
@@ -239,17 +241,31 @@ void main() {
       expect(callOrder, <AppAiRole>[AppAiRole.architect]);
       expect(
         result.analysis.text,
-        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+        contains('OWNER-APPROVED CURRENT TASK SCOPE'),
       );
+      expect(result.analysis.text, contains('fai un app per camminare'));
       expect(
         result.analysis.text,
-        contains('app contatore con +, - e Reset'),
+        contains('Explicit user context: keep the first version simple.'),
       );
+      expect(result.analysis.text, isNot(contains('GPS walking tracking')));
+      expect(result.analysis.text, isNot(contains('weekly goals')));
+      expect(result.analysis.text, isNot(contains('user feedback criteria')));
       expect(architect.lastPrompt, contains('target: android'));
+      expect(architect.lastPrompt, contains('CURRENT TASK SCOPE RULE'));
+      expect(architect.lastPrompt, contains('fai un app per camminare'));
       expect(
         architect.lastPrompt,
-        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+        contains('Explicit user context: keep the first version simple.'),
       );
+      expect(architect.lastPrompt, isNot(contains('GPS walking tracking')));
+      expect(architect.lastPrompt, isNot(contains('weekly goals')));
+      expect(architect.lastPrompt, isNot(contains('user feedback criteria')));
+      expect(
+        architect.lastSystemPrompt,
+        contains('smallest interactive offline MVP'),
+      );
+      expect(architect.lastSystemPrompt, contains('Never infer sensors, GPS'));
     });
 
     test('stops before Architect when Orchestrator inference fails', () async {
@@ -332,6 +348,7 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
   final WorkshopInferenceResult result;
   int calls = 0;
   String? lastPrompt;
+  String? lastSystemPrompt;
   String? lastSessionId;
   bool? lastIsOffline;
 
@@ -353,6 +370,7 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
     calls += 1;
     callOrder.add(role);
     lastPrompt = prompt;
+    lastSystemPrompt = systemPrompt;
     lastSessionId = sessionId;
     lastIsOffline = isOffline;
     return result;
