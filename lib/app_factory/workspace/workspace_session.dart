@@ -271,6 +271,54 @@ final class WorkspaceSession {
     _status = WorkspaceSessionStatus.blocked;
   }
 
+  /// Reopens a gate-rejected staged proposal for one bounded revision.
+  ///
+  /// This is deliberately narrower than a generic "unblock" operation. The
+  /// caller must provide the exact VirtualWorkspace snapshot captured before
+  /// the rejected Engineer proposal and the paths owned by that proposal.
+  /// Only those paths are restored, so certified/library changes that were
+  /// already staged before Engineer remain intact. No real workspace write is
+  /// performed and apply approval is always cleared.
+  void prepareRevisionAfterRejectedProposal({
+    required Map<String, String> baselineSnapshot,
+    required Iterable<String> proposalPaths,
+  }) {
+    if (_status != WorkspaceSessionStatus.blocked) {
+      throw StateError(
+        'Only a blocked WorkspaceSession can prepare a rejected-proposal revision.',
+      );
+    }
+
+    if (!workspace.isInitialized) {
+      throw StateError(
+        'WorkspaceSession must be initialized before preparing a revision.',
+      );
+    }
+
+    final paths = proposalPaths
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet();
+    if (paths.isEmpty) {
+      throw StateError(
+        'Rejected-proposal revision requires at least one proposal path.',
+      );
+    }
+
+    for (final path in paths) {
+      final baseline = baselineSnapshot[path];
+      if (baseline != null) {
+        workspace.write(path: path, content: baseline);
+      } else {
+        workspace.delete(path);
+      }
+    }
+
+    _blockedReason = null;
+    _applyApproved = false;
+    _status = WorkspaceSessionStatus.working;
+  }
+
   /// Cancella la sessione.
   ///
   /// Le modifiche virtuali rimangono solamente in memoria e non vengono
