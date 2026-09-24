@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -31,8 +32,6 @@ final class WorkshopProposalValidationRunner {
 
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
-  static const int _primaryPlanChars = 1200;
-  static const int _retryPlanChars = 700;
   static const int _primaryFileChars = 2400;
   static const int _retryFileChars = 1200;
   static const int _primaryContextChars = 320;
@@ -156,12 +155,10 @@ final class WorkshopProposalValidationRunner {
         .take(compact ? 2 : 4)
         .toList(growable: false);
 
-    final normalizedPlan = implementationPlan?.trim();
-    final planBudget = compact ? _retryPlanChars : _primaryPlanChars;
-    final boundedPlan =
-        normalizedPlan == null || normalizedPlan.isEmpty
-            ? null
-            : _boundedText(normalizedPlan, planBudget);
+    final projectedPlan = WorkshopTaskPlanProjection.project(
+      implementationPlan,
+    );
+    final boundedPlan = projectedPlan.isEmpty ? null : projectedPlan;
 
     final payload = <String, Object?>{
       'requestId': request.id,
