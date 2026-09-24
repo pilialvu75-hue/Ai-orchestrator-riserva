@@ -64,9 +64,13 @@ final class WorkshopChatController extends ChangeNotifier {
         'capacita hardware del dispositivo che non sono state verificate. Se la '
         'richiesta e ampia, limita la proposta approvabile al primo incremento '
         'funzionante; eventuali evoluzioni future non fanno parte dei requisiti '
-        'del task corrente. Non chiedere conferma nella risposta: la conferma '
-        'e gestita dall\'interfaccia del Cantiere. Non dichiarare mai che qualcosa '
-        'e stato costruito, testato o compilato se non e realmente avvenuto.',
+        'del task corrente. Rispondi sempre nella stessa lingua dell\'ultimo '
+        'messaggio dell\'utente e non cambiare lingua tra chiarimenti e proposta. '
+        'Se il messaggio corrente e in italiano, rispondi in italiano; non '
+        'tradurlo in portoghese, spagnolo o altre lingue. Non chiedere conferma '
+        'nella risposta: la conferma e gestita dall\'interfaccia del Cantiere. '
+        'Non dichiarare mai che qualcosa e stato costruito, testato o compilato '
+        'se non e realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'

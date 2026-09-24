@@ -30,6 +30,14 @@ void main() {
       provider.requests.single.systemPrompt,
       contains('Non aggiungere funzionalita'),
     );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains("stessa lingua dell'ultimo messaggio"),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('Se il messaggio corrente e in italiano, rispondi in italiano'),
+    );
 
     await controller.send('seconda richiesta');
 
