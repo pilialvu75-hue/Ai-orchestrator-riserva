@@ -57,6 +57,8 @@ void main() {
       );
       expect(reviewer.lastPrompt, contains('Project goal: walking app'));
       expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
+      expect(reviewer.lastPrompt, isNot(contains('true|false')));
+      expect(reviewer.lastPrompt, contains('"approved" field MUST'));
       expect(
         gateways[AppAiRole.workshopOrchestrator]!.calls,
         0,
@@ -127,7 +129,7 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.review);
       expect(session.hasChanges, isTrue);
       expect(session.isApplyApproved, isFalse);
-      expect(reviewer.calls, 1);
+      expect(reviewer.calls, 2);
     });
   });
 }
