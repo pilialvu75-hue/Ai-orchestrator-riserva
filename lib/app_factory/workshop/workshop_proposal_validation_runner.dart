@@ -259,6 +259,16 @@ Do not return markdown fences or any text outside the JSON object.
     return prompt;
   }
 
+  static bool _isRetryableValidationFormatException(
+    FormatException error,
+  ) {
+    if (error.source != null || error.offset != null) {
+      return true;
+    }
+    return error.message.toString() ==
+        'Workshop validation field "summary" is required.';
+  }
+
   static bool _shouldRetryValidation(
     WorkshopInferenceResult result, {
     CancellationToken? cancellationToken,
@@ -311,4 +321,13 @@ Do not return markdown fences or any text outside the JSON object.
       'failure. Use only the compact bounded task and diff supplied. Validate '
       'only this current increment. Return the required JSON verdict only; '
       'never approve apply or mutate files.';
+
+  static const String _malformedOutputRetrySystemPrompt =
+      'You are the Cantiere validation reviewer retrying because the previous '
+      'structured verdict was incomplete or malformed. Use only the compact '
+      'bounded task and staged diff supplied. Return exactly one JSON object '
+      'with a boolean "valid", a non-empty string "summary", and optional '
+      'string arrays "checks" and "warnings". A true/false verdict remains '
+      'authoritative; do not change it merely to pass the gate. Never approve '
+      'apply or mutate files.';
 }
