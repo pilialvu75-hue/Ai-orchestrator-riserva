@@ -239,16 +239,76 @@ void main() {
       expect(callOrder, <AppAiRole>[AppAiRole.architect]);
       expect(
         result.analysis.text,
-        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+        contains('OWNER-APPROVED PROJECT VISION AVAILABLE AS BACKGROUND'),
       );
+      expect(result.analysis.text, contains(request.instruction));
       expect(
         result.analysis.text,
-        contains('app contatore con +, - e Reset'),
+        isNot(contains('Proposta: app contatore con +, - e Reset.')),
       );
       expect(architect.lastPrompt, contains('target: android'));
+      expect(architect.lastPrompt, contains('CURRENT TASK SCOPE RULE'));
       expect(
         architect.lastPrompt,
-        contains('OWNER-APPROVED WORKSHOP PROPOSAL'),
+        contains('OWNER-APPROVED PROJECT VISION (BACKGROUND)'),
+      );
+      expect(
+        architect.lastPrompt,
+        contains('Proposta: app contatore con +, - e Reset.'),
+      );
+      expect(
+        architect.lastPrompt,
+        contains('not a requirement to implement every feature now'),
+      );
+    });
+
+    test('keeps a broad approved proposal as background for one-task MVP planning',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('minimal walking MVP plan'),
+      );
+      final request = WorkshopRequest(
+        id: 'walking-mvp',
+        title: 'App per camminare',
+        instruction: 'fai un app per camminare',
+        operation: WorkshopOperation.create,
+        context: <String>[
+          WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+            'Tracking camminata, obiettivi settimanali, motivazione, '
+            'feedback dettagliato e futura evoluzione multipiattaforma.',
+          ),
+        ],
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator:
+              _unused(AppAiRole.workshopOrchestrator, callOrder),
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: request);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(callOrder, <AppAiRole>[AppAiRole.architect]);
+      expect(architect.lastPrompt, contains('fai un app per camminare'));
+      expect(architect.lastPrompt, contains('CURRENT TASK SCOPE RULE'));
+      expect(
+        architect.lastPrompt,
+        contains('Plan the smallest runnable increment'),
+      );
+      expect(
+        architect.lastPrompt,
+        contains('OWNER-APPROVED PROJECT VISION (BACKGROUND)'),
+      );
+      expect(architect.lastPrompt, contains('obiettivi settimanali'));
+      expect(
+        architect.lastPrompt,
+        contains('not a requirement to implement every feature now'),
       );
     });
 
