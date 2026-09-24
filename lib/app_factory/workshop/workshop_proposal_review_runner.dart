@@ -32,6 +32,7 @@ final class WorkshopProposalReviewRunner {
 
   Future<WorkshopReviewVerdict> run({
     required WorkspaceSession session,
+    String? implementationPlan,
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
@@ -50,7 +51,10 @@ final class WorkshopProposalReviewRunner {
 
     final result = await _inference.complete(
       stage: WorkshopStage.review,
-      prompt: _buildPrompt(session),
+      prompt: _buildPrompt(
+        session,
+        implementationPlan: implementationPlan,
+      ),
       systemPrompt: _systemPrompt,
       sessionId: 'workshop:review:${session.context.request.id}',
       isOffline: isOffline,
@@ -88,7 +92,10 @@ final class WorkshopProposalReviewRunner {
     return verdict;
   }
 
-  String _buildPrompt(WorkspaceSession session) {
+  String _buildPrompt(
+    WorkspaceSession session, {
+    String? implementationPlan,
+  }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
@@ -112,10 +119,19 @@ final class WorkshopProposalReviewRunner {
         )
         .toList(growable: false);
 
+    final normalizedPlan = implementationPlan?.trim();
+    final boundedPlan =
+        normalizedPlan == null || normalizedPlan.isEmpty
+            ? null
+            : normalizedPlan.length <= 4000
+                ? normalizedPlan
+                : normalizedPlan.substring(0, 4000);
+
     final payload = <String, Object?>{
       'requestId': request.id,
       'title': request.title,
       'instruction': request.instruction,
+      'implementationPlan': boundedPlan,
       'targetFiles': request.targetFiles,
       'constraints': request.constraints,
       'context': taskContext,
@@ -127,10 +143,12 @@ Review the staged Workshop change set below for correctness, regressions,
 requirement compliance and unsafe or incomplete edits.
 
 SCOPE RULE:
-Judge ONLY the current task described by title, instruction, targetFiles and
-constraints. The context field is project background, not a demand to finish
-future project features in this task. Do not reject a correct bounded increment
-solely because later project capabilities are not implemented yet.
+Judge ONLY the current task described by title, instruction, implementationPlan,
+targetFiles and constraints. The implementationPlan is the Architect's bounded
+plan for this task and is authoritative for the expected increment. The context
+field is project background, not a demand to finish future project features in
+this task. Do not reject a correct bounded increment solely because later
+project capabilities are not implemented yet.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
