@@ -91,7 +91,8 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // CPU baseline while investigating native aborts during Vulkan prefill.
-  // Keep context, batching and sampling unchanged for a controlled comparison.
-  static const int nGpuLayers = 0;
+  // Physical A/B candidate paired with official build +2448.
+  // Exercise Vulkan conservatively while leaving most model weights on CPU.
+  // Do not merge before Samsung S24 FE hardware validation.
+  static const int nGpuLayers = 10;
 }
