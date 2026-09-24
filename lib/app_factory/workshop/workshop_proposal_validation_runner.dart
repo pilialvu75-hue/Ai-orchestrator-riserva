@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runs the Cantiere validation stage against the current staged workspace.
 ///
@@ -64,10 +65,20 @@ final class WorkshopProposalValidationRunner {
       throw StateError('Workshop validation returned no verdict.');
     }
 
-    return _gate.evaluate(
+    final verdict = _gate.evaluate(
       session: session,
       responseText: result.text,
     );
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_VALIDATION_VERDICT] '
+      'valid=${verdict.valid} '
+      'summary_chars=${verdict.summary.length} '
+      'checks=${verdict.checks.length} '
+      'warnings=${verdict.warnings.length}',
+    );
+
+    return verdict;
   }
 
   String _buildPrompt(WorkspaceSession session) {
@@ -85,13 +96,22 @@ final class WorkshopProposalValidationRunner {
         },
     ];
 
+    final taskContext = request.context
+        .map((item) => item.trim())
+        .where(
+          (item) =>
+              item.isNotEmpty &&
+              !item.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
+        )
+        .toList(growable: false);
+
     final payload = <String, Object?>{
       'requestId': request.id,
       'title': request.title,
       'instruction': request.instruction,
       'targetFiles': request.targetFiles,
       'constraints': request.constraints,
-      'context': request.context,
+      'context': taskContext,
       'changes': changes,
     };
 
@@ -99,6 +119,12 @@ final class WorkshopProposalValidationRunner {
 Validate the staged Workshop change set below before apply approval.
 Check requirement compliance, internal consistency, regressions and whether
 all staged edits are safe to hand to the explicit approval/apply gate.
+
+SCOPE RULE:
+Validate ONLY the current task described by title, instruction, targetFiles and
+constraints. The context field is project background. Missing future project
+features must not invalidate a correct bounded increment unless they are
+explicit requirements of this current task.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
