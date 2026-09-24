@@ -123,7 +123,11 @@ void main() {
         inference: _stageInference(_gateways(reviewer)),
       ).run(
         session: session,
-        implementationPlan: List<String>.filled(220, 'Architect plan').join(' '),
+        implementationPlan: <String>[
+          'Architect retry contract: implement walking tracking.',
+          List<String>.filled(220, 'Architect plan').join(' '),
+          'ACCEPTANCE: visible user feedback remains required.',
+        ].join('\n'),
       );
 
       expect(verdict.valid, isTrue);
@@ -134,7 +138,17 @@ void main() {
       expect(reviewer.promptsSeen, hasLength(2));
       expect(
         reviewer.promptsSeen.last.length,
-        lessThan(reviewer.promptsSeen.first.length),
+        lessThanOrEqualTo(reviewer.promptsSeen.first.length),
+      );
+      expect(
+        reviewer.promptsSeen,
+        everyElement(
+          contains('ACCEPTANCE: visible user feedback remains required.'),
+        ),
+      );
+      expect(
+        reviewer.promptsSeen,
+        everyElement(contains('[bounded middle omitted]')),
       );
     });
 
