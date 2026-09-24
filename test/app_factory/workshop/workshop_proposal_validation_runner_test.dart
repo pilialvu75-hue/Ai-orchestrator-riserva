@@ -33,7 +33,10 @@ void main() {
 
       final verdict = await WorkshopProposalValidationRunner(
         inference: _stageInference(gateways),
-      ).run(session: session);
+      ).run(
+        session: session,
+        implementationPlan: 'Architect bounded task plan',
+      );
 
       expect(verdict.valid, isTrue);
       expect(verdict.summary, 'Validation passed');
@@ -45,6 +48,17 @@ void main() {
       expect(reviewer.lastPrompt, contains('"path":"lib/app.dart"'));
       expect(reviewer.lastPrompt, contains('"before":"old"'));
       expect(reviewer.lastPrompt, contains('"after":"new"'));
+      expect(reviewer.lastPrompt, contains('SCOPE RULE:'));
+      expect(
+        reviewer.lastPrompt,
+        isNot(contains('WORKSHOP_APPROVED_PROPOSAL:')),
+      );
+      expect(
+        reviewer.lastPrompt,
+        isNot(contains('future oxygen tracking')),
+      );
+      expect(reviewer.lastPrompt, contains('Project goal: walking app'));
+      expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
       expect(gateways[AppAiRole.architect]!.calls, 0);
       expect(gateways[AppAiRole.engineer]!.calls, 0);
@@ -130,6 +144,10 @@ Future<WorkspaceSession> _validationSession() async {
       title: 'Validate staged change',
       instruction: 'Update the app implementation safely',
       constraints: <String>['Do not introduce regressions'],
+      context: <String>[
+        'WORKSHOP_APPROVED_PROPOSAL:future oxygen tracking and navigation',
+        'Project goal: walking app',
+      ],
     ),
     gateway: gateway,
   );
