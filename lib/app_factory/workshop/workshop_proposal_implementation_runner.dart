@@ -247,6 +247,7 @@ final class WorkshopProposalImplementationRunner {
           session,
           preflight: preflight,
           resumeContext: resumeContext,
+          revisionFeedback: revisionFeedback,
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
