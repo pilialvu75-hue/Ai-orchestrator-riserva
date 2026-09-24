@@ -184,11 +184,13 @@ requirement compliance and unsafe or incomplete edits.
 
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
-targetFiles and constraints. The implementationPlan is the Architect's bounded
-plan for this task and is authoritative for the expected increment. The context
-field is project background, not a demand to finish future project features in
-this task. Do not reject a correct bounded increment solely because later
-project capabilities are not implemented yet.
+targetFiles and constraints. The implementationPlan is the exact bounded Architect contract supplied to
+the Engineer and is authoritative for the expected increment. Judge only
+requirements present in this projected contract; do not infer requirements from
+an omitted middle section or from the unavailable full Architect response. The
+context field is project background, not a demand to finish future project
+features in this task. Do not reject a correct bounded increment solely because
+later project capabilities are not implemented yet.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
