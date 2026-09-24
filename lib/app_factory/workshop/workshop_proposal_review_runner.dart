@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Runs the Cantiere Reviewer against the current staged VirtualWorkspace.
 ///
@@ -71,10 +72,20 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
-    return _gate.evaluate(
+    final verdict = _gate.evaluate(
       session: session,
       responseText: result.text,
     );
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_VERDICT] '
+      'approved=${verdict.approved} '
+      'summary_chars=${verdict.summary.length} '
+      'findings=${verdict.findings.length} '
+      'warnings=${verdict.warnings.length}',
+    );
+
+    return verdict;
   }
 
   String _buildPrompt(WorkspaceSession session) {
@@ -92,19 +103,34 @@ final class WorkshopProposalReviewRunner {
         },
     ];
 
+    final taskContext = request.context
+        .map((item) => item.trim())
+        .where(
+          (item) =>
+              item.isNotEmpty &&
+              !item.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
+        )
+        .toList(growable: false);
+
     final payload = <String, Object?>{
       'requestId': request.id,
       'title': request.title,
       'instruction': request.instruction,
       'targetFiles': request.targetFiles,
       'constraints': request.constraints,
-      'context': request.context,
+      'context': taskContext,
       'changes': changes,
     };
 
     return '''
 Review the staged Workshop change set below for correctness, regressions,
 requirement compliance and unsafe or incomplete edits.
+
+SCOPE RULE:
+Judge ONLY the current task described by title, instruction, targetFiles and
+constraints. The context field is project background, not a demand to finish
+future project features in this task. Do not reject a correct bounded increment
+solely because later project capabilities are not implemented yet.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
