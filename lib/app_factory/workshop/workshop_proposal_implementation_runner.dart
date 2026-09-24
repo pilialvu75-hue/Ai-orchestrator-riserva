@@ -46,23 +46,29 @@ final class WorkshopProposalImplementationRunner {
   static const int _retryContextChars = 220;
   static const int _primaryConstraintChars = 360;
   static const int _retryConstraintChars = 220;
+  static const int _primaryRevisionFeedbackChars = 700;
+  static const int _retryRevisionFeedbackChars = 420;
 
   Future<WorkshopChangeProposal> run({
     required WorkspaceSession session,
     WorkshopPreflightInferenceResult? preflight,
+    String? revisionFeedback,
+    int revisionAttempt = 0,
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
     _validateSession(session, preflight: preflight);
 
+    final revisionSuffix = revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
     final sessionId =
-        'workshop:implementation:${session.context.request.id}';
+        'workshop:implementation:${session.context.request.id}$revisionSuffix';
 
     var result = await _inference.complete(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
         session,
         preflight: preflight,
+        revisionFeedback: revisionFeedback,
       ),
       systemPrompt: _systemPrompt,
       sessionId: sessionId,
@@ -88,6 +94,7 @@ final class WorkshopProposalImplementationRunner {
         prompt: _buildPrompt(
           session,
           preflight: preflight,
+          revisionFeedback: revisionFeedback,
           compact: true,
         ),
         systemPrompt: _retrySystemPrompt,
@@ -120,6 +127,7 @@ final class WorkshopProposalImplementationRunner {
         prompt: _buildPrompt(
           session,
           preflight: preflight,
+          revisionFeedback: revisionFeedback,
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
@@ -142,6 +150,8 @@ final class WorkshopProposalImplementationRunner {
     required WorkspaceSession session,
     required WorkshopResumeContext resumeContext,
     WorkshopPreflightInferenceResult? preflight,
+    String? revisionFeedback,
+    int revisionAttempt = 0,
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
@@ -155,15 +165,17 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
+    final revisionSuffix = revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
     var result = await _inference.completeWithIdentity(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
         session,
         preflight: preflight,
         resumeContext: resumeContext,
+        revisionFeedback: revisionFeedback,
       ),
       systemPrompt: _systemPrompt,
-      sessionId: resumeContext.sessionId,
+      sessionId: '${resumeContext.sessionId}$revisionSuffix',
       isOffline: isOffline,
       maxTokens: _primaryMaxTokens,
       requestId: session.context.request.id,
@@ -194,10 +206,11 @@ final class WorkshopProposalImplementationRunner {
           session,
           preflight: preflight,
           resumeContext: resumeContext,
+          revisionFeedback: revisionFeedback,
           compact: true,
         ),
         systemPrompt: _retrySystemPrompt,
-        sessionId: '${resumeContext.sessionId}:engineer-retry-1',
+        sessionId: '${resumeContext.sessionId}$revisionSuffix:engineer-retry-1',
         isOffline: isOffline,
         maxTokens: _retryMaxTokens,
         requestId: session.context.request.id,
@@ -237,7 +250,7 @@ final class WorkshopProposalImplementationRunner {
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
-        sessionId: '${resumeContext.sessionId}:engineer-retry-malformed-1',
+        sessionId: '${resumeContext.sessionId}$revisionSuffix:engineer-retry-malformed-1',
         isOffline: isOffline,
         maxTokens: _malformedOutputRetryMaxTokens,
         requestId: session.context.request.id,
@@ -306,6 +319,7 @@ final class WorkshopProposalImplementationRunner {
     WorkspaceSession session, {
     WorkshopPreflightInferenceResult? preflight,
     WorkshopResumeContext? resumeContext,
+    String? revisionFeedback,
     bool compact = false,
   }) {
     final request = session.context.request;
@@ -322,6 +336,10 @@ final class WorkshopProposalImplementationRunner {
     final constraints = _boundedJoined(
       request.constraints,
       compact ? _retryConstraintChars : _primaryConstraintChars,
+    );
+    final feedback = _boundedText(
+      revisionFeedback ?? '',
+      compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
     final workspaceFiles = _selectWorkspaceFiles(
       snapshot: snapshot,
@@ -342,6 +360,7 @@ final class WorkshopProposalImplementationRunner {
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
             if (resumeContext != null)
               'resume': _compactResumeMetadata(resumeContext),
+            if (feedback.isNotEmpty) 'gateFeedback': feedback,
             'workspaceFiles': workspaceFiles,
           }
         : <String, Object?>{
@@ -356,6 +375,7 @@ final class WorkshopProposalImplementationRunner {
             },
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
             if (resumeContext != null) 'resume': resumeContext.toMetadata(),
+            if (feedback.isNotEmpty) 'gateFeedback': feedback,
             'workspaceManifest': manifest.take(28).toList(),
             'workspaceFiles': workspaceFiles,
           };
@@ -373,8 +393,11 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. Follow architectPlan. No
-markdown, review, approval or apply. For deletion omit content. Every content
+Use only workspaceFiles as existing file content. Follow architectPlan. When
+gateFeedback is present, it is authoritative feedback about the previously
+rejected staged proposal: revise the implementation instead of repeating that
+proposal. No markdown, review, approval or apply. For deletion omit content.
+Every content
 value must be a valid JSON string with line breaks, double quotes and
 backslashes escaped according to JSON.
 '''.trim()
@@ -383,7 +406,10 @@ Implement exactly one Cantiere task from the bounded input below.
 The Architect plan is the authoritative implementation guidance.
 Only current file contents included in workspaceFiles may be modified.
 Files listed only in workspaceManifest are informational; do not rewrite them.
-New files may be added only when required by the task or Architect plan.
+New files may be added only when required by the task or Architect plan. When
+gateFeedback is present, it is authoritative Reviewer/Validation feedback about
+the previous rejected staged proposal. Correct that concrete issue while keeping
+the current task bounded; do not treat the previous proposal as approved.
 
 INPUT:
 $encoded
