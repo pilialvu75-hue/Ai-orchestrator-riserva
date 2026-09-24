@@ -56,6 +56,7 @@ final class WorkshopProposalValidationRunner {
     }
 
     final sessionId = 'workshop:validation:${session.context.request.id}';
+    var didRetry = false;
     var result = await _inference.complete(
       stage: WorkshopStage.validation,
       prompt: _buildPrompt(
@@ -79,6 +80,7 @@ final class WorkshopProposalValidationRunner {
         'chars=${result.text.length}',
       );
 
+      didRetry = true;
       result = await _inference.complete(
         stage: WorkshopStage.validation,
         prompt: _buildPrompt(
@@ -107,10 +109,57 @@ final class WorkshopProposalValidationRunner {
       throw StateError('Workshop validation returned no verdict.');
     }
 
-    final verdict = _gate.evaluate(
-      session: session,
-      responseText: result.text,
-    );
+    WorkshopValidationVerdict verdict;
+    try {
+      verdict = _gate.evaluate(
+        session: session,
+        responseText: result.text,
+      );
+    } on FormatException catch (error) {
+      if (didRetry ||
+          cancellationToken?.isCancelled == true ||
+          !_isRetryableValidationFormatException(error)) {
+        rethrow;
+      }
+
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_VALIDATION_RETRY] '
+        'attempt=2 terminal=${result.terminalState?.name ?? 'none'} '
+        'chars=${result.text.length}',
+      );
+
+      didRetry = true;
+      result = await _inference.complete(
+        stage: WorkshopStage.validation,
+        prompt: _buildPrompt(
+          session,
+          implementationPlan: implementationPlan,
+          compact: true,
+        ),
+        systemPrompt: _malformedOutputRetrySystemPrompt,
+        sessionId: '$sessionId:retry-format-1',
+        isOffline: isOffline,
+        maxTokens: _retryMaxTokens,
+        cancellationToken: cancellationToken,
+      );
+
+      if (!result.isSuccessful) {
+        final detail = result.errorMessage?.trim();
+        throw StateError(
+          detail == null || detail.isEmpty
+              ? 'Workshop validation retry did not complete successfully.'
+              : 'Workshop validation retry failed: $detail',
+        );
+      }
+      if (!result.hasText) {
+        throw StateError('Workshop validation retry returned no verdict.');
+      }
+
+      verdict = _gate.evaluate(
+        session: session,
+        responseText: result.text,
+      );
+    }
 
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_VALIDATION_VERDICT] '
