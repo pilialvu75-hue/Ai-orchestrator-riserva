@@ -174,7 +174,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                         return;
                       }
                       final elapsed = DateTime.now().difference(startedAt);
-                      if (elapsed > AndroidFfiRuntimeProvider._generationTimeout) {
+                      if (elapsed > AndroidFfiRuntimeProvider._verificationTotalTimeout) {
                         freeVerificationPromptPtr();
                         _setPhase(RuntimePhase.stalled);
                         _safeCancel(bindings, verificationSessionId);
