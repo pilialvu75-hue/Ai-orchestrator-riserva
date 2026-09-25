@@ -1,0 +1,66 @@
+name: Publish physical-test beta 2453
+
+on:
+  push:
+    branches:
+      - test/vulkan50-vs-build2451
+    paths:
+      - '.github/workflows/publish-physical-test-beta-2453.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: "36087077404"
+      SOURCE_SHA: "87eb1a7f03a9d37fe8d3482dcb0114421faaf8f7"
+      RELEASE_TAG: "v1.0.12.2453-beta"
+    steps:
+      - name: Download validated Android artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+              --jq '.artifacts[] | select(.name == "AI-Orchestrator-android-release-1.0.12-2453") | .id' \
+              | head -n1
+          )"
+          test -n "$artifact_id"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/android-beta.zip
+          mkdir -p /tmp/android-beta
+          unzip -q /tmp/android-beta.zip -d /tmp/android-beta
+          apk="$(find /tmp/android-beta -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" /tmp/app-release.apk
+          sha256sum /tmp/app-release.apk | tee /tmp/app-release.apk.sha256
+
+      - name: Publish isolated beta prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes=$'Physical-test beta for Samsung S24 FE.\n\nDerived from the validated +2451 Vulkan-10 runtime. The only runtime change is requested Vulkan GPU layers 10 -> 50.\n\nDo not promote to stable before physical Phi-3.5 validation of effective offloaded layers, first-token latency, memory pressure and native stability.'
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" /tmp/app-release.apk /tmp/app-release.apk.sha256 \
+              --clobber --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${RELEASE_TAG}" \
+              /tmp/app-release.apk \
+              /tmp/app-release.apk.sha256 \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${SOURCE_SHA}" \
+              --prerelease \
+              --title "AI Orchestrator 1.0.12+2453 beta" \
+              --notes "$notes"
+          fi
+
+      - name: Verify beta release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,isPrerelease,assets \
+            --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
