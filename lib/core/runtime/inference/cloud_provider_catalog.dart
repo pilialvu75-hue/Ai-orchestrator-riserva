@@ -97,7 +97,6 @@ class CloudProviderCatalog {
         CloudProviderCapability.multimodal,
         CloudProviderCapability.longContext,
       },
-      supportsOAuth: true,
     ),
     'claude': CloudProviderDefinition(
       id: 'claude',
@@ -142,7 +141,6 @@ class CloudProviderCatalog {
         CloudProviderCapability.tools,
         CloudProviderCapability.longContext,
       },
-      supportsOAuth: true,
     ),
     'groq': CloudProviderDefinition(
       id: 'groq',
