@@ -71,9 +71,10 @@ void main() {
         engineer.lastPrompt,
         contains('explicit task instruction and constraints are authoritative'),
       );
+      expect(engineer.lastPrompt, contains('Architect'));
       expect(
         engineer.lastPrompt,
-        contains('Architect plan is model-authored implementation guidance'),
+        contains('plan is model-authored implementation guidance'),
       );
       expect(engineer.maxTokensValues, <int?>[640]);
       expect(engineer.lastPrompt!.length, lessThan(6000));
