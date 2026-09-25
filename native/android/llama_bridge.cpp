@@ -1112,6 +1112,8 @@ void run_generation(
             return;
         }
 
+        kv_sequence_tokens.push_back(next_token);
+
         ++n_cur;
         ++n_decode;
         last_decode_progress_at = std::chrono::steady_clock::now();
@@ -1119,6 +1121,17 @@ void run_generation(
              session->id,
              owner_epoch,
              n_decode);
+    }
+
+    if (cache_scope.empty()) {
+        session->invalidate_prompt_cache("scope_missing");
+    } else {
+        session->store_prompt_cache(cache_scope, tokens, kv_sequence_tokens);
+        LOGI("[KV_CACHE_STORE] session=%" PRId64
+             " scope=logical_session prompt_tokens=%zu kv_tokens=%zu",
+             session->id,
+             tokens.size(),
+             kv_sequence_tokens.size());
     }
 
     set_state_if_epoch(session, kStateCompleted, owner_epoch, "generation_completed");
@@ -1347,9 +1360,10 @@ int64_t llb_create_session_ex(
     return session_id;
 }
 
-int32_t llb_session_start_gen(
+int32_t llb_session_start_gen_scoped(
     int64_t session_id,
     const char* prompt,
+    const char* cache_scope,
     int32_t max_tokens,
     float temperature
 ) {
@@ -1398,13 +1412,14 @@ int32_t llb_session_start_gen(
     session->cancel_requested.store(false, std::memory_order_release);
     session->first_token_emitted.store(false, std::memory_order_release);
     session->clear_error();
-    llama_memory_clear(llama_get_memory(session->ctx), true);
 
     const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     session->gen_state.store(kStateGenerating, std::memory_order_release);
     notify_first_token_waiters(session);
 
     const std::string sanitized_prompt = sanitize_prompt_for_generation(prompt);
+    const std::string normalized_cache_scope =
+        cache_scope == nullptr ? std::string() : std::string(cache_scope);
     if (prompt == nullptr || sanitized_prompt != std::string(prompt)) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " reason=start_gen_sanitized fallback=%s",
              session_id,
@@ -1428,6 +1443,7 @@ int32_t llb_session_start_gen(
             run_generation,
             session,
             sanitized_prompt,
+            normalized_cache_scope,
             max_tokens,
             temperature,
             owner_epoch
@@ -1450,6 +1466,23 @@ int32_t llb_session_start_gen(
          session_id,
          owner_epoch);
     return 0;
+}
+
+int32_t llb_session_start_gen(
+    int64_t session_id,
+    const char* prompt,
+    int32_t max_tokens,
+    float temperature
+) {
+    // Legacy callers intentionally use a cold cache because they do not carry
+    // logical-session identity.
+    return llb_session_start_gen_scoped(
+        session_id,
+        prompt,
+        nullptr,
+        max_tokens,
+        temperature
+    );
 }
 
 int32_t llb_session_poll_token(
@@ -1564,6 +1597,7 @@ void llb_session_cancel(int64_t session_id) {
     }
 
     LOGI("[CANCEL_REQUEST] session=%" PRId64 " requested=true", session_id);
+    session->invalidate_prompt_cache("explicit_cancel");
     session->cancel_requested.store(true, std::memory_order_release);
     const uint64_t owner_epoch = session->epoch.load(std::memory_order_acquire);
     set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_requested_api");
@@ -1641,6 +1675,8 @@ int64_t llb_session_metric(int64_t session_id, int32_t metric) {
         case 2: return session->telemetry_ubatch;
         case 3: return session->telemetry_gpu_layers;
         case 4: return session->telemetry_decode_calls.load(std::memory_order_relaxed);
+        case 5: return session->telemetry_reused_tokens.load(std::memory_order_relaxed);
+        case 6: return session->telemetry_prefilled_tokens.load(std::memory_order_relaxed);
         default: return -1;
     }
 }
