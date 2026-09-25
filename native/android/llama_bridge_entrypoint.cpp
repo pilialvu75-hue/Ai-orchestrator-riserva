@@ -120,7 +120,7 @@ int32_t llb_session_token_count(int64_t session_id, const char* text) {
     return token_count;
 }
 
-int32_t budgeted_start_generation(
+static int32_t budgeted_start_generation(
     int64_t session_id,
     const char* prompt,
     const char* cache_scope,
