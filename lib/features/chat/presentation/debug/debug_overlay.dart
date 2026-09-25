@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -68,6 +69,9 @@ class _DebugOverlayState
   static const Duration _visionTimeout =
       Duration(seconds: 20);
 
+  static const Duration _benchmarkTimeout =
+      Duration(minutes: 12);
+
   /// Numero massimo di righe copiate dal log persistente.
   ///
   /// Il file su disco serve per sopravvivere ai crash nativi e può
@@ -81,6 +85,9 @@ class _DebugOverlayState
 
   late final LocalAiRepository
       _localAiRepository;
+
+  late final LocalModelBenchmarkRunner
+      _localModelBenchmark;
 
   DebugLabRunStatus _status =
       DebugLabRunStatus.idle;
@@ -100,6 +107,12 @@ class _DebugOverlayState
 
     _localAiRepository =
         di.sl<LocalAiRepository>();
+
+    _localModelBenchmark =
+        LocalModelBenchmarkRunner(
+      runtimeProvider: _runtimeProvider,
+      localAiRepository: _localAiRepository,
+    );
 
     RuntimeEventLog.instance.emit(
       '[DEBUG_LAB_FORENSIC_INIT] '
@@ -400,6 +413,91 @@ class _DebugOverlayState
         widget.onRenderVoiceInference(
           prompt: prompt,
           response: response,
+        );
+      },
+    );
+  }
+
+  Future<void> _runLocalModelBenchmark() async {
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'local_model_benchmark',
+      timeout: _benchmarkTimeout,
+      action: () async {
+        report = await _localModelBenchmark.run(
+          onProgress: (message) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _statusMessage = message;
+            });
+          },
+        );
+      },
+    );
+
+    if (report == null || !mounted) {
+      return;
+    }
+
+    await _showLocalModelBenchmarkReport(report!);
+  }
+
+  Future<void> _showLocalModelBenchmarkReport(
+    LocalModelBenchmarkReport report,
+  ) async {
+    final text = report.toPlainText();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Phi vs Nemotron',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(text: text),
+                );
+                if (!dialogContext.mounted) {
+                  return;
+                }
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
         );
       },
     );
@@ -931,6 +1029,19 @@ class _DebugOverlayState
               child:
                   const Text(
                 'Fake Voice → LLM',
+              ),
+            ),
+            const SizedBox(
+              height: 6,
+            ),
+            FilledButton(
+              onPressed:
+                  _running
+                      ? null
+                      : _runLocalModelBenchmark,
+              child:
+                  const Text(
+                'Benchmark Phi ↔ Nemotron',
               ),
             ),
             const SizedBox(
