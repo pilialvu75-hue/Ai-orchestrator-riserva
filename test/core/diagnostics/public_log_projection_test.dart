@@ -256,6 +256,27 @@ void main() {
     expect(line, isNot(contains('private-execution')));
   });
 
+  test('exports bounded Engineer memory-pressure retry reason', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_ENGINEER_RETRY] request=private-request '
+      'execution=private-execution attempt=2 reason=memory_pressure '
+      'terminal=failed',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_RETRY',
+        'attempt': 2,
+        'reason': 'memory_pressure',
+        'terminal': 'failed',
+      },
+    );
+    expect(line, isNot(contains('private-request')));
+    expect(line, isNot(contains('private-execution')));
+  });
+
   test('exports bounded Reviewer and Validation telemetry', () {
     final reviewPrompt = publicLogProjection(
       '$time [WORKSHOP_REVIEW_PROMPT] compact=false chars=2150 '
