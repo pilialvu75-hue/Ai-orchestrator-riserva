@@ -81,6 +81,17 @@ class ResourceProfile {
     // Free RAM alone can look healthy before weights become resident.
     final total = sample?.totalBytes;
     if (total != null && total > 0 && total <= 8 * 1024 * 1024 * 1024) {
+      // Large Vulkan offload on <=8 GiB phones can enter pressure after the
+      // first request. Start directly with the pressure-compatible geometry
+      // instead of creating a 256/64 session that must be torn down to 128/32.
+      if (requestedGpuLayers >= 32) {
+        return const ResourceProfile(
+          2048,
+          128,
+          32,
+          'device_gpu_conservative',
+        );
+      }
       return const ResourceProfile(2048, 256, 64, 'device_memory_budget');
     }
     return const ResourceProfile(4096, 512, 128, 'baseline');
