@@ -105,6 +105,26 @@ void main() {
       expect(promotion.properties, isNot(contains('model_path')));
     });
 
+    test('promotes KV reuse counts without logical session identifiers', () {
+      final promotion = DiagnosticsTelemetryPolicy.promote(
+        _entry(
+          'KV_CACHE_REUSE',
+          '[KV_CACHE_REUSE] session=private-chat scope=logical_session '
+          'reason=verified_prefix reused_tokens=820 prefilled_tokens=44 '
+          'prompt_tokens=864',
+          category: RuntimeEventCategory.model,
+        ),
+      );
+
+      expect(promotion, isNotNull);
+      expect(promotion!.eventName, 'diagnostic_performance');
+      expect(promotion.properties['reused_tokens'], 820);
+      expect(promotion.properties['prefilled_tokens'], 44);
+      expect(promotion.properties['prompt_tokens'], 864);
+      expect(promotion.properties, isNot(contains('session')));
+      expect(promotion.properties, isNot(contains('scope')));
+    });
+
     test('keeps high-frequency token chatter local', () {
       final promotion = DiagnosticsTelemetryPolicy.promote(
         _entry(
