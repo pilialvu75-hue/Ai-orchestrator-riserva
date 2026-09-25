@@ -13,7 +13,9 @@
 //
 // using the exact llama.cpp tokenizer for the model attached to the session.
 #define llb_session_start_gen llb_session_start_gen_unbudgeted
+#define llb_session_start_gen_scoped llb_session_start_gen_scoped_unbudgeted
 #include "llama_bridge.cpp"
+#undef llb_session_start_gen_scoped
 #undef llb_session_start_gen
 
 namespace {
@@ -118,9 +120,10 @@ int32_t llb_session_token_count(int64_t session_id, const char* text) {
     return token_count;
 }
 
-int32_t llb_session_start_gen(
+int32_t budgeted_start_generation(
     int64_t session_id,
     const char* prompt,
+    const char* cache_scope,
     int32_t max_tokens,
     float temperature
 ) {
@@ -177,10 +180,42 @@ int32_t llb_session_start_gen(
          kPromptTokenSafetyMargin,
          effective_max_tokens != max_tokens ? "true" : "false");
 
-    return llb_session_start_gen_unbudgeted(
+    return llb_session_start_gen_scoped_unbudgeted(
         session_id,
         sanitized_prompt.c_str(),
+        cache_scope,
         effective_max_tokens,
+        temperature
+    );
+}
+
+int32_t llb_session_start_gen(
+    int64_t session_id,
+    const char* prompt,
+    int32_t max_tokens,
+    float temperature
+) {
+    return budgeted_start_generation(
+        session_id,
+        prompt,
+        nullptr,
+        max_tokens,
+        temperature
+    );
+}
+
+int32_t llb_session_start_gen_scoped(
+    int64_t session_id,
+    const char* prompt,
+    const char* cache_scope,
+    int32_t max_tokens,
+    float temperature
+) {
+    return budgeted_start_generation(
+        session_id,
+        prompt,
+        cache_scope,
+        max_tokens,
         temperature
     );
 }
