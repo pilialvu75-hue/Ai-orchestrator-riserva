@@ -12,8 +12,9 @@ void main() {
     expect(sample.pressured, isFalse);
     final profile = ResourceProfile.select(sample, phi: false);
     expect(profile.context, 2048);
-    expect(profile.batch, 256);
-    expect(profile.microBatch, 64);
+    expect(profile.batch, 128);
+    expect(profile.microBatch, 32);
+    expect(profile.reason, 'device_memory_conservative');
     expect(ResourceProfile.select(ResourceSample({'totalBytes': 12 << 30}),
         phi: false).context, 4096);
   });

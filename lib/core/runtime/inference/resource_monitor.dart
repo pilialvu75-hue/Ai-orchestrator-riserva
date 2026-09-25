@@ -69,7 +69,16 @@ class ResourceProfile {
     // Free RAM alone can look healthy before weights become resident.
     final total = sample?.totalBytes;
     if (total != null && total > 0 && total <= 8 * 1024 * 1024 * 1024) {
-      return const ResourceProfile(2048, 256, 64, 'device_memory_budget');
+      // 3B-class non-Phi models can cross Android's critical-memory boundary
+      // during later Workshop roles even when the pre-load sample looks
+      // healthy. Start pressure-compatible so Engineer/Reviewer do not need a
+      // mid-generation cancellation merely to shrink batch allocation.
+      return const ResourceProfile(
+        2048,
+        128,
+        32,
+        'device_memory_conservative',
+      );
     }
     return const ResourceProfile(4096, 512, 128, 'baseline');
   }

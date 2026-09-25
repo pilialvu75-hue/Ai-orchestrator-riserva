@@ -83,10 +83,12 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     )) {
       didRetry = true;
+      final memoryPressureRetry = _isCriticalMemoryError(result);
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
-        'attempt=2 reason=runtime terminal=${result.terminalState?.name ?? 'none'}',
+        'attempt=2 reason=${memoryPressureRetry ? 'memory_pressure' : 'runtime'} '
+        'terminal=${result.terminalState?.name ?? 'none'}',
       );
 
       result = await _inference.complete(
@@ -101,7 +103,8 @@ final class WorkshopProposalImplementationRunner {
         sessionId: '$sessionId:retry-1',
         isOffline: isOffline,
         maxTokens: _retryMaxTokens,
-        cancellationToken: cancellationToken,
+        cancellationToken:
+            memoryPressureRetry ? null : cancellationToken,
       );
     }
 
@@ -193,11 +196,13 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     )) {
       didRetry = true;
+      final memoryPressureRetry = _isCriticalMemoryError(result);
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
         'execution=${resumeContext.executionId} '
-        'attempt=2 reason=runtime terminal=${result.terminalState?.name ?? 'none'}',
+        'attempt=2 reason=${memoryPressureRetry ? 'memory_pressure' : 'runtime'} '
+        'terminal=${result.terminalState?.name ?? 'none'}',
       );
 
       result = await _inference.completeWithIdentity(
@@ -219,7 +224,8 @@ final class WorkshopProposalImplementationRunner {
         executionId: resumeContext.executionId,
         attemptId: resumeContext.attemptId,
         checkpointId: resumeContext.checkpointId,
-        cancellationToken: cancellationToken,
+        cancellationToken:
+            memoryPressureRetry ? null : cancellationToken,
       );
     }
 
@@ -531,6 +537,15 @@ JSON. Do not review, approve or apply.
         message == 'Workshop proposal field "explanation" must be text.';
   }
 
+  static bool _isCriticalMemoryError(
+    WorkshopInferenceResult result,
+  ) {
+    final error = (result.errorMessage ?? '').toLowerCase();
+    return error.contains('stage=critical_memory') ||
+        error.contains('reason=critical_memory') ||
+        error.contains('pressione sulla memoria');
+  }
+
   static bool _shouldRetryEngineer(
     WorkshopInferenceResult result, {
     CancellationToken? cancellationToken,
@@ -538,6 +553,15 @@ JSON. Do not review, approve or apply.
     if (result.isSuccessful && result.hasText) {
       return false;
     }
+
+    // The Android resource guard cancels the active runtime token when it
+    // emits critical_memory. That is an internal safety cancellation, not a
+    // user request to abort the Cantiere task. Allow exactly the existing one
+    // bounded Engineer retry and give that retry a fresh runtime token.
+    if (_isCriticalMemoryError(result)) {
+      return true;
+    }
+
     if (cancellationToken?.isCancelled == true ||
         result.terminalState == InferenceTerminalState.cancelled ||
         result.terminalState == InferenceTerminalState.modelUnavailable) {

@@ -19,7 +19,7 @@ There is no new network uploader, background service or permission.
 - Profile changes happen inside the serial queue, before native generation.
 - Phi-3.5 starts with context 2048, batch 128, microbatch 64.
 - Elevated pressure selects context 2048, batch 128, microbatch 32.
-- Other models keep context 4096, batch 512, microbatch 128 without pressure.
+- Non-Phi models on phones with at most 8 GiB start at context 2048, batch 128, microbatch 32; larger devices retain the broader baseline when healthy.
 - Existing smaller sessions are retained when pressure recovers, avoiding
   repeated reloads. A session with larger limits is recreated under pressure.
 - Prompt and generation budgeting use the actual native context capacity.
@@ -126,8 +126,9 @@ Sports rules and personal-name recall do not trigger a public search. Existing
 offline and already-enriched-context safeguards remain in force.
 
 For known devices with at most 8 GiB total RAM, non-Phi sessions now choose
-2048 context / 256 batch / 64 microbatch before memory pressure occurs. This
-reduces configured KV/compute allocation relative to 4096 / 512 / 128; it does
-not reduce weight size or guarantee prevention of Android low-memory kills.
+2048 context / 128 batch / 32 microbatch before memory pressure occurs. This
+starts pressure-compatible for later multi-role Workshop stages and reduces
+configured KV/compute allocation relative to 4096 / 512 / 128; it does not
+reduce weight size or guarantee prevention of Android low-memory kills.
 Phi retains its existing conservative profile. The existing token budget uses
 the actual native context and trims conversation turns accordingly.
