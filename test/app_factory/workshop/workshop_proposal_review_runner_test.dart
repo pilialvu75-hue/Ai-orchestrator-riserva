@@ -56,9 +56,11 @@ void main() {
         reviewer.lastPrompt,
         contains('explicit task instruction and explicit constraints are authoritative'),
       );
+      expect(reviewer.lastPrompt, contains('does NOT mean'));
+      expect(reviewer.lastPrompt, contains('no files are'));
       expect(
         reviewer.lastPrompt,
-        contains('does NOT mean "no files are allowed"'),
+        contains('allowed" and is not by itself a mismatch'),
       );
       expect(
         reviewer.lastPrompt,
