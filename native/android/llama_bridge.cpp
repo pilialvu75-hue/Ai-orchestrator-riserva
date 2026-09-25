@@ -720,6 +720,79 @@ void run_generation(
         return;
     }
 
+    const auto cache_snapshot = session->prompt_cache_snapshot();
+    llama_memory_t memory = llama_get_memory(ctx);
+    int32_t reused_tokens = 0;
+    const char* reuse_reason = "cold_cache";
+
+    const bool exact_regeneration =
+        cache_snapshot.valid &&
+        cache_snapshot.scope == cache_scope &&
+        cache_snapshot.prompt_tokens == tokens;
+
+    if (cache_scope.empty()) {
+        reuse_reason = "scope_missing";
+    } else if (!cache_snapshot.valid) {
+        reuse_reason = "cache_invalid";
+    } else if (cache_snapshot.scope != cache_scope) {
+        reuse_reason = "scope_changed";
+    } else if (exact_regeneration) {
+        // Regeneration must be deterministic from a clean prompt prefill.
+        reuse_reason = "exact_prompt_regeneration";
+    } else {
+        const size_t max_common = std::min(
+            cache_snapshot.kv_tokens.size(),
+            tokens.size()
+        );
+        size_t common = 0;
+        while (common < max_common &&
+               cache_snapshot.kv_tokens[common] == tokens[common]) {
+            ++common;
+        }
+
+        // Replay at least the final prompt token so llama.cpp computes logits
+        // for the exact new prompt boundary. This also guarantees a non-empty
+        // prefill batch.
+        const size_t max_reusable =
+            tokens.size() > 1 ? tokens.size() - 1 : 0;
+        reused_tokens = static_cast<int32_t>(std::min(common, max_reusable));
+
+        if (reused_tokens > 0) {
+            if (llama_memory_seq_rm(memory, 0, reused_tokens, -1)) {
+                reuse_reason = "verified_prefix";
+            } else {
+                reused_tokens = 0;
+                reuse_reason = "partial_remove_unsupported";
+            }
+        } else {
+            reuse_reason = "prefix_diverged";
+        }
+    }
+
+    if (reused_tokens == 0) {
+        llama_memory_clear(memory, true);
+    }
+
+    const int32_t prefilled_tokens = n_tokens - reused_tokens;
+    session->telemetry_reused_tokens.store(
+        reused_tokens,
+        std::memory_order_relaxed
+    );
+    session->telemetry_prefilled_tokens.store(
+        prefilled_tokens,
+        std::memory_order_relaxed
+    );
+    LOGI("[KV_CACHE_REUSE] session=%" PRId64 " scope=%s reason=%s"
+         " reused_tokens=%d prefilled_tokens=%d prompt_tokens=%d",
+         session->id,
+         cache_scope.empty() ? "none" : "logical_session",
+         reuse_reason,
+         reused_tokens,
+         prefilled_tokens,
+         n_tokens);
+
+    std::vector<llama_token> kv_sequence_tokens(tokens);
+
     LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] before session=%" PRId64 " epoch=%" PRIu64,
          session->id,
          owner_epoch);
@@ -742,7 +815,11 @@ void run_generation(
 
     // n_ctx is total sequence capacity; n_batch is the per-decode limit.
     // Submitting the complete prompt above n_batch triggers GGML_ASSERT.
-    BatchGuard prefill_batch(std::min(n_tokens, prefill_n_batch), 0, 1);
+    BatchGuard prefill_batch(
+        std::min(prefilled_tokens, prefill_n_batch),
+        0,
+        1
+    );
     if (!prefill_batch.initialized) {
         session->set_error("Failed to allocate prefill batch");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_batch_alloc_failed");
@@ -751,7 +828,7 @@ void run_generation(
 
     const auto prefill_started_at = std::chrono::steady_clock::now();
     int prefill_status = 0;
-    for (int32_t offset = 0; offset < n_tokens;) {
+    for (int32_t offset = reused_tokens; offset < n_tokens;) {
         if (session->cancel_requested.load(std::memory_order_acquire) ||
             session->epoch.load(std::memory_order_acquire) != owner_epoch) {
             set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_prefill");
@@ -793,11 +870,14 @@ void run_generation(
     LOGI("[FORENSIC] [THREAD_PREFILL_OK] before session=%" PRId64 " epoch=%" PRIu64,
          session->id,
          owner_epoch);
-    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64 " status=%d prefill_ms=%lld",
+    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64
+         " status=%d prefill_ms=%lld reused_tokens=%d prefilled_tokens=%d",
          session->id,
          owner_epoch,
          prefill_status,
-         static_cast<long long>(prefill_ms));
+         static_cast<long long>(prefill_ms),
+         reused_tokens,
+         prefilled_tokens);
     LOGI("[FORENSIC] [THREAD_PREFILL_OK] after session=%" PRId64 " epoch=%" PRIu64
          " status=%d prefill_ms=%lld",
          session->id,
