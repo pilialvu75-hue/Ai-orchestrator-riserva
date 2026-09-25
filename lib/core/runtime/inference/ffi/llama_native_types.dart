@@ -91,8 +91,9 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // Physical A/B candidate paired with official build +2448.
-  // Exercise Vulkan conservatively while leaving most model weights on CPU.
-  // Do not merge before Samsung S24 FE hardware validation.
-  static const int nGpuLayers = 10;
+  // Intermediate physical A/B candidate derived from the validated Vulkan-10
+  // source after Vulkan-50 reached full offload (33 effective layers), became
+  // slower, and triggered critical-memory protection on the third prompt.
+  // Keep the memory guard unchanged; validate repeated prompts on S24 FE.
+  static const int nGpuLayers = 20;
 }
