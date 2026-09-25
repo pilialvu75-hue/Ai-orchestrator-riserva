@@ -139,7 +139,7 @@ class WorkshopInferenceGateway {
       );
     }
 
-    final token = cancellationToken ?? CancellationToken();
+    final token = _runtimeCancellationToken(cancellationToken);
 
     final request = InferenceRequest(
       sessionId: sessionId,
@@ -165,6 +165,14 @@ class WorkshopInferenceGateway {
       request: request,
       cancellationToken: token,
     );
+  }
+
+  static CancellationToken _runtimeCancellationToken(
+    CancellationToken? callerToken,
+  ) {
+    final runtimeToken = CancellationToken();
+    callerToken?.onCancel(runtimeToken.cancel);
+    return runtimeToken;
   }
 
   /// Convenience method that collects a complete Workshop response using the
