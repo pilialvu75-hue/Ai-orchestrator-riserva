@@ -150,6 +150,55 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('retries critical-memory Engineer with a fresh runtime token',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=critical_memory|message=Generazione fermata per pressione sulla memoria.',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"summary":"Recovered","explanation":"Memory retry succeeded","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+        cancelTokenOnCalls: const <int>{0},
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+      final callerToken = CancellationToken();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        cancellationToken: callerToken,
+      );
+
+      expect(proposal.explanation, 'Memory retry succeeded');
+      expect(session.workspace.read('lib/app.dart'), 'new');
+      expect(engineer.calls, 2);
+      expect(callerToken.isCancelled, isTrue);
+      expect(
+        engineer.sessionIds,
+        <String>[
+          'workshop:implementation:implementation-runner-request',
+          'workshop:implementation:implementation-runner-request:retry-1',
+        ],
+      );
+      expect(engineer.maxTokensValues, <int?>[640, 512]);
+      expect(engineer.cancellationTokenWasNull, <bool>[false, true]);
+      expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('retries syntactically truncated Engineer JSON with larger compact budget',
         () async {
       final engineer = _StaticGateway(
@@ -429,7 +478,9 @@ final class _StaticGateway extends WorkshopInferenceGateway {
   _StaticGateway({
     WorkshopInferenceResult? result,
     List<WorkshopInferenceResult>? results,
-  })  : _results = results ??
+    Set<int> cancelTokenOnCalls = const <int>{},
+  })  : _cancelTokenOnCalls = cancelTokenOnCalls,
+        _results = results ??
             <WorkshopInferenceResult>[
               if (result != null) result,
             ],
@@ -440,11 +491,13 @@ final class _StaticGateway extends WorkshopInferenceGateway {
   }
 
   final List<WorkshopInferenceResult> _results;
+  final Set<int> _cancelTokenOnCalls;
   int calls = 0;
   String? lastPrompt;
   final List<String> prompts = <String>[];
   final List<String> sessionIds = <String>[];
   final List<int?> maxTokensValues = <int?>[];
+  final List<bool> cancellationTokenWasNull = <bool>[];
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -467,6 +520,10 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     prompts.add(prompt);
     sessionIds.add(sessionId);
     maxTokensValues.add(maxTokens);
+    cancellationTokenWasNull.add(cancellationToken == null);
+    if (_cancelTokenOnCalls.contains(index)) {
+      cancellationToken?.cancel();
+    }
     if (index >= _results.length) {
       throw StateError('Unexpected extra Engineer inference call.');
     }
