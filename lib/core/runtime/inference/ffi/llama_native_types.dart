@@ -91,8 +91,9 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // Physical A/B candidate paired with official build +2448.
-  // Exercise Vulkan conservatively while leaving most model weights on CPU.
+  // Aggressive physical A/B candidate derived from the validated +2451
+  // Vulkan-10 runtime. Request up to 50 GPU layers; llama.cpp reports the
+  // actually offloaded layer count through runtime diagnostics.
   // Do not merge before Samsung S24 FE hardware validation.
-  static const int nGpuLayers = 10;
+  static const int nGpuLayers = 50;
 }
