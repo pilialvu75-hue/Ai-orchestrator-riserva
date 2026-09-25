@@ -199,7 +199,7 @@ String? publicLogProjection(String line) {
       r'^request=[A-Za-z0-9._:-]{1,120} '
       r'(?:execution=[A-Za-z0-9._:-]{1,120} )?'
       r'attempt=(\d{1,3}) '
-      r'(?:reason=(runtime|malformed_output) )?'
+      r'(?:reason=(runtime|malformed_output|memory_pressure) )?'
       r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none)'
       r'(?: chars=(\d{1,9}))?$',
     ).firstMatch(rest);
