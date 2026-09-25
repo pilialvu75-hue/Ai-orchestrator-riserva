@@ -1123,6 +1123,12 @@ void run_generation(
              n_decode);
     }
 
+    if (session->cancel_requested.load(std::memory_order_acquire)) {
+        set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_before_cache_commit");
+        session->invalidate_prompt_cache("cancelled_before_cache_commit");
+        return;
+    }
+
     if (cache_scope.empty()) {
         session->invalidate_prompt_cache("scope_missing");
     } else {
@@ -1402,10 +1408,15 @@ int32_t llb_session_start_gen_scoped(
     std::lock_guard<std::mutex> lock(session->generation_mutex);
 
     LOGI("[CANCEL_REQUEST] session=%" PRId64 " reason=restart_generation", session_id);
+    const bool interrupted_previous_generation =
+        session->worker_running.load(std::memory_order_acquire);
     session->cancel_requested.store(true, std::memory_order_release);
     if (session->gen_thread.joinable()) {
         LOGI("[CLEANUP_JOIN] session=%" PRId64 " join_previous_generation=true", session_id);
         session->gen_thread.join();
+    }
+    if (interrupted_previous_generation) {
+        session->invalidate_prompt_cache("restart_interrupted_generation");
     }
 
     session->clear_queue();
