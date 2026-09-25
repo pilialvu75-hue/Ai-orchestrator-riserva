@@ -103,8 +103,7 @@ final class WorkshopProposalImplementationRunner {
         sessionId: '$sessionId:retry-1',
         isOffline: isOffline,
         maxTokens: _retryMaxTokens,
-        cancellationToken:
-            memoryPressureRetry ? null : cancellationToken,
+        cancellationToken: cancellationToken,
       );
     }
 
@@ -224,8 +223,7 @@ final class WorkshopProposalImplementationRunner {
         executionId: resumeContext.executionId,
         attemptId: resumeContext.attemptId,
         checkpointId: resumeContext.checkpointId,
-        cancellationToken:
-            memoryPressureRetry ? null : cancellationToken,
+        cancellationToken: cancellationToken,
       );
     }
 
@@ -554,16 +552,18 @@ JSON. Do not review, approve or apply.
       return false;
     }
 
-    // The Android resource guard cancels the active runtime token when it
-    // emits critical_memory. That is an internal safety cancellation, not a
-    // user request to abort the Cantiere task. Allow exactly the existing one
-    // bounded Engineer retry and give that retry a fresh runtime token.
+    // A caller cancellation is authoritative. The Workshop gateway now
+    // forwards it one-way to a per-inference runtime token, so an internal
+    // critical-memory cancellation cannot poison this outer task token.
+    if (cancellationToken?.isCancelled == true) {
+      return false;
+    }
+
     if (_isCriticalMemoryError(result)) {
       return true;
     }
 
-    if (cancellationToken?.isCancelled == true ||
-        result.terminalState == InferenceTerminalState.cancelled ||
+    if (result.terminalState == InferenceTerminalState.cancelled ||
         result.terminalState == InferenceTerminalState.modelUnavailable) {
       return false;
     }
