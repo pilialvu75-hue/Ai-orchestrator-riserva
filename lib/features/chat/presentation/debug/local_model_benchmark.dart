@@ -45,7 +45,7 @@ class LocalModelBenchmarkCase {
       }
     }
 
-    return score.clamp(0, maxScore);
+    return score.clamp(0, maxScore).toInt();
   }
 
   int forbiddenHits(String response) {
@@ -234,7 +234,7 @@ class LocalModelBenchmarkRunner {
     LocalModelBenchmarkCase(
       id: 'vulkan_fact',
       prompt:
-          'Che cos\\'è Vulkan e chi lo standardizza? Rispondi in una frase.',
+          'Che cos\'è Vulkan e chi lo standardizza? Rispondi in una frase.',
       requiredAnyGroups: <List<String>>[
         <String>['api'],
         <String>['khronos'],
@@ -262,7 +262,7 @@ class LocalModelBenchmarkRunner {
     ),
     LocalModelBenchmarkCase(
       id: 'ssd_direct',
-      prompt: 'Che cos\\'è un SSD? Rispondi in una frase.',
+      prompt: 'Che cos\'è un SSD? Rispondi in una frase.',
       requiredAnyGroups: <List<String>>[
         <String>['ssd', 'solid-state', 'stato solido'],
         <String>['flash'],
@@ -308,12 +308,12 @@ class LocalModelBenchmarkRunner {
       context: <ChatTurn>[
         ChatTurn(
           role: ChatRole.user,
-          content: 'Che cos\\'è un SSD?',
+          content: 'Che cos\'è un SSD?',
         ),
         ChatTurn(
           role: ChatRole.assistant,
           content:
-              'Un SSD è un\\'unità di archiviazione a stato solido basata su memoria flash.',
+              'Un SSD è un\'unità di archiviazione a stato solido basata su memoria flash.',
         ),
       ],
       requiredAnyGroups: <List<String>>[
