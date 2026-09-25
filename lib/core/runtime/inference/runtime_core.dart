@@ -172,6 +172,18 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
 
   bool get _isDeveloperMode => _developerModeProvider();
 
+  /// Benchmark/debug-only probe. It exposes lifecycle state, never model data.
+  bool hasActiveNativeSessionForModelPath(String modelPath) {
+    final sessionId = _nativeSessionsByModel[modelPath];
+    final bindings = _bindings;
+    if (sessionId == null || bindings == null) return false;
+    try {
+      return bindings.sessionIsActive(sessionId) == 1;
+    } on Object {
+      return false;
+    }
+  }
+
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
   int? _nativeSessionId;
