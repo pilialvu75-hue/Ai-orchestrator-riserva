@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -484,11 +482,18 @@ class LocalModelBenchmarkRunner {
       cancellationToken: cancellationToken,
     )) {
       final native = _resourceMonitor.native;
-      observedGpuLayers =
-          math.max(observedGpuLayers, native['gpu_layers'] ?? 0);
-      observedBatch = math.max(observedBatch, native['batch'] ?? 0);
-      observedMicroBatch =
-          math.max(observedMicroBatch, native['micro_batch'] ?? 0);
+      final gpuLayers = native['gpu_layers'] ?? 0;
+      final batch = native['batch'] ?? 0;
+      final microBatch = native['micro_batch'] ?? 0;
+      if (gpuLayers > observedGpuLayers) {
+        observedGpuLayers = gpuLayers;
+      }
+      if (batch > observedBatch) {
+        observedBatch = batch;
+      }
+      if (microBatch > observedMicroBatch) {
+        observedMicroBatch = microBatch;
+      }
 
       if (chunk.runtimeNotice != null) {
         continue;
