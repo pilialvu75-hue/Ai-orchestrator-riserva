@@ -10,7 +10,9 @@ import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
+import 'package:ai_orchestrator/features/settings/data/services/assistant_data_reset_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/diagnostics_console_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/danger_zone_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
@@ -358,6 +360,25 @@ class _SettingsPageState extends State<SettingsPage> {
                       MaterialPageRoute<void>(
                         builder: (_) =>
                             const SystemPromptPage(),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _ModuleCard(
+                  icon: Icons.warning_amber_rounded,
+                  title: 'Danger Zone',
+                  subtitle: 'Destructive Assistant memory and data reset',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => DangerZonePage(
+                          resetService:
+                              di.sl<AssistantDataResetService>(),
+                        ),
                       ),
                     );
                   },

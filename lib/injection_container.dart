@@ -77,6 +77,7 @@ import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_r
 import 'package:ai_orchestrator/features/local_ai/domain/usecases/local_ai_usecases.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/model_management/model_management_service.dart';
+import 'package:ai_orchestrator/features/settings/data/services/assistant_data_reset_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/file_attachment_service.dart';
 import 'package:ai_orchestrator/features/onboarding/data/datasources/model_registry_datasource.dart';
@@ -264,6 +265,13 @@ Future<void> initDependencies({
       rollingContextBuilder: sl<RollingContextBuilder>(),
       semanticWorkspaceIndex: sl<SemanticWorkspaceIndex>(),
       embeddingService: sl<WorkspaceEmbeddingService>(),
+    ),
+  );
+  sl.registerLazySingleton<AssistantDataResetService>(
+    () => AssistantDataResetService(
+      databaseHelper: sl<DatabaseHelper>(),
+      conversationMemoryService: sl<ConversationMemoryService>(),
+      contextWindowManager: sl<ContextWindowManager>(),
     ),
   );
   sl.registerLazySingleton<WorkspaceProjectMemoryService>(
