@@ -468,6 +468,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
           promptNativePtr,
           maxTokens,
           effectiveTemperature,
+          cacheScope: sessionId,
         ),
       );
       AndroidFfiRuntimeProvider._log('[FORENSIC_AFTER_START_GENERATION] sessionId=$sessionId nativeSessionId=$nativeSessionId startResult=$startResult');
