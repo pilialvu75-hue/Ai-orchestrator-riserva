@@ -116,7 +116,7 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     _classifyFirstTokenTermination(
       flowState: flowState,
       attemptState: attemptState,
-      reason: 'first_token_watchdog',
+      reason: InferenceLifecycleTerminalReason.firstTokenTimeout.wireName,
       boundary: 'poll_loop',
       runtimeReset: true,
     );
@@ -128,14 +128,14 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     _safeCancel(bindings, nativeSessionHandle);
     clearRuntimeVerification();
     attemptState.runtimeNeedsReset = true;
-    attemptState.runtimeResetReason = 'first_token_watchdog';
+    attemptState.runtimeResetReason = InferenceLifecycleTerminalReason.firstTokenTimeout.wireName;
     final elapsed = DateTime.now().difference(startedAt);
     AndroidFfiRuntimeProvider._log(
       '[STREAM_TIMEOUT] reason=no_first_token elapsed_ms=${elapsed.inMilliseconds}'
       ' timeout_ms=${firstTokenDeadline.inMilliseconds} session=$sessionKey',
     );
     AndroidFfiRuntimeProvider._log(
-      '[STALL] reason=first_token_watchdog elapsed_ms=${elapsed.inMilliseconds}'
+      '[STALL] reason=${InferenceLifecycleTerminalReason.firstTokenTimeout.wireName} elapsed_ms=${elapsed.inMilliseconds}'
       ' no_token_produced=true session=$sessionKey',
     );
     AndroidFfiRuntimeProvider._log(
@@ -143,12 +143,12 @@ extension AndroidFfiRuntimeFirstTokenExtension on AndroidFfiRuntimeProvider {
     );
     AndroidFfiRuntimeProvider._log(
       '[FIRST_TOKEN_FAILURE] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
-      ' sessionId=$sessionKey reason=first_token_watchdog'
+      ' sessionId=$sessionKey reason=${InferenceLifecycleTerminalReason.firstTokenTimeout.wireName}'
       ' elapsed_ms=${elapsed.inMilliseconds} timeout_ms=${firstTokenDeadline.inMilliseconds}'
       ' poll_iterations=${attemptState.pollIterations} pre_first_token_active=$_preFirstTokenActive',
     );
     AndroidFfiRuntimeProvider._log(
-      '[TERMINAL_STATE] state=stalled reason=first_token_watchdog'
+      '[TERMINAL_STATE] state=stalled reason=${InferenceLifecycleTerminalReason.firstTokenTimeout.wireName}'
       ' elapsed_ms=${elapsed.inMilliseconds} no_token_produced=true',
     );
     _updateRuntimeStatus(

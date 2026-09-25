@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.d
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_lifecycle_policy.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/tool_interceptor_transformer.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
@@ -20,8 +21,8 @@ import 'package:flutter/foundation.dart';
 
 class InferenceService {
   static const _logTag = 'INFERENCE';
-  static const Duration _requestTimeout = Duration(minutes: 4);
-  static const Duration _streamIdleTimeout = Duration(seconds: 75);
+  static const Duration _streamIdleTimeout =
+      InferenceLifecyclePolicy.outerStreamIdleTimeout;
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
 
@@ -1012,6 +1013,7 @@ class InferenceService {
         sessionId: cloudRequest.sessionId,
         cancellationToken: cancellationToken,
         attempt: attempt,
+        runtimeMode: runtimeMode,
       )) {
         // Once a terminal response has been delivered to the consumer, keep
         // draining the upstream stream until its natural close. Returning from
@@ -1270,22 +1272,34 @@ class InferenceService {
     required String sessionId,
     required CancellationToken cancellationToken,
     required int attempt,
+    required AiRuntimeMode runtimeMode,
   }) async* {
-    final startedAt =
-        DateTime.now();
+    final lifecycleClock = InferenceLifecycleClock();
+    // Hybrid may route LOCAL first or fall back to LOCAL inside the same
+    // stream. Only cloud-only mode can safely use the shorter generic idle
+    // guard without racing Android's provider-owned first-token deadline.
+    final streamIdleTimeout = InferenceLifecyclePolicy.outerIdleTimeoutFor(
+      cloudOnly: runtimeMode == AiRuntimeMode.cloud,
+    );
     var chunkCount = 0;
 
     await for (final chunk
         in stream.timeout(
-      _streamIdleTimeout,
+      streamIdleTimeout,
       onTimeout: (sink) {
         cancellationToken.cancel();
 
+        _log(
+          '[TERMINAL_STATE] state=timedOut '
+          'reason=${InferenceLifecycleTerminalReason.outerStreamIdleTimeout.wireName} '
+          'session=$sessionId attempt=$attempt '
+          'idle_ms=${lifecycleClock.sinceLastProgress.inMilliseconds}',
+        );
+
         sink.add(
           InferenceResponse.error(
-            'Inference stream timed out waiting for tokens.',
-            state:
-                InferenceTerminalState.timeout,
+            'Inference stream timed out waiting for progress.',
+            state: InferenceTerminalState.timeout,
           ),
         );
 
@@ -1293,6 +1307,12 @@ class InferenceService {
       },
     )) {
       chunkCount++;
+
+      lifecycleClock.markProgress(
+        content: chunk.runtimeNotice == null &&
+            !chunk.isError &&
+            chunk.text.trim().isNotEmpty,
+      );
 
       if (chunkCount >
           _maxChunksPerRequest) {
@@ -1302,7 +1322,8 @@ class InferenceService {
           'hard stop protection '
           'session=$sessionId '
           'attempt=$attempt '
-          'max_chunks=$_maxChunksPerRequest',
+          'max_chunks=$_maxChunksPerRequest '
+          'reason=${InferenceLifecycleTerminalReason.streamChunkLimit.wireName}',
         );
 
         yield InferenceResponse.error(
@@ -1312,27 +1333,9 @@ class InferenceService {
         return;
       }
 
-      if (DateTime.now()
-              .difference(startedAt) >
-          _requestTimeout) {
-        cancellationToken.cancel();
-
-        _log(
-          'hard stop protection '
-          'session=$sessionId '
-          'attempt=$attempt '
-          'request_timeout_ms='
-          '${_requestTimeout.inMilliseconds}',
-        );
-
-        yield InferenceResponse.error(
-          'Inference request timed out.',
-          state:
-              InferenceTerminalState.timeout,
-        );
-
-        return;
-      }
+      // No absolute wall-clock deadline is applied after stream progress.
+      // Productive generation is bounded by provider max tokens, explicit
+      // cancellation, resource/repetition guards and no-progress watchdogs.
 
       yield chunk;
     }
