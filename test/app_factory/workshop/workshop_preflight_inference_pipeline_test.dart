@@ -253,6 +253,14 @@ void main() {
       expect(result.analysis.text, isNot(contains('user feedback criteria')));
       expect(architect.lastPrompt, contains('target: android'));
       expect(architect.lastPrompt, contains('CURRENT TASK SCOPE RULE'));
+      expect(
+        architect.lastPrompt,
+        contains('targetFilesPolicy: unspecified_for_initial_create_task'),
+      );
+      expect(
+        architect.lastPrompt,
+        contains('Do not treat an empty targetFiles list as a blocker'),
+      );
       expect(architect.lastPrompt, contains('fai un app per camminare'));
       expect(
         architect.lastPrompt,

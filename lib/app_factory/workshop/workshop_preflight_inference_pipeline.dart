@@ -386,6 +386,9 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln('instruction: ${request.instruction}')
       ..writeln('projectPath: ${request.projectPath ?? ''}')
       ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
+      ..writeln(
+        'targetFilesPolicy: ${request.targetFiles.isEmpty ? 'unspecified_for_initial_create_task' : 'explicit_scope'}',
+      )
       ..writeln('constraints: ${request.constraints.join(' | ')}')
       ..writeln('context: ${request.context.join(' | ')}')
       ..writeln();
@@ -457,6 +460,9 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln('title: ${request.title}')
       ..writeln('instruction: ${request.instruction}')
       ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
+      ..writeln(
+        'targetFilesPolicy: ${request.targetFiles.isEmpty ? 'unspecified_for_initial_create_task' : 'explicit_scope'}',
+      )
       ..writeln('constraints: ${request.constraints.join(' | ')}')
       ..writeln(
         'context: ${_architectureContext(request).join(' | ')}',
@@ -498,6 +504,12 @@ final class WorkshopPreflightInferencePipeline {
         'requirements or validation criteria.',
       )
       ..writeln(
+        'If targetFilesPolicy is "unspecified_for_initial_create_task", choose '
+        'the smallest coherent Flutter/Dart file set required by the explicit '
+        'task. Do not treat an empty targetFiles list as a blocker or as a '
+        'requirement to avoid file changes.',
+      )
+      ..writeln(
         'For a create request whose behavior is broad or underspecified, plan '
         'the smallest interactive offline MVP that demonstrates the requested '
         'domain. Do not infer GPS, pedometer/step sensors, background tracking, '
@@ -522,8 +534,10 @@ final class WorkshopPreflightInferencePipeline {
   }) {
     const scopeRule =
         ' The current user instruction, explicit constraints and non-proposal '
-        'context are the current-task authority. A model-authored approved '
-        'proposal is project vision/provenance only: never promote its extra '
+        'context are the current-task authority. targetFiles is restrictive '
+        'only when explicitly non-empty; an empty list on an initial create '
+        'task means file selection is delegated to this plan. A model-authored '
+        'approved proposal is project vision/provenance only: never promote its extra '
         'features into this increment. If a create request is broad, choose '
         'the smallest interactive offline MVP. Never infer sensors, GPS, '
         'background tracking, cloud, permissions or health metrics unless '
@@ -592,6 +606,9 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln('title: ${request.title}')
       ..writeln('instruction: ${request.instruction}')
       ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
+      ..writeln(
+        'targetFilesPolicy: ${request.targetFiles.isEmpty ? 'unspecified_for_initial_create_task' : 'explicit_scope'}',
+      )
       ..writeln('constraints: ${request.constraints.join(' | ')}')
       ..writeln();
 
@@ -613,8 +630,10 @@ final class WorkshopPreflightInferencePipeline {
       ..writeln(
         'Use only the explicit current instruction, constraints and '
         'non-proposal context as requirements. Keep any model-authored project '
-        'vision outside the current acceptance criteria. For broad create '
-        'requests choose the smallest interactive offline MVP; do not infer '
+        'vision outside the current acceptance criteria. If targetFiles is '
+        'empty, select the smallest coherent file set for the explicit task; '
+        'do not treat it as "no files allowed". For broad create requests '
+        'choose the smallest interactive offline MVP; do not infer '
         'GPS, sensors, background tracking, cloud or permissions unless '
         'explicitly requested.',
       )
