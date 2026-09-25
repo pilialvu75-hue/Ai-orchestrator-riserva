@@ -176,6 +176,9 @@ final class WorkshopProposalReviewRunner {
       'instruction': request.instruction,
       'implementationPlan': boundedPlan,
       'targetFiles': request.targetFiles,
+      'targetFilesPolicy': request.targetFiles.isEmpty
+          ? 'unspecified_for_initial_create_task'
+          : 'explicit_scope',
       'constraints': request.constraints,
       'context': taskContext,
       'changes': changes,
@@ -187,11 +190,24 @@ requirement compliance and unsafe or incomplete edits.
 
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
-targetFiles and constraints. The implementationPlan is the Architect's bounded
-plan for this task and is authoritative for the expected increment. The context
-field is project background, not a demand to finish future project features in
-this task. Do not reject a correct bounded increment solely because later
-project capabilities are not implemented yet.
+targetFiles and constraints.
+
+CONTRACT PRECEDENCE:
+1. The explicit task instruction and explicit constraints are authoritative.
+2. implementationPlan is model-authored Architect guidance and must not override
+   or contradict the explicit task.
+3. targetFiles is a hard restriction only when targetFilesPolicy is
+   "explicit_scope". When targetFilesPolicy is
+   "unspecified_for_initial_create_task", an empty targetFiles list means the
+   initial create task did not preselect files; it does NOT mean "no files are
+   allowed" and is not by itself a mismatch.
+
+If implementationPlan conflicts with the explicit instruction, judge the staged
+change against the explicit task and constraints. The context field is project
+background, not a demand to finish future project features in this task. Do not
+reject a correct bounded increment solely because later project capabilities
+are not implemented yet or because initial targetFiles were intentionally
+unspecified.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
