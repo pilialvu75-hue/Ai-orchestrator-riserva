@@ -19,13 +19,16 @@ jobs:
       SOURCE_RUN_ID: "36108788493"
       SOURCE_SHA: "e62ba29638b4bbde42f45737d13e3430f2d9e966"
       RELEASE_TAG: "v1.0.12.2466-beta"
+      ARTIFACT_NAME: "AI-Orchestrator-android-release-1.0.12-2466"
     steps:
       - name: Download validated Android artifact
         shell: bash
         run: |
           set -euo pipefail
           artifact_id="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts"               --jq '.artifacts[] | select(.name == "AI-Orchestrator-android-release-1.0.12-2461") | .id'               | head -n1
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+              --jq ".artifacts[] | select(.name == \"\${ARTIFACT_NAME}\") | .id" \
+              | head -n1
           )"
           test -n "$artifact_id"
           gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/android-beta.zip
@@ -40,27 +43,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          notes=
+          notes="$(cat <<'EOF'
+Physical-test beta for Samsung S24 FE.
+
+Based on stable +2460 with Vulkan-50 requested offload plus the Phi GPU profile fix: n_ubatch starts at 32 when requestedGpuLayers >= 32, so memory pressure should not tear down a healthy cached session only to shrink 64 -> 32. Verification and production use the same profile selection.
+
+Do not promote to stable before physical Phi-3.5 validation of warm session reuse, first-token latency, memory pressure and native stability.
+EOF
+          )"
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" /tmp/app-release.apk /tmp/app-release.apk.sha256               --clobber --repo "${GITHUB_REPOSITORY}"
+            gh release upload "${RELEASE_TAG}" /tmp/app-release.apk /tmp/app-release.apk.sha256 \
+              --clobber --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${RELEASE_TAG}"               /tmp/app-release.apk               /tmp/app-release.apk.sha256               --repo "${GITHUB_REPOSITORY}"               --target "${SOURCE_SHA}"               --prerelease               --title "AI Orchestrator 1.0.12+2466 beta"               --notes "$notes"
+            gh release create "${RELEASE_TAG}" \
+              /tmp/app-release.apk \
+              /tmp/app-release.apk.sha256 \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${SOURCE_SHA}" \
+              --prerelease \
+              --title "AI Orchestrator 1.0.12+2466 beta" \
+              --notes "$notes"
           fi
 
       - name: Verify beta release
         shell: bash
         run: |
           set -euo pipefail
-          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}"             --json tagName,isPrerelease,assets             --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
-Physical-test beta for Samsung S24 FE.\n\nBased on stable +2460 with Vulkan-50 requested offload plus the follow-up Phi GPU profile fix: n_ubatch starts at 32 when requestedGpuLayers >= 32, so memory pressure should not tear down a healthy cached session only to shrink 64 -> 32. Verification and production use the same profile selection.\n\nDo not promote to stable before physical Phi-3.5 validation of warm session reuse, first-token latency, memory pressure and native stability.'
-          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" /tmp/app-release.apk /tmp/app-release.apk.sha256               --clobber --repo "${GITHUB_REPOSITORY}"
-          else
-            gh release create "${RELEASE_TAG}"               /tmp/app-release.apk               /tmp/app-release.apk.sha256               --repo "${GITHUB_REPOSITORY}"               --target "${SOURCE_SHA}"               --prerelease               --title "AI Orchestrator 1.0.12+2461 beta"               --notes "$notes"
-          fi
-
-      - name: Verify beta release
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}"             --json tagName,isPrerelease,assets             --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,isPrerelease,assets \
+            --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
