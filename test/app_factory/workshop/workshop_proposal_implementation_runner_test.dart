@@ -167,7 +167,6 @@ void main() {
             model: 'engineer-model',
           ),
         ],
-        cancelTokenOnCalls: const <int>{0},
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -185,7 +184,7 @@ void main() {
       expect(proposal.explanation, 'Memory retry succeeded');
       expect(session.workspace.read('lib/app.dart'), 'new');
       expect(engineer.calls, 2);
-      expect(callerToken.isCancelled, isTrue);
+      expect(callerToken.isCancelled, isFalse);
       expect(
         engineer.sessionIds,
         <String>[
@@ -194,7 +193,7 @@ void main() {
         ],
       );
       expect(engineer.maxTokensValues, <int?>[640, 512]);
-      expect(engineer.cancellationTokenWasNull, <bool>[false, true]);
+      expect(engineer.cancellationTokenWasNull, <bool>[false, false]);
       expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
       expect(workspaceGateway.writeCalls, 0);
     });
