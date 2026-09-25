@@ -260,12 +260,15 @@ struct RuntimeSession {
     int telemetry_ctx = 0, telemetry_batch = 0, telemetry_ubatch = 0;
     int telemetry_gpu_layers = -1;
     std::atomic<int64_t> telemetry_decode_calls{0};
+    std::atomic<int64_t> telemetry_reused_tokens{0};
+    std::atomic<int64_t> telemetry_prefilled_tokens{0};
 
     mutable std::mutex generation_mutex;
     mutable std::mutex queue_mutex;
     mutable std::mutex error_mutex;
     mutable std::mutex native_mutex;
     mutable std::mutex first_token_mutex;
+    mutable std::mutex prompt_cache_mutex;
     std::condition_variable first_token_cv;
 
     llama_model* model{nullptr};
@@ -279,6 +282,15 @@ struct RuntimeSession {
     std::atomic<uint64_t> epoch{0};
 
     std::deque<TokenEntry> token_queue;
+
+    // Verified token sequences corresponding to the current context memory.
+    // KV reuse is allowed only when cache_scope matches the logical Dart
+    // session and the new prompt shares an exact token-id prefix.
+    std::vector<llama_token> cached_kv_tokens;
+    std::vector<llama_token> last_prompt_tokens;
+    std::string prompt_cache_scope;
+    bool prompt_cache_valid{false};
+
     std::atomic<int64_t> queue_overflow_count{0};
     std::atomic<int64_t> stale_drop_count{0};
 
@@ -311,6 +323,58 @@ struct RuntimeSession {
     size_t queue_size_snapshot() const {
         std::lock_guard<std::mutex> lock(queue_mutex);
         return token_queue.size();
+    }
+
+    struct PromptCacheSnapshot {
+        bool valid{false};
+        std::string scope;
+        std::vector<llama_token> kv_tokens;
+        std::vector<llama_token> prompt_tokens;
+    };
+
+    PromptCacheSnapshot prompt_cache_snapshot() const {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        return PromptCacheSnapshot{
+            prompt_cache_valid,
+            prompt_cache_scope,
+            cached_kv_tokens,
+            last_prompt_tokens,
+        };
+    }
+
+    void store_prompt_cache(
+        const std::string& scope,
+        const std::vector<llama_token>& prompt_tokens,
+        const std::vector<llama_token>& kv_tokens
+    ) {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        if (scope.empty() || prompt_tokens.empty() || kv_tokens.empty()) {
+            prompt_cache_valid = false;
+            prompt_cache_scope.clear();
+            cached_kv_tokens.clear();
+            last_prompt_tokens.clear();
+            return;
+        }
+        prompt_cache_scope = scope;
+        last_prompt_tokens = prompt_tokens;
+        cached_kv_tokens = kv_tokens;
+        prompt_cache_valid = true;
+    }
+
+    void invalidate_prompt_cache(const char* reason) {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        const bool was_valid = prompt_cache_valid;
+        prompt_cache_valid = false;
+        prompt_cache_scope.clear();
+        cached_kv_tokens.clear();
+        last_prompt_tokens.clear();
+        telemetry_reused_tokens.store(0, std::memory_order_relaxed);
+        telemetry_prefilled_tokens.store(0, std::memory_order_relaxed);
+        if (was_valid) {
+            LOGI("[KV_CACHE_INVALIDATE] session=%" PRId64 " reason=%s",
+                 id,
+                 reason ? reason : "unknown");
+        }
     }
 
     bool has_native_resources() const {
@@ -447,6 +511,7 @@ size_t enqueue_token(
 void run_generation(
     const std::shared_ptr<RuntimeSession>& session,
     std::string prompt,
+    std::string cache_scope,
     int32_t max_tokens,
     float temperature,
     const uint64_t owner_epoch
@@ -473,6 +538,9 @@ void run_generation(
 
         ~ThreadGuard() {
             session->worker_running.store(false, std::memory_order_release);
+            if (session->gen_state.load(std::memory_order_acquire) != kStateCompleted) {
+                session->invalidate_prompt_cache("generation_not_completed");
+            }
             notify_first_token_waiters(session);
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at
