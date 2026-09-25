@@ -1,4 +1,5 @@
 name: Publish physical-test beta 2470
+# Triggered after the workflow exists on the branch.
 
 on:
   push:
