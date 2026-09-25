@@ -198,6 +198,38 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('caller cancellation suppresses critical-memory retry', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=critical_memory|message=Generazione fermata per pressione sulla memoria.',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+      final callerToken = CancellationToken()..cancel();
+
+      await expectLater(
+        WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+          session: session,
+          cancellationToken: callerToken,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(engineer.calls, 1);
+      expect(callerToken.isCancelled, isTrue);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('retries syntactically truncated Engineer JSON with larger compact budget',
         () async {
       final engineer = _StaticGateway(
