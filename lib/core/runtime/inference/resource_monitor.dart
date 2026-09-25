@@ -60,11 +60,23 @@ class ResourceProfile {
   const ResourceProfile(this.context, this.batch, this.microBatch, this.reason);
   final int context, batch, microBatch;
   final String reason;
-  static ResourceProfile select(ResourceSample? sample, {required bool phi}) {
+  static ResourceProfile select(
+    ResourceSample? sample, {
+    required bool phi,
+    int requestedGpuLayers = 0,
+  }) {
     if (sample?.pressured == true) {
       return const ResourceProfile(2048, 128, 32, 'pressure');
     }
-    if (phi) return const ResourceProfile(2048, 128, 64, 'phi_conservative');
+    if (phi) {
+      // Aggressive GPU offload on Phi leaves substantially less free RAM.
+      // Start with the same micro-batch used under pressure so a healthy
+      // cached session does not have to be torn down only to shrink 64 -> 32.
+      if (requestedGpuLayers >= 32) {
+        return const ResourceProfile(2048, 128, 32, 'phi_gpu_conservative');
+      }
+      return const ResourceProfile(2048, 128, 64, 'phi_conservative');
+    }
     // Keep a smaller KV/compute allocation on phones with at most 8 GiB.
     // Free RAM alone can look healthy before weights become resident.
     final total = sample?.totalBytes;
