@@ -249,8 +249,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
   /// workspace state. The authoritative lifecycle remains owned by the existing
   /// engine and guarded production pipeline.
   void reportOperationalStage(WorkshopStage stage) {
-    _ensureNotDisposed();
-    if (_state.requestId == null) return;
+    // Presentation telemetry must never become an execution dependency.
+    if (_disposed || _state.requestId == null) return;
 
     switch (stage) {
       case WorkshopStage.analysis:
@@ -269,11 +269,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       case WorkshopStage.completed:
       case WorkshopStage.blocked:
       case WorkshopStage.cancelled:
-        throw ArgumentError.value(
-          stage,
-          'stage',
-          'Only active Cantiere execution stages can be reported.',
-        );
+        return;
     }
   }
 
