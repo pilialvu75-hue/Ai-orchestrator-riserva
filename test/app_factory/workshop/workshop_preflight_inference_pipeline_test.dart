@@ -18,6 +18,7 @@ void main() {
   group('WorkshopPreflightInferencePipeline', () {
     test('routes Orchestrator then Architect and passes analysis forward', () async {
       final callOrder = <AppAiRole>[];
+      final stages = <WorkshopStage>[];
       final orchestrator = _RecordingGateway(
         role: AppAiRole.workshopOrchestrator,
         callOrder: callOrder,
@@ -46,9 +47,19 @@ void main() {
           AppAiRole.engineer: engineer,
           AppAiRole.reviewer: reviewer,
         }),
-      ).run(request: _request);
+      ).run(
+        request: _request,
+        onStage: stages.add,
+      );
 
       expect(result.readyForImplementation, isTrue);
+      expect(
+        stages,
+        <WorkshopStage>[
+          WorkshopStage.analysis,
+          WorkshopStage.planning,
+        ],
+      );
       expect(
         callOrder,
         <AppAiRole>[

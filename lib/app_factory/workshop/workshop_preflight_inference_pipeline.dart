@@ -91,6 +91,7 @@ final class WorkshopPreflightInferencePipeline {
     List<String> requiredCapabilities = const <String>[],
     String? target,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final resolvedTarget = _resolveTarget(request: request, explicitTarget: target);
     final resumeKey = _resumeKey(
@@ -108,6 +109,8 @@ final class WorkshopPreflightInferencePipeline {
     }
 
     final approvedProposal = _approvedProposalFrom(request);
+
+    onStage?.call(WorkshopStage.analysis);
 
     final reuseDecision = allowLocalReuse
         ? previous?.analysisReady == true
@@ -192,6 +195,8 @@ final class WorkshopPreflightInferencePipeline {
       _resumeByKey[resumeKey] = result;
       return result;
     }
+
+    onStage?.call(WorkshopStage.planning);
 
     var architecture = await _inference.complete(
       stage: WorkshopStage.planning,

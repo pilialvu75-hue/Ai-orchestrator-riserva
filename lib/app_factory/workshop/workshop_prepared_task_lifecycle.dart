@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_inference_runner.dart';
@@ -56,6 +57,7 @@ final class WorkshopPreparedTaskLifecycle {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) {
     _requireCompletePreflight(preflight);
     return _inferenceRunner.run(
@@ -63,6 +65,7 @@ final class WorkshopPreparedTaskLifecycle {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
@@ -78,6 +81,7 @@ final class WorkshopPreparedTaskLifecycle {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) {
     _requireCompletePreflight(preflight);
     return _inferenceRunner.runWithResumeContext(
@@ -86,6 +90,7 @@ final class WorkshopPreparedTaskLifecycle {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
