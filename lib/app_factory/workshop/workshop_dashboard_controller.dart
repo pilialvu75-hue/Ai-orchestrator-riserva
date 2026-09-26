@@ -260,7 +260,6 @@ final class WorkshopDashboardController extends ChangeNotifier {
       case WorkshopStage.validation:
         _updateState(
           _state.copyWith(
-            stage: stage,
             lastOperationalStage: stage,
           ),
         );
