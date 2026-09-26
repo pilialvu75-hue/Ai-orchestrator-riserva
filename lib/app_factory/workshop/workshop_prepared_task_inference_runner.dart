@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
@@ -28,6 +29,7 @@ final class WorkshopPreparedTaskInferenceRunner {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final session = _preparedSession(taskId);
 
@@ -36,6 +38,7 @@ final class WorkshopPreparedTaskInferenceRunner {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
@@ -47,6 +50,7 @@ final class WorkshopPreparedTaskInferenceRunner {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final session = _preparedSession(taskId);
 
@@ -63,6 +67,7 @@ final class WorkshopPreparedTaskInferenceRunner {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
