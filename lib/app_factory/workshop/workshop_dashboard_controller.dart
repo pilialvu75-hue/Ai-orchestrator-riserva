@@ -371,6 +371,12 @@ final class WorkshopDashboardController extends ChangeNotifier {
         projectId: restoredPlan.id,
         projectTitle: restoredPlan.title,
         stage: restoredStage,
+        lastOperationalStage:
+            restoredStage == WorkshopStage.blocked ||
+                    restoredStage == WorkshopStage.cancelled ||
+                    restoredStage == WorkshopStage.completed
+                ? null
+                : restoredStage,
         projectStatus: restoredPlan.status,
         progress: restoredPlan.progress,
         completedTasks: restoredPlan.completedTasks,
@@ -495,6 +501,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
         requestId: requestId,
         projectId: plan.id,
         projectTitle: plan.title,
+        stage: WorkshopStage.planning,
+        lastOperationalStage: WorkshopStage.planning,
         projectStatus: plan.status,
         progress: plan.progress,
         completedTasks: plan.completedTasks,
