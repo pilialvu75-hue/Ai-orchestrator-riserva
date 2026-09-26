@@ -23,6 +23,7 @@ final class WorkshopDashboardControllerState {
     this.projectId,
     this.projectTitle,
     this.stage,
+    this.lastOperationalStage,
     this.projectStatus,
     this.progress = 0,
     this.completedTasks = 0,
@@ -48,6 +49,21 @@ final class WorkshopDashboardControllerState {
 
   /// Fase corrente del Workshop.
   final WorkshopStage? stage;
+
+  /// Ultimo stage operativo raggiunto prima di uno stato terminale/bloccato.
+  ///
+  /// È solo evidenza di presentazione: non modifica lo stato reale del progetto
+  /// e non viene usato per autorizzazioni, apply o completamento dei task.
+  final WorkshopStage? lastOperationalStage;
+
+  WorkshopStage? get progressPresentationStage {
+    final current = stage;
+    if (current == WorkshopStage.blocked ||
+        current == WorkshopStage.cancelled) {
+      return lastOperationalStage;
+    }
+    return current;
+  }
 
   /// Stato del project plan.
   final WorkshopProjectStatus? projectStatus;
@@ -99,6 +115,7 @@ final class WorkshopDashboardControllerState {
     String? projectId,
     String? projectTitle,
     WorkshopStage? stage,
+    WorkshopStage? lastOperationalStage,
     WorkshopProjectStatus? projectStatus,
     double? progress,
     int? completedTasks,
@@ -121,6 +138,8 @@ final class WorkshopDashboardControllerState {
       projectId: projectId ?? this.projectId,
       projectTitle: projectTitle ?? this.projectTitle,
       stage: stage ?? this.stage,
+      lastOperationalStage:
+          lastOperationalStage ?? this.lastOperationalStage,
       projectStatus: projectStatus ?? this.projectStatus,
       progress: progress ?? this.progress,
       completedTasks: completedTasks ?? this.completedTasks,
@@ -890,9 +909,15 @@ final class WorkshopDashboardController extends ChangeNotifier {
       return;
     }
 
+    final isOperational = currentStage != WorkshopStage.blocked &&
+        currentStage != WorkshopStage.cancelled &&
+        currentStage != WorkshopStage.completed;
+
     _updateState(
       _state.copyWith(
         stage: currentStage,
+        lastOperationalStage:
+            isOperational ? currentStage : _state.lastOperationalStage,
         isBusy: false,
       ),
     );
