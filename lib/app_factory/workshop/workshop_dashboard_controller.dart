@@ -57,12 +57,10 @@ final class WorkshopDashboardControllerState {
   final WorkshopStage? lastOperationalStage;
 
   WorkshopStage? get progressPresentationStage {
-    final current = stage;
-    if (current == WorkshopStage.blocked ||
-        current == WorkshopStage.cancelled) {
-      return lastOperationalStage;
+    if (stage == WorkshopStage.completed) {
+      return WorkshopStage.completed;
     }
-    return current;
+    return lastOperationalStage ?? stage;
   }
 
   /// Stato del project plan.
@@ -406,11 +404,9 @@ final class WorkshopDashboardController extends ChangeNotifier {
         projectTitle: restoredPlan.title,
         stage: restoredStage,
         lastOperationalStage:
-            restoredStage == WorkshopStage.blocked ||
-                    restoredStage == WorkshopStage.cancelled ||
-                    restoredStage == WorkshopStage.completed
-                ? null
-                : restoredStage,
+            restoredStage == WorkshopStage.completed
+                ? WorkshopStage.completed
+                : WorkshopStage.requested,
         projectStatus: restoredPlan.status,
         progress: restoredPlan.progress,
         completedTasks: restoredPlan.completedTasks,
@@ -536,7 +532,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
         projectId: plan.id,
         projectTitle: plan.title,
         stage: WorkshopStage.planning,
-        lastOperationalStage: WorkshopStage.planning,
+        lastOperationalStage: WorkshopStage.requested,
         projectStatus: plan.status,
         progress: plan.progress,
         completedTasks: plan.completedTasks,
@@ -951,15 +947,9 @@ final class WorkshopDashboardController extends ChangeNotifier {
       return;
     }
 
-    final isOperational = currentStage != WorkshopStage.blocked &&
-        currentStage != WorkshopStage.cancelled &&
-        currentStage != WorkshopStage.completed;
-
     _updateState(
       _state.copyWith(
         stage: currentStage,
-        lastOperationalStage:
-            isOperational ? currentStage : _state.lastOperationalStage,
         isBusy: false,
       ),
     );
