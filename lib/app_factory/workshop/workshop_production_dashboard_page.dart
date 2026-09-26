@@ -528,11 +528,12 @@ class _WorkshopProductionDashboardPageState
   }
 
   Future<void> _retryFinalBuildOnly() async {
-    final result = _buildResult;
-    if (_mutationBusy ||
-        !_projectReadyForBuild ||
-        result == null ||
-        _repairPreparer.planner.assess(result).isVerifiedSuccess) {
+    if (!WorkshopFinalBuildRetryPolicy.canRetry(
+      projectReadyForBuild: _projectReadyForBuild,
+      hasBuildResult: _buildResult != null,
+      hasVerifiedArtifact: _hasVerifiedArtifact,
+      isBusy: _mutationBusy,
+    )) {
       return;
     }
 
@@ -875,6 +876,20 @@ class _WorkshopProductionDashboardPageState
         ),
       ),
     );
+  }
+}
+
+abstract final class WorkshopFinalBuildRetryPolicy {
+  static bool canRetry({
+    required bool projectReadyForBuild,
+    required bool hasBuildResult,
+    required bool hasVerifiedArtifact,
+    required bool isBusy,
+  }) {
+    return projectReadyForBuild &&
+        hasBuildResult &&
+        !hasVerifiedArtifact &&
+        !isBusy;
   }
 }
 
