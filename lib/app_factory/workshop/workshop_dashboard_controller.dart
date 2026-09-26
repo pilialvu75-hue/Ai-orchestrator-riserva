@@ -245,6 +245,40 @@ final class WorkshopDashboardController extends ChangeNotifier {
 
   WorkshopBuildLab get buildLab => _buildLab;
 
+  /// Reports the currently executing Cantiere role for presentation only.
+  ///
+  /// This never mutates WorkshopEngine, project/task completion, approvals or
+  /// workspace state. The authoritative lifecycle remains owned by the existing
+  /// engine and guarded production pipeline.
+  void reportOperationalStage(WorkshopStage stage) {
+    _ensureNotDisposed();
+    if (_state.requestId == null) return;
+
+    switch (stage) {
+      case WorkshopStage.analysis:
+      case WorkshopStage.planning:
+      case WorkshopStage.implementation:
+      case WorkshopStage.review:
+      case WorkshopStage.validation:
+        _updateState(
+          _state.copyWith(
+            stage: stage,
+            lastOperationalStage: stage,
+          ),
+        );
+        return;
+      case WorkshopStage.requested:
+      case WorkshopStage.completed:
+      case WorkshopStage.blocked:
+      case WorkshopStage.cancelled:
+        throw ArgumentError.value(
+          stage,
+          'stage',
+          'Only active Cantiere execution stages can be reported.',
+        );
+    }
+  }
+
   /// Rebuilds a durable Cantiere production without restoring any ephemeral
   /// in-memory diff or approval flag.
   ///
