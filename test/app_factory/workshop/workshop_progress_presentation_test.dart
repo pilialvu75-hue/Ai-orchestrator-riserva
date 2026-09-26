@@ -48,6 +48,27 @@ void main() {
       );
     });
 
+    test('prepared engine stage does not jump ahead of execution telemetry', () {
+      const state = WorkshopDashboardControllerState(
+        stage: WorkshopStage.implementation,
+        lastOperationalStage: WorkshopStage.requested,
+        progress: 0,
+        completedTasks: 0,
+        totalTasks: 1,
+      );
+
+      expect(state.progressPresentationStage, WorkshopStage.requested);
+      expect(
+        WorkshopProgressPresentation.displayValue(
+          authoritativeProgress: state.progress,
+          completedTasks: state.completedTasks,
+          totalTasks: state.totalTasks,
+          stage: state.progressPresentationStage,
+        ),
+        closeTo(0.05, 0.0001),
+      );
+    });
+
     test('blocked UI can retain the last operational stage', () {
       const state = WorkshopDashboardControllerState(
         stage: WorkshopStage.blocked,
