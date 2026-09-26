@@ -155,6 +155,7 @@ final class WorkshopProductionTaskCoordinator {
       allowLocalReuse: !remoteLibraryReused,
       certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
+      onStage: _bundle.dashboardController.reportOperationalStage,
     );
 
     if (!remoteLibraryReused) {
@@ -169,6 +170,7 @@ final class WorkshopProductionTaskCoordinator {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: _bundle.dashboardController.reportOperationalStage,
     );
   }
 
@@ -216,6 +218,7 @@ final class WorkshopProductionTaskCoordinator {
       allowLocalReuse: !remoteLibraryReused,
       certifiedLibraryReuseIdentity: remoteLibraryReuseIdentity,
       cancellationToken: cancellationToken,
+      onStage: _bundle.dashboardController.reportOperationalStage,
     );
 
     if (!remoteLibraryReused) {
@@ -231,6 +234,7 @@ final class WorkshopProductionTaskCoordinator {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: _bundle.dashboardController.reportOperationalStage,
     );
   }
 
