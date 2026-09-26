@@ -223,35 +223,14 @@ final class WorkshopChangeProposalDecoder {
 
     final first = lines.first.trim();
     final last = lines.last.trim();
-    if (!RegExp(r'^\x60\x60\x60[A-Za-z0-9_+.-]*    var normalized = path.replaceAll('\\', '/').trim();
-
-    while (normalized.startsWith('./')) {
-      normalized = normalized.substring(2);
+    final fence = String.fromCharCodes(const <int>[96, 96, 96]);
+    if (!first.startsWith(fence) || last != fence) {
+      return content;
     }
 
-    if (normalized.isEmpty ||
-        normalized.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
-      throw FormatException(
-        'Workshop change path must be workspace-relative: $path',
-      );
-    }
-
-    final segments = normalized.split('/');
-    if (segments.any(
-      (segment) =>
-          segment.isEmpty || segment == '.' || segment == '..',
-    )) {
-      throw FormatException(
-        'Workshop change path is not safe: $path',
-      );
-    }
-
-    return normalized;
-  }
-}
-).hasMatch(first) ||
-        last != '\x60\x60\x60') {
+    final language = first.substring(fence.length).trim();
+    if (language.isNotEmpty &&
+        !RegExp(r'^[A-Za-z0-9_+.-]+').hasMatch(language)) {
       return content;
     }
 
