@@ -29,6 +29,11 @@ class LlamaBridgeBindings {
           .lookupFunction<LlbSessionStartGenNative, LlbSessionStartGenDart>(
             'llb_session_start_gen',
           ),
+      _sessionStartGenScoped = lib.lookupFunction<
+          LlbSessionStartGenScopedNative,
+          LlbSessionStartGenScopedDart>(
+        'llb_session_start_gen_scoped',
+      ),
       _sessionPollToken = lib
           .lookupFunction<LlbSessionPollTokenNative, LlbSessionPollTokenDart>(
             'llb_session_poll_token',
@@ -65,6 +70,8 @@ class LlamaBridgeBindings {
     'micro_batch': _sessionMetric(session, 2),
     'gpu_layers': _sessionMetric(session, 3),
     'decode_calls': _sessionMetric(session, 4),
+    'reused_tokens': _sessionMetric(session, 5),
+    'prefilled_tokens': _sessionMetric(session, 6),
   };
 
   final LlbInitBackendDart _initBackend;
@@ -73,6 +80,7 @@ class LlamaBridgeBindings {
   final LlbCreateSessionDart _createSession;
   final LlbSessionTokenCountDart _sessionTokenCount;
   final LlbSessionStartGenDart _sessionStartGen;
+  final LlbSessionStartGenScopedDart _sessionStartGenScoped;
   final LlbSessionPollTokenDart _sessionPollToken;
   final LlbSessionCancelDart _sessionCancel;
   final LlbReleaseSessionDart _releaseSession;
@@ -154,8 +162,9 @@ class LlamaBridgeBindings {
     int sessionId,
     Pointer<Utf8> promptPtr,
     int maxTokens,
-    double temperature,
-  ) {
+    double temperature, {
+    String? cacheScope,
+  }) {
     if (sessionId <= 0) {
       throw StateError(
         'Cannot start native generation with invalid sessionId=$sessionId.',
@@ -174,7 +183,23 @@ class LlamaBridgeBindings {
       );
     }
 
-    return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
+    final normalizedScope = cacheScope?.trim();
+    if (normalizedScope == null || normalizedScope.isEmpty) {
+      return _sessionStartGen(sessionId, promptPtr, maxTokens, temperature);
+    }
+
+    final scopePtr = normalizedScope.toNativeUtf8(allocator: calloc);
+    try {
+      return _sessionStartGenScoped(
+        sessionId,
+        promptPtr,
+        scopePtr,
+        maxTokens,
+        temperature,
+      );
+    } finally {
+      calloc.free(scopePtr);
+    }
   }
 
   int pollToken(int sessionId, Pointer<Utf8> buf) =>

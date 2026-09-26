@@ -260,12 +260,15 @@ struct RuntimeSession {
     int telemetry_ctx = 0, telemetry_batch = 0, telemetry_ubatch = 0;
     int telemetry_gpu_layers = -1;
     std::atomic<int64_t> telemetry_decode_calls{0};
+    std::atomic<int64_t> telemetry_reused_tokens{0};
+    std::atomic<int64_t> telemetry_prefilled_tokens{0};
 
     mutable std::mutex generation_mutex;
     mutable std::mutex queue_mutex;
     mutable std::mutex error_mutex;
     mutable std::mutex native_mutex;
     mutable std::mutex first_token_mutex;
+    mutable std::mutex prompt_cache_mutex;
     std::condition_variable first_token_cv;
 
     llama_model* model{nullptr};
@@ -279,6 +282,15 @@ struct RuntimeSession {
     std::atomic<uint64_t> epoch{0};
 
     std::deque<TokenEntry> token_queue;
+
+    // Verified token sequences corresponding to the current context memory.
+    // KV reuse is allowed only when cache_scope matches the logical Dart
+    // session and the new prompt shares an exact token-id prefix.
+    std::vector<llama_token> cached_kv_tokens;
+    std::vector<llama_token> last_prompt_tokens;
+    std::string prompt_cache_scope;
+    bool prompt_cache_valid{false};
+
     std::atomic<int64_t> queue_overflow_count{0};
     std::atomic<int64_t> stale_drop_count{0};
 
@@ -311,6 +323,58 @@ struct RuntimeSession {
     size_t queue_size_snapshot() const {
         std::lock_guard<std::mutex> lock(queue_mutex);
         return token_queue.size();
+    }
+
+    struct PromptCacheSnapshot {
+        bool valid{false};
+        std::string scope;
+        std::vector<llama_token> kv_tokens;
+        std::vector<llama_token> prompt_tokens;
+    };
+
+    PromptCacheSnapshot prompt_cache_snapshot() const {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        return PromptCacheSnapshot{
+            prompt_cache_valid,
+            prompt_cache_scope,
+            cached_kv_tokens,
+            last_prompt_tokens,
+        };
+    }
+
+    void store_prompt_cache(
+        const std::string& scope,
+        const std::vector<llama_token>& prompt_tokens,
+        const std::vector<llama_token>& kv_tokens
+    ) {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        if (scope.empty() || prompt_tokens.empty() || kv_tokens.empty()) {
+            prompt_cache_valid = false;
+            prompt_cache_scope.clear();
+            cached_kv_tokens.clear();
+            last_prompt_tokens.clear();
+            return;
+        }
+        prompt_cache_scope = scope;
+        last_prompt_tokens = prompt_tokens;
+        cached_kv_tokens = kv_tokens;
+        prompt_cache_valid = true;
+    }
+
+    void invalidate_prompt_cache(const char* reason) {
+        std::lock_guard<std::mutex> lock(prompt_cache_mutex);
+        const bool was_valid = prompt_cache_valid;
+        prompt_cache_valid = false;
+        prompt_cache_scope.clear();
+        cached_kv_tokens.clear();
+        last_prompt_tokens.clear();
+        telemetry_reused_tokens.store(0, std::memory_order_relaxed);
+        telemetry_prefilled_tokens.store(0, std::memory_order_relaxed);
+        if (was_valid) {
+            LOGI("[KV_CACHE_INVALIDATE] session=%" PRId64 " reason=%s",
+                 id,
+                 reason ? reason : "unknown");
+        }
     }
 
     bool has_native_resources() const {
@@ -447,6 +511,7 @@ size_t enqueue_token(
 void run_generation(
     const std::shared_ptr<RuntimeSession>& session,
     std::string prompt,
+    std::string cache_scope,
     int32_t max_tokens,
     float temperature,
     const uint64_t owner_epoch
@@ -473,6 +538,9 @@ void run_generation(
 
         ~ThreadGuard() {
             session->worker_running.store(false, std::memory_order_release);
+            if (session->gen_state.load(std::memory_order_acquire) != kStateCompleted) {
+                session->invalidate_prompt_cache("generation_not_completed");
+            }
             notify_first_token_waiters(session);
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at
@@ -652,6 +720,79 @@ void run_generation(
         return;
     }
 
+    const auto cache_snapshot = session->prompt_cache_snapshot();
+    llama_memory_t memory = llama_get_memory(ctx);
+    int32_t reused_tokens = 0;
+    const char* reuse_reason = "cold_cache";
+
+    const bool exact_regeneration =
+        cache_snapshot.valid &&
+        cache_snapshot.scope == cache_scope &&
+        cache_snapshot.prompt_tokens == tokens;
+
+    if (cache_scope.empty()) {
+        reuse_reason = "scope_missing";
+    } else if (!cache_snapshot.valid) {
+        reuse_reason = "cache_invalid";
+    } else if (cache_snapshot.scope != cache_scope) {
+        reuse_reason = "scope_changed";
+    } else if (exact_regeneration) {
+        // Regeneration must be deterministic from a clean prompt prefill.
+        reuse_reason = "exact_prompt_regeneration";
+    } else {
+        const size_t max_common = std::min(
+            cache_snapshot.kv_tokens.size(),
+            tokens.size()
+        );
+        size_t common = 0;
+        while (common < max_common &&
+               cache_snapshot.kv_tokens[common] == tokens[common]) {
+            ++common;
+        }
+
+        // Replay at least the final prompt token so llama.cpp computes logits
+        // for the exact new prompt boundary. This also guarantees a non-empty
+        // prefill batch.
+        const size_t max_reusable =
+            tokens.size() > 1 ? tokens.size() - 1 : 0;
+        reused_tokens = static_cast<int32_t>(std::min(common, max_reusable));
+
+        if (reused_tokens > 0) {
+            if (llama_memory_seq_rm(memory, 0, reused_tokens, -1)) {
+                reuse_reason = "verified_prefix";
+            } else {
+                reused_tokens = 0;
+                reuse_reason = "partial_remove_unsupported";
+            }
+        } else {
+            reuse_reason = "prefix_diverged";
+        }
+    }
+
+    if (reused_tokens == 0) {
+        llama_memory_clear(memory, true);
+    }
+
+    const int32_t prefilled_tokens = n_tokens - reused_tokens;
+    session->telemetry_reused_tokens.store(
+        reused_tokens,
+        std::memory_order_relaxed
+    );
+    session->telemetry_prefilled_tokens.store(
+        prefilled_tokens,
+        std::memory_order_relaxed
+    );
+    LOGI("[KV_CACHE_REUSE] session=%" PRId64 " scope=%s reason=%s"
+         " reused_tokens=%d prefilled_tokens=%d prompt_tokens=%d",
+         session->id,
+         cache_scope.empty() ? "none" : "logical_session",
+         reuse_reason,
+         reused_tokens,
+         prefilled_tokens,
+         n_tokens);
+
+    std::vector<llama_token> kv_sequence_tokens(tokens);
+
     LOGI("[FORENSIC] [THREAD_PREFILL_BEGIN] before session=%" PRId64 " epoch=%" PRIu64,
          session->id,
          owner_epoch);
@@ -674,7 +815,11 @@ void run_generation(
 
     // n_ctx is total sequence capacity; n_batch is the per-decode limit.
     // Submitting the complete prompt above n_batch triggers GGML_ASSERT.
-    BatchGuard prefill_batch(std::min(n_tokens, prefill_n_batch), 0, 1);
+    BatchGuard prefill_batch(
+        std::min(prefilled_tokens, prefill_n_batch),
+        0,
+        1
+    );
     if (!prefill_batch.initialized) {
         session->set_error("Failed to allocate prefill batch");
         set_state_if_epoch(session, kStateFailed, owner_epoch, "prefill_batch_alloc_failed");
@@ -683,7 +828,7 @@ void run_generation(
 
     const auto prefill_started_at = std::chrono::steady_clock::now();
     int prefill_status = 0;
-    for (int32_t offset = 0; offset < n_tokens;) {
+    for (int32_t offset = reused_tokens; offset < n_tokens;) {
         if (session->cancel_requested.load(std::memory_order_acquire) ||
             session->epoch.load(std::memory_order_acquire) != owner_epoch) {
             set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_prefill");
@@ -725,11 +870,14 @@ void run_generation(
     LOGI("[FORENSIC] [THREAD_PREFILL_OK] before session=%" PRId64 " epoch=%" PRIu64,
          session->id,
          owner_epoch);
-    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64 " status=%d prefill_ms=%lld",
+    LOGI("[THREAD_PREFILL_OK] session=%" PRId64 " epoch=%" PRIu64
+         " status=%d prefill_ms=%lld reused_tokens=%d prefilled_tokens=%d",
          session->id,
          owner_epoch,
          prefill_status,
-         static_cast<long long>(prefill_ms));
+         static_cast<long long>(prefill_ms),
+         reused_tokens,
+         prefilled_tokens);
     LOGI("[FORENSIC] [THREAD_PREFILL_OK] after session=%" PRId64 " epoch=%" PRIu64
          " status=%d prefill_ms=%lld",
          session->id,
@@ -964,6 +1112,8 @@ void run_generation(
             return;
         }
 
+        kv_sequence_tokens.push_back(next_token);
+
         ++n_cur;
         ++n_decode;
         last_decode_progress_at = std::chrono::steady_clock::now();
@@ -971,6 +1121,23 @@ void run_generation(
              session->id,
              owner_epoch,
              n_decode);
+    }
+
+    if (session->cancel_requested.load(std::memory_order_acquire)) {
+        set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancelled_before_cache_commit");
+        session->invalidate_prompt_cache("cancelled_before_cache_commit");
+        return;
+    }
+
+    if (cache_scope.empty()) {
+        session->invalidate_prompt_cache("scope_missing");
+    } else {
+        session->store_prompt_cache(cache_scope, tokens, kv_sequence_tokens);
+        LOGI("[KV_CACHE_STORE] session=%" PRId64
+             " scope=logical_session prompt_tokens=%zu kv_tokens=%zu",
+             session->id,
+             tokens.size(),
+             kv_sequence_tokens.size());
     }
 
     set_state_if_epoch(session, kStateCompleted, owner_epoch, "generation_completed");
@@ -1199,9 +1366,10 @@ int64_t llb_create_session_ex(
     return session_id;
 }
 
-int32_t llb_session_start_gen(
+int32_t llb_session_start_gen_scoped(
     int64_t session_id,
     const char* prompt,
+    const char* cache_scope,
     int32_t max_tokens,
     float temperature
 ) {
@@ -1240,23 +1408,29 @@ int32_t llb_session_start_gen(
     std::lock_guard<std::mutex> lock(session->generation_mutex);
 
     LOGI("[CANCEL_REQUEST] session=%" PRId64 " reason=restart_generation", session_id);
+    const bool interrupted_previous_generation =
+        session->worker_running.load(std::memory_order_acquire);
     session->cancel_requested.store(true, std::memory_order_release);
     if (session->gen_thread.joinable()) {
         LOGI("[CLEANUP_JOIN] session=%" PRId64 " join_previous_generation=true", session_id);
         session->gen_thread.join();
+    }
+    if (interrupted_previous_generation) {
+        session->invalidate_prompt_cache("restart_interrupted_generation");
     }
 
     session->clear_queue();
     session->cancel_requested.store(false, std::memory_order_release);
     session->first_token_emitted.store(false, std::memory_order_release);
     session->clear_error();
-    llama_memory_clear(llama_get_memory(session->ctx), true);
 
     const uint64_t owner_epoch = session->epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     session->gen_state.store(kStateGenerating, std::memory_order_release);
     notify_first_token_waiters(session);
 
     const std::string sanitized_prompt = sanitize_prompt_for_generation(prompt);
+    const std::string normalized_cache_scope =
+        cache_scope == nullptr ? std::string() : std::string(cache_scope);
     if (prompt == nullptr || sanitized_prompt != std::string(prompt)) {
         LOGI("[PROMPT_FALLBACK] session=%" PRId64 " reason=start_gen_sanitized fallback=%s",
              session_id,
@@ -1280,6 +1454,7 @@ int32_t llb_session_start_gen(
             run_generation,
             session,
             sanitized_prompt,
+            normalized_cache_scope,
             max_tokens,
             temperature,
             owner_epoch
@@ -1302,6 +1477,23 @@ int32_t llb_session_start_gen(
          session_id,
          owner_epoch);
     return 0;
+}
+
+int32_t llb_session_start_gen(
+    int64_t session_id,
+    const char* prompt,
+    int32_t max_tokens,
+    float temperature
+) {
+    // Legacy callers intentionally use a cold cache because they do not carry
+    // logical-session identity.
+    return llb_session_start_gen_scoped(
+        session_id,
+        prompt,
+        nullptr,
+        max_tokens,
+        temperature
+    );
 }
 
 int32_t llb_session_poll_token(
@@ -1416,6 +1608,7 @@ void llb_session_cancel(int64_t session_id) {
     }
 
     LOGI("[CANCEL_REQUEST] session=%" PRId64 " requested=true", session_id);
+    session->invalidate_prompt_cache("explicit_cancel");
     session->cancel_requested.store(true, std::memory_order_release);
     const uint64_t owner_epoch = session->epoch.load(std::memory_order_acquire);
     set_state_if_epoch(session, kStateCancelled, owner_epoch, "cancel_requested_api");
@@ -1493,6 +1686,8 @@ int64_t llb_session_metric(int64_t session_id, int32_t metric) {
         case 2: return session->telemetry_ubatch;
         case 3: return session->telemetry_gpu_layers;
         case 4: return session->telemetry_decode_calls.load(std::memory_order_relaxed);
+        case 5: return session->telemetry_reused_tokens.load(std::memory_order_relaxed);
+        case 6: return session->telemetry_prefilled_tokens.load(std::memory_order_relaxed);
         default: return -1;
     }
 }

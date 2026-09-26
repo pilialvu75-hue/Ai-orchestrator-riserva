@@ -120,6 +120,7 @@ final class DiagnosticsTelemetryPolicy {
   static const Set<String> _performanceTags = <String>{
     'FIRST_TOKEN_REAL',
     'GENERATION_END',
+    'KV_CACHE_REUSE',
   };
 
   static const Set<String> _alwaysPromoteTags = <String>{
@@ -241,6 +242,9 @@ final class DiagnosticsTelemetryPolicy {
     'n_ctx',
     'n_threads',
     'requested_layers',
+    'reused_tokens',
+    'prefilled_tokens',
+    'prompt_tokens',
     'token_index',
     'tokens',
     'tokens_generated',
