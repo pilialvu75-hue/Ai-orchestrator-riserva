@@ -211,7 +211,33 @@ final class WorkshopChangeProposalDecoder {
         'Workshop change for $path requires string content.',
       );
     }
-    return content;
+    return _normalizeOuterCodeFence(content);
+  }
+
+  static String _normalizeOuterCodeFence(String content) {
+    final trimmed = content.trim();
+    final lines = trimmed.split(RegExp(r'\r?\n'));
+    if (lines.length < 3) {
+      return content;
+    }
+
+    final first = lines.first.trim();
+    final last = lines.last.trim();
+    final fence = String.fromCharCodes(const <int>[96, 96, 96]);
+    if (!first.startsWith(fence) || last != fence) {
+      return content;
+    }
+
+    final language = first.substring(fence.length).trim();
+    if (language.isNotEmpty &&
+        RegExp(r'[^A-Za-z0-9_+.-]').hasMatch(language)) {
+      return content;
+    }
+
+    // Only remove one fence that wraps the entire file content. Never remove
+    // internal Markdown/code strings or attempt to repair arbitrary syntax.
+    final body = lines.sublist(1, lines.length - 1).join('\n');
+    return content.endsWith('\n') ? '$body\n' : body;
   }
 
   static String _normalizeRelativePath(String path) {
