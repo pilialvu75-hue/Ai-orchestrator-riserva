@@ -91,7 +91,7 @@ void main() {
     expect(workspaceGateway.writeCalls, 0);
   });
 
-  test('resume path retries once when Engineer omits explanation', () async {
+  test('resume path reuses summary when Engineer omits explanation', () async {
     final provider = _RetryRecordingProvider();
     final stageInference = WorkshopStageRoleInference(
       executor: WorkshopRoleInferenceExecutor(
@@ -136,19 +136,16 @@ void main() {
       revisionAttempt: 1,
     );
 
-    expect(proposal.explanation, 'Repair completed');
+    expect(proposal.explanation, 'Repair');
     expect(session.workspace.read('lib/app.dart'), 'repaired');
-    expect(provider.requests, hasLength(2));
+    expect(provider.requests, hasLength(1));
     expect(
       provider.requests.map((request) => request.sessionId).toList(),
-      <String>[
-        'session-schema:revision-1',
-        'session-schema:revision-1:engineer-retry-malformed-1',
-      ],
+      <String>['session-schema:revision-1'],
     );
     expect(
       provider.requests.map((request) => request.maxTokens).toList(),
-      <int?>[640, 768],
+      <int?>[640],
     );
     expect(
       provider.requests.every((request) => request.executionId == 'execution-schema'),

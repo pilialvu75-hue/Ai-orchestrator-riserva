@@ -298,22 +298,14 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('retries valid JSON that omits required explanation', () async {
+    test('recovers omitted explanation from summary without retry', () async {
       final engineer = _StaticGateway(
-        results: <WorkshopInferenceResult>[
-          const WorkshopInferenceResult(
-            text:
-                '{"summary":"Walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-          const WorkshopInferenceResult(
-            text:
-                '{"summary":"Walking MVP","explanation":"Complete the bounded walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-        ],
+        result: const WorkshopInferenceResult(
+          text:
+              '{"summary":"Walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -337,22 +329,47 @@ void main() {
         preflight: preflight,
       );
 
-      expect(proposal.explanation, 'Complete the bounded walking MVP');
+      expect(proposal.explanation, 'Walking MVP');
       expect(proposal.changes.single.path, 'lib/app.dart');
       expect(session.workspace.read('lib/app.dart'), 'new');
-      expect(engineer.calls, 2);
+      expect(engineer.calls, 1);
       expect(
         engineer.sessionIds,
-        <String>[
-          'workshop:implementation:implementation-runner-request',
-          'workshop:implementation:implementation-runner-request:retry-malformed-1',
+        <String>['workshop:implementation:implementation-runner-request'],
+      );
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+    test('still retries when all explanatory metadata is missing', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered on retry","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
         ],
       );
-      expect(engineer.maxTokensValues, <int?>[640, 768]);
-      expect(
-        engineer.prompts[1],
-        contains('"explanation":"required"'),
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
       );
+      final session = await _session(workspaceGateway);
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.explanation, 'Recovered on retry');
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
       expect(workspaceGateway.writeCalls, 0);
     });
 
