@@ -4,6 +4,22 @@ import 'package:ai_orchestrator/core/diagnostics/public_log_projection.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('resource profiles export current and historical device budgets', () {
+    const prefix = '[2026-09-26T23:30:00.000] [RESOURCE_PROFILE] ';
+    for (final reason in ['pressure', 'phi_conservative', 'baseline',
+        'device_memory_budget', 'device_memory_conservative']) {
+      final line = '${prefix}reason=$reason n_ctx=2048 n_batch=128 n_ubatch=32';
+      final data = jsonDecode(publicLogProjection(line)!);
+      expect(data['reason'], reason);
+      expect(data['n_ctx'], 2048);
+      expect(data['n_batch'], 128);
+      expect(data['n_ubatch'], 32);
+      expect(publicLogProjection('$line prompt=private'), isNull);
+    }
+    expect(publicLogProjection('${prefix}reason=private n_ctx=2048 n_batch=128 n_ubatch=32'), isNull);
+    expect(publicLogProjection('${prefix}reason=device_memory_conservative n_ctx=secret n_batch=128 n_ubatch=32'), isNull);
+  });
+
   test('timing export preserves numeric latency and model without response text', () {
     const line = '[2026-09-20T22:57:23.000] [INFERENCE_TIMING] model=phi3_5_mini mode=local attempt=1 first_content_ms=22440 total_ms=24253 reported_tokens=13 text_chunks=13 outcome=success';
     final data = jsonDecode(publicLogProjection(line)!);
