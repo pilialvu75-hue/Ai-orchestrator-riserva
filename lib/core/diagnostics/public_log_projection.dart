@@ -92,12 +92,14 @@ String? publicLogProjection(String line) {
   }
   if (event == null) return null;
 
-  final benchmarkProjection = localModelBenchmarkPublicProjection(
-    event: event,
-    rest: rest,
-    time: timestamp[1]!,
-  );
-  if (benchmarkProjection != null) return benchmarkProjection;
+  if (event.startsWith('LOCAL_MODEL_BENCH_') ||
+      event == 'POST_GENERATION_MEMORY_RELEASE') {
+    return localModelBenchmarkPublicProjection(
+      event: event,
+      rest: rest,
+      time: timestamp[1]!,
+    );
+  }
 
   // CLOUD_ROUTING has a fully closed grammar. Never accept free-form values:
   // custom-provider identifiers are reduced to the literal "custom" before
