@@ -18,6 +18,31 @@ void main() {
     expect(ResourceProfile.select(ResourceSample({'totalBytes': 12 << 30}),
         phi: false).context, 4096);
   });
+  test('aggressive Phi GPU offload starts pressure-compatible', () {
+    final sample = ResourceSample({
+      'totalBytes': 7575265280,
+      'availableBytes': 2255867904,
+      'thresholdBytes': 408944640,
+    });
+    final conservative = ResourceProfile.select(
+      sample,
+      phi: true,
+      requestedGpuLayers: 10,
+    );
+    expect(conservative.microBatch, 64);
+    expect(conservative.reason, 'phi_conservative');
+
+    final aggressive = ResourceProfile.select(
+      sample,
+      phi: true,
+      requestedGpuLayers: 50,
+    );
+    expect(aggressive.context, 2048);
+    expect(aggressive.batch, 128);
+    expect(aggressive.microBatch, 32);
+    expect(aggressive.reason, 'phi_gpu_conservative');
+  });
+
   test('logging and listener errors cannot prevent remaining RAM guards',
       () async {
     var guarded = false;
