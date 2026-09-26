@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -51,20 +53,43 @@ void main() {
       expect(second.snapshotFor('claude').configured, isTrue);
     });
 
-    test('expired OAuth access token is not exposed', () async {
+    test('OAuth writes fail closed when the active adapter has no OAuth flow',
+        () async {
       final storage = _MemorySecretStorage();
       final store = CloudCredentialStore(storage: storage);
       await store.initialize();
 
-      await store.setOAuthAccessToken(
-        'gemini',
-        'expired-token',
-        expiresAt: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
+      for (final provider in <String>['gemini', 'copilot']) {
+        await expectLater(
+          store.setOAuthAccessToken(provider, 'oauth-token'),
+          throwsUnsupportedError,
+        );
+        expect(store.secretFor(provider), isNull);
+      }
+    });
+
+    test('legacy OAuth record is never exposed as an API key', () async {
+      final storage = _MemorySecretStorage();
+      storage.values['ai_orchestrator.cloud.credential.v1.gemini'] = jsonEncode(
+        <String, Object?>{
+          'version': 1,
+          'providerId': 'gemini',
+          'kind': 'oauthAccessToken',
+          'secret': 'legacy-oauth-token',
+          'accountId': null,
+          'expiresAt': null,
+        },
       );
+
+      final store = CloudCredentialStore(storage: storage);
+      await store.initialize();
 
       expect(store.secretFor('gemini'), isNull);
       expect(store.snapshotFor('gemini').configured, isFalse);
-      expect(store.snapshotFor('gemini').isExpired, isTrue);
+      expect(
+        store.snapshotFor('gemini').kind,
+        CloudCredentialKind.oauthAccessToken,
+      );
     });
 
     test('remove deletes the persisted secret and in-memory credential', () async {
