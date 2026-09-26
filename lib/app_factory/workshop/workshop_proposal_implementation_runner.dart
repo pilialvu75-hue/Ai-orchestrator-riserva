@@ -409,7 +409,10 @@ toward the explicit task instead of repeating the mistaken plan. No markdown,
 review, approval or apply. For deletion omit content.
 Every content
 value must be a valid JSON string with line breaks, double quotes and
-backslashes escaped according to JSON.
+backslashes escaped according to JSON. Prefer Flutter/Dart SDK-only code for
+the smallest MVP. If you import a third-party package that is not already
+declared by the project, include a matching pubspec.yaml addition/modification
+in the same proposal; never emit an undeclared package import.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
@@ -440,7 +443,10 @@ with "./", never use "../", and never use an absolute path.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
-JSON. Do not review, approve or apply.
+JSON. Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
+package is truly required and is not already declared, include the matching
+pubspec.yaml addition/modification in the same proposal. Never emit an
+undeclared package import. Do not review, approve or apply.
 '''.trim();
 
     RuntimeEventLog.instance.emit(
