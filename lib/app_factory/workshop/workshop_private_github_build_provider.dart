@@ -209,6 +209,15 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         finishedAt: _now().toUtc(),
         message: 'Remote Android build monitoring was cancelled.',
       );
+    } on _WorkshopRemoteBuildFailure catch (error) {
+      return _failure(
+        request,
+        startedAt,
+        error.message,
+        error.code,
+        stderr: error.diagnostics,
+        exitCode: 1,
+      );
     } on TimeoutException catch (error) {
       return _failure(
         request,
@@ -449,11 +458,90 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       if (run['status'] == 'completed') {
         if (run['conclusion'] == 'success') return;
         final conclusion = run['conclusion']?.toString() ?? 'unknown';
-        throw StateError('Private Android build completed with $conclusion.');
+        final failure = await _diagnoseFailedRun(
+          token: token,
+          runId: runId,
+          conclusion: conclusion,
+        );
+        throw failure;
       }
       await _delay(pollInterval);
     }
     throw TimeoutException('Private Android build did not finish in time.');
+  }
+
+  Future<_WorkshopRemoteBuildFailure> _diagnoseFailedRun({
+    required String token,
+    required int runId,
+    required String conclusion,
+  }) async {
+    String? failedStep;
+    int? failedJobId;
+
+    try {
+      final response = await _client.get(
+        _api('actions/runs/$runId/jobs', const <String, String>{
+          'per_page': '20',
+        }),
+        headers: _headers(token),
+      );
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['jobs'] is List) {
+          for (final rawJob in decoded['jobs'] as List) {
+            if (rawJob is! Map || rawJob['conclusion'] != 'failure') continue;
+            final id = rawJob['id'];
+            if (id is num) failedJobId = id.toInt();
+            final steps = rawJob['steps'];
+            if (steps is List) {
+              for (final rawStep in steps) {
+                if (rawStep is! Map || rawStep['conclusion'] != 'failure') {
+                  continue;
+                }
+                failedStep = rawStep['name']?.toString().trim();
+                break;
+              }
+            }
+            break;
+          }
+        }
+      }
+    } catch (_) {
+      // Diagnostics are best effort. Failure classification below remains
+      // conservative if GitHub does not expose jobs/logs.
+    }
+
+    var diagnostics = '';
+    if (failedJobId != null) {
+      try {
+        final response = await _client.get(
+          _api('actions/jobs/$failedJobId/logs'),
+          headers: _headers(token),
+        );
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          diagnostics = _boundedBuildLog(response.body);
+        }
+      } catch (_) {
+        // Keep the failed step classification even when logs are unavailable.
+      }
+    }
+
+    final code = WorkshopPrivateBuildFailureClassifier.codeForStep(failedStep);
+    final stepLabel =
+        failedStep == null || failedStep.isEmpty ? 'unknown step' : failedStep;
+    return _WorkshopRemoteBuildFailure(
+      code: code,
+      message:
+          'Private Android build completed with $conclusion at $stepLabel.',
+      diagnostics: diagnostics,
+    );
+  }
+
+  static String _boundedBuildLog(String value, {int maxChars = 6000}) {
+    final normalized = value.replaceAll('\u0000', '').trim();
+    if (normalized.length <= maxChars) return normalized;
+    return '[... remote build log truncated ...]\n'
+        '${normalized.substring(normalized.length - maxChars)}';
   }
 
   Future<_VerifiedRemoteArtifact> _downloadAndVerifyArtifact({
@@ -635,8 +723,10 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     WorkshopBuildRequest request,
     DateTime startedAt,
     String message,
-    String code,
-  ) {
+    String code, {
+    String stderr = '',
+    int? exitCode,
+  }) {
     return WorkshopBuildResult(
       requestId: request.id,
       target: request.target,
@@ -644,6 +734,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       startedAt: startedAt,
       finishedAt: _now().toUtc(),
       message: message,
+      stderr: stderr,
+      exitCode: exitCode,
       errors: <String>[code],
     );
   }
@@ -689,6 +781,27 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
   }
 }
 
+/// Maps the failed private CI step to a safe build-failure class.
+///
+/// Only failures caused by generated project content are eligible for the
+/// bounded Cantiere repair loop. Toolchain/security/artifact infrastructure
+/// remains non-repairable by the model.
+abstract final class WorkshopPrivateBuildFailureClassifier {
+  static String codeForStep(String? rawStep) {
+    final step = rawStep?.trim() ?? '';
+    switch (step) {
+      case 'Resolve dependencies':
+        return 'remote_dependency_resolution_failed';
+      case 'Validate generated project':
+        return 'remote_validation_failed';
+      case 'Build Android APK':
+        return 'remote_project_build_failed';
+      default:
+        return 'remote_infrastructure_failed';
+    }
+  }
+}
+
 final class _StagedBuildSource {
   const _StagedBuildSource({required this.branch, required this.commitSha});
 
@@ -700,6 +813,21 @@ final class _VerifiedRemoteArtifact {
   const _VerifiedRemoteArtifact({required this.apkBytes});
 
   final List<int> apkBytes;
+}
+
+final class _WorkshopRemoteBuildFailure implements Exception {
+  const _WorkshopRemoteBuildFailure({
+    required this.code,
+    required this.message,
+    required this.diagnostics,
+  });
+
+  final String code;
+  final String message;
+  final String diagnostics;
+
+  @override
+  String toString() => message;
 }
 
 final class _WorkshopRemoteBuildCancelled implements Exception {
