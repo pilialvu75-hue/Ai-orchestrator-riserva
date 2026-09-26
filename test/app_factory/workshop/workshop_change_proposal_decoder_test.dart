@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
@@ -127,6 +129,48 @@ void main() {
         proposal.changes.single.afterContent,
         contains('Text("Walk")'),
       );
+    });
+
+    test('strips only an outer markdown fence from file content', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-fenced-file',
+        responseText: jsonEncode(<String, Object?>{
+          'explanation': 'Create main',
+          'changes': <Object?>[
+            <String, Object?>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content':
+                  '\x60\x60\x60dart\nimport \'package:flutter/material.dart\';\n\nvoid main() {}\n\x60\x60\x60',
+            },
+          ],
+        }),
+      );
+
+      expect(
+        proposal.changes.single.afterContent,
+        "import 'package:flutter/material.dart';\n\nvoid main() {}",
+      );
+    });
+
+    test('preserves internal markdown fences that do not wrap whole file', () {
+      final content =
+          "const text = 'prefix\\n\x60\x60\x60dart\\ncode\\n\x60\x60\x60\\nsuffix';";
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-internal-fence',
+        responseText: jsonEncode(<String, Object?>{
+          'explanation': 'Create text fixture',
+          'changes': <Object?>[
+            <String, Object?>{
+              'path': 'lib/text.dart',
+              'type': 'addition',
+              'content': content,
+            },
+          ],
+        }),
+      );
+
+      expect(proposal.changes.single.afterContent, content);
     });
 
     test('resolves add-or-modify from authoritative workspace paths', () {
