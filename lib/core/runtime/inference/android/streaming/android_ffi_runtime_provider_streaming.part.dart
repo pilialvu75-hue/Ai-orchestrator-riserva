@@ -382,6 +382,33 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 flowState: flowState,
               );
 
+              // A successful generation can still leave a multi-gigabyte GGUF
+              // session resident while Android is already under RAM pressure.
+              // Keep the warm session only when the post-generation sample is
+              // healthy; otherwise release it before the OS has to kill the
+              // process. This does not convert a successful answer into an
+              // error and it runs inside the serialized inference boundary.
+              final postGenerationSample = await resources.sample();
+              if (!flowState.memoryCancellationSent &&
+                  postGenerationSample?.pressured == true) {
+                AndroidFfiRuntimeProvider._log(
+                  '[POST_GENERATION_MEMORY_RELEASE] '
+                  'session=$sessionId '
+                  'native_session=${startup.nativeSessionId} '
+                  'modelId=${startup.modelId} '
+                  'available_bytes=${postGenerationSample?.availableBytes ?? -1} '
+                  'threshold_bytes=${postGenerationSample?.thresholdBytes ?? -1} '
+                  'pressure=${postGenerationSample?.pressure ?? 'unknown'}',
+                );
+                await _shutdownNativeSessionGracefully(
+                  startup.bindings,
+                  startup.nativeSessionId,
+                  reason: 'post_generation_memory_pressure',
+                  modelPath: startup.modelPath,
+                );
+                resources.readNative = null;
+              }
+
               AndroidFfiRuntimeProvider._log(
                 '[FFI_FLOW_EXIT] '
                 'session=$sessionId '

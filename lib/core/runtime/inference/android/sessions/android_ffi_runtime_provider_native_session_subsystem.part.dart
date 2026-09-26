@@ -41,7 +41,12 @@ class _AndroidFfiNativeSessionSubsystem {
         _log('[RESOURCE_GUARD] action=defer reason=critical_memory');
         throw StateError('Memoria insufficiente: attendi prima di avviare il modello locale.');
       }
-      final profile = ResourceProfile.select(sample, phi: modelId == 'phi3_5_mini' || modelPath.toLowerCase().contains('phi-3.5'));
+      final profile = ResourceProfile.select(
+        sample,
+        phi: modelId == 'phi3_5_mini' ||
+            modelPath.toLowerCase().contains('phi-3.5'),
+        requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+      );
       var existingSessionId = _owner._nativeSessionsByModel[modelPath];
       if (existingSessionId != null && sample?.pressured == true &&
           (bindings.sessionMetrics(existingSessionId)['context']! > profile.context ||
