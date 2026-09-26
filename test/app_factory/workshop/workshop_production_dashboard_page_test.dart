@@ -84,6 +84,16 @@ void main() {
       expect(
         WorkshopFinalBuildRetryPolicy.canRetry(
           projectReadyForBuild: true,
+          hasBuildResult: false,
+          hasVerifiedArtifact: false,
+          isBusy: false,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: true,
           hasBuildResult: true,
           hasVerifiedArtifact: false,
           isBusy: true,
