@@ -230,7 +230,7 @@ final class WorkshopChangeProposalDecoder {
 
     final language = first.substring(fence.length).trim();
     if (language.isNotEmpty &&
-        !RegExp(r'^[A-Za-z0-9_+.-]+').hasMatch(language)) {
+        RegExp(r'[^A-Za-z0-9_+.-]').hasMatch(language)) {
       return content;
     }
 
