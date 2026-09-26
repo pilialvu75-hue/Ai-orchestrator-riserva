@@ -413,7 +413,11 @@ backslashes escaped according to JSON. Prefer Flutter/Dart SDK-only code for
 the smallest MVP. If you import a third-party package that is not already
 declared by the project, include a matching pubspec.yaml addition/modification
 in the same proposal; never emit an undeclared package import or an unused
-import.
+import. Generated Dart must be clean under default flutter analyze lints.
+When UI-visible state changes inside a StatefulWidget, trigger a rebuild with
+setState or an already-declared equivalent state mechanism. Do not invent or
+simulate sensor/health measurements as real tracking when the task did not
+explicitly request verified sensor integration.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
@@ -447,7 +451,12 @@ JSON string with line breaks, double quotes and backslashes escaped according to
 JSON. Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
 package is truly required and is not already declared, include the matching
 pubspec.yaml addition/modification in the same proposal. Never emit an
-undeclared package import or an unused import. Do not review, approve or apply.
+undeclared package import or an unused import. Generated Dart must be clean
+under default flutter analyze lints. Public widget APIs must follow those lints,
+and UI-visible StatefulWidget mutations must trigger a rebuild with setState or
+an already-declared equivalent mechanism. Do not invent or simulate sensor or
+health measurements as real tracking unless verified integration was explicitly
+requested. Do not review, approve or apply.
 '''.trim();
 
     RuntimeEventLog.instance.emit(
