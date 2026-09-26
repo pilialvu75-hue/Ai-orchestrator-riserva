@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.da
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentation.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/module_library/presentation/module_library_page.dart';
@@ -1016,9 +1017,15 @@ class _WorkshopProjectBar
         chatController.lastModel;
 
     final progress =
-        (dashboardState?.progress ?? 0)
-            .clamp(0.0, 1.0)
-            .toDouble();
+        WorkshopProgressPresentation.displayValue(
+      authoritativeProgress:
+          dashboardState?.progress ?? 0,
+      completedTasks:
+          dashboardState?.completedTasks ?? 0,
+      totalTasks:
+          dashboardState?.totalTasks ?? 0,
+      stage: stage,
+    );
 
     final progressPercent =
         (progress * 100).round();
