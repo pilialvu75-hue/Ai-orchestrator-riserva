@@ -1013,6 +1013,10 @@ class _WorkshopProjectBar
     final stage =
         dashboardState?.stage;
 
+    final presentationStage =
+        dashboardState?.progressPresentationStage ??
+            stage;
+
     final model =
         chatController.lastModel;
 
@@ -1024,8 +1028,7 @@ class _WorkshopProjectBar
           dashboardState?.completedTasks ?? 0,
       totalTasks:
           dashboardState?.totalTasks ?? 0,
-      stage:
-          dashboardState?.progressPresentationStage ?? stage,
+      stage: presentationStage,
     );
 
     final progressPercent =
@@ -1107,7 +1110,7 @@ class _WorkshopProjectBar
             ),
             const SizedBox(height: 7),
             _WorkshopStageStrip(
-              currentStage: stage,
+              currentStage: presentationStage,
             ),
             if (dashboardState?.hasProject == true) ...<Widget>[
               const SizedBox(height: 7),
