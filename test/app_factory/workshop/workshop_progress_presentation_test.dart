@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentation.dart';
 
 void main() {
@@ -44,6 +45,30 @@ void main() {
           stage: WorkshopStage.validation,
         ),
         closeTo(0.475, 0.0001),
+      );
+    });
+
+    test('blocked UI can retain the last operational stage', () {
+      const state = WorkshopDashboardControllerState(
+        stage: WorkshopStage.blocked,
+        lastOperationalStage: WorkshopStage.implementation,
+        progress: 0,
+        completedTasks: 0,
+        totalTasks: 1,
+      );
+
+      expect(
+        state.progressPresentationStage,
+        WorkshopStage.implementation,
+      );
+      expect(
+        WorkshopProgressPresentation.displayValue(
+          authoritativeProgress: state.progress,
+          completedTasks: state.completedTasks,
+          totalTasks: state.totalTasks,
+          stage: state.progressPresentationStage,
+        ),
+        closeTo(0.55, 0.0001),
       );
     });
 
