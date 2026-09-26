@@ -91,7 +91,8 @@ abstract final class LlamaNativeDefaults {
   static const int topK = 40;
   static const double topP = 0.9;
   static const int tokenBufferSize = 256;
-  // CPU baseline while investigating native aborts during Vulkan prefill.
-  // Keep context, batching and sampling unchanged for a controlled comparison.
-  static const int nGpuLayers = 0;
+  // Intermediate physical A/B candidate on current main.
+  // Vulkan-50 reached 33 effective layers, became slower, and triggered the
+  // critical-memory guard on prompt 3. Keep guard/profile/watchdogs unchanged.
+  static const int nGpuLayers = 20;
 }
