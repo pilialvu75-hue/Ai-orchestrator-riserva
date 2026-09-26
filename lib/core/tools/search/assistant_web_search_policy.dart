@@ -203,7 +203,7 @@ abstract final class AssistantWebSearchPolicy {
   }
 
   static bool _timeSensitiveIntent(String value) {
-    const markers = <String>[
+    const alwaysDynamic = <String>[
       'meteo',
       'weather',
       'météo',
@@ -212,45 +212,84 @@ abstract final class AssistantWebSearchPolicy {
       'actualités',
       'actualites',
       'noticias',
-      'aggiornamenti',
-      'oggi',
-      'today',
-      "aujourd'hui",
-      'hoy',
-      'stasera',
-      'tonight',
-      'ce soir',
-      'esta noche',
-      'attuale',
-      'attualmente',
-      'current',
-      'latest',
-      'ultimo',
-      'ultima',
-      'ultime',
-      'recent',
-      'récent',
-      'reciente',
       'in tempo reale',
       'real time',
       'en temps réel',
       'tiempo real',
-      'chi gioca',
-      'quando gioca',
-      'risultato',
-      'classifica',
-      'standings',
-      'score',
-      'prezzo',
-      'price',
-      'prix',
-      'precio',
-      'quotazione',
-      'exchange rate',
-      'tasso di cambio',
     ];
 
-    return markers.any(value.contains);
+    if (alwaysDynamic.any(value.contains)) {
+      return true;
+    }
+
+    return _liveSportsIntent(value) ||
+        _marketIntent(value) ||
+        _recencyBoundIntent(value);
+  }
+
+  static bool _liveSportsIntent(String value) {
+    if (value.contains('chi gioca') ||
+        value.contains('quando gioca') ||
+        value.contains('who plays') ||
+        value.contains('when does') && value.contains(' play') ||
+        value.contains('qui joue') ||
+        value.contains('quand joue') ||
+        value.contains('quién juega') ||
+        value.contains('quien juega') ||
+        value.contains('cuándo juega') ||
+        value.contains('cuando juega')) {
+      return true;
+    }
+
+    final sportsSubject = RegExp(
+      r'\b(?:partita|match|gara|campionato|league|serie a|champions|mondiale|world cup|olimpiadi|olympics|torneo|tournament)\b',
+    );
+    final liveResult = RegExp(
+      r'\b(?:risultato|risultati|score|scores|classifica|standings|calendario|schedule)\b',
+    );
+
+    return sportsSubject.hasMatch(value) && liveResult.hasMatch(value);
+  }
+
+  static bool _marketIntent(String value) {
+    const explicitMarketPhrases = <String>[
+      'prezzo attuale',
+      'prezzo oggi',
+      'quanto costa',
+      'quotazione',
+      'tasso di cambio',
+      'current price',
+      'price today',
+      'how much does',
+      'how much is',
+      'exchange rate',
+      'cours actuel',
+      'prix actuel',
+      'combien coûte',
+      'combien coute',
+      'precio actual',
+      'precio hoy',
+      'cuánto cuesta',
+      'cuanto cuesta',
+      'tipo de cambio',
+    ];
+
+    return explicitMarketPhrases.any(value.contains);
+  }
+
+  static bool _recencyBoundIntent(String value) {
+    final recency = RegExp(
+      r"\b(?:oggi|today|hoy|attuale|attualmente|current|currently|latest|recent|ultimo|ultima|ultime|récent|reciente|stasera|tonight)\b",
+    );
+    if (!recency.hasMatch(value)) {
+      return false;
+    }
+
+    final changingSubject = RegExp(
+      r'\b(?:versione|version|release|aggiornamento|update|disponibilit[aà]|availability|orari|hours|schedule|programma|evento|event|traffico|traffic|stato del servizio|service status|prezzo|price|prix|precio|partita|match|classifica|standings|risultato|score)\b',
+    );
+
+    return changingSubject.hasMatch(value);
   }
 
   /// Some questions are not explicitly time-sensitive but still benefit from
