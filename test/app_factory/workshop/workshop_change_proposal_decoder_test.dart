@@ -292,6 +292,90 @@ void main() {
       }
     });
 
+
+    test('uses summary when explanation is omitted', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-summary-fallback',
+        responseText: r'''
+{
+  "summary": "Counter MVP",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(proposal.explanation, 'Counter MVP');
+      expect(proposal.changes.single.path, 'lib/main.dart');
+    });
+
+    test('uses analysis when explanation and summary are omitted', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-analysis-fallback',
+        responseText: r'''
+{
+  "analysis": "Implement the bounded counter task.",
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(proposal.explanation, 'Implement the bounded counter task.');
+    });
+
+    test('still rejects a proposal with no explanatory metadata', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-no-explanation',
+          responseText: r'''
+{
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('still rejects non-text explanation metadata', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-non-text-explanation',
+          responseText: r'''
+{
+  "summary": "Counter MVP",
+  "explanation": 42,
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('requires content for create and update operations', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(
