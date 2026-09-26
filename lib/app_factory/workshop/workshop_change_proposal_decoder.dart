@@ -211,7 +211,54 @@ final class WorkshopChangeProposalDecoder {
         'Workshop change for $path requires string content.',
       );
     }
-    return content;
+    return _normalizeOuterCodeFence(content);
+  }
+
+  static String _normalizeOuterCodeFence(String content) {
+    final trimmed = content.trim();
+    final lines = trimmed.split(RegExp(r'\r?\n'));
+    if (lines.length < 3) {
+      return content;
+    }
+
+    final first = lines.first.trim();
+    final last = lines.last.trim();
+    if (!RegExp(r'^\x60\x60\x60[A-Za-z0-9_+.-]*    var normalized = path.replaceAll('\\', '/').trim();
+
+    while (normalized.startsWith('./')) {
+      normalized = normalized.substring(2);
+    }
+
+    if (normalized.isEmpty ||
+        normalized.startsWith('/') ||
+        RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
+      throw FormatException(
+        'Workshop change path must be workspace-relative: $path',
+      );
+    }
+
+    final segments = normalized.split('/');
+    if (segments.any(
+      (segment) =>
+          segment.isEmpty || segment == '.' || segment == '..',
+    )) {
+      throw FormatException(
+        'Workshop change path is not safe: $path',
+      );
+    }
+
+    return normalized;
+  }
+}
+).hasMatch(first) ||
+        last != '\x60\x60\x60') {
+      return content;
+    }
+
+    // Only remove one fence that wraps the entire file content. Never remove
+    // internal Markdown/code strings or attempt to repair arbitrary syntax.
+    final body = lines.sublist(1, lines.length - 1).join('\n');
+    return content.endsWith('\n') ? '$body\n' : body;
   }
 
   static String _normalizeRelativePath(String path) {
