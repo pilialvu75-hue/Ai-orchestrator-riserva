@@ -412,7 +412,8 @@ value must be a valid JSON string with line breaks, double quotes and
 backslashes escaped according to JSON. Prefer Flutter/Dart SDK-only code for
 the smallest MVP. If you import a third-party package that is not already
 declared by the project, include a matching pubspec.yaml addition/modification
-in the same proposal; never emit an undeclared package import.
+in the same proposal; never emit an undeclared package import or an unused
+import.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
@@ -446,7 +447,7 @@ JSON string with line breaks, double quotes and backslashes escaped according to
 JSON. Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
 package is truly required and is not already declared, include the matching
 pubspec.yaml addition/modification in the same proposal. Never emit an
-undeclared package import. Do not review, approve or apply.
+undeclared package import or an unused import. Do not review, approve or apply.
 '''.trim();
 
     RuntimeEventLog.instance.emit(
