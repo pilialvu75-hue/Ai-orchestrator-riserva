@@ -527,6 +527,23 @@ class _WorkshopProductionDashboardPageState
     }
   }
 
+  Future<void> _retryFinalBuildOnly() async {
+    final result = _buildResult;
+    if (_mutationBusy ||
+        !_projectReadyForBuild ||
+        result == null ||
+        _repairPreparer.planner.assess(result).isVerifiedSuccess) {
+      return;
+    }
+
+    setState(() {
+      _buildResult = null;
+      _error = null;
+    });
+
+    await _buildCompletedProject();
+  }
+
   Future<void> _buildCompletedProject() async {
     if (_mutationBusy || !_projectReadyForBuild || _buildResult != null) return;
     final failedPlan = _activePlan;
@@ -735,6 +752,12 @@ class _WorkshopProductionDashboardPageState
         _repairPreparer.planner.assess(result).isVerifiedSuccess;
   }
 
+  bool get _hasFailedFinalBuild {
+    final result = _buildResult;
+    return result != null &&
+        !_repairPreparer.planner.assess(result).isVerifiedSuccess;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -834,6 +857,12 @@ class _WorkshopProductionDashboardPageState
                   onPressed: _runPreparedTask,
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Esegui task'),
+                )
+              else if (_projectReadyForBuild && _hasFailedFinalBuild)
+                FilledButton.icon(
+                  onPressed: _retryFinalBuildOnly,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Riprova solo build'),
                 )
               else if (_projectReadyForBuild && _buildResult == null)
                 FilledButton.icon(
