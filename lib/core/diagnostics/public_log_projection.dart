@@ -42,6 +42,7 @@ String? publicLogProjection(String line) {
     'GENERATION_END',
     'GENERATION_ERROR',
     'FIRST_TOKEN_TIMEOUT',
+    'FIRST_TOKEN_DEADLINE_EXTENDED',
     'FIRST_TOKEN_FAILURE',
     'MODEL_READY',
     'MODEL_FOUND',
@@ -344,6 +345,26 @@ String? publicLogProjection(String line) {
       'event': isError ? 'FINAL_RESPONSE_ERROR' : 'FINAL_RESPONSE_SUCCESS',
       'is_final': true,
       'text_len': int.parse(finalResponse[3]!),
+    });
+  }
+
+  if (event == 'FIRST_TOKEN_DEADLINE_EXTENDED') {
+    final m = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,120} '
+      r'elapsed_ms=(\d{1,12}) soft_timeout_ms=(\d{1,12}) '
+      r'hard_timeout_ms=(\d{1,12}) decode_baseline=(-?\d{1,12}) '
+      r'decode_current=(-?\d{1,12}) reason=native_decode_progress$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'elapsed_ms': int.parse(m[1]!),
+      'soft_timeout_ms': int.parse(m[2]!),
+      'hard_timeout_ms': int.parse(m[3]!),
+      'decode_baseline': int.parse(m[4]!),
+      'decode_current': int.parse(m[5]!),
+      'reason': 'native_decode_progress',
     });
   }
 
