@@ -85,7 +85,6 @@ class WorkshopInferenceGateway {
     String? executionId,
     String? attemptId,
     String? checkpointId,
-    Duration? firstTokenTimeoutOverride,
     CancellationToken? cancellationToken,
   }) {
     return _streamInternal(
@@ -128,6 +127,7 @@ class WorkshopInferenceGateway {
     String? executionId,
     String? attemptId,
     String? checkpointId,
+    Duration? firstTokenTimeoutOverride,
     CancellationToken? cancellationToken,
   }) {
     final normalizedPrompt = prompt.trim();
