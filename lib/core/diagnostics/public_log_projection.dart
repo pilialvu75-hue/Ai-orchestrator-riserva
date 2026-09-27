@@ -40,6 +40,7 @@ String? publicLogProjection(String line) {
     'GENERATION_END',
     'GENERATION_ERROR',
     'FIRST_TOKEN_TIMEOUT',
+    'FIRST_TOKEN_DEADLINE_EXTENDED',
     'FIRST_TOKEN_FAILURE',
     'MODEL_READY',
     'MODEL_FOUND',
