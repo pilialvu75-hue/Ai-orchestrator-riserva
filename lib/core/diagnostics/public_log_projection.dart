@@ -417,7 +417,7 @@ String? publicLogProjection(String line) {
   }
   if (event == 'RESOURCE_PROFILE') {
     final m = RegExp(
-      r'^reason=(pressure|phi_conservative|phi_gpu_conservative|device_memory_budget|device_memory_conservative|device_gpu_conservative|baseline) n_ctx=(\d{1,6}) '
+      r'^reason=(pressure|phi_conservative|phi_gpu_conservative|phi_memory_recovery|device_memory_budget|device_memory_conservative|device_gpu_conservative|baseline) n_ctx=(\d{1,6}) '
       r'n_batch=(\d{1,6}) n_ubatch=(\d{1,6})$',
     ).firstMatch(rest);
     if (m == null) return null;
