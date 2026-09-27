@@ -5,6 +5,7 @@
 /// to dedicated modules.
 library runtime_core;
 
+import 'package:ai_orchestrator/core/runtime/inference/android/native_generation_budget.dart';
 import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'dart:collection';
