@@ -134,6 +134,42 @@ void main() {
     );
   });
 
+  test('exports first-token extension metrics without session identity', () {
+    final line = publicLogProjection(
+      '$time [FIRST_TOKEN_DEADLINE_EXTENDED] '
+      'session=private-review-session elapsed_ms=51000 '
+      'soft_timeout_ms=45000 hard_timeout_ms=90000 '
+      'decode_baseline=4 decode_current=10 reason=native_decode_progress',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'FIRST_TOKEN_DEADLINE_EXTENDED',
+        'elapsed_ms': 51000,
+        'soft_timeout_ms': 45000,
+        'hard_timeout_ms': 90000,
+        'decode_baseline': 4,
+        'decode_current': 10,
+        'reason': 'native_decode_progress',
+      },
+    );
+    expect(line, isNot(contains('private-review-session')));
+  });
+
+  test('rejects malformed first-token extension telemetry', () {
+    expect(
+      publicLogProjection(
+        '$time [FIRST_TOKEN_DEADLINE_EXTENDED] '
+        'session=private elapsed_ms=51000 soft_timeout_ms=45000 '
+        'hard_timeout_ms=90000 decode_baseline=4 decode_current=10 '
+        'reason=private',
+      ),
+      isNull,
+    );
+  });
+
   test('exports terminal outcome without session or response contents', () {
     final success = publicLogProjection(
       '$time [FINAL_RESPONSE] [FINAL_RESPONSE] session=default attempt=1 '
