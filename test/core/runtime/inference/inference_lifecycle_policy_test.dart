@@ -114,6 +114,53 @@ void main() {
     });
   });
 
+  group('active native first-token progress', () {
+    test('extends release wait when decoder advances after soft deadline', () {
+      expect(
+        InferenceLifecyclePolicy.mayExtendAndroidFirstTokenForNativeProgress(
+          elapsed: const Duration(seconds: 51),
+          baselineDecodeCalls: 4,
+          currentDecodeCalls: 10,
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not extend an actually idle decoder', () {
+      expect(
+        InferenceLifecyclePolicy.mayExtendAndroidFirstTokenForNativeProgress(
+          elapsed: const Duration(seconds: 51),
+          baselineDecodeCalls: 4,
+          currentDecodeCalls: 4,
+        ),
+        isFalse,
+      );
+    });
+
+    test('keeps active progress bounded by the hard ceiling', () {
+      expect(
+        InferenceLifecyclePolicy.mayExtendAndroidFirstTokenForNativeProgress(
+          elapsed: const Duration(seconds: 91),
+          baselineDecodeCalls: 4,
+          currentDecodeCalls: 12,
+        ),
+        isFalse,
+      );
+    });
+
+    test('never extends forensic verification', () {
+      expect(
+        InferenceLifecyclePolicy.mayExtendAndroidFirstTokenForNativeProgress(
+          elapsed: const Duration(seconds: 6),
+          baselineDecodeCalls: 0,
+          currentDecodeCalls: 1,
+          verification: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   test('terminal reasons are stable wire values', () {
     expect(
       InferenceLifecycleTerminalReason.firstTokenTimeout.wireName,
