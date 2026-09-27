@@ -60,14 +60,14 @@ function Replace-ExactAsciiImport(
   Write-Host "Redirected $Original -> $Replacement at byte offset $offset"
 }
 
-# Diagnostic engine-only branch: ONNX is intentionally not required. The
-# generated native plugin targets are absent, so sherpa/ONNX does not enter the
-# release bundle. All loader-critical Flutter/Win7 compatibility files remain
-# mandatory. Production branches retain the stricter patcher.
+# Full Windows release candidate: Flutter, ONNX and all compatibility shims
+# are mandatory. Fail closed if the bundle no longer contains the runtime
+# layout validated for Windows 7.
 $requiredFiles = @(
   'ai_orchestrator.exe',
   'AI-Orchestrator-Windows-Diagnostics.exe',
   'flutter_windows.dll',
+  'onnxruntime.dll',
   'ws2fix.dll',
   'nt7fx.dll',
   'win7krnl.dll',
@@ -128,30 +128,26 @@ foreach ($check in $flutterChecks) {
 }
 
 $onnxPath = Join-Path $ReleaseDir 'onnxruntime.dll'
-if (Test-Path $onnxPath) {
-  $onnxBytes = [IO.File]::ReadAllBytes($onnxPath)
-  $onnxRedirects = @(
-    @('KERNEL32.dll', 'win7krnl.dll'),
-    @('api-ms-win-core-path-l1-1-0.dll', 'win7path-compatibility-shim.dll'),
-    @('dxgi.dll', 'dxg7.dll')
-  )
-  foreach ($redirect in $onnxRedirects) {
-    Replace-ExactAsciiImport $onnxBytes $redirect[0] $redirect[1]
-  }
-  [IO.File]::WriteAllBytes($onnxPath, $onnxBytes)
-
-  $verifiedOnnx = [IO.File]::ReadAllBytes($onnxPath)
-  foreach ($redirect in $onnxRedirects) {
-    $oldCount = Count-AsciiPattern $verifiedOnnx ([string]$redirect[0])
-    $newCount = Count-AsciiPattern $verifiedOnnx ([string]$redirect[1])
-    if ($oldCount -ne 0 -or $newCount -ne 1) {
-      throw "ONNX compatibility validation failed for $($redirect[0]): old=$oldCount new=$newCount."
-    }
-  }
-  $hash = (Get-FileHash -Path $onnxPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  Write-Host "Patched ONNX Runtime SHA256: $hash"
-} else {
-  Write-Host 'Engine-only diagnostic bundle: onnxruntime.dll intentionally absent; ONNX patch skipped.'
+$onnxBytes = [IO.File]::ReadAllBytes($onnxPath)
+$onnxRedirects = @(
+  @('KERNEL32.dll', 'win7krnl.dll'),
+  @('api-ms-win-core-path-l1-1-0.dll', 'win7path-compatibility-shim.dll'),
+  @('dxgi.dll', 'dxg7.dll')
+)
+foreach ($redirect in $onnxRedirects) {
+  Replace-ExactAsciiImport $onnxBytes $redirect[0] $redirect[1]
 }
+[IO.File]::WriteAllBytes($onnxPath, $onnxBytes)
 
-Write-Host "Windows 7 engine-only release bundle compatibility validation passed."
+$verifiedOnnx = [IO.File]::ReadAllBytes($onnxPath)
+foreach ($redirect in $onnxRedirects) {
+  $oldCount = Count-AsciiPattern $verifiedOnnx ([string]$redirect[0])
+  $newCount = Count-AsciiPattern $verifiedOnnx ([string]$redirect[1])
+  if ($oldCount -ne 0 -or $newCount -ne 1) {
+    throw "ONNX compatibility validation failed for $($redirect[0]): old=$oldCount new=$newCount."
+  }
+}
+$hash = (Get-FileHash -Path $onnxPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "Patched ONNX Runtime SHA256: $hash"
+
+Write-Host "Windows 7 full release bundle compatibility validation passed."
