@@ -41,6 +41,7 @@ class InferenceRequest {
     this.routeDirective = InferenceRouteDirective.runtimeDefault,
     this.cloudProviderId,
     this.allowCloudProviderFailover = true,
+    this.firstTokenTimeoutOverride,
   });
 
   final String sessionId;
@@ -84,6 +85,13 @@ class InferenceRequest {
   /// automatic. Hybrid orchestration normally sets it false because Hannibal
   /// owns provider replacement and checkpoint/resume decisions.
   final bool allowCloudProviderFailover;
+
+  /// Optional local-runtime first-token deadline override.
+  ///
+  /// This is a narrow execution-policy hint. Providers that do not expose a
+  /// first-token watchdog may ignore it. Android clamps the value to the
+  /// canonical lifecycle bounds, so callers cannot disable the watchdog.
+  final Duration? firstTokenTimeoutOverride;
 
   static int maxTokensForModel(String? modelId) {
     final id = (modelId ?? '').toLowerCase();
@@ -191,6 +199,7 @@ class InferenceRequest {
     InferenceRouteDirective? routeDirective,
     String? cloudProviderId,
     bool? allowCloudProviderFailover,
+    Duration? firstTokenTimeoutOverride,
   }) {
     return InferenceRequest(
       sessionId: sessionId ?? this.sessionId,
@@ -214,6 +223,8 @@ class InferenceRequest {
       cloudProviderId: cloudProviderId ?? this.cloudProviderId,
       allowCloudProviderFailover:
           allowCloudProviderFailover ?? this.allowCloudProviderFailover,
+      firstTokenTimeoutOverride:
+          firstTokenTimeoutOverride ?? this.firstTokenTimeoutOverride,
     );
   }
 
