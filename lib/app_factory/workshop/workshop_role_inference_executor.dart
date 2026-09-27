@@ -51,6 +51,36 @@ final class WorkshopRoleInferenceExecutor {
     );
   }
 
+  Future<WorkshopInferenceResult> completeWithFirstTokenTimeout({
+    required AppAiRole role,
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = false,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    CancellationToken? cancellationToken,
+  }) {
+    final gateway = _router.gatewayFor(role);
+    return gateway.completeWithFirstTokenTimeout(
+      prompt: prompt,
+      firstTokenTimeout: firstTokenTimeout,
+      systemPrompt: systemPrompt,
+      context: context,
+      sessionId: sessionId,
+      isOffline: isOffline,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      topP: topP,
+      repeatPenalty: repeatPenalty,
+      cancellationToken: cancellationToken,
+    );
+  }
+
   /// Executes one role while preserving Cantiere-owned execution identity.
   ///
   /// The historical [complete] contract intentionally remains unchanged so
