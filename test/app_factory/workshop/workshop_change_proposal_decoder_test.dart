@@ -524,6 +524,25 @@ void main() {
       );
     });
 
+    test('diagnostic shape reports only recognized schema states', () {
+      expect(
+        WorkshopChangeProposalDecoder.diagnosticShape(r'''
+{
+  "fileChanges": [
+    {"path": "lib/main.dart", "type": "addition", "content": "private code"}
+  ]
+}
+'''),
+        'json=object changes=missing fileChanges=list_nonempty '
+        'file_changes=missing files=missing top_path=no top_type=no '
+        'top_content=no',
+      );
+      expect(
+        WorkshopChangeProposalDecoder.diagnosticShape('not json'),
+        'json=invalid',
+      );
+    });
+
     test('requires content for create and update operations', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(
