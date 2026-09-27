@@ -423,16 +423,19 @@ String? publicLogProjection(String line) {
 
   if (event == 'LOCAL_EXECUTION_CONFIG') {
     final config = RegExp(
-      r'^mode=cpu_baseline gpu_layers=0 n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
+      r'^mode=(cpu_baseline|vulkan) gpu_layers=(\d{1,3}) n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
     ).firstMatch(rest);
     if (config == null) return null;
+    final layers = int.parse(config[2]!);
+    if ((config[1] == 'cpu_baseline' && layers != 0) ||
+        (config[1] == 'vulkan' && layers == 0)) return null;
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': event,
-      'mode': 'cpu_baseline',
-      'gpu_layers': 0,
-      'n_ctx': int.parse(config[1]!),
-      'n_batch': int.parse(config[2]!),
+      'mode': config[1]!,
+      'gpu_layers': layers,
+      'n_ctx': int.parse(config[3]!),
+      'n_batch': int.parse(config[4]!),
     });
   }
 

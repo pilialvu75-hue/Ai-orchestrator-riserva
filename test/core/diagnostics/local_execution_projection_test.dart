@@ -20,9 +20,18 @@ void main() {
     });
   });
 
+  test('exports the Vulkan request separately from native resource samples', () {
+    final result = publicLogProjection(
+      '${prefix}mode=vulkan gpu_layers=50 n_ctx=2048 n_batch=128');
+    expect(jsonDecode(result!)['gpu_layers'], 50);
+    expect(jsonDecode(result)['mode'], 'vulkan');
+  });
+
   test('rejects extra payload and incorrectly labelled GPU execution', () {
     for (final payload in <String>[
       'mode=cpu_baseline gpu_layers=0 n_ctx=4096 n_batch=512 path=/private',
+      'mode=vulkan gpu_layers=0 n_ctx=2048 n_batch=128',
+      'mode=vulkan gpu_layers=50 n_ctx=2048 n_batch=128 private=value',
       'mode=cpu_baseline gpu_layers=10 n_ctx=4096 n_batch=512',
       'mode=cpu_baseline gpu_layers=0 n_ctx=unknown n_batch=512',
     ]) {
