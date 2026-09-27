@@ -396,7 +396,11 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     final effectiveTopP = isForensicSelfTest
         ? 0.1
         : (samplingMetadata.topP ?? LlamaNativeDefaults.topP);
-    final firstTokenDeadline = isForensicSelfTest ? AndroidFfiRuntimeProvider._verificationFirstTokenTimeout : AndroidFfiRuntimeProvider._firstTokenTimeout;
+    final firstTokenDeadline = isForensicSelfTest
+        ? AndroidFfiRuntimeProvider._verificationFirstTokenTimeout
+        : InferenceLifecyclePolicy.androidFirstTokenTimeout(
+            requestedOverride: request.firstTokenTimeoutOverride,
+          );
     if (request.maxTokens > AndroidFfiRuntimeProvider._safeMaxTokens) {
       AndroidFfiRuntimeProvider._log(
         '[MODEL_EXECUTION] requested max_tokens=${request.maxTokens} exceeds safe limit, clamped to $maxTokens',
