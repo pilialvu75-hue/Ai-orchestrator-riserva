@@ -1117,8 +1117,34 @@ class _WorkshopProjectBar
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: LinearProgressIndicator(
-                      value: progress,
+                    child: Semantics(
+                      label: 'Avanzamento Cantiere',
+                      value: '$progressPercent%',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: SizedBox(
+                          height: 8,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: <Widget>[
+                              ColoredBox(
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.16),
+                              ),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: FractionallySizedBox(
+                                  widthFactor: progress,
+                                  heightFactor: 1,
+                                  child: ColoredBox(
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
