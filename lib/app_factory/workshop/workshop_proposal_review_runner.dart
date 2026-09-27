@@ -34,6 +34,7 @@ final class WorkshopProposalReviewRunner {
 
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
+  static const Duration _retryFirstTokenTimeout = Duration(seconds: 75);
   static const int _primaryPlanChars = 1200;
   static const int _retryPlanChars = 700;
   static const int _primaryFileChars = 2400;
@@ -84,13 +85,14 @@ final class WorkshopProposalReviewRunner {
         'chars=${result.text.length}',
       );
 
-      result = await _inference.complete(
+      result = await _inference.completeWithFirstTokenTimeout(
         stage: WorkshopStage.review,
         prompt: _buildPrompt(
           session,
           implementationPlan: implementationPlan,
           compact: true,
         ),
+        firstTokenTimeout: _retryFirstTokenTimeout,
         systemPrompt: _retrySystemPrompt,
         sessionId: '$sessionId:retry-1',
         isOffline: isOffline,
