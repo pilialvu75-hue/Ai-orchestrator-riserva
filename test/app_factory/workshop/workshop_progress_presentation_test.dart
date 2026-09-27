@@ -6,55 +6,67 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentat
 
 void main() {
   group('WorkshopProgressPresentation', () {
-    test('shows intermediate progress for a one-task project', () {
+    test('does not invent fractional task completion from operational stage', () {
+      for (final stage in <WorkshopStage>[
+        WorkshopStage.requested,
+        WorkshopStage.analysis,
+        WorkshopStage.planning,
+        WorkshopStage.implementation,
+        WorkshopStage.review,
+        WorkshopStage.validation,
+      ]) {
+        expect(
+          WorkshopProgressPresentation.displayValue(
+            authoritativeProgress: 0,
+            completedTasks: 0,
+            totalTasks: 3,
+            stage: stage,
+          ),
+          0,
+        );
+      }
+    });
+
+    test('advances from real completed task count', () {
       expect(
         WorkshopProgressPresentation.displayValue(
-          authoritativeProgress: 0,
-          completedTasks: 0,
-          totalTasks: 1,
-          stage: WorkshopStage.analysis,
+          authoritativeProgress: 1 / 3,
+          completedTasks: 1,
+          totalTasks: 3,
+          stage: WorkshopStage.planning,
         ),
-        closeTo(0.20, 0.0001),
+        closeTo(1 / 3, 0.0001),
       );
       expect(
         WorkshopProgressPresentation.displayValue(
-          authoritativeProgress: 0,
-          completedTasks: 0,
-          totalTasks: 1,
-          stage: WorkshopStage.implementation,
-        ),
-        closeTo(0.55, 0.0001),
-      );
-      expect(
-        WorkshopProgressPresentation.displayValue(
-          authoritativeProgress: 0,
-          completedTasks: 0,
-          totalTasks: 1,
+          authoritativeProgress: 2 / 3,
+          completedTasks: 2,
+          totalTasks: 3,
           stage: WorkshopStage.validation,
         ),
-        closeTo(0.90, 0.0001),
+        closeTo(2 / 3, 0.0001),
       );
     });
 
-    test('interpolates only the current task in multi-task projects', () {
+    test('completed task count can repair stale presentation progress', () {
       expect(
         WorkshopProgressPresentation.displayValue(
-          authoritativeProgress: 0.25,
+          authoritativeProgress: 0,
           completedTasks: 1,
           totalTasks: 4,
-          stage: WorkshopStage.validation,
+          stage: WorkshopStage.blocked,
         ),
-        closeTo(0.475, 0.0001),
+        0.25,
       );
     });
 
-    test('prepared engine stage does not jump ahead of execution telemetry', () {
+    test('prepared engine stage stays presentation-only', () {
       const state = WorkshopDashboardControllerState(
         stage: WorkshopStage.implementation,
         lastOperationalStage: WorkshopStage.requested,
         progress: 0,
         completedTasks: 0,
-        totalTasks: 1,
+        totalTasks: 3,
       );
 
       expect(state.progressPresentationStage, WorkshopStage.requested);
@@ -65,17 +77,18 @@ void main() {
           totalTasks: state.totalTasks,
           stage: state.progressPresentationStage,
         ),
-        closeTo(0.05, 0.0001),
+        0,
       );
     });
 
-    test('blocked UI can retain the last operational stage', () {
+    test('blocked UI can retain the last operational stage without fake progress',
+        () {
       const state = WorkshopDashboardControllerState(
         stage: WorkshopStage.blocked,
         lastOperationalStage: WorkshopStage.implementation,
         progress: 0,
         completedTasks: 0,
-        totalTasks: 1,
+        totalTasks: 3,
       );
 
       expect(
@@ -89,11 +102,11 @@ void main() {
           totalTasks: state.totalTasks,
           stage: state.progressPresentationStage,
         ),
-        closeTo(0.55, 0.0001),
+        0,
       );
     });
 
-    test('never changes authoritative completion semantics', () {
+    test('preserves authoritative completion', () {
       expect(
         WorkshopProgressPresentation.displayValue(
           authoritativeProgress: 0.5,
