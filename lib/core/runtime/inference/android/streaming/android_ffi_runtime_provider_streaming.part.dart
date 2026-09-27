@@ -180,6 +180,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
                 if (flowState.memoryCancellationSent || controller.isClosed ||
                     cancellationToken.isCancelled) return;
                 flowState.memoryCancellationSent = true;
+                resources.recordModelPressure(request.modelId ?? request.modelPath ?? '');
                 _updateRuntimeStatus(LocalRuntimeStatus.failed,
                     message: _StreamFlowControlState.memoryPressureMessage);
                 AndroidFfiRuntimeProvider._log('[RESOURCE_GUARD] action=cancel reason=critical_memory');
@@ -391,6 +392,7 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               final postGenerationSample = await resources.sample();
               if (!flowState.memoryCancellationSent &&
                   postGenerationSample?.pressured == true) {
+                resources.recordModelPressure(startup.modelId);
                 AndroidFfiRuntimeProvider._log(
                   '[POST_GENERATION_MEMORY_RELEASE] '
                   'session=$sessionId '
