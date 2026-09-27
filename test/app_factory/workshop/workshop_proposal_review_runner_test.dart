@@ -151,6 +151,130 @@ void main() {
       );
     });
 
+    test('reviews every staged file before aggregate approval', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":true,"summary":"Batch passed","findings":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Batch 1 passed","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Batch 2 passed","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Batch 3 passed","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _reviewSessionWithChangedFiles(5);
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(
+        session: session,
+        implementationPlan: 'Architect bounded task plan',
+      );
+
+      expect(verdict.approved, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.calls, 3);
+      expect(reviewer.promptsSeen, hasLength(3));
+      expect(
+        reviewer.promptsSeen,
+        everyElement(contains('"coverageManifest"')),
+      );
+      for (var index = 1; index <= 5; index += 1) {
+        expect(
+          reviewer.promptsSeen
+              .where((prompt) => prompt.contains('"after":"new-$index"')),
+          hasLength(1),
+          reason: 'Each staged file body must be reviewed exactly once.',
+        );
+      }
+      expect(
+        reviewer.promptsSeen.last,
+        contains('"paths":["lib/file_5.dart"]'),
+      );
+    });
+
+    test('a rejected intermediate batch blocks aggregate approval', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":false,"summary":"Batch rejected","findings":["bug"],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Batch 1 passed","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"approved":false,"summary":"Batch 2 rejected","findings":["bug"],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _reviewSessionWithChangedFiles(5);
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.approved, isFalse);
+      expect(verdict.summary, 'Batch 2 rejected');
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+      expect(reviewer.calls, 2);
+      expect(
+        reviewer.promptsSeen.any((prompt) => prompt.contains('"after":"new-5"')),
+        isFalse,
+      );
+    });
+
+    test('changing the staged diff invalidates prior batch approval', () async {
+      late WorkspaceSession session;
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":true,"summary":"Batch passed","findings":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        onCall: (index) {
+          if (index == 0) {
+            session.workspace.write(
+              path: 'lib/file_3.dart',
+              content: 'changed-during-review',
+            );
+          }
+        },
+      );
+      session = await _reviewSessionWithChangedFiles(3);
+
+      await expectLater(
+        WorkshopProposalReviewRunner(
+          inference: _stageInference(_gateways(reviewer)),
+        ).run(session: session),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
+      expect(reviewer.calls, 1);
+    });
+
     test('failed Reviewer inference leaves staged workspace in review',
         () async {
       final reviewer = _StaticGateway(
@@ -225,14 +349,44 @@ Future<WorkspaceSession> _reviewSession() async {
   return session;
 }
 
+Future<WorkspaceSession> _reviewSessionWithChangedFiles(int count) async {
+  final files = <String, String>{
+    for (var index = 1; index <= count; index += 1)
+      'lib/file_$index.dart': 'old-$index',
+  };
+  final gateway = _RecordingWorkspaceGateway(files: files);
+  final session = WorkspaceSession(
+    request: const WorkshopRequest(
+      id: 'review-runner-multi-file-request',
+      title: 'Review all staged changes',
+      instruction: 'Update every staged file safely',
+      constraints: <String>['Do not introduce regressions'],
+      context: <String>['Project goal: walking app'],
+    ),
+    gateway: gateway,
+  );
+
+  await session.initialize();
+  for (var index = 1; index <= count; index += 1) {
+    session.workspace.write(
+      path: 'lib/file_$index.dart',
+      content: 'new-$index',
+    );
+  }
+  session.beginReview();
+  return session;
+}
+
 final class _StaticGateway extends WorkshopInferenceGateway {
   _StaticGateway({
     required this.result,
     this.sequence = const <WorkshopInferenceResult>[],
+    this.onCall,
   }) : super(provider: _NoopProvider());
 
   final WorkshopInferenceResult result;
   final List<WorkshopInferenceResult> sequence;
+  final void Function(int index)? onCall;
   int calls = 0;
   String? lastPrompt;
   final List<String> promptsSeen = <String>[];
@@ -262,6 +416,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     maxTokensSeen.add(maxTokens);
     sessionIdsSeen.add(sessionId);
     firstTokenTimeoutsSeen.add(null);
+    onCall?.call(index);
     if (sequence.isNotEmpty) {
       return sequence[index < sequence.length ? index : sequence.length - 1];
     }
@@ -291,6 +446,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     maxTokensSeen.add(maxTokens);
     sessionIdsSeen.add(sessionId);
     firstTokenTimeoutsSeen.add(firstTokenTimeout);
+    onCall?.call(index);
     if (sequence.isNotEmpty) {
       return sequence[index < sequence.length ? index : sequence.length - 1];
     }
