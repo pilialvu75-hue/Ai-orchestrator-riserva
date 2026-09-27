@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_implementation_runner.dart';
@@ -69,9 +70,11 @@ final class WorkshopTaskInferencePipeline {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
+    onStage?.call(WorkshopStage.implementation);
     final proposal = await _implementationRunner.run(
       session: session,
       preflight: preflight,
@@ -86,6 +89,7 @@ final class WorkshopTaskInferencePipeline {
       preflight: preflight,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
@@ -102,9 +106,11 @@ final class WorkshopTaskInferencePipeline {
     WorkshopPreflightInferenceResult? preflight,
     bool isOffline = false,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
+    onStage?.call(WorkshopStage.implementation);
     final proposal = await _implementationRunner.runWithResumeContext(
       session: session,
       resumeContext: resumeContext,
@@ -121,6 +127,7 @@ final class WorkshopTaskInferencePipeline {
       resumeContext: resumeContext,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+      onStage: onStage,
     );
   }
 
@@ -132,12 +139,14 @@ final class WorkshopTaskInferencePipeline {
     WorkshopResumeContext? resumeContext,
     required bool isOffline,
     CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
   }) async {
     final implementationPlan = preflight?.architecture?.text;
     var currentProposal = proposal;
     var repairAttempts = 0;
 
     while (true) {
+      onStage?.call(WorkshopStage.review);
       final review = await _reviewRunner.run(
         session: session,
         implementationPlan: implementationPlan,
@@ -166,6 +175,7 @@ final class WorkshopTaskInferencePipeline {
           baselineSnapshot: revisionBaseline,
           proposalPaths: currentProposal.affectedPaths,
         );
+        onStage?.call(WorkshopStage.implementation);
         currentProposal = await _runRevision(
           session: session,
           preflight: preflight,
@@ -178,6 +188,7 @@ final class WorkshopTaskInferencePipeline {
         continue;
       }
 
+      onStage?.call(WorkshopStage.validation);
       final validation = await _validationRunner.run(
         session: session,
         implementationPlan: implementationPlan,
@@ -207,6 +218,7 @@ final class WorkshopTaskInferencePipeline {
         baselineSnapshot: revisionBaseline,
         proposalPaths: currentProposal.affectedPaths,
       );
+      onStage?.call(WorkshopStage.implementation);
       currentProposal = await _runRevision(
         session: session,
         preflight: preflight,

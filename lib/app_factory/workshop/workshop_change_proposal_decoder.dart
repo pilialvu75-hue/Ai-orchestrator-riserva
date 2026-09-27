@@ -46,9 +46,13 @@ final class WorkshopChangeProposalDecoder {
     }
 
     final payload = Map<String, dynamic>.from(decoded);
-    final explanation = _requiredString(payload, 'explanation');
     final summary = _optionalString(payload, 'summary');
     final analysis = _optionalString(payload, 'analysis');
+    final explanation = _proposalExplanation(
+      payload,
+      summary: summary,
+      analysis: analysis,
+    );
     final validationNotes = _stringList(payload, 'validationNotes');
     final warnings = _stringList(payload, 'warnings');
 
@@ -153,6 +157,40 @@ final class WorkshopChangeProposalDecoder {
     }
   }
 
+  static String _proposalExplanation(
+    Map<String, dynamic> payload, {
+    required String? summary,
+    required String? analysis,
+  }) {
+    final value = payload['explanation'];
+    if (value != null && value is! String) {
+      throw const FormatException(
+        'Workshop proposal field "explanation" must be text.',
+      );
+    }
+
+    final explicit = value is String ? value.trim() : '';
+    if (explicit.isNotEmpty) {
+      return explicit;
+    }
+
+    // explanation is descriptive metadata, not an execution/safety gate.
+    // Small local models occasionally omit this redundant field while still
+    // returning a structurally valid, reviewable change set. Reuse existing
+    // model-authored context instead of discarding the code or spending a
+    // second inference. Reviewer, Validation and guarded apply remain intact.
+    if (summary != null && summary.isNotEmpty) {
+      return summary;
+    }
+    if (analysis != null && analysis.isNotEmpty) {
+      return analysis;
+    }
+
+    throw const FormatException(
+      'Workshop proposal field "explanation" is required.',
+    );
+  }
+
   static String _requiredString(
     Map<String, dynamic> payload,
     String key,
@@ -211,7 +249,33 @@ final class WorkshopChangeProposalDecoder {
         'Workshop change for $path requires string content.',
       );
     }
-    return content;
+    return _normalizeOuterCodeFence(content);
+  }
+
+  static String _normalizeOuterCodeFence(String content) {
+    final trimmed = content.trim();
+    final lines = trimmed.split(RegExp(r'\r?\n'));
+    if (lines.length < 3) {
+      return content;
+    }
+
+    final first = lines.first.trim();
+    final last = lines.last.trim();
+    final fence = String.fromCharCodes(const <int>[96, 96, 96]);
+    if (!first.startsWith(fence) || last != fence) {
+      return content;
+    }
+
+    final language = first.substring(fence.length).trim();
+    if (language.isNotEmpty &&
+        RegExp(r'[^A-Za-z0-9_+.-]').hasMatch(language)) {
+      return content;
+    }
+
+    // Only remove one fence that wraps the entire file content. Never remove
+    // internal Markdown/code strings or attempt to repair arbitrary syntax.
+    final body = lines.sublist(1, lines.length - 1).join('\n');
+    return content.endsWith('\n') ? '$body\n' : body;
   }
 
   static String _normalizeRelativePath(String path) {

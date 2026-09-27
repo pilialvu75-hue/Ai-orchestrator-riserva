@@ -65,6 +65,8 @@ void main() {
         'local_target_not_supported',
         'project_directory_missing',
         'provider_unavailable',
+        'remote_infrastructure_failed',
+        'remote_build_timeout',
       ]) {
         final assessment = planner.assess(
           _build(

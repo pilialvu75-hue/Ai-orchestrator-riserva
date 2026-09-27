@@ -47,6 +47,21 @@ void main() {
       expect(reviewer.lastPrompt, contains('"before":"old"'));
       expect(reviewer.lastPrompt, contains('"after":"new"'));
       expect(reviewer.lastPrompt, contains('SCOPE RULE:'));
+      expect(reviewer.lastPrompt, contains('CONTRACT PRECEDENCE:'));
+      expect(
+        reviewer.lastPrompt,
+        contains('"targetFilesPolicy":"unspecified_for_initial_create_task"'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('explicit task instruction and explicit constraints are authoritative'),
+      );
+      expect(reviewer.lastPrompt, contains('does NOT mean'));
+      expect(reviewer.lastPrompt, contains('no files are'));
+      expect(
+        reviewer.lastPrompt,
+        contains('allowed" and is not by itself a mismatch'),
+      );
       expect(
         reviewer.lastPrompt,
         isNot(contains('WORKSHOP_APPROVED_PROPOSAL:')),
@@ -100,6 +115,10 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.validation);
       expect(reviewer.calls, 2);
       expect(reviewer.maxTokensSeen, <int?>[256, 192]);
+      expect(
+        reviewer.firstTokenTimeoutsSeen,
+        <Duration?>[null, const Duration(seconds: 75)],
+      );
       expect(reviewer.sessionIdsSeen.last, endsWith(':retry-1'));
       expect(reviewer.promptsSeen, hasLength(2));
       expect(
@@ -195,6 +214,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
   final List<String> promptsSeen = <String>[];
   final List<int?> maxTokensSeen = <int?>[];
   final List<String> sessionIdsSeen = <String>[];
+  final List<Duration?> firstTokenTimeoutsSeen = <Duration?>[];
 
   @override
   Future<WorkshopInferenceResult> complete({
@@ -217,6 +237,36 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     promptsSeen.add(prompt);
     maxTokensSeen.add(maxTokens);
     sessionIdsSeen.add(sessionId);
+    firstTokenTimeoutsSeen.add(null);
+    if (sequence.isNotEmpty) {
+      return sequence[index < sequence.length ? index : sequence.length - 1];
+    }
+    return result;
+  }
+
+  @override
+  Future<WorkshopInferenceResult> completeWithFirstTokenTimeout({
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = true,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? modelId,
+    String? modelPath,
+    CancellationToken? cancellationToken,
+  }) async {
+    final index = calls;
+    calls += 1;
+    lastPrompt = prompt;
+    promptsSeen.add(prompt);
+    maxTokensSeen.add(maxTokens);
+    sessionIdsSeen.add(sessionId);
+    firstTokenTimeoutsSeen.add(firstTokenTimeout);
     if (sequence.isNotEmpty) {
       return sequence[index < sequence.length ? index : sequence.length - 1];
     }

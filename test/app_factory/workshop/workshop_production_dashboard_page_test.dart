@@ -49,6 +49,60 @@ void main() {
     });
   });
 
+  group('WorkshopFinalBuildRetryPolicy', () {
+    test('retries only the final build after a failed artifact attempt', () {
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: true,
+          hasBuildResult: true,
+          hasVerifiedArtifact: false,
+          isBusy: false,
+        ),
+        isTrue,
+      );
+
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: true,
+          hasBuildResult: true,
+          hasVerifiedArtifact: true,
+          isBusy: false,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: false,
+          hasBuildResult: true,
+          hasVerifiedArtifact: false,
+          isBusy: false,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: true,
+          hasBuildResult: false,
+          hasVerifiedArtifact: false,
+          isBusy: false,
+        ),
+        isFalse,
+      );
+
+      expect(
+        WorkshopFinalBuildRetryPolicy.canRetry(
+          projectReadyForBuild: true,
+          hasBuildResult: true,
+          hasVerifiedArtifact: false,
+          isBusy: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('WorkshopProductionAutonomyPolicy', () {
     test('auto apply requires project approval and all validation boundaries', () {
       expect(

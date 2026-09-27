@@ -218,6 +218,9 @@ final class WorkshopProposalValidationRunner {
       'instruction': request.instruction,
       'implementationPlan': boundedPlan,
       'targetFiles': request.targetFiles,
+      'targetFilesPolicy': request.targetFiles.isEmpty
+          ? 'unspecified_for_initial_create_task'
+          : 'explicit_scope',
       'constraints': request.constraints,
       'context': taskContext,
       'changes': changes,
@@ -230,11 +233,23 @@ all staged edits are safe to hand to the explicit approval/apply gate.
 
 SCOPE RULE:
 Validate ONLY the current task described by title, instruction,
-implementationPlan, targetFiles and constraints. The implementationPlan is the
-Architect's bounded plan for this task and is authoritative for the expected
-increment. The context field is project background. Missing future project
-features must not invalidate a correct bounded increment unless they are
-explicit requirements of this current task.
+implementationPlan, targetFiles and constraints.
+
+CONTRACT PRECEDENCE:
+1. The explicit task instruction and explicit constraints are authoritative.
+2. implementationPlan is model-authored Architect guidance and must not override
+   or contradict the explicit task.
+3. targetFiles is a hard restriction only when targetFilesPolicy is
+   "explicit_scope". When targetFilesPolicy is
+   "unspecified_for_initial_create_task", an empty targetFiles list means the
+   initial create task did not preselect files; it does NOT mean "no files are
+   allowed" and is not by itself a validation failure.
+
+If implementationPlan conflicts with the explicit instruction, validate the
+staged change against the explicit task and constraints. The context field is
+project background. Missing future project features must not invalidate a
+correct bounded increment unless they are explicit requirements of this current
+task.
 
 Workshop input JSON:
 ${jsonEncode(payload)}

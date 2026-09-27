@@ -22,6 +22,7 @@ void main() {
     test('runs Engineer then Reviewer review and validation without real writes',
         () async {
       final callOrder = <AppAiRole>[];
+      final stages = <WorkshopStage>[];
       final engineer = _QueueGateway(
         role: AppAiRole.engineer,
         callOrder: callOrder,
@@ -62,9 +63,18 @@ void main() {
       ).run(
         session: session,
         preflight: preflight,
+        onStage: stages.add,
       );
 
       expect(result.readyForApproval, isTrue);
+      expect(
+        stages,
+        <WorkshopStage>[
+          WorkshopStage.implementation,
+          WorkshopStage.review,
+          WorkshopStage.validation,
+        ],
+      );
       expect(result.review.approved, isTrue);
       expect(result.validation?.valid, isTrue);
       expect(session.status, WorkspaceSessionStatus.validation);

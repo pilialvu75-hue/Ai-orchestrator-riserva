@@ -103,8 +103,7 @@ final class WorkshopProposalImplementationRunner {
         sessionId: '$sessionId:retry-1',
         isOffline: isOffline,
         maxTokens: _retryMaxTokens,
-        cancellationToken:
-            memoryPressureRetry ? null : cancellationToken,
+        cancellationToken: cancellationToken,
       );
     }
 
@@ -224,8 +223,7 @@ final class WorkshopProposalImplementationRunner {
         executionId: resumeContext.executionId,
         attemptId: resumeContext.attemptId,
         checkpointId: resumeContext.checkpointId,
-        cancellationToken:
-            memoryPressureRetry ? null : cancellationToken,
+        cancellationToken: cancellationToken,
       );
     }
 
@@ -400,23 +398,42 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. Follow architectPlan. When
+Use only workspaceFiles as existing file content. The explicit task instruction
+and constraints are authoritative; architectPlan is implementation guidance and
+must not override them. An empty request.targetFiles list on an initial create
+task means paths were not preselected, not that no file may be changed. When
 gateFeedback is present, it is authoritative feedback about the previously
-rejected staged proposal: revise the implementation instead of repeating that
-proposal. No markdown, review, approval or apply. For deletion omit content.
+rejected staged proposal. If that feedback identifies a mismatch between the
+Architect plan/target files and the explicit task, correct the implementation
+toward the explicit task instead of repeating the mistaken plan. No markdown,
+review, approval or apply. For deletion omit content.
 Every content
 value must be a valid JSON string with line breaks, double quotes and
-backslashes escaped according to JSON.
+backslashes escaped according to JSON. Prefer Flutter/Dart SDK-only code for
+the smallest MVP. If you import a third-party package that is not already
+declared by the project, include a matching pubspec.yaml addition/modification
+in the same proposal; never emit an undeclared package import or an unused
+import. Generated Dart must be clean under default flutter analyze lints.
+When UI-visible state changes inside a StatefulWidget, trigger a rebuild with
+setState or an already-declared equivalent state mechanism. Do not invent or
+simulate sensor/health measurements as real tracking when the task did not
+explicitly request verified sensor integration.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
-The Architect plan is the authoritative implementation guidance.
-Only current file contents included in workspaceFiles may be modified.
+The explicit task instruction and constraints are authoritative. The Architect
+plan is model-authored implementation guidance and must not override or
+contradict the explicit task. If request.targetFiles is empty for an initial
+create task, paths were not preselected; it does not mean no file may be
+changed. Only current file contents included in workspaceFiles may be modified.
 Files listed only in workspaceManifest are informational; do not rewrite them.
 New files may be added only when required by the task or Architect plan. When
 gateFeedback is present, it is authoritative Reviewer/Validation feedback about
 the previous rejected staged proposal. Correct that concrete issue while keeping
-the current task bounded; do not treat the previous proposal as approved.
+the current task bounded. If the feedback says the Architect plan or target
+files do not match the explicit task, follow the explicit instruction and
+constraints rather than repeating the mismatched plan. Do not treat the
+previous proposal as approved.
 
 INPUT:
 $encoded
@@ -431,7 +448,15 @@ with "./", never use "../", and never use an absolute path.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
-JSON. Do not review, approve or apply.
+JSON. Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
+package is truly required and is not already declared, include the matching
+pubspec.yaml addition/modification in the same proposal. Never emit an
+undeclared package import or an unused import. Generated Dart must be clean
+under default flutter analyze lints. Public widget APIs must follow those lints,
+and UI-visible StatefulWidget mutations must trigger a rebuild with setState or
+an already-declared equivalent mechanism. Do not invent or simulate sensor or
+health measurements as real tracking unless verified integration was explicitly
+requested. Do not review, approve or apply.
 '''.trim();
 
     RuntimeEventLog.instance.emit(
@@ -554,16 +579,18 @@ JSON. Do not review, approve or apply.
       return false;
     }
 
-    // The Android resource guard cancels the active runtime token when it
-    // emits critical_memory. That is an internal safety cancellation, not a
-    // user request to abort the Cantiere task. Allow exactly the existing one
-    // bounded Engineer retry and give that retry a fresh runtime token.
+    // A caller cancellation is authoritative. The Workshop gateway now
+    // forwards it one-way to a per-inference runtime token, so an internal
+    // critical-memory cancellation cannot poison this outer task token.
+    if (cancellationToken?.isCancelled == true) {
+      return false;
+    }
+
     if (_isCriticalMemoryError(result)) {
       return true;
     }
 
-    if (cancellationToken?.isCancelled == true ||
-        result.terminalState == InferenceTerminalState.cancelled ||
+    if (result.terminalState == InferenceTerminalState.cancelled ||
         result.terminalState == InferenceTerminalState.modelUnavailable) {
       return false;
     }

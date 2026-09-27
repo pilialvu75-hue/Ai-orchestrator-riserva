@@ -67,6 +67,15 @@ void main() {
         engineer.lastPrompt,
         contains('bounded implementation plan from Architect'),
       );
+      expect(
+        engineer.lastPrompt,
+        contains('explicit task instruction and constraints are authoritative'),
+      );
+      expect(engineer.lastPrompt, contains('Architect'));
+      expect(
+        engineer.lastPrompt,
+        contains('plan is model-authored implementation guidance'),
+      );
       expect(engineer.maxTokensValues, <int?>[640]);
       expect(engineer.lastPrompt!.length, lessThan(6000));
       expect(gateways[AppAiRole.workshopOrchestrator]!.calls, 0);
@@ -167,7 +176,6 @@ void main() {
             model: 'engineer-model',
           ),
         ],
-        cancelTokenOnCalls: const <int>{0},
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -185,7 +193,7 @@ void main() {
       expect(proposal.explanation, 'Memory retry succeeded');
       expect(session.workspace.read('lib/app.dart'), 'new');
       expect(engineer.calls, 2);
-      expect(callerToken.isCancelled, isTrue);
+      expect(callerToken.isCancelled, isFalse);
       expect(
         engineer.sessionIds,
         <String>[
@@ -194,8 +202,40 @@ void main() {
         ],
       );
       expect(engineer.maxTokensValues, <int?>[640, 512]);
-      expect(engineer.cancellationTokenWasNull, <bool>[false, true]);
+      expect(engineer.cancellationTokenWasNull, <bool>[false, false]);
       expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+    test('caller cancellation suppresses critical-memory retry', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=critical_memory|message=Generazione fermata per pressione sulla memoria.',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+      final callerToken = CancellationToken()..cancel();
+
+      await expectLater(
+        WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+          session: session,
+          cancellationToken: callerToken,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(engineer.calls, 1);
+      expect(callerToken.isCancelled, isTrue);
       expect(workspaceGateway.writeCalls, 0);
     });
 
@@ -258,22 +298,14 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('retries valid JSON that omits required explanation', () async {
+    test('recovers omitted explanation from summary without retry', () async {
       final engineer = _StaticGateway(
-        results: <WorkshopInferenceResult>[
-          const WorkshopInferenceResult(
-            text:
-                '{"summary":"Walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-          const WorkshopInferenceResult(
-            text:
-                '{"summary":"Walking MVP","explanation":"Complete the bounded walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-        ],
+        result: const WorkshopInferenceResult(
+          text:
+              '{"summary":"Walking MVP","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -297,22 +329,47 @@ void main() {
         preflight: preflight,
       );
 
-      expect(proposal.explanation, 'Complete the bounded walking MVP');
+      expect(proposal.explanation, 'Walking MVP');
       expect(proposal.changes.single.path, 'lib/app.dart');
       expect(session.workspace.read('lib/app.dart'), 'new');
-      expect(engineer.calls, 2);
+      expect(engineer.calls, 1);
       expect(
         engineer.sessionIds,
-        <String>[
-          'workshop:implementation:implementation-runner-request',
-          'workshop:implementation:implementation-runner-request:retry-malformed-1',
+        <String>['workshop:implementation:implementation-runner-request'],
+      );
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+    test('still retries when all explanatory metadata is missing', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered on retry","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
         ],
       );
-      expect(engineer.maxTokensValues, <int?>[640, 768]);
-      expect(
-        engineer.prompts[1],
-        contains('"explanation":"required"'),
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
       );
+      final session = await _session(workspaceGateway);
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.explanation, 'Recovered on retry');
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
       expect(workspaceGateway.writeCalls, 0);
     });
 

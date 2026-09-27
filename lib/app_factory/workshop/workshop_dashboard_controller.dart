@@ -23,6 +23,7 @@ final class WorkshopDashboardControllerState {
     this.projectId,
     this.projectTitle,
     this.stage,
+    this.lastOperationalStage,
     this.projectStatus,
     this.progress = 0,
     this.completedTasks = 0,
@@ -48,6 +49,19 @@ final class WorkshopDashboardControllerState {
 
   /// Fase corrente del Workshop.
   final WorkshopStage? stage;
+
+  /// Ultimo stage operativo raggiunto prima di uno stato terminale/bloccato.
+  ///
+  /// È solo evidenza di presentazione: non modifica lo stato reale del progetto
+  /// e non viene usato per autorizzazioni, apply o completamento dei task.
+  final WorkshopStage? lastOperationalStage;
+
+  WorkshopStage? get progressPresentationStage {
+    if (stage == WorkshopStage.completed) {
+      return WorkshopStage.completed;
+    }
+    return lastOperationalStage ?? stage;
+  }
 
   /// Stato del project plan.
   final WorkshopProjectStatus? projectStatus;
@@ -99,6 +113,7 @@ final class WorkshopDashboardControllerState {
     String? projectId,
     String? projectTitle,
     WorkshopStage? stage,
+    WorkshopStage? lastOperationalStage,
     WorkshopProjectStatus? projectStatus,
     double? progress,
     int? completedTasks,
@@ -121,6 +136,8 @@ final class WorkshopDashboardControllerState {
       projectId: projectId ?? this.projectId,
       projectTitle: projectTitle ?? this.projectTitle,
       stage: stage ?? this.stage,
+      lastOperationalStage:
+          lastOperationalStage ?? this.lastOperationalStage,
       projectStatus: projectStatus ?? this.projectStatus,
       progress: progress ?? this.progress,
       completedTasks: completedTasks ?? this.completedTasks,
@@ -225,6 +242,35 @@ final class WorkshopDashboardController extends ChangeNotifier {
       _localToolchainService;
 
   WorkshopBuildLab get buildLab => _buildLab;
+
+  /// Reports the currently executing Cantiere role for presentation only.
+  ///
+  /// This never mutates WorkshopEngine, project/task completion, approvals or
+  /// workspace state. The authoritative lifecycle remains owned by the existing
+  /// engine and guarded production pipeline.
+  void reportOperationalStage(WorkshopStage stage) {
+    // Presentation telemetry must never become an execution dependency.
+    if (_disposed || _state.requestId == null) return;
+
+    switch (stage) {
+      case WorkshopStage.analysis:
+      case WorkshopStage.planning:
+      case WorkshopStage.implementation:
+      case WorkshopStage.review:
+      case WorkshopStage.validation:
+        _updateState(
+          _state.copyWith(
+            lastOperationalStage: stage,
+          ),
+        );
+        return;
+      case WorkshopStage.requested:
+      case WorkshopStage.completed:
+      case WorkshopStage.blocked:
+      case WorkshopStage.cancelled:
+        return;
+    }
+  }
 
   /// Rebuilds a durable Cantiere production without restoring any ephemeral
   /// in-memory diff or approval flag.
@@ -352,6 +398,10 @@ final class WorkshopDashboardController extends ChangeNotifier {
         projectId: restoredPlan.id,
         projectTitle: restoredPlan.title,
         stage: restoredStage,
+        lastOperationalStage:
+            restoredStage == WorkshopStage.completed
+                ? WorkshopStage.completed
+                : WorkshopStage.requested,
         projectStatus: restoredPlan.status,
         progress: restoredPlan.progress,
         completedTasks: restoredPlan.completedTasks,
@@ -476,6 +526,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
         requestId: requestId,
         projectId: plan.id,
         projectTitle: plan.title,
+        stage: WorkshopStage.planning,
+        lastOperationalStage: WorkshopStage.requested,
         projectStatus: plan.status,
         progress: plan.progress,
         completedTasks: plan.completedTasks,
