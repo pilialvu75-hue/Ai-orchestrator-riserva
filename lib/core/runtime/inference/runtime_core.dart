@@ -1,3 +1,4 @@
+import 'android/native_generation_budget.dart';
 /// Core implementation for the Android FFI runtime provider.
 ///
 /// This library keeps the original runtime behavior intact while delegating

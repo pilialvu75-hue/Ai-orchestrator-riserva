@@ -306,12 +306,6 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     final budgetGenerationReserve = budgetRequestedMaxTokens
         .clamp(1, minResourceGenerationLimit(actualContext))
         .toInt();
-    final maxPromptTokens = (
-      actualContext -
-      budgetGenerationReserve -
-      LlamaNativeDefaults.promptTokenSafetyMargin
-    ).clamp(1, actualContext).toInt();
-
     String composePromptForBudget(List<ChatTurn> contextTurns) {
       final composed = _composePrompt(
         request,
@@ -323,6 +317,23 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       );
       return SamplingMetadata.fromPrompt(composed).stripFrom(composed);
     }
+
+    final basePromptTokens = bindings.countTokens(
+      nativeSessionId, composePromptForBudget(const <ChatTurn>[]));
+    final effectiveGenerationReserve = NativeGenerationBudget.generationReserve(
+      context: actualContext, promptTokens: basePromptTokens,
+      requested: budgetGenerationReserve,
+      safetyMargin: LlamaNativeDefaults.promptTokenSafetyMargin,
+    );
+    if (effectiveGenerationReserve == 0) {
+      _updateRuntimeStatus(LocalRuntimeStatus.failed,
+        message: 'Prompt exceeds the local context capacity.');
+      AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
+        stage: 'prompt_budget', message: 'Prompt exceeds the local context capacity.');
+      return null;
+    }
+    final maxPromptTokens = actualContext - effectiveGenerationReserve -
+        LlamaNativeDefaults.promptTokenSafetyMargin;
 
     final tokenBudget = NativeTokenContextBudget.fit(
       contextTurns: request.context,
@@ -339,11 +350,18 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       ' original_turns=${request.context.length}'
       ' selected_turns=${tokenBudget.contextTurns.length}'
       ' trimmed_turns=${tokenBudget.trimmedTurns}'
-      ' generation_reserve=$budgetGenerationReserve'
+      ' generation_reserve=$effectiveGenerationReserve'
       ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}'
       ' fits=${tokenBudget.fitsRequestedBudget}',
     );
 
+    if (!tokenBudget.fitsRequestedBudget || tokenBudget.promptTokens < 0) {
+      _updateRuntimeStatus(LocalRuntimeStatus.failed,
+        message: 'Prompt exceeds the local context capacity.');
+      AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
+        stage: 'prompt_budget', message: 'Prompt exceeds the local context capacity.');
+      return null;
+    }
     final composedPrompt = _composePrompt(
       request,
       modelId: modelId,
@@ -388,7 +406,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     AndroidFfiRuntimeProvider._log('[KV_CACHE] layer=native status=managed_by_llama_bridge');
     AndroidFfiRuntimeProvider._log( '[PROMPT_EVAL] stage=start prompt_chars=${prompt.length} prompt_word_estimate=$promptWordEstimate', );
     final requestedMaxTokens = budgetRequestedMaxTokens;
-    final maxTokens = budgetGenerationReserve;
+    final maxTokens = effectiveGenerationReserve;
     final effectiveTemperature = isForensicSelfTest
         ? 0.1
         : (samplingMetadata.temperature ?? request.temperature);
