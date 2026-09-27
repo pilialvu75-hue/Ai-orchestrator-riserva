@@ -141,42 +141,6 @@ final class WorkshopChangeProposalDecoder {
     );
   }
 
-  static String diagnosticShape(String responseText) {
-    String state(dynamic value) {
-      if (value == null) return 'missing';
-      if (value is! List) return 'non_list';
-      return value.isEmpty ? 'list_empty' : 'list_nonempty';
-    }
-
-    try {
-      final jsonText = WorkshopStructuredJson.extractObjectText(
-        responseText,
-        emptyMessage: 'empty',
-      );
-      dynamic decoded;
-      try {
-        decoded = jsonDecode(jsonText);
-      } on FormatException {
-        final repaired =
-            WorkshopStructuredJson.repairMalformedContentStrings(jsonText);
-        if (repaired == null) return 'json=invalid';
-        decoded = jsonDecode(repaired);
-      }
-      if (decoded is! Map) return 'json=non_object';
-      final payload = Map<String, dynamic>.from(decoded);
-      return 'json=object '
-          'changes=${state(payload['changes'])} '
-          'fileChanges=${state(payload['fileChanges'])} '
-          'file_changes=${state(payload['file_changes'])} '
-          'files=${state(payload['files'])} '
-          'top_path=${payload['path'] is String ? 'yes' : 'no'} '
-          'top_type=${payload['type'] is String ? 'yes' : 'no'} '
-          'top_content=${payload['content'] is String ? 'yes' : 'no'}';
-    } catch (_) {
-      return 'json=invalid';
-    }
-  }
-
   static List<dynamic> _resolveRawChanges(
     Map<String, dynamic> payload, {
     required Set<String> existingPaths,
