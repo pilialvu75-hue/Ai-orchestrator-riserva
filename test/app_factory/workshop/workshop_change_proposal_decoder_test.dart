@@ -423,6 +423,43 @@ void main() {
       );
     });
 
+    test('accepts one canonical changes object as a one-item change set', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-single-change-object',
+        responseText: r'''
+{
+  "changes": {
+    "path": "lib/main.dart",
+    "type": "addition",
+    "content": "void main() {}"
+  }
+}
+''',
+      );
+
+      expect(proposal.changes, hasLength(1));
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(proposal.changes.single.isAddition, isTrue);
+    });
+
+    test('accepts one files object as a one-item equivalent change set', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-single-files-object',
+        responseText: r'''
+{
+  "files": {
+    "path": "lib/main.dart",
+    "content": "void main() {}"
+  }
+}
+''',
+        existingPaths: const <String>{'lib/main.dart'},
+      );
+
+      expect(proposal.changes, hasLength(1));
+      expect(proposal.changes.single.isModification, isTrue);
+    });
+
     test('recovers fileChanges aliases without weakening validation', () {
       final proposal = WorkshopChangeProposalDecoder.decode(
         requestId: 'request-file-changes-alias',
