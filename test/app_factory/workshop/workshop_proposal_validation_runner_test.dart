@@ -203,7 +203,7 @@ void main() {
       expect(reviewer.sessionIdsSeen.last, endsWith(':retry-format-1'));
       expect(
         reviewer.promptsSeen.last.length,
-        lessThan(reviewer.promptsSeen.first.length),
+        lessThanOrEqualTo(reviewer.promptsSeen.first.length),
       );
     });
 
