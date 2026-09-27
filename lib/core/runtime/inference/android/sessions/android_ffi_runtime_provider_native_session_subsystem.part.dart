@@ -41,7 +41,12 @@ class _AndroidFfiNativeSessionSubsystem {
         _log('[RESOURCE_GUARD] action=defer reason=critical_memory');
         throw StateError('Memoria insufficiente: attendi prima di avviare il modello locale.');
       }
-      final profile = ResourceProfile.select(sample, phi: modelId == 'phi3_5_mini' || modelPath.toLowerCase().contains('phi-3.5'));
+      final profile = ResourceProfile.select(
+        sample,
+        phi: modelId == 'phi3_5_mini' ||
+            modelPath.toLowerCase().contains('phi-3.5'),
+        requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+      );
       var existingSessionId = _owner._nativeSessionsByModel[modelPath];
       if (existingSessionId != null && sample?.pressured == true &&
           (bindings.sessionMetrics(existingSessionId)['context']! > profile.context ||
@@ -144,7 +149,7 @@ class _AndroidFfiNativeSessionSubsystem {
           'n_ctx=${profile.context} n_batch=${profile.batch} n_ubatch=${profile.microBatch}');
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');
       _log(
-        '[LOCAL_EXECUTION_CONFIG] mode=cpu_baseline '
+        '[LOCAL_EXECUTION_CONFIG] mode=${desiredGpuLayers > 0 ? 'vulkan' : 'cpu_baseline'} '
         'gpu_layers=$desiredGpuLayers n_ctx=${profile.context} '
         'n_batch=${profile.batch}',
       );
@@ -174,6 +179,8 @@ class _AndroidFfiNativeSessionSubsystem {
           '[FFI_CREATE_SESSION_RETURN] returned_session_id=$created path=$modelPath gpu_layers=$desiredGpuLayers');
 
       if (created <= 0 && desiredGpuLayers > 0) {
+        _log('[LOCAL_EXECUTION_CONFIG] mode=cpu_baseline gpu_layers=0 '
+            'n_ctx=${profile.context} n_batch=${profile.batch}');
         _log(
           '[GPU_FALLBACK] path=$modelPath gpu_layers=$desiredGpuLayers failed=$created reason=session_create_error retrying_with_cpu',
         );

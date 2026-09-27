@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/core/diagnostics/local_model_benchmark_public_projection.dart';
+
 /// Public export is a projection, never a redacted copy of arbitrary text.
 /// Unknown tags and all free-form payloads are discarded.
 String? publicLogProjection(String line) {
@@ -73,6 +75,11 @@ String? publicLogProjection(String line) {
     'WORKSHOP_VALIDATION_RETRY',
     'WORKSHOP_VALIDATION_VERDICT',
     'WORKSHOP_GATE_REPAIR',
+    'LOCAL_MODEL_BENCH_BEGIN',
+    'LOCAL_MODEL_BENCH_CASE',
+    'LOCAL_MODEL_BENCH_MODEL_END',
+    'LOCAL_MODEL_BENCH_END',
+    'POST_GENERATION_MEMORY_RELEASE',
   };
   // Only contiguous leading tags are eligible; a prompt may contain [TTS_FAIL].
   var rest = line.substring(timestamp.end).trimLeft();
@@ -84,6 +91,15 @@ String? publicLogProjection(String line) {
     rest = rest.substring(tag.end).trimLeft();
   }
   if (event == null) return null;
+
+  if (event.startsWith('LOCAL_MODEL_BENCH_') ||
+      event == 'POST_GENERATION_MEMORY_RELEASE') {
+    return localModelBenchmarkPublicProjection(
+      event: event,
+      rest: rest,
+      time: timestamp[1]!,
+    );
+  }
 
   // CLOUD_ROUTING has a fully closed grammar. Never accept free-form values:
   // custom-provider identifiers are reduced to the literal "custom" before
@@ -380,7 +396,7 @@ String? publicLogProjection(String line) {
   }
   if (event == 'RESOURCE_PROFILE') {
     final m = RegExp(
-      r'^reason=(pressure|phi_conservative|device_memory_budget|device_memory_conservative|baseline) n_ctx=(\d{1,6}) '
+      r'^reason=(pressure|phi_conservative|phi_gpu_conservative|device_memory_budget|device_memory_conservative|device_gpu_conservative|baseline) n_ctx=(\d{1,6}) '
       r'n_batch=(\d{1,6}) n_ubatch=(\d{1,6})$',
     ).firstMatch(rest);
     if (m == null) return null;
@@ -407,16 +423,19 @@ String? publicLogProjection(String line) {
 
   if (event == 'LOCAL_EXECUTION_CONFIG') {
     final config = RegExp(
-      r'^mode=cpu_baseline gpu_layers=0 n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
+      r'^mode=(cpu_baseline|vulkan) gpu_layers=(\d{1,3}) n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
     ).firstMatch(rest);
     if (config == null) return null;
+    final layers = int.parse(config[2]!);
+    if ((config[1] == 'cpu_baseline' && layers != 0) ||
+        (config[1] == 'vulkan' && layers == 0)) return null;
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': event,
-      'mode': 'cpu_baseline',
-      'gpu_layers': 0,
-      'n_ctx': int.parse(config[1]!),
-      'n_batch': int.parse(config[2]!),
+      'mode': config[1]!,
+      'gpu_layers': layers,
+      'n_ctx': int.parse(config[3]!),
+      'n_batch': int.parse(config[4]!),
     });
   }
 

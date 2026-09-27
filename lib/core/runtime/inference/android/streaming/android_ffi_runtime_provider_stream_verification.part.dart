@@ -82,7 +82,11 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                         stage: 'verification_memory_guard', message: 'Verification deferred: memory pressure or cancellation.');
                     return;
                   }
-                  final profile = ResourceProfile.select(sample, phi: modelId == 'phi3_5_mini');
+                  final profile = ResourceProfile.select(
+                    sample,
+                    phi: modelId == 'phi3_5_mini',
+                    requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                  );
                   final verificationSessionId = await createNativeSessionOffUi(
                     modelPath,
                     nGpuLayers: LlamaNativeDefaults.nGpuLayers,

@@ -41,6 +41,11 @@ String diagnosticsReleaseBody(String filteredBatch, {String previousBody = ''}) 
     final event = record['log']['event'] as String;
     return RegExp(r'FAIL|ERROR|TIMEOUT|STALL|BLOCKED|REJECTED|EXCEPTION|EXIT_HISTORY').hasMatch(event);
   }
+  bool benchmark(Map<String, dynamic> record) {
+    final event = record['log']['event'] as String;
+    return event.startsWith('LOCAL_MODEL_BENCH_') ||
+        event == 'POST_GENERATION_MEMORY_RELEASE';
+  }
   String tail(Iterable<Map<String, dynamic>> source, int budget) {
     final values = source.toList();
     final selected = <String>[];
@@ -55,7 +60,9 @@ String diagnosticsReleaseBody(String filteredBatch, {String previousBody = ''}) 
   return 'Log tecnici filtrati cumulativi. Contesto = build e sessione di raccolta, '
       'non necessariamente del crash originale. Cronologia limitata; archivio nei file allegati.\n\n'
       '### Eventi recenti\n\n'
-      '${tail(ordered, 32000)}\n'
+      '${tail(ordered, 28000)}\n'
+      '### Benchmark locali\n\n'
+      '${tail(ordered.where(benchmark), 12000)}\n'
       '### Ultimi errori e arresti (possono essere storici)\n\n'
       '${tail(ordered.where(important), 12000)}';
 }

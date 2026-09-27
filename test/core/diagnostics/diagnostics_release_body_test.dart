@@ -26,6 +26,31 @@ void main() {
     expect(body, contains('001999'));
   });
 
+  test('shows local benchmark events in a dedicated section', () {
+    final filtered =
+        'schema=1 build=2475 device=test capture_session=bench\n'
+        '${jsonEncode({
+          'time': '2026-09-25T14:30:00.000000',
+          'event': 'LOCAL_MODEL_BENCH_CASE',
+          'model': 'phi3_5_mini',
+          'case': 'vulkan_fact',
+          'score': 2,
+          'max_score': 2,
+        })}\n'
+        '${jsonEncode({
+          'time': '2026-09-25T14:31:00.000000',
+          'event': 'LOCAL_MODEL_BENCH_MODEL_END',
+          'model': 'phi3_5_mini',
+          'score': 9,
+          'max_score': 11,
+        })}\n';
+
+    final body = diagnosticsReleaseBody(filtered);
+    expect(body, contains('### Benchmark locali'));
+    expect(body, contains('LOCAL_MODEL_BENCH_CASE'));
+    expect(body, contains('LOCAL_MODEL_BENCH_MODEL_END'));
+  });
+
   test('migrates old summary and does not publish arbitrary input', () {
     final old = '    schema=1 device=test\n    {"time":"2026","event":"TTS_FAIL"}\n';
     final body = diagnosticsReleaseBody('schema=1 device=test\nsecret raw text\n', previousBody: old);

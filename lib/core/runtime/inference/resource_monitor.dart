@@ -60,24 +60,37 @@ class ResourceProfile {
   const ResourceProfile(this.context, this.batch, this.microBatch, this.reason);
   final int context, batch, microBatch;
   final String reason;
-  static ResourceProfile select(ResourceSample? sample, {required bool phi}) {
+  static ResourceProfile select(
+    ResourceSample? sample, {
+    required bool phi,
+    int requestedGpuLayers = 0,
+  }) {
     if (sample?.pressured == true) {
       return const ResourceProfile(2048, 128, 32, 'pressure');
     }
-    if (phi) return const ResourceProfile(2048, 128, 64, 'phi_conservative');
+    if (phi) {
+      // Aggressive GPU offload on Phi leaves substantially less free RAM.
+      // Start with the same micro-batch used under pressure so a healthy
+      // cached session does not have to be torn down only to shrink 64 -> 32.
+      if (requestedGpuLayers >= 32) {
+        return const ResourceProfile(2048, 128, 32, 'phi_gpu_conservative');
+      }
+      return const ResourceProfile(2048, 128, 64, 'phi_conservative');
+    }
     // Keep a smaller KV/compute allocation on phones with at most 8 GiB.
     // Free RAM alone can look healthy before weights become resident.
     final total = sample?.totalBytes;
     if (total != null && total > 0 && total <= 8 * 1024 * 1024 * 1024) {
-      // 3B-class non-Phi models can cross Android's critical-memory boundary
-      // during later Workshop roles even when the pre-load sample looks
-      // healthy. Start pressure-compatible so Engineer/Reviewer do not need a
-      // mid-generation cancellation merely to shrink batch allocation.
-      return const ResourceProfile(
+      // Current main already uses pressure-compatible geometry for 3B-class
+      // non-Phi models on <=8 GiB phones. Keep that safety baseline and only
+      // refine the diagnostic reason when aggressive Vulkan offload is active.
+      return ResourceProfile(
         2048,
         128,
         32,
-        'device_memory_conservative',
+        requestedGpuLayers >= 32
+            ? 'device_gpu_conservative'
+            : 'device_memory_conservative',
       );
     }
     return const ResourceProfile(4096, 512, 128, 'baseline');
