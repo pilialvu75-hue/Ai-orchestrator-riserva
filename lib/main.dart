@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:ai_orchestrator/core/runtime/inference/android_process_exit_diagnostics.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -58,13 +59,20 @@ void _emitForensicException(
   }
 }
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Windows-safe startup: mount the Flutter tree before disk/plugin/service
-  // initialization. Persistent diagnostics and the full runtime bootstrap are
-  // deferred until after the first frame, so an unavailable Win7 service
-  // cannot prevent every pixel of UI from appearing.
+  final deferWindowsStartup =
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  // Preserve the established startup order everywhere except Windows. On
+  // Windows the first frame is allowed to render before disk/plugin/service
+  // initialization so legacy hosts cannot fail before showing any UI.
+  if (!deferWindowsStartup) {
+    await RuntimeEventLog.instance.initPersistence();
+    unawaited(recordAndroidProcessExitHistory());
+    unawaited(GitHubDiagnostics.instance.initialize());
+  }
 
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
@@ -112,9 +120,9 @@ void main() {
   RuntimeEventLog.instance
       .emit('[FORENSIC_GLOBAL_EXCEPTION_HANDLERS_INSTALLED]');
 
-  runZonedGuarded(
-    () {
-      runApp(const StartupApp());
+  await runZonedGuarded(
+    () async {
+      runApp(StartupApp(deferWindowsStartup: deferWindowsStartup));
     },
     (Object error, StackTrace stackTrace) {
       _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
@@ -123,7 +131,12 @@ void main() {
 }
 
 class StartupApp extends StatefulWidget {
-  const StartupApp({super.key});
+  const StartupApp({
+    super.key,
+    required this.deferWindowsStartup,
+  });
+
+  final bool deferWindowsStartup;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -140,15 +153,19 @@ class _StartupAppState extends State<StartupApp> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        unawaited(_startBootstrap());
-      }
-    });
+    if (widget.deferWindowsStartup) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_startBootstrap());
+        }
+      });
+    } else {
+      unawaited(_startBootstrap());
+    }
   }
 
   Future<void> _initializeDeferredDiagnostics() async {
-    if (_diagnosticsInitialized) return;
+    if (!widget.deferWindowsStartup || _diagnosticsInitialized) return;
     _diagnosticsInitialized = true;
 
     try {
@@ -163,7 +180,7 @@ class _StartupAppState extends State<StartupApp> {
 
     unawaited(recordAndroidProcessExitHistory());
     unawaited(GitHubDiagnostics.instance.initialize());
-    RuntimeEventLog.instance.emit('[WIN7_SAFE_STARTUP_FIRST_FRAME_REACHED]');
+    RuntimeEventLog.instance.emit('[WINDOWS_SAFE_STARTUP_FIRST_FRAME_REACHED]');
   }
 
   Future<void> _startBootstrap() async {
