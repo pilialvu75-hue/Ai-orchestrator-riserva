@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_detector.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_planner.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
@@ -479,6 +480,13 @@ final class WorkshopDashboardController extends ChangeNotifier {
       ),
     );
 
+    final productionPlan = const WorkshopProductionTaskPlanner().build(
+      instruction: normalizedInstruction,
+      requirements: requirements,
+      deliverables: deliverables,
+      validationCriteria: validationCriteria,
+    );
+
     _engine.createProjectPlan(
       request,
       domain: WorkshopProjectDomain.software,
@@ -487,29 +495,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
       technologies: technologies,
       deliverables: deliverables,
       validationCriteria: validationCriteria,
-      phases: <WorkshopProjectPhase>[
-        WorkshopProjectPhase(
-          id: 'phase:implementation',
-          title: 'Implementazione',
-          description:
-              'Preparazione ed esecuzione della prima unità '
-              'di lavoro del progetto.',
-          taskIds: const <String>[
-            'task:initial-implementation',
-          ],
-          validationCriteria: validationCriteria,
-        ),
-      ],
-      tasks: <WorkshopProjectTask>[
-        WorkshopProjectTask(
-          id: 'task:initial-implementation',
-          title: 'Implementazione iniziale',
-          description: normalizedInstruction,
-          phaseId: 'phase:implementation',
-          affectedPaths: const <String>[],
-          validationCriteria: validationCriteria,
-        ),
-      ],
+      phases: productionPlan.phases,
+      tasks: productionPlan.tasks,
     );
 
     final plan = _engine.planOf(requestId);

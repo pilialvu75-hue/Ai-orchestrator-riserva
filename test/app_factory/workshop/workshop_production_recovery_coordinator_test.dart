@@ -105,7 +105,7 @@ void main() {
       );
       expect(secondController.state.stage, WorkshopStage.implementation);
       expect(secondController.state.completedTasks, 0);
-      expect(secondController.state.totalTasks, 1);
+      expect(secondController.state.totalTasks, 3);
       expect(secondController.state.isProjectApproved, isTrue);
       expect(
         secondController.state.projectApproval?.approvalId,
@@ -154,6 +154,63 @@ void main() {
   );
 
   test(
+    'resumes the next incomplete bounded task after a restart',
+    () async {
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final firstCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: preferences,
+        ),
+      );
+      final firstController = _controllerFor(workspace.path);
+
+      firstController.startProduction(
+        title: 'Incremental Cantiere project',
+        instruction: 'Create a small counter application.',
+      );
+
+      final requestId = firstController.state.requestId!;
+      final plan = firstController.engine.planOf(requestId)!;
+      plan.taskById('task:initial-implementation')!.completed = true;
+      plan.phaseById('phase:implementation')!.status =
+          WorkshopProjectPhaseStatus.inProgress;
+      plan.status = WorkshopProjectStatus.inProgress;
+
+      await firstCoordinator.saveCurrent(firstController);
+      firstController.dispose();
+
+      final secondCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+      );
+      final secondController = _controllerFor(workspace.path);
+
+      final restored = await secondCoordinator.restore(secondController);
+
+      expect(restored, isTrue);
+      expect(secondController.state.completedTasks, 1);
+      expect(secondController.state.totalTasks, 3);
+      expect(secondController.state.progress, closeTo(1 / 3, 0.0001));
+      expect(
+        secondController.state.activeTaskId,
+        'task:core-behavior',
+      );
+      expect(secondController.state.stage, WorkshopStage.implementation);
+      expect(
+        secondController.engine.planOf(requestId)!.nextAvailableTask?.id,
+        'task:core-behavior',
+      );
+
+      secondController.dispose();
+    },
+  );
+
+  test(
     'keeps a completed project build-ready after a restart',
     () async {
       final preferences = PreferencesService(
@@ -173,12 +230,13 @@ void main() {
 
       final requestId = firstController.state.requestId!;
       final plan = firstController.engine.planOf(requestId)!;
-      final task = plan.taskById('task:initial-implementation')!;
       final phase = plan.phaseById('phase:implementation')!;
 
       // This test fixture represents the authoritative state that normally
-      // results only after the guarded approval/apply lifecycle succeeds.
-      task.completed = true;
+      // results only after every guarded approval/apply lifecycle succeeds.
+      for (final task in plan.tasks) {
+        task.completed = true;
+      }
       phase.status = WorkshopProjectPhaseStatus.completed;
       plan.status = WorkshopProjectStatus.completed;
 
@@ -205,8 +263,8 @@ void main() {
       expect(secondController.state.stage, WorkshopStage.completed);
       expect(secondController.engine.stageOf(requestId), WorkshopStage.completed);
       expect(secondController.state.activeTaskId, isNull);
-      expect(secondController.state.completedTasks, 1);
-      expect(secondController.state.totalTasks, 1);
+      expect(secondController.state.completedTasks, 3);
+      expect(secondController.state.totalTasks, 3);
       expect(secondController.state.progress, 1);
 
       final restoredPlan = secondController.engine.planOf(requestId)!;

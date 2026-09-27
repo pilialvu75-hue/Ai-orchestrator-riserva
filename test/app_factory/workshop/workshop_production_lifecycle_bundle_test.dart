@@ -68,6 +68,20 @@ void main() {
 
       expect(taskId, 'task:initial-implementation');
       expect(identical(executor.sessionForTask(taskId), session), isTrue);
+      expect(
+        session.context.request.targetFiles,
+        <String>['lib/main.dart'],
+      );
+      expect(
+        session.context.request.constraints.first,
+        startsWith('Task acceptance: '),
+      );
+      expect(
+        session.context.request.context,
+        contains(
+          startsWith('Task acceptance criteria: '),
+        ),
+      );
 
       final inference = await bundle.taskLifecycle.runPrepared(
         taskId: taskId,
@@ -108,8 +122,11 @@ void main() {
       expect(workspaceGateway.writeCalls, 1);
       expect(
         plan.status,
-        WorkshopProjectStatus.completed,
+        WorkshopProjectStatus.inProgress,
       );
+      expect(plan.completedTasks, 1);
+      expect(plan.totalTasks, 3);
+      expect(plan.nextAvailableTask?.id, 'task:core-behavior');
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);

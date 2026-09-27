@@ -85,14 +85,15 @@ void main() {
 
     final dashboardState = bundle.dashboardController.state;
 
-    expect(dashboardState.projectStatus, WorkshopProjectStatus.completed);
-    expect(dashboardState.progress, 1.0);
+    expect(dashboardState.projectStatus, WorkshopProjectStatus.inProgress);
+    expect(dashboardState.progress, closeTo(1 / 3, 0.0001));
     expect(dashboardState.completedTasks, 1);
-    expect(dashboardState.totalTasks, 1);
+    expect(dashboardState.totalTasks, 3);
     expect(dashboardState.activeTaskId, isNull);
+    expect(handle.plan.nextAvailableTask?.id, 'task:core-behavior');
     expect(
       bundle.dashboardController.engine.stageOf(requestId!),
-      WorkshopStage.completed,
+      WorkshopStage.planning,
     );
   });
 
