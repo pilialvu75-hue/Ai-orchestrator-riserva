@@ -341,22 +341,14 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('still retries when all explanatory metadata is missing', () async {
+    test('does not retry valid changes only because metadata is missing', () async {
       final engineer = _StaticGateway(
-        results: <WorkshopInferenceResult>[
-          const WorkshopInferenceResult(
-            text:
-                '{"changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-          const WorkshopInferenceResult(
-            text:
-                '{"explanation":"Recovered on retry","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
-            terminalState: InferenceTerminalState.success,
-            model: 'engineer-model',
-          ),
-        ],
+        result: const WorkshopInferenceResult(
+          text:
+              '{"changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
@@ -367,9 +359,10 @@ void main() {
         inference: _stageInference(_gateways(engineer)),
       ).run(session: session);
 
-      expect(proposal.explanation, 'Recovered on retry');
-      expect(engineer.calls, 2);
-      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(proposal.explanation, 'Proposed file change: lib/app.dart');
+      expect(engineer.calls, 1);
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(session.workspace.read('lib/app.dart'), 'new');
       expect(workspaceGateway.writeCalls, 0);
     });
 

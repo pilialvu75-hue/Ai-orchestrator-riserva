@@ -334,15 +334,62 @@ void main() {
       expect(proposal.explanation, 'Implement the bounded counter task.');
     });
 
-    test('still rejects a proposal with no explanatory metadata', () {
-      expect(
-        () => WorkshopChangeProposalDecoder.decode(
-          requestId: 'request-no-explanation',
-          responseText: r'''
+    test('derives explanation from validated changes when metadata is omitted', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-no-explanation',
+        responseText: r'''
 {
   "changes": [
     {
       "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(proposal.explanation, 'Proposed file change: lib/main.dart');
+      expect(proposal.changes.single.path, 'lib/main.dart');
+    });
+
+    test('derived explanation lists multiple validated paths deterministically', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-no-explanation-multiple',
+        responseText: r'''
+{
+  "changes": [
+    {
+      "path": "lib/main.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    },
+    {
+      "path": "test/widget_test.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(
+        proposal.explanation,
+        'Proposed 2 file changes: lib/main.dart, test/widget_test.dart',
+      );
+    });
+
+    test('metadata fallback does not bypass path safety', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-no-metadata-unsafe',
+          responseText: r'''
+{
+  "changes": [
+    {
+      "path": "../escape.dart",
       "type": "addition",
       "content": "void main() {}"
     }
