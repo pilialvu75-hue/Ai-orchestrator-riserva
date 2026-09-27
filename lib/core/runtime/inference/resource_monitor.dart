@@ -64,7 +64,13 @@ class ResourceProfile {
     ResourceSample? sample, {
     required bool phi,
     int requestedGpuLayers = 0,
+    bool memoryConstrained = false,
   }) {
+    // Keep the learned budget after unloading restores free system RAM.
+    // Phi has a large KV cache: shrink it without disabling GPU offload.
+    if (phi && memoryConstrained) {
+      return const ResourceProfile(1536, 64, 16, 'phi_memory_recovery');
+    }
     if (sample?.pressured == true) {
       return const ResourceProfile(2048, 128, 32, 'pressure');
     }
@@ -116,6 +122,19 @@ class ResourceMonitor extends ChangeNotifier {
   Map<String, int> native = const {};
   Map<String, int> Function()? readNative;
   String phase = 'idle';
+  // Shared by chat/provider instances, bounded, and local to this process.
+  // A healthy post-release sample must not erase pressure learned under load.
+  final Set<String> _memoryConstrainedModels = <String>{};
+  bool isMemoryConstrained(String model) =>
+      _memoryConstrainedModels.contains(model);
+  void recordModelPressure(String model) {
+    if (model.isEmpty || _disposed) return;
+    if (_memoryConstrainedModels.length >= 16 &&
+        !_memoryConstrainedModels.contains(model)) {
+      _memoryConstrainedModels.remove(_memoryConstrainedModels.first);
+    }
+    _memoryConstrainedModels.add(model);
+  }
   Timer? _timer;
   Future<ResourceSample?>? _pending;
   Future<Map<Object?, Object?>?>? _sensorPending;

@@ -7,7 +7,8 @@ void main() {
   test('resource profiles export current and historical device budgets', () {
     const prefix = '[2026-09-26T23:30:00.000] [RESOURCE_PROFILE] ';
     for (final reason in ['pressure', 'phi_conservative', 'baseline',
-        'device_memory_budget', 'device_memory_conservative']) {
+        'device_memory_budget', 'device_memory_conservative',
+        'phi_memory_recovery']) {
       final line = '${prefix}reason=$reason n_ctx=2048 n_batch=128 n_ubatch=32';
       final data = jsonDecode(publicLogProjection(line)!);
       expect(data['reason'], reason);
