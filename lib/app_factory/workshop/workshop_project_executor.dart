@@ -83,12 +83,18 @@ final class WorkshopProjectExecutor {
       projectPath: null,
       targetFiles: task.affectedPaths,
       constraints: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
         ...plan.constraints,
       ],
       context: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
+        if (task.affectedPaths.isNotEmpty)
+          'Task target files: ${task.affectedPaths.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
@@ -162,17 +168,29 @@ final class WorkshopProjectExecutor {
       operation: _operationForTask(task),
       targetFiles: task.affectedPaths,
       constraints: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
         ...plan.constraints,
       ],
       context: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
+        if (task.affectedPaths.isNotEmpty)
+          'Task target files: ${task.affectedPaths.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
         'Project domain: ${plan.domain.name}',
         'Phase: ${task.phaseId}',
+        if (plan.requirements.isNotEmpty)
+          'Requirements: ${plan.requirements.join(' | ')}',
+        if (plan.technologies.isNotEmpty)
+          'Technologies: ${plan.technologies.join(' | ')}',
+        if (plan.hardware.isNotEmpty)
+          'Hardware: ${plan.hardware.join(' | ')}',
       ],
     );
 
@@ -402,15 +420,11 @@ final class WorkshopProjectExecutor {
         continue;
       }
 
-      final hasBlockedTask = phaseTasks.any(
-        (task) =>
-            plan.isTaskBlocked(task) &&
-            !task.completed,
-      );
+      if (phase.status == WorkshopProjectPhaseStatus.blocked) {
+        continue;
+      }
 
-      phase.status = hasBlockedTask
-          ? WorkshopProjectPhaseStatus.blocked
-          : WorkshopProjectPhaseStatus.inProgress;
+      phase.status = WorkshopProjectPhaseStatus.inProgress;
     }
 
     if (plan.phases.isNotEmpty &&
