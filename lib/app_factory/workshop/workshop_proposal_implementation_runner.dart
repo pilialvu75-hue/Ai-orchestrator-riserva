@@ -647,22 +647,26 @@ requested. Do not review, approve or apply.
 
   static const String _systemPrompt =
       'You are the Engineer brain of the Cantiere. Implement only the bounded '
-      'task input and exact workspace file contents supplied. The Architect '
-      'plan is authoritative. Do not use Assistant memory or hidden project '
-      'state. Return only the requested structured JSON proposal and never '
-      'mutate the real repository directly.';
+      'task input and exact workspace file contents supplied. The explicit task '
+      'instruction, constraints and acceptance scope are authoritative; the '
+      'Architect plan is bounded implementation guidance and must not override '
+      'them. Do not use Assistant memory or hidden project state. Return only '
+      'the requested structured JSON proposal and never mutate the real '
+      'repository directly.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Engineer retrying after a local first-token stall. '
       'Use only the compact bounded input. Make the smallest valid change that '
-      'satisfies the Architect plan. Return only the requested JSON object. '
+      'satisfies the explicit task contract; use the Architect plan only as '
+      'bounded implementation guidance. Return only the requested JSON object. '
       'Do not review, approve, apply, or use Assistant state.';
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
       'response was incomplete, invalid JSON, or omitted a required proposal '
       'field. Use only the compact bounded input and satisfy the core required '
-      'behavior from the Architect plan. Return one complete JSON object with '
+      'behavior from the explicit task contract, using the Architect plan only '
+      'as bounded implementation guidance. Return one complete JSON object with '
       'a non-empty string field "explanation" and a non-empty "changes" array. '
       'Produce the smallest complete compilable change, preferably one concise '
       'file when possible. Finish valid JSON before optional features or UI '
