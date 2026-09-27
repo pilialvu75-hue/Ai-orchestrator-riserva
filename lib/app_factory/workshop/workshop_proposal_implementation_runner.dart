@@ -344,12 +344,16 @@ final class WorkshopProposalImplementationRunner {
       revisionFeedback ?? '',
       compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
-    final workspaceFiles = _selectWorkspaceFiles(
+    final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
       maxChars:
           compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
+      allowOversizedTargetReplacement:
+          request.operation == WorkshopOperation.create,
     );
+    final workspaceFiles = workspaceSelection.files;
+    final replaceableTargets = workspaceSelection.replaceableTargets;
 
     final manifest = snapshot.keys.toList()..sort();
     final payload = compact
@@ -364,6 +368,8 @@ final class WorkshopProposalImplementationRunner {
             if (resumeContext != null)
               'resume': _compactResumeMetadata(resumeContext),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
+            if (replaceableTargets.isNotEmpty)
+              'replaceableTargets': replaceableTargets,
             'workspaceFiles': workspaceFiles,
           }
         : <String, Object?>{
@@ -379,6 +385,8 @@ final class WorkshopProposalImplementationRunner {
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
             if (resumeContext != null) 'resume': resumeContext.toMetadata(),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
+            if (replaceableTargets.isNotEmpty)
+              'replaceableTargets': replaceableTargets,
             'workspaceManifest': manifest.take(28).toList(),
             'workspaceFiles': workspaceFiles,
           };
@@ -396,9 +404,12 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. The explicit task instruction
-and constraints are authoritative; architectPlan is implementation guidance and
-must not override them. An empty request.targetFiles list on an initial create
+Use only workspaceFiles as existing file content. replaceableTargets, when
+present, are existing oversized starter files intentionally omitted from the
+prompt for a create task; you may replace those paths only with complete
+resulting file content, never infer or partially preserve their omitted prior
+content. The explicit task instruction and constraints are authoritative;
+architectPlan is implementation guidance and must not override them. An empty request.targetFiles list on an initial create
 task means paths were not preselected, not that no file may be changed. When
 gateFeedback is present, it is authoritative feedback about the previously
 rejected staged proposal. If that feedback identifies a mismatch between the
@@ -423,9 +434,13 @@ The explicit task instruction and constraints are authoritative. The Architect
 plan is model-authored implementation guidance and must not override or
 contradict the explicit task. If request.targetFiles is empty for an initial
 create task, paths were not preselected; it does not mean no file may be
-changed. Only current file contents included in workspaceFiles may be modified.
-Files listed only in workspaceManifest are informational; do not rewrite them.
-New files may be added only when required by the task or Architect plan. When
+changed. Only current file contents included in workspaceFiles may be modified, except
+paths listed in replaceableTargets. replaceableTargets are existing oversized
+starter files intentionally omitted from the prompt for this create task; they
+may be replaced only with complete resulting content, never partially edited or
+assumed from unseen prior text. Files listed only in workspaceManifest are
+informational; do not rewrite them. New files may be added only when required
+by the task or Architect plan. When
 gateFeedback is present, it is authoritative Reviewer/Validation feedback about
 the previous rejected staged proposal. Correct that concrete issue while keeping
 the current task bounded. If the feedback says the Architect plan or target
@@ -461,16 +476,18 @@ requested. Do not review, approve or apply.
       '[WORKSHOP_ENGINEER_PROMPT] '
       'request=${request.id} compact=$compact chars=${prompt.length} '
       'workspace_files=${workspaceFiles.length} '
+      'replaceable_targets=${replaceableTargets.length} '
       'architect_chars=${architectPlan.length}',
     );
 
     return prompt;
   }
 
-  Map<String, String> _selectWorkspaceFiles({
+  _WorkshopWorkspaceSelection _selectWorkspaceFiles({
     required Map<String, String> snapshot,
     required List<String> targetFiles,
     required int maxChars,
+    required bool allowOversizedTargetReplacement,
   }) {
     final ordered = <String>[];
     final seen = <String>{};
@@ -512,6 +529,7 @@ requested. Do not review, approve or apply.
 
     var used = 0;
     final selected = <String, String>{};
+    final replaceableTargets = <String>[];
     for (final path in ordered) {
       final content = snapshot[path] ?? '';
       final cost = path.length + content.length;
@@ -519,6 +537,10 @@ requested. Do not review, approve or apply.
         continue;
       }
       if (content.length > maxChars && targetFiles.contains(path)) {
+        if (allowOversizedTargetReplacement) {
+          replaceableTargets.add(path);
+          continue;
+        }
         throw StateError(
           'Workshop Engineer target file "$path" exceeds the local prompt '
           'budget; split the task before implementation.',
@@ -530,7 +552,11 @@ requested. Do not review, approve or apply.
       selected[path] = content;
       used += cost;
     }
-    return selected;
+    return _WorkshopWorkspaceSelection(
+      files: Map<String, String>.unmodifiable(selected),
+      replaceableTargets:
+          List<String>.unmodifiable(replaceableTargets),
+    );
   }
 
   static Map<String, Object?> _compactResumeMetadata(
@@ -643,4 +669,15 @@ requested. Do not review, approve or apply.
       'polish. Every change type must be exactly addition, modification, or '
       'deletion; never combine enum values. Escape all file content as valid '
       'JSON strings. Do not review, approve, apply, or use Assistant state.';
+}
+
+
+final class _WorkshopWorkspaceSelection {
+  const _WorkshopWorkspaceSelection({
+    required this.files,
+    required this.replaceableTargets,
+  });
+
+  final Map<String, String> files;
+  final List<String> replaceableTargets;
 }
