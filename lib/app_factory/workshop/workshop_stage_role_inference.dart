@@ -102,6 +102,62 @@ final class WorkshopStageRoleInference {
     }
   }
 
+  /// Executes one stage with a bounded, caller-requested first-token window.
+  ///
+  /// Used only after a proven transient stall; normal stage execution keeps the
+  /// canonical runtime timeout.
+  Future<WorkshopInferenceResult> completeWithFirstTokenTimeout({
+    required WorkshopStage stage,
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = false,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    CancellationToken? cancellationToken,
+  }) async {
+    final role = WorkshopStageRoleResolver.roleFor(stage);
+
+    if (role == AppAiRole.assistantOrchestrator) {
+      throw StateError(
+        'Assistant role cannot be used by Workshop stage inference.',
+      );
+    }
+
+    WorkshopExecutionLease? lease;
+    final leaseService = _foregroundLeaseService;
+    if (leaseService != null) {
+      lease = await leaseService.acquire(
+        operationId: '${sessionId}:${stage.name}',
+      );
+    }
+
+    try {
+      return await _executor.completeWithFirstTokenTimeout(
+        role: role,
+        prompt: prompt,
+        firstTokenTimeout: firstTokenTimeout,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        cancellationToken: cancellationToken,
+      );
+    } finally {
+      if (lease != null) {
+        await lease.release();
+      }
+    }
+  }
+
   /// Executes one Workshop stage while preserving Cantiere-owned execution
   /// continuity identity through the role-aware inference boundary.
   ///
