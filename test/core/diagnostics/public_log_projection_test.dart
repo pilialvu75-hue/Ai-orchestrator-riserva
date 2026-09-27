@@ -232,6 +232,44 @@ void main() {
     expect(line, isNot(contains('private-project-id')));
   });
 
+  test('exports Engineer schema shape without request or model content', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_ENGINEER_SCHEMA] request=private-request '
+      'json=object changes=missing fileChanges=list_nonempty '
+      'file_changes=missing files=missing top_path=no top_type=no '
+      'top_content=no',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_SCHEMA',
+        'json': 'object',
+        'changes': 'missing',
+        'fileChanges': 'list_nonempty',
+        'file_changes': 'missing',
+        'files': 'missing',
+        'top_path': 'no',
+        'top_type': 'no',
+        'top_content': 'no',
+      },
+    );
+    expect(line, isNot(contains('private-request')));
+  });
+
+  test('rejects extended Engineer schema telemetry', () {
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_ENGINEER_SCHEMA] request=req '
+        'json=object changes=missing fileChanges=missing '
+        'file_changes=missing files=missing top_path=no top_type=no '
+        'top_content=no code=private',
+      ),
+      isNull,
+    );
+  });
+
   test('exports Engineer retry outcome without request or execution IDs', () {
     final line = publicLogProjection(
       '$time [WORKSHOP_ENGINEER_RETRY] '
