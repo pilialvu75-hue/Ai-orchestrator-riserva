@@ -54,9 +54,9 @@ final class WorkshopProductionTaskPlanner {
         .where((value) => !_isPostTaskBuildCriterion(value))
         .toList(growable: false);
 
-    final foundationId = 'task:initial-implementation';
-    final coreId = 'task:core-behavior';
-    final acceptanceId = 'task:acceptance-verification';
+    const foundationId = 'task:initial-implementation';
+    const coreId = 'task:core-behavior';
+    const acceptanceId = 'task:acceptance-verification';
 
     final tasks = <WorkshopProjectTask>[
       WorkshopProjectTask(
