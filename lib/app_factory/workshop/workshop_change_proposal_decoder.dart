@@ -48,11 +48,7 @@ final class WorkshopChangeProposalDecoder {
     final payload = Map<String, dynamic>.from(decoded);
     final summary = _optionalString(payload, 'summary');
     final analysis = _optionalString(payload, 'analysis');
-    final explanation = _proposalExplanation(
-      payload,
-      summary: summary,
-      analysis: analysis,
-    );
+    final explicitExplanation = _optionalExplanation(payload);
     final validationNotes = _stringList(payload, 'validationNotes');
     final warnings = _stringList(payload, 'warnings');
 
@@ -129,6 +125,13 @@ final class WorkshopChangeProposalDecoder {
       }
     }
 
+    final explanation = _proposalExplanation(
+      explicit: explicitExplanation,
+      summary: summary,
+      analysis: analysis,
+      changes: changes,
+    );
+
     return WorkshopChangeProposal(
       requestId: normalizedRequestId,
       summary: summary,
@@ -157,28 +160,29 @@ final class WorkshopChangeProposalDecoder {
     }
   }
 
-  static String _proposalExplanation(
-    Map<String, dynamic> payload, {
-    required String? summary,
-    required String? analysis,
-  }) {
+  static String? _optionalExplanation(Map<String, dynamic> payload) {
     final value = payload['explanation'];
-    if (value != null && value is! String) {
+    if (value == null) {
+      return null;
+    }
+    if (value is! String) {
       throw const FormatException(
         'Workshop proposal field "explanation" must be text.',
       );
     }
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
 
-    final explicit = value is String ? value.trim() : '';
-    if (explicit.isNotEmpty) {
+  static String _proposalExplanation({
+    required String? explicit,
+    required String? summary,
+    required String? analysis,
+    required List<WorkspaceFileChange> changes,
+  }) {
+    if (explicit != null && explicit.isNotEmpty) {
       return explicit;
     }
-
-    // explanation is descriptive metadata, not an execution/safety gate.
-    // Small local models occasionally omit this redundant field while still
-    // returning a structurally valid, reviewable change set. Reuse existing
-    // model-authored context instead of discarding the code or spending a
-    // second inference. Reviewer, Validation and guarded apply remain intact.
     if (summary != null && summary.isNotEmpty) {
       return summary;
     }
@@ -186,9 +190,15 @@ final class WorkshopChangeProposalDecoder {
       return analysis;
     }
 
-    throw const FormatException(
-      'Workshop proposal field "explanation" is required.',
-    );
+    // explanation is human-readable metadata, never an execution/safety gate.
+    // Once the change set has passed all structural/path/content validation,
+    // derive a deterministic description from the validated changes instead
+    // of rejecting otherwise reviewable code or spending another inference.
+    final paths = changes.map((change) => change.path).toList(growable: false);
+    if (paths.length == 1) {
+      return 'Proposed file change: ${paths.single}';
+    }
+    return 'Proposed ${paths.length} file changes: ${paths.join(', ')}';
   }
 
   static String _requiredString(
