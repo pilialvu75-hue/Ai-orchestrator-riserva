@@ -1,0 +1,27 @@
+// Extra exports required when ONNX Runtime's KERNEL32 import table is
+// redirected to win7krnl.dll. Most entries are available on Windows 7 and are
+// forwarded unchanged. Three Windows 8+ APIs are implemented in win7krnl.cpp.
+
+#pragma comment(linker, "/export:GetFileAttributesA=KERNEL32.GetFileAttributesA")
+#pragma comment(linker, "/export:CreateFile2=CompatCreateFile2")
+#pragma comment(linker, "/export:DebugBreak=KERNEL32.DebugBreak")
+#pragma comment(linker, "/export:GetLogicalProcessorInformationEx=KERNEL32.GetLogicalProcessorInformationEx")
+#pragma comment(linker, "/export:GetModuleFileNameA=KERNEL32.GetModuleFileNameA")
+#pragma comment(linker, "/export:GetModuleHandleA=KERNEL32.GetModuleHandleA")
+#pragma comment(linker, "/export:SetThreadGroupAffinity=KERNEL32.SetThreadGroupAffinity")
+#pragma comment(linker, "/export:GetCurrentProcessorNumber=KERNEL32.GetCurrentProcessorNumber")
+#pragma comment(linker, "/export:ReleaseMutex=KERNEL32.ReleaseMutex")
+#pragma comment(linker, "/export:OpenSemaphoreW=KERNEL32.OpenSemaphoreW")
+#pragma comment(linker, "/export:CreateMutexExW=KERNEL32.CreateMutexExW")
+#pragma comment(linker, "/export:CreateSemaphoreExW=KERNEL32.CreateSemaphoreExW")
+#pragma comment(linker, "/export:GetProcessMitigationPolicy=CompatGetProcessMitigationPolicy")
+#pragma comment(linker, "/export:GetSystemTimePreciseAsFileTime=CompatGetSystemTimePreciseAsFileTime")
+#pragma comment(linker, "/export:RtlCaptureStackBackTrace=ntdll.RtlCaptureStackBackTrace")
+#pragma comment(linker, "/export:GetMaximumProcessorGroupCount=KERNEL32.GetMaximumProcessorGroupCount")
+#pragma comment(linker, "/export:GetMaximumProcessorCount=KERNEL32.GetMaximumProcessorCount")
+#pragma comment(linker, "/export:CreateDirectoryA=KERNEL32.CreateDirectoryA")
+#pragma comment(linker, "/export:GetEnvironmentVariableA=KERNEL32.GetEnvironmentVariableA")
+#pragma comment(linker, "/export:VerSetConditionMask=ntdll.VerSetConditionMask")
+#pragma comment(linker, "/export:HeapQueryInformation=KERNEL32.HeapQueryInformation")
+#pragma comment(linker, "/export:RtlUnwindEx=ntdll.RtlUnwindEx")
+#pragma comment(linker, "/export:RtlUnwind=ntdll.RtlUnwind")
