@@ -147,12 +147,15 @@ final class WorkshopChangeProposalDecoder {
   }) {
     if (payload.containsKey('changes')) {
       final canonical = payload['changes'];
-      if (canonical is! List || canonical.isEmpty) {
-        throw const FormatException(
-          'Workshop proposal must contain at least one file change.',
-        );
+      if (canonical is List && canonical.isNotEmpty) {
+        return canonical;
       }
-      return canonical;
+      if (canonical is Map && canonical.isNotEmpty) {
+        return <dynamic>[canonical];
+      }
+      throw const FormatException(
+        'Workshop proposal must contain at least one file change.',
+      );
     }
 
     const aliases = <String>['fileChanges', 'file_changes', 'files'];
@@ -168,13 +171,18 @@ final class WorkshopChangeProposalDecoder {
 
     final alias = present.single;
     final value = payload[alias];
-    if (value is! List || value.isEmpty) {
+    final entries = value is List
+        ? value
+        : value is Map
+            ? <dynamic>[value]
+            : const <dynamic>[];
+    if (entries.isEmpty) {
       throw const FormatException(
         'Workshop proposal must contain at least one file change.',
       );
     }
 
-    return value
+    return entries
         .map<dynamic>(
           (raw) => _normalizeAliasedChange(
             raw,
