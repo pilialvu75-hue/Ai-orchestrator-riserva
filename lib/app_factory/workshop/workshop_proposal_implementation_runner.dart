@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
@@ -110,6 +111,11 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_SCHEMA] '
+        'request=${session.context.request.id} '
+        '${WorkshopChangeProposalDecoder.diagnosticShape(result.text)}',
+      );
       if (didRetry ||
           cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
@@ -230,6 +236,11 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ENGINEER_SCHEMA] '
+        'request=${session.context.request.id} '
+        '${WorkshopChangeProposalDecoder.diagnosticShape(result.text)}',
+      );
       if (didRetry ||
           cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
