@@ -64,6 +64,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
       
       final firstTokenDecodeBaseline =
           bindings.sessionMetrics(nativeSessionId)['decode_calls'] ?? -1;
+      var effectiveFirstTokenDeadline = firstTokenDeadline;
       var activePromptExtensionLogged = false;
 
       AndroidFfiRuntimeProvider._log(
@@ -149,7 +150,8 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         // ---------------------------------------------------------------------
         final firstTokenWaitElapsed = state.lifecycleClock.elapsed;
         if (attemptState.firstTokenAt == null &&
-            firstTokenWaitElapsed.inMilliseconds > firstTokenDeadline.inMilliseconds) {
+            firstTokenWaitElapsed.inMilliseconds >
+                effectiveFirstTokenDeadline.inMilliseconds) {
           final currentDecodeCalls =
               bindings.sessionMetrics(nativeSessionId)['decode_calls'] ?? -1;
           final mayContinueForNativeProgress =
@@ -160,7 +162,10 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             verification: isForensicSelfTest,
           );
 
-          if (mayContinueForNativeProgress) {
+          if (mayContinueForNativeProgress &&
+              effectiveFirstTokenDeadline == firstTokenDeadline) {
+            effectiveFirstTokenDeadline =
+                InferenceLifecyclePolicy.androidFirstTokenActiveProgressTimeout;
             if (!activePromptExtensionLogged) {
               activePromptExtensionLogged = true;
               AndroidFfiRuntimeProvider._log(
@@ -193,7 +198,7 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
             modelId: modelId,
             nativeSessionHandle: nativeSessionId,
             startedAt: state.startedAt,
-            firstTokenDeadline: firstTokenDeadline,
+            firstTokenDeadline: effectiveFirstTokenDeadline,
             dartThreadId: dartThreadId,
             isForensicSelfTest: isForensicSelfTest,
           );
