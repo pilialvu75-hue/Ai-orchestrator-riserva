@@ -389,6 +389,15 @@ void ReportDllInventory() {
 
   do {
     if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) continue;
+
+    // dartjni.dll is an optional JVM bridge. Loading it only for inventory
+    // triggers Windows' missing-jvm.dll dialog on machines without Java even
+    // though AI Orchestrator does not need the JVM for normal startup.
+    if (::lstrcmpiW(data.cFileName, L"dartjni.dll") == 0) {
+      WriteLine(L"SKIP  dartjni.dll optional JVM bridge; not loaded by probe");
+      continue;
+    }
+
     HMODULE module = LoadLocalDll(data.cFileName, false);
     if (module != nullptr) FreeLibrary(module);
   } while (FindNextFileW(find, &data));
@@ -468,6 +477,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE,
                       _In_opt_ HINSTANCE,
                       _In_ wchar_t*,
                       _In_ int) {
+  // A diagnostic inventory must report missing optional dependencies in the
+  // text report, never through modal Windows loader dialogs.
+  ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX |
+                 SEM_NOGPFAULTERRORBOX);
+
   if (!OpenReport()) {
     MessageBoxW(nullptr,
                 L"Impossibile creare il rapporto diagnostico Windows.",
