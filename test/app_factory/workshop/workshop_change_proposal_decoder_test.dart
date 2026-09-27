@@ -381,6 +381,26 @@ void main() {
       );
     });
 
+    test('metadata fallback does not bypass path safety', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-no-metadata-unsafe',
+          responseText: r'''
+{
+  "changes": [
+    {
+      "path": "../escape.dart",
+      "type": "addition",
+      "content": "void main() {}"
+    }
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('still rejects non-text explanation metadata', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(
