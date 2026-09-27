@@ -62,10 +62,15 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
       _preFirstTokenActive = true;
       _setPhase(RuntimePhase.waitingFirstToken);
       
+      final firstTokenDecodeBaseline =
+          bindings.sessionMetrics(nativeSessionId)['decode_calls'] ?? -1;
+      var activePromptExtensionLogged = false;
+
       AndroidFfiRuntimeProvider._log(
         '[FIRST_TOKEN_POLL_LOOP_BEGIN] attemptId=${_currentFirstTokenAttemptId ?? 'unknown'}'
         ' sessionId=$sessionId nativeSessionId=$nativeSessionId phase=$_currentFfiPhase'
-        ' pre_first_token_active=true max_tokens=${startup.maxTokens}',
+        ' pre_first_token_active=true max_tokens=${startup.maxTokens}'
+        ' decode_baseline=$firstTokenDecodeBaseline',
       );
 
       while (true) {
@@ -145,6 +150,32 @@ extension AndroidFfiRuntimePollingExtension on AndroidFfiRuntimeProvider {
         final firstTokenWaitElapsed = state.lifecycleClock.elapsed;
         if (attemptState.firstTokenAt == null &&
             firstTokenWaitElapsed.inMilliseconds > firstTokenDeadline.inMilliseconds) {
+          final currentDecodeCalls =
+              bindings.sessionMetrics(nativeSessionId)['decode_calls'] ?? -1;
+          final mayContinueForNativeProgress =
+              InferenceLifecyclePolicy.mayExtendAndroidFirstTokenForNativeProgress(
+            elapsed: firstTokenWaitElapsed,
+            baselineDecodeCalls: firstTokenDecodeBaseline,
+            currentDecodeCalls: currentDecodeCalls,
+            verification: isForensicSelfTest,
+          );
+
+          if (mayContinueForNativeProgress) {
+            if (!activePromptExtensionLogged) {
+              activePromptExtensionLogged = true;
+              AndroidFfiRuntimeProvider._log(
+                '[FIRST_TOKEN_DEADLINE_EXTENDED] session=$sessionId'
+                ' elapsed_ms=${firstTokenWaitElapsed.inMilliseconds}'
+                ' soft_timeout_ms=${firstTokenDeadline.inMilliseconds}'
+                ' hard_timeout_ms=${InferenceLifecyclePolicy.androidFirstTokenActiveProgressTimeout.inMilliseconds}'
+                ' decode_baseline=$firstTokenDecodeBaseline'
+                ' decode_current=$currentDecodeCalls'
+                ' reason=native_decode_progress',
+              );
+            }
+            continue;
+          }
+
           _classifyFirstTokenTermination(
             flowState: flowState,
             attemptState: attemptState,
