@@ -46,9 +46,12 @@ class _AndroidFfiNativeSessionSubsystem {
         phi: modelId == 'phi3_5_mini' ||
             modelPath.toLowerCase().contains('phi-3.5'),
         requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+        memoryConstrained: resources.isMemoryConstrained(modelId ?? modelPath),
       );
       var existingSessionId = _owner._nativeSessionsByModel[modelPath];
-      if (existingSessionId != null && sample?.pressured == true &&
+      if (existingSessionId != null &&
+          (sample?.pressured == true ||
+              resources.isMemoryConstrained(modelId ?? modelPath)) &&
           (bindings.sessionMetrics(existingSessionId)['context']! > profile.context ||
            bindings.sessionMetrics(existingSessionId)['micro_batch']! > profile.microBatch)) {
         // This runs inside the serial inference queue, before startGeneration.
