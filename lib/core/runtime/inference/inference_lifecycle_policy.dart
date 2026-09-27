@@ -21,6 +21,15 @@ abstract final class InferenceLifecyclePolicy {
   static const Duration androidStartGenerationTimeout = Duration(seconds: 60);
   static const Duration androidFirstTokenReleaseTimeout = Duration(seconds: 45);
 
+  /// Hard ceiling used only when the native decoder proves that prompt
+  /// evaluation is still advancing before the first emitted token.
+  ///
+  /// This avoids classifying slow CPU prompt evaluation as a dead stall while
+  /// keeping genuinely idle attempts bounded by the normal 45-second release
+  /// watchdog.
+  static const Duration androidFirstTokenActiveProgressTimeout =
+      Duration(seconds: 90);
+
   /// Before this policy was centralized, debug had both a 120-second
   /// first-token watchdog and a separate 90-second generation watchdog.
   /// The effective earliest deadline was therefore 90 seconds. Preserve that
@@ -33,6 +42,19 @@ abstract final class InferenceLifecyclePolicy {
 
   static Duration outerIdleTimeoutFor({required bool cloudOnly}) =>
       cloudOnly ? outerStreamIdleTimeout : outerLocalStreamIdleTimeout;
+
+  static bool mayExtendAndroidFirstTokenForNativeProgress({
+    required Duration elapsed,
+    required int baselineDecodeCalls,
+    required int currentDecodeCalls,
+    bool verification = false,
+  }) {
+    if (verification) return false;
+    if (baselineDecodeCalls < 0 || currentDecodeCalls <= baselineDecodeCalls) {
+      return false;
+    }
+    return elapsed < androidFirstTokenActiveProgressTimeout;
+  }
 
   static Duration androidFirstTokenTimeout({
     bool verification = false,
