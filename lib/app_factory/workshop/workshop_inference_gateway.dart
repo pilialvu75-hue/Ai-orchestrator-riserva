@@ -127,6 +127,7 @@ class WorkshopInferenceGateway {
     String? executionId,
     String? attemptId,
     String? checkpointId,
+    Duration? firstTokenTimeoutOverride,
     CancellationToken? cancellationToken,
   }) {
     final normalizedPrompt = prompt.trim();
@@ -159,6 +160,7 @@ class WorkshopInferenceGateway {
       executionId: executionId,
       attemptId: attemptId,
       checkpointId: checkpointId,
+      firstTokenTimeoutOverride: firstTokenTimeoutOverride,
     );
 
     return _provider.streamInference(
@@ -204,6 +206,44 @@ class WorkshopInferenceGateway {
         repeatPenalty: repeatPenalty,
         modelId: modelId,
         modelPath: modelPath,
+        cancellationToken: cancellationToken,
+      ),
+    );
+  }
+
+  /// Completion path for a caller that needs a bounded first-token window.
+  ///
+  /// The ordinary [complete] API remains unchanged. This keeps the override
+  /// opt-in and lets the Reviewer retry extend only its second local attempt.
+  Future<WorkshopInferenceResult> completeWithFirstTokenTimeout({
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = false,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? modelId,
+    String? modelPath,
+    CancellationToken? cancellationToken,
+  }) {
+    return _collect(
+      _streamInternal(
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        modelId: modelId,
+        modelPath: modelPath,
+        firstTokenTimeoutOverride: firstTokenTimeout,
         cancellationToken: cancellationToken,
       ),
     );

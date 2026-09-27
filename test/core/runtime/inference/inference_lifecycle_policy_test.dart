@@ -25,6 +25,38 @@ void main() {
       );
     });
 
+    test('bounds explicit first-token overrides without weakening watchdogs', () {
+      expect(
+        InferenceLifecyclePolicy.androidFirstTokenTimeout(
+          debugMode: false,
+          requestedOverride: const Duration(seconds: 75),
+        ),
+        const Duration(seconds: 75),
+      );
+      expect(
+        InferenceLifecyclePolicy.androidFirstTokenTimeout(
+          debugMode: false,
+          requestedOverride: const Duration(seconds: 10),
+        ),
+        const Duration(seconds: 45),
+      );
+      expect(
+        InferenceLifecyclePolicy.androidFirstTokenTimeout(
+          debugMode: false,
+          requestedOverride: const Duration(minutes: 3),
+        ),
+        const Duration(seconds: 90),
+      );
+      expect(
+        InferenceLifecyclePolicy.androidFirstTokenTimeout(
+          verification: true,
+          debugMode: false,
+          requestedOverride: const Duration(seconds: 75),
+        ),
+        const Duration(seconds: 5),
+      );
+    });
+
     test('keeps lifecycle boundaries distinct', () {
       expect(
         InferenceLifecyclePolicy.androidStartGenerationTimeout,

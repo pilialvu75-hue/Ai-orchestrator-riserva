@@ -35,6 +35,7 @@ abstract final class InferenceLifecyclePolicy {
   /// The effective earliest deadline was therefore 90 seconds. Preserve that
   /// protection while exposing one unambiguous first-token deadline.
   static const Duration androidFirstTokenDebugTimeout = Duration(seconds: 90);
+  static const Duration androidFirstTokenOverrideMax = Duration(seconds: 90);
   static const Duration androidVerificationFirstTokenTimeout =
       Duration(seconds: 5);
   static const Duration androidNoTokenProgressTimeout = Duration(seconds: 35);
@@ -59,12 +60,22 @@ abstract final class InferenceLifecyclePolicy {
   static Duration androidFirstTokenTimeout({
     bool verification = false,
     bool? debugMode,
+    Duration? requestedOverride,
   }) {
     if (verification) return androidVerificationFirstTokenTimeout;
     final debug = debugMode ?? kDebugMode;
-    return debug
+    final baseline = debug
         ? androidFirstTokenDebugTimeout
         : androidFirstTokenReleaseTimeout;
+    if (requestedOverride == null) return baseline;
+
+    final boundedMs = requestedOverride.inMilliseconds
+        .clamp(
+          baseline.inMilliseconds,
+          androidFirstTokenOverrideMax.inMilliseconds,
+        )
+        .toInt();
+    return Duration(milliseconds: boundedMs);
   }
 }
 
