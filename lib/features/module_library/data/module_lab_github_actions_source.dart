@@ -19,12 +19,16 @@ final class ModuleLabRunStatus {
   bool get running => status != 'completed';
 }
 
+typedef ModuleLabAccessTokenProvider = Future<String> Function();
+
 final class ModuleLabGitHubActionsSource {
   ModuleLabGitHubActionsSource({
     required WorkshopLibraryGitHubCredentialStore credentialStore,
     http.Client? client,
+    ModuleLabAccessTokenProvider? accessTokenProvider,
   })  : _credentialStore = credentialStore,
-        _client = client ?? http.Client();
+        _client = client ?? http.Client(),
+        _accessTokenProvider = accessTokenProvider;
 
   static const _researcherRepository =
       'pilialvu75-hue/AI-Orchestrator-Module-Researcher';
@@ -32,8 +36,15 @@ final class ModuleLabGitHubActionsSource {
 
   final WorkshopLibraryGitHubCredentialStore _credentialStore;
   final http.Client _client;
+  final ModuleLabAccessTokenProvider? _accessTokenProvider;
 
   Future<String> _token() async {
+    final injected = _accessTokenProvider;
+    if (injected != null) {
+      final token = (await injected()).trim();
+      if (token.isEmpty) throw StateError('Autorizzazione GitHub assente.');
+      return token;
+    }
     final credential = await _credentialStore.load();
     if (credential == null || credential.isExpired) {
       throw StateError('Autorizzazione GitHub assente o scaduta.');
