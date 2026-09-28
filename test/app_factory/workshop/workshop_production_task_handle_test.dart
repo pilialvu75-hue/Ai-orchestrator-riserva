@@ -301,9 +301,19 @@ void main() {
       state: _certifiedLibraryState(),
       package: _certifiedStoragePackage(),
     );
+    final certifiedReuseGateways = _gateways(calls);
+    certifiedReuseGateways[AppAiRole.reviewer] = _QueueGateway(
+      role: AppAiRole.reviewer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_approvedReviewJson),
+        _success(_approvedReviewJson),
+        _success(_validValidationJson),
+      ],
+    );
     final bundle = WorkshopProductionLifecycleBundleFactory.create(
       projectExecutor: executor,
-      roleGateways: _gateways(calls),
+      roleGateways: certifiedReuseGateways,
       libraryReuseService: WorkshopLibraryReuseService(
         client: libraryClient,
       ),
@@ -339,6 +349,7 @@ void main() {
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
+        AppAiRole.reviewer,
         AppAiRole.reviewer,
         AppAiRole.reviewer,
       ],
