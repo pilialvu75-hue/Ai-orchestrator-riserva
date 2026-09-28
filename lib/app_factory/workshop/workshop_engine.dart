@@ -116,6 +116,10 @@ final class WorkshopEngine {
   bool get hasProjectExecutor =>
       _projectExecutor != null;
 
+  /// Read-only access for recovery/build boundaries that must resolve the
+  /// authoritative physical workspace owned by this engine.
+  WorkshopProjectExecutor? get projectExecutor => _projectExecutor;
+
   // ---------------------------------------------------------------------------
   // Main pipeline
   // ---------------------------------------------------------------------------
