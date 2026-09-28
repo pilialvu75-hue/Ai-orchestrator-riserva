@@ -47,6 +47,7 @@ final class WorkshopProductionTaskCoordinator {
     List<String> technologies = const <String>[],
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
+    String? workspaceProjectId,
   }) async {
     final plan = _bundle.dashboardController.startProduction(
       title: title,
@@ -56,6 +57,7 @@ final class WorkshopProductionTaskCoordinator {
       technologies: technologies,
       deliverables: deliverables,
       validationCriteria: validationCriteria,
+      workspaceProjectId: workspaceProjectId,
     );
 
     final session = await _bundle.dashboardController.prepareNextTask();
@@ -302,14 +304,6 @@ final class WorkshopProductionTaskCoordinator {
     bool cleanBuild = false,
     List<String> arguments = const <String>[],
   }) async {
-    final workspaceRootPath = _bundle.workspaceRootPath?.trim();
-
-    if (workspaceRootPath == null || workspaceRootPath.isEmpty) {
-      throw StateError(
-        'Workshop production bundle has no authoritative workspace path.',
-      );
-    }
-
     final dashboardState = _bundle.dashboardController.state;
     final requestId = dashboardState.requestId?.trim();
 
@@ -324,6 +318,21 @@ final class WorkshopProductionTaskCoordinator {
     if (plan == null) {
       throw StateError(
         'Workshop has no authoritative project plan for "$requestId".',
+      );
+    }
+
+    final isolatedWorkspacePath =
+        _bundle.projectExecutor
+            .workspacePathForProject(plan.effectiveWorkspaceProjectId)
+            ?.trim();
+    final workspaceRootPath =
+        isolatedWorkspacePath != null && isolatedWorkspacePath.isNotEmpty
+            ? isolatedWorkspacePath
+            : _bundle.workspaceRootPath?.trim();
+
+    if (workspaceRootPath == null || workspaceRootPath.isEmpty) {
+      throw StateError(
+        'Workshop production bundle has no authoritative workspace path.',
       );
     }
 
