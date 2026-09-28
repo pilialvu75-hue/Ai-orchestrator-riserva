@@ -617,6 +617,7 @@ final class _WorkshopProductionSnapshot {
         'id': plan.id,
         'title': plan.title,
         'goal': plan.goal,
+        'workspaceProjectId': plan.workspaceProjectId,
         'domain': plan.domain.name,
         'status': plan.status.name,
         'createdAt': plan.createdAt.toUtc().toIso8601String(),
@@ -640,6 +641,7 @@ final class _WorkshopProductionSnapshot {
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
       goal: _requiredString(json, 'goal'),
+      workspaceProjectId: _nullableString(json['workspaceProjectId']),
       domain: _enumByName(
         WorkshopProjectDomain.values,
         json['domain'],
