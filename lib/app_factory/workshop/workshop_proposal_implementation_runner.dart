@@ -361,6 +361,7 @@ final class WorkshopProposalImplementationRunner {
             'request': <String, Object?>{
               'title': _boundedText(request.title, 120),
               'instruction': _boundedText(request.instruction, 320),
+              'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               if (constraints.isNotEmpty) 'constraints': constraints,
             },
