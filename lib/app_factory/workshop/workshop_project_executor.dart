@@ -79,7 +79,10 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       projectPath: null,
       targetFiles: task.affectedPaths,
       constraints: <String>[
@@ -165,7 +168,10 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       targetFiles: task.affectedPaths,
       constraints: <String>[
         if (task.validationCriteria.isNotEmpty)
@@ -355,12 +361,28 @@ final class WorkshopProjectExecutor {
 
   /// Determina l'operazione Workshop più appropriata per un task.
   WorkshopOperation _operationForTask(
-    WorkshopProjectTask task,
-  ) {
-    // Classify from task-owned semantics only. Planner descriptions may append
-    // "Project goal: <user text>"; user titles/goals must never change the
-    // execution contract merely because they contain words such as "Test",
-    // "Build" or "Fix".
+    WorkshopProjectTask task, {
+    WorkshopRequest? projectRequest,
+  }) {
+    // Standard production tasks have explicit lifecycle semantics. Never infer
+    // them from user-controlled project names/goals (for example "Contatore
+    // Test"), because words such as Test/Build/Fix are valid product names.
+    if (task.id == 'task:acceptance-verification') {
+      return WorkshopOperation.validate;
+    }
+
+    if (task.title == 'Correzione build mirata' ||
+        task.description.toUpperCase().startsWith('BUILD REPAIR ATTEMPT:')) {
+      return WorkshopOperation.fix;
+    }
+
+    if (task.id == 'task:initial-implementation' &&
+        projectRequest != null) {
+      return projectRequest.operation;
+    }
+
+    // Legacy/generic tasks still need a deterministic fallback. Classify only
+    // task-owned text and exclude the appended user project goal.
     final description = task.description;
     const projectGoalMarker = 'Project goal:';
     final markerIndex = description.indexOf(projectGoalMarker);
@@ -381,8 +403,7 @@ final class WorkshopProjectExecutor {
       return WorkshopOperation.fix;
     }
 
-    if (hasWord('refactor') ||
-        hasWord('refactoring')) {
+    if (hasWord('refactor') || hasWord('refactoring')) {
       return WorkshopOperation.refactor;
     }
 
