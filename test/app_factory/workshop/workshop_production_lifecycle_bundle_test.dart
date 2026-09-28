@@ -70,7 +70,7 @@ void main() {
       expect(identical(executor.sessionForTask(taskId), session), isTrue);
       expect(
         session.context.request.targetFiles,
-        <String>['lib/main.dart'],
+        <String>['lib/main.dart', 'lib/app.dart'],
       );
       expect(
         session.context.request.constraints.first,
@@ -125,8 +125,8 @@ void main() {
         WorkshopProjectStatus.inProgress,
       );
       expect(plan.completedTasks, 1);
-      expect(plan.totalTasks, 3);
-      expect(plan.nextAvailableTask?.id, 'task:core-behavior');
+      expect(plan.totalTasks, 2);
+      expect(plan.nextAvailableTask?.id, 'task:acceptance-verification');
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);
