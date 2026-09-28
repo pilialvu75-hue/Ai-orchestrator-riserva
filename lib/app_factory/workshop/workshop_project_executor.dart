@@ -78,6 +78,72 @@ final class WorkshopProjectExecutor {
     return _projectWorkspacePathResolver?.call(normalized);
   }
 
+  GitWorkspaceGateway _storageGatewayForProject(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(
+        projectId,
+        'projectId',
+        'Workshop project id cannot be empty.',
+      );
+    }
+    final factory = _projectGatewayFactory;
+    if (factory == null) {
+      return _gateway!;
+    }
+    return _projectGateways.putIfAbsent(
+      normalized,
+      () => factory(normalized),
+    );
+  }
+
+  /// Seeds a fresh project workspace from another project using only text files
+  /// visible through the existing workspace boundary.
+  ///
+  /// The target must be empty. This is used by bounded build-repair projects:
+  /// they get an isolated persistent workspace while preserving the exact
+  /// project source that failed the build.
+  Future<void> seedProjectWorkspace({
+    required String sourceProjectId,
+    required String targetProjectId,
+  }) async {
+    final sourceId = sourceProjectId.trim();
+    final targetId = targetProjectId.trim();
+    if (sourceId.isEmpty || targetId.isEmpty || sourceId == targetId) {
+      throw ArgumentError(
+        'Source and target Workshop project ids must be distinct and non-empty.',
+      );
+    }
+    if (_projectGatewayFactory == null) {
+      throw StateError(
+        'Project workspace seeding requires project-scoped workspaces.',
+      );
+    }
+
+    final source = _storageGatewayForProject(sourceId);
+    final target = _storageGatewayForProject(targetId);
+    await source.openWorkspace();
+    await target.openWorkspace();
+
+    final existingTargetFiles = await target.listFiles();
+    if (existingTargetFiles.isNotEmpty) {
+      throw StateError(
+        'Target Workshop project workspace must be empty before seeding.',
+      );
+    }
+
+    final sourceFiles = await source.listFiles();
+    for (final path in sourceFiles) {
+      final content = await source.readFile(path);
+      if (content == null) {
+        // Binary/unreadable assets are intentionally not copied by the
+        // text-only Cantiere workspace boundary.
+        continue;
+      }
+      await target.writeFile(path: path, content: content);
+    }
+  }
+
   GitWorkspaceGateway _gatewayForProject(String projectId) {
     final normalized = projectId.trim();
     if (normalized.isEmpty) {
@@ -95,15 +161,7 @@ final class WorkshopProjectExecutor {
       _activeProjectId = normalized;
     }
 
-    final factory = _projectGatewayFactory;
-    if (factory == null) {
-      return _gateway!;
-    }
-
-    return _projectGateways.putIfAbsent(
-      normalized,
-      () => factory(normalized),
-    );
+    return _storageGatewayForProject(normalized);
   }
 
   /// Prepara il prossimo task eseguibile del progetto.
