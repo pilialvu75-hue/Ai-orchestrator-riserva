@@ -30,6 +30,11 @@ final class WorkshopProposalWorkspaceStager {
       existingPaths: session.workspace.paths.toSet(),
     );
 
+    _requireCreateEntrypointChange(
+      session: session,
+      proposal: proposal,
+    );
+
     _applier.applyProposal(
       session: session,
       proposal: proposal,
@@ -37,7 +42,28 @@ final class WorkshopProposalWorkspaceStager {
 
     if (proposal.isNotEmpty) {
       session.beginReview();
+      void _requireCreateEntrypointChange({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+  }) {
+    final request = session.context.request;
+    if (request.operation != WorkshopOperation.create ||
+        !request.targetFiles.contains('lib/main.dart')) {
+      return;
     }
+
+    final mainChanges = proposal.changesForPath('lib/main.dart');
+    final writesEntrypoint =
+        mainChanges.any((change) => !change.isDeletion);
+    if (!writesEntrypoint) {
+      throw const FormatException(
+        'Workshop create proposal must write "lib/main.dart" so a new project '
+        'cannot inherit an entrypoint from a previous workspace.',
+      );
+    }
+  }
+
+}
 
     return proposal;
   }
