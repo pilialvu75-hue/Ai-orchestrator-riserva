@@ -55,6 +55,48 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+    test(
+        'create task cannot inherit lib/main.dart from a previous project',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{
+          'lib/main.dart': 'old walking app',
+        },
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'request-create-entrypoint',
+          title: 'Contatore Test',
+          instruction: 'Crea una semplice app contatore.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart', 'lib/app.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+
+      expect(
+        () => const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: '''
+{"explanation":"Create counter","changes":[{"path":"lib/app.dart","type":"addition","content":"class CounterApp {}"}]}
+''',
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('must write "lib/main.dart"'),
+          ),
+        ),
+      );
+
+      expect(session.status, WorkspaceSessionStatus.ready);
+      expect(session.hasChanges, isFalse);
+      expect(session.workspace.read('lib/main.dart'), 'old walking app');
+      expect(gateway.writeCalls, 0);
+    });
+
     test('does not enter review or materialize malformed output', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/existing.dart': 'old'},
