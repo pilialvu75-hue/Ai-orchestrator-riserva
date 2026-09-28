@@ -36,6 +36,7 @@ final class LocalGitWorkspaceGateway implements GitWorkspaceGateway {
     required String rootPath,
     this.includeHiddenFiles = false,
     this.maxFileSizeBytes = 10 * 1024 * 1024,
+    this.createRootIfMissing = false,
   }) : _rootDirectory = Directory(rootPath);
 
   final Directory _rootDirectory;
@@ -51,6 +52,12 @@ final class LocalGitWorkspaceGateway implements GitWorkspaceGateway {
   /// Evita che un singolo file binario o generato accidentalmente
   /// saturi la memoria dell'app.
   final int maxFileSizeBytes;
+
+  /// Allows project-scoped Cantiere workspaces to be created lazily.
+  ///
+  /// The default stays fail-closed for callers that expect an existing
+  /// repository root.
+  final bool createRootIfMissing;
 
   Directory get rootDirectory => _rootDirectory;
 
@@ -245,9 +252,12 @@ final class LocalGitWorkspaceGateway implements GitWorkspaceGateway {
     final exists = await _rootDirectory.exists();
 
     if (!exists) {
-      throw StateError(
-        'Workspace directory does not exist: ${_rootDirectory.path}',
-      );
+      if (!createRootIfMissing) {
+        throw StateError(
+          'Workspace directory does not exist: ${_rootDirectory.path}',
+        );
+      }
+      await _rootDirectory.create(recursive: true);
     }
 
     final stat = await _rootDirectory.stat();
