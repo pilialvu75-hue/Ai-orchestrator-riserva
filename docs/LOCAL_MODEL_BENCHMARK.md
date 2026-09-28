@@ -21,10 +21,11 @@ Each request uses:
 - top-p: 0.9;
 - repeat penalty: 1.1.
 
-The report records first-content latency, total latency, generated tokens,
-post-first-content decode throughput, observed GPU layers, batch/micro-batch,
-memory pressure, and whether each case started cold/warm and ended with the
-native session kept/released.
+The report records first-content latency, **native prompt prefill time**,
+total latency, generated tokens, post-first-content decode throughput, requested
+and observed GPU layers, batch/micro-batch, memory pressure, a battery-temperature
+thermal proxy, and whether each case started cold/warm and ended with the native
+session kept/released.
 
 ## Quality rubric
 
@@ -42,12 +43,37 @@ shown only in the local Debug Lab result dialog. RuntimeEventLog emits case IDs,
 scores and technical timings, but not generated response text or user
 conversation content.
 
+## Vulkan GPU-layer matrix
+
+Debug Lab exposes a separate **Vulkan 0 / 10 / full** matrix. It runs the same
+small diagnostic subset for both local models with requested GPU-layer values:
+
+- `0`: CPU baseline;
+- `10`: partial Vulkan offload;
+- `50`: full-offload request for the currently tested Phi/Nemotron models.
+
+The value `50` is deliberately used instead of pretending that a request of
+`99` proves something extra on these two models. Diagnostics already observed
+about 33 offloaded layers for Phi and 43 for Nemotron, so a request of 50 covers
+their full layer count. A future model with more than 50 offloadable layers must
+be benchmarked separately; this matrix does **not** establish that 50 and 99 are
+generally equivalent.
+
+Changing the matrix value releases resident native sessions before the next
+configuration is created. The production default remains unchanged after the
+matrix, including on errors.
+
 ## Physical-device interpretation
 
-The first model in a run may have a thermal/order advantage. If the two models
-finish close, repeat the benchmark with the opposite model order before drawing
-a performance conclusion. A run that reaches critical memory is invalid and
+The first model/configuration in a run may have a thermal/order advantage.
+Compare the full matrix from one uninterrupted run and repeat in reverse order
+when differences are close. A run that reaches critical memory is invalid and
 must stop.
+
+`prefill_ms` is measured inside the native llama.cpp bridge around the prompt
+decode loop. The thermal value is Android's battery temperature from
+`ACTION_BATTERY_CHANGED`; it is a stable, permission-free **device thermal
+proxy**, not a CPU/GPU die-temperature measurement.
 
 When post-generation RAM remains under pressure, the Android runtime is allowed
 to release the resident native model session. This makes the benchmark reflect
