@@ -59,6 +59,7 @@ void main() {
         instruction: 'Create the requested application safely.',
         requirements: const <String>['Keep the existing workspace intact.'],
         technologies: const <String>['Flutter'],
+        workspaceProjectId: 'project:physical-source',
         context: <String>[
           WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
             approvedProposal,
@@ -140,6 +141,14 @@ void main() {
         const <String>['Keep the existing workspace intact.'],
       );
       expect(restoredPlan.technologies, const <String>['Flutter']);
+      expect(
+        restoredPlan.workspaceProjectId,
+        'project:physical-source',
+      );
+      expect(
+        restoredPlan.effectiveWorkspaceProjectId,
+        'project:physical-source',
+      );
 
       // Recovery deliberately creates a fresh guarded WorkspaceSession. No
       // staged diff or task-level apply approval is fabricated after process

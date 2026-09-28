@@ -151,6 +151,95 @@ void main() {
     });
   });
 
+  group('WorkshopProjectExecutor project isolation', () {
+    test('same task id never reuses a session from another project', () async {
+      final alphaGateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'alpha'},
+      );
+      final betaGateway = _RecordingGateway(
+        files: <String, String>{'lib/app.dart': 'beta'},
+      );
+      final fallback = _RecordingGateway(files: <String, String>{});
+
+      final executor = WorkshopProjectExecutor(
+        gateway: fallback,
+        projectGatewayFactory: (projectId) {
+          if (projectId == 'project:alpha') return alphaGateway;
+          if (projectId == 'project:beta') return betaGateway;
+          throw StateError('Unexpected project: $projectId');
+        },
+        projectWorkspacePathResolver: (projectId) => '/workspaces/$projectId',
+      );
+
+      final alpha = _planForProject('project:alpha');
+      final beta = _planForProject('project:beta');
+
+      final alphaSession = await executor.prepareNextTask(alpha);
+      expect(alphaSession, isNotNull);
+      expect(alphaSession!.workspace.read('lib/app.dart'), 'alpha');
+
+      final betaSession = await executor.prepareNextTask(beta);
+      expect(betaSession, isNotNull);
+      expect(betaSession!.workspace.read('lib/app.dart'), 'beta');
+      expect(identical(alphaSession, betaSession), isFalse);
+      expect(identical(executor.sessionForTask('task:shared'), betaSession), isTrue);
+      expect(
+        executor.workspacePathForProject('project:beta'),
+        '/workspaces/project:beta',
+      );
+    });
+    test('repair plan can inherit the failed project workspace', () async {
+      final sourceGateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'failed source'},
+      );
+      final fallback = _RecordingGateway(files: <String, String>{});
+
+      final executor = WorkshopProjectExecutor(
+        gateway: fallback,
+        projectGatewayFactory: (projectId) {
+          if (projectId == 'project:source') return sourceGateway;
+          throw StateError('Unexpected workspace identity: $projectId');
+        },
+        projectWorkspacePathResolver: (projectId) => '/workspaces/$projectId',
+      );
+
+      final repairPlan = WorkshopProjectPlan(
+        id: 'project:repair-cycle',
+        title: 'Repair',
+        goal: 'Fix the failed build',
+        workspaceProjectId: 'project:source',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Repair',
+            description: 'Repair one build failure',
+            taskIds: const <String>['task:initial-implementation'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:initial-implementation',
+            title: 'Correzione build mirata',
+            description: 'BUILD REPAIR ATTEMPT: 1 Fix syntax.',
+            phaseId: 'phase:implementation',
+          ),
+        ],
+      );
+
+      final session = await executor.prepareNextTask(repairPlan);
+
+      expect(session, isNotNull);
+      expect(session!.workspace.read('lib/main.dart'), 'failed source');
+      expect(
+        executor.workspacePathForProject(
+          repairPlan.effectiveWorkspaceProjectId,
+        ),
+        '/workspaces/project:source',
+      );
+    });
+  });
+
   group('WorkshopProjectExecutor.applyApprovedTask', () {
     test('applies only an approved task and completes its workspace session',
         () async {
@@ -213,6 +302,32 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
   });
+}
+
+WorkshopProjectPlan _planForProject(String projectId) {
+  return WorkshopProjectPlan(
+    id: projectId,
+    title: projectId,
+    goal: 'Keep project workspace isolated',
+    status: WorkshopProjectStatus.planned,
+    phases: <WorkshopProjectPhase>[
+      WorkshopProjectPhase(
+        id: 'phase:implementation',
+        title: 'Implementation',
+        description: 'One isolated task',
+        taskIds: const <String>['task:shared'],
+      ),
+    ],
+    tasks: <WorkshopProjectTask>[
+      WorkshopProjectTask(
+        id: 'task:shared',
+        title: 'Modify project app',
+        description: 'Modify only this project',
+        phaseId: 'phase:implementation',
+        affectedPaths: const <String>['lib/app.dart'],
+      ),
+    ],
+  );
 }
 
 WorkshopProjectPlan _plan() {
