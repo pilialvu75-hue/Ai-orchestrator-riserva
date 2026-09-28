@@ -63,6 +63,7 @@ class MainActivity : FlutterActivity() {
         resourceTelemetry = ResourceTelemetry(applicationContext, flutterEngine)
         ProcessExitDiagnostics.register(this, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
+        ScreenVisionBridge.register(this, flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
