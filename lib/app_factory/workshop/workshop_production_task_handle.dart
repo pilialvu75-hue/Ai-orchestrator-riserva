@@ -47,6 +47,7 @@ final class WorkshopProductionTaskCoordinator {
     List<String> technologies = const <String>[],
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
+    String? seedWorkspaceFromProjectId,
   }) async {
     final plan = _bundle.dashboardController.startProduction(
       title: title,
@@ -57,6 +58,14 @@ final class WorkshopProductionTaskCoordinator {
       deliverables: deliverables,
       validationCriteria: validationCriteria,
     );
+
+    final seedProjectId = seedWorkspaceFromProjectId?.trim();
+    if (seedProjectId != null && seedProjectId.isNotEmpty) {
+      await _bundle.projectExecutor.seedProjectWorkspace(
+        sourceProjectId: seedProjectId,
+        targetProjectId: plan.id,
+      );
+    }
 
     final session = await _bundle.dashboardController.prepareNextTask();
     final taskId = _bundle.dashboardController.state.activeTaskId?.trim();
