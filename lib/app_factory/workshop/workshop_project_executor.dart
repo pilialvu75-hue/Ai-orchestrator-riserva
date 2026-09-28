@@ -392,9 +392,11 @@ final class WorkshopProjectExecutor {
     final text =
         '${task.title} $taskOwnedDescription'.toLowerCase();
 
-    bool hasWord(String word) => RegExp(
-          '(^|[^a-z0-9_])${RegExp.escape(word)}([^a-z0-9_]|\\$)',
-        ).hasMatch(text);
+    final words = RegExp(r'[a-z0-9_]+')
+        .allMatches(text)
+        .map((match) => match.group(0)!)
+        .toSet();
+    bool hasWord(String word) => words.contains(word);
 
     if (hasWord('fix') ||
         hasWord('bug') ||
