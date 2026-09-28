@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_workspace_scope.dart';
 
@@ -31,7 +32,7 @@ void main() {
         projectId: r'project:../../walking/app',
       );
 
-      final suffix = path.split('/').last;
+      final suffix = p.basename(path);
       expect(suffix, startsWith('project-'));
       expect(suffix, isNot(contains('..')));
       expect(suffix, isNot(contains(':')));
