@@ -201,7 +201,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     final gpuBackendName = bindings.gpuBackendName();
     final gpuBackendReason = bindings.gpuBackendReason();
     AndroidFfiRuntimeProvider._log(
-      '[GPU_BEGIN] session=$sessionId requested_layers=${LlamaNativeDefaults.nGpuLayers} modelId=$modelId',
+      '[GPU_BEGIN] session=$sessionId requested_layers=${requestedGpuLayers} modelId=$modelId',
     );
     AndroidFfiRuntimeProvider._log(
       '[GPU_DEVICE_FOUND] backend=$gpuBackendName',
@@ -210,7 +210,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       '[GPU_BACKEND] type=$gpuBackendName $gpuBackendReason',
     );
     AndroidFfiRuntimeProvider._log(
-      '[GPU_SELECTED] backend=$gpuBackendName requested_layers=${LlamaNativeDefaults.nGpuLayers}',
+      '[GPU_SELECTED] backend=$gpuBackendName requested_layers=${requestedGpuLayers}',
     );
     AndroidFfiRuntimeProvider._log(
       '[GPU_MEMORY] backend=$gpuBackendName model_path=$resolvedModelPath',
@@ -226,7 +226,7 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     _updateRuntimeStatus( LocalRuntimeStatus.loading, message: 'Loading model: $modelId', resetProgress: true, );
     await Future<void>.delayed(Duration.zero);
     AndroidFfiRuntimeProvider._logAi('creating native session...');
-    AndroidFfiRuntimeProvider._log('[NATIVE_MODEL_LOAD_BEGIN] path=$resolvedModelPath modelId=$modelId' ' n_ctx=${LlamaNativeDefaults.nCtx} n_threads=${LlamaNativeDefaults.nThreads}' ' gpu_layers=${LlamaNativeDefaults.nGpuLayers}');
+    AndroidFfiRuntimeProvider._log('[NATIVE_MODEL_LOAD_BEGIN] path=$resolvedModelPath modelId=$modelId' ' n_ctx=${LlamaNativeDefaults.nCtx} n_threads=${LlamaNativeDefaults.nThreads}' ' gpu_layers=${requestedGpuLayers}');
     int nativeSessionId;
     try {
       _setPhase(RuntimePhase.tokenizing);
