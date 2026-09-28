@@ -728,6 +728,7 @@ class _WorkshopDashboardPageState
             _WorkshopProposalActions(
               busy:
                   _chatController.isBusy ||
+                      widget.productionBusy ||
                       dashboardState?.isBusy ==
                           true,
               onConfirm:
@@ -741,7 +742,9 @@ class _WorkshopDashboardPageState
             focusNode:
                 _messageFocusNode,
             busy:
-                _chatController.isBusy,
+                _chatController.isBusy ||
+                    widget.productionBusy ||
+                    dashboardState?.isBusy == true,
             onSend:
                 _sendMessage,
           ),
