@@ -396,6 +396,73 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test(
+        'create task retries when first proposal omits the new entrypoint',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Add counter body","changes":[{"path":"lib/app.dart","type":"addition","content":"class CounterApp {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Replace stale entrypoint","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {\\n  print(\\\"counter\\\");\\n}"},{"path":"lib/app.dart","type":"addition","content":"class CounterApp {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/main.dart': 'old walking app',
+        },
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'create-entrypoint-retry',
+          title: 'Contatore Test',
+          instruction: 'Crea una semplice app contatore.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart', 'lib/app.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+      final preflight = WorkshopPreflightInferenceResult(
+        analysis: const WorkshopInferenceResult(
+          text: 'analysis',
+          terminalState: InferenceTerminalState.success,
+        ),
+        architecture: const WorkshopInferenceResult(
+          text: 'Create a bounded counter app.',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        preflight: preflight,
+      );
+
+      expect(engineer.calls, 2);
+      expect(proposal.affectedPaths, contains('lib/main.dart'));
+      expect(
+        session.workspace.read('lib/main.dart'),
+        'void main() {\n  print("counter");\n}',
+      );
+      expect(engineer.prompts[1], contains('"operation":"create"'));
+      expect(
+        engineer.sessionIds.last,
+        'workshop:implementation:create-entrypoint-retry:retry-malformed-1',
+      );
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('recovers omitted explanation from summary without retry', () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
