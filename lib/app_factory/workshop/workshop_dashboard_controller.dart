@@ -441,6 +441,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
     List<String> context = const <String>[],
+    String? workspaceProjectId,
   }) {
     _ensureNotDisposed();
 
@@ -506,6 +507,12 @@ final class WorkshopDashboardController extends ChangeNotifier {
         'WorkshopEngine created no project plan for '
         'request "$requestId".',
       );
+    }
+
+    final normalizedWorkspaceProjectId = workspaceProjectId?.trim();
+    if (normalizedWorkspaceProjectId != null &&
+        normalizedWorkspaceProjectId.isNotEmpty) {
+      plan.workspaceProjectId = normalizedWorkspaceProjectId;
     }
 
     _updateState(
