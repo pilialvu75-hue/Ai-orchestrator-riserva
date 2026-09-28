@@ -1,0 +1,48 @@
+name: Web Cantiere Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  web-cantiere:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze Web entrypoint
+        run: |
+          flutter analyze --no-fatal-warnings --no-fatal-infos \
+            lib/web_main.dart \
+            lib/app_factory/workshop/web/workshop_web_shell.dart \
+            test/app_factory/workshop/web/workshop_web_shell_test.dart
+
+      - name: Run Web shell tests
+        run: flutter test test/app_factory/workshop/web/workshop_web_shell_test.dart
+
+      - name: Build ordinary Cantiere Web application
+        run: flutter build web --release --target lib/web_main.dart
+
+      - name: Assert no PWA manifest was introduced in W1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f web/manifest.json
+          test -s build/web/index.html
+          test -s build/web/main.dart.js
