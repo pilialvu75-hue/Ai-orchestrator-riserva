@@ -106,6 +106,54 @@ void main() {
       );
     });
 
+    test('same task id is never reused across different projects', () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'starter'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+
+      WorkshopProjectPlan plan(String id, String title) => WorkshopProjectPlan(
+            id: id,
+            title: title,
+            goal: 'Create $title',
+            status: WorkshopProjectStatus.planned,
+            phases: <WorkshopProjectPhase>[
+              WorkshopProjectPhase(
+                id: 'phase:implementation',
+                title: 'Implementation',
+                description: 'Implement',
+                taskIds: const <String>['task:initial-implementation'],
+              ),
+            ],
+            tasks: <WorkshopProjectTask>[
+              WorkshopProjectTask(
+                id: 'task:initial-implementation',
+                title: 'Funzionalità principale',
+                description: 'Implement $title.',
+                phaseId: 'phase:implementation',
+                affectedPaths: const <String>['lib/main.dart'],
+              ),
+            ],
+          );
+
+      final first = await executor.prepareNextTask(plan('project:a', 'Walking App'));
+      final second =
+          await executor.prepareNextTask(plan('project:b', 'Contatore Test'));
+
+      expect(first, isNotNull);
+      expect(second, isNotNull);
+      expect(identical(first, second), isFalse);
+      expect(
+        first!.context.request.id,
+        'workshop-task:project:a:task:initial-implementation',
+      );
+      expect(
+        second!.context.request.id,
+        'workshop-task:project:b:task:initial-implementation',
+      );
+      expect(executor.sessionForTask('task:initial-implementation'), same(second));
+    });
+
     test('build repair task routes to fix instead of inherited create', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/main.dart': 'old'},
