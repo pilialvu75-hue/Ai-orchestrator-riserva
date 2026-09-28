@@ -158,12 +158,14 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     String? reuseSnapshotsRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool projectScopedWorkspaces = false,
   }) {
     final normalizedWorkspaceRootPath = workspaceRootPath.trim();
     final executor = WorkshopFactory.createProjectExecutor(
       workspaceRootPath: normalizedWorkspaceRootPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      projectScopedWorkspaces: projectScopedWorkspaces,
     );
     // Production Cantiere always has a real local/offline candidate. It is
     // fail-closed and becomes selectable only when its authoritative toolchain
@@ -250,6 +252,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      projectScopedWorkspaces: true,
     );
   }
 
