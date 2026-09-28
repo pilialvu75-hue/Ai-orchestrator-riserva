@@ -6,9 +6,11 @@ import 'package:ai_orchestrator/features/module_library/data/module_curator_gith
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_curator_advice.dart';
 import 'package:ai_orchestrator/features/module_library/presentation/module_curator_advice_dialog.dart';
+import 'package:ai_orchestrator/features/module_library/presentation/module_lab_page.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -470,6 +472,22 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       appBar: AppBar(
         title: const Text('Moduli'),
         actions: [
+          if (_connected && !_externalRepository)
+            IconButton(
+              tooltip: 'Lab moduli',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ModuleLabPage(
+                      source: ModuleLabGitHubActionsSource(
+                        credentialStore: _credentialStore,
+                      ),
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.science_outlined),
+            ),
           if (_connected)
             IconButton(
               tooltip: 'Salute moduli — AI Curator',
