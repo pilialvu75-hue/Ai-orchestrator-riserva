@@ -64,6 +64,7 @@ class LocalModelBenchmarkCaseResult {
     required this.maxScore,
     required this.forbiddenHits,
     required this.firstContentMs,
+    required this.prefillMs,
     required this.totalMs,
     required this.reportedTokens,
     required this.observedGpuLayers,
@@ -73,6 +74,8 @@ class LocalModelBenchmarkCaseResult {
     required this.endPressure,
     required this.startAvailableBytes,
     required this.endAvailableBytes,
+    required this.startBatteryTemperatureMilliC,
+    required this.endBatteryTemperatureMilliC,
     required this.sessionStart,
     required this.sessionEnd,
   });
@@ -83,6 +86,7 @@ class LocalModelBenchmarkCaseResult {
   final int maxScore;
   final int forbiddenHits;
   final int firstContentMs;
+  final int prefillMs;
   final int totalMs;
   final int reportedTokens;
   final int observedGpuLayers;
@@ -92,6 +96,8 @@ class LocalModelBenchmarkCaseResult {
   final String endPressure;
   final int? startAvailableBytes;
   final int? endAvailableBytes;
+  final int? startBatteryTemperatureMilliC;
+  final int? endBatteryTemperatureMilliC;
   final String sessionStart;
   final String sessionEnd;
 
@@ -106,11 +112,13 @@ class LocalModelBenchmarkModelResult {
   const LocalModelBenchmarkModelResult({
     required this.modelId,
     required this.displayName,
+    required this.requestedGpuLayers,
     required this.cases,
   });
 
   final String modelId;
   final String displayName;
+  final int requestedGpuLayers;
   final List<LocalModelBenchmarkCaseResult> cases;
 
   int get score => cases.fold<int>(0, (sum, item) => sum + item.score);
@@ -126,6 +134,28 @@ class LocalModelBenchmarkModelResult {
   double get averageTotalMs => cases.isEmpty
       ? 0
       : cases.fold<int>(0, (sum, item) => sum + item.totalMs) / cases.length;
+
+  double get averagePrefillMs {
+    final valid = cases
+        .map((item) => item.prefillMs)
+        .where((value) => value >= 0)
+        .toList(growable: false);
+    if (valid.isEmpty) return -1;
+    return valid.reduce((a, b) => a + b) / valid.length;
+  }
+
+  double? get averageBatteryTemperatureDeltaC {
+    final deltas = <double>[];
+    for (final item in cases) {
+      final start = item.startBatteryTemperatureMilliC;
+      final end = item.endBatteryTemperatureMilliC;
+      if (start != null && end != null) {
+        deltas.add((end - start) / 1000);
+      }
+    }
+    if (deltas.isEmpty) return null;
+    return deltas.reduce((a, b) => a + b) / deltas.length;
+  }
 
   double get averageDecodeTokensPerSecond {
     final valid = cases
@@ -168,19 +198,28 @@ class LocalModelBenchmarkReport {
     final buffer = StringBuffer()
       ..writeln('LOCAL MODEL BENCHMARK')
       ..writeln('created_at=${createdAt.toIso8601String()}')
-      ..writeln('order=${models.map((item) => item.modelId).join(' -> ')}')
+      ..writeln(
+        'order=${models.map((item) => '${item.modelId}@gpu${item.requestedGpuLayers}').join(' -> ')}',
+      )
       ..writeln();
 
     for (final model in models) {
       buffer
-        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          '${model.displayName} [${model.modelId}] gpu_request=${model.requestedGpuLayers}',
+        )
         ..writeln('quality=${model.score}/${model.maxScore}')
         ..writeln(
           'avg_first_content_ms=${model.averageFirstContentMs.toStringAsFixed(0)}',
         )
+        ..writeln('avg_prefill_ms=${model.averagePrefillMs.toStringAsFixed(0)}')
         ..writeln('avg_total_ms=${model.averageTotalMs.toStringAsFixed(0)}')
         ..writeln(
           'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln(
+          'avg_battery_temp_delta_c='
+          '${model.averageBatteryTemperatureDeltaC?.toStringAsFixed(2) ?? 'n/a'}',
         )
         ..writeln(
           'sdd_repeat_consistent=${model.repeatedSddOutcomeConsistent ?? 'n/a'}',
@@ -190,12 +229,16 @@ class LocalModelBenchmarkReport {
         buffer.writeln(
           '- ${item.caseId}: score=${item.score}/${item.maxScore} '
           'forbidden=${item.forbiddenHits} '
-          'first=${item.firstContentMs}ms total=${item.totalMs}ms '
-          'tokens=${item.reportedTokens} '
+          'first=${item.firstContentMs}ms prefill=${item.prefillMs}ms '
+          'total=${item.totalMs}ms tokens=${item.reportedTokens} '
           'decode=${item.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
           'gpu=${item.observedGpuLayers} '
           'batch=${item.observedBatch}/${item.observedMicroBatch} '
           'pressure=${item.startPressure}->${item.endPressure} '
+          'battery_temp_c='
+          '${item.startBatteryTemperatureMilliC == null ? 'n/a' : (item.startBatteryTemperatureMilliC! / 1000).toStringAsFixed(1)}'
+          '->'
+          '${item.endBatteryTemperatureMilliC == null ? 'n/a' : (item.endBatteryTemperatureMilliC! / 1000).toStringAsFixed(1)} '
           'session=${item.sessionStart}->${item.sessionEnd}',
         );
         if (includeResponses) {
@@ -221,6 +264,13 @@ class LocalModelBenchmarkRunner {
   static const int _maxTokens = 96;
   static const double _temperature = 0.5;
   static const Duration _betweenCases = Duration(milliseconds: 350);
+
+  static const List<int> vulkanMatrixGpuLayers = <int>[0, 10, 50];
+  static const Set<String> _vulkanMatrixCaseIds = <String>{
+    'vulkan_fact',
+    'arithmetic',
+    'ssd_hdd_followup',
+  };
 
   static const List<String> _targetModelIds = <String>[
     LocalInferenceModelIds.phi35Mini,
@@ -335,7 +385,22 @@ class LocalModelBenchmarkRunner {
 
   Future<LocalModelBenchmarkReport> run({
     LocalModelBenchmarkProgress? onProgress,
+    int? gpuLayersOverride,
+    List<LocalModelBenchmarkCase>? benchmarkCases,
   }) async {
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider as AndroidFfiRuntimeProvider
+        : null;
+    if (gpuLayersOverride != null && androidRuntime == null) {
+      throw StateError(
+        'GPU-layer benchmark override requires AndroidFfiRuntimeProvider.',
+      );
+    }
+    if (gpuLayersOverride != null) {
+      await androidRuntime!.setBenchmarkGpuLayersOverride(gpuLayersOverride);
+    }
+
+    final activeCases = benchmarkCases ?? cases;
     final availableResult = await _localAiRepository.getAvailableModels();
     final available = availableResult.fold<List<AiModel>>(
       (failure) => throw StateError(
@@ -374,7 +439,8 @@ class LocalModelBenchmarkRunner {
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_BEGIN] models=${targets.map((m) => m.effectiveRuntimeModelId).join(',')} '
-      'cases=${cases.length} max_tokens=$_maxTokens temperature=$_temperature',
+      'cases=${activeCases.length} max_tokens=$_maxTokens temperature=$_temperature '
+      'requested_gpu_layers=${androidRuntime?.requestedGpuLayers ?? -1}',
     );
 
     final modelResults = <LocalModelBenchmarkModelResult>[];
@@ -388,10 +454,10 @@ class LocalModelBenchmarkRunner {
         'order=${modelIndex + 1}/${targets.length}',
       );
 
-      for (var caseIndex = 0; caseIndex < cases.length; caseIndex++) {
-        final benchmarkCase = cases[caseIndex];
+      for (var caseIndex = 0; caseIndex < activeCases.length; caseIndex++) {
+        final benchmarkCase = activeCases[caseIndex];
         onProgress?.call(
-          '${model.displayName} ${caseIndex + 1}/${cases.length}',
+          '${model.displayName} ${caseIndex + 1}/${activeCases.length}',
         );
 
         final result = await _runCase(
@@ -407,6 +473,7 @@ class LocalModelBenchmarkRunner {
           'score=${result.score}/${result.maxScore} '
           'forbidden_hits=${result.forbiddenHits} '
           'first_content_ms=${result.firstContentMs} '
+          'prefill_ms=${result.prefillMs} '
           'total_ms=${result.totalMs} '
           'reported_tokens=${result.reportedTokens} '
           'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
@@ -416,10 +483,12 @@ class LocalModelBenchmarkRunner {
           'pressure=${result.startPressure}->${result.endPressure} '
           'start_available_bytes=${result.startAvailableBytes ?? -1} '
           'end_available_bytes=${result.endAvailableBytes ?? -1} '
+          'start_battery_temp_milli_c=${result.startBatteryTemperatureMilliC ?? -1} '
+          'end_battery_temp_milli_c=${result.endBatteryTemperatureMilliC ?? -1} '
           'session=${result.sessionStart}->${result.sessionEnd}',
         );
 
-        if (caseIndex + 1 < cases.length) {
+        if (caseIndex + 1 < activeCases.length) {
           await Future<void>.delayed(_betweenCases);
         }
       }
@@ -427,6 +496,7 @@ class LocalModelBenchmarkRunner {
       final modelResult = LocalModelBenchmarkModelResult(
         modelId: model.effectiveRuntimeModelId,
         displayName: model.displayName,
+        requestedGpuLayers: androidRuntime?.requestedGpuLayers ?? -1,
         cases: List<LocalModelBenchmarkCaseResult>.unmodifiable(caseResults),
       );
       modelResults.add(modelResult);
@@ -435,7 +505,9 @@ class LocalModelBenchmarkRunner {
         '[LOCAL_MODEL_BENCH_MODEL_END] '
         'model=${model.effectiveRuntimeModelId} '
         'quality=${modelResult.score}/${modelResult.maxScore} '
+        'requested_gpu_layers=${modelResult.requestedGpuLayers} '
         'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
+        'avg_prefill_ms=${modelResult.averagePrefillMs.toStringAsFixed(0)} '
         'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
         'avg_decode_tokens_s=${modelResult.averageDecodeTokensPerSecond.toStringAsFixed(2)} '
         'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
@@ -459,9 +531,47 @@ class LocalModelBenchmarkRunner {
       await diagnostics.sync();
     }
 
-    return LocalModelBenchmarkReport(
+    final report = LocalModelBenchmarkReport(
       createdAt: DateTime.now(),
       models: List<LocalModelBenchmarkModelResult>.unmodifiable(modelResults),
+    );
+    if (gpuLayersOverride != null) {
+      await androidRuntime!.setBenchmarkGpuLayersOverride(null);
+    }
+    return report;
+  }
+
+  Future<LocalModelBenchmarkReport> runVulkanMatrix({
+    LocalModelBenchmarkProgress? onProgress,
+  }) async {
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider as AndroidFfiRuntimeProvider
+        : null;
+    if (androidRuntime == null) {
+      throw StateError('Vulkan matrix requires the Android FFI runtime.');
+    }
+
+    final matrixCases = cases
+        .where((item) => _vulkanMatrixCaseIds.contains(item.id))
+        .toList(growable: false);
+    final combined = <LocalModelBenchmarkModelResult>[];
+    try {
+      for (final layers in vulkanMatrixGpuLayers) {
+        final report = await run(
+          gpuLayersOverride: layers,
+          benchmarkCases: matrixCases,
+          onProgress: (message) =>
+              onProgress?.call('GPU $layers • $message'),
+        );
+        combined.addAll(report.models);
+      }
+    } finally {
+      await androidRuntime.setBenchmarkGpuLayersOverride(null);
+    }
+
+    return LocalModelBenchmarkReport(
+      createdAt: DateTime.now(),
+      models: List<LocalModelBenchmarkModelResult>.unmodifiable(combined),
     );
   }
 
@@ -494,6 +604,7 @@ class LocalModelBenchmarkRunner {
     var observedGpuLayers = 0;
     var observedBatch = 0;
     var observedMicroBatch = 0;
+    var prefillMs = -1;
 
     final sessionId =
         'debug-bench-${model.effectiveRuntimeModelId}-${benchmarkCase.id}-'
@@ -518,6 +629,10 @@ class LocalModelBenchmarkRunner {
       final gpuLayers = native['gpu_layers'] ?? 0;
       final batch = native['batch'] ?? 0;
       final microBatch = native['micro_batch'] ?? 0;
+      final nativePrefillMs = native['prefill_ms'] ?? -1;
+      if (nativePrefillMs >= 0) {
+        prefillMs = nativePrefillMs;
+      }
       if (gpuLayers > observedGpuLayers) {
         observedGpuLayers = gpuLayers;
       }
@@ -591,6 +706,7 @@ class LocalModelBenchmarkRunner {
       maxScore: benchmarkCase.maxScore,
       forbiddenHits: benchmarkCase.forbiddenHits(response),
       firstContentMs: firstContentMs,
+      prefillMs: prefillMs,
       totalMs: stopwatch.elapsedMilliseconds,
       reportedTokens: reportedTokens,
       observedGpuLayers: observedGpuLayers,
@@ -600,6 +716,10 @@ class LocalModelBenchmarkRunner {
       endPressure: endSample?.pressure ?? 'unknown',
       startAvailableBytes: startSample?.availableBytes,
       endAvailableBytes: endSample?.availableBytes,
+      startBatteryTemperatureMilliC:
+          startSample?.batteryTemperatureMilliC,
+      endBatteryTemperatureMilliC:
+          endSample?.batteryTemperatureMilliC,
       sessionStart: sessionStart,
       sessionEnd: sessionEnd,
     );
