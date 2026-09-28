@@ -264,10 +264,49 @@ String _orchestratorResponse(InferenceRequest request) =>
     'Non servono dipendenze esterne. Verificare incremento, decremento, reset, '
     'analyzer, widget test e produzione APK Android.';
 
-String _architectResponse(InferenceRequest request) =>
-    'Mantieni lo scaffold Android generato da Flutter. Sostituisci lib/main.dart '
-    'con una UI Material minimale a stato locale e aggiorna test/widget_test.dart '
-    'con un test dei tre comandi. Non aggiungere dipendenze.';
+String _architectResponse(InferenceRequest request) {
+  if (request.sessionId.contains(':project-plan')) {
+    return jsonEncode(<String, Object?>{
+      'phases': <Object?>[
+        <String, Object?>{
+          'id': 'implementation',
+          'title': 'Implementazione',
+          'description': 'Implementa e verifica il contatore Flutter.',
+          'dependsOn': <String>[],
+        },
+      ],
+      'tasks': <Object?>[
+        <String, Object?>{
+          'id': 'initial-implementation',
+          'phaseId': 'implementation',
+          'title': 'Funzionalità principale',
+          'description': 'Implementa incremento, decremento e reset.',
+          'dependsOn': <String>[],
+          'affectedPaths': <String>['lib/main.dart'],
+          'validationCriteria': <String>[
+            'Il contatore parte da zero e i tre comandi funzionano.',
+          ],
+        },
+        <String, Object?>{
+          'id': 'acceptance-verification',
+          'phaseId': 'implementation',
+          'title': 'Verifica e rifinitura',
+          'description': 'Aggiungi la verifica widget del comportamento.',
+          'dependsOn': <String>['initial-implementation'],
+          'affectedPaths': <String>['test/widget_test.dart'],
+          'validationCriteria': <String>[
+            'Il widget test copre incremento, decremento e reset.',
+          ],
+        },
+      ],
+    });
+  }
+
+  return 'Mantieni lo scaffold Android generato da Flutter. Sostituisci '
+      'lib/main.dart con una UI Material minimale a stato locale e aggiorna '
+      'test/widget_test.dart con un test dei tre comandi. Non aggiungere '
+      'dipendenze.';
+}
 
 String _engineerResponse(InferenceRequest request) {
   final taskId = request.sessionId;
@@ -275,7 +314,7 @@ String _engineerResponse(InferenceRequest request) {
   late final String explanation;
   late final List<Map<String, Object?>> changes;
 
-  if (taskId.contains('task:initial-implementation')) {
+  if (taskId.endsWith(':initial-implementation')) {
     summary = 'Implementa il comportamento del contatore.';
     explanation =
         'Aggiunge il comportamento richiesto direttamente sullo scaffold Flutter esistente.';
@@ -286,7 +325,7 @@ String _engineerResponse(InferenceRequest request) {
         'content': _counterMainDart,
       },
     ];
-  } else if (taskId.contains('task:acceptance-verification')) {
+  } else if (taskId.endsWith(':acceptance-verification')) {
     summary = 'Aggiunge la verifica del comportamento.';
     explanation =
         'Copre i tre comandi con un widget test deterministico.';
