@@ -408,10 +408,6 @@ If request.operation is "create" and request.targetFiles contains
 "lib/main.dart", changes MUST include a non-deletion "lib/main.dart" with the
 complete new entrypoint. Never leave an entrypoint inherited from older project
 content.
-If request.operation is "create" and request.targetFiles contains
-"lib/main.dart", changes MUST include a non-deletion "lib/main.dart" with the
-complete new entrypoint. Never leave an entrypoint inherited from older project
-content.
 Use only workspaceFiles as existing file content. replaceableTargets, when
 present, are existing oversized starter files intentionally omitted from the
 prompt for a create task; you may replace those paths only with complete
@@ -466,6 +462,10 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
+If request.operation is "create" and request.targetFiles contains
+"lib/main.dart", changes MUST include a non-deletion "lib/main.dart" with the
+complete new entrypoint. Never leave an entrypoint inherited from older project
+content.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
