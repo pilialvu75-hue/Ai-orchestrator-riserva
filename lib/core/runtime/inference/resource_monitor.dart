@@ -16,6 +16,9 @@ class ResourceSample {
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
+        thermalStatus = _number(data['thermalStatus']),
+        thermalHeadroom = _finiteDouble(data['thermalHeadroom']),
+        batteryTempDeciC = _number(data['batteryTempDeciC']),
         lowMemory = data['lowMemory'] == true,
         trimLevel = _number(data['trimLevel']) ?? 0;
 
@@ -24,11 +27,19 @@ class ResourceSample {
       totalBytes,
       thresholdBytes,
       rssBytes,
-      nativeHeapBytes;
+      nativeHeapBytes,
+      thermalStatus,
+      batteryTempDeciC;
+  final double? thermalHeadroom;
   final bool lowMemory;
   final int trimLevel;
   static int? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value.toInt() : null;
+  static double? _finiteDouble(Object? value) =>
+      value is num && value.isFinite && value >= 0 ? value.toDouble() : null;
+
+  double? get batteryTemperatureC =>
+      batteryTempDeciC == null ? null : batteryTempDeciC! / 10.0;
 
   // UI_HIDDEN=20 and background levels are lifecycle signals, not evidence
   // of foreground RAM pressure. Android 14+ may omit trim notifications.
@@ -205,6 +216,10 @@ class ResourceMonitor extends ChangeNotifier {
           'decode_calls=${native['decode_calls'] ?? -1} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
+          'thermal_status=${reading.thermalStatus ?? -1} '
+          'thermal_headroom=${reading.thermalHeadroom?.toStringAsFixed(3) ?? 'na'} '
+          'battery_temp_deci_c=${reading.batteryTempDeciC ?? -1} '
+          'prefill_ms=${native['prefill_ms'] ?? -1} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
           'n_ubatch=${native['micro_batch'] ?? -1}',
         );
