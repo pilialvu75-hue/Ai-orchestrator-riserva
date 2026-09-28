@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -321,6 +322,18 @@ final class WorkshopDashboardController extends ChangeNotifier {
       throw StateError(
         'Recovered Workshop project approval does not belong to '
         'project "${plan.id}".',
+      );
+    }
+
+    final projectWorkspacePath =
+        _engine.projectExecutor?.workspaceRootPathForProject(plan.id);
+    if (projectWorkspacePath != null &&
+        plan.completedTasks > 0 &&
+        !await Directory(projectWorkspacePath).exists()) {
+      throw StateError(
+        'Recovered Workshop project source is unavailable in its isolated '
+        'workspace. Legacy shared workspace content is not migrated '
+        'automatically because it may belong to another project.',
       );
     }
 
