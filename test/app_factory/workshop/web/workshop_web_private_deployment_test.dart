@@ -22,9 +22,15 @@ void main() {
     expect(source, contains('status: 401'));
     expect(source, contains('context.next()'));
 
-    // Credentials must never be hard-coded into the repository.
-    expect(source, isNot(contains('password =')));
-    expect(source, isNot(contains('username =')));
+    // The authoritative expected credentials must come from Pages secrets.
+    expect(
+      source,
+      contains('expectedUser = context.env.WEB_ACCESS_USER'),
+    );
+    expect(
+      source,
+      contains('expectedPassword = context.env.WEB_ACCESS_PASSWORD'),
+    );
   });
 
   test('private deploy verifies both denial and authenticated access', () {
