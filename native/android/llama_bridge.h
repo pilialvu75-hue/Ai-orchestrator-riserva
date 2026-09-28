@@ -25,7 +25,8 @@ int64_t llb_create_session_ex(const char* model_path, int32_t n_ctx,
     int32_t n_threads, int32_t n_gpu_layers, int32_t n_batch, int32_t n_ubatch);
 // 0=context, 1=batch, 2=microbatch, 3=observed offloaded layers,
 // 4=successful decode calls (CPU or GPU), 5=reused prompt/KV tokens,
-// 6=prefilled prompt tokens. Unknown/session absent returns -1.
+// 6=prefilled prompt tokens, 7=last prompt prefill milliseconds.
+// Unknown/session absent returns -1.
 int64_t llb_session_metric(int64_t session_id, int32_t metric);
 
 // Exact llama.cpp token count using the vocabulary of an already-loaded
