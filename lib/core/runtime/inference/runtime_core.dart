@@ -96,6 +96,47 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
         _maxActiveNativeSessions =
             maxActiveNativeSessions < 1 ? 1 : maxActiveNativeSessions;
 
+  int? _benchmarkGpuLayersOverride;
+
+  int get requestedGpuLayers =>
+      _benchmarkGpuLayersOverride ?? LlamaNativeDefaults.nGpuLayers;
+
+  /// Debug-Lab-only runtime override used by the quantitative Vulkan matrix.
+  ///
+  /// Changing the requested layer count always tears down resident native
+  /// sessions first, so measurements cannot accidentally reuse a context that
+  /// was created with a different offload configuration.
+  Future<void> setBenchmarkGpuLayersOverride(int? layers) async {
+    if (layers != null && (layers < 0 || layers > 99)) {
+      throw ArgumentError.value(
+        layers,
+        'layers',
+        'Benchmark GPU layers must be between 0 and 99.',
+      );
+    }
+    if (_activeInferenceSessions.isNotEmpty) {
+      throw StateError(
+        'Cannot change benchmark GPU layers during active inference.',
+      );
+    }
+
+    final bindings = _bindings;
+    if (bindings != null && _nativeSessionsByModel.isNotEmpty) {
+      await _nativeSessionSubsystem.releaseAllNativeSessions(
+        bindings,
+        reason: 'benchmark_gpu_layers_change',
+      );
+      ResourceMonitor.instance.readNative = null;
+    }
+
+    _benchmarkGpuLayersOverride = layers;
+    _log(
+      '[BENCH_GPU_LAYER_OVERRIDE] requested_layers='
+      '${layers ?? LlamaNativeDefaults.nGpuLayers} '
+      'source=${layers == null ? 'runtime_default' : 'debug_matrix'}',
+    );
+  }
+
   static const _logTag = 'AI_RUNTIME';
   static const int _safeMaxTokens = 2048;  // tetto assoluto di sicurezza nativa
   static const int _defaultMaxTokens = 1024; // default operativo per modelli 1B
