@@ -1,4 +1,5 @@
 import 'package:get_it/get_it.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:ai_orchestrator/app_factory/workspace/local_git_workspace_gateway.dart';
 
@@ -73,6 +74,7 @@ final class WorkshopFactory {
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool createRootIfMissing = false,
   }) {
     final normalizedPath = workspaceRootPath.trim();
 
@@ -96,6 +98,7 @@ final class WorkshopFactory {
       rootPath: normalizedPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      createRootIfMissing: createRootIfMissing,
     );
   }
 
@@ -122,15 +125,46 @@ final class WorkshopFactory {
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool projectScopedWorkspaces = false,
   }) {
-    final gateway = createWorkspaceGateway(
-      workspaceRootPath: workspaceRootPath,
-      includeHiddenFiles: includeHiddenFiles,
-      maxFileSizeBytes: maxFileSizeBytes,
-    );
+    final normalizedRoot = workspaceRootPath.trim();
+    if (!projectScopedWorkspaces) {
+      final gateway = createWorkspaceGateway(
+        workspaceRootPath: normalizedRoot,
+        includeHiddenFiles: includeHiddenFiles,
+        maxFileSizeBytes: maxFileSizeBytes,
+      );
+      return WorkshopProjectExecutor(gateway: gateway);
+    }
+
+    String projectPath(String projectId) {
+      final normalizedProjectId = projectId.trim();
+      if (normalizedProjectId.isEmpty) {
+        throw ArgumentError.value(
+          projectId,
+          'projectId',
+          'Workshop project id cannot be empty.',
+        );
+      }
+      final safeProjectDirectory = normalizedProjectId.replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
+      return p.join(
+        normalizedRoot,
+        'projects',
+        safeProjectDirectory,
+      );
+    }
 
     return WorkshopProjectExecutor(
-      gateway: gateway,
+      projectGatewayFactory: (projectId) => createWorkspaceGateway(
+        workspaceRootPath: projectPath(projectId),
+        includeHiddenFiles: includeHiddenFiles,
+        maxFileSizeBytes: maxFileSizeBytes,
+        createRootIfMissing: true,
+      ),
+      projectWorkspacePathResolver: projectPath,
     );
   }
 
