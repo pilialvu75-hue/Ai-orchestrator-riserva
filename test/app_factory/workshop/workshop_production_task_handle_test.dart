@@ -236,7 +236,10 @@ void main() {
         AppAiRole.architect: _QueueGateway(
           role: AppAiRole.architect,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_planningJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.engineer: engineer,
         AppAiRole.reviewer: reviewer,
