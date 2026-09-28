@@ -64,9 +64,9 @@ class ImageService {
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return null;
 
-      return await _saveBytes(
+      return await savePngBytes(
         byteData.buffer.asUint8List(),
-        'screenshot',
+        prefix: 'screenshot',
       );
     } catch (_) {
       return null;
@@ -74,11 +74,20 @@ class ImageService {
   }
 
   /// Saves raw PNG [bytes] to the app's temp directory and returns the [File].
-  Future<File> _saveBytes(Uint8List bytes, String prefix) async {
+  ///
+  /// Screen Vision uses the same storage boundary as camera/gallery/widget
+  /// captures so downstream chat attachments remain source-agnostic.
+  Future<File> savePngBytes(
+    Uint8List bytes, {
+    String prefix = 'image',
+  }) async {
+    if (bytes.isEmpty) {
+      throw ArgumentError.value(bytes, 'bytes', 'PNG bytes cannot be empty.');
+    }
     final dir = await getTemporaryDirectory();
     final path =
         '${dir.path}/${prefix}_${DateTime.now().millisecondsSinceEpoch}.png';
-    return File(path).writeAsBytes(bytes);
+    return File(path).writeAsBytes(bytes, flush: true);
   }
 
   // ── Utility ─────────────────────────────────────────────────────────────────
