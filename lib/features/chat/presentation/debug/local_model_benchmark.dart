@@ -69,10 +69,17 @@ class LocalModelBenchmarkCaseResult {
     required this.observedGpuLayers,
     required this.observedBatch,
     required this.observedMicroBatch,
+    required this.prefillMs,
     required this.startPressure,
     required this.endPressure,
     required this.startAvailableBytes,
     required this.endAvailableBytes,
+    required this.startThermalStatus,
+    required this.endThermalStatus,
+    required this.startThermalHeadroom,
+    required this.endThermalHeadroom,
+    required this.startBatteryTempDeciC,
+    required this.endBatteryTempDeciC,
     required this.sessionStart,
     required this.sessionEnd,
   });
@@ -88,10 +95,17 @@ class LocalModelBenchmarkCaseResult {
   final int observedGpuLayers;
   final int observedBatch;
   final int observedMicroBatch;
+  final int prefillMs;
   final String startPressure;
   final String endPressure;
   final int? startAvailableBytes;
   final int? endAvailableBytes;
+  final int? startThermalStatus;
+  final int? endThermalStatus;
+  final double? startThermalHeadroom;
+  final double? endThermalHeadroom;
+  final int? startBatteryTempDeciC;
+  final int? endBatteryTempDeciC;
   final String sessionStart;
   final String sessionEnd;
 
@@ -133,6 +147,15 @@ class LocalModelBenchmarkModelResult {
         .where((value) => value > 0)
         .toList(growable: false);
     if (valid.isEmpty) return 0;
+    return valid.reduce((a, b) => a + b) / valid.length;
+  }
+
+  double get averagePrefillMs {
+    final valid = cases
+        .map((item) => item.prefillMs)
+        .where((value) => value >= 0)
+        .toList(growable: false);
+    if (valid.isEmpty) return -1;
     return valid.reduce((a, b) => a + b) / valid.length;
   }
 
@@ -180,6 +203,9 @@ class LocalModelBenchmarkReport {
         )
         ..writeln('avg_total_ms=${model.averageTotalMs.toStringAsFixed(0)}')
         ..writeln(
+          'avg_prefill_ms=${model.averagePrefillMs.toStringAsFixed(0)}',
+        )
+        ..writeln(
           'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
         )
         ..writeln(
@@ -193,9 +219,15 @@ class LocalModelBenchmarkReport {
           'first=${item.firstContentMs}ms total=${item.totalMs}ms '
           'tokens=${item.reportedTokens} '
           'decode=${item.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
+          'prefill=${item.prefillMs}ms '
           'gpu=${item.observedGpuLayers} '
           'batch=${item.observedBatch}/${item.observedMicroBatch} '
           'pressure=${item.startPressure}->${item.endPressure} '
+          'thermal_status=${item.startThermalStatus ?? -1}->${item.endThermalStatus ?? -1} '
+          'thermal_headroom=${item.startThermalHeadroom?.toStringAsFixed(3) ?? 'na'}'
+          '->${item.endThermalHeadroom?.toStringAsFixed(3) ?? 'na'} '
+          'battery_temp_deci_c=${item.startBatteryTempDeciC ?? -1}'
+          '->${item.endBatteryTempDeciC ?? -1} '
           'session=${item.sessionStart}->${item.sessionEnd}',
         );
         if (includeResponses) {
@@ -410,12 +442,19 @@ class LocalModelBenchmarkRunner {
           'total_ms=${result.totalMs} '
           'reported_tokens=${result.reportedTokens} '
           'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
+          'prefill_ms=${result.prefillMs} '
           'gpu_layers=${result.observedGpuLayers} '
           'n_batch=${result.observedBatch} '
           'n_ubatch=${result.observedMicroBatch} '
           'pressure=${result.startPressure}->${result.endPressure} '
           'start_available_bytes=${result.startAvailableBytes ?? -1} '
           'end_available_bytes=${result.endAvailableBytes ?? -1} '
+          'start_thermal_status=${result.startThermalStatus ?? -1} '
+          'end_thermal_status=${result.endThermalStatus ?? -1} '
+          'start_thermal_headroom=${result.startThermalHeadroom?.toStringAsFixed(3) ?? 'na'} '
+          'end_thermal_headroom=${result.endThermalHeadroom?.toStringAsFixed(3) ?? 'na'} '
+          'start_battery_temp_deci_c=${result.startBatteryTempDeciC ?? -1} '
+          'end_battery_temp_deci_c=${result.endBatteryTempDeciC ?? -1} '
           'session=${result.sessionStart}->${result.sessionEnd}',
         );
 
@@ -437,6 +476,7 @@ class LocalModelBenchmarkRunner {
         'quality=${modelResult.score}/${modelResult.maxScore} '
         'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
         'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
+        'avg_prefill_ms=${modelResult.averagePrefillMs.toStringAsFixed(0)} '
         'avg_decode_tokens_s=${modelResult.averageDecodeTokensPerSecond.toStringAsFixed(2)} '
         'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
       );
@@ -494,6 +534,7 @@ class LocalModelBenchmarkRunner {
     var observedGpuLayers = 0;
     var observedBatch = 0;
     var observedMicroBatch = 0;
+    var observedPrefillMs = -1;
 
     final sessionId =
         'debug-bench-${model.effectiveRuntimeModelId}-${benchmarkCase.id}-'
@@ -518,6 +559,10 @@ class LocalModelBenchmarkRunner {
       final gpuLayers = native['gpu_layers'] ?? 0;
       final batch = native['batch'] ?? 0;
       final microBatch = native['micro_batch'] ?? 0;
+      final prefillMs = native['prefill_ms'] ?? -1;
+      if (prefillMs >= 0) {
+        observedPrefillMs = prefillMs;
+      }
       if (gpuLayers > observedGpuLayers) {
         observedGpuLayers = gpuLayers;
       }
@@ -570,6 +615,10 @@ class LocalModelBenchmarkRunner {
     }
 
     final endSample = await _resourceMonitor.sample();
+    final endPrefillMs = _resourceMonitor.native['prefill_ms'];
+    if (endPrefillMs != null && endPrefillMs >= 0) {
+      observedPrefillMs = endPrefillMs;
+    }
     final hasSessionAfter = androidRuntime != null &&
         modelPath != null &&
         androidRuntime.hasActiveNativeSessionForModelPath(modelPath);
@@ -596,10 +645,17 @@ class LocalModelBenchmarkRunner {
       observedGpuLayers: observedGpuLayers,
       observedBatch: observedBatch,
       observedMicroBatch: observedMicroBatch,
+      prefillMs: observedPrefillMs,
       startPressure: startSample?.pressure ?? 'unknown',
       endPressure: endSample?.pressure ?? 'unknown',
       startAvailableBytes: startSample?.availableBytes,
       endAvailableBytes: endSample?.availableBytes,
+      startThermalStatus: startSample?.thermalStatus,
+      endThermalStatus: endSample?.thermalStatus,
+      startThermalHeadroom: startSample?.thermalHeadroom,
+      endThermalHeadroom: endSample?.thermalHeadroom,
+      startBatteryTempDeciC: startSample?.batteryTempDeciC,
+      endBatteryTempDeciC: endSample?.batteryTempDeciC,
       sessionStart: sessionStart,
       sessionEnd: sessionEnd,
     );
