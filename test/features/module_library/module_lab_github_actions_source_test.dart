@@ -22,7 +22,6 @@ void main() {
       return http.Response('unexpected', 500);
     });
     final source = ModuleLabGitHubActionsSource(
-      credentialStore: throw UnimplementedError(),
       client: client,
       accessTokenProvider: () async => 'test-token',
     );
@@ -39,7 +38,6 @@ void main() {
       ]}), 200);
     });
     final source = ModuleLabGitHubActionsSource(
-      credentialStore: throw UnimplementedError(),
       client: client,
       accessTokenProvider: () async => 'test-token',
     );
