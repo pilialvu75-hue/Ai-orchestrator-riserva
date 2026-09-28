@@ -256,6 +256,7 @@ final class WorkshopProjectPlan {
     required this.id,
     required this.title,
     required this.goal,
+    this.workspaceProjectId,
     this.domain = WorkshopProjectDomain.software,
     this.status = WorkshopProjectStatus.draft,
     DateTime? createdAt,
@@ -288,6 +289,18 @@ final class WorkshopProjectPlan {
   final String id;
   final String title;
   final String goal;
+
+  /// Physical workspace identity. Null means this plan owns its own workspace.
+  ///
+  /// Build-repair plans use the failed project's identity so a new repair
+  /// lifecycle edits the exact source tree that failed instead of an empty
+  /// project directory.
+  String? workspaceProjectId;
+
+  String get effectiveWorkspaceProjectId {
+    final normalized = workspaceProjectId?.trim();
+    return normalized == null || normalized.isEmpty ? id : normalized;
+  }
 
   final WorkshopProjectDomain domain;
   WorkshopProjectStatus status;
@@ -418,6 +431,7 @@ final class WorkshopProjectPlan {
     String? id,
     String? title,
     String? goal,
+    String? workspaceProjectId,
     WorkshopProjectDomain? domain,
     WorkshopProjectStatus? status,
     DateTime? createdAt,
@@ -437,6 +451,8 @@ final class WorkshopProjectPlan {
       id: id ?? this.id,
       title: title ?? this.title,
       goal: goal ?? this.goal,
+      workspaceProjectId:
+          workspaceProjectId ?? this.workspaceProjectId,
       domain: domain ?? this.domain,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
