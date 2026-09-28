@@ -124,6 +124,17 @@ void main() {
       expect(settings.automaticCloudUseAllowed('copilot'), isFalse);
     });
 
+    test('OAuth capability reflects implemented inference adapters only', () {
+      expect(
+        CloudProviderCatalog.definitionFor('gemini')?.supportsOAuth,
+        isFalse,
+      );
+      expect(
+        CloudProviderCatalog.definitionFor('copilot')?.supportsOAuth,
+        isFalse,
+      );
+    });
+
     test('system free-pool providers are visible to normal Cloud selectors', () async {
       await createSettings();
 
