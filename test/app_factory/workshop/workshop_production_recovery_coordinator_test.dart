@@ -105,7 +105,7 @@ void main() {
       );
       expect(secondController.state.stage, WorkshopStage.implementation);
       expect(secondController.state.completedTasks, 0);
-      expect(secondController.state.totalTasks, 3);
+      expect(secondController.state.totalTasks, 2);
       expect(secondController.state.isProjectApproved, isTrue);
       expect(
         secondController.state.projectApproval?.approvalId,
@@ -194,16 +194,16 @@ void main() {
 
       expect(restored, isTrue);
       expect(secondController.state.completedTasks, 1);
-      expect(secondController.state.totalTasks, 3);
-      expect(secondController.state.progress, closeTo(1 / 3, 0.0001));
+      expect(secondController.state.totalTasks, 2);
+      expect(secondController.state.progress, closeTo(1 / 2, 0.0001));
       expect(
         secondController.state.activeTaskId,
-        'task:core-behavior',
+        'task:acceptance-verification',
       );
       expect(secondController.state.stage, WorkshopStage.implementation);
       expect(
         secondController.engine.planOf(requestId)!.nextAvailableTask?.id,
-        'task:core-behavior',
+        'task:acceptance-verification',
       );
 
       secondController.dispose();
@@ -263,7 +263,7 @@ void main() {
       expect(secondController.state.stage, WorkshopStage.completed);
       expect(secondController.engine.stageOf(requestId), WorkshopStage.completed);
       expect(secondController.state.activeTaskId, isNull);
-      expect(secondController.state.completedTasks, 3);
+      expect(secondController.state.completedTasks, 2);
       expect(secondController.state.totalTasks, 3);
       expect(secondController.state.progress, 1);
 
