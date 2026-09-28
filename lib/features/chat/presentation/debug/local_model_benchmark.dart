@@ -400,6 +400,7 @@ class LocalModelBenchmarkRunner {
       await androidRuntime!.setBenchmarkGpuLayersOverride(gpuLayersOverride);
     }
 
+    try {
     final activeCases = benchmarkCases ?? cases;
     final availableResult = await _localAiRepository.getAvailableModels();
     final available = availableResult.fold<List<AiModel>>(
@@ -535,10 +536,12 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       models: List<LocalModelBenchmarkModelResult>.unmodifiable(modelResults),
     );
-    if (gpuLayersOverride != null) {
-      await androidRuntime!.setBenchmarkGpuLayersOverride(null);
-    }
     return report;
+    } finally {
+      if (gpuLayersOverride != null) {
+        await androidRuntime!.setBenchmarkGpuLayersOverride(null);
+      }
+    }
   }
 
   Future<LocalModelBenchmarkReport> runVulkanMatrix({
