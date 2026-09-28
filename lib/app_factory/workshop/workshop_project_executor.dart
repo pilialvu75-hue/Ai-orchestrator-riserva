@@ -357,43 +357,57 @@ final class WorkshopProjectExecutor {
   WorkshopOperation _operationForTask(
     WorkshopProjectTask task,
   ) {
+    // Classify from task-owned semantics only. Planner descriptions may append
+    // "Project goal: <user text>"; user titles/goals must never change the
+    // execution contract merely because they contain words such as "Test",
+    // "Build" or "Fix".
+    final description = task.description;
+    const projectGoalMarker = 'Project goal:';
+    final markerIndex = description.indexOf(projectGoalMarker);
+    final taskOwnedDescription = markerIndex < 0
+        ? description
+        : description.substring(0, markerIndex);
     final text =
-        '${task.title} ${task.description}'.toLowerCase();
+        '${task.title} $taskOwnedDescription'.toLowerCase();
 
-    if (text.contains('fix') ||
-        text.contains('bug') ||
-        text.contains('errore') ||
-        text.contains('crash')) {
+    bool hasWord(String word) => RegExp(
+          '(^|[^a-z0-9_])${RegExp.escape(word)}([^a-z0-9_]|\\$)',
+        ).hasMatch(text);
+
+    if (hasWord('fix') ||
+        hasWord('bug') ||
+        hasWord('errore') ||
+        hasWord('crash')) {
       return WorkshopOperation.fix;
     }
 
-    if (text.contains('refactor') ||
-        text.contains('refactoring')) {
+    if (hasWord('refactor') ||
+        hasWord('refactoring')) {
       return WorkshopOperation.refactor;
     }
 
-    if (text.contains('optim') ||
-        text.contains('performance') ||
-        text.contains('latency')) {
+    if (hasWord('optim') ||
+        hasWord('performance') ||
+        hasWord('latency')) {
       return WorkshopOperation.optimize;
     }
 
-    if (text.contains('remove') ||
-        text.contains('delete') ||
-        text.contains('elimina')) {
+    if (hasWord('remove') ||
+        hasWord('delete') ||
+        hasWord('elimina')) {
       return WorkshopOperation.remove;
     }
 
-    if (text.contains('modify') ||
-        text.contains('update') ||
-        text.contains('change') ||
-        text.contains('modifica')) {
+    if (hasWord('modify') ||
+        hasWord('update') ||
+        hasWord('change') ||
+        hasWord('modifica')) {
       return WorkshopOperation.modify;
     }
 
-    if (text.contains('validate') ||
-        text.contains('test') ||
-        text.contains('build')) {
+    if (hasWord('validate') ||
+        hasWord('test') ||
+        hasWord('build')) {
       return WorkshopOperation.validate;
     }
 
