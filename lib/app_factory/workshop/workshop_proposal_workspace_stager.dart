@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 
@@ -42,7 +43,11 @@ final class WorkshopProposalWorkspaceStager {
 
     if (proposal.isNotEmpty) {
       session.beginReview();
-      void _requireCreateEntrypointChange({
+    }
+
+    return proposal;
+  }
+  void _requireCreateEntrypointChange({
     required WorkspaceSession session,
     required WorkshopChangeProposal proposal,
   }) {
@@ -53,8 +58,7 @@ final class WorkshopProposalWorkspaceStager {
     }
 
     final mainChanges = proposal.changesForPath('lib/main.dart');
-    final writesEntrypoint =
-        mainChanges.any((change) => !change.isDeletion);
+    final writesEntrypoint = mainChanges.any((change) => !change.isDeletion);
     if (!writesEntrypoint) {
       throw const FormatException(
         'Workshop create proposal must write "lib/main.dart" so a new project '
@@ -63,8 +67,4 @@ final class WorkshopProposalWorkspaceStager {
     }
   }
 
-}
-
-    return proposal;
-  }
 }
