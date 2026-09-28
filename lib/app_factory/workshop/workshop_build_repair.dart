@@ -365,6 +365,7 @@ final class WorkshopBuildRepairPreparer {
       technologies: request.technologies,
       deliverables: request.deliverables,
       validationCriteria: request.validationCriteria,
+      seedWorkspaceFromProjectId: failedPlan.id,
     );
   }
 
