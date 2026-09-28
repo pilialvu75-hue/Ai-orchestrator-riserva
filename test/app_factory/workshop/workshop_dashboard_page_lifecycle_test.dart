@@ -54,6 +54,34 @@ void main() {
   });
 
   testWidgets(
+      'production busy disables free-form composer so status questions cannot start a new request',
+      (tester) async {
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'production-busy-chat-lock',
+    );
+    addTearDown(chat.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          productionBusy: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.enabled, isFalse);
+
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    expect(provider.requests, isEmpty);
+  });
+
+  testWidgets(
       'new conversation cannot inherit an active project accidentally',
       (tester) async {
     final provider = _CapturingProvider();
