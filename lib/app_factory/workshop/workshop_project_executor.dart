@@ -68,14 +68,23 @@ final class WorkshopProjectExecutor {
       return null;
     }
 
+    final taskRequestId = 'workshop-task:${plan.id}:${task.id}';
     final existing = _sessions[task.id];
 
-    if (existing != null) {
+    if (existing != null &&
+        existing.context.request.id == taskRequestId) {
       return existing;
     }
 
+    // Task IDs are intentionally stable across projects. A session from a
+    // different project must never be reused merely because both plans contain
+    // e.g. "task:initial-implementation".
+    if (existing != null) {
+      _sessions.remove(task.id);
+    }
+
     final request = WorkshopRequest(
-      id: 'workshop-task:${plan.id}:${task.id}',
+      id: taskRequestId,
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
@@ -157,14 +166,20 @@ final class WorkshopProjectExecutor {
       );
     }
 
+    final taskRequestId = 'workshop-task:${plan.id}:${task.id}';
     final existing = _sessions[task.id];
 
-    if (existing != null) {
+    if (existing != null &&
+        existing.context.request.id == taskRequestId) {
       return existing;
     }
 
+    if (existing != null) {
+      _sessions.remove(task.id);
+    }
+
     final request = WorkshopRequest(
-      id: 'workshop-task:${plan.id}:${task.id}',
+      id: taskRequestId,
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,

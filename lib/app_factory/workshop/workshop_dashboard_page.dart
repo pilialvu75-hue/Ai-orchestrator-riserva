@@ -62,6 +62,7 @@ class WorkshopDashboardPage extends StatefulWidget {
     Future<bool> Function()? closeProjectForNewConversation,
     Future<void> Function()? openProjects,
     List<WorkshopModelAssignment>? modelAssignments,
+    this.productionBusy = false,
   })  : _emissionController = emissionController,
         _dashboardController = dashboardController,
         _chatController = chatController,
@@ -75,6 +76,11 @@ class WorkshopDashboardPage extends StatefulWidget {
   final WorkshopChatController? _chatController;
   final Future<bool> Function()? _closeProjectForNewConversation;
   final Future<void> Function()? _openProjects;
+
+  /// True while the production lifecycle (task inference/apply/build/repair)
+  /// owns the current project. Free-form chat is disabled in this interval so
+  /// a status question cannot be mistaken for a new project request.
+  final bool productionBusy;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -232,8 +238,11 @@ class _WorkshopDashboardPageState
     final message =
         _messageController.text.trim();
 
+    final dashboardState = _dashboardController?.state;
     if (message.isEmpty ||
-        _chatController.isBusy) {
+        _chatController.isBusy ||
+        widget.productionBusy ||
+        dashboardState?.isBusy == true) {
       return;
     }
 
@@ -719,6 +728,7 @@ class _WorkshopDashboardPageState
             _WorkshopProposalActions(
               busy:
                   _chatController.isBusy ||
+                      widget.productionBusy ||
                       dashboardState?.isBusy ==
                           true,
               onConfirm:
@@ -732,7 +742,9 @@ class _WorkshopDashboardPageState
             focusNode:
                 _messageFocusNode,
             busy:
-                _chatController.isBusy,
+                _chatController.isBusy ||
+                    widget.productionBusy ||
+                    dashboardState?.isBusy == true,
             onSend:
                 _sendMessage,
           ),

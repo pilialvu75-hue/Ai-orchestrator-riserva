@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 
@@ -30,6 +31,11 @@ final class WorkshopProposalWorkspaceStager {
       existingPaths: session.workspace.paths.toSet(),
     );
 
+    _requireCreateEntrypointChange(
+      session: session,
+      proposal: proposal,
+    );
+
     _applier.applyProposal(
       session: session,
       proposal: proposal,
@@ -40,5 +46,25 @@ final class WorkshopProposalWorkspaceStager {
     }
 
     return proposal;
+  }
+
+  void _requireCreateEntrypointChange({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+  }) {
+    final request = session.context.request;
+    if (request.operation != WorkshopOperation.create ||
+        !request.targetFiles.contains('lib/main.dart')) {
+      return;
+    }
+
+    final mainChanges = proposal.changesForPath('lib/main.dart');
+    final writesEntrypoint = mainChanges.any((change) => !change.isDeletion);
+    if (!writesEntrypoint) {
+      throw const FormatException(
+        'Workshop create proposal must write "lib/main.dart" so a new project '
+        'cannot inherit an entrypoint from a previous workspace.',
+      );
+    }
   }
 }

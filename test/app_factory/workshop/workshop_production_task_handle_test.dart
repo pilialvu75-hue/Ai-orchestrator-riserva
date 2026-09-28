@@ -78,7 +78,7 @@ void main() {
 
     expect(identical(applied, handle.session), isTrue);
     expect(workspaceGateway.files['lib/app.dart'], 'new');
-    expect(workspaceGateway.writeCalls, 1);
+    expect(workspaceGateway.writeCalls, 2);
     expect(workspaceGateway.commitCalls, 0);
     expect(workspaceGateway.pushCalls, 0);
     expect(workspaceGateway.pullRequestCalls, 0);
@@ -301,9 +301,19 @@ void main() {
       state: _certifiedLibraryState(),
       package: _certifiedStoragePackage(),
     );
+    final certifiedReuseGateways = _gateways(calls);
+    certifiedReuseGateways[AppAiRole.reviewer] = _QueueGateway(
+      role: AppAiRole.reviewer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_approvedReviewJson),
+        _success(_approvedReviewJson),
+        _success(_validValidationJson),
+      ],
+    );
     final bundle = WorkshopProductionLifecycleBundleFactory.create(
       projectExecutor: executor,
-      roleGateways: _gateways(calls),
+      roleGateways: certifiedReuseGateways,
       libraryReuseService: WorkshopLibraryReuseService(
         client: libraryClient,
       ),
@@ -339,6 +349,7 @@ void main() {
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
+        AppAiRole.reviewer,
         AppAiRole.reviewer,
         AppAiRole.reviewer,
       ],
@@ -549,7 +560,8 @@ final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
 
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
-    '"changes":[{"path":"lib/app.dart","type":"modification",'
+    '"changes":[{"path":"lib/main.dart","type":"addition",'
+    '"content":"void main() {}"},{"path":"lib/app.dart","type":"modification",'
     '"content":"new"}],"validationNotes":[],"warnings":[]}';
 const String _approvedReviewJson =
     '{"approved":true,"summary":"Review passed","findings":[],"warnings":[]}';
