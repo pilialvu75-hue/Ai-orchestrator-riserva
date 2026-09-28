@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
@@ -108,4 +110,55 @@ void main() {
       isFalse,
     );
   });
+
+  test('recovery fails closed when applied source has no isolated workspace',
+      () async {
+    final root = await Directory.systemTemp.createTemp(
+      'workshop-project-recovery-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    WorkshopDashboardController controller() {
+      final executor = WorkshopFactory.createProjectExecutor(
+        workspaceRootPath: root.path,
+        projectScopedWorkspaces: true,
+      );
+      return WorkshopDashboardController(
+        engine: WorkshopEngine(projectExecutor: executor),
+      );
+    }
+
+    final original = controller();
+    addTearDown(original.dispose);
+    final plan = original.startProduction(
+      title: 'Legacy project',
+      instruction: 'Create an isolated app.',
+    );
+    final requestId = original.state.requestId!;
+    final request = original.engine.requestOf(requestId)!;
+
+    // Simulate a legacy checkpoint claiming applied work while no project
+    // directory exists in the new isolated layout.
+    plan.tasks.first.completed = true;
+
+    final restored = controller();
+    addTearDown(restored.dispose);
+
+    await expectLater(
+      restored.restoreProduction(
+        request: request,
+        plan: plan,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final projectRoot =
+        restored.engine.projectExecutor!.workspaceRootPathForProject(plan.id)!;
+    expect(await Directory(projectRoot).exists(), isFalse);
+  });
+
 }
