@@ -47,11 +47,15 @@ void main() {
   test('extended samples export thresholds pressure and native profile safely',
       () {
     const suffix =
-        ' total_bytes=8000 threshold_bytes=500 pressure=high low_memory=false trim_level=10 n_ctx=2048 n_batch=128 n_ubatch=32';
+        ' prefill_ms=321 battery_temp_milli_c=33700'
+        ' total_bytes=8000 threshold_bytes=500 pressure=high low_memory=false'
+        ' trim_level=10 n_ctx=2048 n_batch=128 n_ubatch=32';
     final exported = jsonDecode(publicLogProjection('$prefix$payload$suffix')!);
     expect(exported['total_bytes'], 8000);
     expect(exported['threshold_bytes'], 500);
     expect(exported['pressure'], 'high');
+    expect(exported['prefill_ms'], 321);
+    expect(exported['battery_temp_milli_c'], 33700);
     expect(exported['n_ubatch'], 32);
     expect(
         publicLogProjection('$prefix$payload$suffix prompt=private'), isNull);
