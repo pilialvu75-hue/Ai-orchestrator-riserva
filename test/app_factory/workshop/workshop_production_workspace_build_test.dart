@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_workspace_scope.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -148,6 +149,114 @@ void main() {
     expect(provider.request, isNotNull);
     expect(provider.request!.projectPath, workspace.path);
     expect(bundle.workspaceRootPath, workspace.path);
+  });
+
+  test('isolated production build targets only the active project directory',
+      () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'workshop-isolated-build-',
+    );
+    addTearDown(() async {
+      if (await workspace.exists()) {
+        await workspace.delete(recursive: true);
+      }
+    });
+
+    final staleMain = File('${workspace.path}/lib/main.dart');
+    await staleMain.parent.create(recursive: true);
+    await staleMain.writeAsString('old walking app');
+
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: workspace.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+      isolateProjects: true,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Contatore Test',
+      instruction: 'Create an isolated counter app.',
+    );
+    _markPlanCompleted(plan);
+
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final result = await coordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+
+    final expectedProjectPath = WorkshopProjectWorkspaceScope.resolve(
+      workspaceRootPath: workspace.path,
+      projectId: plan.id,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(provider.request, isNotNull);
+    expect(provider.request!.projectPath, expectedProjectPath);
+    expect(provider.request!.projectPath, isNot(workspace.path));
+    expect(bundle.workspaceRootPath, workspace.path);
+  });
+
+  test('repair build keeps the failed project physical workspace', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'workshop-repair-build-',
+    );
+    addTearDown(() async {
+      if (await workspace.exists()) {
+        await workspace.delete(recursive: true);
+      }
+    });
+
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: workspace.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+      isolateProjects: true,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Repair cycle',
+      instruction: 'Repair the failed project.',
+      workspaceProjectId: 'project:failed-source',
+    );
+    _markPlanCompleted(plan);
+
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    await coordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+
+    expect(
+      provider.request!.projectPath,
+      WorkshopProjectWorkspaceScope.resolve(
+        workspaceRootPath: workspace.path,
+        projectId: 'project:failed-source',
+      ),
+    );
+    expect(
+      provider.request!.projectPath,
+      isNot(
+        WorkshopProjectWorkspaceScope.resolve(
+          workspaceRootPath: workspace.path,
+          projectId: plan.id,
+        ),
+      ),
+    );
   });
 
   test('production build refuses an incomplete Cantiere project', () {
