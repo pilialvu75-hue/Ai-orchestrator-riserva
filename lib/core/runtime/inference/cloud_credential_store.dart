@@ -117,7 +117,7 @@ final class CloudCredentialStore {
 
   String? secretFor(String providerId) {
     final record = _records[providerId];
-    if (record != null && !record.isExpired) {
+    if (record != null && _recordIsUsable(record)) {
       return record.secret;
     }
 
@@ -132,7 +132,7 @@ final class CloudCredentialStore {
     if (record != null) {
       return CloudCredentialSnapshot(
         providerId: providerId,
-        configured: !record.isExpired && record.secret.trim().isNotEmpty,
+        configured: _recordIsUsable(record),
         kind: record.kind,
         accountId: record.accountId,
         expiresAt: record.expiresAt,
@@ -182,6 +182,12 @@ final class CloudCredentialStore {
     DateTime? expiresAt,
   }) async {
     _validateProvider(providerId);
+    final definition = CloudProviderCatalog.definitionFor(providerId);
+    if (definition?.supportsOAuth != true) {
+      throw UnsupportedError(
+        'OAuth is not implemented for provider $providerId in the active inference adapter.',
+      );
+    }
     final secret = accessToken.trim();
     if (secret.isEmpty) {
       throw ArgumentError.value(
@@ -225,6 +231,17 @@ final class CloudCredentialStore {
         'Unsupported Cloud provider.',
       );
     }
+  }
+
+  bool _recordIsUsable(_CloudCredentialRecord record) {
+    if (record.isExpired || record.secret.trim().isEmpty) {
+      return false;
+    }
+    if (record.kind == CloudCredentialKind.oauthAccessToken) {
+      return CloudProviderCatalog.definitionFor(record.providerId)?.supportsOAuth ==
+          true;
+    }
+    return true;
   }
 
   String _storageKey(String providerId) => '$_keyPrefix$providerId';
