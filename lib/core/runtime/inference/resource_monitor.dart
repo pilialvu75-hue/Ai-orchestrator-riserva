@@ -16,6 +16,8 @@ class ResourceSample {
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
+        batteryTemperatureMilliC =
+            _number(data['batteryTemperatureMilliC']),
         lowMemory = data['lowMemory'] == true,
         trimLevel = _number(data['trimLevel']) ?? 0;
 
@@ -24,7 +26,8 @@ class ResourceSample {
       totalBytes,
       thresholdBytes,
       rssBytes,
-      nativeHeapBytes;
+      nativeHeapBytes,
+      batteryTemperatureMilliC;
   final bool lowMemory;
   final int trimLevel;
   static int? _number(Object? value) =>
@@ -203,6 +206,8 @@ class ResourceMonitor extends ChangeNotifier {
           'critical=${reading.critical} phase=$phase '
           'gpu_layers=${native['gpu_layers'] ?? -1} '
           'decode_calls=${native['decode_calls'] ?? -1} '
+          'prefill_ms=${native['prefill_ms'] ?? -1} '
+          'battery_temp_milli_c=${reading.batteryTemperatureMilliC ?? -1} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
