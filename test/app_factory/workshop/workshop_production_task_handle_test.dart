@@ -78,7 +78,7 @@ void main() {
 
     expect(identical(applied, handle.session), isTrue);
     expect(workspaceGateway.files['lib/app.dart'], 'new');
-    expect(workspaceGateway.writeCalls, 1);
+    expect(workspaceGateway.writeCalls, 2);
     expect(workspaceGateway.commitCalls, 0);
     expect(workspaceGateway.pushCalls, 0);
     expect(workspaceGateway.pullRequestCalls, 0);
@@ -549,7 +549,8 @@ final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
 
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
-    '"changes":[{"path":"lib/app.dart","type":"modification",'
+    '"changes":[{"path":"lib/main.dart","type":"addition",'
+    '"content":"void main() {}"},{"path":"lib/app.dart","type":"modification",'
     '"content":"new"}],"validationNotes":[],"warnings":[]}';
 const String _approvedReviewJson =
     '{"approved":true,"summary":"Review passed","findings":[],"warnings":[]}';
