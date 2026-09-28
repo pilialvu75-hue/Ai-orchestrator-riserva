@@ -146,7 +146,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gatewayForProject(plan.id),
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
@@ -236,7 +236,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gatewayForProject(plan.id),
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
