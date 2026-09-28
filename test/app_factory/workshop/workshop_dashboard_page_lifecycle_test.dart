@@ -75,9 +75,8 @@ void main() {
 
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.enabled, isFalse);
-
-    await tester.tap(find.byIcon(Icons.send));
-    await tester.pump();
+    expect(find.byIcon(Icons.send), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(provider.requests, isEmpty);
   });
 
