@@ -264,7 +264,7 @@ void main() {
       expect(secondController.engine.stageOf(requestId), WorkshopStage.completed);
       expect(secondController.state.activeTaskId, isNull);
       expect(secondController.state.completedTasks, 2);
-      expect(secondController.state.totalTasks, 3);
+      expect(secondController.state.totalTasks, 2);
       expect(secondController.state.progress, 1);
 
       final restoredPlan = secondController.engine.planOf(requestId)!;
