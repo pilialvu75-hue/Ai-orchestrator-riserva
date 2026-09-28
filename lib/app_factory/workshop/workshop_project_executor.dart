@@ -31,23 +31,53 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 ///
 /// L'esecuzione reale rimane sempre protetta dal ciclo di approvazione
 /// della WorkspaceSession.
+typedef WorkshopProjectGatewayFactory = GitWorkspaceGateway Function(
+  String projectId,
+);
+typedef WorkshopProjectWorkspacePathResolver = String Function(
+  String projectId,
+);
+
 final class WorkshopProjectExecutor {
   WorkshopProjectExecutor({
     required GitWorkspaceGateway gateway,
-  }) : _gateway = gateway;
+    WorkshopProjectGatewayFactory? projectGatewayFactory,
+    WorkshopProjectWorkspacePathResolver? projectWorkspacePathResolver,
+  })  : _gateway = gateway,
+        _projectGatewayFactory = projectGatewayFactory,
+        _projectWorkspacePathResolver = projectWorkspacePathResolver;
 
   final GitWorkspaceGateway _gateway;
+  final WorkshopProjectGatewayFactory? _projectGatewayFactory;
+  final WorkshopProjectWorkspacePathResolver? _projectWorkspacePathResolver;
 
+  final Map<String, GitWorkspaceGateway> _projectGateways =
+      <String, GitWorkspaceGateway>{};
   final Map<String, WorkspaceSession> _sessions =
       <String, WorkspaceSession>{};
+
+  String? _activeProjectId;
 
   /// Sessioni Workspace attualmente associate ai task del progetto.
   List<WorkspaceSession> get sessions =>
       List.unmodifiable(_sessions.values);
 
-  /// Sessione associata a un task, se esistente.
-  WorkspaceSession? sessionForTask(String taskId) =>
-      _sessions[taskId];
+  /// Sessione associata a un task del progetto attualmente attivo.
+  WorkspaceSession? sessionForTask(String taskId) {
+    final normalizedTaskId = taskId.trim();
+    if (normalizedTaskId.isEmpty) return null;
+    return _sessions[normalizedTaskId];
+  }
+
+  /// Directory fisica autorevole del progetto, quando la composizione
+  /// persistente usa workspace isolate per progetto.
+  String? workspacePathForProject(String projectId) {
+    final resolver = _projectWorkspacePathResolver;
+    if (resolver == null) return null;
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) return null;
+    return resolver(normalizedProjectId);
+  }
 
   /// Prepara il prossimo task eseguibile del progetto.
   ///
@@ -62,6 +92,8 @@ final class WorkshopProjectExecutor {
     WorkshopRequest? projectRequest,
     WorkshopBrief? brief,
   }) async {
+    _activateProject(plan.id);
+
     final task = plan.nextAvailableTask;
 
     if (task == null) {
@@ -114,7 +146,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
@@ -156,6 +188,8 @@ final class WorkshopProjectExecutor {
         'The Workshop project task "$taskId" still has incomplete dependencies.',
       );
     }
+
+    _activateProject(plan.id);
 
     final existing = _sessions[task.id];
 
@@ -202,7 +236,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
@@ -255,6 +289,7 @@ final class WorkshopProjectExecutor {
     WorkshopProjectPlan plan,
     String taskId,
   ) {
+    _activateProject(plan.id);
     final task = plan.taskById(taskId);
 
     if (task == null) {
@@ -291,6 +326,7 @@ final class WorkshopProjectExecutor {
     String taskId,
     String reason,
   ) {
+    _activateProject(plan.id);
     final task = plan.taskById(taskId);
 
     if (task == null) {
@@ -357,6 +393,40 @@ final class WorkshopProjectExecutor {
 
       session.cancel();
     }
+  }
+
+  void _activateProject(String projectId) {
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) {
+      throw ArgumentError.value(
+        projectId,
+        'projectId',
+        'Project id cannot be empty.',
+      );
+    }
+
+    if (_activeProjectId == normalizedProjectId) {
+      return;
+    }
+
+    // WorkspaceSession objects are runtime state, not durable project state.
+    // Recovery reconstructs them from the selected project's persisted plan.
+    // Never let standard task ids (e.g. task:initial-implementation) reuse a
+    // session that belonged to a different project.
+    _sessions.clear();
+    _activeProjectId = normalizedProjectId;
+  }
+
+  GitWorkspaceGateway _gatewayForProject(String projectId) {
+    final factory = _projectGatewayFactory;
+    if (factory == null) {
+      return _gateway;
+    }
+    final normalizedProjectId = projectId.trim();
+    return _projectGateways.putIfAbsent(
+      normalizedProjectId,
+      () => factory(normalizedProjectId),
+    );
   }
 
   /// Determina l'operazione Workshop più appropriata per un task.
