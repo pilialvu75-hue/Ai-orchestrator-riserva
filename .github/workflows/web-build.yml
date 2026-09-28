@@ -31,7 +31,8 @@ jobs:
           flutter analyze --no-fatal-warnings --no-fatal-infos \
             lib/web_main.dart \
             lib/app_factory/workshop/web/workshop_web_shell.dart \
-            test/app_factory/workshop/web/workshop_web_shell_test.dart
+            test/app_factory/workshop/web/workshop_web_shell_test.dart \
+            test/app_factory/workshop/web/workshop_web_private_deployment_test.dart
 
       - name: Run Web shell and private-deployment contract tests
         run: |
