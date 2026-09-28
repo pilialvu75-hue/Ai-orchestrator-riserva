@@ -108,10 +108,10 @@ Future<void> main(List<String> args) async {
   try {
     stdout.writeln('[FIRST_APP] stage=project status=starting');
     final handle = await coordinator.startAndPrepare(
-      title: 'Prima app Cantiere - Contatore',
+      title: 'Contatore Test',
       instruction:
-          'Crea una semplice app Flutter contatore con pulsante +, pulsante - '
-          'e pulsante Reset. Deve funzionare su Android.',
+          'Crea una semplice app Flutter chiamata Contatore Test con pulsante +, '
+          'pulsante - e pulsante Reset. Deve funzionare su Android.',
       technologies: const <String>['Flutter', 'Dart'],
       deliverables: const <String>['APK Android installabile'],
       validationCriteria: const <String>[
