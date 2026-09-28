@@ -22,6 +22,7 @@ void main() {
       _success('{}'),
     ]);
     final architect = _CapturingGateway(<WorkshopInferenceResult>[
+      _success(_planningJson),
       _success('{}'),
     ]);
     final engineer = _CapturingGateway(<WorkshopInferenceResult>[
@@ -57,6 +58,14 @@ void main() {
     expect(reviewer.offlineValues, everyElement(isFalse));
   });
 }
+
+const String _planningJson =
+    '{"phases":[{"id":"implementation","title":"Implementation",'
+    '"description":"Implement the change","dependsOn":[]}],'
+    '"tasks":[{"id":"initial-implementation","phaseId":"implementation",'
+    '"title":"Implement","description":"Update the app safely",'
+    '"dependsOn":[],"affectedPaths":["lib/app.dart"],'
+    '"validationCriteria":["Requested change is implemented"]}]}';
 
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
