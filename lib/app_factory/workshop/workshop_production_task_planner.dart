@@ -54,49 +54,31 @@ final class WorkshopProductionTaskPlanner {
         .where((value) => !_isPostTaskBuildCriterion(value))
         .toList(growable: false);
 
-    const foundationId = 'task:initial-implementation';
-    const coreId = 'task:core-behavior';
+    const implementationId = 'task:initial-implementation';
     const acceptanceId = 'task:acceptance-verification';
 
     final tasks = <WorkshopProjectTask>[
       WorkshopProjectTask(
-        id: foundationId,
-        title: 'Fondazione applicazione',
+        id: implementationId,
+        title: 'Funzionalità principale',
         description: _boundedTaskDescription(
-          'Prepare the smallest runnable SDK-only project foundation required '
-          'for the approved goal. Establish or correct the application entry '
-          'point only; do not add third-party dependencies here. Defer the '
-          'requested business behavior and acceptance polishing to later tasks. '
-          'Project goal: '
+          'Implement the requested core behavior directly on top of the existing '
+          'Flutter scaffold as one bounded increment. The scaffold is already '
+          'the runnable project foundation, so do not replace it with a '
+          'placeholder-only intermediate screen. Keep lib/main.dart as a small '
+          'bootstrap and put product UI/behavior in lib/app.dart when that keeps '
+          'the task safer and easier to review. Preserve the approved project '
+          'goal and avoid unrelated features. Project goal: '
           '$normalizedInstruction',
         ),
         phaseId: 'phase:implementation',
-        affectedPaths: const <String>[
-          'lib/main.dart',
-        ],
-        validationCriteria: _boundedCriteria(<String>[
-          'The application has a coherent runnable foundation for the approved goal.',
-          'The entry point is internally consistent and uses only declared SDK capabilities.',
-        ]),
-      ),
-      WorkshopProjectTask(
-        id: coreId,
-        title: 'Funzionalità principale',
-        description: _boundedTaskDescription(
-          'Update the existing foundation with the requested core behavior as '
-          'one bounded increment. Keep lib/main.dart as a small bootstrap and '
-          'put the product UI/behavior in lib/app.dart when that keeps the task '
-          'safer and easier to review. Preserve the approved project goal and '
-          'avoid unrelated features. Project goal: $normalizedInstruction',
-        ),
-        phaseId: 'phase:implementation',
-        dependencies: const <String>[foundationId],
         affectedPaths: const <String>[
           'lib/main.dart',
           'lib/app.dart',
         ],
         validationCriteria: _boundedCriteria(<String>[
           'The requested core behavior is implemented without placeholder output.',
+          'The application remains a coherent runnable SDK-only Flutter project.',
           ...coreCriteria,
         ]),
       ),
@@ -110,7 +92,7 @@ final class WorkshopProductionTaskPlanner {
           'after all bounded tasks complete. Do not expand product scope.',
         ),
         phaseId: 'phase:implementation',
-        dependencies: const <String>[coreId],
+        dependencies: const <String>[implementationId],
         affectedPaths: const <String>[
           'test/widget_test.dart',
         ],
