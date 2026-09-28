@@ -14,6 +14,36 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
+  testWidgets(
+      'production busy state disables composer and explains why',
+      (tester) async {
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'production-busy-composer',
+    );
+    addTearDown(chat.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          productionBusy: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.enabled, isFalse);
+    expect(
+      field.decoration?.hintText,
+      'Cantiere in esecuzione…',
+    );
+    expect(find.byIcon(Icons.send), findsNothing);
+    expect(provider.requests, isEmpty);
+  });
+
   testWidgets('injected Workshop chat survives route disposal', (tester) async {
     final provider = _CapturingProvider();
     final chat = WorkshopChatController(

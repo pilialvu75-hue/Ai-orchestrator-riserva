@@ -761,6 +761,9 @@ class _WorkshopProductionDashboardPageState
 
   @override
   Widget build(BuildContext context) {
+    final execution = widget.executionController.state;
+    final productionBusy = _mutationBusy || execution.isRunning;
+
     return Scaffold(
       body: SafeArea(
         top: false,
@@ -773,6 +776,7 @@ class _WorkshopProductionDashboardPageState
             closeProjectForNewConversation: _closeProjectForNewConversation,
             openProjects: _openSavedProjects,
             modelAssignments: widget.modelAssignments,
+            productionBusy: productionBusy,
           ),
         ),
       ),

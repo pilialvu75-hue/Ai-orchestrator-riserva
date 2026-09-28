@@ -62,6 +62,7 @@ class WorkshopDashboardPage extends StatefulWidget {
     Future<bool> Function()? closeProjectForNewConversation,
     Future<void> Function()? openProjects,
     List<WorkshopModelAssignment>? modelAssignments,
+    this.productionBusy = false,
   })  : _emissionController = emissionController,
         _dashboardController = dashboardController,
         _chatController = chatController,
@@ -75,6 +76,11 @@ class WorkshopDashboardPage extends StatefulWidget {
   final WorkshopChatController? _chatController;
   final Future<bool> Function()? _closeProjectForNewConversation;
   final Future<void> Function()? _openProjects;
+
+  /// True while the production lifecycle is executing a task, build or repair.
+  /// Conversation input is locked only for this interval; project controls and
+  /// recovery remain owned by the production page.
+  final bool productionBusy;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -732,7 +738,13 @@ class _WorkshopDashboardPageState
             focusNode:
                 _messageFocusNode,
             busy:
-                _chatController.isBusy,
+                _chatController.isBusy ||
+                    dashboardState?.isBusy == true ||
+                    widget.productionBusy,
+            busyHint:
+                widget.productionBusy
+                    ? 'Cantiere in esecuzione…'
+                    : null,
             onSend:
                 _sendMessage,
           ),
@@ -1541,6 +1553,7 @@ class _WorkshopComposer
     required this.focusNode,
     required this.busy,
     required this.onSend,
+    this.busyHint,
   });
 
   final TextEditingController
@@ -1549,6 +1562,8 @@ class _WorkshopComposer
   final FocusNode focusNode;
 
   final bool busy;
+
+  final String? busyHint;
 
   final VoidCallback onSend;
 
@@ -1594,7 +1609,9 @@ class _WorkshopComposer
                 decoration:
                     InputDecoration(
                   hintText:
-                      'Scrivi al Cantiere...',
+                      busy && busyHint != null
+                          ? busyHint
+                          : 'Scrivi al Cantiere...',
                   filled:
                       true,
                   fillColor: theme
