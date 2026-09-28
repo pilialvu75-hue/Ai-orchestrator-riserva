@@ -146,6 +146,18 @@ void main() {
     expect(guarded, isTrue);
     monitor.dispose();
   });
+  test('battery temperature is carried as an optional thermal proxy', () {
+    final sample = ResourceSample(<Object?, Object?>{
+      'availableBytes': 123,
+      'batteryTemperatureMilliC': 33700,
+    });
+    expect(sample.batteryTemperatureMilliC, 33700);
+    expect(
+      ResourceSample(<Object?, Object?>{}).batteryTemperatureMilliC,
+      isNull,
+    );
+  });
+
   test('partial and non-finite samples do not claim normal memory', () {
     expect(ResourceSample({}).pressure, 'unknown');
     expect(ResourceSample({'availableBytes': double.infinity}).availableBytes,
