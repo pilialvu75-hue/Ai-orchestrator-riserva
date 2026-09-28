@@ -60,6 +60,18 @@ void main() {
     await walkingMain.parent.create(recursive: true);
     await walkingMain.writeAsString('void main() => print("walking");');
 
+    await executor.seedProjectWorkspace(
+      sourceProjectId: walking.id,
+      targetProjectId: 'project:walking-repair',
+    );
+    final repairRoot =
+        executor.workspaceRootPathForProject('project:walking-repair');
+    expect(repairRoot, isNotNull);
+    expect(
+      await File('$repairRoot/lib/main.dart').readAsString(),
+      'void main() => print("walking");',
+    );
+
     final counter = _plan('project:counter-test');
     final counterSession = await executor.prepareNextTask(counter);
     expect(counterSession, isNotNull);
