@@ -276,20 +276,9 @@ String _engineerResponse(InferenceRequest request) {
   late final List<Map<String, Object?>> changes;
 
   if (taskId.contains('task:initial-implementation')) {
-    summary = 'Prepara la fondazione Flutter minima.';
-    explanation =
-        'Mantiene il bootstrap SDK-only e rinvia il comportamento al task successivo.';
-    changes = <Map<String, Object?>>[
-      <String, Object?>{
-        'path': 'lib/main.dart',
-        'type': 'modification',
-        'content': _counterFoundationDart,
-      },
-    ];
-  } else if (taskId.contains('task:core-behavior')) {
     summary = 'Implementa il comportamento del contatore.';
     explanation =
-        'Aggiunge incremento, decremento e reset senza dipendenze esterne.';
+        'Aggiunge il comportamento richiesto direttamente sullo scaffold Flutter esistente.';
     changes = <Map<String, Object?>>[
       <String, Object?>{
         'path': 'lib/main.dart',
@@ -345,29 +334,6 @@ String _reviewerResponse(InferenceRequest request) {
     'warnings': const <String>[],
   });
 }
-
-const String _counterFoundationDart = r'''
-import 'package:flutter/material.dart';
-
-void main() {
-  runApp(const CounterApp());
-}
-
-class CounterApp extends StatelessWidget {
-  const CounterApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text('Contatore in preparazione'),
-        ),
-      ),
-    );
-  }
-}
-''';
 
 const String _counterMainDart = r'''
 import 'package:flutter/material.dart';
