@@ -59,6 +59,9 @@ void main() {
     final walkingMain = File('$walkingRoot/lib/main.dart');
     await walkingMain.parent.create(recursive: true);
     await walkingMain.writeAsString('void main() => print("walking");');
+    final generatedBuildFile = File('$walkingRoot/build/generated.txt');
+    await generatedBuildFile.parent.create(recursive: true);
+    await generatedBuildFile.writeAsString('generated output');
 
     await executor.seedProjectWorkspace(
       sourceProjectId: walking.id,
@@ -70,6 +73,10 @@ void main() {
     expect(
       await File('$repairRoot/lib/main.dart').readAsString(),
       'void main() => print("walking");',
+    );
+    expect(
+      await File('$repairRoot/build/generated.txt').exists(),
+      isFalse,
     );
 
     final counter = _plan('project:counter-test');
