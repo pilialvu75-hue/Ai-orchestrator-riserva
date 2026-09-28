@@ -39,9 +39,9 @@ void main() {
 
     expect(workflow, contains('WEB_ACCESS_USER'));
     expect(workflow, contains('WEB_ACCESS_PASSWORD'));
-    expect(workflow, contains('test "$root_status" = "401"'));
-    expect(workflow, contains('test "$asset_status" = "401"'));
-    expect(workflow, contains('test "$root_status" = "200"'));
-    expect(workflow, contains('test "$asset_status" = "200"'));
+    expect(workflow, contains(r'test "$root_status" = "401"'));
+    expect(workflow, contains(r'test "$asset_status" = "401"'));
+    expect(workflow, contains(r'test "$root_status" = "200"'));
+    expect(workflow, contains(r'test "$asset_status" = "200"'));
   });
 }
