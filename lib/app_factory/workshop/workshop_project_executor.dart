@@ -437,7 +437,8 @@ final class WorkshopProjectExecutor {
     // Standard production tasks have explicit lifecycle semantics. Never infer
     // them from user-controlled project names/goals (for example "Contatore
     // Test"), because words such as Test/Build/Fix are valid product names.
-    if (task.id == 'task:acceptance-verification') {
+    if (task.id == 'task:acceptance-verification' ||
+        task.id.endsWith(':acceptance-verification')) {
       return WorkshopOperation.validate;
     }
 
@@ -446,7 +447,8 @@ final class WorkshopProjectExecutor {
       return WorkshopOperation.fix;
     }
 
-    if (task.id == 'task:initial-implementation' &&
+    if ((task.id == 'task:initial-implementation' ||
+            task.id.endsWith(':initial-implementation')) &&
         projectRequest != null) {
       return projectRequest.operation;
     }

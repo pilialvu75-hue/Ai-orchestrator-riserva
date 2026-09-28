@@ -48,8 +48,9 @@ final class WorkshopProductionTaskCoordinator {
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
     String? workspaceProjectId,
+    bool isOffline = false,
   }) async {
-    final plan = _bundle.dashboardController.startProduction(
+    final plan = await _bundle.dashboardController.startPlannedProduction(
       title: title,
       instruction: instruction,
       requirements: requirements,
@@ -58,6 +59,7 @@ final class WorkshopProductionTaskCoordinator {
       deliverables: deliverables,
       validationCriteria: validationCriteria,
       workspaceProjectId: workspaceProjectId,
+      isOffline: isOffline,
     );
 
     final session = await _bundle.dashboardController.prepareNextTask();
