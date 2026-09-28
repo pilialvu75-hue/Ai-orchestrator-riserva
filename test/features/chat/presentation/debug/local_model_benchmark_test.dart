@@ -56,6 +56,13 @@ void main() {
     );
   });
 
+  test('Vulkan matrix has CPU, moderate and full-offload requests', () {
+    expect(
+      LocalModelBenchmarkRunner.vulkanMatrixGpuLayers,
+      <int>[0, 10, 50],
+    );
+  });
+
   test('report omits responses when requested', () {
     const item = LocalModelBenchmarkCaseResult(
       caseId: 'sample',
@@ -64,6 +71,7 @@ void main() {
       maxScore: 1,
       forbiddenHits: 0,
       firstContentMs: 100,
+      prefillMs: 40,
       totalMs: 200,
       reportedTokens: 10,
       observedGpuLayers: 33,
@@ -73,6 +81,8 @@ void main() {
       endPressure: 'high',
       startAvailableBytes: 1000,
       endAvailableBytes: 500,
+      startBatteryTemperatureMilliC: 32000,
+      endBatteryTemperatureMilliC: 33500,
       sessionStart: 'warm',
       sessionEnd: 'released',
     );
@@ -82,6 +92,7 @@ void main() {
         LocalModelBenchmarkModelResult(
           modelId: 'phi3_5_mini',
           displayName: 'Phi',
+          requestedGpuLayers: 50,
           cases: <LocalModelBenchmarkCaseResult>[item],
         ),
       ],
@@ -89,6 +100,9 @@ void main() {
 
     final diagnosticsText = report.toPlainText(includeResponses: false);
     expect(diagnosticsText, contains('quality=1/1'));
+    expect(diagnosticsText, contains('gpu_request=50'));
+    expect(diagnosticsText, contains('prefill=40ms'));
+    expect(diagnosticsText, contains('battery_temp_c=32.0->33.5'));
     expect(diagnosticsText, contains('session=warm->released'));
     expect(diagnosticsText, isNot(contains('private response text')));
   });
