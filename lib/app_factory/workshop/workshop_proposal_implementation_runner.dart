@@ -404,6 +404,14 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
+If request.operation is "create" and request.targetFiles contains
+"lib/main.dart", changes MUST include a non-deletion "lib/main.dart" with the
+complete new entrypoint. Never leave an entrypoint inherited from older project
+content.
+If request.operation is "create" and request.targetFiles contains
+"lib/main.dart", changes MUST include a non-deletion "lib/main.dart" with the
+complete new entrypoint. Never leave an entrypoint inherited from older project
+content.
 Use only workspaceFiles as existing file content. replaceableTargets, when
 present, are existing oversized starter files intentionally omitted from the
 prompt for a create task; you may replace those paths only with complete
@@ -583,7 +591,10 @@ requested. Do not review, approve or apply.
 
     final message = error.message.toString();
     return message == 'Workshop proposal field "explanation" is required.' ||
-        message == 'Workshop proposal field "explanation" must be text.';
+        message == 'Workshop proposal field "explanation" must be text.' ||
+        message ==
+            'Workshop create proposal must write "lib/main.dart" so a new project '
+                'cannot inherit an entrypoint from a previous workspace.';
   }
 
   static bool _isCriticalMemoryError(
