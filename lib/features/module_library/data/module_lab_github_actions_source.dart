@@ -23,10 +23,10 @@ typedef ModuleLabAccessTokenProvider = Future<String> Function();
 
 final class ModuleLabGitHubActionsSource {
   ModuleLabGitHubActionsSource({
-    required WorkshopLibraryGitHubCredentialStore credentialStore,
+    WorkshopLibraryGitHubCredentialStore? credentialStore,
     http.Client? client,
     ModuleLabAccessTokenProvider? accessTokenProvider,
-  })  : _credentialStore = credentialStore,
+  })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
         _client = client ?? http.Client(),
         _accessTokenProvider = accessTokenProvider;
 
