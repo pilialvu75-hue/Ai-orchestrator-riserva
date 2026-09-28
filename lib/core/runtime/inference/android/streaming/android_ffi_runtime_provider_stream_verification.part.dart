@@ -85,11 +85,11 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                   final profile = ResourceProfile.select(
                     sample,
                     phi: modelId == 'phi3_5_mini',
-                    requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                    requestedGpuLayers: this.requestedGpuLayers,
                   );
                   final verificationSessionId = await createNativeSessionOffUi(
                     modelPath,
-                    nGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                    nGpuLayers: this.requestedGpuLayers,
                     nCtx: profile.context,
                     nBatch: profile.batch,
                     nMicroBatch: profile.microBatch,
