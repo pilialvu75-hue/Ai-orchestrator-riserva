@@ -13,7 +13,7 @@ browser mechanics remain behind Web-specific adapters.
 ## Sequencing
 
 1. W1 browser-safe startup and ordinary Web build.
-2. W2 private authenticated deployment.
+2. W2 private authenticated deployment through a fail-closed Cloudflare Pages Function.
 3. W3 durable browser storage.
 4. W4 Cantiere Cloud/AUTO execution.
 5. W5 Module Library + Researcher parity.
@@ -68,3 +68,15 @@ to another platform.
 Web workflow together with the focused Web shell tests.
 
 Android/Windows/Linux/macOS CI remains unchanged.
+
+
+## W2 deployment boundary
+
+The private-development deployment uses a root Cloudflare Pages Function and
+`web/_routes.json` to authenticate every HTML/static request. Credentials live
+only in Cloudflare/GitHub environment secrets; missing secrets return HTTP 503.
+The manual deployment workflow rejects a release unless anonymous root/asset
+requests return 401 and authenticated requests return 200.
+
+This remains ordinary Web hosting. No manifest, service worker, installability,
+or offline-first behavior is introduced before W9.
