@@ -773,6 +773,8 @@ class _WorkshopProductionDashboardPageState
             closeProjectForNewConversation: _closeProjectForNewConversation,
             openProjects: _openSavedProjects,
             modelAssignments: widget.modelAssignments,
+            productionBusy:
+                _mutationBusy || widget.executionController.state.isRunning,
           ),
         ),
       ),
@@ -827,7 +829,14 @@ class _WorkshopProductionDashboardPageState
                 const SizedBox(height: 8),
               ],
               if (_mutationBusy)
-                const FilledButton(onPressed: null, child: Text('Cantiere in esecuzione…'))
+                FilledButton(
+                  onPressed: null,
+                  child: Text(
+                    _projectReadyForBuild && _buildResult == null
+                        ? 'Build APK online in corso…'
+                        : 'Cantiere in esecuzione…',
+                  ),
+                )
               else if (execution.isRunning)
                 FilledButton.icon(
                   onPressed: execution.status ==
