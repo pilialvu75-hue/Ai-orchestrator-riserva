@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_curator_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_curator_advice.dart';
@@ -51,6 +52,10 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
   String? _clientId;
   String? _error;
   final Set<String> _curatorLoading = <String>{};
+  late final ModuleLabGitHubActionsSource _labSource;
+  ModuleLabRunStatus? _labRun;
+  bool _labLoading = false;
+  String? _labError;
   List<ModuleCapabilityStatus> _items = const <ModuleCapabilityStatus>[];
   DateTime? _lastUpdatedAt;
 
@@ -68,6 +73,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
           configStore: _configStore,
           authClient: _authClient,
         );
+    _labSource = ModuleLabGitHubActionsSource(credentialStore: _credentialStore);
     _curatorRunner = widget.curatorRunner ??
         ModuleCuratorGitHubActionsSource(
           credentialStore: _credentialStore,
@@ -101,6 +107,37 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
     }
   }
 
+  Future<void> _refreshLab() async {
+    if (_externalRepository || !_connected || _labLoading) return;
+    setState(() { _labLoading = true; _labError = null; });
+    try {
+      final run = await _labSource.latestResearcherRun();
+      if (!mounted) return;
+      setState(() => _labRun = run);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _labError = error.toString());
+    } finally {
+      if (mounted) setState(() => _labLoading = false);
+    }
+  }
+
+  Future<void> _runResearcherNow() async {
+    if (_labLoading) return;
+    setState(() { _labLoading = true; _labError = null; });
+    try {
+      await _labSource.dispatchResearcher();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Researcher avviato.')));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _labError = error.toString());
+    } finally {
+      if (mounted) setState(() => _labLoading = false);
+    }
+    await _refreshLab();
+  }
+
   Future<void> _refresh() async {
     if (!_externalRepository && !_connected) return;
     setState(() {
@@ -116,6 +153,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
         _connected = true;
         _loading = false;
       });
+      unawaited(_refreshLab());
     } catch (error) {
       if (!mounted) return;
       final text = error.toString();
@@ -475,6 +513,11 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       onReconnect: _externalRepository ? null : _connect,
                     )
                   : _ModuleIndexView(
+                      labRun: _labRun,
+                      labLoading: _labLoading,
+                      labError: _labError,
+                      onRunResearcher: _runResearcherNow,
+                      onRefreshLab: _refreshLab,
                       items: _items,
                       updatedAt: _lastUpdatedAt,
                       onRefresh: _refresh,
@@ -487,6 +530,11 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
 
 class _ModuleIndexView extends StatelessWidget {
   const _ModuleIndexView({
+    required this.labRun,
+    required this.labLoading,
+    required this.labError,
+    required this.onRunResearcher,
+    required this.onRefreshLab,
     required this.items,
     required this.updatedAt,
     required this.onRefresh,
@@ -494,6 +542,11 @@ class _ModuleIndexView extends StatelessWidget {
     required this.onCurator,
   });
 
+  final ModuleLabRunStatus? labRun;
+  final bool labLoading;
+  final String? labError;
+  final Future<void> Function() onRunResearcher;
+  final Future<void> Function() onRefreshLab;
   final List<ModuleCapabilityStatus> items;
   final DateTime? updatedAt;
   final Future<void> Function() onRefresh;
@@ -515,11 +568,12 @@ class _ModuleIndexView extends StatelessWidget {
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: sorted.length + 1,
+        itemCount: sorted.length + 2,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
           if (index == 0) return _LastUpdatedBanner(updatedAt: updatedAt);
-          final status = sorted[index - 1];
+          if (index == 1) return _ModuleLabCard(run: labRun, loading: labLoading, error: labError, onRun: onRunResearcher, onRefresh: onRefreshLab);
+          final status = sorted[index - 2];
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(vertical: 6),
             title: Text('${status.title} (${status.progressLabel})'),
@@ -868,6 +922,38 @@ class _ErrorView extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+class _ModuleLabCard extends StatelessWidget {
+  const _ModuleLabCard({required this.run, required this.loading, required this.error, required this.onRun, required this.onRefresh});
+  final ModuleLabRunStatus? run;
+  final bool loading;
+  final String? error;
+  final Future<void> Function() onRun;
+  final Future<void> Function() onRefresh;
+  @override
+  Widget build(BuildContext context) {
+    final current = run;
+    final running = current?.running ?? false;
+    final state = current == null ? 'Nessun run disponibile' : running ? 'Researcher in esecuzione' : 'Ultimo run: ${current!.conclusion ?? current.status}';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [const Icon(Icons.science_outlined), const SizedBox(width: 8), Text('Lab', style: Theme.of(context).textTheme.titleMedium)]),
+          const SizedBox(height: 8), Text(state),
+          if (error != null) ...[const SizedBox(height: 8), Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, children: [
+            FilledButton.icon(onPressed: loading || running ? null : () => unawaited(onRun()), icon: const Icon(Icons.play_arrow), label: const Text('Avvia Researcher ora')),
+            IconButton(tooltip: 'Aggiorna stato Lab', onPressed: loading ? null : () => unawaited(onRefresh()), icon: loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh)),
+          ]),
+          const SizedBox(height: 6), Text('Il Lab impedisce un secondo avvio mentre un ciclo è già attivo.', style: Theme.of(context).textTheme.bodySmall),
+        ]),
       ),
     );
   }
