@@ -204,6 +204,61 @@ void main() {
     expect(bundle.workspaceRootPath, workspace.path);
   });
 
+  test('repair build keeps the failed project physical workspace', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'workshop-repair-build-',
+    );
+    addTearDown(() async {
+      if (await workspace.exists()) {
+        await workspace.delete(recursive: true);
+      }
+    });
+
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: workspace.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+      isolateProjects: true,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Repair cycle',
+      instruction: 'Repair the failed project.',
+      workspaceProjectId: 'project:failed-source',
+    );
+    _markPlanCompleted(plan);
+
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    await coordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+
+    expect(
+      provider.request!.projectPath,
+      WorkshopProjectWorkspaceScope.resolve(
+        workspaceRootPath: workspace.path,
+        projectId: 'project:failed-source',
+      ),
+    );
+    expect(
+      provider.request!.projectPath,
+      isNot(
+        WorkshopProjectWorkspaceScope.resolve(
+          workspaceRootPath: workspace.path,
+          projectId: plan.id,
+        ),
+      ),
+    );
+  });
+
   test('production build refuses an incomplete Cantiere project', () {
     final provider = _CapturingBuildProvider();
     final buildLab = WorkshopBuildLab(
