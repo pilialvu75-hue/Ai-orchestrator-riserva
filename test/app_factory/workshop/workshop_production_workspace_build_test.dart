@@ -150,6 +150,57 @@ void main() {
     expect(bundle.workspaceRootPath, workspace.path);
   });
 
+  test('project-scoped build targets only the active project directory',
+      () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'workshop-project-build-',
+    );
+    addTearDown(() async {
+      if (await workspace.exists()) {
+        await workspace.delete(recursive: true);
+      }
+    });
+
+    final provider = _CapturingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: workspace.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+      projectScopedWorkspaces: true,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Counter Test',
+      instruction: 'Build only this project.',
+    );
+    final projectPath =
+        bundle.projectExecutor.workspaceRootPathForProject(plan.id);
+    expect(projectPath, isNotNull);
+    await Directory(projectPath!).create(recursive: true);
+    await File('$projectPath/lib/main.dart')
+        .create(recursive: true)
+        .then((file) => file.writeAsString('void main() {}'));
+
+    _markPlanCompleted(plan);
+
+    final result = await coordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(provider.request, isNotNull);
+    expect(provider.request!.projectPath, projectPath);
+    expect(provider.request!.projectPath, isNot(workspace.path));
+  });
+
   test('production build refuses an incomplete Cantiere project', () {
     final provider = _CapturingBuildProvider();
     final buildLab = WorkshopBuildLab(
