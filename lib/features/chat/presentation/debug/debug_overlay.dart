@@ -72,6 +72,9 @@ class _DebugOverlayState
   static const Duration _benchmarkTimeout =
       Duration(minutes: 12);
 
+  static const Duration _vulkanMatrixTimeout =
+      Duration(minutes: 30);
+
   /// Numero massimo di righe copiate dal log persistente.
   ///
   /// Il file su disco serve per sopravvivere ai crash nativi e può
@@ -445,9 +448,35 @@ class _DebugOverlayState
     await _showLocalModelBenchmarkReport(report!);
   }
 
+  Future<void> _runVulkanMatrixBenchmark() async {
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'vulkan_gpu_layer_matrix',
+      timeout: _vulkanMatrixTimeout,
+      action: () async {
+        report = await _localModelBenchmark.runVulkanMatrix(
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = message;
+            });
+          },
+        );
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showLocalModelBenchmarkReport(
+      report!,
+      title: 'Vulkan 0 / 10 / full',
+    );
+  }
+
   Future<void> _showLocalModelBenchmarkReport(
-    LocalModelBenchmarkReport report,
-  ) async {
+    LocalModelBenchmarkReport report, {
+    String title = 'Phi vs Nemotron',
+  }) async {
     final text = report.toPlainText();
 
     await showDialog<void>(
@@ -455,9 +484,9 @@ class _DebugOverlayState
       builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: const Color(0xFF101723),
-          title: const Text(
-            'Phi vs Nemotron',
-            style: TextStyle(
+          title: Text(
+            title,
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 14,
             ),
@@ -1042,6 +1071,19 @@ class _DebugOverlayState
               child:
                   const Text(
                 'Benchmark Phi ↔ Nemotron',
+              ),
+            ),
+            const SizedBox(
+              height: 6,
+            ),
+            FilledButton(
+              onPressed:
+                  _running
+                      ? null
+                      : _runVulkanMatrixBenchmark,
+              child:
+                  const Text(
+                'Vulkan 0 / 10 / full',
               ),
             ),
             const SizedBox(
