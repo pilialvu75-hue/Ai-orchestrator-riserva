@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 /// Deterministic filesystem scope for one Cantiere production project.
@@ -32,11 +33,8 @@ abstract final class WorkshopProjectWorkspaceScope {
       );
     }
 
-    final encoded = utf8
-        .encode(id)
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final digest = sha256.convert(utf8.encode(id)).toString();
 
-    return p.join(root, 'projects', 'project-$encoded');
+    return p.join(root, 'projects', 'project-$digest');
   }
 }
