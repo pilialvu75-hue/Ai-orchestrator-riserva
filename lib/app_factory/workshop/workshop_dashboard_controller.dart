@@ -349,6 +349,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       );
     }
 
+    restoredPlan.workspaceProjectId = plan.workspaceProjectId;
     restoredPlan.status = plan.status;
     restoredPlan.updatedAt = plan.updatedAt;
     if (restoredPlan.status == WorkshopProjectStatus.completed) {
