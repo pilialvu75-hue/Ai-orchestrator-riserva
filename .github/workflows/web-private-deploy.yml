@@ -31,6 +31,9 @@ jobs:
       - name: Build Cantiere Web
         run: flutter build web --release --target lib/web_main.dart
 
+      - name: Install Cloudflare Pages routing metadata
+        run: cp web/_routes.json build/web/_routes.json
+
       - name: Verify whole-site auth routing is packaged
         shell: bash
         run: |
