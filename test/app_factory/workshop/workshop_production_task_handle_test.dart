@@ -46,7 +46,7 @@ void main() {
     final requestId = bundle.dashboardController.state.requestId;
 
     expect(requestId, isNotNull);
-    expect(handle.taskId, 'task:initial-implementation');
+    expect(handle.taskId, endsWith(':initial-implementation'));
     expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
     expect(workspaceGateway.writeCalls, 0);
 
@@ -58,6 +58,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
@@ -90,7 +91,10 @@ void main() {
     expect(dashboardState.completedTasks, 1);
     expect(dashboardState.totalTasks, 2);
     expect(dashboardState.activeTaskId, isNull);
-    expect(handle.plan.nextAvailableTask?.id, 'task:acceptance-verification');
+    expect(
+      handle.plan.nextAvailableTask?.id,
+      endsWith(':acceptance-verification'),
+    );
     expect(
       bundle.dashboardController.engine.stageOf(requestId!),
       WorkshopStage.planning,
@@ -116,7 +120,10 @@ void main() {
         AppAiRole.architect: _QueueGateway(
           role: AppAiRole.architect,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_planningJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.engineer: _QueueGateway(
           role: AppAiRole.engineer,
@@ -229,7 +236,10 @@ void main() {
         AppAiRole.architect: _QueueGateway(
           role: AppAiRole.architect,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_planningJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.engineer: engineer,
         AppAiRole.reviewer: reviewer,
@@ -241,11 +251,11 @@ void main() {
       instruction: 'Continue the application change safely.',
     );
 
-    const resume = WorkshopResumeContext(
+    final resume = WorkshopResumeContext(
       executionId: 'execution-stable',
       attemptId: 'attempt-2',
       projectId: 'project-1',
-      taskId: 'task:initial-implementation',
+      taskId: handle.taskId,
       sessionId: 'workshop-session-1',
       objective: 'Continue implementation safely',
       phase: 'implementation',
@@ -270,6 +280,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
@@ -280,7 +291,7 @@ void main() {
     expect(engineer.lastIdentity, isNotNull);
     expect(engineer.lastIdentity!['executionId'], 'execution-stable');
     expect(engineer.lastIdentity!['attemptId'], 'attempt-2');
-    expect(engineer.lastIdentity!['taskId'], 'task:initial-implementation');
+    expect(engineer.lastIdentity!['taskId'], handle.taskId);
     expect(engineer.lastIdentity!['projectId'], 'project-1');
     expect(engineer.lastIdentity!['checkpointId'], 'checkpoint-4');
     expect(engineer.lastIdentity!['sessionId'], 'workshop-session-1');
@@ -336,6 +347,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
@@ -374,6 +386,7 @@ void main() {
         'local database persistence',
       ],
       technologies: const <String>['Android'],
+      isOffline: true,
     );
     bundle.dashboardController.approveCurrentProject();
 
@@ -438,6 +451,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
@@ -547,6 +561,19 @@ final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
   }
 }
 
+const String _planningJson =
+    '{"phases":[{"id":"implementation","title":"Implementation",'
+    '"description":"Implement and verify the requested change","dependsOn":[]}],'
+    '"tasks":[{"id":"initial-implementation","phaseId":"implementation",'
+    '"title":"Funzionalità principale","description":"Implement the requested change",'
+    '"dependsOn":[],"affectedPaths":["lib/app.dart"],'
+    '"validationCriteria":["Requested change is implemented"]},'
+    '{"id":"acceptance-verification","phaseId":"implementation",'
+    '"title":"Verifica e rifinitura","description":"Verify the requested change",'
+    '"dependsOn":["initial-implementation"],'
+    '"affectedPaths":["lib/app.dart"],'
+    '"validationCriteria":["Requested change is verified"]}]}';
+
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
     '"changes":[{"path":"lib/app.dart","type":"modification",'
@@ -567,7 +594,10 @@ Map<AppAiRole, WorkshopInferenceGateway> _gateways(List<AppAiRole> calls) =>
       AppAiRole.architect: _QueueGateway(
         role: AppAiRole.architect,
         calls: calls,
-        results: <WorkshopInferenceResult>[_success('{}')],
+        results: <WorkshopInferenceResult>[
+          _success(_planningJson),
+          _success('{}'),
+        ],
       ),
       AppAiRole.engineer: _QueueGateway(
         role: AppAiRole.engineer,

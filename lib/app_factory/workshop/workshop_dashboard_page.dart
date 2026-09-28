@@ -384,7 +384,7 @@ class _WorkshopDashboardPageState
     try {
       final approvedProposal = _pendingApprovedProposal?.trim();
 
-      controller.startProduction(
+      await controller.startPlannedProduction(
         title: title,
         instruction: instruction,
         context: approvedProposal == null || approvedProposal.isEmpty
