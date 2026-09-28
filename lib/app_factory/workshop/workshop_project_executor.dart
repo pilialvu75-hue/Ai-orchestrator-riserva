@@ -126,7 +126,6 @@ final class WorkshopProjectExecutor {
     }
 
     final gateway = _gatewayForProject(plan.id);
-    final gateway = _gatewayForProject(plan.id);
     final existing = _sessions[task.id];
 
     if (existing != null) {
@@ -216,6 +215,7 @@ final class WorkshopProjectExecutor {
       );
     }
 
+    final gateway = _gatewayForProject(plan.id);
     final existing = _sessions[task.id];
 
     if (existing != null) {
