@@ -188,6 +188,56 @@ void main() {
         '/workspaces/project:beta',
       );
     });
+    test('repair plan can inherit the failed project workspace', () async {
+      final sourceGateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'failed source'},
+      );
+      final fallback = _RecordingGateway(files: <String, String>{});
+
+      final executor = WorkshopProjectExecutor(
+        gateway: fallback,
+        projectGatewayFactory: (projectId) {
+          if (projectId == 'project:source') return sourceGateway;
+          throw StateError('Unexpected workspace identity: $projectId');
+        },
+        projectWorkspacePathResolver: (projectId) => '/workspaces/$projectId',
+      );
+
+      final repairPlan = WorkshopProjectPlan(
+        id: 'project:repair-cycle',
+        title: 'Repair',
+        goal: 'Fix the failed build',
+        workspaceProjectId: 'project:source',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Repair',
+            description: 'Repair one build failure',
+            taskIds: const <String>['task:initial-implementation'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:initial-implementation',
+            title: 'Correzione build mirata',
+            description: 'BUILD REPAIR ATTEMPT: 1 Fix syntax.',
+            phaseId: 'phase:implementation',
+          ),
+        ],
+      );
+
+      final session = await executor.prepareNextTask(repairPlan);
+
+      expect(session, isNotNull);
+      expect(session!.workspace.read('lib/main.dart'), 'failed source');
+      expect(
+        executor.workspacePathForProject(
+          repairPlan.effectiveWorkspaceProjectId,
+        ),
+        '/workspaces/project:source',
+      );
+    });
   });
 
   group('WorkshopProjectExecutor.applyApprovedTask', () {
