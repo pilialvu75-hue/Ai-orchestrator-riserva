@@ -3,10 +3,154 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 void main() {
+  group('WorkshopProjectExecutor task operation routing', () {
+    test('Contatore Test project keeps initial implementation as create', () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'starter'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:counter-test',
+        title: 'Contatore Test',
+        goal: 'Crea una semplice app Contatore Test.',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Implementation',
+            description: 'Implement product tasks',
+            taskIds: const <String>['task:initial-implementation'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:initial-implementation',
+            title: 'Funzionalità principale',
+            description:
+                'Implement the requested behavior. Project goal: Crea una app Contatore Test.',
+            phaseId: 'phase:implementation',
+            affectedPaths: const <String>['lib/main.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:counter-test',
+        title: 'Contatore Test',
+        instruction: 'Crea una semplice app Contatore Test.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(
+        session!.context.request.operation,
+        WorkshopOperation.create,
+      );
+    });
+
+    test('acceptance task routes to validate regardless of wording', () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'test/widget_test.dart': 'old'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:acceptance',
+        title: 'Acceptance project',
+        goal: 'Ship safely',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Implementation',
+            description: 'Verify product',
+            taskIds: const <String>['task:acceptance-verification'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:acceptance-verification',
+            title: 'Verifica e rifinitura',
+            description: 'Add or update focused verification.',
+            phaseId: 'phase:implementation',
+            affectedPaths: const <String>['test/widget_test.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:acceptance',
+        title: 'Product',
+        instruction: 'Create product',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(
+        session!.context.request.operation,
+        WorkshopOperation.validate,
+      );
+    });
+
+    test('build repair task routes to fix instead of inherited create', () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'old'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:repair',
+        title: 'Repair',
+        goal: 'Repair build',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Repair',
+            description: 'Repair',
+            taskIds: const <String>['task:initial-implementation'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:initial-implementation',
+            title: 'Correzione build mirata',
+            description: 'BUILD REPAIR ATTEMPT: 1 Fix analyzer failure.',
+            phaseId: 'phase:implementation',
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:repair',
+        title: 'Repair',
+        instruction: 'Repair build',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(session!.context.request.operation, WorkshopOperation.fix);
+    });
+  });
+
   group('WorkshopProjectExecutor.applyApprovedTask', () {
     test('applies only an approved task and completes its workspace session',
         () async {

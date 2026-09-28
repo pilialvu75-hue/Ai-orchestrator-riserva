@@ -79,7 +79,10 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       projectPath: null,
       targetFiles: task.affectedPaths,
       constraints: <String>[
@@ -165,7 +168,10 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       targetFiles: task.affectedPaths,
       constraints: <String>[
         if (task.validationCriteria.isNotEmpty)
@@ -355,45 +361,76 @@ final class WorkshopProjectExecutor {
 
   /// Determina l'operazione Workshop più appropriata per un task.
   WorkshopOperation _operationForTask(
-    WorkshopProjectTask task,
-  ) {
-    final text =
-        '${task.title} ${task.description}'.toLowerCase();
+    WorkshopProjectTask task, {
+    WorkshopRequest? projectRequest,
+  }) {
+    // Standard production tasks have explicit lifecycle semantics. Never infer
+    // them from user-controlled project names/goals (for example "Contatore
+    // Test"), because words such as Test/Build/Fix are valid product names.
+    if (task.id == 'task:acceptance-verification') {
+      return WorkshopOperation.validate;
+    }
 
-    if (text.contains('fix') ||
-        text.contains('bug') ||
-        text.contains('errore') ||
-        text.contains('crash')) {
+    if (task.title == 'Correzione build mirata' ||
+        task.description.toUpperCase().startsWith('BUILD REPAIR ATTEMPT:')) {
       return WorkshopOperation.fix;
     }
 
-    if (text.contains('refactor') ||
-        text.contains('refactoring')) {
+    if (task.id == 'task:initial-implementation' &&
+        projectRequest != null) {
+      return projectRequest.operation;
+    }
+
+    // Legacy/generic tasks still need a deterministic fallback. Classify only
+    // task-owned text and exclude the appended user project goal.
+    final description = task.description;
+    const projectGoalMarker = 'Project goal:';
+    final markerIndex = description.indexOf(projectGoalMarker);
+    final taskOwnedDescription = markerIndex < 0
+        ? description
+        : description.substring(0, markerIndex);
+    final text =
+        '${task.title} $taskOwnedDescription'.toLowerCase();
+
+    final words = RegExp(r'[a-z0-9_]+')
+        .allMatches(text)
+        .map((match) => match.group(0)!)
+        .toSet();
+    bool hasWord(String word) => words.contains(word);
+
+    if (hasWord('fix') ||
+        hasWord('bug') ||
+        hasWord('errore') ||
+        hasWord('crash')) {
+      return WorkshopOperation.fix;
+    }
+
+    if (hasWord('refactor') || hasWord('refactoring')) {
       return WorkshopOperation.refactor;
     }
 
-    if (text.contains('optim') ||
-        text.contains('performance') ||
-        text.contains('latency')) {
+    if (hasWord('optim') ||
+        hasWord('performance') ||
+        hasWord('latency')) {
       return WorkshopOperation.optimize;
     }
 
-    if (text.contains('remove') ||
-        text.contains('delete') ||
-        text.contains('elimina')) {
+    if (hasWord('remove') ||
+        hasWord('delete') ||
+        hasWord('elimina')) {
       return WorkshopOperation.remove;
     }
 
-    if (text.contains('modify') ||
-        text.contains('update') ||
-        text.contains('change') ||
-        text.contains('modifica')) {
+    if (hasWord('modify') ||
+        hasWord('update') ||
+        hasWord('change') ||
+        hasWord('modifica')) {
       return WorkshopOperation.modify;
     }
 
-    if (text.contains('validate') ||
-        text.contains('test') ||
-        text.contains('build')) {
+    if (hasWord('validate') ||
+        hasWord('test') ||
+        hasWord('build')) {
       return WorkshopOperation.validate;
     }
 
