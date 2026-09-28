@@ -47,6 +47,7 @@ final class WorkshopProposalWorkspaceStager {
 
     return proposal;
   }
+
   void _requireCreateEntrypointChange({
     required WorkspaceSession session,
     required WorkshopChangeProposal proposal,
@@ -66,5 +67,4 @@ final class WorkshopProposalWorkspaceStager {
       );
     }
   }
-
 }
