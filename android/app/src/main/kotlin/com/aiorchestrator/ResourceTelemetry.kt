@@ -3,8 +3,13 @@ package com.aiorchestrator
 import android.app.ActivityManager
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
+import android.os.BatteryManager
+import android.os.Build
 import android.os.Debug
+import android.os.PowerManager
 import android.os.SystemClock
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,6 +35,28 @@ class ResourceTelemetry(private val context: Context, engine: FlutterEngine) : C
                         lines.firstOrNull { it.startsWith("VmRSS:") }
                             ?.trim()?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull()
                     }
+
+                    val powerManager =
+                        context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    val thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        powerManager.currentThermalStatus
+                    } else {
+                        null
+                    }
+                    val thermalHeadroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        powerManager.getThermalHeadroom(0)
+                            .takeIf { it.isFinite() && it >= 0f }
+                    } else {
+                        null
+                    }
+                    val battery = context.registerReceiver(
+                        null,
+                        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                    )
+                    val batteryTempDeciC = battery
+                        ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+                        ?.takeIf { it != Int.MIN_VALUE && it >= 0 }
+
                     result.success(mapOf(
                         "availableBytes" to info.availMem,
                         "totalBytes" to info.totalMem,
@@ -37,7 +64,10 @@ class ResourceTelemetry(private val context: Context, engine: FlutterEngine) : C
                         "lowMemory" to info.lowMemory,
                         "rssBytes" to rssKb?.times(1024),
                         "nativeHeapBytes" to Debug.getNativeHeapAllocatedSize(),
-                        "trimLevel" to if (SystemClock.elapsedRealtime() - trimAt < 10000) trimLevel else 0
+                        "trimLevel" to if (SystemClock.elapsedRealtime() - trimAt < 10000) trimLevel else 0,
+                        "thermalStatus" to thermalStatus,
+                        "thermalHeadroom" to thermalHeadroom,
+                        "batteryTempDeciC" to batteryTempDeciC
                     ))
                 } catch (_: Exception) {
                     result.error("unavailable", "Resource sample unavailable", null)
