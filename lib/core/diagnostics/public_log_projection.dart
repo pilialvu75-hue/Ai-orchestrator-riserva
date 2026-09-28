@@ -388,9 +388,153 @@ String? publicLogProjection(String line) {
       r'native_heap_bytes=(-?\d{1,15}) critical=(true|false) '
       r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
       r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12})'
+      r'(?: prefill_ms=(-?\d{1,12}) battery_temp_milli_c=(-?\d{1,12}))?'
       r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
       r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
-      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'available_bytes': int.parse(m[1]!),
+      'rss_bytes': int.parse(m[2]!),
+      'native_heap_bytes': int.parse(m[3]!),
+      'critical': m[4] == 'true',
+      'phase': m[5]!,
+      'gpu_layers': int.parse(m[6]!),
+      'decode_calls': int.parse(m[7]!),
+      if (m[8] != null) 'prefill_ms': int.parse(m[8]!),
+      if (m[9] != null) 'battery_temp_milli_c': int.parse(m[9]!),
+      if (m[10] != null) ...{
+        'total_bytes': int.parse(m[10]!),
+        'threshold_bytes': int.parse(m[11]!),
+        'pressure': m[12]!,
+        'low_memory': m[13] == 'true',
+        'trim_level': int.parse(m[14]!),
+        'n_ctx': int.parse(m[15]!),
+        'n_batch': int.parse(m[16]!),
+        'n_ubatch': int.parse(m[17]!),
+      },
+    });
+  }
+  if (event == 'RESOURCE_PROFILE') {
+    final m = RegExp(
+      r'^reason=(pressure|phi_conservative|phi_gpu_conservative|phi_memory_recovery|device_memory_budget|device_memory_conservative|device_gpu_conservative|baseline) n_ctx=(\d{1,6}) '
+      r'n_batch=(\d{1,6}) n_ubatch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'reason': m[1]!,
+      'n_ctx': int.parse(m[2]!),
+      'n_batch': int.parse(m[3]!),
+      'n_ubatch': int.parse(m[4]!),
+    });
+  }
+  if (event == 'RESOURCE_GUARD') {
+    final m = RegExp(r'^action=(defer|cancel) reason=critical_memory$')
+        .firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'action': m[1]!,
+      'reason': 'critical_memory',
+    });
+  }
+
+  if (event == 'LOCAL_EXECUTION_CONFIG') {
+    final config = RegExp(
+      r'^mode=(cpu_baseline|vulkan) gpu_layers=(\d{1,3}) n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (config == null) return null;
+    final layers = int.parse(config[2]!);
+    if ((config[1] == 'cpu_baseline' && layers != 0) ||
+        (config[1] == 'vulkan' && layers == 0)) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'mode': config[1]!,
+      'gpu_layers': layers,
+      'n_ctx': int.parse(config[3]!),
+      'n_batch': int.parse(config[4]!),
+    });
+  }
+
+  final result = <String, Object>{'time': timestamp[1]!, 'event': event};
+  // Exact known producer format; do not extract numbers from free-form errors.
+  if (event == 'TTS_GENERATE_BEGIN') {
+    final m = RegExp(
+      r'^family=kokoro lang=(it|fr|en) sid=(\d{1,3}) '
+      r'speed=([0-9.]{1,12}) chars=(\d{1,9})(?: phrase=\d{1,9})?$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'family': 'kokoro',
+        'lang': m[1]!,
+        'sid': int.parse(m[2]!),
+        'speed': m[3]!,
+        'chars': int.parse(m[4]!),
+      });
+    }
+  }
+  if (event == 'TTS_TIMING') {
+    final m = RegExp(
+      r'^reused=(true|false) load_ms=(\d{1,9}) synthesis_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'reused': m[1] == 'true',
+        'load_ms': int.parse(m[2]!),
+        'synthesis_ms': int.parse(m[3]!),
+      });
+    }
+  }
+  if (event == 'TTS_PREPARE_TIMING') {
+    final m = RegExp(r'^asset_ms=(\d{1,9})$').firstMatch(rest);
+    if (m != null) result['asset_ms'] = int.parse(m[1]!);
+  }
+  if (event == 'TTS_FAIL') {
+    final reason = RegExp(
+      r'^reason=(worker_failed|non_finite_pcm|invalid_pcm|playback_failed)$',
+    ).firstMatch(rest);
+    if (reason != null) result['error'] = reason[1]!;
+    final m = RegExp(
+      r'^Bad state: TTS returned invalid audio: (\d{1,9}) of '
+      r'(\d{1,9}) samples are non-finite\.$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'error': 'non_finite_pcm',
+        'invalid': int.parse(m[1]!),
+        'samples': int.parse(m[2]!),
+      });
+    }
+  }
+  if (event == 'ANDROID_PROCESS_EXIT_HISTORY') {
+    try {
+      final data = jsonDecode(rest);
+      if (data is Map) {
+        for (final key in <String>[
+          'timestamp_ms',
+          'reason_code',
+          'status',
+          'pss_kb',
+          'rss_kb',
+        ]) {
+          final value = data[key];
+          if (value is int) result[key] = value;
+        }
+      }
+    } catch (_) {
+      // Retain the event even without a structured exit record.
+    }
+  }
+  // No arbitrary exception text, stack, prompt, path, ID or token is exported.
+  return jsonEncode(result);
+}
+,
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode({
