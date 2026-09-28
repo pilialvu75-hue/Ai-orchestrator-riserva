@@ -31,15 +31,37 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 ///
 /// L'esecuzione reale rimane sempre protetta dal ciclo di approvazione
 /// della WorkspaceSession.
+typedef WorkshopProjectGatewayFactory = GitWorkspaceGateway Function(
+  String projectId,
+);
+
+typedef WorkshopProjectWorkspacePathResolver = String Function(
+  String projectId,
+);
+
 final class WorkshopProjectExecutor {
   WorkshopProjectExecutor({
-    required GitWorkspaceGateway gateway,
-  }) : _gateway = gateway;
+    GitWorkspaceGateway? gateway,
+    WorkshopProjectGatewayFactory? projectGatewayFactory,
+    WorkshopProjectWorkspacePathResolver? projectWorkspacePathResolver,
+  })  : assert(
+          gateway != null || projectGatewayFactory != null,
+          'A fixed gateway or a project gateway factory is required.',
+        ),
+        _gateway = gateway,
+        _projectGatewayFactory = projectGatewayFactory,
+        _projectWorkspacePathResolver = projectWorkspacePathResolver;
 
-  final GitWorkspaceGateway _gateway;
+  final GitWorkspaceGateway? _gateway;
+  final WorkshopProjectGatewayFactory? _projectGatewayFactory;
+  final WorkshopProjectWorkspacePathResolver? _projectWorkspacePathResolver;
 
+  final Map<String, GitWorkspaceGateway> _projectGateways =
+      <String, GitWorkspaceGateway>{};
   final Map<String, WorkspaceSession> _sessions =
       <String, WorkspaceSession>{};
+
+  String? _activeProjectId;
 
   /// Sessioni Workspace attualmente associate ai task del progetto.
   List<WorkspaceSession> get sessions =>
@@ -48,6 +70,41 @@ final class WorkshopProjectExecutor {
   /// Sessione associata a un task, se esistente.
   WorkspaceSession? sessionForTask(String taskId) =>
       _sessions[taskId];
+
+  /// Physical workspace used by one project when project isolation is enabled.
+  String? workspaceRootPathForProject(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) return null;
+    return _projectWorkspacePathResolver?.call(normalized);
+  }
+
+  GitWorkspaceGateway _gatewayForProject(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(
+        projectId,
+        'projectId',
+        'Workshop project id cannot be empty.',
+      );
+    }
+
+    if (_activeProjectId != normalized) {
+      // WorkspaceSession is intentionally ephemeral. A parked/restored project
+      // will prepare fresh sessions against its own persistent project root.
+      _sessions.clear();
+      _activeProjectId = normalized;
+    }
+
+    final factory = _projectGatewayFactory;
+    if (factory == null) {
+      return _gateway!;
+    }
+
+    return _projectGateways.putIfAbsent(
+      normalized,
+      () => factory(normalized),
+    );
+  }
 
   /// Prepara il prossimo task eseguibile del progetto.
   ///
@@ -68,6 +125,8 @@ final class WorkshopProjectExecutor {
       return null;
     }
 
+    final gateway = _gatewayForProject(plan.id);
+    final gateway = _gatewayForProject(plan.id);
     final existing = _sessions[task.id];
 
     if (existing != null) {
@@ -114,7 +173,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: gateway,
       brief: brief,
     );
 
@@ -202,7 +261,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: gateway,
       brief: brief,
     );
 
