@@ -18,25 +18,25 @@ void main() {
         ],
       );
 
-      expect(draft.tasks, hasLength(3));
+      expect(draft.tasks, hasLength(2));
       expect(
         draft.tasks.map((task) => task.id),
         <String>[
           'task:initial-implementation',
-          'task:core-behavior',
           'task:acceptance-verification',
         ],
       );
 
-      final foundation = draft.tasks[0];
-      final core = draft.tasks[1];
-      final acceptance = draft.tasks[2];
+      final implementation = draft.tasks[0];
+      final acceptance = draft.tasks[1];
 
-      expect(foundation.affectedPaths, isNotEmpty);
-      expect(core.affectedPaths, isNotEmpty);
+      expect(implementation.title, 'Funzionalità principale');
+      expect(
+        implementation.affectedPaths,
+        <String>['lib/main.dart', 'lib/app.dart'],
+      );
+      expect(implementation.validationCriteria, isNotEmpty);
       expect(acceptance.affectedPaths, isNotEmpty);
-      expect(foundation.validationCriteria, isNotEmpty);
-      expect(core.validationCriteria, isNotEmpty);
       expect(acceptance.validationCriteria, isNotEmpty);
       expect(
         acceptance.validationCriteria,
@@ -55,13 +55,15 @@ void main() {
         isFalse,
       );
 
-      expect(core.dependencies, <String>['task:initial-implementation']);
-      expect(acceptance.dependencies, <String>['task:core-behavior']);
+      expect(implementation.dependencies, isEmpty);
+      expect(
+        acceptance.dependencies,
+        <String>['task:initial-implementation'],
+      );
       expect(
         draft.phases.single.taskIds,
         <String>[
           'task:initial-implementation',
-          'task:core-behavior',
           'task:acceptance-verification',
         ],
       );
