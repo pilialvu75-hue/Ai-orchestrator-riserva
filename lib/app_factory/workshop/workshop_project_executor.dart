@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 
 /// Esecutore del piano di progetto del Cantiere.
 ///
@@ -134,6 +135,9 @@ final class WorkshopProjectExecutor {
 
     final sourceFiles = await source.listFiles();
     for (final path in sourceFiles) {
+      if (!WorkshopReuseSourceSnapshotService.isSafeReusablePath(path)) {
+        continue;
+      }
       final content = await source.readFile(path);
       if (content == null) {
         // Binary/unreadable assets are intentionally not copied by the
