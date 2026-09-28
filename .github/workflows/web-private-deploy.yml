@@ -1,0 +1,111 @@
+name: Web Private Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cantiere-web-private-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: cantiere-web-private
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build Cantiere Web
+        run: flutter build web --release --target lib/web_main.dart
+
+      - name: Verify whole-site auth routing is packaged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build/web/index.html
+          test -s build/web/_routes.json
+          grep -F '"include": ["/*"]' build/web/_routes.json
+          test -s functions/_middleware.js
+
+      - name: Validate required Cloudflare configuration
+        shell: bash
+        env:
+          CF_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          CF_URL: ${{ vars.CLOUDFLARE_PAGES_URL }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WEB_USER: ${{ secrets.WEB_ACCESS_USER }}
+          WEB_PASSWORD: ${{ secrets.WEB_ACCESS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CF_PROJECT"
+          test -n "$CF_URL"
+          test -n "$CF_ACCOUNT"
+          test -n "$CF_TOKEN"
+          test -n "$WEB_USER"
+          test -n "$WEB_PASSWORD"
+
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+
+      - name: Update private access secrets
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          WEB_USER: ${{ secrets.WEB_ACCESS_USER }}
+          WEB_PASSWORD: ${{ secrets.WEB_ACCESS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$WEB_USER" |
+            wrangler pages secret put WEB_ACCESS_USER --project-name "$CF_PROJECT"
+          printf '%s' "$WEB_PASSWORD" |
+            wrangler pages secret put WEB_ACCESS_PASSWORD --project-name "$CF_PROJECT"
+
+      - name: Deploy authenticated Pages application
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          set -euo pipefail
+          wrangler pages deploy build/web             --project-name "$CF_PROJECT"             --branch main             --commit-dirty=true
+
+      - name: Verify unauthenticated requests fail closed
+        shell: bash
+        env:
+          CF_URL: ${{ vars.CLOUDFLARE_PAGES_URL }}
+        run: |
+          set -euo pipefail
+          root_status="$(curl --silent --show-error --output /dev/null             --write-out '%{http_code}' "$CF_URL/")"
+          asset_status="$(curl --silent --show-error --output /dev/null             --write-out '%{http_code}' "$CF_URL/flutter_bootstrap.js")"
+          test "$root_status" = "401"
+          test "$asset_status" = "401"
+
+      - name: Verify authenticated requests succeed
+        shell: bash
+        env:
+          CF_URL: ${{ vars.CLOUDFLARE_PAGES_URL }}
+          WEB_USER: ${{ secrets.WEB_ACCESS_USER }}
+          WEB_PASSWORD: ${{ secrets.WEB_ACCESS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          root_status="$(curl --silent --show-error --output /dev/null             --write-out '%{http_code}'             --user "$WEB_USER:$WEB_PASSWORD" "$CF_URL/")"
+          asset_status="$(curl --silent --show-error --output /dev/null             --write-out '%{http_code}'             --user "$WEB_USER:$WEB_PASSWORD" "$CF_URL/flutter_bootstrap.js")"
+          test "$root_status" = "200"
+          test "$asset_status" = "200"
