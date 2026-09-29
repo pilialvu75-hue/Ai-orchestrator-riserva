@@ -55,6 +55,41 @@ void main() {
     expect(LocalBenchmarkScoring.quickScore(result), 100);
   });
 
+  test('quality score reflects rubric ratio only', () {
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        perfectCase(),
+        const LocalModelBenchmarkCaseResult(
+          caseId: 'miss',
+          response: 'wrong',
+          score: 0,
+          maxScore: 2,
+          forbiddenHits: 1,
+          firstContentMs: 5000,
+          totalMs: 7000,
+          reportedTokens: 20,
+          prefillMs: 1000,
+          observedGpuLayers: 0,
+          observedBatch: 64,
+          observedMicroBatch: 16,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 305,
+          sessionStart: 'cold',
+          sessionEnd: 'kept',
+        ),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.qualityScore(result), 50);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
@@ -113,7 +148,7 @@ void main() {
       },
     );
 
-    // (80*10 + 100*25) / 35 = 94.285...
+    // General Score is the transparent mean of completed suites.
     expect(score.generalScore, 90);
     expect(score.completedComponents, 2);
   });

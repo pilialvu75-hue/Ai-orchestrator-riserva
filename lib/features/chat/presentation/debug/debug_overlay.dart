@@ -561,9 +561,13 @@ class _DebugOverlayState
                           icon: Icons.fact_check_outlined,
                           title: 'Benchmark qualita',
                           subtitle:
-                              'Suite completa: accuratezza, istruzioni, '
-                              'contesto e hallucination.',
-                          available: false,
+                              'Fattualita, istruzioni, contesto, '
+                              'ragionamento e hallucination.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runQualityGeneralBenchmark());
+                          },
                         ),
                         item(
                           icon: Icons.speed_outlined,
@@ -738,17 +742,6 @@ class _DebugOverlayState
       }
       buffer.writeln();
     }
-    if (report.failures.isNotEmpty) {
-      buffer
-        ..writeln('failures=${report.failures.length}')
-        ..writeln();
-      for (final failure in report.failures) {
-        buffer.writeln(
-          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
-        );
-      }
-    }
-
     final text = buffer.toString().trimRight();
 
     await showDialog<void>(
@@ -786,6 +779,162 @@ class _DebugOverlayState
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
                   const SnackBar(
                     content: Text('Benchmark rapido copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runQualityGeneralBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello locale pronto per il benchmark.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'local_model_quality_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 6).clamp(12, 90).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.run(
+          modelIds: runnable.map((model) => model.id),
+          benchmarkCases: LocalModelBenchmarkRunner.qualityCases,
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Qualita • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final catalogId = result.catalogModelId ?? result.modelId;
+          final model = byId[catalogId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.quality,
+            score: LocalBenchmarkScoring.qualityScore(result),
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showQualityBenchmarkReport(report!);
+  }
+
+  Future<void> _showQualityBenchmarkReport(
+    LocalModelBenchmarkReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK QUALITA')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in report.models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'quality_score=${LocalBenchmarkScoring.qualityScore(model)}/100',
+        )
+        ..writeln('raw_quality=${model.score}/${model.maxScore}')
+        ..writeln(
+          'avg_first_content_ms=${model.averageFirstContentMs.toStringAsFixed(0)}',
+        )
+        ..writeln(
+          'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Benchmark qualita',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 420,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark qualita copiato negli appunti'),
                   ),
                 );
               },
