@@ -103,6 +103,60 @@ abstract final class LocalBenchmarkScoring {
         .clamp(0, 100)
         .toInt();
   }
+
+  static int performanceScore(LocalModelPerformanceModelResult result) {
+    final cold = result.coldSample?.result;
+    if (cold == null || result.warmSamples.isEmpty) return 0;
+
+    final coldFirst = _lowerIsBetter(
+      cold.firstContentMs.toDouble(),
+      best: 1500,
+      worst: 15000,
+    );
+    final warmFirst = _lowerIsBetter(
+      result.averageWarmFirstContentMs,
+      best: 750,
+      worst: 7500,
+    );
+    final warmPrefill = _lowerIsBetter(
+      result.averageWarmPrefillMs,
+      best: 400,
+      worst: 4000,
+    );
+    final warmDecode = _higherIsBetter(
+      result.averageWarmDecodeTokensPerSecond,
+      worst: 4,
+      best: 20,
+    );
+
+    return (coldFirst * 0.25 +
+            warmFirst * 0.25 +
+            warmPrefill * 0.20 +
+            warmDecode * 0.30)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
+  static double _lowerIsBetter(
+    double value, {
+    required double best,
+    required double worst,
+  }) {
+    if (value <= best) return 100;
+    if (value >= worst) return 0;
+    return ((worst - value) / (worst - best) * 100).clamp(0, 100);
+  }
+
+  static double _higherIsBetter(
+    double value, {
+    required double worst,
+    required double best,
+  }) {
+    if (value <= worst) return 0;
+    if (value >= best) return 100;
+    return ((value - worst) / (best - worst) * 100).clamp(0, 100);
+  }
 }
 
 class LocalBenchmarkScoreStore {
