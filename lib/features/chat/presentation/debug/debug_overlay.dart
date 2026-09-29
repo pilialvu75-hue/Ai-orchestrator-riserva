@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
@@ -529,7 +530,9 @@ class _DebugOverlayState
                           available: true,
                           onTap: () {
                             Navigator.of(sheetContext).pop();
-                            unawaited(_runLocalModelBenchmark());
+                            unawaited(
+                              _showOrchestratorBenchmarkModelPicker(),
+                            );
                           },
                         ),
                         item(
@@ -612,14 +615,254 @@ class _DebugOverlayState
     );
   }
 
-  Future<void> _runLocalModelBenchmark() async {
+  Future<void> _showOrchestratorBenchmarkModelPicker() async {
+    if (_running) return;
+
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
+    final selected = <String>{};
+    for (final defaultId
+        in LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds) {
+      for (final candidate in candidates) {
+        if (candidate.id == defaultId &&
+            LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
+          selected.add(candidate.id);
+          break;
+        }
+      }
+    }
+
+    if (selected.isEmpty) {
+      for (final candidate in candidates) {
+        if (LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
+          selected.add(candidate.id);
+          break;
+        }
+      }
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF101723),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final runnableCount = candidates
+                .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+                .length;
+
+            void selectDefaults() {
+              setSheetState(() {
+                selected.clear();
+                for (final defaultId in LocalModelBenchmarkRunner
+                    .defaultOrchestratorTargetModelIds) {
+                  for (final candidate in candidates) {
+                    if (candidate.id == defaultId &&
+                        LocalModelBenchmarkRunner.isRunnableCandidate(
+                          candidate,
+                        )) {
+                      selected.add(candidate.id);
+                      break;
+                    }
+                  }
+                }
+              });
+            }
+
+            void selectAllRunnable() {
+              setSheetState(() {
+                selected
+                  ..clear()
+                  ..addAll(
+                    candidates
+                        .where(
+                          LocalModelBenchmarkRunner.isRunnableCandidate,
+                        )
+                        .map((model) => model.id),
+                  );
+              });
+            }
+
+            return SafeArea(
+              child: FractionallySizedBox(
+                heightFactor: 0.92,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Benchmark Orchestratore',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$runnableCount/${candidates.length} modelli pronti • '
+                        '${selected.length} selezionati',
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          OutlinedButton(
+                            onPressed: selectDefaults,
+                            child: const Text('Predefiniti'),
+                          ),
+                          OutlinedButton(
+                            onPressed: runnableCount == 0
+                                ? null
+                                : selectAllRunnable,
+                            child: const Text('Tutti scaricati'),
+                          ),
+                          TextButton(
+                            onPressed: selected.isEmpty
+                                ? null
+                                : () => setSheetState(selected.clear),
+                            child: const Text('Nessuno'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: candidates.length,
+                          itemBuilder: (context, index) {
+                            final model = candidates[index];
+                            final runnable = LocalModelBenchmarkRunner
+                                .isRunnableCandidate(model);
+                            final checked = selected.contains(model.id);
+                            final size = model.sizeCategory?.trim();
+                            final sourceLabel = switch (model.source) {
+                              'local_import' => 'Importato',
+                              'custom_url' => 'URL personalizzato',
+                              _ => 'Catalogo',
+                            };
+                            final stateLabel = runnable
+                                ? 'Pronto'
+                                : model.isDownloaded
+                                    ? 'Non valido'
+                                    : 'Non scaricato';
+
+                            return Card(
+                              color: const Color(0xFF161E2B),
+                              margin: const EdgeInsets.only(bottom: 7),
+                              child: CheckboxListTile(
+                                value: checked,
+                                enabled: runnable,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                title: Text(
+                                  model.displayName,
+                                  style: TextStyle(
+                                    color: runnable
+                                        ? Colors.white
+                                        : Colors.white38,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${size == null || size.isEmpty ? "Dimensione n/d" : size}'
+                                  ' • $sourceLabel • $stateLabel\n'
+                                  'Punteggio generale: —',
+                                  style: TextStyle(
+                                    color: runnable
+                                        ? Colors.white60
+                                        : Colors.white30,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                onChanged: !runnable
+                                    ? null
+                                    : (value) {
+                                        setSheetState(() {
+                                          if (value == true) {
+                                            selected.add(model.id);
+                                          } else {
+                                            selected.remove(model.id);
+                                          }
+                                        });
+                                      },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () {
+                                final chosenIds = candidates
+                                    .where((model) => selected.contains(model.id))
+                                    .map((model) => model.id)
+                                    .toList(growable: false);
+                                Navigator.of(sheetContext).pop();
+                                unawaited(
+                                  _runLocalModelBenchmark(
+                                    modelIds: chosenIds,
+                                  ),
+                                );
+                              },
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          selected.isEmpty
+                              ? 'Seleziona almeno un modello'
+                              : 'Avvia benchmark (${selected.length})',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+  Duration _orchestratorBenchmarkTimeoutFor(
+    Iterable<String>? modelIds,
+  ) {
+    final modelCount = modelIds?.length ??
+        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+    final minutes = (modelCount * 6).clamp(12, 60).toInt();
+    return Duration(minutes: minutes);
+  }
+  Future<void> _runLocalModelBenchmark({
+    Iterable<String>? modelIds,
+  }) async {
     LocalModelBenchmarkReport? report;
 
     await _runTest(
       testId: 'local_model_benchmark',
-      timeout: _benchmarkTimeout,
+      timeout: _orchestratorBenchmarkTimeoutFor(modelIds),
       action: () async {
         report = await _localModelBenchmark.run(
+          modelIds: modelIds,
           onProgress: (message) {
             if (!mounted) {
               return;

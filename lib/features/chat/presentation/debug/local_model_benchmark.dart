@@ -339,10 +339,16 @@ class LocalModelBenchmarkRunner {
   static const List<int> vulkanSweepProfiles = <int>[0, 10, 99];
   static const int vulkanSweepRepetitions = 2;
 
-  static const List<String> _targetModelIds = <String>[
+  static const List<String> defaultOrchestratorTargetModelIds = <String>[
     LocalInferenceModelIds.phi35Mini,
     LocalInferenceModelIds.nemotron3Nano4b,
   ];
+
+  static bool isRunnableCandidate(AiModel model) =>
+      model.isDownloaded &&
+      (model.localPath?.trim().isNotEmpty ?? false) &&
+      (model.validationStatus == ModelValidationStatus.validatedOk ||
+          model.validationStatus == ModelValidationStatus.updateAvailable);
 
   static const List<LocalModelBenchmarkCase> cases =
       <LocalModelBenchmarkCase>[
@@ -450,10 +456,36 @@ class LocalModelBenchmarkRunner {
   final LocalAiRepository _localAiRepository;
   final ResourceMonitor _resourceMonitor;
 
+  Future<List<AiModel>> loadBenchmarkCandidates() async {
+    final availableResult = await _localAiRepository.getAvailableModels();
+    final available = availableResult.fold<List<AiModel>>(
+      (failure) => throw StateError(
+        'Model catalogue lookup failed: ${failure.message}',
+      ),
+      (models) => List<AiModel>.of(models),
+    );
+
+    available.sort((a, b) {
+      final runnableOrder =
+          (isRunnableCandidate(a) ? 0 : 1) - (isRunnableCandidate(b) ? 0 : 1);
+      if (runnableOrder != 0) return runnableOrder;
+
+      final sizeOrder = a.sizeBytes.compareTo(b.sizeBytes);
+      if (sizeOrder != 0) return sizeOrder;
+
+      return a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          );
+    });
+
+    return List<AiModel>.unmodifiable(available);
+  }
+
   Future<LocalModelBenchmarkReport> run({
     LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
   }) async {
-    final targets = await _resolveTargets();
+    final targets = await _resolveTargets(modelIds);
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_BEGIN] models=${targets.map((m) => m.effectiveRuntimeModelId).join(',')} '
@@ -556,6 +588,7 @@ class LocalModelBenchmarkRunner {
 
   Future<VulkanLayerSweepReport> runVulkanLayerSweep({
     LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
   }) async {
     final runtime = _runtimeProvider;
     if (runtime is! AndroidFfiRuntimeProvider) {
@@ -564,7 +597,7 @@ class LocalModelBenchmarkRunner {
       );
     }
 
-    final targets = await _resolveTargets();
+    final targets = await _resolveTargets(modelIds);
     final benchmarkCase =
         cases.firstWhere((item) => item.id == 'vulkan_fact');
     final samples = <VulkanLayerSweepSample>[];
@@ -653,43 +686,63 @@ class LocalModelBenchmarkRunner {
     );
   }
 
-  Future<List<AiModel>> _resolveTargets() async {
-    final availableResult = await _localAiRepository.getAvailableModels();
-    final available = availableResult.fold<List<AiModel>>(
-      (failure) => throw StateError(
-        'Model catalogue lookup failed: ${failure.message}',
-      ),
-      (models) => models,
-    );
+  Future<List<AiModel>> _resolveTargets(
+    Iterable<String>? requestedModelIds,
+  ) async {
+    final available = await loadBenchmarkCandidates();
+    final requested = (requestedModelIds ?? defaultOrchestratorTargetModelIds)
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+
+    if (requested.isEmpty) {
+      throw StateError('Select at least one downloaded model.');
+    }
 
     final targets = <AiModel>[];
     final missing = <String>[];
-    for (final modelId in _targetModelIds) {
+    final selectedIds = <String>{};
+
+    for (final requestedId in requested) {
       AiModel? found;
+
+      // Prefer the exact catalogue/import id so imported variants that share
+      // a runtime family remain individually benchmarkable.
       for (final candidate in available) {
-        if (candidate.effectiveRuntimeModelId == modelId ||
-            candidate.id == modelId) {
+        if (candidate.id == requestedId) {
           found = candidate;
           break;
         }
       }
-      if (found == null ||
-          !found.isDownloaded ||
-          (found.localPath?.trim().isEmpty ?? true)) {
-        missing.add(modelId);
-      } else {
+
+      if (found == null) {
+        for (final candidate in available) {
+          if (candidate.effectiveRuntimeModelId == requestedId) {
+            found = candidate;
+            break;
+          }
+        }
+      }
+
+      if (found == null || !isRunnableCandidate(found)) {
+        missing.add(requestedId);
+        continue;
+      }
+
+      if (selectedIds.add(found.id)) {
         targets.add(found);
       }
     }
+
     if (missing.isNotEmpty) {
       throw StateError(
-        'Benchmark requires both downloaded models. Missing: '
+        'Selected benchmark model(s) are unavailable or not validated: '
         '${missing.join(', ')}',
       );
     }
+
     return targets;
   }
-
   Future<LocalModelBenchmarkCaseResult> _runCase({
     required AiModel model,
     required LocalModelBenchmarkCase benchmarkCase,
