@@ -41,6 +41,57 @@ void main() {
       ),
     );
   });
+  test('claim with incomplete acceptance gates fails closed', () {
+    final claim = _claim();
+    (claim['acceptance_gates'] as List<String>).removeLast();
+    expect(
+      () => adapter.fromJson(claim),
+      throwsA(isA<WorkshopLibraryEvolutionClaimException>()
+          .having((error) => error.code, 'code', 'invalid-acceptance-gates')),
+    );
+  });
+
+  test('claim with unexpected acceptance gate fails closed', () {
+    final claim = _claim();
+    (claim['acceptance_gates'] as List<String>).add('untrusted_gate');
+    expect(
+      () => adapter.fromJson(claim),
+      throwsA(isA<WorkshopLibraryEvolutionClaimException>()
+          .having((error) => error.code, 'code', 'invalid-acceptance-gates')),
+    );
+  });
+
+  test('claim with invalid required output fails closed', () {
+    final claim = _claim();
+    (claim['required_output'] as Map<String, dynamic>)['status'] = 'active';
+    expect(
+      () => adapter.fromJson(claim),
+      throwsA(isA<WorkshopLibraryEvolutionClaimException>()
+          .having((error) => error.code, 'code', 'invalid-required-output')),
+    );
+  });
+
+  test('claim carrying executable payload fields fails closed', () {
+    for (final field in <String>[
+      'source_code',
+      'files',
+      'payload',
+      'patch',
+      'diff',
+      'commands',
+    ]) {
+      final claim = _claim()..[field] = 'untrusted';
+      expect(
+        () => adapter.fromJson(claim),
+        throwsA(isA<WorkshopLibraryEvolutionClaimException>().having(
+          (error) => error.code,
+          'code',
+          'forbidden-executable-field-$field',
+        )),
+        reason: field,
+      );
+    }
+  });
 }
 
 Map<String, dynamic> _claim() => <String, dynamic>{
