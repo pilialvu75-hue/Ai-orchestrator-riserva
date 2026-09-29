@@ -530,6 +530,7 @@ class LocalModelBenchmarkRunner {
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
     Iterable<LocalModelBenchmarkCase>? benchmarkCases,
+    bool continueOnModelError = false,
   }) async {
     final targets = await _resolveTargets(modelIds);
     final selectedCases = benchmarkCases?.toList(growable: false) ?? cases;
@@ -544,90 +545,112 @@ class LocalModelBenchmarkRunner {
     );
 
     final modelResults = <LocalModelBenchmarkModelResult>[];
+    final failures = <LocalModelBenchmarkFailure>[];
 
     for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
       final model = targets[modelIndex];
-      final caseResults = <LocalModelBenchmarkCaseResult>[];
 
-      RuntimeEventLog.instance.emit(
-        '[LOCAL_MODEL_BENCH_MODEL_BEGIN] model=${model.effectiveRuntimeModelId} '
-        'order=${modelIndex + 1}/${targets.length}',
-      );
-
-      for (var caseIndex = 0; caseIndex < selectedCases.length; caseIndex++) {
-        final benchmarkCase = selectedCases[caseIndex];
-        onProgress?.call(
-          '${model.displayName} ${caseIndex + 1}/${selectedCases.length}',
-        );
-
-        final result = await _runCase(
-          model: model,
-          benchmarkCase: benchmarkCase,
-        );
-        caseResults.add(result);
+      try {
+        final caseResults = <LocalModelBenchmarkCaseResult>[];
 
         RuntimeEventLog.instance.emit(
-          '[LOCAL_MODEL_BENCH_CASE] '
-          'model=${model.effectiveRuntimeModelId} '
-          'case=${benchmarkCase.id} '
-          'score=${result.score}/${result.maxScore} '
-          'forbidden_hits=${result.forbiddenHits} '
-          'first_content_ms=${result.firstContentMs} '
-          'total_ms=${result.totalMs} '
-          'prefill_ms=${result.prefillMs} '
-          'reported_tokens=${result.reportedTokens} '
-          'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
-          'gpu_layers=${result.observedGpuLayers} '
-          'n_batch=${result.observedBatch} '
-          'n_ubatch=${result.observedMicroBatch} '
-          'pressure=${result.startPressure}->${result.endPressure} '
-          'start_available_bytes=${result.startAvailableBytes ?? -1} '
-          'end_available_bytes=${result.endAvailableBytes ?? -1} '
-          'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
-          'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1} '
-          'session=${result.sessionStart}->${result.sessionEnd}',
+          '[LOCAL_MODEL_BENCH_MODEL_BEGIN] model=${model.effectiveRuntimeModelId} '
+          'order=${modelIndex + 1}/${targets.length}',
         );
 
-        if (caseIndex + 1 < selectedCases.length) {
-          await Future<void>.delayed(_betweenCases);
+        for (var caseIndex = 0;
+            caseIndex < selectedCases.length;
+            caseIndex++) {
+          final benchmarkCase = selectedCases[caseIndex];
+          onProgress?.call(
+            '${model.displayName} ${caseIndex + 1}/${selectedCases.length}',
+          );
+
+          final result = await _runCase(
+            model: model,
+            benchmarkCase: benchmarkCase,
+          );
+          caseResults.add(result);
+
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_BENCH_CASE] '
+            'model=${model.effectiveRuntimeModelId} '
+            'case=${benchmarkCase.id} '
+            'score=${result.score}/${result.maxScore} '
+            'forbidden_hits=${result.forbiddenHits} '
+            'first_content_ms=${result.firstContentMs} '
+            'total_ms=${result.totalMs} '
+            'prefill_ms=${result.prefillMs} '
+            'reported_tokens=${result.reportedTokens} '
+            'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
+            'gpu_layers=${result.observedGpuLayers} '
+            'n_batch=${result.observedBatch} '
+            'n_ubatch=${result.observedMicroBatch} '
+            'pressure=${result.startPressure}->${result.endPressure} '
+            'start_available_bytes=${result.startAvailableBytes ?? -1} '
+            'end_available_bytes=${result.endAvailableBytes ?? -1} '
+            'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
+            'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1} '
+            'session=${result.sessionStart}->${result.sessionEnd}',
+          );
+
+          if (caseIndex + 1 < selectedCases.length) {
+            await Future<void>.delayed(_betweenCases);
+          }
         }
+
+        final modelResult = LocalModelBenchmarkModelResult(
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          cases: List<LocalModelBenchmarkCaseResult>.unmodifiable(caseResults),
+        );
+        modelResults.add(modelResult);
+
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_MODEL_END] '
+          'model=${model.effectiveRuntimeModelId} '
+          'quality=${modelResult.score}/${modelResult.maxScore} '
+          'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
+          'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
+          'avg_prefill_ms=${modelResult.averagePrefillMs.toStringAsFixed(0)} '
+          'avg_decode_tokens_s=${modelResult.averageDecodeTokensPerSecond.toStringAsFixed(2)} '
+          'max_battery_temp_c=${modelResult.maxBatteryTemperatureC?.toStringAsFixed(1) ?? 'na'} '
+          'battery_temp_delta_c=${modelResult.batteryTemperatureDeltaC?.toStringAsFixed(1) ?? 'na'} '
+          'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
+        );
+      } on LocalModelBenchmarkCriticalResourceException {
+        rethrow;
+      } catch (error, stackTrace) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_MODEL_FAILED] '
+          'model=${model.effectiveRuntimeModelId} '
+          'error=$error stack=$stackTrace',
+        );
+
+        if (!continueOnModelError) {
+          rethrow;
+        }
+
+        failures.add(
+          LocalModelBenchmarkFailure(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            error: error.toString(),
+          ),
+        );
       }
-
-      final modelResult = LocalModelBenchmarkModelResult(
-        modelId: model.effectiveRuntimeModelId,
-        catalogModelId: model.id,
-        displayName: model.displayName,
-        cases: List<LocalModelBenchmarkCaseResult>.unmodifiable(caseResults),
-      );
-      modelResults.add(modelResult);
-
-      RuntimeEventLog.instance.emit(
-        '[LOCAL_MODEL_BENCH_MODEL_END] '
-        'model=${model.effectiveRuntimeModelId} '
-        'quality=${modelResult.score}/${modelResult.maxScore} '
-        'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
-        'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
-        'avg_prefill_ms=${modelResult.averagePrefillMs.toStringAsFixed(0)} '
-        'avg_decode_tokens_s=${modelResult.averageDecodeTokensPerSecond.toStringAsFixed(2)} '
-        'max_battery_temp_c=${modelResult.maxBatteryTemperatureC?.toStringAsFixed(1) ?? 'na'} '
-        'battery_temp_delta_c=${modelResult.batteryTemperatureDeltaC?.toStringAsFixed(1) ?? 'na'} '
-        'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
-      );
     }
 
     RuntimeEventLog.instance.emit(
-      '[LOCAL_MODEL_BENCH_END] models=${modelResults.length} status=success',
+      '[LOCAL_MODEL_BENCH_END] models=${modelResults.length} '
+      'failures=${failures.length} status=success',
     );
 
-    // Benchmark results are already emitted as privacy-safe metric events.
-    // If public Diagnostics is enabled, flush them immediately instead of
-    // waiting for the periodic one-minute uploader.
     final diagnostics = GitHubDiagnostics.instance;
     await diagnostics.initialize();
     if (diagnostics.enabled) {
-      // RuntimeEventLog uses an asynchronous broadcast stream. Yield once so
-      // the final benchmark events reach the Diagnostics collector before it
-      // seals and uploads the batch.
       await Future<void>.delayed(Duration.zero);
       await diagnostics.sync();
     }
@@ -635,9 +658,9 @@ class LocalModelBenchmarkRunner {
     return LocalModelBenchmarkReport(
       createdAt: DateTime.now(),
       models: List<LocalModelBenchmarkModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
     );
   }
-
   Future<VulkanLayerSweepReport> runVulkanLayerSweep({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
@@ -809,7 +832,7 @@ class LocalModelBenchmarkRunner {
 
     final startSample = await _resourceMonitor.sample();
     if (startSample?.critical == true) {
-      throw StateError(
+      throw LocalModelBenchmarkCriticalResourceException(
         'Benchmark stopped before ${benchmarkCase.id}: critical memory.',
       );
     }
