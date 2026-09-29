@@ -2,8 +2,10 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 
 final class WorkshopDynamicProjectPlan {
   const WorkshopDynamicProjectPlan({
