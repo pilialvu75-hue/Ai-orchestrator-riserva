@@ -568,7 +568,9 @@ class _DebugOverlayState
                           available: true,
                           onTap: () {
                             Navigator.of(sheetContext).pop();
-                            unawaited(_runVulkanLayerSweep());
+                            unawaited(
+                              _showVulkanBenchmarkModelPicker(),
+                            );
                           },
                         ),
                         item(
@@ -616,45 +618,76 @@ class _DebugOverlayState
   }
 
   Future<void> _showOrchestratorBenchmarkModelPicker() async {
-    if (_running) return;
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Benchmark Orchestratore',
+      subtitle:
+          'Scegli i modelli da confrontare nel ruolo Orchestratore.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runLocalModelBenchmark(modelIds: modelIds);
+  }
+
+  Future<void> _showVulkanBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Vulkan 0 / 10 / 99',
+      subtitle:
+          'Scegli uno o più modelli. Per ciascuno verranno provati '
+          'CPU, offload parziale e massimo offload GPU.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runVulkanLayerSweep(modelIds: modelIds);
+  }
+
+  Future<List<String>?> _pickBenchmarkModels({
+    required String title,
+    required String subtitle,
+    required Iterable<String> defaultModelIds,
+  }) async {
+    if (_running) return null;
 
     List<AiModel> candidates;
     try {
       candidates = await _localModelBenchmark.loadBenchmarkCandidates();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Impossibile caricare i modelli: $error'),
         ),
       );
-      return;
+      return null;
     }
 
-    if (!mounted) return;
+    if (!mounted) return null;
 
+    final defaults = defaultModelIds.toSet();
     final selected = <String>{};
-    for (final defaultId
-        in LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds) {
+
+    void applyDefaults() {
+      selected.clear();
       for (final candidate in candidates) {
-        if (candidate.id == defaultId &&
+        if (defaults.contains(candidate.id) &&
             LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
           selected.add(candidate.id);
-          break;
+        }
+      }
+      if (selected.isEmpty) {
+        for (final candidate in candidates) {
+          if (LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
+            selected.add(candidate.id);
+            break;
+          }
         }
       }
     }
 
-    if (selected.isEmpty) {
-      for (final candidate in candidates) {
-        if (LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
-          selected.add(candidate.id);
-          break;
-        }
-      }
-    }
+    applyDefaults();
 
-    await showModalBottomSheet<void>(
+    return showModalBottomSheet<List<String>>(
       context: context,
       backgroundColor: const Color(0xFF101723),
       isScrollControlled: true,
@@ -667,21 +700,7 @@ class _DebugOverlayState
                 .length;
 
             void selectDefaults() {
-              setSheetState(() {
-                selected.clear();
-                for (final defaultId in LocalModelBenchmarkRunner
-                    .defaultOrchestratorTargetModelIds) {
-                  for (final candidate in candidates) {
-                    if (candidate.id == defaultId &&
-                        LocalModelBenchmarkRunner.isRunnableCandidate(
-                          candidate,
-                        )) {
-                      selected.add(candidate.id);
-                      break;
-                    }
-                  }
-                }
-              });
+              setSheetState(applyDefaults);
             }
 
             void selectAllRunnable() {
@@ -706,15 +725,24 @@ class _DebugOverlayState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Benchmark Orchestratore',
-                        style: TextStyle(
+                      Text(
+                        title,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 6),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
                       Text(
                         '$runnableCount/${candidates.length} modelli pronti • '
                         '${selected.length} selezionati',
@@ -817,21 +845,18 @@ class _DebugOverlayState
                             ? null
                             : () {
                                 final chosenIds = candidates
-                                    .where((model) => selected.contains(model.id))
+                                    .where(
+                                      (model) => selected.contains(model.id),
+                                    )
                                     .map((model) => model.id)
                                     .toList(growable: false);
-                                Navigator.of(sheetContext).pop();
-                                unawaited(
-                                  _runLocalModelBenchmark(
-                                    modelIds: chosenIds,
-                                  ),
-                                );
+                                Navigator.of(sheetContext).pop(chosenIds);
                               },
                         icon: const Icon(Icons.play_arrow),
                         label: Text(
                           selected.isEmpty
                               ? 'Seleziona almeno un modello'
-                              : 'Avvia benchmark (${selected.length})',
+                              : 'Avvia test (${selected.length})',
                         ),
                       ),
                     ],
@@ -844,12 +869,15 @@ class _DebugOverlayState
       },
     );
   }
+
   Duration _orchestratorBenchmarkTimeoutFor(
     Iterable<String>? modelIds,
   ) {
     final modelCount = modelIds?.length ??
         LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
-    final minutes = (modelCount * 6).clamp(12, 60).toInt();
+    final minutes = (modelCount * 6)
+        .clamp(_benchmarkTimeout.inMinutes, 60)
+        .toInt();
     return Duration(minutes: minutes);
   }
   Future<void> _runLocalModelBenchmark({
@@ -882,14 +910,28 @@ class _DebugOverlayState
     await _showLocalModelBenchmarkReport(report!);
   }
 
-  Future<void> _runVulkanLayerSweep() async {
+  Duration _vulkanSweepTimeoutFor(
+    Iterable<String>? modelIds,
+  ) {
+    final modelCount = modelIds?.length ??
+        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+    final minutes = (modelCount * 10)
+        .clamp(_vulkanSweepTimeout.inMinutes, 90)
+        .toInt();
+    return Duration(minutes: minutes);
+  }
+
+  Future<void> _runVulkanLayerSweep({
+    Iterable<String>? modelIds,
+  }) async {
     VulkanLayerSweepReport? report;
 
     await _runTest(
       testId: 'vulkan_layer_sweep_0_10_99',
-      timeout: _vulkanSweepTimeout,
+      timeout: _vulkanSweepTimeoutFor(modelIds),
       action: () async {
         report = await _localModelBenchmark.runVulkanLayerSweep(
+          modelIds: modelIds,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
