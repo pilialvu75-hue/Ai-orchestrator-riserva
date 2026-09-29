@@ -21,6 +21,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.da
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_persistent_checkpoint_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_notification_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
@@ -39,6 +40,8 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UpdateManager _updateManager;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
+  final WorkshopProjectNotificationService _workshopProjectNotifications =
+      WorkshopProjectNotificationService();
   String? _shownUpdateVersion;
   bool _openingWorkshop = false;
   WorkshopProductionLifecycleBundle? _workshopBundle;
@@ -85,6 +88,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  void _onWorkshopDashboardStateChanged() {
+    final bundle = _workshopBundle;
+    if (bundle == null) return;
+    unawaited(
+      _workshopProjectNotifications.sync(
+        bundle.dashboardController.state,
+      ),
+    );
+  }
+
   Future<void> _flushWorkshopCheckpoint() async {
     final recovery = _workshopRecoveryCoordinator;
     final bundle = _workshopBundle;
@@ -124,6 +137,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final chat = _workshopChatController;
     final recovery = _workshopRecoveryCoordinator;
     final bundle = _workshopBundle;
+
+    bundle?.dashboardController.removeListener(
+      _onWorkshopDashboardStateChanged,
+    );
 
     _workshopExecutionController = null;
     _workshopChatController = null;
@@ -232,6 +249,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _workshopExecutionController = execution;
       _workshopChatController = chat;
       _workshopAssignments = workshopAssignments;
+      bundle.dashboardController.addListener(
+        _onWorkshopDashboardStateChanged,
+      );
+      _onWorkshopDashboardStateChanged();
     } catch (_) {
       await recovery.detach(flushCurrent: false);
       bundle.dashboardController.dispose();
@@ -276,9 +297,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         ),
       ));
-      // Leaving the Cantiere parks the project instead of keeping its runtime
-      // attached to the next route opening. Reopening therefore starts clean.
-      await _parkAndDisposeWorkshopSession();
+      final dashboardState = workshopBundle.dashboardController.state;
+      final surface = WorkshopProjectSurfaceSnapshot.fromDashboardState(
+        dashboardState,
+      );
+      final keepCurrentProject =
+          surface.shouldRetainSession ||
+          dashboardState.isBusy ||
+          executionController.state.isRunning;
+      if (keepCurrentProject) {
+        // Hiding the Cantiere is not cancellation. Keep the same authoritative
+        // project/controllers alive so reopening returns to the same project,
+        // while also flushing a durable checkpoint for process-death recovery.
+        await _flushWorkshopCheckpoint();
+      } else {
+        // Completed/cancelled/blocked/failed projects are detached. The next
+        // Cantiere entry therefore starts neutral, while terminal notification
+        // state remains visible to the owner.
+        await _parkAndDisposeWorkshopSession();
+      }
     } catch (error) {
       if (!mounted) return;
       messenger
