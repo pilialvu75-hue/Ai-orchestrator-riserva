@@ -58,7 +58,10 @@ bool RegisterWin7PermissionCompatPlugin(flutter::FlutterEngine* engine) {
   }
 
   auto channel = std::make_unique<flutter::MethodChannel<>>(
-      messenger, "flutter.baseflow.com/permissions/methods",
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref)
+          ->messenger(),
+      "flutter.baseflow.com/permissions/methods",
       &flutter::StandardMethodCodec::GetInstance());
 
   channel->SetMethodCallHandler(
