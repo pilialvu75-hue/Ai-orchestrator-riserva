@@ -599,9 +599,13 @@ class _DebugOverlayState
                           icon: Icons.thermostat_outlined,
                           title: 'Stress termico',
                           subtitle:
-                              'Run prolungato con temperatura, memoria e '
-                              'stabilita.',
-                          available: false,
+                              'Run prolungato su un modello con temperatura, '
+                              'memoria e stabilita.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_showThermalStressModelPicker());
+                          },
                         ),
                         item(
                           icon: Icons.storage_outlined,
@@ -1143,6 +1147,21 @@ class _DebugOverlayState
     await _runLocalModelBenchmark(modelIds: modelIds);
   }
 
+  Future<void> _showThermalStressModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Stress termico',
+      subtitle:
+          'Scegli un solo modello. Il test esegue carico sostenuto e si '
+          'ferma in anticipo su memoria critica o a 45,0 °C di '
+          'temperatura batteria-proxy.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+      maxSelection: 1,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runThermalStressBenchmark(modelIds.single);
+  }
+
   Future<void> _showVulkanBenchmarkModelPicker() async {
     final modelIds = await _pickBenchmarkModels(
       title: 'Vulkan 0 / 10 / 99',
@@ -1160,8 +1179,16 @@ class _DebugOverlayState
     required String title,
     required String subtitle,
     required Iterable<String> defaultModelIds,
+    int? maxSelection,
   }) async {
     if (_running) return null;
+    if (maxSelection != null && maxSelection < 1) {
+      throw ArgumentError.value(
+        maxSelection,
+        'maxSelection',
+        'Must be null or >= 1.',
+      );
+    }
 
     List<AiModel> candidates;
     try {
@@ -1190,6 +1217,10 @@ class _DebugOverlayState
         if (defaults.contains(candidate.id) &&
             LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
           selected.add(candidate.id);
+          if (maxSelection != null &&
+              selected.length >= maxSelection) {
+            break;
+          }
         }
       }
       if (selected.isEmpty) {
@@ -1222,14 +1253,17 @@ class _DebugOverlayState
 
             void selectAllRunnable() {
               setSheetState(() {
+                final runnable = candidates
+                    .where(
+                      LocalModelBenchmarkRunner.isRunnableCandidate,
+                    )
+                    .map((model) => model.id);
                 selected
                   ..clear()
                   ..addAll(
-                    candidates
-                        .where(
-                          LocalModelBenchmarkRunner.isRunnableCandidate,
-                        )
-                        .map((model) => model.id),
+                    maxSelection == null
+                        ? runnable
+                        : runnable.take(maxSelection),
                   );
               });
             }
@@ -1277,12 +1311,14 @@ class _DebugOverlayState
                             onPressed: selectDefaults,
                             child: const Text('Predefiniti'),
                           ),
-                          OutlinedButton(
-                            onPressed: runnableCount == 0
-                                ? null
-                                : selectAllRunnable,
-                            child: const Text('Tutti scaricati'),
-                          ),
+                          if (maxSelection == null ||
+                              maxSelection > 1)
+                            OutlinedButton(
+                              onPressed: runnableCount == 0
+                                  ? null
+                                  : selectAllRunnable,
+                              child: const Text('Tutti scaricati'),
+                            ),
                           TextButton(
                             onPressed: selected.isEmpty
                                 ? null
@@ -1353,7 +1389,14 @@ class _DebugOverlayState
                                     : (value) {
                                         setSheetState(() {
                                           if (value == true) {
-                                            selected.add(model.id);
+                                            if (maxSelection == 1) {
+                                              selected.clear();
+                                            }
+                                            if (maxSelection == null ||
+                                                selected.length <
+                                                    maxSelection) {
+                                              selected.add(model.id);
+                                            }
                                           } else {
                                             selected.remove(model.id);
                                           }
@@ -1390,6 +1433,132 @@ class _DebugOverlayState
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  Future<void> _runThermalStressBenchmark(
+    String modelId,
+  ) async {
+    final candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    AiModel? selectedModel;
+    for (final candidate in candidates) {
+      if (candidate.id == modelId) {
+        selectedModel = candidate;
+        break;
+      }
+    }
+    if (selectedModel == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Modello selezionato non disponibile.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelThermalStressReport? report;
+
+    await _runTest(
+      testId: 'local_model_thermal_stress',
+      timeout: const Duration(minutes: 20),
+      action: () async {
+        report = await _localModelBenchmark.runThermalStressBenchmark(
+          modelId: selectedModel!.id,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Termico • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final score = LocalBenchmarkScoring.thermalScore(
+          completed.result,
+        );
+        if (score != null) {
+          await _benchmarkScoreStore.saveComponent(
+            model: selectedModel!,
+            component: LocalBenchmarkComponent.thermal,
+            score: score,
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showThermalStressReport(report!);
+  }
+
+  Future<void> _showThermalStressReport(
+    LocalModelThermalStressReport report,
+  ) async {
+    final score = LocalBenchmarkScoring.thermalScore(report.result);
+    final buffer = StringBuffer()
+      ..writeln('STRESS TERMICO')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln(
+        'thermal_score=${score?.toString() ?? 'n/a'}/100',
+      )
+      ..writeln(
+        'score_weights=temp_rise:40 peak_temp:30 '
+        'stability:20 memory_pressure:10',
+      )
+      ..writeln(
+        'safety_stop=battery_proxy>=45.0C or critical memory',
+      )
+      ..writeln()
+      ..writeln(report.toPlainText());
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Stress termico',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 420,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Stress termico copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
         );
       },
     );
