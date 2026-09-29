@@ -1,0 +1,137 @@
+name: Web Private Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY_PRIVATE_CANTIERE to confirm the Access gate is configured'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: web-private-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-private:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: web-private-production
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+
+    steps:
+      - name: Require explicit private-deploy confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirmation }}" != "DEPLOY_PRIVATE_CANTIERE" ]]; then
+            echo "Private Web deployment was not explicitly confirmed."
+            exit 1
+          fi
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_PAGES_PROJECT}"
+
+      - name: Prove Cloudflare Access is fail-closed before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          verify_access_redirect() {
+            local url="$1"
+            local headers
+            headers="$(mktemp)"
+            local status
+            status="$(curl -sS --connect-timeout 10 --max-time 20               --max-redirs 0 -D "${headers}" -o /dev/null               -w '%{http_code}' "${url}" || true)"
+
+            local location
+            location="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit}' "${headers}")"
+            rm -f "${headers}"
+
+            if [[ ! "${status}" =~ ^30[12378]$ ]]; then
+              echo "Access preflight failed for ${url}: expected login redirect, got HTTP ${status}."
+              exit 1
+            fi
+            if [[ "${location}" != *"cloudflareaccess.com"* &&                   "${location}" != *"/cdn-cgi/access/"* ]]; then
+              echo "Access preflight failed for ${url}: redirect is not a Cloudflare Access boundary."
+              exit 1
+            fi
+          }
+
+          verify_access_redirect "https://${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
+          verify_access_redirect "https://w2-access-probe.${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Run focused Web tests
+        run: flutter test test/app_factory/workshop/web/
+
+      - name: Build ordinary Cantiere Web application
+        run: flutter build web --release --target lib/web_main.dart
+
+      - name: Install Cloudflare Pages hardening metadata
+        run: cp web/_headers build/web/_headers
+
+      - name: Verify private-build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f web/manifest.json
+          test -s build/web/index.html
+          test -s build/web/main.dart.js
+          test -s build/web/_headers
+
+      - name: Deploy private Cantiere to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy build/web --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prove immutable deployment remains Access-protected
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPLOYMENT_URL}"
+
+          headers="$(mktemp)"
+          status="$(curl -sS --connect-timeout 10 --max-time 20             --max-redirs 0 -D "${headers}" -o /dev/null             -w '%{http_code}' "${DEPLOYMENT_URL}" || true)"
+          location="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit}' "${headers}")"
+          rm -f "${headers}"
+
+          if [[ ! "${status}" =~ ^30[12378]$ ]]; then
+            echo "Deployment is not fail-closed behind Access (HTTP ${status})."
+            exit 1
+          fi
+          if [[ "${location}" != *"cloudflareaccess.com"* &&                 "${location}" != *"/cdn-cgi/access/"* ]]; then
+            echo "Deployment redirect is not a Cloudflare Access boundary."
+            exit 1
+          fi
+
+          echo "Private Cantiere deployment verified behind Cloudflare Access."
