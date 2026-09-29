@@ -671,7 +671,6 @@ class _DebugOverlayState
           modelIds: runnable.map((model) => model.id),
           benchmarkCases: LocalModelBenchmarkRunner.quickCases,
           continueOnModelError: true,
-          continueOnModelError: true,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
