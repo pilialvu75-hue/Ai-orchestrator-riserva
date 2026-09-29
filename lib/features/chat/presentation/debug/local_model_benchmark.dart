@@ -114,10 +114,12 @@ class LocalModelBenchmarkModelResult {
     required this.modelId,
     required this.displayName,
     required this.cases,
+    this.catalogModelId,
   });
 
   final String modelId;
   final String displayName;
+  final String? catalogModelId;
   final List<LocalModelBenchmarkCaseResult> cases;
 
   int get score => cases.fold<int>(0, (sum, item) => sum + item.score);
@@ -452,6 +454,16 @@ class LocalModelBenchmarkRunner {
     ),
   ];
 
+  static List<LocalModelBenchmarkCase> get quickCases {
+    const ids = <String>{
+      'vulkan_fact',
+      'ram_fact',
+      'arithmetic',
+      'ssd_hdd_followup',
+    };
+    return cases.where((item) => ids.contains(item.id)).toList(growable: false);
+  }
+
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
   final ResourceMonitor _resourceMonitor;
@@ -484,12 +496,18 @@ class LocalModelBenchmarkRunner {
   Future<LocalModelBenchmarkReport> run({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
+    Iterable<LocalModelBenchmarkCase>? benchmarkCases,
   }) async {
     final targets = await _resolveTargets(modelIds);
+    final selectedCases = benchmarkCases?.toList(growable: false) ?? cases;
+
+    if (selectedCases.isEmpty) {
+      throw StateError('Benchmark requires at least one test case.');
+    }
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_BEGIN] models=${targets.map((m) => m.effectiveRuntimeModelId).join(',')} '
-      'cases=${cases.length} max_tokens=$_maxTokens temperature=$_temperature',
+      'cases=${selectedCases.length} max_tokens=$_maxTokens temperature=$_temperature',
     );
 
     final modelResults = <LocalModelBenchmarkModelResult>[];
@@ -503,10 +521,10 @@ class LocalModelBenchmarkRunner {
         'order=${modelIndex + 1}/${targets.length}',
       );
 
-      for (var caseIndex = 0; caseIndex < cases.length; caseIndex++) {
-        final benchmarkCase = cases[caseIndex];
+      for (var caseIndex = 0; caseIndex < selectedCases.length; caseIndex++) {
+        final benchmarkCase = selectedCases[caseIndex];
         onProgress?.call(
-          '${model.displayName} ${caseIndex + 1}/${cases.length}',
+          '${model.displayName} ${caseIndex + 1}/${selectedCases.length}',
         );
 
         final result = await _runCase(
@@ -537,13 +555,14 @@ class LocalModelBenchmarkRunner {
           'session=${result.sessionStart}->${result.sessionEnd}',
         );
 
-        if (caseIndex + 1 < cases.length) {
+        if (caseIndex + 1 < selectedCases.length) {
           await Future<void>.delayed(_betweenCases);
         }
       }
 
       final modelResult = LocalModelBenchmarkModelResult(
         modelId: model.effectiveRuntimeModelId,
+        catalogModelId: model.id,
         displayName: model.displayName,
         cases: List<LocalModelBenchmarkCaseResult>.unmodifiable(caseResults),
       );
