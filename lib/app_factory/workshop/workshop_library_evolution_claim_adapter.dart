@@ -21,6 +21,20 @@ final class WorkshopLibraryEvolutionClaimAdapter {
       'ai-orchestrator.evolution-cantiere-claim.v1';
   static const String mutationPolicy =
       'isolated_candidate_no_library_mutation';
+  static const Set<String> requiredGates = <String>{
+    'implementation_tests_pass',
+    'security_gates_pass',
+    'regression_tests_pass',
+    'library_contract_pass',
+  };
+  static const Set<String> forbiddenExecutableFields = <String>{
+    'source_code',
+    'files',
+    'payload',
+    'patch',
+    'diff',
+    'commands',
+  };
 
   WorkshopTaskContract fromJson(Map<String, dynamic> json) {
     if (json['schema'] != schema) {
@@ -28,6 +42,13 @@ final class WorkshopLibraryEvolutionClaimAdapter {
     }
     if (json['source'] != 'library_evolution_queue') {
       throw const WorkshopLibraryEvolutionClaimException('invalid-source');
+    }
+    for (final field in forbiddenExecutableFields) {
+      if (json.containsKey(field)) {
+        throw WorkshopLibraryEvolutionClaimException(
+          'forbidden-executable-field-$field',
+        );
+      }
     }
     if (json['mutation_policy'] != mutationPolicy) {
       throw const WorkshopLibraryEvolutionClaimException(
@@ -41,7 +62,23 @@ final class WorkshopLibraryEvolutionClaimAdapter {
     final objective = _required(json, 'objective');
     final delta = _strings(json['knowledge_delta']);
     final gates = _strings(json['acceptance_gates']);
-    if (delta.isEmpty || gates.isEmpty) {
+    if (delta.isEmpty || gates.toSet().length != requiredGates.length ||
+        !gates.toSet().containsAll(requiredGates)) {
+      throw const WorkshopLibraryEvolutionClaimException(
+        'invalid-acceptance-gates',
+      );
+    }
+    final requiredOutput = json['required_output'];
+    if (requiredOutput is! Map ||
+        requiredOutput['type'] != 'library_intake_bundle' ||
+        requiredOutput['status'] != 'discovered' ||
+        requiredOutput['path_scope'] != 'intake/<asset>/<version>' ||
+        requiredOutput.length != 3) {
+      throw const WorkshopLibraryEvolutionClaimException(
+        'invalid-required-output',
+      );
+    }
+    if (delta.isEmpty) {
       throw const WorkshopLibraryEvolutionClaimException(
         'incomplete-evolution-claim',
       );
