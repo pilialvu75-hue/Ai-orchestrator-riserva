@@ -282,6 +282,124 @@ void main() {
     expect(LocalBenchmarkScoring.performanceScore(result), 80);
   });
 
+  test('thermal score rewards cool stable completed stress run', () {
+    const sample = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'ok',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 800,
+      totalMs: 3500,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 330,
+      endBatteryTemperatureDeciC: 340,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+
+    const result = LocalModelThermalStressResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      samples: <LocalModelBenchmarkCaseResult>[
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+        sample,
+      ],
+      targetRepetitions: 10,
+      thermalLimitReached: false,
+      criticalResourceStop: false,
+    );
+
+    expect(LocalBenchmarkScoring.thermalScore(result), 100);
+  });
+
+  test('thermal score is unavailable without telemetry or after critical stop', () {
+    const missingTelemetry = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'ok',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 800,
+      totalMs: 3500,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: null,
+      endBatteryTemperatureDeciC: null,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+
+    const noTelemetry = LocalModelThermalStressResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      samples: <LocalModelBenchmarkCaseResult>[missingTelemetry],
+      targetRepetitions: 10,
+      thermalLimitReached: false,
+      criticalResourceStop: false,
+    );
+    expect(LocalBenchmarkScoring.thermalScore(noTelemetry), isNull);
+
+    const critical = LocalModelThermalStressResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      samples: <LocalModelBenchmarkCaseResult>[
+        LocalModelBenchmarkCaseResult(
+          caseId: 'performance_generation',
+          response: 'ok',
+          score: 0,
+          maxScore: 0,
+          forbiddenHits: 0,
+          firstContentMs: 800,
+          totalMs: 3500,
+          reportedTokens: 40,
+          prefillMs: 400,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'critical',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 300,
+          startBatteryTemperatureDeciC: 330,
+          endBatteryTemperatureDeciC: 360,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        ),
+      ],
+      targetRepetitions: 10,
+      thermalLimitReached: false,
+      criticalResourceStop: true,
+    );
+    expect(LocalBenchmarkScoring.thermalScore(critical), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
