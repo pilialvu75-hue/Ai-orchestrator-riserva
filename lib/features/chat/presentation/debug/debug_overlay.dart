@@ -670,6 +670,7 @@ class _DebugOverlayState
         report = await _localModelBenchmark.run(
           modelIds: runnable.map((model) => model.id),
           benchmarkCases: LocalModelBenchmarkRunner.quickCases,
+          continueOnModelError: true,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
@@ -728,6 +729,15 @@ class _DebugOverlayState
         ..writeln();
     }
 
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
     final text = buffer.toString().trimRight();
 
     await showDialog<void>(
@@ -962,7 +972,7 @@ class _DebugOverlayState
                                 : 'Punteggio generale: '
                                     '${storedScore!.generalScore}/100 • '
                                     '${storedScore.completedComponents}/'
-                                    '${LocalModelBenchmarkScore.totalComponents} test';
+                                    '${LocalModelBenchmarkScore.totalComponents} suite';
 
 
                             return Card(
