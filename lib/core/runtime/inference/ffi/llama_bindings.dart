@@ -72,6 +72,7 @@ class LlamaBridgeBindings {
     'decode_calls': _sessionMetric(session, 4),
     'reused_tokens': _sessionMetric(session, 5),
     'prefilled_tokens': _sessionMetric(session, 6),
+    'prefill_ms': _sessionMetric(session, 7),
   };
 
   final LlbInitBackendDart _initBackend;

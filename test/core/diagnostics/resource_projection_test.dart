@@ -31,11 +31,15 @@ void main() {
 
   const prefix = '[2026-09-20T14:45:17.000] [RESOURCE_SAMPLE] ';
   const payload =
-      'available_bytes=123 rss_bytes=456 native_heap_bytes=-1 critical=false phase=loading gpu_layers=0 decode_calls=0';
+      'available_bytes=123 rss_bytes=456 native_heap_bytes=-1 '
+      'battery_temp_decic=347 critical=false phase=loading '
+      'gpu_layers=0 decode_calls=0 prefill_ms=89';
   test('resource diagnostics preserve numeric facts without prompt data', () {
     final json = jsonDecode(publicLogProjection('$prefix$payload')!);
     expect(json['gpu_layers'], 0);
     expect(json['native_heap_bytes'], -1);
+    expect(json['battery_temp_decic'], 347);
+    expect(json['prefill_ms'], 89);
     expect(publicLogProjection('$prefix$payload prompt=private'), isNull);
     expect(
       publicLogProjection(

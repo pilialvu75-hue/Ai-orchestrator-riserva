@@ -5,6 +5,7 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
     required InferenceRequest request,
     required CancellationToken cancellationToken,
   }) {
+    final effectiveGpuLayers = requestedGpuLayers;
     try {
       AndroidFfiRuntimeProvider._log(
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1683 | Function: streamVerificationInference() | BEFORE entry',
@@ -85,11 +86,11 @@ extension AndroidFfiRuntimeStreamingVerificationExtension on AndroidFfiRuntimePr
                   final profile = ResourceProfile.select(
                     sample,
                     phi: modelId == 'phi3_5_mini',
-                    requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                    requestedGpuLayers: effectiveGpuLayers,
                   );
                   final verificationSessionId = await createNativeSessionOffUi(
                     modelPath,
-                    nGpuLayers: LlamaNativeDefaults.nGpuLayers,
+                    nGpuLayers: effectiveGpuLayers,
                     nCtx: profile.context,
                     nBatch: profile.batch,
                     nMicroBatch: profile.microBatch,

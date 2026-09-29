@@ -80,6 +80,9 @@ String? publicLogProjection(String line) {
     'LOCAL_MODEL_BENCH_CASE',
     'LOCAL_MODEL_BENCH_MODEL_END',
     'LOCAL_MODEL_BENCH_END',
+    'LOCAL_VULKAN_SWEEP_BEGIN',
+    'LOCAL_VULKAN_SWEEP_CASE',
+    'LOCAL_VULKAN_SWEEP_END',
     'POST_GENERATION_MEMORY_RELEASE',
   };
   // Only contiguous leading tags are eligible; a prompt may contain [TTS_FAIL].
@@ -94,6 +97,7 @@ String? publicLogProjection(String line) {
   if (event == null) return null;
 
   if (event.startsWith('LOCAL_MODEL_BENCH_') ||
+      event.startsWith('LOCAL_VULKAN_SWEEP_') ||
       event == 'POST_GENERATION_MEMORY_RELEASE') {
     return localModelBenchmarkPublicProjection(
       event: event,
@@ -383,7 +387,46 @@ String? publicLogProjection(String line) {
     });
   }
   if (event == 'RESOURCE_SAMPLE') {
-    final m = RegExp(
+    final current = RegExp(
+      r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
+      r'native_heap_bytes=(-?\d{1,15}) battery_temp_decic=(-?\d{1,6}) '
+      r'critical=(true|false) '
+      r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
+      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12}) '
+      r'prefill_ms=(-?\d{1,12})'
+      r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
+      r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
+    ).firstMatch(rest);
+    if (current != null) {
+      return jsonEncode({
+        'time': timestamp[1]!,
+        'event': event,
+        'available_bytes': int.parse(current[1]!),
+        'rss_bytes': int.parse(current[2]!),
+        'native_heap_bytes': int.parse(current[3]!),
+        'battery_temp_decic': int.parse(current[4]!),
+        'critical': current[5] == 'true',
+        'phase': current[6]!,
+        'gpu_layers': int.parse(current[7]!),
+        'decode_calls': int.parse(current[8]!),
+        'prefill_ms': int.parse(current[9]!),
+        if (current[10] != null) ...{
+          'total_bytes': int.parse(current[10]!),
+          'threshold_bytes': int.parse(current[11]!),
+          'pressure': current[12]!,
+          'low_memory': current[13] == 'true',
+          'trim_level': int.parse(current[14]!),
+          'n_ctx': int.parse(current[15]!),
+          'n_batch': int.parse(current[16]!),
+          'n_ubatch': int.parse(current[17]!),
+        },
+      });
+    }
+
+    // Historical persisted logs remain exportable through the old closed
+    // grammar. New fields are never inferred when they were not measured.
+    final legacy = RegExp(
       r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
       r'native_heap_bytes=(-?\d{1,15}) critical=(true|false) '
       r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
@@ -392,26 +435,26 @@ String? publicLogProjection(String line) {
       r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
       r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
     ).firstMatch(rest);
-    if (m == null) return null;
+    if (legacy == null) return null;
     return jsonEncode({
       'time': timestamp[1]!,
       'event': event,
-      'available_bytes': int.parse(m[1]!),
-      'rss_bytes': int.parse(m[2]!),
-      'native_heap_bytes': int.parse(m[3]!),
-      'critical': m[4] == 'true',
-      'phase': m[5]!,
-      'gpu_layers': int.parse(m[6]!),
-      'decode_calls': int.parse(m[7]!),
-      if (m[8] != null) ...{
-        'total_bytes': int.parse(m[8]!),
-        'threshold_bytes': int.parse(m[9]!),
-        'pressure': m[10]!,
-        'low_memory': m[11] == 'true',
-        'trim_level': int.parse(m[12]!),
-        'n_ctx': int.parse(m[13]!),
-        'n_batch': int.parse(m[14]!),
-        'n_ubatch': int.parse(m[15]!),
+      'available_bytes': int.parse(legacy[1]!),
+      'rss_bytes': int.parse(legacy[2]!),
+      'native_heap_bytes': int.parse(legacy[3]!),
+      'critical': legacy[4] == 'true',
+      'phase': legacy[5]!,
+      'gpu_layers': int.parse(legacy[6]!),
+      'decode_calls': int.parse(legacy[7]!),
+      if (legacy[8] != null) ...{
+        'total_bytes': int.parse(legacy[8]!),
+        'threshold_bytes': int.parse(legacy[9]!),
+        'pressure': legacy[10]!,
+        'low_memory': legacy[11] == 'true',
+        'trim_level': int.parse(legacy[12]!),
+        'n_ctx': int.parse(legacy[13]!),
+        'n_batch': int.parse(legacy[14]!),
+        'n_ubatch': int.parse(legacy[15]!),
       },
     });
   }

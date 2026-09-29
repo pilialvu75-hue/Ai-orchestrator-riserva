@@ -66,6 +66,7 @@ void main() {
       firstContentMs: 100,
       totalMs: 200,
       reportedTokens: 10,
+      prefillMs: 75,
       observedGpuLayers: 33,
       observedBatch: 128,
       observedMicroBatch: 32,
@@ -73,6 +74,8 @@ void main() {
       endPressure: 'high',
       startAvailableBytes: 1000,
       endAvailableBytes: 500,
+      startBatteryTemperatureDeciC: 350,
+      endBatteryTemperatureDeciC: 365,
       sessionStart: 'warm',
       sessionEnd: 'released',
     );
@@ -89,6 +92,8 @@ void main() {
 
     final diagnosticsText = report.toPlainText(includeResponses: false);
     expect(diagnosticsText, contains('quality=1/1'));
+    expect(diagnosticsText, contains('prefill=75ms'));
+    expect(diagnosticsText, contains('battery_temp_c=35.0->36.5'));
     expect(diagnosticsText, contains('session=warm->released'));
     expect(diagnosticsText, isNot(contains('private response text')));
   });
