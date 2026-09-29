@@ -1,6 +1,6 @@
 # AI-Orchestrator Web Platform
 
-Status: W1 browser-startup implementation
+Status: W1 merged; W3 durable-storage implementation
 
 ## Product boundary
 
@@ -68,3 +68,31 @@ to another platform.
 Web workflow together with the focused Web shell tests.
 
 Android/Windows/Linux/macOS CI remains unchanged.
+
+
+## W3 durable browser storage
+
+W3 reuses the existing `WorkshopCheckpointStore` and
+`PersistentWorkshopCheckpointStore`; it does not create a Web-only project
+persistence model.
+
+To keep the browser dependency graph clean, the checkpoint data model,
+interface and in-memory implementation live in
+`workshop_checkpoint_store.dart`, which has no dependency on
+`WorkshopEngine`, Flutter UI, native filesystem/process execution or runtime
+providers. `workshop_background_service.dart` re-exports that contract for
+source compatibility with existing native callers.
+
+The Web adapter opens the existing persistent store through
+`PreferencesService` + `shared_preferences`. On Web this is provided by the
+federated browser implementation. A failure to open/read persistence is shown
+as unavailable; Cantiere Web must not silently fall back to volatile storage.
+
+This persistence is durable for the current browser/profile only. It is not a
+credential vault, cloud authority or multi-device synchronization layer;
+provider/GitHub/Cloudflare secrets must never be written through this adapter.
+
+CI runs the storage adapter test both on the VM and in Chrome, then still
+requires the ordinary `flutter build web --release --target lib/web_main.dart`
+gate. W3 does not add PWA/offline-first behavior; durable browser state and PWA
+installation are separate concerns.

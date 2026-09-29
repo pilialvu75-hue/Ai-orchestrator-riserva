@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_background_service.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 
 /// Persistenza reale dei checkpoint del Cantiere.
 ///
