@@ -17,6 +17,11 @@ class ResourceSample {
         rssBytes = _number(data['rssBytes']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
         batteryTemperatureDeciC = _number(data['batteryTempDeciC']),
+        deviceManufacturer = _text(data['deviceManufacturer']),
+        deviceModel = _text(data['deviceModel']),
+        deviceName = _text(data['deviceName']),
+        sdkInt = _number(data['sdkInt']),
+        primaryAbi = _text(data['primaryAbi']),
         lowMemory = data['lowMemory'] == true,
         trimLevel = _number(data['trimLevel']) ?? 0;
 
@@ -26,7 +31,9 @@ class ResourceSample {
       thresholdBytes,
       rssBytes,
       nativeHeapBytes,
-      batteryTemperatureDeciC;
+      batteryTemperatureDeciC,
+      sdkInt;
+  final String? deviceManufacturer, deviceModel, deviceName, primaryAbi;
   final bool lowMemory;
   final int trimLevel;
 
@@ -38,6 +45,21 @@ class ResourceSample {
       : batteryTemperatureDeciC! / 10.0;
   static int? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value.toInt() : null;
+
+  static String? _text(Object? value) {
+    final text = value is String ? value.trim() : '';
+    return text.isEmpty ? null : text;
+  }
+
+  String get benchmarkHardwareProfile => <String>[
+        'android',
+        'manufacturer:${deviceManufacturer ?? 'unknown'}',
+        'model:${deviceModel ?? 'unknown'}',
+        'device:${deviceName ?? 'unknown'}',
+        'sdk:${sdkInt ?? -1}',
+        'abi:${primaryAbi ?? 'unknown'}',
+        'ram:${totalBytes ?? -1}',
+      ].join('|');
 
   // UI_HIDDEN=20 and background levels are lifecycle signals, not evidence
   // of foreground RAM pressure. Android 14+ may omit trim notifications.

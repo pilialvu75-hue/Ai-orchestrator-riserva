@@ -203,6 +203,33 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
+  /// Debug-Lab-only cold-start reset.
+  ///
+  /// Releases native model sessions without changing the production GPU
+  /// profile or any persisted runtime setting. It must only run while local
+  /// inference is idle.
+  Future<void> resetBenchmarkNativeSessions() async {
+    if (_activeInferenceSessions.isNotEmpty ||
+        monitor.state.status == LocalRuntimeStatus.inferencing ||
+        monitor.state.status == LocalRuntimeStatus.streaming) {
+      throw StateError(
+        'Cannot reset benchmark sessions while local inference is active.',
+      );
+    }
+
+    final bindings = _bindings;
+    if (bindings == null || _nativeSessionsByModel.isEmpty) {
+      return;
+    }
+
+    await _nativeSessionSubsystem.releaseAllNativeSessions(
+      bindings,
+      reason: 'benchmark_cold_start_reset',
+    );
+    ResourceMonitor.instance.readNative = null;
+    _log('[BENCHMARK_SESSION_RESET] status=complete');
+  }
+
   int? _benchmarkGpuLayersOverride;
 
   int get requestedGpuLayers =>

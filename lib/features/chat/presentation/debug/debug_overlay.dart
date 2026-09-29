@@ -575,7 +575,11 @@ class _DebugOverlayState
                           subtitle:
                               'First token, prefill, decode, warm/cold e '
                               'tempo totale.',
-                          available: false,
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runPerformanceGeneralBenchmark());
+                          },
                         ),
                         item(
                           icon: Icons.memory_outlined,
@@ -936,6 +940,186 @@ class _DebugOverlayState
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
                   const SnackBar(
                     content: Text('Benchmark qualita copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runPerformanceGeneralBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello locale pronto per il benchmark.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelPerformanceReport? report;
+
+    await _runTest(
+      testId: 'local_model_performance_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 6).clamp(12, 90).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.runPerformanceBenchmark(
+          modelIds: runnable.map((model) => model.id),
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Performance • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final model = byId[result.catalogModelId];
+          if (model == null ||
+              !result.coldSessionConfirmed ||
+              !result.warmSessionConfirmed) {
+            continue;
+          }
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.performance,
+            score: LocalBenchmarkScoring.performanceScore(result),
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showPerformanceBenchmarkReport(report!);
+  }
+
+  Future<void> _showPerformanceBenchmarkReport(
+    LocalModelPerformanceReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK PERFORMANCE')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln(
+        'score_weights=cold_first:25 warm_first:25 '
+        'warm_prefill:20 warm_decode:30',
+      )
+      ..writeln();
+
+    for (final model in report.models) {
+      final cold = model.coldSample?.result;
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          model.coldSessionConfirmed && model.warmSessionConfirmed
+              ? 'performance_score='
+                  '${LocalBenchmarkScoring.performanceScore(model)}/100'
+              : 'performance_score=n/a (cold/warm non confermati)',
+        )
+        ..writeln(
+          'cold_first_ms=${cold?.firstContentMs ?? -1} '
+          'cold_prefill_ms=${cold?.prefillMs ?? -1} '
+          'cold_total_ms=${cold?.totalMs ?? -1} '
+          'cold_decode_tokens_s='
+          '${cold?.decodeTokensPerSecond.toStringAsFixed(2) ?? 'n/a'}',
+        )
+        ..writeln(
+          'warm_first_ms='
+          '${model.averageWarmFirstContentMs.toStringAsFixed(0)} '
+          'warm_prefill_ms='
+          '${model.averageWarmPrefillMs.toStringAsFixed(0)} '
+          'warm_total_ms=${model.averageWarmTotalMs.toStringAsFixed(0)} '
+          'warm_decode_tokens_s='
+          '${model.averageWarmDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln(
+          'cold_session_confirmed=${model.coldSessionConfirmed} '
+          'warm_session_confirmed=${model.warmSessionConfirmed}',
+        )
+        ..writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Benchmark performance',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 420,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content:
+                        Text('Benchmark performance copiato negli appunti'),
                   ),
                 );
               },

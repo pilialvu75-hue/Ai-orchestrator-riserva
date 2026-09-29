@@ -2,6 +2,7 @@ package com.aiorchestrator
 
 import android.app.ActivityManager
 import android.os.BatteryManager
+import android.os.Build
 import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.IntentFilter
@@ -50,6 +51,11 @@ class ResourceTelemetry(private val context: Context, engine: FlutterEngine) : C
                         "rssBytes" to rssKb?.times(1024),
                         "nativeHeapBytes" to Debug.getNativeHeapAllocatedSize(),
                         "batteryTempDeciC" to batteryTempDeciC,
+                        "deviceManufacturer" to Build.MANUFACTURER,
+                        "deviceModel" to Build.MODEL,
+                        "deviceName" to Build.DEVICE,
+                        "sdkInt" to Build.VERSION.SDK_INT,
+                        "primaryAbi" to Build.SUPPORTED_ABIS.firstOrNull(),
                         "trimLevel" to if (SystemClock.elapsedRealtime() - trimAt < 10000) trimLevel else 0
                     ))
                 } catch (_: Exception) {

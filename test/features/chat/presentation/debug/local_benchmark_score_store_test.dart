@@ -6,6 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  LocalBenchmarkScoreStore storeFor(
+    PreferencesService preferences, {
+    String hardwareProfile = 'android|s24fe-test',
+  }) =>
+      LocalBenchmarkScoreStore(
+        preferences,
+        hardwareProfileProvider: () async => hardwareProfile,
+      );
+
   const model = AiModel(
     id: 'phi_test',
     displayName: 'Phi Test',
@@ -90,12 +99,195 @@ void main() {
     expect(LocalBenchmarkScoring.qualityScore(result), 75);
   });
 
+  test('performance score reaches 100 at fixed best thresholds', () {
+    LocalModelBenchmarkCaseResult sample({
+      required int firstMs,
+      required int prefillMs,
+      required String sessionStart,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'performance_generation',
+          response: 'benchmark response',
+          score: 0,
+          maxScore: 0,
+          forbiddenHits: 0,
+          firstContentMs: firstMs,
+          totalMs: firstMs + 2000,
+          reportedTokens: 40,
+          prefillMs: prefillMs,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 305,
+          sessionStart: sessionStart,
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelPerformanceModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      samples: <LocalModelPerformanceSample>[
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.cold,
+          repetition: 1,
+          result: sample(
+            firstMs: 1500,
+            prefillMs: 400,
+            sessionStart: 'cold',
+          ),
+        ),
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.warm,
+          repetition: 1,
+          result: sample(
+            firstMs: 750,
+            prefillMs: 400,
+            sessionStart: 'warm',
+          ),
+        ),
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.warm,
+          repetition: 2,
+          result: sample(
+            firstMs: 750,
+            prefillMs: 400,
+            sessionStart: 'warm',
+          ),
+        ),
+      ],
+    );
+
+    expect(result.coldSessionConfirmed, isTrue);
+    expect(result.warmSessionConfirmed, isTrue);
+    expect(LocalBenchmarkScoring.performanceScore(result), 100);
+  });
+
+  test('unconfirmed cold-warm sessions do not produce a valid score', () {
+    const sample = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'benchmark response',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 750,
+      totalMs: 2750,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 305,
+      sessionStart: 'unknown',
+      sessionEnd: 'kept',
+    );
+
+    const result = LocalModelPerformanceModelResult(
+      modelId: 'perf',
+      catalogModelId: 'perf',
+      displayName: 'Perf',
+      samples: <LocalModelPerformanceSample>[
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.cold,
+          repetition: 1,
+          result: sample,
+        ),
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.warm,
+          repetition: 1,
+          result: sample,
+        ),
+      ],
+    );
+
+    expect(result.coldSessionConfirmed, isFalse);
+    expect(result.warmSessionConfirmed, isFalse);
+    expect(LocalBenchmarkScoring.performanceScore(result), 0);
+  });
+
+  test('missing warm prefill telemetry is not rewarded as perfect', () {
+    const cold = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'benchmark response',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 1500,
+      totalMs: 3500,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 305,
+      sessionStart: 'cold',
+      sessionEnd: 'kept',
+    );
+    const warm = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'benchmark response',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 750,
+      totalMs: 2750,
+      reportedTokens: 40,
+      prefillMs: -1,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 900,
+      endAvailableBytes: 850,
+      startBatteryTemperatureDeciC: 305,
+      endBatteryTemperatureDeciC: 308,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+
+    const result = LocalModelPerformanceModelResult(
+      modelId: 'perf',
+      catalogModelId: 'perf',
+      displayName: 'Perf',
+      samples: <LocalModelPerformanceSample>[
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.cold,
+          repetition: 1,
+          result: cold,
+        ),
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.warm,
+          repetition: 1,
+          result: warm,
+        ),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.performanceScore(result), 80);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
       await SharedPreferences.getInstance(),
     );
-    final store = LocalBenchmarkScoreStore(preferences);
+    final store = storeFor(preferences);
 
     await store.saveComponent(
       model: model,
@@ -115,7 +307,7 @@ void main() {
     final preferences = PreferencesService(
       await SharedPreferences.getInstance(),
     );
-    final store = LocalBenchmarkScoreStore(preferences);
+    final store = storeFor(preferences);
 
     await store.saveComponent(
       model: model,
@@ -130,6 +322,40 @@ void main() {
     final loaded = await store.loadForModels(<AiModel>[changed]);
 
     expect(loaded.containsKey(model.id), isFalse);
+  });
+
+  test('score store ignores scores from a different hardware profile',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+
+    final s24 = storeFor(
+      preferences,
+      hardwareProfile: 'android|s24fe-test',
+    );
+    await s24.saveComponent(
+      model: model,
+      component: LocalBenchmarkComponent.performance,
+      score: 91,
+      updatedAt: DateTime.utc(2026, 9, 30),
+    );
+
+    final redmi = storeFor(
+      preferences,
+      hardwareProfile: 'android|redmi-test',
+    );
+    final wrongDevice = await redmi.loadForModels(const <AiModel>[model]);
+    expect(wrongDevice.containsKey(model.id), isFalse);
+
+    final sameDevice = await s24.loadForModels(const <AiModel>[model]);
+    expect(
+      sameDevice[model.id]
+          ?.components[LocalBenchmarkComponent.performance]
+          ?.score,
+      91,
+    );
   });
 
   test('general score averages only completed benchmark suites', () {
@@ -148,7 +374,7 @@ void main() {
       },
     );
 
-    // (80*10 + 100*25) / 35 = 94.285...
+    // The General Score is the transparent mean of completed suites.
     expect(score.generalScore, 90);
     expect(score.completedComponents, 2);
   });
