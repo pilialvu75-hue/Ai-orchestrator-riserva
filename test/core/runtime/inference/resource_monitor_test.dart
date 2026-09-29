@@ -159,6 +159,23 @@ void main() {
     );
   });
 
+  test('benchmark hardware profile uses only device class metadata', () {
+    final sample = ResourceSample(<Object?, Object?>{
+      'deviceManufacturer': 'samsung',
+      'deviceModel': 'SM-S721B',
+      'deviceName': 'r12s',
+      'sdkInt': 36,
+      'primaryAbi': 'arm64-v8a',
+      'totalBytes': 7575265280,
+    });
+
+    expect(
+      sample.benchmarkHardwareProfile,
+      'android|manufacturer:samsung|model:SM-S721B|device:r12s|'
+      'sdk:36|abi:arm64-v8a|ram:7575265280',
+    );
+  });
+
   test('partial and non-finite samples do not claim normal memory', () {
     expect(ResourceSample({}).pressure, 'unknown');
     expect(ResourceSample({'availableBytes': double.infinity}).availableBytes,
