@@ -5,7 +5,6 @@
 #include <optional>
 
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
 #include "startup_trace.h"
@@ -50,17 +49,16 @@ bool RegisterWin7PermissionCompatPlugin(flutter::FlutterEngine* engine) {
     return false;
   }
 
-  auto registrar = flutter::PluginRegistrarManager::GetInstance()
-                       ->GetRegistrar<flutter::PluginRegistrarWindows>(
-                           registrar_ref);
-  if (registrar == nullptr) {
+  FlutterDesktopMessengerRef messenger =
+      FlutterDesktopPluginRegistrarGetMessenger(registrar_ref);
+  if (messenger == nullptr) {
     startup_trace::Mark(
-        "27g Win7 permission compat registrar wrapper missing; continuing");
+        "27g Win7 permission compat messenger missing; continuing");
     return false;
   }
 
   auto channel = std::make_unique<flutter::MethodChannel<>>(
-      registrar->messenger(), "flutter.baseflow.com/permissions/methods",
+      messenger, "flutter.baseflow.com/permissions/methods",
       &flutter::StandardMethodCodec::GetInstance());
 
   channel->SetMethodCallHandler(
