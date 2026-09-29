@@ -57,27 +57,12 @@ class LocalModelBenchmarkScore {
   int? get generalScore {
     if (components.isEmpty) return null;
 
-    const weights = <LocalBenchmarkComponent, int>{
-      LocalBenchmarkComponent.quick: 10,
-      LocalBenchmarkComponent.quality: 25,
-      LocalBenchmarkComponent.performance: 15,
-      LocalBenchmarkComponent.vulkan: 10,
-      LocalBenchmarkComponent.thermal: 10,
-      LocalBenchmarkComponent.memoryContext: 10,
-      LocalBenchmarkComponent.multilingual: 10,
-      LocalBenchmarkComponent.stability: 10,
-    };
-
-    var weighted = 0;
-    var totalWeight = 0;
-    for (final entry in components.entries) {
-      final weight = weights[entry.key] ?? 0;
-      if (weight <= 0) continue;
-      weighted += entry.value.score * weight;
-      totalWeight += weight;
-    }
-    if (totalWeight == 0) return null;
-    return (weighted / totalWeight).round().clamp(0, 100).toInt();
+    final values = components.values
+        .map((component) => component.score)
+        .toList(growable: false);
+    return (values.reduce((a, b) => a + b) / values.length)
+        .round()
+        .clamp(0, 100);
   }
 
   int get completedComponents => components.length;
