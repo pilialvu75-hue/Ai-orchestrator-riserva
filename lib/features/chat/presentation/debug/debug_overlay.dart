@@ -944,6 +944,14 @@ class _DebugOverlayState
                                 : model.isDownloaded
                                     ? 'Non valido'
                                     : 'Non scaricato';
+                            final storedScore = scores[model.id];
+                            final scoreLabel = storedScore?.generalScore == null
+                                ? 'Punteggio generale: —'
+                                : 'Punteggio generale: '
+                                    '${storedScore!.generalScore}/100 • '
+                                    '${storedScore.completedComponents}/'
+                                    '${LocalModelBenchmarkScore.totalComponents} test';
+
 
                             return Card(
                               color: const Color(0xFF161E2B),
@@ -965,12 +973,7 @@ class _DebugOverlayState
                                 subtitle: Text(
                                   '${size == null || size.isEmpty ? "Dimensione n/d" : size}'
                                   ' • $sourceLabel • $stateLabel\n'
-                                  scores[model.id]?.generalScore == null
-                                      ? 'Punteggio generale: —'
-                                      : 'Punteggio generale: '
-                                          '${scores[model.id]!.generalScore}/100 • '
-                                          '${scores[model.id]!.completedComponents}/'
-                                          '${LocalModelBenchmarkScore.totalComponents} test',
+                                  '$scoreLabel',
                                   style: TextStyle(
                                     color: runnable
                                         ? Colors.white60
