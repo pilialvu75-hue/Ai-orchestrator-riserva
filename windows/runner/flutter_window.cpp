@@ -5,11 +5,16 @@
 #include <optional>
 
 #include <flutter/method_channel.h>
+#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
 #include "startup_trace.h"
 
 namespace {
+
+std::unique_ptr<flutter::PluginRegistrarWindows> g_win7_permission_registrar;
+std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+    g_win7_permission_channel;
 
 struct DynamicPluginSpec {
   const wchar_t* dll_name;
@@ -57,16 +62,17 @@ bool RegisterWin7PermissionCompatPlugin(flutter::FlutterEngine* engine) {
     return false;
   }
 
-  auto channel = std::make_unique<flutter::MethodChannel<>>(
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref)
-          ->messenger(),
-      "flutter.baseflow.com/permissions/methods",
-      &flutter::StandardMethodCodec::GetInstance());
+  g_win7_permission_registrar =
+      std::make_unique<flutter::PluginRegistrarWindows>(registrar_ref);
+  g_win7_permission_channel =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          g_win7_permission_registrar->messenger(),
+          "flutter.baseflow.com/permissions/methods",
+          &flutter::StandardMethodCodec::GetInstance());
 
-  channel->SetMethodCallHandler(
-      [](const flutter::MethodCall<>& call,
-         std::unique_ptr<flutter::MethodResult<>> result) {
+  g_win7_permission_channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
         const std::string& method = call.method_name();
 
         if (method == "checkPermissionStatus") {
@@ -107,8 +113,8 @@ bool RegisterWin7PermissionCompatPlugin(flutter::FlutterEngine* engine) {
         result->NotImplemented();
       });
 
-  // Flutter's MethodChannel installs the messenger callback in
-  // SetMethodCallHandler; the channel object itself does not own plugin state.
+  // Keep both registrar wrapper and channel alive for the process lifetime.
+  // The messenger callback installed above references this channel state.
   startup_trace::Mark("27g Win7 permission compat channel registered");
   return true;
 }
