@@ -199,14 +199,38 @@ class LocalModelBenchmarkModelResult {
   }
 }
 
+class LocalModelBenchmarkFailure {
+  const LocalModelBenchmarkFailure({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.error,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final String error;
+}
+
+class LocalModelBenchmarkCriticalResourceException implements Exception {
+  const LocalModelBenchmarkCriticalResourceException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
 class LocalModelBenchmarkReport {
   const LocalModelBenchmarkReport({
     required this.createdAt,
     required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
   });
 
   final DateTime createdAt;
   final List<LocalModelBenchmarkModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
 
   String toPlainText({bool includeResponses = true}) {
     final buffer = StringBuffer()
@@ -259,6 +283,15 @@ class LocalModelBenchmarkReport {
         }
       }
       buffer.writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
     }
 
     return buffer.toString().trimRight();
