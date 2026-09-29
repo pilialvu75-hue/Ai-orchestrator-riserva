@@ -111,6 +111,74 @@ void main() {
     expect(LocalModelBenchmarkRunner.performanceCase.maxScore, 0);
   });
 
+  test('thermal stress keeps bounded repetitions and 45C safety stop', () {
+    expect(LocalModelBenchmarkRunner.thermalStressRepetitions, 10);
+    expect(LocalModelBenchmarkRunner.thermalStressStopDeciC, 450);
+  });
+
+  test('thermal result derives peak, rise and pressure counts', () {
+    const first = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'ok',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 1000,
+      totalMs: 4000,
+      reportedTokens: 40,
+      prefillMs: 500,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 320,
+      endBatteryTemperatureDeciC: 335,
+      sessionStart: 'cold',
+      sessionEnd: 'kept',
+    );
+    const second = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'ok',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 800,
+      totalMs: 3500,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'high',
+      startAvailableBytes: 900,
+      endAvailableBytes: 700,
+      startBatteryTemperatureDeciC: 335,
+      endBatteryTemperatureDeciC: 350,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+
+    const result = LocalModelThermalStressResult(
+      modelId: 'model',
+      catalogModelId: 'model',
+      displayName: 'Model',
+      samples: <LocalModelBenchmarkCaseResult>[first, second],
+      targetRepetitions: 10,
+      thermalLimitReached: false,
+      criticalResourceStop: false,
+    );
+
+    expect(result.startBatteryTemperatureC, 32.0);
+    expect(result.maxBatteryTemperatureC, 35.0);
+    expect(result.batteryTemperatureRiseC, 3.0);
+    expect(result.pressuredSamples, 1);
+    expect(result.hasValidThermalTelemetry, isTrue);
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
