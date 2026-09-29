@@ -33,15 +33,27 @@ jobs:
             lib/app_factory/workshop/workshop_checkpoint_store.dart \
             lib/app_factory/workshop/workshop_persistent_checkpoint_store.dart \
             lib/app_factory/workshop/web/workshop_web_checkpoint_storage.dart \
+            lib/app_factory/workshop/web/workshop_web_cloud_broker.dart \
             lib/app_factory/workshop/web/workshop_web_shell.dart \
             test/app_factory/workshop/web/workshop_web_shell_test.dart \
-            test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart
+            test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart \
+            test/app_factory/workshop/web/workshop_web_cloud_broker_test.dart \
+            test/app_factory/workshop/web/workshop_web_cloud_broker_contract_test.dart
 
       - name: Run Web contract tests on VM
         run: flutter test test/app_factory/workshop/web/
 
-      - name: Run durable storage adapter test in Chrome
-        run: flutter test --platform chrome test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart
+      - name: Run browser adapters in Chrome
+        run: |
+          flutter test --platform chrome test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart
+          flutter test --platform chrome test/app_factory/workshop/web/workshop_web_cloud_broker_test.dart
+
+      - name: Validate Cloudflare Function module syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module --check < functions/api/cantiere/capabilities.js
+          node --input-type=module --check < functions/api/cantiere/inference.js
 
       - name: Build ordinary Cantiere Web application
         run: flutter build web --release --target lib/web_main.dart
