@@ -421,6 +421,197 @@ class _DebugOverlayState
     );
   }
 
+  Future<void> _showBenchmarkLabMenu() async {
+    if (_running) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF101723),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        Widget item({
+          required IconData icon,
+          required String title,
+          required String subtitle,
+          required bool available,
+          VoidCallback? onTap,
+        }) {
+          return Card(
+            color: const Color(0xFF161E2B),
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              enabled: available,
+              leading: Icon(
+                icon,
+                color: available ? Colors.lightBlueAccent : Colors.white38,
+              ),
+              title: Text(
+                title,
+                style: TextStyle(
+                  color: available ? Colors.white : Colors.white54,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                subtitle,
+                style: TextStyle(
+                  color: available ? Colors.white70 : Colors.white38,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: available
+                      ? const Color(0xFF123B2A)
+                      : const Color(0xFF2B3038),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  available ? 'Disponibile' : 'Da implementare',
+                  style: TextStyle(
+                    color: available
+                        ? const Color(0xFF6EE7A8)
+                        : Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              onTap: onTap,
+            ),
+          );
+        }
+
+        return SafeArea(
+          child: FractionallySizedBox(
+            heightFactor: 0.88,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Benchmark Lab',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Scegli il tipo di prova. I benchmark gia esistenti '
+                    'restano invariati; gli altri verranno collegati '
+                    'progressivamente.',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        item(
+                          icon: Icons.account_tree_outlined,
+                          title: 'Benchmark Orchestratore',
+                          subtitle:
+                              'Test di ruolo attuale. Selezione modelli e '
+                              'punteggio ruolo nel prossimo step.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runLocalModelBenchmark());
+                          },
+                        ),
+                        item(
+                          icon: Icons.bolt_outlined,
+                          title: 'Benchmark rapido',
+                          subtitle:
+                              'Tutti i modelli compatibili, pochi test '
+                              'rappresentativi.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.fact_check_outlined,
+                          title: 'Benchmark qualita',
+                          subtitle:
+                              'Suite completa: accuratezza, istruzioni, '
+                              'contesto e hallucination.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.speed_outlined,
+                          title: 'Benchmark performance',
+                          subtitle:
+                              'First token, prefill, decode, warm/cold e '
+                              'tempo totale.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.memory_outlined,
+                          title: 'Vulkan 0 / 10 / 99',
+                          subtitle:
+                              'Confronto CPU, offload parziale e massimo '
+                              'offload GPU.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runVulkanLayerSweep());
+                          },
+                        ),
+                        item(
+                          icon: Icons.thermostat_outlined,
+                          title: 'Stress termico',
+                          subtitle:
+                              'Run prolungato con temperatura, memoria e '
+                              'stabilita.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.storage_outlined,
+                          title: 'Memoria / Context',
+                          subtitle:
+                              'Contesti crescenti, KV cache, recovery e '
+                              'pressione memoria.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.translate_outlined,
+                          title: 'Multilingua',
+                          subtitle:
+                              'Confronto coerente in italiano, inglese, '
+                              'francese e spagnolo.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.shield_outlined,
+                          title: 'Stabilita',
+                          subtitle:
+                              'Inferenze consecutive, session reuse, switch '
+                              'modello e cancellazione.',
+                          available: false,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _runLocalModelBenchmark() async {
     LocalModelBenchmarkReport? report;
 
@@ -535,7 +726,7 @@ class _DebugOverlayState
         return AlertDialog(
           backgroundColor: const Color(0xFF101723),
           title: const Text(
-            'Phi vs Nemotron',
+            'Benchmark Orchestratore',
             style: TextStyle(
               color: Colors.white,
               fontSize: 14,
@@ -1113,27 +1304,18 @@ class _DebugOverlayState
             const SizedBox(
               height: 6,
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed:
                   _running
                       ? null
-                      : _runLocalModelBenchmark,
-              child:
-                  const Text(
-                'Benchmark Phi ↔ Nemotron',
+                      : _showBenchmarkLabMenu,
+              icon:
+                  const Icon(
+                Icons.science_outlined,
               ),
-            ),
-            const SizedBox(
-              height: 6,
-            ),
-            FilledButton(
-              onPressed:
-                  _running
-                      ? null
-                      : _runVulkanLayerSweep,
-              child:
+              label:
                   const Text(
-                'Vulkan 0 / 10 / 99',
+                'Benchmark Lab',
               ),
             ),
             const SizedBox(
