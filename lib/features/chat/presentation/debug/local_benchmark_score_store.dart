@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:flutter/foundation.dart';
 
 enum LocalBenchmarkComponent {
   quick,
@@ -167,11 +169,29 @@ abstract final class LocalBenchmarkScoring {
 }
 
 class LocalBenchmarkScoreStore {
-  LocalBenchmarkScoreStore(this._preferences);
+  LocalBenchmarkScoreStore(
+    this._preferences, {
+    Future<String> Function()? hardwareProfileProvider,
+  }) : _hardwareProfileProvider =
+            hardwareProfileProvider ?? _defaultHardwareProfile;
 
   static const String _storageKey = 'debug_local_benchmark_scores_v1';
 
   final PreferencesService _preferences;
+  final Future<String> Function() _hardwareProfileProvider;
+  Future<String>? _cachedHardwareProfile;
+
+  Future<String> hardwareProfile() =>
+      _cachedHardwareProfile ??= _hardwareProfileProvider();
+
+  static Future<String> _defaultHardwareProfile() async {
+    if (kIsWeb) return 'web';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final sample = await ResourceMonitor.instance.sample();
+      return sample?.benchmarkHardwareProfile ?? 'android|unknown';
+    }
+    return 'platform:${defaultTargetPlatform.name}';
+  }
 
   Future<Map<String, LocalModelBenchmarkScore>> loadForModels(
     Iterable<AiModel> models,
@@ -196,6 +216,7 @@ class LocalBenchmarkScoreStore {
       return const <String, LocalModelBenchmarkScore>{};
     }
 
+    final currentHardwareProfile = await hardwareProfile();
     final output = <String, LocalModelBenchmarkScore>{};
     for (final model in models) {
       final entry = modelMap[model.id];
@@ -203,6 +224,14 @@ class LocalBenchmarkScoreStore {
 
       final fingerprint = entry['fingerprint'];
       if (fingerprint != fingerprintFor(model)) continue;
+
+      final storedHardwareProfile = entry['hardwareProfile'];
+      // Legacy local records did not have a hardware profile. They remain
+      // readable on the same installation and are upgraded on next save.
+      if (storedHardwareProfile is String &&
+          storedHardwareProfile != currentHardwareProfile) {
+        continue;
+      }
 
       final rawComponents = entry['components'];
       if (rawComponents is! Map) continue;
@@ -251,17 +280,26 @@ class LocalBenchmarkScoreStore {
         : <String, dynamic>{};
 
     final fingerprint = fingerprintFor(model);
+    final currentHardwareProfile = await hardwareProfile();
     final existing = models[model.id];
     Map<String, dynamic> entry;
-    if (existing is Map && existing['fingerprint'] == fingerprint) {
+    final existingHardwareProfile =
+        existing is Map ? existing['hardwareProfile'] : null;
+    final hardwareCompatible = existingHardwareProfile == null ||
+        existingHardwareProfile == currentHardwareProfile;
+    if (existing is Map &&
+        existing['fingerprint'] == fingerprint &&
+        hardwareCompatible) {
       entry = Map<String, dynamic>.from(existing);
     } else {
       entry = <String, dynamic>{
         'modelId': model.id,
         'fingerprint': fingerprint,
+        'hardwareProfile': currentHardwareProfile,
         'components': <String, dynamic>{},
       };
     }
+    entry['hardwareProfile'] = currentHardwareProfile;
 
     final components = entry['components'] is Map
         ? Map<String, dynamic>.from(entry['components'] as Map)
@@ -276,7 +314,7 @@ class LocalBenchmarkScoreStore {
     models[model.id] = entry;
 
     root = <String, dynamic>{
-      'version': 1,
+      'version': 2,
       'models': models,
     };
     await _preferences.setString(_storageKey, jsonEncode(root));
