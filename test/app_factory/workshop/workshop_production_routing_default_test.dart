@@ -150,6 +150,7 @@ final class _NoopProvider implements RuntimeInferenceProvider {
 
 final class _MemoryWorkspaceGateway implements GitWorkspaceGateway {
   final Map<String, String> files = <String, String>{
+    'lib/main.dart': 'void main() {}',
     'lib/app.dart': 'old',
   };
 
