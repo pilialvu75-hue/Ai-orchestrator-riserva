@@ -1,7 +1,64 @@
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('orchestrator benchmark keeps Phi and Nemotron defaults', () {
+    expect(
+      LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+      const <String>[
+        LocalInferenceModelIds.phi35Mini,
+        LocalInferenceModelIds.nemotron3Nano4b,
+      ],
+    );
+  });
+
+  test('benchmark candidate must be downloaded, validated and have a path', () {
+    const base = AiModel(
+      id: 'candidate',
+      displayName: 'Candidate',
+      fileName: 'candidate.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 123,
+      description: 'test',
+      isDownloaded: true,
+      localPath: '/models/candidate.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+
+    expect(LocalModelBenchmarkRunner.isRunnableCandidate(base), isTrue);
+    expect(
+      LocalModelBenchmarkRunner.isRunnableCandidate(
+        base.copyWith(
+          validationStatus: ModelValidationStatus.updateAvailable,
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      LocalModelBenchmarkRunner.isRunnableCandidate(
+        base.copyWith(isDownloaded: false),
+      ),
+      isFalse,
+    );
+    expect(
+      LocalModelBenchmarkRunner.isRunnableCandidate(
+        base.copyWith(localPath: ''),
+      ),
+      isFalse,
+    );
+    expect(
+      LocalModelBenchmarkRunner.isRunnableCandidate(
+        base.copyWith(
+          validationStatus: ModelValidationStatus.invalidModel,
+        ),
+      ),
+      isFalse,
+    );
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
