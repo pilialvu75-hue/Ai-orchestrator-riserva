@@ -102,6 +102,15 @@ void main() {
     expect(benchmarkCase.score('La risposta è 42'), 1);
   });
 
+  test('performance benchmark uses one cold and two warm passes', () {
+    expect(LocalModelBenchmarkRunner.performanceWarmRepetitions, 2);
+    expect(
+      LocalModelBenchmarkRunner.performanceCase.id,
+      'performance_generation',
+    );
+    expect(LocalModelBenchmarkRunner.performanceCase.maxScore, 0);
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
