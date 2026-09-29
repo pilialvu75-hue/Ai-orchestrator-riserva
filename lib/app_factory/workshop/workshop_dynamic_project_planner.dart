@@ -65,7 +65,7 @@ final class WorkshopDynamicProjectPlanner {
     }
 
     try {
-      return _decoder.decode(first.text, requestId: request.id);
+      return _decodeForRequest(first.text, request: request);
     } on FormatException {
       if (cancellationToken?.isCancelled == true) rethrow;
 
@@ -93,8 +93,57 @@ final class WorkshopDynamicProjectPlanner {
         );
       }
 
-      return _decoder.decode(retry.text, requestId: request.id);
+      return _decodeForRequest(retry.text, request: request);
     }
+  }
+
+  WorkshopDynamicProjectPlan _decodeForRequest(
+    String raw, {
+    required WorkshopRequest request,
+  }) {
+    final plan = _decoder.decode(raw, requestId: request.id);
+    return _enforceRequestInvariants(plan, request);
+  }
+
+  static WorkshopDynamicProjectPlan _enforceRequestInvariants(
+    WorkshopDynamicProjectPlan plan,
+    WorkshopRequest request,
+  ) {
+    if (request.operation != WorkshopOperation.create || plan.tasks.isEmpty) {
+      return plan;
+    }
+
+    final rootIndex = plan.tasks.indexWhere(
+      (task) => task.dependencies.isEmpty,
+    );
+    if (rootIndex < 0) {
+      throw const FormatException(
+        'Create project plan has no dependency-free root task.',
+      );
+    }
+
+    final root = plan.tasks[rootIndex];
+    if (root.affectedPaths.contains('lib/main.dart')) {
+      return plan;
+    }
+    if (root.affectedPaths.length >= WorkshopDynamicProjectPlanDecoder.maxPaths) {
+      throw const FormatException(
+        'Create root task cannot include required lib/main.dart within path bounds.',
+      );
+    }
+
+    final tasks = List<WorkshopProjectTask>.of(plan.tasks);
+    tasks[rootIndex] = root.copyWith(
+      affectedPaths: <String>[
+        'lib/main.dart',
+        ...root.affectedPaths,
+      ],
+    );
+
+    return WorkshopDynamicProjectPlan(
+      phases: plan.phases,
+      tasks: List<WorkshopProjectTask>.unmodifiable(tasks),
+    );
   }
 
   static String _prompt(
@@ -181,7 +230,7 @@ final class WorkshopDynamicProjectPlanDecoder {
   static const int _maxDescriptionChars = 800;
   static const int _maxCriteria = 8;
   static const int _maxCriterionChars = 240;
-  static const int _maxPaths = 16;
+  static const int maxPaths = 16;
   static const int _maxPathChars = 220;
   static final RegExp _localId = RegExp(r'^[a-z][a-z0-9_-]{0,47}$');
 
@@ -435,7 +484,7 @@ final class WorkshopDynamicProjectPlanDecoder {
     final paths = _boundedStrings(
       value,
       'task.affectedPaths',
-      maxItems: _maxPaths,
+      maxItems: maxPaths,
       maxChars: _maxPathChars,
     );
     for (final path in paths) {

@@ -202,6 +202,31 @@ void main() {
     );
   });
 
+
+  test('create planner deterministically adds lib/main.dart to root task',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      _singlePlan(affectedPaths: const <String>['lib/app.dart']),
+    ]);
+    final planner = _planner(provider);
+
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'create-entrypoint-request',
+        title: 'Contatore Test',
+        instruction: 'Create a Flutter counter app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      ),
+    );
+
+    expect(plan.tasks, hasLength(1));
+    expect(
+      plan.tasks.single.affectedPaths,
+      <String>['lib/main.dart', 'lib/app.dart'],
+    );
+  });
+
   test('planner retries one malformed Architect response', () async {
     final provider = _ScriptedProvider(<String>[
       'not-json',

@@ -106,17 +106,24 @@ final class WorkshopProjectExecutor {
       return existing;
     }
 
+    final operation = _operationForTask(
+      task,
+      projectRequest: projectRequest,
+    );
+    final targetFiles = _targetFilesForTask(
+      plan,
+      task,
+      operation: operation,
+    );
+
     final request = WorkshopRequest(
       id: 'workshop-task:${plan.id}:${task.id}',
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(
-        task,
-        projectRequest: projectRequest,
-      ),
+      operation: operation,
       projectPath: null,
-      targetFiles: task.affectedPaths,
+      targetFiles: targetFiles,
       constraints: <String>[
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance: ${task.validationCriteria.join(' | ')}',
@@ -128,8 +135,8 @@ final class WorkshopProjectExecutor {
       context: <String>[
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
-        if (task.affectedPaths.isNotEmpty)
-          'Task target files: ${task.affectedPaths.join(' | ')}',
+        if (targetFiles.isNotEmpty)
+          'Task target files: ${targetFiles.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
@@ -197,16 +204,23 @@ final class WorkshopProjectExecutor {
       return existing;
     }
 
+    final operation = _operationForTask(
+      task,
+      projectRequest: projectRequest,
+    );
+    final targetFiles = _targetFilesForTask(
+      plan,
+      task,
+      operation: operation,
+    );
+
     final request = WorkshopRequest(
       id: 'workshop-task:${plan.id}:${task.id}',
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(
-        task,
-        projectRequest: projectRequest,
-      ),
-      targetFiles: task.affectedPaths,
+      operation: operation,
+      targetFiles: targetFiles,
       constraints: <String>[
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance: ${task.validationCriteria.join(' | ')}',
@@ -218,8 +232,8 @@ final class WorkshopProjectExecutor {
       context: <String>[
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
-        if (task.affectedPaths.isNotEmpty)
-          'Task target files: ${task.affectedPaths.join(' | ')}',
+        if (targetFiles.isNotEmpty)
+          'Task target files: ${targetFiles.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
@@ -426,6 +440,27 @@ final class WorkshopProjectExecutor {
     return _projectGateways.putIfAbsent(
       normalizedProjectId,
       () => factory(normalizedProjectId),
+    );
+  }
+
+  List<String> _targetFilesForTask(
+    WorkshopProjectPlan plan,
+    WorkshopProjectTask task, {
+    required WorkshopOperation operation,
+  }) {
+    if (operation != WorkshopOperation.create ||
+        plan.completedTasks != 0 ||
+        task.affectedPaths.contains('lib/main.dart')) {
+      return task.affectedPaths;
+    }
+
+    // A create task starts from an empty/new project boundary. Older persisted
+    // dynamic plans may predate the planner invariant and omit lib/main.dart
+    // even though the Engineer correctly needs to materialize the Flutter
+    // entry point. Repair that scope deterministically instead of forcing the
+    // model into an impossible retry loop at 0% progress.
+    return List<String>.unmodifiable(
+      <String>['lib/main.dart', ...task.affectedPaths],
     );
   }
 

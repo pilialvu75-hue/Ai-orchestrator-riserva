@@ -59,6 +59,58 @@ void main() {
     });
 
 
+
+    test('create root task repairs persisted scope with lib/main.dart',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:persisted-create-scope',
+        title: 'Contatore Test',
+        goal: 'Create the app',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:dynamic',
+            title: 'Implementation',
+            description: 'Implement product',
+            taskIds: const <String>['task:scope:counter-ui'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:scope:counter-ui',
+            title: 'Counter UI',
+            description: 'Create the Flutter counter UI.',
+            phaseId: 'phase:dynamic',
+            affectedPaths: const <String>['lib/app.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:persisted-create-scope',
+        title: 'Contatore Test',
+        instruction: 'Create a new Flutter counter app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(
+        session!.context.request.targetFiles,
+        <String>['lib/main.dart', 'lib/app.dart'],
+      );
+      expect(
+        session.context.request.context,
+        contains('Task target files: lib/main.dart | lib/app.dart'),
+      );
+    });
+
     test('dynamic dependency-free root task inherits owner create operation',
         () async {
       final gateway = _RecordingGateway(files: <String, String>{});
