@@ -6,6 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  LocalBenchmarkScoreStore storeFor(
+    PreferencesService preferences, {
+    String hardwareProfile = 'android|s24fe-test',
+  }) =>
+      LocalBenchmarkScoreStore(
+        preferences,
+        hardwareProfileProvider: () async => hardwareProfile,
+      );
+
   const model = AiModel(
     id: 'phi_test',
     displayName: 'Phi Test',
@@ -278,7 +287,7 @@ void main() {
     final preferences = PreferencesService(
       await SharedPreferences.getInstance(),
     );
-    final store = LocalBenchmarkScoreStore(preferences);
+    final store = storeFor(preferences);
 
     await store.saveComponent(
       model: model,
@@ -298,7 +307,7 @@ void main() {
     final preferences = PreferencesService(
       await SharedPreferences.getInstance(),
     );
-    final store = LocalBenchmarkScoreStore(preferences);
+    final store = storeFor(preferences);
 
     await store.saveComponent(
       model: model,
@@ -313,6 +322,40 @@ void main() {
     final loaded = await store.loadForModels(<AiModel>[changed]);
 
     expect(loaded.containsKey(model.id), isFalse);
+  });
+
+  test('score store ignores scores from a different hardware profile',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+
+    final s24 = storeFor(
+      preferences,
+      hardwareProfile: 'android|s24fe-test',
+    );
+    await s24.saveComponent(
+      model: model,
+      component: LocalBenchmarkComponent.performance,
+      score: 91,
+      updatedAt: DateTime.utc(2026, 9, 30),
+    );
+
+    final redmi = storeFor(
+      preferences,
+      hardwareProfile: 'android|redmi-test',
+    );
+    final wrongDevice = await redmi.loadForModels(const <AiModel>[model]);
+    expect(wrongDevice.containsKey(model.id), isFalse);
+
+    final sameDevice = await s24.loadForModels(const <AiModel>[model]);
+    expect(
+      sameDevice[model.id]
+          ?.components[LocalBenchmarkComponent.performance]
+          ?.score,
+      91,
+    );
   });
 
   test('general score averages only completed benchmark suites', () {
