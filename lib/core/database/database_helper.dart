@@ -17,6 +17,12 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     _configurePlatformFactory();
     final basePath = await getDatabasesPath();
+    if (!kIsWeb) {
+      final databaseDirectory = Directory(basePath);
+      if (!await databaseDirectory.exists()) {
+        await databaseDirectory.create(recursive: true);
+      }
+    }
     final dbPath = join(basePath, AppConstants.databaseName);
     return openDatabase(
       dbPath,
