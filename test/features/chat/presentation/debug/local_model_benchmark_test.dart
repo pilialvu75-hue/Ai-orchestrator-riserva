@@ -71,6 +71,37 @@ void main() {
     );
   });
 
+  test('quality suite is separate and covers seven general quality cases', () {
+    expect(
+      LocalModelBenchmarkRunner.qualityCases.map((item) => item.id).toSet(),
+      <String>{
+        'quality_fact_planet',
+        'quality_fact_water',
+        'quality_instruction_arithmetic',
+        'quality_context_license',
+        'quality_hallucination_unknown',
+        'quality_logic_deduction',
+        'quality_exact_instruction',
+      },
+    );
+  });
+
+  test('exact-answer rubric rewards instruction following only when exact', () {
+    const benchmarkCase = LocalModelBenchmarkCase(
+      id: 'exact',
+      prompt: 'Rispondi solo con 42',
+      requiredAnyGroups: <List<String>>[
+        <String>['42'],
+      ],
+      exactAnswers: <String>['42'],
+    );
+
+    expect(benchmarkCase.maxScore, 2);
+    expect(benchmarkCase.score('42'), 2);
+    expect(benchmarkCase.score('42.'), 2);
+    expect(benchmarkCase.score('La risposta è 42'), 1);
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
