@@ -227,6 +227,64 @@ void main() {
     );
   });
 
+
+  test('planner retries one transient timeout before project planning fails',
+      () async {
+    final provider = _ScriptedProvider(
+      <String>['', _singlePlan()],
+      terminalStates: const <InferenceTerminalState>[
+        InferenceTerminalState.timeout,
+        InferenceTerminalState.success,
+      ],
+    );
+    final planner = _planner(provider);
+
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'timeout-retry-request',
+        title: 'Contatore Test',
+        instruction: 'Create the requested app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      ),
+    );
+
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.last.sessionId, contains('retry-1'));
+  });
+
+  test('planner does not retry an owner-cancelled inference', () async {
+    final provider = _ScriptedProvider(
+      const <String>[''],
+      terminalStates: const <InferenceTerminalState>[
+        InferenceTerminalState.cancelled,
+      ],
+    );
+    final planner = _planner(provider);
+
+    await expectLater(
+      planner.plan(
+        request: const WorkshopRequest(
+          id: 'cancelled-plan-request',
+          title: 'Cancelled plan',
+          instruction: 'Create the requested app.',
+          source: WorkshopRequestSource.workshop,
+          operation: WorkshopOperation.create,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('terminal=cancelled'),
+        ),
+      ),
+    );
+
+    expect(provider.requests, hasLength(1));
+  });
+
   test('planner retries one malformed Architect response', () async {
     final provider = _ScriptedProvider(<String>[
       'not-json',
@@ -289,9 +347,16 @@ WorkshopDynamicProjectPlanner _planner(_ScriptedProvider provider) {
 }
 
 final class _ScriptedProvider implements RuntimeInferenceProvider {
-  _ScriptedProvider(this.outputs);
+  _ScriptedProvider(
+    this.outputs, {
+    List<InferenceTerminalState> terminalStates =
+        const <InferenceTerminalState>[],
+  }) : terminalStates = List<InferenceTerminalState>.unmodifiable(
+          terminalStates,
+        );
 
   final List<String> outputs;
+  final List<InferenceTerminalState> terminalStates;
   final List<InferenceRequest> requests = <InferenceRequest>[];
   int _index = 0;
 
@@ -304,7 +369,21 @@ final class _ScriptedProvider implements RuntimeInferenceProvider {
     if (_index >= outputs.length) {
       throw StateError('No scripted planner output remains.');
     }
-    final text = outputs[_index++];
+    final index = _index++;
+    final text = outputs[index];
+    final terminalState = index < terminalStates.length
+        ? terminalStates[index]
+        : InferenceTerminalState.success;
+
+    if (terminalState != InferenceTerminalState.success) {
+      return Stream<InferenceResponse>.value(
+        InferenceResponse.error(
+          'scripted planner terminal state',
+          state: terminalState,
+        ),
+      );
+    }
+
     return Stream<InferenceResponse>.fromIterable(
       <InferenceResponse>[
         InferenceResponse(text: text, timestamp: 1),
