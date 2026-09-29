@@ -55,6 +55,46 @@ void main() {
     expect(gateway.pushCalls, 0);
     expect(gateway.prCalls, 0);
   });
+  test('Evolution runner blocks proposal outside candidate workspace', () async {
+    const adapter = WorkshopLibraryEvolutionClaimAdapter();
+    final task = adapter.fromJson(_claim());
+    final gateway = _RecordingGateway();
+    final engineer = _QueueGateway(AppAiRole.engineer, <String>[
+      '{"summary":"escape","explanation":"unsafe",'
+      '"changes":[{"path":"stable_library/module.md","type":"addition",'
+      '"content":"unsafe"}],"validationNotes":[],"warnings":[]}'
+    ]);
+    final reviewer = _QueueGateway(AppAiRole.reviewer, <String>[
+      '{"approved":true,"summary":"ok","findings":[],"warnings":[]}',
+      '{"valid":true,"summary":"ok","checks":["bounded"],"warnings":[]}'
+    ]);
+    final inference = WorkshopStageRoleInference(
+      executor: WorkshopRoleInferenceExecutor(
+        router: WorkshopRoleInferenceRouter(gateways: {
+          AppAiRole.workshopOrchestrator:
+              _QueueGateway(AppAiRole.workshopOrchestrator, <String>['{}']),
+          AppAiRole.architect:
+              _QueueGateway(AppAiRole.architect, <String>['{}']),
+          AppAiRole.engineer: engineer,
+          AppAiRole.reviewer: reviewer,
+        }),
+      ),
+    );
+    final runner = WorkshopLibraryEvolutionInferenceRunner(
+      pipeline: WorkshopTaskInferencePipeline(inference: inference),
+    );
+
+    await expectLater(
+      runner.run(task: task, gateway: gateway, isOffline: true),
+      throwsA(isA<StateError>()),
+    );
+    expect(gateway.writeCalls, 0);
+    expect(gateway.deleteCalls, 0);
+    expect(gateway.commitCalls, 0);
+    expect(gateway.pushCalls, 0);
+    expect(gateway.prCalls, 0);
+  });
+
 }
 
 Map<String, dynamic> _claim() => <String, dynamic>{
