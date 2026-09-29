@@ -497,6 +497,101 @@ class LocalModelBenchmarkRunner {
     return cases.where((item) => ids.contains(item.id)).toList(growable: false);
   }
 
+  static const List<LocalModelBenchmarkCase> qualityCases =
+      <LocalModelBenchmarkCase>[
+    LocalModelBenchmarkCase(
+      id: 'quality_australia_capital',
+      prompt:
+          'Qual è la capitale dell\'Australia? Rispondi solo con il nome della città.',
+      requiredAnyGroups: <List<String>>[
+        <String>['canberra'],
+      ],
+      forbiddenPhrases: <String>[
+        'sydney',
+        'melbourne',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_http_not_found',
+      prompt:
+          'Quale codice di stato HTTP indica "Not Found"? Rispondi solo con il numero.',
+      requiredAnyGroups: <List<String>>[
+        <String>['404'],
+      ],
+      forbiddenPhrases: <String>[
+        '200',
+        '500',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_context_recall',
+      prompt: 'Qual è il codice della prova? Rispondi solo con il codice.',
+      context: <ChatTurn>[
+        ChatTurn(
+          role: ChatRole.user,
+          content: 'Per questa prova il codice è ARANCIO-47. Ricordalo.',
+        ),
+        ChatTurn(
+          role: ChatRole.assistant,
+          content: 'Ricevuto: ricorderò il codice della prova.',
+        ),
+      ],
+      requiredAnyGroups: <List<String>>[
+        <String>['arancio-47'],
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_instruction_single_word',
+      prompt: 'Rispondi con una sola parola: BLU.',
+      requiredAnyGroups: <List<String>>[
+        <String>['blu'],
+      ],
+      forbiddenPhrases: <String>[
+        'la parola',
+        'risposta',
+        'colore',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_reasoning_boxes',
+      prompt:
+          'Ci sono 7 scatole con 6 viti ciascuna. Quante viti ci sono in totale? Rispondi solo con il numero.',
+      requiredAnyGroups: <List<String>>[
+        <String>['42'],
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_unknown_product',
+      prompt:
+          'In quale anno è stato lanciato il processore Intel QuantumCore X9000? '
+          'Se il prodotto non è reale o non hai informazioni affidabili, '
+          'dillo chiaramente senza inventare una data.',
+      requiredAnyGroups: <List<String>>[
+        <String>[
+          'non risulta',
+          'non esiste',
+          'non conosco',
+          'non posso confermare',
+          'non è noto',
+          'non ho informazioni',
+          'non sono sicuro',
+        ],
+      ],
+      forbiddenPhrases: <String>[
+        'è stato lanciato nel',
+        'è stato presentato nel',
+        '2020',
+        '2021',
+        '2022',
+        '2023',
+        '2024',
+        '2025',
+        '2026',
+      ],
+    ),
+  ];
+
+
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
   final ResourceMonitor _resourceMonitor;
