@@ -244,13 +244,20 @@ final class WorkshopProposalImplementationRunner {
         'chars=${result.text.length}',
       );
 
+      final structuralFeedback = <String>[
+        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
+          revisionFeedback.trim(),
+        'Previous Engineer proposal was rejected before review: '
+            '${error.message}',
+      ].join(' | ');
+
       final recovered = await _inference.completeWithIdentity(
         stage: WorkshopStage.implementation,
         prompt: _buildPrompt(
           session,
           preflight: preflight,
           resumeContext: resumeContext,
-          revisionFeedback: revisionFeedback,
+          revisionFeedback: structuralFeedback,
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
@@ -583,7 +590,11 @@ requested. Do not review, approve or apply.
 
     final message = error.message.toString();
     return message == 'Workshop proposal field "explanation" is required.' ||
-        message == 'Workshop proposal field "explanation" must be text.';
+        message == 'Workshop proposal field "explanation" must be text.' ||
+        message.startsWith('Workshop proposal path "') ||
+        message ==
+            'Workshop create proposal must materialize required target '
+                '"lib/main.dart".';
   }
 
   static bool _isCriticalMemoryError(

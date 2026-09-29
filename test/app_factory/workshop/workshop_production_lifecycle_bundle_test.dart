@@ -21,7 +21,10 @@ void main() {
     'production bundle shares preflight and prepared task role stack',
     () async {
       final workspaceGateway = _RecordingWorkspaceGateway(
-        files: <String, String>{'lib/app.dart': 'old'},
+        files: <String, String>{
+          'lib/main.dart': 'void main() {}',
+          'lib/app.dart': 'old',
+        },
       );
       final executor = WorkshopProjectExecutor(
         gateway: workspaceGateway,

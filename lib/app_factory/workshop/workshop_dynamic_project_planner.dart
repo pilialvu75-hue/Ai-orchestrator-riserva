@@ -141,6 +141,17 @@ final class WorkshopDynamicProjectPlanner {
       ..writeln('- no cycles')
       ..writeln('- every task has at least one validation criterion')
       ..writeln('- paths are relative repository paths only')
+      ..writeln(
+        '- for Flutter create work, the implementation task must include '
+        'lib/main.dart so the approved source owns the runnable entry point',
+      )
+      ..writeln(
+        '- Flutter widget/unit tests belong under test/, never lib/test/',
+      )
+      ..writeln(
+        '- preserve explicit dependency constraints; if external packages are '
+        'forbidden, keep the plan and implementation SDK-only',
+      )
       ..writeln('- simple one-step work should stay one task')
       ..writeln('- substantial app work may use multiple ordered tasks')
       ..writeln('- do not add sensors, permissions, cloud or background work unless requested')

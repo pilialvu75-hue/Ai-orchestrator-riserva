@@ -437,7 +437,7 @@ final class WorkshopProjectExecutor {
     // Standard production tasks have explicit lifecycle semantics. Never infer
     // them from user-controlled project names/goals (for example "Contatore
     // Test"), because words such as Test/Build/Fix are valid product names.
-    if (task.id == 'task:acceptance-verification') {
+    if (_matchesTaskId(task.id, 'acceptance-verification')) {
       return WorkshopOperation.validate;
     }
 
@@ -446,8 +446,14 @@ final class WorkshopProjectExecutor {
       return WorkshopOperation.fix;
     }
 
-    if (task.id == 'task:initial-implementation' &&
-        projectRequest != null) {
+    // Dynamic Architect plans namespace task ids and may use request-specific
+    // local ids instead of the legacy "initial-implementation" label. The
+    // first dependency-free unit still belongs to the owner-approved project
+    // operation. In particular, a create project must not silently degrade to
+    // modify merely because the model described the task as "update app".
+    if (projectRequest != null &&
+        (_matchesTaskId(task.id, 'initial-implementation') ||
+            task.dependencies.isEmpty)) {
       return projectRequest.operation;
     }
 
@@ -506,6 +512,9 @@ final class WorkshopProjectExecutor {
 
     return WorkshopOperation.create;
   }
+
+  static bool _matchesTaskId(String taskId, String localId) =>
+      taskId == 'task:$localId' || taskId.endsWith(':$localId');
 
   /// Aggiorna lo stato globale del progetto in base alle fasi completate.
   void _refreshPlanStatus(

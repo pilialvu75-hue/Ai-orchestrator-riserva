@@ -7,6 +7,12 @@ void main() {
     test('marks generated-project build steps as repairable classes', () {
       expect(
         WorkshopPrivateBuildFailureClassifier.codeForStep(
+          'Validate staged source boundary',
+        ),
+        'remote_source_boundary_failed',
+      );
+      expect(
+        WorkshopPrivateBuildFailureClassifier.codeForStep(
           'Resolve dependencies',
         ),
         'remote_dependency_resolution_failed',
@@ -29,7 +35,6 @@ void main() {
       for (final step in <String?>[
         'Validate dispatch inputs',
         'Checkout staged Cantiere source only',
-        'Validate staged source boundary',
         'Setup Java',
         'Setup Flutter',
         'Materialize generic Android scaffold',
