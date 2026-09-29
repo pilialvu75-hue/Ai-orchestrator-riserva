@@ -118,11 +118,13 @@ abstract final class LocalBenchmarkScoring {
       best: 750,
       worst: 7500,
     );
-    final warmPrefill = _lowerIsBetter(
-      result.averageWarmPrefillMs,
-      best: 400,
-      worst: 4000,
-    );
+    final warmPrefill = result.averageWarmPrefillMs <= 0
+        ? 0.0
+        : _lowerIsBetter(
+            result.averageWarmPrefillMs,
+            best: 400,
+            worst: 4000,
+          );
     final warmDecode = _higherIsBetter(
       result.averageWarmDecodeTokensPerSecond,
       worst: 4,
