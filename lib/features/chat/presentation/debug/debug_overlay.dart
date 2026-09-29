@@ -1007,7 +1007,11 @@ class _DebugOverlayState
 
         for (final result in completed.models) {
           final model = byId[result.catalogModelId];
-          if (model == null) continue;
+          if (model == null ||
+              !result.coldSessionConfirmed ||
+              !result.warmSessionConfirmed) {
+            continue;
+          }
 
           await _benchmarkScoreStore.saveComponent(
             model: model,
@@ -1040,8 +1044,10 @@ class _DebugOverlayState
       buffer
         ..writeln('${model.displayName} [${model.modelId}]')
         ..writeln(
-          'performance_score='
-          '${LocalBenchmarkScoring.performanceScore(model)}/100',
+          model.coldSessionConfirmed && model.warmSessionConfirmed
+              ? 'performance_score='
+                  '${LocalBenchmarkScoring.performanceScore(model)}/100'
+              : 'performance_score=n/a (cold/warm non confermati)',
         )
         ..writeln(
           'cold_first_ms=${cold?.firstContentMs ?? -1} '
