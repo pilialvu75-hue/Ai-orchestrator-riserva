@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:flutter/material.dart';
 
@@ -9,6 +10,7 @@ enum WorkshopWebCapabilityState {
 
 enum WorkshopWebCapability {
   cantiereShell,
+  durableStorage,
   cloudAuto,
   moduleLibrary,
   researcher,
@@ -21,6 +23,8 @@ abstract final class WorkshopWebCapabilities {
   static const Map<WorkshopWebCapability, WorkshopWebCapabilityState> current =
       <WorkshopWebCapability, WorkshopWebCapabilityState>{
     WorkshopWebCapability.cantiereShell:
+        WorkshopWebCapabilityState.available,
+    WorkshopWebCapability.durableStorage:
         WorkshopWebCapabilityState.available,
     WorkshopWebCapability.cloudAuto:
         WorkshopWebCapabilityState.planned,
@@ -40,14 +44,18 @@ abstract final class WorkshopWebCapabilities {
       current[capability] ?? WorkshopWebCapabilityState.unavailable;
 }
 
-/// Browser-safe W1 shell.
+/// Browser-safe Cantiere shell.
 ///
-/// This entrypoint deliberately imports only Flutter plus the shared pure
-/// Cantiere contract. Native runtime, filesystem, voice, updater, database and
-/// general Assistant composition are not reachable from the Web compilation
-/// graph.
+/// W3 adds only the pure checkpoint persistence contract. Native runtime,
+/// filesystem/process execution, voice, updater, native database and general
+/// Assistant composition remain outside the Web compilation graph.
 class WorkshopWebShell extends StatelessWidget {
-  const WorkshopWebShell({super.key});
+  const WorkshopWebShell({
+    super.key,
+    required this.checkpointStore,
+  });
+
+  final Future<WorkshopCheckpointStore> checkpointStore;
 
   @override
   Widget build(BuildContext context) {
@@ -77,8 +85,8 @@ class WorkshopWebShell extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Browser startup ready • shared Workshop contract stage=' +
-                      WorkshopStage.requested.name,
+                  'Browser startup ready • shared Workshop contract '
+                      'stage=${WorkshopStage.requested.name}',
                   style: const TextStyle(
                     color: Colors.white70,
                     height: 1.4,
@@ -90,6 +98,9 @@ class WorkshopWebShell extends StatelessWidget {
                   subtitle:
                       'Browser-safe startup with no native or Assistant dependency.',
                   state: WorkshopWebCapabilityState.available,
+                ),
+                _DurableStorageCard(
+                  checkpointStore: checkpointStore,
                 ),
                 const _CapabilityCard(
                   title: 'Cloud / AUTO execution',
@@ -136,6 +147,60 @@ class WorkshopWebShell extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DurableStorageCard extends StatefulWidget {
+  const _DurableStorageCard({
+    required this.checkpointStore,
+  });
+
+  final Future<WorkshopCheckpointStore> checkpointStore;
+
+  @override
+  State<_DurableStorageCard> createState() => _DurableStorageCardState();
+}
+
+class _DurableStorageCardState extends State<_DurableStorageCard> {
+  late final Future<List<WorkshopBackgroundCheckpoint>> _checkpointProbe;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkpointProbe = widget.checkpointStore.then((store) => store.loadAll());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<WorkshopBackgroundCheckpoint>>(
+      future: _checkpointProbe,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const _CapabilityCard(
+            title: 'Durable browser storage',
+            subtitle:
+                'Unavailable: persistent Workshop checkpoints could not be opened or read.',
+            state: WorkshopWebCapabilityState.unavailable,
+          );
+        }
+        final checkpoints = snapshot.data;
+        if (checkpoints == null) {
+          return const _CapabilityCard(
+            title: 'Durable browser storage',
+            subtitle:
+                'Opening the existing Workshop checkpoint persistence contract.',
+            state: WorkshopWebCapabilityState.planned,
+          );
+        }
+        return _CapabilityCard(
+          title: 'Durable browser storage',
+          subtitle:
+              'Existing WorkshopCheckpointStore active • '
+              '${checkpoints.length} saved checkpoint(s).',
+          state: WorkshopWebCapabilityState.available,
+        );
+      },
     );
   }
 }
