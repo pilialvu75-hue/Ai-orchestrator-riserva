@@ -55,6 +55,41 @@ void main() {
     expect(LocalBenchmarkScoring.quickScore(result), 100);
   });
 
+  test('quality score is raw quality percentage only', () {
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        perfectCase(),
+        const LocalModelBenchmarkCaseResult(
+          caseId: 'partial',
+          response: 'partial',
+          score: 1,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: 9000,
+          totalMs: 20000,
+          reportedTokens: 20,
+          prefillMs: 5000,
+          observedGpuLayers: 0,
+          observedBatch: 64,
+          observedMicroBatch: 16,
+          startPressure: 'normal',
+          endPressure: 'high',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 600,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 330,
+          sessionStart: 'cold',
+          sessionEnd: 'kept',
+        ),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.qualityScore(result), 75);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
