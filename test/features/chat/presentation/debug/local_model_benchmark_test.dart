@@ -71,6 +71,47 @@ void main() {
     );
   });
 
+  test('quality benchmark uses an independent six-case suite', () {
+    expect(
+      LocalModelBenchmarkRunner.qualityCases.map((item) => item.id).toSet(),
+      <String>{
+        'quality_australia_capital',
+        'quality_http_not_found',
+        'quality_context_recall',
+        'quality_instruction_single_word',
+        'quality_reasoning_boxes',
+        'quality_unknown_product',
+      },
+    );
+    expect(LocalModelBenchmarkRunner.qualityCases, hasLength(6));
+  });
+
+  test('quality unknown-product rubric rewards uncertainty, not invented dates',
+      () {
+    final benchmarkCase = LocalModelBenchmarkRunner.qualityCases
+        .firstWhere((item) => item.id == 'quality_unknown_product');
+
+    expect(
+      benchmarkCase.score(
+        'Non risulta un processore Intel con quel nome; non posso confermare '
+        'una data di lancio.',
+      ),
+      1,
+    );
+    expect(
+      benchmarkCase.score(
+        'Intel QuantumCore X9000 è stato lanciato nel 2024.',
+      ),
+      0,
+    );
+    expect(
+      benchmarkCase.forbiddenHits(
+        'Intel QuantumCore X9000 è stato lanciato nel 2024.',
+      ),
+      greaterThanOrEqualTo(2),
+    );
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
