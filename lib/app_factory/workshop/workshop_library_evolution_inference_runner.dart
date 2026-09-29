@@ -34,7 +34,10 @@ final class WorkshopLibraryEvolutionInferenceRunner {
         instruction: task.objective,
         source: WorkshopRequestSource.system,
         operation: WorkshopOperation.modify,
-        targetFiles: const <String>['candidate_workspace/**'],
+        // The generic Workshop stager accepts exact target paths, not globs.
+        // Evolution therefore leaves targetFiles open and enforces its prefix
+        // structurally on the staged proposal below, still inside VirtualWorkspace.
+        targetFiles: const <String>[],
         constraints: <String>[
           ...task.constraints,
           'Write only under candidate_workspace/**.',
@@ -60,6 +63,19 @@ final class WorkshopLibraryEvolutionInferenceRunner {
       cancellationToken: cancellationToken,
       onStage: onStage,
     );
+
+    final unsafePaths = result.proposal.affectedPaths
+        .where((path) => !path.startsWith('candidate_workspace/'))
+        .toList(growable: false);
+    if (unsafePaths.isNotEmpty) {
+      session.block(
+        'Library Evolution proposal escaped candidate_workspace: '
+        '${unsafePaths.join(', ')}',
+      );
+      throw StateError(
+        'Library Evolution proposal contains paths outside candidate_workspace.',
+      );
+    }
 
     if (session.isApplyApproved || session.isCompleted) {
       throw StateError(
