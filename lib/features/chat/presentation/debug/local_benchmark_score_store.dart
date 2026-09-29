@@ -106,7 +106,12 @@ abstract final class LocalBenchmarkScoring {
 
   static int performanceScore(LocalModelPerformanceModelResult result) {
     final cold = result.coldSample?.result;
-    if (cold == null || result.warmSamples.isEmpty) return 0;
+    if (cold == null ||
+        result.warmSamples.isEmpty ||
+        !result.coldSessionConfirmed ||
+        !result.warmSessionConfirmed) {
+      return 0;
+    }
 
     final coldFirst = _lowerIsBetter(
       cold.firstContentMs.toDouble(),
