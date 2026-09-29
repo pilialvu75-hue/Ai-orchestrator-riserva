@@ -41,6 +41,51 @@ void main() {
     expect(snapshot.contains('build/app/output.txt'), isFalse);
   });
 
+
+  test('Android source boundary rejects a missing generated entry point',
+      () async {
+    final root = await Directory.systemTemp.createTemp('workshop-build-source-');
+    addTearDown(() => root.delete(recursive: true));
+
+    await _write(root, 'lib/app.dart', 'class App {}\n');
+    final snapshot =
+        await const WorkshopBuildSourceSnapshotter().capture(root.path);
+
+    expect(
+      WorkshopAndroidBuildSourceBoundary.validate(snapshot),
+      contains('lib/main.dart'),
+    );
+  });
+
+  test('Android source boundary rejects tests misplaced under lib/test',
+      () async {
+    final root = await Directory.systemTemp.createTemp('workshop-build-source-');
+    addTearDown(() => root.delete(recursive: true));
+
+    await _write(root, 'lib/main.dart', 'void main() {}\n');
+    await _write(root, 'lib/test/widget_test.dart', 'void main() {}\n');
+    final snapshot =
+        await const WorkshopBuildSourceSnapshotter().capture(root.path);
+
+    expect(
+      WorkshopAndroidBuildSourceBoundary.validate(snapshot),
+      contains('test/'),
+    );
+  });
+
+  test('Android source boundary accepts main.dart and normal test layout',
+      () async {
+    final root = await Directory.systemTemp.createTemp('workshop-build-source-');
+    addTearDown(() => root.delete(recursive: true));
+
+    await _write(root, 'lib/main.dart', 'void main() {}\n');
+    await _write(root, 'test/widget_test.dart', 'void main() {}\n');
+    final snapshot =
+        await const WorkshopBuildSourceSnapshotter().capture(root.path);
+
+    expect(WorkshopAndroidBuildSourceBoundary.validate(snapshot), isNull);
+  });
+
   test('fails closed when a single source file exceeds its limit', () async {
     final root = await Directory.systemTemp.createTemp('workshop-build-source-');
     addTearDown(() => root.delete(recursive: true));

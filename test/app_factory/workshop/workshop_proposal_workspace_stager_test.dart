@@ -55,6 +55,76 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+
+    test('rejects a proposal that escapes an explicit task target scope',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'request-scope',
+          title: 'Add widget test',
+          instruction: 'Add the bounded verification only.',
+          targetFiles: <String>['test/widget_test.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+
+      expect(
+        () => const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: '''
+{"explanation":"test","changes":[{"path":"lib/test/widget_test.dart","type":"create","content":"void main() {}"}]}
+''',
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('outside the current task targetFiles'),
+          ),
+        ),
+      );
+
+      expect(session.hasChanges, isFalse);
+      expect(session.status, WorkspaceSessionStatus.ready);
+    });
+
+    test('create task cannot omit a required missing lib/main.dart target',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'request-entrypoint',
+          title: 'Create Flutter app',
+          instruction: 'Create the app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart', 'lib/app.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+
+      expect(
+        () => const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: '''
+{"explanation":"app","changes":[{"path":"lib/app.dart","type":"create","content":"class App {}"}]}
+''',
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('lib/main.dart'),
+          ),
+        ),
+      );
+
+      expect(session.hasChanges, isFalse);
+      expect(session.status, WorkspaceSessionStatus.ready);
+    });
+
     test('does not enter review or materialize malformed output', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/existing.dart': 'old'},

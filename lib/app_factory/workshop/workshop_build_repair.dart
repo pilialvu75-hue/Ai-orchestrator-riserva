@@ -91,6 +91,7 @@ final class WorkshopBuildRepairPlanner {
     'local_analyze_failed',
     'local_test_failed',
     'local_build_failed',
+    'remote_source_boundary_failed',
     'remote_dependency_resolution_failed',
     'remote_validation_failed',
     'remote_project_build_failed',

@@ -28,7 +28,10 @@ void main() {
   test('production task handle keeps one session through approval and apply',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
@@ -105,7 +108,10 @@ void main() {
       'approved conversation proposal reaches task preflight without duplicate Orchestrator',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];

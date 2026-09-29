@@ -143,6 +143,17 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       final snapshot = await _snapshotter.capture(request.projectPath);
       _throwIfCancelled(request.id);
 
+      final sourceBoundaryError =
+          WorkshopAndroidBuildSourceBoundary.validate(snapshot);
+      if (sourceBoundaryError != null) {
+        throw _WorkshopRemoteBuildFailure(
+          code: 'remote_source_boundary_failed',
+          message:
+              'Generated Cantiere source failed the Android source boundary.',
+          diagnostics: sourceBoundaryError,
+        );
+      }
+
       final staged = await _stageSnapshot(
         token: token,
         snapshot: snapshot,
@@ -790,6 +801,8 @@ abstract final class WorkshopPrivateBuildFailureClassifier {
   static String codeForStep(String? rawStep) {
     final step = rawStep?.trim() ?? '';
     switch (step) {
+      case 'Validate staged source boundary':
+        return 'remote_source_boundary_failed';
       case 'Resolve dependencies':
         return 'remote_dependency_resolution_failed';
       case 'Validate generated project':

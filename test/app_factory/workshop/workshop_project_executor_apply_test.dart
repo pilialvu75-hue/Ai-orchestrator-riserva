@@ -58,6 +58,94 @@ void main() {
       );
     });
 
+
+    test('dynamic dependency-free root task inherits owner create operation',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:dynamic-root',
+        title: 'Dynamic root',
+        goal: 'Create the app',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:dynamic',
+            title: 'Implementation',
+            description: 'Implement product',
+            taskIds: const <String>['task:scope:update-app'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:scope:update-app',
+            title: 'Update app',
+            description: 'Update the app implementation safely.',
+            phaseId: 'phase:dynamic',
+            affectedPaths: const <String>['lib/main.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:dynamic-root',
+        title: 'New app',
+        instruction: 'Create a new Flutter app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(session!.context.request.operation, WorkshopOperation.create);
+    });
+
+    test('scoped acceptance task still routes to validate', () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:scoped-acceptance',
+        title: 'Scoped acceptance',
+        goal: 'Verify app',
+        status: WorkshopProjectStatus.planned,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:scoped',
+            title: 'Verification',
+            description: 'Verify product',
+            taskIds: const <String>['task:scope:acceptance-verification'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:scope:acceptance-verification',
+            title: 'Polish',
+            description: 'Polish final output.',
+            phaseId: 'phase:scoped',
+            affectedPaths: const <String>['test/widget_test.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:scoped-acceptance',
+        title: 'Product',
+        instruction: 'Create product',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(session!.context.request.operation, WorkshopOperation.validate);
+    });
+
     test('acceptance task routes to validate regardless of wording', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'test/widget_test.dart': 'old'},

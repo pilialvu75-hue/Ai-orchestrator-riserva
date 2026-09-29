@@ -38,6 +38,46 @@ final class WorkshopBuildSourceSnapshot {
       files.any((file) => file.relativePath == relativePath);
 }
 
+/// Pure Android source-boundary checks that run before any remote CI dispatch.
+///
+/// The generic remote scaffold is infrastructure only. Cantiere must still
+/// provide the generated app entry point itself, otherwise CI could build a
+/// scaffold that does not represent the approved project.
+abstract final class WorkshopAndroidBuildSourceBoundary {
+  static const String requiredEntryPoint = 'lib/main.dart';
+
+  static String? validate(WorkshopBuildSourceSnapshot snapshot) {
+    WorkshopBuildSourceFile? mainFile;
+    for (final file in snapshot.files) {
+      if (file.relativePath == requiredEntryPoint) {
+        mainFile = file;
+        break;
+      }
+    }
+
+    if (mainFile == null) {
+      return 'Required Flutter entry point "$requiredEntryPoint" is missing '
+          'from the approved Cantiere source snapshot.';
+    }
+    if (mainFile.sizeInBytes == 0) {
+      return 'Required Flutter entry point "$requiredEntryPoint" is empty.';
+    }
+
+    final misplacedTests = snapshot.files
+        .map((file) => file.relativePath)
+        .where(
+          (path) => path.startsWith('lib/test/') && path.endsWith('_test.dart'),
+        )
+        .toList(growable: false);
+    if (misplacedTests.isNotEmpty) {
+      return 'Flutter test files must live under test/, not lib/test/: '
+          '${misplacedTests.join(', ')}';
+    }
+
+    return null;
+  }
+}
+
 final class WorkshopBuildSourceSnapshotter {
   const WorkshopBuildSourceSnapshotter({
     this.maxFiles = 1024,
