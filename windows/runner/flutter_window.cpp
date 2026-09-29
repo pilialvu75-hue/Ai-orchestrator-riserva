@@ -172,6 +172,13 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
       continue;
     }
 
+    if (is_windows_7 &&
+        ::lstrcmpA(plugin.registry_name, "RecordWindowsPluginCApi") == 0) {
+      startup_trace::Mark(
+          "27j Win7 fallback: record plugin deferred to protect first UI launch");
+      continue;
+    }
+
     LoadAndRegisterPlugin(engine, plugin);
   }
   startup_trace::Mark("28 dynamic plugin registration complete");
