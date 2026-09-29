@@ -1,7 +1,10 @@
 package com.aiorchestrator
 
 import android.app.ActivityManager
+import android.os.BatteryManager
 import android.content.ComponentCallbacks2
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Debug
@@ -30,6 +33,15 @@ class ResourceTelemetry(private val context: Context, engine: FlutterEngine) : C
                         lines.firstOrNull { it.startsWith("VmRSS:") }
                             ?.trim()?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull()
                     }
+                    // ACTION_BATTERY_CHANGED is a sticky, read-only system signal.
+                    // Android exposes temperature in tenths of a degree Celsius.
+                    // This is battery temperature (not SoC junction temperature),
+                    // so it is logged explicitly as a thermal proxy.
+                    val batteryIntent =
+                        context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val batteryTempDeciC = batteryIntent
+                        ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+                        ?.takeIf { it != Int.MIN_VALUE && it >= 0 }
                     result.success(mapOf(
                         "availableBytes" to info.availMem,
                         "totalBytes" to info.totalMem,
@@ -37,6 +49,7 @@ class ResourceTelemetry(private val context: Context, engine: FlutterEngine) : C
                         "lowMemory" to info.lowMemory,
                         "rssBytes" to rssKb?.times(1024),
                         "nativeHeapBytes" to Debug.getNativeHeapAllocatedSize(),
+                        "batteryTempDeciC" to batteryTempDeciC,
                         "trimLevel" to if (SystemClock.elapsedRealtime() - trimAt < 10000) trimLevel else 0
                     ))
                 } catch (_: Exception) {

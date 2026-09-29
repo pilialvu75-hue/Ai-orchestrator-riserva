@@ -146,6 +146,19 @@ void main() {
     expect(guarded, isTrue);
     monitor.dispose();
   });
+  test('battery temperature is exposed only as the Android thermal proxy', () {
+    final sample = ResourceSample(<Object?, Object?>{
+      'batteryTempDeciC': 367,
+    });
+    expect(sample.batteryTemperatureDeciC, 367);
+    expect(sample.batteryTemperatureC, 36.7);
+    expect(
+      ResourceSample(<Object?, Object?>{'batteryTempDeciC': -1})
+          .batteryTemperatureC,
+      isNull,
+    );
+  });
+
   test('partial and non-finite samples do not claim normal memory', () {
     expect(ResourceSample({}).pressure, 'unknown');
     expect(ResourceSample({'availableBytes': double.infinity}).availableBytes,

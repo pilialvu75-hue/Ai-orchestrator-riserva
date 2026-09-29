@@ -72,6 +72,9 @@ class _DebugOverlayState
   static const Duration _benchmarkTimeout =
       Duration(minutes: 12);
 
+  static const Duration _vulkanSweepTimeout =
+      Duration(minutes: 20);
+
   /// Numero massimo di righe copiate dal log persistente.
   ///
   /// Il file su disco serve per sopravvivere ai crash nativi e può
@@ -443,6 +446,82 @@ class _DebugOverlayState
     }
 
     await _showLocalModelBenchmarkReport(report!);
+  }
+
+  Future<void> _runVulkanLayerSweep() async {
+    VulkanLayerSweepReport? report;
+
+    await _runTest(
+      testId: 'vulkan_layer_sweep_0_10_99',
+      timeout: _vulkanSweepTimeout,
+      action: () async {
+        report = await _localModelBenchmark.runVulkanLayerSweep(
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = message;
+            });
+          },
+        );
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showVulkanLayerSweepReport(report!);
+  }
+
+  Future<void> _showVulkanLayerSweepReport(
+    VulkanLayerSweepReport report,
+  ) async {
+    final text = report.toPlainText();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Vulkan 0 / 10 / 99',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Sweep Vulkan copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _showLocalModelBenchmarkReport(
@@ -1042,6 +1121,19 @@ class _DebugOverlayState
               child:
                   const Text(
                 'Benchmark Phi ↔ Nemotron',
+              ),
+            ),
+            const SizedBox(
+              height: 6,
+            ),
+            FilledButton(
+              onPressed:
+                  _running
+                      ? null
+                      : _runVulkanLayerSweep,
+              child:
+                  const Text(
+                'Vulkan 0 / 10 / 99',
               ),
             ),
             const SizedBox(

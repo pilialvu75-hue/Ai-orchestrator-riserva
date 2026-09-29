@@ -262,6 +262,7 @@ struct RuntimeSession {
     std::atomic<int64_t> telemetry_decode_calls{0};
     std::atomic<int64_t> telemetry_reused_tokens{0};
     std::atomic<int64_t> telemetry_prefilled_tokens{0};
+    std::atomic<int64_t> telemetry_prefill_ms{-1};
 
     mutable std::mutex generation_mutex;
     mutable std::mutex queue_mutex;
@@ -370,6 +371,7 @@ struct RuntimeSession {
         last_prompt_tokens.clear();
         telemetry_reused_tokens.store(0, std::memory_order_relaxed);
         telemetry_prefilled_tokens.store(0, std::memory_order_relaxed);
+        telemetry_prefill_ms.store(-1, std::memory_order_relaxed);
         if (was_valid) {
             LOGI("[KV_CACHE_INVALIDATE] session=%" PRId64 " reason=%s",
                  id,
@@ -867,6 +869,10 @@ void run_generation(
     const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - prefill_started_at
     ).count();
+    session->telemetry_prefill_ms.store(
+        static_cast<int64_t>(prefill_ms),
+        std::memory_order_relaxed
+    );
     LOGI("[FORENSIC] [THREAD_PREFILL_OK] before session=%" PRId64 " epoch=%" PRIu64,
          session->id,
          owner_epoch);
@@ -1688,6 +1694,7 @@ int64_t llb_session_metric(int64_t session_id, int32_t metric) {
         case 4: return session->telemetry_decode_calls.load(std::memory_order_relaxed);
         case 5: return session->telemetry_reused_tokens.load(std::memory_order_relaxed);
         case 6: return session->telemetry_prefilled_tokens.load(std::memory_order_relaxed);
+        case 7: return session->telemetry_prefill_ms.load(std::memory_order_relaxed);
         default: return -1;
     }
 }

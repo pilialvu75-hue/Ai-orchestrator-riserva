@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provi
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
@@ -66,6 +67,7 @@ class LocalModelBenchmarkCaseResult {
     required this.firstContentMs,
     required this.totalMs,
     required this.reportedTokens,
+    required this.prefillMs,
     required this.observedGpuLayers,
     required this.observedBatch,
     required this.observedMicroBatch,
@@ -73,6 +75,8 @@ class LocalModelBenchmarkCaseResult {
     required this.endPressure,
     required this.startAvailableBytes,
     required this.endAvailableBytes,
+    required this.startBatteryTemperatureDeciC,
+    required this.endBatteryTemperatureDeciC,
     required this.sessionStart,
     required this.sessionEnd,
   });
@@ -85,6 +89,7 @@ class LocalModelBenchmarkCaseResult {
   final int firstContentMs;
   final int totalMs;
   final int reportedTokens;
+  final int prefillMs;
   final int observedGpuLayers;
   final int observedBatch;
   final int observedMicroBatch;
@@ -92,6 +97,8 @@ class LocalModelBenchmarkCaseResult {
   final String endPressure;
   final int? startAvailableBytes;
   final int? endAvailableBytes;
+  final int? startBatteryTemperatureDeciC;
+  final int? endBatteryTemperatureDeciC;
   final String sessionStart;
   final String sessionEnd;
 
@@ -126,6 +133,41 @@ class LocalModelBenchmarkModelResult {
   double get averageTotalMs => cases.isEmpty
       ? 0
       : cases.fold<int>(0, (sum, item) => sum + item.totalMs) / cases.length;
+
+  double get averagePrefillMs {
+    final valid = cases
+        .map((item) => item.prefillMs)
+        .where((value) => value >= 0)
+        .toList(growable: false);
+    if (valid.isEmpty) return 0;
+    return valid.reduce((a, b) => a + b) / valid.length;
+  }
+
+  double? get maxBatteryTemperatureC {
+    final readings = <int>[
+      for (final item in cases)
+        if (item.startBatteryTemperatureDeciC != null)
+          item.startBatteryTemperatureDeciC!,
+      for (final item in cases)
+        if (item.endBatteryTemperatureDeciC != null)
+          item.endBatteryTemperatureDeciC!,
+    ];
+    if (readings.isEmpty) return null;
+    return readings.reduce((a, b) => a > b ? a : b) / 10.0;
+  }
+
+  double? get batteryTemperatureDeltaC {
+    final starts = cases
+        .map((item) => item.startBatteryTemperatureDeciC)
+        .whereType<int>()
+        .toList(growable: false);
+    final ends = cases
+        .map((item) => item.endBatteryTemperatureDeciC)
+        .whereType<int>()
+        .toList(growable: false);
+    if (starts.isEmpty || ends.isEmpty) return null;
+    return (ends.last - starts.first) / 10.0;
+  }
 
   double get averageDecodeTokensPerSecond {
     final valid = cases
@@ -179,8 +221,15 @@ class LocalModelBenchmarkReport {
           'avg_first_content_ms=${model.averageFirstContentMs.toStringAsFixed(0)}',
         )
         ..writeln('avg_total_ms=${model.averageTotalMs.toStringAsFixed(0)}')
+        ..writeln('avg_prefill_ms=${model.averagePrefillMs.toStringAsFixed(0)}')
         ..writeln(
           'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln(
+          'max_battery_temp_c=${model.maxBatteryTemperatureC?.toStringAsFixed(1) ?? 'n/a'}',
+        )
+        ..writeln(
+          'battery_temp_delta_c=${model.batteryTemperatureDeltaC?.toStringAsFixed(1) ?? 'n/a'}',
         )
         ..writeln(
           'sdd_repeat_consistent=${model.repeatedSddOutcomeConsistent ?? 'n/a'}',
@@ -191,11 +240,16 @@ class LocalModelBenchmarkReport {
           '- ${item.caseId}: score=${item.score}/${item.maxScore} '
           'forbidden=${item.forbiddenHits} '
           'first=${item.firstContentMs}ms total=${item.totalMs}ms '
+          'prefill=${item.prefillMs}ms '
           'tokens=${item.reportedTokens} '
           'decode=${item.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
           'gpu=${item.observedGpuLayers} '
           'batch=${item.observedBatch}/${item.observedMicroBatch} '
           'pressure=${item.startPressure}->${item.endPressure} '
+          'battery_temp_c='
+          '${item.startBatteryTemperatureDeciC == null ? 'n/a' : (item.startBatteryTemperatureDeciC! / 10).toStringAsFixed(1)}'
+          '->'
+          '${item.endBatteryTemperatureDeciC == null ? 'n/a' : (item.endBatteryTemperatureDeciC! / 10).toStringAsFixed(1)} '
           'session=${item.sessionStart}->${item.sessionEnd}',
         );
         if (includeResponses) {
@@ -205,6 +259,67 @@ class LocalModelBenchmarkReport {
       buffer.writeln();
     }
 
+    return buffer.toString().trimRight();
+  }
+}
+
+class VulkanLayerSweepSample {
+  const VulkanLayerSweepSample({
+    required this.requestedGpuLayers,
+    required this.modelId,
+    required this.displayName,
+    required this.repetition,
+    required this.result,
+  });
+
+  final int requestedGpuLayers;
+  final String modelId;
+  final String displayName;
+  final int repetition;
+  final LocalModelBenchmarkCaseResult result;
+}
+
+class VulkanLayerSweepReport {
+  const VulkanLayerSweepReport({
+    required this.createdAt,
+    required this.samples,
+  });
+
+  final DateTime createdAt;
+  final List<VulkanLayerSweepSample> samples;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('VULKAN GPU LAYER SWEEP')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln('profiles=0 -> 10 -> 99')
+      ..writeln('production_default=${LlamaNativeDefaults.nGpuLayers}')
+      ..writeln(
+        'thermal_source=Android battery temperature proxy (not SoC junction temperature)',
+      )
+      ..writeln();
+
+    for (final sample in samples) {
+      final result = sample.result;
+      buffer.writeln(
+        '- requested=${sample.requestedGpuLayers} '
+        'observed=${result.observedGpuLayers} '
+        'model=${sample.modelId} '
+        'run=${sample.repetition} '
+        'first=${result.firstContentMs}ms '
+        'prefill=${result.prefillMs}ms '
+        'total=${result.totalMs}ms '
+        'decode=${result.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
+        'pressure=${result.startPressure}->${result.endPressure} '
+        'available=${result.startAvailableBytes ?? -1}->'
+        '${result.endAvailableBytes ?? -1} '
+        'battery_temp_c='
+        '${result.startBatteryTemperatureDeciC == null ? 'n/a' : (result.startBatteryTemperatureDeciC! / 10).toStringAsFixed(1)}'
+        '->'
+        '${result.endBatteryTemperatureDeciC == null ? 'n/a' : (result.endBatteryTemperatureDeciC! / 10).toStringAsFixed(1)} '
+        'session=${result.sessionStart}->${result.sessionEnd}',
+      );
+    }
     return buffer.toString().trimRight();
   }
 }
@@ -221,6 +336,8 @@ class LocalModelBenchmarkRunner {
   static const int _maxTokens = 96;
   static const double _temperature = 0.5;
   static const Duration _betweenCases = Duration(milliseconds: 350);
+  static const List<int> vulkanSweepProfiles = <int>[0, 10, 99];
+  static const int vulkanSweepRepetitions = 2;
 
   static const List<String> _targetModelIds = <String>[
     LocalInferenceModelIds.phi35Mini,
@@ -336,41 +453,7 @@ class LocalModelBenchmarkRunner {
   Future<LocalModelBenchmarkReport> run({
     LocalModelBenchmarkProgress? onProgress,
   }) async {
-    final availableResult = await _localAiRepository.getAvailableModels();
-    final available = availableResult.fold<List<AiModel>>(
-      (failure) => throw StateError(
-        'Model catalogue lookup failed: ${failure.message}',
-      ),
-      (models) => models,
-    );
-
-    final targets = <AiModel>[];
-    final missing = <String>[];
-
-    for (final modelId in _targetModelIds) {
-      AiModel? found;
-      for (final candidate in available) {
-        if (candidate.effectiveRuntimeModelId == modelId ||
-            candidate.id == modelId) {
-          found = candidate;
-          break;
-        }
-      }
-
-      if (found == null ||
-          !found.isDownloaded ||
-          (found.localPath?.trim().isEmpty ?? true)) {
-        missing.add(modelId);
-      } else {
-        targets.add(found);
-      }
-    }
-
-    if (missing.isNotEmpty) {
-      throw StateError(
-        'Benchmark requires both downloaded models. Missing: ${missing.join(', ')}',
-      );
-    }
+    final targets = await _resolveTargets();
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_BEGIN] models=${targets.map((m) => m.effectiveRuntimeModelId).join(',')} '
@@ -408,6 +491,7 @@ class LocalModelBenchmarkRunner {
           'forbidden_hits=${result.forbiddenHits} '
           'first_content_ms=${result.firstContentMs} '
           'total_ms=${result.totalMs} '
+          'prefill_ms=${result.prefillMs} '
           'reported_tokens=${result.reportedTokens} '
           'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
           'gpu_layers=${result.observedGpuLayers} '
@@ -416,6 +500,8 @@ class LocalModelBenchmarkRunner {
           'pressure=${result.startPressure}->${result.endPressure} '
           'start_available_bytes=${result.startAvailableBytes ?? -1} '
           'end_available_bytes=${result.endAvailableBytes ?? -1} '
+          'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
+          'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1} '
           'session=${result.sessionStart}->${result.sessionEnd}',
         );
 
@@ -437,7 +523,10 @@ class LocalModelBenchmarkRunner {
         'quality=${modelResult.score}/${modelResult.maxScore} '
         'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
         'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
+        'avg_prefill_ms=${modelResult.averagePrefillMs.toStringAsFixed(0)} '
         'avg_decode_tokens_s=${modelResult.averageDecodeTokensPerSecond.toStringAsFixed(2)} '
+        'max_battery_temp_c=${modelResult.maxBatteryTemperatureC?.toStringAsFixed(1) ?? 'na'} '
+        'battery_temp_delta_c=${modelResult.batteryTemperatureDeltaC?.toStringAsFixed(1) ?? 'na'} '
         'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
       );
     }
@@ -463,6 +552,142 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       models: List<LocalModelBenchmarkModelResult>.unmodifiable(modelResults),
     );
+  }
+
+  Future<VulkanLayerSweepReport> runVulkanLayerSweep({
+    LocalModelBenchmarkProgress? onProgress,
+  }) async {
+    final runtime = _runtimeProvider;
+    if (runtime is! AndroidFfiRuntimeProvider) {
+      throw StateError(
+        'The 0/10/99 GPU-layer sweep requires the Android FFI runtime.',
+      );
+    }
+
+    final targets = await _resolveTargets();
+    final benchmarkCase =
+        cases.firstWhere((item) => item.id == 'vulkan_fact');
+    final samples = <VulkanLayerSweepSample>[];
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_VULKAN_SWEEP_BEGIN] profiles=0,10,99 '
+      'models=${targets.length} repetitions=$vulkanSweepRepetitions',
+    );
+
+    try {
+      for (var repetition = 1;
+          repetition <= vulkanSweepRepetitions;
+          repetition++) {
+        // Counterbalance both profile and model order so the hottest part of
+        // the run is not always assigned to the same candidate.
+        final profileOrder = repetition.isOdd
+            ? vulkanSweepProfiles
+            : vulkanSweepProfiles.reversed.toList(growable: false);
+        final modelOrder = repetition.isOdd
+            ? targets
+            : targets.reversed.toList(growable: false);
+
+        for (final requestedLayers in profileOrder) {
+          await runtime.setBenchmarkGpuLayersOverride(requestedLayers);
+
+          for (final model in modelOrder) {
+            onProgress?.call(
+              'Vulkan $requestedLayers • ${model.displayName} '
+              '$repetition/$vulkanSweepRepetitions',
+            );
+
+            final result = await _runCase(
+              model: model,
+              benchmarkCase: benchmarkCase,
+            );
+            samples.add(
+              VulkanLayerSweepSample(
+                requestedGpuLayers: requestedLayers,
+                modelId: model.effectiveRuntimeModelId,
+                displayName: model.displayName,
+                repetition: repetition,
+                result: result,
+              ),
+            );
+
+            RuntimeEventLog.instance.emit(
+              '[LOCAL_VULKAN_SWEEP_CASE] '
+              'model=${model.effectiveRuntimeModelId} '
+              'requested_gpu_layers=$requestedLayers '
+              'observed_gpu_layers=${result.observedGpuLayers} '
+              'repetition=$repetition '
+              'first_content_ms=${result.firstContentMs} '
+              'prefill_ms=${result.prefillMs} '
+              'total_ms=${result.totalMs} '
+              'reported_tokens=${result.reportedTokens} '
+              'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
+              'pressure=${result.startPressure}->${result.endPressure} '
+              'start_available_bytes=${result.startAvailableBytes ?? -1} '
+              'end_available_bytes=${result.endAvailableBytes ?? -1} '
+              'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
+              'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1}',
+            );
+
+            await Future<void>.delayed(_betweenCases);
+          }
+        }
+      }
+    } finally {
+      await runtime.setBenchmarkGpuLayersOverride(null);
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_VULKAN_SWEEP_END] samples=${samples.length} status=success',
+    );
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return VulkanLayerSweepReport(
+      createdAt: DateTime.now(),
+      samples: List<VulkanLayerSweepSample>.unmodifiable(samples),
+    );
+  }
+
+  Future<List<AiModel>> _resolveTargets() async {
+    final availableResult = await _localAiRepository.getAvailableModels();
+    final available = availableResult.fold<List<AiModel>>(
+      (failure) => throw StateError(
+        'Model catalogue lookup failed: ${failure.message}',
+      ),
+      (models) => models,
+    );
+
+    final targets = <AiModel>[];
+    final missing = <String>[];
+    for (final modelId in _targetModelIds) {
+      AiModel? found;
+      for (final candidate in available) {
+        if (candidate.effectiveRuntimeModelId == modelId ||
+            candidate.id == modelId) {
+          found = candidate;
+          break;
+        }
+      }
+      if (found == null ||
+          !found.isDownloaded ||
+          (found.localPath?.trim().isEmpty ?? true)) {
+        missing.add(modelId);
+      } else {
+        targets.add(found);
+      }
+    }
+    if (missing.isNotEmpty) {
+      throw StateError(
+        'Benchmark requires both downloaded models. Missing: '
+        '${missing.join(', ')}',
+      );
+    }
+    return targets;
   }
 
   Future<LocalModelBenchmarkCaseResult> _runCase({
@@ -491,6 +716,7 @@ class LocalModelBenchmarkRunner {
     String? finalText;
     var reportedTokens = 0;
     var firstContentMs = -1;
+    var observedPrefillMs = -1;
     var observedGpuLayers = 0;
     var observedBatch = 0;
     var observedMicroBatch = 0;
@@ -514,10 +740,17 @@ class LocalModelBenchmarkRunner {
       ),
       cancellationToken: cancellationToken,
     )) {
-      final native = _resourceMonitor.native;
+      final native = androidRuntime != null && modelPath != null
+          ? androidRuntime.nativeSessionMetricsForModelPath(modelPath) ??
+              _resourceMonitor.native
+          : _resourceMonitor.native;
+      final prefillMs = native['prefill_ms'] ?? -1;
       final gpuLayers = native['gpu_layers'] ?? 0;
       final batch = native['batch'] ?? 0;
       final microBatch = native['micro_batch'] ?? 0;
+      if (prefillMs >= 0) {
+        observedPrefillMs = prefillMs;
+      }
       if (gpuLayers > observedGpuLayers) {
         observedGpuLayers = gpuLayers;
       }
@@ -593,6 +826,7 @@ class LocalModelBenchmarkRunner {
       firstContentMs: firstContentMs,
       totalMs: stopwatch.elapsedMilliseconds,
       reportedTokens: reportedTokens,
+      prefillMs: observedPrefillMs,
       observedGpuLayers: observedGpuLayers,
       observedBatch: observedBatch,
       observedMicroBatch: observedMicroBatch,
@@ -600,6 +834,8 @@ class LocalModelBenchmarkRunner {
       endPressure: endSample?.pressure ?? 'unknown',
       startAvailableBytes: startSample?.availableBytes,
       endAvailableBytes: endSample?.availableBytes,
+      startBatteryTemperatureDeciC: startSample?.batteryTemperatureDeciC,
+      endBatteryTemperatureDeciC: endSample?.batteryTemperatureDeciC,
       sessionStart: sessionStart,
       sessionEnd: sessionEnd,
     );
