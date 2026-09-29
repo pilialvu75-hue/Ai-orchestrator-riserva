@@ -645,7 +645,8 @@ class LocalModelBenchmarkRunner {
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_END] models=${modelResults.length} '
-      'failures=${failures.length} status=success',
+      'failures=${failures.length} '
+      'status=${failures.isEmpty ? 'success' : 'partial'}',
     );
 
     final diagnostics = GitHubDiagnostics.instance;
