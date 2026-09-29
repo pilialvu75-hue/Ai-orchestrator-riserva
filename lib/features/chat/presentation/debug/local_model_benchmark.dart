@@ -824,7 +824,7 @@ class LocalModelBenchmarkRunner {
     required LocalModelBenchmarkCase benchmarkCase,
   }) async {
     final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
-        ? _runtimeProvider as AndroidFfiRuntimeProvider
+        ? _runtimeProvider
         : null;
     final modelPath = model.localPath;
     final hadSessionBefore = androidRuntime != null &&
