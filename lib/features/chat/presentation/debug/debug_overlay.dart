@@ -632,7 +632,19 @@ class _DebugOverlayState
   }
 
   Future<void> _runQuickGeneralBenchmark() async {
-    final candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
     final runnable = candidates
         .where(LocalModelBenchmarkRunner.isRunnableCandidate)
         .toList(growable: false);
