@@ -234,10 +234,96 @@ void LogException(const DEBUG_EVENT& event) {
     WriteLine(L"module=<unresolved>");
   }
 
+  WriteDecLine(L"parameter_count=",
+               static_cast<DWORD>(info.ExceptionRecord.NumberParameters));
+  for (DWORD index = 0;
+       index < info.ExceptionRecord.NumberParameters &&
+       index < EXCEPTION_MAXIMUM_PARAMETERS;
+       ++index) {
+    wchar_t label[40] = {};
+    wsprintfW(label, L"parameter_%lu=", index);
+    WriteHexLine(label, static_cast<ULONG_PTR>(
+                            info.ExceptionRecord.ExceptionInformation[index]));
+  }
+
   if (IsInterestingFatal(code)) {
     WriteLine(L"classification=interesting-fatal");
     WriteChildMiniDump();
   }
+}
+
+void AppendStartupTraceSnapshot() {
+  wchar_t trace_path[MAX_PATH] = {};
+  if (!BuildReportPath(trace_path, L"AI-Orchestrator-win7-startup.log")) {
+    WriteLine(L"");
+    WriteLine(L"[STARTUP_TRACE]");
+    WriteLine(L"<path unavailable>");
+    return;
+  }
+
+  HANDLE trace = CreateFileW(trace_path, GENERIC_READ,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (trace == INVALID_HANDLE_VALUE) {
+    WriteLine(L"");
+    WriteLine(L"[STARTUP_TRACE]");
+    WriteLine(L"<not found>");
+    return;
+  }
+
+  LARGE_INTEGER size = {};
+  if (!GetFileSizeEx(trace, &size)) {
+    CloseHandle(trace);
+    WriteLine(L"");
+    WriteLine(L"[STARTUP_TRACE]");
+    WriteLine(L"<size unavailable>");
+    return;
+  }
+
+  constexpr DWORD kMaxSnapshotBytes = 32768;
+  DWORD bytes_to_read = static_cast<DWORD>(
+      size.QuadPart > kMaxSnapshotBytes ? kMaxSnapshotBytes : size.QuadPart);
+  if (size.QuadPart > kMaxSnapshotBytes) {
+    LARGE_INTEGER offset = {};
+    offset.QuadPart = size.QuadPart - kMaxSnapshotBytes;
+    SetFilePointerEx(trace, offset, nullptr, FILE_BEGIN);
+  }
+
+  char buffer[kMaxSnapshotBytes + 1] = {};
+  DWORD bytes_read = 0;
+  const BOOL read_ok =
+      ReadFile(trace, buffer, bytes_to_read, &bytes_read, nullptr);
+  CloseHandle(trace);
+
+  WriteLine(L"");
+  WriteLine(L"[STARTUP_TRACE]");
+  if (!read_ok || bytes_read == 0) {
+    WriteLine(L"<empty>");
+    return;
+  }
+
+  const int wide_length =
+      MultiByteToWideChar(CP_ACP, 0, buffer, bytes_read, nullptr, 0);
+  if (wide_length <= 0) {
+    WriteLine(L"<decode failed>");
+    return;
+  }
+
+  wchar_t* wide = static_cast<wchar_t*>(
+      HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                (static_cast<SIZE_T>(wide_length) + 1) * sizeof(wchar_t)));
+  if (wide == nullptr) {
+    WriteLine(L"<allocation failed>");
+    return;
+  }
+
+  MultiByteToWideChar(CP_ACP, 0, buffer, bytes_read, wide, wide_length);
+  wide[wide_length] = L'\0';
+  WriteRaw(wide);
+  if (wide_length > 0 && wide[wide_length - 1] != L'\n') {
+    WriteRaw(L"\r\n");
+  }
+  HeapFree(GetProcessHeap(), 0, wide);
 }
 
 }  // namespace
@@ -380,6 +466,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE,
     CloseHandle(g_child_process);
     g_child_process = nullptr;
   }
+  AppendStartupTraceSnapshot();
   WriteLine(L"");
   WriteLine(L"END bootstrap debug session");
   CloseHandle(g_report);
