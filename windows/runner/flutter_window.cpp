@@ -18,7 +18,24 @@ struct DynamicPluginSpec {
   const char* load_failed_marker;
   const char* symbol_failed_marker;
   const char* registrar_failed_marker;
+  const char* exception_marker;
 };
+
+bool IsWindows7() {
+  using RtlGetVersionFn = LONG (WINAPI*)(OSVERSIONINFOW*);
+  HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+  if (ntdll == nullptr) return false;
+
+  auto rtl_get_version = reinterpret_cast<RtlGetVersionFn>(
+      ::GetProcAddress(ntdll, "RtlGetVersion"));
+  if (rtl_get_version == nullptr) return false;
+
+  OSVERSIONINFOW version = {};
+  version.dwOSVersionInfoSize = sizeof(version);
+  if (rtl_get_version(&version) != 0) return false;
+
+  return version.dwMajorVersion == 6 && version.dwMinorVersion == 1;
+}
 
 bool BuildSiblingPath(const wchar_t* file_name, wchar_t (&path)[MAX_PATH]) {
   const DWORD length = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -51,41 +68,49 @@ bool LoadAndRegisterPlugin(flutter::FlutterEngine* engine,
                            const DynamicPluginSpec& spec) {
   startup_trace::Mark(spec.before_marker);
 
-  wchar_t plugin_path[MAX_PATH] = {};
-  if (!BuildSiblingPath(spec.dll_name, plugin_path)) {
-    startup_trace::Mark(spec.load_failed_marker);
+  try {
+    wchar_t plugin_path[MAX_PATH] = {};
+    if (!BuildSiblingPath(spec.dll_name, plugin_path)) {
+      startup_trace::Mark(spec.load_failed_marker);
+      return false;
+    }
+
+    HMODULE module = ::LoadLibraryW(plugin_path);
+    if (module == nullptr) {
+      startup_trace::Mark(spec.load_failed_marker);
+      return false;
+    }
+    startup_trace::Mark(spec.loaded_marker);
+
+    FARPROC raw_register = ::GetProcAddress(module, spec.symbol_name);
+    if (raw_register == nullptr) {
+      startup_trace::Mark(spec.symbol_failed_marker);
+      ::FreeLibrary(module);
+      return false;
+    }
+
+    auto registrar = engine->GetRegistrarForPlugin(spec.registry_name);
+    if (registrar == nullptr) {
+      startup_trace::Mark(spec.registrar_failed_marker);
+      ::FreeLibrary(module);
+      return false;
+    }
+
+    using RegisterPluginFn = void (*)(decltype(registrar));
+    auto register_plugin = reinterpret_cast<RegisterPluginFn>(raw_register);
+    register_plugin(registrar);
+
+    // Intentionally keep the module loaded for the lifetime of the process.
+    // Flutter plugin instances can retain code/data pointers into their DLL.
+    startup_trace::Mark(spec.registered_marker);
+    return true;
+  } catch (...) {
+    // Optional desktop plugins must never be allowed to terminate the entire
+    // application during bootstrap on a legacy host. Keep the failure visible
+    // in the startup trace and continue with the remaining plugins.
+    startup_trace::Mark(spec.exception_marker);
     return false;
   }
-
-  HMODULE module = ::LoadLibraryW(plugin_path);
-  if (module == nullptr) {
-    startup_trace::Mark(spec.load_failed_marker);
-    return false;
-  }
-  startup_trace::Mark(spec.loaded_marker);
-
-  FARPROC raw_register = ::GetProcAddress(module, spec.symbol_name);
-  if (raw_register == nullptr) {
-    startup_trace::Mark(spec.symbol_failed_marker);
-    ::FreeLibrary(module);
-    return false;
-  }
-
-  auto registrar = engine->GetRegistrarForPlugin(spec.registry_name);
-  if (registrar == nullptr) {
-    startup_trace::Mark(spec.registrar_failed_marker);
-    ::FreeLibrary(module);
-    return false;
-  }
-
-  using RegisterPluginFn = void (*)(decltype(registrar));
-  auto register_plugin = reinterpret_cast<RegisterPluginFn>(raw_register);
-  register_plugin(registrar);
-
-  // Intentionally keep the module loaded for the lifetime of the process.
-  // Flutter plugin instances can retain code/data pointers into their DLL.
-  startup_trace::Mark(spec.registered_marker);
-  return true;
 }
 
 void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
@@ -98,7 +123,8 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
        "27c dynamic plugin: file_selector registered",
        "27x dynamic plugin: file_selector load failed; continuing",
        "27x dynamic plugin: file_selector symbol missing; continuing",
-       "27x dynamic plugin: file_selector registrar missing; continuing"},
+       "27x dynamic plugin: file_selector registrar missing; continuing",
+       "27x dynamic plugin: file_selector threw C++ exception; continuing"},
       {L"flutter_secure_storage_windows_plugin.dll",
        "FlutterSecureStorageWindowsPluginRegisterWithRegistrar",
        "FlutterSecureStorageWindowsPlugin",
@@ -107,7 +133,8 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
        "27f dynamic plugin: secure_storage registered",
        "27x dynamic plugin: secure_storage load failed; continuing",
        "27x dynamic plugin: secure_storage symbol missing; continuing",
-       "27x dynamic plugin: secure_storage registrar missing; continuing"},
+       "27x dynamic plugin: secure_storage registrar missing; continuing",
+       "27x dynamic plugin: secure_storage threw C++ exception; continuing"},
       {L"permission_handler_windows_plugin.dll",
        "PermissionHandlerWindowsPluginRegisterWithRegistrar",
        "PermissionHandlerWindowsPlugin",
@@ -116,7 +143,8 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
        "27i dynamic plugin: permission_handler registered",
        "27x dynamic plugin: permission_handler load failed; continuing",
        "27x dynamic plugin: permission_handler symbol missing; continuing",
-       "27x dynamic plugin: permission_handler registrar missing; continuing"},
+       "27x dynamic plugin: permission_handler registrar missing; continuing",
+       "27x dynamic plugin: permission_handler threw C++ exception; continuing"},
       {L"record_windows_plugin.dll",
        "RecordWindowsPluginCApiRegisterWithRegistrar",
        "RecordWindowsPluginCApi",
@@ -125,11 +153,25 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
        "27l dynamic plugin: record registered",
        "27x dynamic plugin: record load failed; continuing",
        "27x dynamic plugin: record symbol missing; continuing",
-       "27x dynamic plugin: record registrar missing; continuing"},
+       "27x dynamic plugin: record registrar missing; continuing",
+       "27x dynamic plugin: record threw C++ exception; continuing"},
   };
 
   startup_trace::Mark("27 dynamic plugin registration begin");
+  const bool is_windows_7 = IsWindows7();
+
   for (const auto& plugin : kPlugins) {
+    // The physical Win7 bootstrap trace shows an unhandled MSVC C++ exception
+    // immediately after permission_handler_windows_plugin.dll is loaded and
+    // before record_windows_plugin.dll is reached. Quarantine that optional
+    // plugin on Win7 only; Windows 8.1+ keeps the native plugin path.
+    if (is_windows_7 &&
+        ::lstrcmpA(plugin.registry_name, "PermissionHandlerWindowsPlugin") == 0) {
+      startup_trace::Mark(
+          "27g Win7: permission_handler quarantined after physical crash trace");
+      continue;
+    }
+
     LoadAndRegisterPlugin(engine, plugin);
   }
   startup_trace::Mark("28 dynamic plugin registration complete");
