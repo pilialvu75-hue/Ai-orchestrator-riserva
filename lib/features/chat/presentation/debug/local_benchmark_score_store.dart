@@ -37,7 +37,7 @@ class LocalBenchmarkComponentScore {
     final parsed = DateTime.tryParse(updatedAt);
     if (parsed == null) return null;
     return LocalBenchmarkComponentScore(
-      score: score.round().clamp(0, 100),
+      score: score.round().clamp(0, 100).toInt(),
       updatedAt: parsed,
     );
   }
@@ -77,7 +77,7 @@ class LocalModelBenchmarkScore {
       totalWeight += weight;
     }
     if (totalWeight == 0) return null;
-    return (weighted / totalWeight).round().clamp(0, 100);
+    return (weighted / totalWeight).round().clamp(0, 100).toInt();
   }
 
   int get completedComponents => components.length;
@@ -107,7 +107,8 @@ abstract final class LocalBenchmarkScoring {
 
     return (quality * 0.70 + responsiveness * 0.15 + throughput * 0.15)
         .round()
-        .clamp(0, 100);
+        .clamp(0, 100)
+        .toInt();
   }
 }
 
@@ -212,7 +213,7 @@ class LocalBenchmarkScoreStore {
         ? Map<String, dynamic>.from(entry['components'] as Map)
         : <String, dynamic>{};
     components[component.name] = LocalBenchmarkComponentScore(
-      score: score.clamp(0, 100),
+      score: score.clamp(0, 100).toInt(),
       updatedAt: updatedAt ?? DateTime.now(),
     ).toJson();
 
