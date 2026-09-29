@@ -147,6 +147,47 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? thermalScore(LocalModelThermalStressResult result) {
+    if (!result.hasValidThermalTelemetry ||
+        result.samples.isEmpty ||
+        result.criticalResourceStop ||
+        result.failure != null) {
+      return null;
+    }
+
+    final start = result.startBatteryTemperatureC!;
+    final max = result.maxBatteryTemperatureC!;
+    final rise = (max - start).clamp(0.0, 100.0);
+
+    final riseScore = _lowerIsBetter(
+      rise,
+      best: 1.0,
+      worst: 8.0,
+    );
+    final peakScore = _lowerIsBetter(
+      max,
+      best: 35.0,
+      worst: 45.0,
+    );
+    final stabilityScore = result.targetRepetitions <= 0
+        ? 0.0
+        : (result.completedRepetitions / result.targetRepetitions * 100)
+            .clamp(0.0, 100.0);
+    final pressureScore = result.samples.isEmpty
+        ? 0.0
+        : (100 -
+                (result.pressuredSamples / result.samples.length * 100))
+            .clamp(0.0, 100.0);
+
+    return (riseScore * 0.40 +
+            peakScore * 0.30 +
+            stabilityScore * 0.20 +
+            pressureScore * 0.10)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static double _lowerIsBetter(
     double value, {
     required double best,
