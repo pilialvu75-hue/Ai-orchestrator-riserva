@@ -214,7 +214,10 @@ void main() {
   test('production coordinator resumes same task and forwards stable identity',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
@@ -310,7 +313,10 @@ void main() {
   test('production coordinator prefers certified remote Library reuse',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
@@ -366,7 +372,10 @@ void main() {
   test('strict offline production never touches the remote Module Library',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
@@ -414,7 +423,10 @@ void main() {
   test('remote Library failure is a reuse miss and normal AI path continues',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
