@@ -95,6 +95,14 @@ abstract final class LocalBenchmarkScoring {
         .clamp(0, 100)
         .toInt();
   }
+
+  static int qualityScore(LocalModelBenchmarkModelResult result) {
+    if (result.maxScore <= 0) return 0;
+    return (result.score / result.maxScore * 100)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
 }
 
 class LocalBenchmarkScoreStore {
