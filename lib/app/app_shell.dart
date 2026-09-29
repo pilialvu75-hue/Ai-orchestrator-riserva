@@ -297,10 +297,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         ),
       ));
+      final dashboardState = workshopBundle.dashboardController.state;
       final surface = WorkshopProjectSurfaceSnapshot.fromDashboardState(
-        workshopBundle.dashboardController.state,
+        dashboardState,
       );
-      if (surface.shouldRetainSession) {
+      final keepCurrentProject =
+          surface.shouldRetainSession ||
+          dashboardState.isBusy ||
+          executionController.state.isRunning;
+      if (keepCurrentProject) {
         // Hiding the Cantiere is not cancellation. Keep the same authoritative
         // project/controllers alive so reopening returns to the same project,
         // while also flushing a durable checkpoint for process-death recovery.
