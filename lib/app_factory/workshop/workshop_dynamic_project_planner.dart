@@ -61,7 +61,25 @@ final class WorkshopDynamicProjectPlanner {
     );
 
     if (!first.isSuccessful || !first.hasText) {
-      throw StateError('Cantiere project planning did not complete successfully.');
+      if (!_shouldRetryPlanning(
+        first,
+        cancellationToken: cancellationToken,
+      )) {
+        throw _planningFailure(
+          'Cantiere project planning did not complete successfully',
+          first,
+        );
+      }
+
+      return _retryPlan(
+        request: request,
+        requirements: requirements,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
     }
 
     try {
@@ -69,32 +87,79 @@ final class WorkshopDynamicProjectPlanner {
     } on FormatException {
       if (cancellationToken?.isCancelled == true) rethrow;
 
-      final retry = await _inference.complete(
-        stage: WorkshopStage.planning,
-        prompt: _prompt(
-          request,
-          requirements: requirements,
-          technologies: technologies,
-          deliverables: deliverables,
-          validationCriteria: validationCriteria,
-          compact: true,
-        ),
-        systemPrompt: _retrySystemPrompt,
-        sessionId: 'workshop:${request.id}:project-plan:retry-1',
+      return _retryPlan(
+        request: request,
+        requirements: requirements,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
         isOffline: isOffline,
-        maxTokens: _retryMaxTokens,
-        temperature: 0.1,
         cancellationToken: cancellationToken,
       );
-
-      if (!retry.isSuccessful || !retry.hasText) {
-        throw StateError(
-          'Cantiere project planning retry did not complete successfully.',
-        );
-      }
-
-      return _decodeForRequest(retry.text, request: request);
     }
+  }
+
+  Future<WorkshopDynamicProjectPlan> _retryPlan({
+    required WorkshopRequest request,
+    required List<String> requirements,
+    required List<String> technologies,
+    required List<String> deliverables,
+    required List<String> validationCriteria,
+    required bool isOffline,
+    required CancellationToken? cancellationToken,
+  }) async {
+    final retry = await _inference.complete(
+      stage: WorkshopStage.planning,
+      prompt: _prompt(
+        request,
+        requirements: requirements,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
+        compact: true,
+      ),
+      systemPrompt: _retrySystemPrompt,
+      sessionId: 'workshop:${request.id}:project-plan:retry-1',
+      isOffline: isOffline,
+      maxTokens: _retryMaxTokens,
+      temperature: 0.1,
+      cancellationToken: cancellationToken,
+    );
+
+    if (!retry.isSuccessful || !retry.hasText) {
+      throw _planningFailure(
+        'Cantiere project planning retry did not complete successfully',
+        retry,
+      );
+    }
+
+    return _decodeForRequest(retry.text, request: request);
+  }
+
+  static bool _shouldRetryPlanning(
+    WorkshopInferenceResult result, {
+    required CancellationToken? cancellationToken,
+  }) {
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
+        result.terminalState == InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+
+    return true;
+  }
+
+  static StateError _planningFailure(
+    String message,
+    WorkshopInferenceResult result,
+  ) {
+    final terminal = result.terminalState?.name ?? 'none';
+    final detail = result.errorMessage?.trim();
+    return StateError(
+      detail == null || detail.isEmpty
+          ? '$message (terminal=$terminal).'
+          : '$message (terminal=$terminal): $detail',
+    );
   }
 
   WorkshopDynamicProjectPlan _decodeForRequest(
