@@ -599,9 +599,13 @@ class _DebugOverlayState
                           icon: Icons.thermostat_outlined,
                           title: 'Stress termico',
                           subtitle:
-                              'Run prolungato con temperatura, memoria e '
-                              'stabilita.',
-                          available: false,
+                              'Un modello alla volta: temperatura, memoria '
+                              'e degradazione prestazioni.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_showThermalBenchmarkModelPicker());
+                          },
                         ),
                         item(
                           icon: Icons.storage_outlined,
@@ -1131,6 +1135,166 @@ class _DebugOverlayState
     );
   }
 
+  Future<void> _showThermalBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Stress termico',
+      subtitle:
+          'Seleziona un solo modello. Il test esegue un warm-up e poi '
+          '10 generazioni consecutive con cutoff di sicurezza.',
+      defaultModelIds: const <String>[],
+      singleSelection: true,
+    );
+    if (modelIds == null || modelIds.length != 1 || !mounted) return;
+    await _runThermalStressBenchmark(modelId: modelIds.single);
+  }
+
+  Future<void> _runThermalStressBenchmark({
+    required String modelId,
+  }) async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    AiModel? selectedModel;
+    for (final candidate in candidates) {
+      if (candidate.id == modelId) {
+        selectedModel = candidate;
+        break;
+      }
+    }
+
+    if (selectedModel == null ||
+        !LocalModelBenchmarkRunner.isRunnableCandidate(selectedModel)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Il modello selezionato non è pronto per il test.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelThermalReport? report;
+
+    await _runTest(
+      testId: 'local_model_thermal_stress',
+      timeout: const Duration(minutes: 20),
+      action: () async {
+        report = await _localModelBenchmark.runThermalStressBenchmark(
+          modelId: modelId,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Termico • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null || completed.models.isEmpty) return;
+        final result = completed.models.single;
+
+        final thermalScore = LocalBenchmarkScoring.thermalScore(result);
+        if (thermalScore != null) {
+          await _benchmarkScoreStore.saveComponent(
+            model: selectedModel!,
+            component: LocalBenchmarkComponent.thermal,
+            score: thermalScore,
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showThermalBenchmarkReport(report!);
+  }
+
+  Future<void> _showThermalBenchmarkReport(
+    LocalModelThermalReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln(report.toPlainText())
+      ..writeln()
+      ..writeln('SCORING TERMICO')
+      ..writeln(
+        'pesi=temperature_rise:50 decode_retention:30 '
+        'first_content_retention:20',
+      )
+      ..writeln(
+        'cutoff=start<42.0C stop>=45.0C max_rise>=8.0C',
+      );
+
+    for (final model in report.models) {
+      final thermalScore = LocalBenchmarkScoring.thermalScore(model);
+      final reason = model.stoppedEarly
+          ? 'test interrotto: ${model.stopReason ?? 'safety_cutoff'}'
+          : !model.thermalTelemetryComplete
+              ? 'telemetria termica assente'
+              : null;
+      buffer.writeln(
+        thermalScore == null
+            ? '${model.displayName}: n/a (${reason ?? 'test non valido'})'
+            : '${model.displayName}: $thermalScore/100',
+      );
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Stress termico',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Stress termico copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
   Future<void> _showOrchestratorBenchmarkModelPicker() async {
     final modelIds = await _pickBenchmarkModels(
       title: 'Benchmark Orchestratore',
@@ -1160,6 +1324,7 @@ class _DebugOverlayState
     required String title,
     required String subtitle,
     required Iterable<String> defaultModelIds,
+    bool singleSelection = false,
   }) async {
     if (_running) return null;
 
@@ -1273,16 +1438,18 @@ class _DebugOverlayState
                         spacing: 8,
                         runSpacing: 4,
                         children: [
-                          OutlinedButton(
-                            onPressed: selectDefaults,
-                            child: const Text('Predefiniti'),
-                          ),
-                          OutlinedButton(
-                            onPressed: runnableCount == 0
-                                ? null
-                                : selectAllRunnable,
-                            child: const Text('Tutti scaricati'),
-                          ),
+                          if (defaults.isNotEmpty)
+                            OutlinedButton(
+                              onPressed: selectDefaults,
+                              child: const Text('Predefiniti'),
+                            ),
+                          if (!singleSelection)
+                            OutlinedButton(
+                              onPressed: runnableCount == 0
+                                  ? null
+                                  : selectAllRunnable,
+                              child: const Text('Tutti scaricati'),
+                            ),
                           TextButton(
                             onPressed: selected.isEmpty
                                 ? null
@@ -1353,7 +1520,13 @@ class _DebugOverlayState
                                     : (value) {
                                         setSheetState(() {
                                           if (value == true) {
-                                            selected.add(model.id);
+                                            if (singleSelection) {
+                                              selected
+                                                ..clear()
+                                                ..add(model.id);
+                                            } else {
+                                              selected.add(model.id);
+                                            }
                                           } else {
                                             selected.remove(model.id);
                                           }

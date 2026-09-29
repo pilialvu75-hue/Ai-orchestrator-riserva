@@ -282,6 +282,97 @@ void main() {
     expect(LocalBenchmarkScoring.performanceScore(result), 80);
   });
 
+  test('thermal score rewards low rise and stable performance', () {
+    LocalModelBenchmarkCaseResult sample(int endTemp) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'performance_generation',
+          response: 'benchmark response',
+          score: 0,
+          maxScore: 0,
+          forbiddenHits: 0,
+          firstContentMs: 1000,
+          totalMs: 3000,
+          reportedTokens: 40,
+          prefillMs: 400,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: endTemp,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelThermalModelResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      baselineBatteryTemperatureDeciC: 300,
+      samples: <LocalModelThermalSample>[
+        LocalModelThermalSample(repetition: 1, result: sample(305)),
+        LocalModelThermalSample(repetition: 2, result: sample(310)),
+        LocalModelThermalSample(repetition: 3, result: sample(315)),
+      ],
+      stoppedEarly: false,
+    );
+
+    expect(LocalBenchmarkScoring.thermalScore(result), 100);
+  });
+
+  test('thermal score is absent after safety cutoff or missing temperature', () {
+    const baseResult = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'benchmark response',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 1000,
+      totalMs: 3000,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 320,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+
+    const stopped = LocalModelThermalModelResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      baselineBatteryTemperatureDeciC: 300,
+      samples: <LocalModelThermalSample>[
+        LocalModelThermalSample(repetition: 1, result: baseResult),
+      ],
+      stoppedEarly: true,
+      stopReason: 'temperature_cutoff',
+    );
+    const missing = LocalModelThermalModelResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      baselineBatteryTemperatureDeciC: null,
+      samples: <LocalModelThermalSample>[
+        LocalModelThermalSample(repetition: 1, result: baseResult),
+      ],
+      stoppedEarly: false,
+    );
+
+    expect(LocalBenchmarkScoring.thermalScore(stopped), isNull);
+    expect(LocalBenchmarkScoring.thermalScore(missing), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(

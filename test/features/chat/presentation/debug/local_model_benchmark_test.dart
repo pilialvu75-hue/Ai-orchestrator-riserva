@@ -111,6 +111,75 @@ void main() {
     expect(LocalModelBenchmarkRunner.performanceCase.maxScore, 0);
   });
 
+  test('thermal stress keeps conservative safety profile', () {
+    expect(LocalModelBenchmarkRunner.thermalStressRepetitions, 10);
+    expect(
+      LocalModelBenchmarkRunner.thermalStartMaxBatteryTemperatureDeciC,
+      420,
+    );
+    expect(
+      LocalModelBenchmarkRunner.thermalStopBatteryTemperatureDeciC,
+      450,
+    );
+    expect(LocalModelBenchmarkRunner.thermalMaxRiseDeciC, 80);
+  });
+
+  test('thermal result derives rise and performance retention', () {
+    LocalModelBenchmarkCaseResult sample({
+      required int firstMs,
+      required int endTemp,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'performance_generation',
+          response: 'benchmark response',
+          score: 0,
+          maxScore: 0,
+          forbiddenHits: 0,
+          firstContentMs: firstMs,
+          totalMs: firstMs + 2000,
+          reportedTokens: 40,
+          prefillMs: 400,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: endTemp,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelThermalModelResult(
+      modelId: 'thermal',
+      catalogModelId: 'thermal',
+      displayName: 'Thermal',
+      baselineBatteryTemperatureDeciC: 300,
+      samples: <LocalModelThermalSample>[
+        LocalModelThermalSample(
+          repetition: 1,
+          result: sample(firstMs: 1000, endTemp: 305),
+        ),
+        LocalModelThermalSample(
+          repetition: 2,
+          result: sample(firstMs: 1050, endTemp: 310),
+        ),
+        LocalModelThermalSample(
+          repetition: 3,
+          result: sample(firstMs: 1100, endTemp: 315),
+        ),
+      ],
+      stoppedEarly: false,
+    );
+
+    expect(result.thermalTelemetryComplete, isTrue);
+    expect(result.batteryTemperatureRiseC, 1.5);
+    expect(result.decodeRetention, closeTo(1.0, 0.001));
+    expect(result.firstContentSlowdown, closeTo(1.0, 0.1));
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
