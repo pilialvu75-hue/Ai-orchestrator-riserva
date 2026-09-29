@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:flutter/material.dart';
 
 enum WorkshopWebCapabilityState {
@@ -27,7 +28,7 @@ abstract final class WorkshopWebCapabilities {
     WorkshopWebCapability.durableStorage:
         WorkshopWebCapabilityState.available,
     WorkshopWebCapability.cloudAuto:
-        WorkshopWebCapabilityState.planned,
+        WorkshopWebCapabilityState.available,
     WorkshopWebCapability.moduleLibrary:
         WorkshopWebCapabilityState.planned,
     WorkshopWebCapability.researcher:
@@ -53,9 +54,11 @@ class WorkshopWebShell extends StatelessWidget {
   const WorkshopWebShell({
     super.key,
     required this.checkpointStore,
+    required this.cloudHealth,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
+  final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
 
   @override
   Widget build(BuildContext context) {
@@ -102,11 +105,8 @@ class WorkshopWebShell extends StatelessWidget {
                 _DurableStorageCard(
                   checkpointStore: checkpointStore,
                 ),
-                const _CapabilityCard(
-                  title: 'Cloud / AUTO execution',
-                  subtitle:
-                      'Planned for the Web execution ring; no provider secret is bundled here.',
-                  state: WorkshopWebCapabilityState.planned,
+                _CloudAutoCard(
+                  cloudHealth: cloudHealth,
                 ),
                 const _CapabilityCard(
                   title: 'Module Library + Researcher',
@@ -147,6 +147,60 @@ class WorkshopWebShell extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CloudAutoCard extends StatefulWidget {
+  const _CloudAutoCard({
+    required this.cloudHealth,
+  });
+
+  final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
+
+  @override
+  State<_CloudAutoCard> createState() => _CloudAutoCardState();
+}
+
+class _CloudAutoCardState extends State<_CloudAutoCard> {
+  late final Future<WorkshopWebCloudBrokerHealth> _health;
+
+  @override
+  void initState() {
+    super.initState();
+    _health = widget.cloudHealth;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<WorkshopWebCloudBrokerHealth>(
+      future: _health,
+      builder: (context, snapshot) {
+        final health = snapshot.data;
+        if (snapshot.hasError || (health != null && !health.isReady)) {
+          return _CapabilityCard(
+            title: 'Cloud / AUTO execution',
+            subtitle: health?.errorCode == null
+                ? 'Server-side broker is reachable but one or more Cantiere capabilities are not configured.'
+                : 'Server-side broker unavailable: ${health!.errorCode}.',
+            state: WorkshopWebCapabilityState.unavailable,
+          );
+        }
+        if (health == null) {
+          return const _CapabilityCard(
+            title: 'Cloud / AUTO execution',
+            subtitle:
+                'Checking the server-side capability broker. No provider secret is stored in the browser.',
+            state: WorkshopWebCapabilityState.planned,
+          );
+        }
+        return const _CapabilityCard(
+          title: 'Cloud / AUTO execution',
+          subtitle:
+              'Server-side AUTO routing ready for Orchestrator, Architect, Engineer and Reviewer.',
+          state: WorkshopWebCapabilityState.available,
+        );
+      },
     );
   }
 }
