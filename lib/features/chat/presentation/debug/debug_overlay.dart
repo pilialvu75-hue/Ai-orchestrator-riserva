@@ -671,6 +671,7 @@ class _DebugOverlayState
           modelIds: runnable.map((model) => model.id),
           benchmarkCases: LocalModelBenchmarkRunner.quickCases,
           continueOnModelError: true,
+          continueOnModelError: true,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
@@ -738,6 +739,17 @@ class _DebugOverlayState
       }
       buffer.writeln();
     }
+    if (report.failures.isNotEmpty) {
+      buffer
+        ..writeln('failures=${report.failures.length}')
+        ..writeln();
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
     final text = buffer.toString().trimRight();
 
     await showDialog<void>(
