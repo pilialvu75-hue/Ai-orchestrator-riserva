@@ -59,6 +59,18 @@ void main() {
     );
   });
 
+  test('quick benchmark keeps the intended small representative suite', () {
+    expect(
+      LocalModelBenchmarkRunner.quickCases.map((item) => item.id).toSet(),
+      <String>{
+        'vulkan_fact',
+        'ram_fact',
+        'arithmetic',
+        'ssd_hdd_followup',
+      },
+    );
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -10,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/local_benchmark_score_store.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
@@ -93,6 +95,9 @@ class _DebugOverlayState
   late final LocalModelBenchmarkRunner
       _localModelBenchmark;
 
+  late final LocalBenchmarkScoreStore
+      _benchmarkScoreStore;
+
   DebugLabRunStatus _status =
       DebugLabRunStatus.idle;
 
@@ -116,6 +121,11 @@ class _DebugOverlayState
         LocalModelBenchmarkRunner(
       runtimeProvider: _runtimeProvider,
       localAiRepository: _localAiRepository,
+    );
+
+    _benchmarkScoreStore =
+        LocalBenchmarkScoreStore(
+      di.sl<PreferencesService>(),
     );
 
     RuntimeEventLog.instance.emit(
@@ -539,9 +549,13 @@ class _DebugOverlayState
                           icon: Icons.bolt_outlined,
                           title: 'Benchmark rapido',
                           subtitle:
-                              'Tutti i modelli compatibili, pochi test '
-                              'rappresentativi.',
-                          available: false,
+                              'Tutti i modelli pronti, pochi test '
+                              'rappresentativi e primo General Score.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runQuickGeneralBenchmark());
+                          },
                         ),
                         item(
                           icon: Icons.fact_check_outlined,
@@ -617,6 +631,172 @@ class _DebugOverlayState
     );
   }
 
+  Future<void> _runQuickGeneralBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello locale pronto per il benchmark.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'local_model_quick_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 4).clamp(8, 60).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.run(
+          modelIds: runnable.map((model) => model.id),
+          benchmarkCases: LocalModelBenchmarkRunner.quickCases,
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Rapido • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final catalogId = result.catalogModelId ?? result.modelId;
+          final model = byId[catalogId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.quick,
+            score: LocalBenchmarkScoring.quickScore(result),
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showQuickBenchmarkReport(report!);
+  }
+
+  Future<void> _showQuickBenchmarkReport(
+    LocalModelBenchmarkReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK RAPIDO')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in report.models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'general_quick_score=${LocalBenchmarkScoring.quickScore(model)}/100',
+        )
+        ..writeln('quality=${model.score}/${model.maxScore}')
+        ..writeln(
+          'avg_first_content_ms=${model.averageFirstContentMs.toStringAsFixed(0)}',
+        )
+        ..writeln(
+          'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+    if (report.failures.isNotEmpty) {
+      buffer
+        ..writeln('failures=${report.failures.length}')
+        ..writeln();
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Benchmark rapido',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 420,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark rapido copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _showOrchestratorBenchmarkModelPicker() async {
     final modelIds = await _pickBenchmarkModels(
       title: 'Benchmark Orchestratore',
@@ -662,6 +842,9 @@ class _DebugOverlayState
       return null;
     }
 
+    if (!mounted) return null;
+
+    final scores = await _benchmarkScoreStore.loadForModels(candidates);
     if (!mounted) return null;
 
     final defaults = defaultModelIds.toSet();
@@ -794,6 +977,14 @@ class _DebugOverlayState
                                 : model.isDownloaded
                                     ? 'Non valido'
                                     : 'Non scaricato';
+                            final storedScore = scores[model.id];
+                            final scoreLabel = storedScore?.generalScore == null
+                                ? 'Punteggio generale: —'
+                                : 'Punteggio generale: '
+                                    '${storedScore!.generalScore}/100 • '
+                                    '${storedScore.completedComponents}/'
+                                    '${LocalModelBenchmarkScore.totalComponents} suite';
+
 
                             return Card(
                               color: const Color(0xFF161E2B),
@@ -815,7 +1006,7 @@ class _DebugOverlayState
                                 subtitle: Text(
                                   '${size == null || size.isEmpty ? "Dimensione n/d" : size}'
                                   ' • $sourceLabel • $stateLabel\n'
-                                  'Punteggio generale: —',
+                                  '$scoreLabel',
                                   style: TextStyle(
                                     color: runnable
                                         ? Colors.white60
