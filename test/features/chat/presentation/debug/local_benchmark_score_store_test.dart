@@ -97,7 +97,7 @@ void main() {
     expect(loaded.containsKey(model.id), isFalse);
   });
 
-  test('general score combines only completed components by weight', () {
+  test('general score averages only completed benchmark suites', () {
     final score = LocalModelBenchmarkScore(
       modelId: model.id,
       fingerprint: LocalBenchmarkScoreStore.fingerprintFor(model),
@@ -114,7 +114,7 @@ void main() {
     );
 
     // (80*10 + 100*25) / 35 = 94.285...
-    expect(score.generalScore, 94);
+    expect(score.generalScore, 90);
     expect(score.completedComponents, 2);
   });
 }
