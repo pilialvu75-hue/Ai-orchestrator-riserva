@@ -159,6 +159,53 @@ void main() {
     expect(LocalBenchmarkScoring.performanceScore(result), 100);
   });
 
+  test('unconfirmed cold-warm sessions do not produce a valid score', () {
+    const sample = LocalModelBenchmarkCaseResult(
+      caseId: 'performance_generation',
+      response: 'benchmark response',
+      score: 0,
+      maxScore: 0,
+      forbiddenHits: 0,
+      firstContentMs: 750,
+      totalMs: 2750,
+      reportedTokens: 40,
+      prefillMs: 400,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 305,
+      sessionStart: 'unknown',
+      sessionEnd: 'kept',
+    );
+
+    const result = LocalModelPerformanceModelResult(
+      modelId: 'perf',
+      catalogModelId: 'perf',
+      displayName: 'Perf',
+      samples: <LocalModelPerformanceSample>[
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.cold,
+          repetition: 1,
+          result: sample,
+        ),
+        LocalModelPerformanceSample(
+          phase: LocalModelPerformancePhase.warm,
+          repetition: 1,
+          result: sample,
+        ),
+      ],
+    );
+
+    expect(result.coldSessionConfirmed, isFalse);
+    expect(result.warmSessionConfirmed, isFalse);
+    expect(LocalBenchmarkScoring.performanceScore(result), 0);
+  });
+
   test('missing warm prefill telemetry is not rewarded as perfect', () {
     const cold = LocalModelBenchmarkCaseResult(
       caseId: 'performance_generation',
