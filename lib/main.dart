@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:ai_orchestrator/core/runtime/inference/android_process_exit_diagnostics.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -61,15 +62,17 @@ void _emitForensicException(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Crash log persistence ──────────────────────────────────────────────────
-  // Must be awaited before anything else: every RuntimeEventLog.emit() call
-  // that follows persists its line to disk. If the process is later killed
-  // by a native crash (e.g. inside llama_bridge.cpp), the in-memory log is
-  // lost with it, but everything already flushed to disk survives and can
-  // be inspected on the next launch via Debug Lab → "Mostra log crash".
-  await RuntimeEventLog.instance.initPersistence();
-  unawaited(recordAndroidProcessExitHistory());
-  unawaited(GitHubDiagnostics.instance.initialize());
+  final deferWindowsStartup =
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  // Preserve the established startup order everywhere except Windows. On
+  // Windows the first frame is allowed to render before disk/plugin/service
+  // initialization so legacy hosts cannot fail before showing any UI.
+  if (!deferWindowsStartup) {
+    await RuntimeEventLog.instance.initPersistence();
+    unawaited(recordAndroidProcessExitHistory());
+    unawaited(GitHubDiagnostics.instance.initialize());
+  }
 
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
@@ -119,7 +122,7 @@ Future<void> main() async {
 
   await runZonedGuarded(
     () async {
-      runApp(const StartupApp());
+      runApp(StartupApp(deferWindowsStartup: deferWindowsStartup));
     },
     (Object error, StackTrace stackTrace) {
       _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
@@ -128,7 +131,12 @@ Future<void> main() async {
 }
 
 class StartupApp extends StatefulWidget {
-  const StartupApp({super.key});
+  const StartupApp({
+    super.key,
+    required this.deferWindowsStartup,
+  });
+
+  final bool deferWindowsStartup;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -140,15 +148,44 @@ class _StartupAppState extends State<StartupApp> {
   final RuntimeBootstrap _bootstrap = const RuntimeBootstrap();
 
   Object? _startupError;
+  bool _diagnosticsInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    _startBootstrap();
+    if (widget.deferWindowsStartup) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_startBootstrap());
+        }
+      });
+    } else {
+      unawaited(_startBootstrap());
+    }
+  }
+
+  Future<void> _initializeDeferredDiagnostics() async {
+    if (!widget.deferWindowsStartup || _diagnosticsInitialized) return;
+    _diagnosticsInitialized = true;
+
+    try {
+      await RuntimeEventLog.instance.initPersistence();
+    } catch (error, stackTrace) {
+      _emitForensicException(
+        error,
+        stackTrace,
+        source: 'RuntimeEventLog.initPersistence',
+      );
+    }
+
+    unawaited(recordAndroidProcessExitHistory());
+    unawaited(GitHubDiagnostics.instance.initialize());
+    RuntimeEventLog.instance.emit('[WINDOWS_SAFE_STARTUP_FIRST_FRAME_REACHED]');
   }
 
   Future<void> _startBootstrap() async {
     try {
+      await _initializeDeferredDiagnostics();
       await _bootstrap.initialize();
       if (!mounted) return;
       _transitionController.markReady();

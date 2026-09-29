@@ -6,7 +6,8 @@ on:
       - main
     paths:
       - '.github/workflows/windows-release-publish.yml'
-      - 'windows/installer/**'
+      - 'windows/**'
+      - 'tool/patch_windows_bundle_win7.ps1'
   workflow_run:
     workflows:
       - Build & Release APK
@@ -40,6 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f windows/installer/ai_orchestrator.iss
+          test -f tool/patch_windows_bundle_win7.ps1
           grep -q 'OutputBaseFilename=AI-Orchestrator-Setup-x64' windows/installer/ai_orchestrator.iss
           grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
           echo 'Windows release publisher contract is valid.'
@@ -106,6 +108,12 @@ jobs:
       - name: Build coordinated Windows release
         shell: pwsh
         run: flutter build windows --release
+
+      - name: Apply Windows 7 bundle compatibility
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $releaseDir
 
       - name: Prepare Windows release payload
         id: payload

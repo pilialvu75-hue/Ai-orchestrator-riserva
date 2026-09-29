@@ -36,15 +36,18 @@ endfunction()
 
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
-
+add_subdirectory("compat")
 add_subdirectory("runner")
+add_subdirectory("diagnostics")
 
-# Generated plugin build rules.
+# WINDOWS 7 DYNAMIC-PLUGIN CANDIDATE:
+# Build the generated plugin targets so their DLLs are available in the bundle,
+# but do not link their import libraries into ai_orchestrator.exe. The runner
+# loads and registers each DLL explicitly after wWinMain, eliminating plugin
+# static initialization from the process pre-main path.
 include(flutter/generated_plugins.cmake)
 
 # === Installation ===
-# Keep all support files next to the executable so the Release directory is
-# directly runnable and can be zipped as a portable bundle.
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -54,8 +57,21 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
-install(TARGETS ${BINARY_NAME}
+install(TARGETS
+  ${BINARY_NAME}
+  ai_orchestrator_windows_probe
+  ai_orchestrator_windows_graphics_probe
+  ai_orchestrator_windows_bootstrap_probe
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(TARGETS ws2fix nt7fx win7krnl win7path win7sync dxg7fix
+  RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/diagnostics/AI-Orchestrator-Collect-Diagnostics.cmd"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}"
@@ -66,19 +82,22 @@ install(FILES "${FLUTTER_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-if(PLUGIN_BUNDLED_LIBRARIES)
-  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
+# Keep native Flutter plugin DLLs beside the executable. They are intentionally
+# not linked into the runner; flutter_window.cpp loads them dynamically.
+foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
+  install(FILES "${bundled_library}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
-endif()
+endforeach()
 
-# Native assets emitted by Dart/Flutter packages.
+# Native assets emitted by Dart/Flutter packages remain present because the Dart
+# application may reference them after startup. They are not linked into the
+# runner and therefore cannot participate in pre-main plugin initialization.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
-# Recopy Flutter assets on every build to prevent stale bundle contents.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
 install(CODE "
   file(REMOVE_RECURSE \"${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
@@ -87,7 +106,6 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
-# AOT library is required for Profile and Release builds.
 install(FILES "${AOT_LIBRARY}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
