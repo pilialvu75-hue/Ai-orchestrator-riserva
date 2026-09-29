@@ -20,6 +20,7 @@ class LocalModelBenchmarkCase {
     this.context = const <ChatTurn>[],
     this.requiredAnyGroups = const <List<String>>[],
     this.forbiddenPhrases = const <String>[],
+    this.exactAnswers = const <String>[],
   });
 
   final String id;
@@ -27,17 +28,29 @@ class LocalModelBenchmarkCase {
   final List<ChatTurn> context;
   final List<List<String>> requiredAnyGroups;
   final List<String> forbiddenPhrases;
+  final List<String> exactAnswers;
 
-  int get maxScore => requiredAnyGroups.length;
+  int get maxScore =>
+      requiredAnyGroups.length + (exactAnswers.isEmpty ? 0 : 1);
 
   int score(String response) {
     final normalized = response.trim().toLowerCase();
+    final exactNormalized = normalized
+        .replaceFirst(RegExp(r'[.!?]+$'), '')
+        .trim();
     var score = 0;
 
     for (final group in requiredAnyGroups) {
       if (group.any((candidate) => normalized.contains(candidate.toLowerCase()))) {
         score++;
       }
+    }
+
+    if (exactAnswers.isNotEmpty &&
+        exactAnswers.any(
+          (answer) => exactNormalized == answer.trim().toLowerCase(),
+        )) {
+      score++;
     }
 
     for (final forbidden in forbiddenPhrases) {
@@ -496,6 +509,104 @@ class LocalModelBenchmarkRunner {
     };
     return cases.where((item) => ids.contains(item.id)).toList(growable: false);
   }
+
+  static const List<LocalModelBenchmarkCase> qualityCases =
+      <LocalModelBenchmarkCase>[
+    LocalModelBenchmarkCase(
+      id: 'quality_fact_planet',
+      prompt:
+          'Quale pianeta è conosciuto come Pianeta Rosso? '
+          'Rispondi solo con il nome del pianeta.',
+      requiredAnyGroups: <List<String>>[
+        <String>['marte', 'mars'],
+      ],
+      exactAnswers: <String>['marte', 'mars'],
+      forbiddenPhrases: <String>['giove', 'jupiter', 'venere', 'venus'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_fact_water',
+      prompt:
+          'A livello del mare, a quale temperatura bolle '
+          'approssimativamente l\'acqua? Rispondi in una frase breve.',
+      requiredAnyGroups: <List<String>>[
+        <String>['100'],
+        <String>['celsius', '°c', 'gradi'],
+      ],
+      forbiddenPhrases: <String>['90 °c', '80 °c', '212 °c'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_instruction_arithmetic',
+      prompt: 'Quanto fa 14 + 28? Rispondi solo con il numero.',
+      requiredAnyGroups: <List<String>>[
+        <String>['42'],
+      ],
+      exactAnswers: <String>['42'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_context_license',
+      prompt:
+          'Quale licenza usa il progetto Aurora? '
+          'Rispondi solo con la sigla.',
+      context: <ChatTurn>[
+        ChatTurn(
+          role: ChatRole.user,
+          content:
+              'Nota per questa conversazione: il progetto Aurora usa '
+              'la licenza MIT.',
+        ),
+        ChatTurn(
+          role: ChatRole.assistant,
+          content: 'Ricevuto: Aurora usa la licenza MIT.',
+        ),
+      ],
+      requiredAnyGroups: <List<String>>[
+        <String>['mit'],
+      ],
+      exactAnswers: <String>['mit'],
+      forbiddenPhrases: <String>['apache', 'gpl'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_hallucination_unknown',
+      prompt:
+          'La parola inventata "trulvex" non ha un significato stabilito. '
+          'Se ti chiedo cos\'è trulvex, rispondi in una frase senza '
+          'inventare una definizione.',
+      requiredAnyGroups: <List<String>>[
+        <String>[
+          'inventata',
+          'non ha un significato',
+          'nessun significato',
+          'non esiste',
+          'non è definita',
+          'senza contesto',
+        ],
+      ],
+      forbiddenPhrases: <String>[
+        'protocollo di rete',
+        'linguaggio di programmazione',
+        'sistema operativo',
+        'database distribuito',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_logic_deduction',
+      prompt:
+          'Tutti gli zorbi sono blu. Lio è uno zorbo. '
+          'Di che colore è Lio? Rispondi solo con il colore.',
+      requiredAnyGroups: <List<String>>[
+        <String>['blu', 'blue'],
+      ],
+      exactAnswers: <String>['blu', 'blue'],
+      forbiddenPhrases: <String>['rosso', 'red', 'verde', 'green'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'quality_exact_instruction',
+      prompt:
+          'Rispondi esattamente con queste tre parole, senza aggiungere '
+          'altro: cielo mare vento',
+      exactAnswers: <String>['cielo mare vento'],
+    ),
+  ];
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
