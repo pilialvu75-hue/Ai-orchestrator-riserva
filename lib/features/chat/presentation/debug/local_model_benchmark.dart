@@ -311,6 +311,138 @@ class LocalModelBenchmarkReport {
   }
 }
 
+enum LocalModelPerformancePhase { cold, warm }
+
+class LocalModelPerformanceSample {
+  const LocalModelPerformanceSample({
+    required this.phase,
+    required this.repetition,
+    required this.result,
+  });
+
+  final LocalModelPerformancePhase phase;
+  final int repetition;
+  final LocalModelBenchmarkCaseResult result;
+}
+
+class LocalModelPerformanceModelResult {
+  const LocalModelPerformanceModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.samples,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final List<LocalModelPerformanceSample> samples;
+
+  LocalModelPerformanceSample? get coldSample {
+    for (final sample in samples) {
+      if (sample.phase == LocalModelPerformancePhase.cold) return sample;
+    }
+    return null;
+  }
+
+  List<LocalModelPerformanceSample> get warmSamples => samples
+      .where((sample) => sample.phase == LocalModelPerformancePhase.warm)
+      .toList(growable: false);
+
+  double get averageWarmFirstContentMs => _warmAverage(
+        (sample) => sample.result.firstContentMs.toDouble(),
+      );
+
+  double get averageWarmPrefillMs => _warmAverage(
+        (sample) => sample.result.prefillMs.toDouble(),
+        ignoreNegative: true,
+      );
+
+  double get averageWarmTotalMs => _warmAverage(
+        (sample) => sample.result.totalMs.toDouble(),
+      );
+
+  double get averageWarmDecodeTokensPerSecond => _warmAverage(
+        (sample) => sample.result.decodeTokensPerSecond,
+      );
+
+  bool get coldSessionConfirmed => coldSample?.result.sessionStart == 'cold';
+
+  bool get warmSessionConfirmed {
+    final warm = warmSamples;
+    return warm.isNotEmpty &&
+        warm.every((sample) => sample.result.sessionStart == 'warm');
+  }
+
+  double _warmAverage(
+    double Function(LocalModelPerformanceSample sample) valueOf, {
+    bool ignoreNegative = false,
+  }) {
+    final values = warmSamples
+        .map(valueOf)
+        .where((value) => !ignoreNegative || value >= 0)
+        .toList(growable: false);
+    if (values.isEmpty) return 0;
+    return values.reduce((a, b) => a + b) / values.length;
+  }
+}
+
+class LocalModelPerformanceReport {
+  const LocalModelPerformanceReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelPerformanceModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL PERFORMANCE BENCHMARK')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in models) {
+      final cold = model.coldSample?.result;
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'cold_first_ms=${cold?.firstContentMs ?? -1} '
+          'cold_prefill_ms=${cold?.prefillMs ?? -1} '
+          'cold_total_ms=${cold?.totalMs ?? -1} '
+          'cold_decode_tokens_s='
+          '${cold?.decodeTokensPerSecond.toStringAsFixed(2) ?? 'n/a'}',
+        )
+        ..writeln(
+          'warm_first_ms='
+          '${model.averageWarmFirstContentMs.toStringAsFixed(0)} '
+          'warm_prefill_ms=${model.averageWarmPrefillMs.toStringAsFixed(0)} '
+          'warm_total_ms=${model.averageWarmTotalMs.toStringAsFixed(0)} '
+          'warm_decode_tokens_s='
+          '${model.averageWarmDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln(
+          'cold_session_confirmed=${model.coldSessionConfirmed} '
+          'warm_session_confirmed=${model.warmSessionConfirmed}',
+        )
+        ..writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
 class VulkanLayerSweepSample {
   const VulkanLayerSweepSample({
     required this.requestedGpuLayers,
@@ -608,6 +740,17 @@ class LocalModelBenchmarkRunner {
     ),
   ];
 
+  static const LocalModelBenchmarkCase performanceCase =
+      LocalModelBenchmarkCase(
+    id: 'performance_generation',
+    prompt:
+        'Scrivi circa 70 parole in italiano su come la memoria RAM aiuta '
+        'un computer durante l\'uso quotidiano. Usa testo continuo, '
+        'senza elenco.',
+  );
+
+  static const int performanceWarmRepetitions = 2;
+
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
   final ResourceMonitor _resourceMonitor;
@@ -773,6 +916,140 @@ class LocalModelBenchmarkRunner {
       failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
     );
   }
+  Future<LocalModelPerformanceReport> runPerformanceBenchmark({
+    LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
+    bool continueOnModelError = true,
+  }) async {
+    final targets = await _resolveTargets(modelIds);
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    final modelResults = <LocalModelPerformanceModelResult>[];
+    final failures = <LocalModelBenchmarkFailure>[];
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_PERF_BEGIN] models=${targets.length} '
+      'warm_repetitions=$performanceWarmRepetitions',
+    );
+
+    try {
+      for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
+        final model = targets[modelIndex];
+
+        try {
+          if (androidRuntime != null) {
+            await androidRuntime.resetBenchmarkNativeSessions();
+            await Future<void>.delayed(_betweenCases);
+          }
+
+          final samples = <LocalModelPerformanceSample>[];
+
+          onProgress?.call(
+            '${model.displayName} cold '
+            '${modelIndex + 1}/${targets.length}',
+          );
+          final cold = await _runCase(
+            model: model,
+            benchmarkCase: performanceCase,
+          );
+          samples.add(
+            LocalModelPerformanceSample(
+              phase: LocalModelPerformancePhase.cold,
+              repetition: 1,
+              result: cold,
+            ),
+          );
+
+          for (var repetition = 1;
+              repetition <= performanceWarmRepetitions;
+              repetition++) {
+            await Future<void>.delayed(_betweenCases);
+            onProgress?.call(
+              '${model.displayName} warm '
+              '$repetition/$performanceWarmRepetitions',
+            );
+            final warm = await _runCase(
+              model: model,
+              benchmarkCase: performanceCase,
+            );
+            samples.add(
+              LocalModelPerformanceSample(
+                phase: LocalModelPerformancePhase.warm,
+                repetition: repetition,
+                result: warm,
+              ),
+            );
+          }
+
+          final modelResult = LocalModelPerformanceModelResult(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            samples: List<LocalModelPerformanceSample>.unmodifiable(samples),
+          );
+          modelResults.add(modelResult);
+
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_PERF_MODEL_END] '
+            'model=${model.effectiveRuntimeModelId} '
+            'cold_first_ms=${cold.firstContentMs} '
+            'cold_prefill_ms=${cold.prefillMs} '
+            'warm_first_ms='
+            '${modelResult.averageWarmFirstContentMs.toStringAsFixed(0)} '
+            'warm_prefill_ms='
+            '${modelResult.averageWarmPrefillMs.toStringAsFixed(0)} '
+            'warm_decode_tokens_s='
+            '${modelResult.averageWarmDecodeTokensPerSecond.toStringAsFixed(2)} '
+            'cold_confirmed=${modelResult.coldSessionConfirmed} '
+            'warm_confirmed=${modelResult.warmSessionConfirmed}',
+          );
+        } on LocalModelBenchmarkCriticalResourceException {
+          rethrow;
+        } catch (error, stackTrace) {
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_PERF_MODEL_FAILED] '
+            'model=${model.effectiveRuntimeModelId} '
+            'error=$error stack=$stackTrace',
+          );
+          if (!continueOnModelError) rethrow;
+          failures.add(
+            LocalModelBenchmarkFailure(
+              modelId: model.effectiveRuntimeModelId,
+              catalogModelId: model.id,
+              displayName: model.displayName,
+              error: error.toString(),
+            ),
+          );
+        }
+      }
+    } finally {
+      if (androidRuntime != null) {
+        await androidRuntime.resetBenchmarkNativeSessions();
+      }
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_PERF_END] models=${modelResults.length} '
+      'failures=${failures.length} '
+      'status=${failures.isEmpty ? 'success' : 'partial'}',
+    );
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return LocalModelPerformanceReport(
+      createdAt: DateTime.now(),
+      models:
+          List<LocalModelPerformanceModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+    );
+  }
+
   Future<VulkanLayerSweepReport> runVulkanLayerSweep({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
