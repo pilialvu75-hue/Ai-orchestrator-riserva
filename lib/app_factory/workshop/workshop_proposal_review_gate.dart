@@ -42,14 +42,28 @@ final class WorkshopProposalReviewGate {
     required WorkspaceSession session,
     required String responseText,
   }) {
+    final verdict = decode(responseText);
+    applyVerdict(session: session, verdict: verdict);
+    return verdict;
+  }
+
+  /// Decodes one Reviewer response without mutating the workspace session.
+  ///
+  /// Batch-aware runners use this to collect complete review coverage before a
+  /// single aggregate verdict is allowed to advance the session.
+  WorkshopReviewVerdict decode(String responseText) => _decode(responseText);
+
+  /// Applies one already-decoded aggregate verdict to the review gate.
+  void applyVerdict({
+    required WorkspaceSession session,
+    required WorkshopReviewVerdict verdict,
+  }) {
     if (session.status != WorkspaceSessionStatus.review) {
       throw StateError(
         'Workshop review can only be evaluated while the workspace session '
         'is in review. Current status: ${session.status.name}.',
       );
     }
-
-    final verdict = _decode(responseText);
 
     if (verdict.approved) {
       session.beginValidation();
@@ -60,8 +74,6 @@ final class WorkshopProposalReviewGate {
             : verdict.summary,
       );
     }
-
-    return verdict;
   }
 
   WorkshopReviewVerdict _decode(String responseText) {

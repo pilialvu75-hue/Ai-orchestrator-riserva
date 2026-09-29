@@ -35,13 +35,18 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(workspaceGateway);
+      final longPlan = <String>[
+        'bounded implementation plan from Architect: implement walking tracking.',
+        List<String>.filled(1200, 'middle').join(' '),
+        'ACCEPTANCE: show visible user feedback for walking progress.',
+      ].join('\n');
       final preflight = WorkshopPreflightInferenceResult(
         analysis: const WorkshopInferenceResult(
           text: 'scope analysis from Orchestrator',
           terminalState: InferenceTerminalState.success,
         ),
-        architecture: const WorkshopInferenceResult(
-          text: 'bounded implementation plan from Architect',
+        architecture: WorkshopInferenceResult(
+          text: longPlan,
           terminalState: InferenceTerminalState.success,
         ),
       );
@@ -69,6 +74,11 @@ void main() {
       );
       expect(
         engineer.lastPrompt,
+        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
+      );
+      expect(engineer.lastPrompt, contains('[bounded middle omitted]'));
+      expect(
+        engineer.lastPrompt,
         contains('explicit task instruction and constraints are authoritative'),
       );
       expect(engineer.lastPrompt, contains('Architect'));
@@ -86,6 +96,94 @@ void main() {
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);
+    });
+
+    test(
+        'create task may replace an oversized explicit scaffold without reading it',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"summary":"Replace scaffold","explanation":"Create bounded entry point","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
+      );
+      final oversizedScaffold = List<String>.filled(2600, 'x').join();
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/main.dart': oversizedScaffold},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'create-oversized-scaffold',
+          title: 'Create app foundation',
+          instruction: 'Replace the starter entry point with a minimal app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(
+        engineer.lastPrompt,
+        contains('"replaceableTargets":["lib/main.dart"]'),
+      );
+      expect(
+        engineer.lastPrompt,
+        isNot(contains(List<String>.filled(256, 'x').join())),
+      );
+      expect(engineer.calls, 1);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+    test('modify task still fails closed for an oversized explicit target',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/main.dart': List<String>.filled(2600, 'x').join(),
+        },
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'modify-oversized-target',
+          title: 'Modify existing app',
+          instruction: 'Make a bounded change without losing existing code.',
+          operation: WorkshopOperation.modify,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      await expectLater(
+        WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('exceeds the local prompt budget'),
+          ),
+        ),
+      );
+
+      expect(engineer.calls, 0);
+      expect(session.workspace.read('lib/main.dart'), isNot('void main() {}'));
+      expect(workspaceGateway.writeCalls, 0);
     });
 
     test('retries a local Engineer first-token stall with compact prompt',

@@ -108,10 +108,10 @@ Future<void> main(List<String> args) async {
   try {
     stdout.writeln('[FIRST_APP] stage=project status=starting');
     final handle = await coordinator.startAndPrepare(
-      title: 'Prima app Cantiere - Contatore',
+      title: 'Contatore Test',
       instruction:
-          'Crea una semplice app Flutter contatore con pulsante +, pulsante - '
-          'e pulsante Reset. Deve funzionare su Android.',
+          'Crea una semplice app Flutter chiamata Contatore Test con pulsante +, '
+          'pulsante - e pulsante Reset. Deve funzionare su Android.',
       technologies: const <String>['Flutter', 'Dart'],
       deliverables: const <String>['APK Android installabile'],
       validationCriteria: const <String>[
@@ -124,23 +124,57 @@ Future<void> main(List<String> args) async {
       ],
     );
 
-    stdout.writeln(
-      '[FIRST_APP] stage=inference status=running task=${handle.taskId}',
-    );
-    final inference = await coordinator.runPrepared(
-      handle: handle,
-      isOffline: true,
-    );
-    if (!inference.readyForApproval) {
-      throw StateError('Cantiere proposal did not reach approval-ready state.');
+    var currentHandle = handle;
+    while (true) {
+      stdout.writeln(
+        '[FIRST_APP] stage=inference status=running task=${currentHandle.taskId}',
+      );
+      final inference = await coordinator.runPrepared(
+        handle: currentHandle,
+        isOffline: true,
+      );
+      if (!inference.readyForApproval) {
+        throw StateError(
+          'Cantiere proposal did not reach approval-ready state for '
+          '${currentHandle.taskId}.',
+        );
+      }
+
+      stdout.writeln(
+        '[FIRST_APP] stage=approval status=approved task=${currentHandle.taskId}',
+      );
+      coordinator.decide(
+        handle: currentHandle,
+        decision: WorkshopApplyDecision.approve,
+      );
+      await coordinator.applyApproved(handle: currentHandle);
+
+      final progress = bundle.dashboardController.state;
+      stdout.writeln(
+        '[FIRST_APP] stage=task status=completed '
+        'completed=${progress.completedTasks}/${progress.totalTasks}',
+      );
+
+      if (currentHandle.plan.isComplete) {
+        break;
+      }
+
+      final nextSession =
+          await bundle.dashboardController.prepareNextTask();
+      if (nextSession == null) {
+        throw StateError(
+          'Cantiere project is incomplete but no next task is executable.',
+        );
+      }
+      currentHandle = coordinator.preparedHandle();
     }
 
-    stdout.writeln('[FIRST_APP] stage=approval status=approved');
-    coordinator.decide(
-      handle: handle,
-      decision: WorkshopApplyDecision.approve,
-    );
-    await coordinator.applyApproved(handle: handle);
+    if (handle.plan.completedTasks != handle.plan.totalTasks ||
+        handle.plan.totalTasks < 2) {
+      throw StateError(
+        'Cantiere first-app smoke did not exercise bounded multi-task production.',
+      );
+    }
 
     stdout.writeln('[FIRST_APP] stage=format status=checking');
     final format = await Process.run(
@@ -230,32 +264,89 @@ String _orchestratorResponse(InferenceRequest request) =>
     'Non servono dipendenze esterne. Verificare incremento, decremento, reset, '
     'analyzer, widget test e produzione APK Android.';
 
-String _architectResponse(InferenceRequest request) =>
-    'Mantieni lo scaffold Android generato da Flutter. Sostituisci lib/main.dart '
-    'con una UI Material minimale a stato locale e aggiorna test/widget_test.dart '
-    'con un test dei tre comandi. Non aggiungere dipendenze.';
+String _architectResponse(InferenceRequest request) {
+  if (request.sessionId.contains(':project-plan')) {
+    return jsonEncode(<String, Object?>{
+      'phases': <Object?>[
+        <String, Object?>{
+          'id': 'implementation',
+          'title': 'Implementazione',
+          'description': 'Implementa e verifica il contatore Flutter.',
+          'dependsOn': <String>[],
+        },
+      ],
+      'tasks': <Object?>[
+        <String, Object?>{
+          'id': 'initial-implementation',
+          'phaseId': 'implementation',
+          'title': 'Funzionalità principale',
+          'description': 'Implementa incremento, decremento e reset.',
+          'dependsOn': <String>[],
+          'affectedPaths': <String>['lib/main.dart'],
+          'validationCriteria': <String>[
+            'Il contatore parte da zero e i tre comandi funzionano.',
+          ],
+        },
+        <String, Object?>{
+          'id': 'acceptance-verification',
+          'phaseId': 'implementation',
+          'title': 'Verifica e rifinitura',
+          'description': 'Aggiungi la verifica widget del comportamento.',
+          'dependsOn': <String>['initial-implementation'],
+          'affectedPaths': <String>['test/widget_test.dart'],
+          'validationCriteria': <String>[
+            'Il widget test copre incremento, decremento e reset.',
+          ],
+        },
+      ],
+    });
+  }
+
+  return 'Mantieni lo scaffold Android generato da Flutter. Sostituisci '
+      'lib/main.dart con una UI Material minimale a stato locale e aggiorna '
+      'test/widget_test.dart con un test dei tre comandi. Non aggiungere '
+      'dipendenze.';
+}
 
 String _engineerResponse(InferenceRequest request) {
-  return jsonEncode(<String, Object?>{
-    'summary': 'Implementa la prima app contatore del Cantiere.',
-    'explanation':
-        'Usa solo Flutter SDK, stato locale e un widget test deterministico.',
-    'analysis': 'Lo scaffold Android esistente è sufficiente.',
-    'changes': <Map<String, Object?>>[
+  final taskId = request.sessionId;
+  late final String summary;
+  late final String explanation;
+  late final List<Map<String, Object?>> changes;
+
+  if (taskId.endsWith(':initial-implementation')) {
+    summary = 'Implementa il comportamento del contatore.';
+    explanation =
+        'Aggiunge il comportamento richiesto direttamente sullo scaffold Flutter esistente.';
+    changes = <Map<String, Object?>>[
       <String, Object?>{
         'path': 'lib/main.dart',
         'type': 'modification',
         'content': _counterMainDart,
       },
+    ];
+  } else if (taskId.endsWith(':acceptance-verification')) {
+    summary = 'Aggiunge la verifica del comportamento.';
+    explanation =
+        'Copre i tre comandi con un widget test deterministico.';
+    changes = <Map<String, Object?>>[
       <String, Object?>{
         'path': 'test/widget_test.dart',
         'type': 'modification',
         'content': _counterWidgetTest,
       },
-    ],
+    ];
+  } else {
+    throw StateError('Unexpected Cantiere smoke task identity: $taskId');
+  }
+
+  return jsonEncode(<String, Object?>{
+    'summary': summary,
+    'explanation': explanation,
+    'analysis': 'Lo scaffold Android esistente è sufficiente.',
+    'changes': changes,
     'validationNotes': <String>[
-      'Verificare +, -, Reset con flutter test.',
-      'Eseguire flutter analyze prima della build.',
+      'Eseguire flutter analyze e flutter test prima della build.',
     ],
     'warnings': const <String>[],
   });

@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -35,8 +37,7 @@ final class WorkshopProposalReviewRunner {
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
   static const Duration _retryFirstTokenTimeout = Duration(seconds: 75);
-  static const int _primaryPlanChars = 1200;
-  static const int _retryPlanChars = 700;
+  static const int _filesPerBatch = 2;
   static const int _primaryFileChars = 2400;
   static const int _retryFileChars = 1200;
   static const int _primaryContextChars = 320;
@@ -61,12 +62,114 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
-    final sessionId = 'workshop:review:${session.context.request.id}';
+    final changes = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    if (changes.isEmpty) {
+      throw StateError(
+        'Workshop Reviewer requires a non-empty staged diff.',
+      );
+    }
+
+    final coverage = _coverageManifest(session);
+    final batchCount =
+        (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
+    final summaries = <String>[];
+    final findings = <String>[];
+    final warnings = <String>[];
+    final reviewedPaths = <String>{};
+
+    for (var batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
+      final start = batchIndex * _filesPerBatch;
+      final proposedEnd = start + _filesPerBatch;
+      final end = proposedEnd < changes.length ? proposedEnd : changes.length;
+      final batch = changes.sublist(start, end);
+
+      final verdict = await _reviewBatch(
+        session: session,
+        implementationPlan: implementationPlan,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        coverage: coverage,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+
+      final currentCoverage = _coverageManifest(session);
+      if (currentCoverage.fingerprint != coverage.fingerprint) {
+        throw StateError(
+          'Workshop review invalidated because the staged diff changed while '
+          'review was in progress. Restart review for the new diff.',
+        );
+      }
+
+      reviewedPaths.addAll(batch.map((change) => change.path));
+      summaries.add(verdict.summary);
+      findings.addAll(verdict.findings);
+      warnings.addAll(verdict.warnings);
+
+      if (!verdict.approved) {
+        _gate.applyVerdict(session: session, verdict: verdict);
+        return verdict;
+      }
+    }
+
+    final expectedPaths = changes.map((change) => change.path).toSet();
+    if (reviewedPaths.length != expectedPaths.length ||
+        !reviewedPaths.containsAll(expectedPaths)) {
+      throw StateError(
+        'Workshop review coverage is incomplete; aggregate approval denied.',
+      );
+    }
+
+    final aggregate = WorkshopReviewVerdict(
+      approved: true,
+      summary: summaries.length == 1
+          ? summaries.single
+          : 'All ${summaries.length} review batches approved: '
+              '${summaries.join(' | ')}',
+      findings: List<String>.unmodifiable(findings),
+      warnings: List<String>.unmodifiable(warnings),
+    );
+
+    _gate.applyVerdict(session: session, verdict: aggregate);
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_VERDICT] '
+      'approved=true files=${changes.length} batches=$batchCount '
+      'coverage=${coverage.fingerprint} '
+      'findings=${aggregate.findings.length} '
+      'warnings=${aggregate.warnings.length}',
+    );
+
+    return aggregate;
+  }
+
+  Future<WorkshopReviewVerdict> _reviewBatch({
+    required WorkspaceSession session,
+    required String? implementationPlan,
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    required _WorkshopReviewCoverageManifest coverage,
+    required bool isOffline,
+    required CancellationToken? cancellationToken,
+  }) async {
+    final requestId = session.context.request.id;
+    final batchSuffix = batchCount == 1
+        ? ''
+        : ':batch-${batchIndex + 1}-of-$batchCount';
+    final sessionId = 'workshop:review:$requestId$batchSuffix';
+
     var result = await _inference.complete(
       stage: WorkshopStage.review,
       prompt: _buildPrompt(
         session,
         implementationPlan: implementationPlan,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        coverage: coverage,
       ),
       systemPrompt: _systemPrompt,
       sessionId: sessionId,
@@ -81,6 +184,7 @@ final class WorkshopProposalReviewRunner {
     )) {
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_REVIEW_RETRY] '
+        'batch=${batchIndex + 1}/$batchCount '
         'attempt=2 terminal=${result.terminalState?.name ?? 'none'} '
         'chars=${result.text.length}',
       );
@@ -90,6 +194,10 @@ final class WorkshopProposalReviewRunner {
         prompt: _buildPrompt(
           session,
           implementationPlan: implementationPlan,
+          batch: batch,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
+          coverage: coverage,
           compact: true,
         ),
         firstTokenTimeout: _retryFirstTokenTimeout,
@@ -116,17 +224,13 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
-    final verdict = _gate.evaluate(
-      session: session,
-      responseText: result.text,
-    );
+    final verdict = _gate.decode(result.text);
 
     RuntimeEventLog.instance.emit(
-      '[WORKSHOP_REVIEW_VERDICT] '
-      'approved=${verdict.approved} '
-      'summary_chars=${verdict.summary.length} '
-      'findings=${verdict.findings.length} '
-      'warnings=${verdict.warnings.length}',
+      '[WORKSHOP_REVIEW_BATCH_VERDICT] '
+      'batch=${batchIndex + 1}/$batchCount '
+      'approved=${verdict.approved} files=${batch.length} '
+      'coverage=${coverage.fingerprint}',
     );
 
     return verdict;
@@ -134,6 +238,10 @@ final class WorkshopProposalReviewRunner {
 
   String _buildPrompt(
     WorkspaceSession session, {
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    required _WorkshopReviewCoverageManifest coverage,
     String? implementationPlan,
     bool compact = false,
   }) {
@@ -143,7 +251,7 @@ final class WorkshopProposalReviewRunner {
 
     final fileChars = compact ? _retryFileChars : _primaryFileChars;
     final changes = <Map<String, Object?>>[
-      for (final change in session.diff.files.take(compact ? 2 : 4))
+      for (final change in batch)
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
@@ -165,12 +273,10 @@ final class WorkshopProposalReviewRunner {
         .take(compact ? 2 : 4)
         .toList(growable: false);
 
-    final normalizedPlan = implementationPlan?.trim();
-    final planBudget = compact ? _retryPlanChars : _primaryPlanChars;
-    final boundedPlan =
-        normalizedPlan == null || normalizedPlan.isEmpty
-            ? null
-            : _boundedText(normalizedPlan, planBudget);
+    final projectedPlan = WorkshopTaskPlanProjection.project(
+      implementationPlan,
+    );
+    final boundedPlan = projectedPlan.isEmpty ? null : projectedPlan;
 
     final payload = <String, Object?>{
       'requestId': request.id,
@@ -183,12 +289,26 @@ final class WorkshopProposalReviewRunner {
           : 'explicit_scope',
       'constraints': request.constraints,
       'context': taskContext,
+      'coverageManifest': coverage.toJson(),
+      'reviewBatch': <String, Object?>{
+        'index': batchIndex + 1,
+        'count': batchCount,
+        'paths': batch.map((change) => change.path).toList(growable: false),
+      },
       'changes': changes,
     };
 
     final prompt = '''
-Review the staged Workshop change set below for correctness, regressions,
+Review the staged Workshop change batch below for correctness, regressions,
 requirement compliance and unsafe or incomplete edits.
+
+COVERAGE RULE:
+This is batch ${batchIndex + 1} of $batchCount. Review every file in
+reviewBatch.paths. coverageManifest lists the complete staged diff using
+content fingerprints. Approve only this supplied batch. The runner will grant a
+global approval only after every expected path has an approved batch verdict
+against the same coverage fingerprint. Never assume an omitted staged file was
+reviewed.
 
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
@@ -196,8 +316,10 @@ targetFiles and constraints.
 
 CONTRACT PRECEDENCE:
 1. The explicit task instruction and explicit constraints are authoritative.
-2. implementationPlan is model-authored Architect guidance and must not override
-   or contradict the explicit task.
+2. implementationPlan is the exact bounded Architect projection supplied to
+   the Engineer. It is model-authored guidance and must not override or
+   contradict the explicit task. Do not infer requirements from omitted parts
+   of the unavailable full Architect response.
 3. targetFiles is a hard restriction only when targetFilesPolicy is
    "explicit_scope". When targetFilesPolicy is
    "unspecified_for_initial_create_task", an empty targetFiles list means the
@@ -228,10 +350,52 @@ Do not return markdown fences or any text outside the JSON object.
 
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_REVIEW_PROMPT] '
-      'compact=$compact chars=${prompt.length} files=${changes.length} '
+      'compact=$compact batch=${batchIndex + 1}/$batchCount '
+      'chars=${prompt.length} files=${changes.length} '
+      'coverage=${coverage.fingerprint} '
       'plan_chars=${boundedPlan?.length ?? 0}',
     );
     return prompt;
+  }
+
+  static _WorkshopReviewCoverageManifest _coverageManifest(
+    WorkspaceSession session,
+  ) {
+    final original = session.workspace.originalSnapshot;
+    final current = session.workspace.snapshot;
+    final changes = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+
+    final files = <Map<String, Object?>>[
+      for (final change in changes)
+        <String, Object?>{
+          'path': change.path,
+          'type': change.changeType.name,
+          'before': _fingerprintNullable(original[change.path]),
+          'after': _fingerprintNullable(current[change.path]),
+        },
+    ];
+    final fingerprint = _fingerprint(jsonEncode(files));
+    return _WorkshopReviewCoverageManifest(
+      fingerprint: fingerprint,
+      files: List<Map<String, Object?>>.unmodifiable(files),
+    );
+  }
+
+  static String _fingerprintNullable(String? value) {
+    if (value == null) {
+      return 'null';
+    }
+    return _fingerprint('value:$value');
+  }
+
+  static String _fingerprint(String value) {
+    var hash = 0x811c9dc5;
+    for (final unit in value.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
   }
 
   static bool _shouldRetryReviewer(
@@ -287,3 +451,19 @@ Do not return markdown fences or any text outside the JSON object.
       'this current increment is correct and safe. Return the required JSON '
       'verdict only; do not use project-wide future requirements.';
 }
+
+final class _WorkshopReviewCoverageManifest {
+  const _WorkshopReviewCoverageManifest({
+    required this.fingerprint,
+    required this.files,
+  });
+
+  final String fingerprint;
+  final List<Map<String, Object?>> files;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'fingerprint': fingerprint,
+        'files': files,
+      };
+}
+

@@ -31,23 +31,53 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 ///
 /// L'esecuzione reale rimane sempre protetta dal ciclo di approvazione
 /// della WorkspaceSession.
+typedef WorkshopProjectGatewayFactory = GitWorkspaceGateway Function(
+  String projectId,
+);
+typedef WorkshopProjectWorkspacePathResolver = String Function(
+  String projectId,
+);
+
 final class WorkshopProjectExecutor {
   WorkshopProjectExecutor({
     required GitWorkspaceGateway gateway,
-  }) : _gateway = gateway;
+    WorkshopProjectGatewayFactory? projectGatewayFactory,
+    WorkshopProjectWorkspacePathResolver? projectWorkspacePathResolver,
+  })  : _gateway = gateway,
+        _projectGatewayFactory = projectGatewayFactory,
+        _projectWorkspacePathResolver = projectWorkspacePathResolver;
 
   final GitWorkspaceGateway _gateway;
+  final WorkshopProjectGatewayFactory? _projectGatewayFactory;
+  final WorkshopProjectWorkspacePathResolver? _projectWorkspacePathResolver;
 
+  final Map<String, GitWorkspaceGateway> _projectGateways =
+      <String, GitWorkspaceGateway>{};
   final Map<String, WorkspaceSession> _sessions =
       <String, WorkspaceSession>{};
+
+  String? _activeProjectId;
 
   /// Sessioni Workspace attualmente associate ai task del progetto.
   List<WorkspaceSession> get sessions =>
       List.unmodifiable(_sessions.values);
 
-  /// Sessione associata a un task, se esistente.
-  WorkspaceSession? sessionForTask(String taskId) =>
-      _sessions[taskId];
+  /// Sessione associata a un task del progetto attualmente attivo.
+  WorkspaceSession? sessionForTask(String taskId) {
+    final normalizedTaskId = taskId.trim();
+    if (normalizedTaskId.isEmpty) return null;
+    return _sessions[normalizedTaskId];
+  }
+
+  /// Directory fisica autorevole del progetto, quando la composizione
+  /// persistente usa workspace isolate per progetto.
+  String? workspacePathForProject(String projectId) {
+    final resolver = _projectWorkspacePathResolver;
+    if (resolver == null) return null;
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) return null;
+    return resolver(normalizedProjectId);
+  }
 
   /// Prepara il prossimo task eseguibile del progetto.
   ///
@@ -62,6 +92,8 @@ final class WorkshopProjectExecutor {
     WorkshopRequest? projectRequest,
     WorkshopBrief? brief,
   }) async {
+    _activateProject(plan.id);
+
     final task = plan.nextAvailableTask;
 
     if (task == null) {
@@ -79,16 +111,25 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       projectPath: null,
       targetFiles: task.affectedPaths,
       constraints: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
         ...plan.constraints,
       ],
       context: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
+        if (task.affectedPaths.isNotEmpty)
+          'Task target files: ${task.affectedPaths.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
@@ -105,7 +146,7 @@ final class WorkshopProjectExecutor {
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
@@ -148,6 +189,8 @@ final class WorkshopProjectExecutor {
       );
     }
 
+    _activateProject(plan.id);
+
     final existing = _sessions[task.id];
 
     if (existing != null) {
@@ -159,26 +202,41 @@ final class WorkshopProjectExecutor {
       title: task.title,
       instruction: task.description,
       source: WorkshopRequestSource.workshop,
-      operation: _operationForTask(task),
+      operation: _operationForTask(
+        task,
+        projectRequest: projectRequest,
+      ),
       targetFiles: task.affectedPaths,
       constraints: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
         ...plan.constraints,
       ],
       context: <String>[
+        if (task.validationCriteria.isNotEmpty)
+          'Task acceptance criteria: ${task.validationCriteria.join(' | ')}',
+        if (task.affectedPaths.isNotEmpty)
+          'Task target files: ${task.affectedPaths.join(' | ')}',
         ...?projectRequest?.context,
         'Project: ${plan.title}',
         'Project goal: ${plan.goal}',
         'Project domain: ${plan.domain.name}',
         'Phase: ${task.phaseId}',
+        if (plan.requirements.isNotEmpty)
+          'Requirements: ${plan.requirements.join(' | ')}',
+        if (plan.technologies.isNotEmpty)
+          'Technologies: ${plan.technologies.join(' | ')}',
+        if (plan.hardware.isNotEmpty)
+          'Hardware: ${plan.hardware.join(' | ')}',
       ],
     );
 
     final session = WorkspaceSession(
       request: request,
-      gateway: _gateway,
+      gateway: _gatewayForProject(plan.effectiveWorkspaceProjectId),
       brief: brief,
     );
 
@@ -231,6 +289,7 @@ final class WorkshopProjectExecutor {
     WorkshopProjectPlan plan,
     String taskId,
   ) {
+    _activateProject(plan.id);
     final task = plan.taskById(taskId);
 
     if (task == null) {
@@ -267,6 +326,7 @@ final class WorkshopProjectExecutor {
     String taskId,
     String reason,
   ) {
+    _activateProject(plan.id);
     final task = plan.taskById(taskId);
 
     if (task == null) {
@@ -335,52 +395,126 @@ final class WorkshopProjectExecutor {
     }
   }
 
+  void _activateProject(String projectId) {
+    final normalizedProjectId = projectId.trim();
+    if (normalizedProjectId.isEmpty) {
+      throw ArgumentError.value(
+        projectId,
+        'projectId',
+        'Project id cannot be empty.',
+      );
+    }
+
+    if (_activeProjectId == normalizedProjectId) {
+      return;
+    }
+
+    // WorkspaceSession objects are runtime state, not durable project state.
+    // Recovery reconstructs them from the selected project's persisted plan.
+    // Never let standard task ids (e.g. task:initial-implementation) reuse a
+    // session that belonged to a different project.
+    _sessions.clear();
+    _activeProjectId = normalizedProjectId;
+  }
+
+  GitWorkspaceGateway _gatewayForProject(String projectId) {
+    final factory = _projectGatewayFactory;
+    if (factory == null) {
+      return _gateway;
+    }
+    final normalizedProjectId = projectId.trim();
+    return _projectGateways.putIfAbsent(
+      normalizedProjectId,
+      () => factory(normalizedProjectId),
+    );
+  }
+
   /// Determina l'operazione Workshop più appropriata per un task.
   WorkshopOperation _operationForTask(
-    WorkshopProjectTask task,
-  ) {
-    final text =
-        '${task.title} ${task.description}'.toLowerCase();
+    WorkshopProjectTask task, {
+    WorkshopRequest? projectRequest,
+  }) {
+    // Standard production tasks have explicit lifecycle semantics. Never infer
+    // them from user-controlled project names/goals (for example "Contatore
+    // Test"), because words such as Test/Build/Fix are valid product names.
+    if (_matchesTaskId(task.id, 'acceptance-verification')) {
+      return WorkshopOperation.validate;
+    }
 
-    if (text.contains('fix') ||
-        text.contains('bug') ||
-        text.contains('errore') ||
-        text.contains('crash')) {
+    if (task.title == 'Correzione build mirata' ||
+        task.description.toUpperCase().startsWith('BUILD REPAIR ATTEMPT:')) {
       return WorkshopOperation.fix;
     }
 
-    if (text.contains('refactor') ||
-        text.contains('refactoring')) {
+    // Dynamic Architect plans namespace task ids and may use request-specific
+    // local ids instead of the legacy "initial-implementation" label. The
+    // first dependency-free unit still belongs to the owner-approved project
+    // operation. In particular, a create project must not silently degrade to
+    // modify merely because the model described the task as "update app".
+    if (projectRequest != null &&
+        (_matchesTaskId(task.id, 'initial-implementation') ||
+            task.dependencies.isEmpty)) {
+      return projectRequest.operation;
+    }
+
+    // Legacy/generic tasks still need a deterministic fallback. Classify only
+    // task-owned text and exclude the appended user project goal.
+    final description = task.description;
+    const projectGoalMarker = 'Project goal:';
+    final markerIndex = description.indexOf(projectGoalMarker);
+    final taskOwnedDescription = markerIndex < 0
+        ? description
+        : description.substring(0, markerIndex);
+    final text =
+        '${task.title} $taskOwnedDescription'.toLowerCase();
+
+    final words = RegExp(r'[a-z0-9_]+')
+        .allMatches(text)
+        .map((match) => match.group(0)!)
+        .toSet();
+    bool hasWord(String word) => words.contains(word);
+
+    if (hasWord('fix') ||
+        hasWord('bug') ||
+        hasWord('errore') ||
+        hasWord('crash')) {
+      return WorkshopOperation.fix;
+    }
+
+    if (hasWord('refactor') || hasWord('refactoring')) {
       return WorkshopOperation.refactor;
     }
 
-    if (text.contains('optim') ||
-        text.contains('performance') ||
-        text.contains('latency')) {
+    if (hasWord('optim') ||
+        hasWord('performance') ||
+        hasWord('latency')) {
       return WorkshopOperation.optimize;
     }
 
-    if (text.contains('remove') ||
-        text.contains('delete') ||
-        text.contains('elimina')) {
+    if (hasWord('remove') ||
+        hasWord('delete') ||
+        hasWord('elimina')) {
       return WorkshopOperation.remove;
     }
 
-    if (text.contains('modify') ||
-        text.contains('update') ||
-        text.contains('change') ||
-        text.contains('modifica')) {
+    if (hasWord('modify') ||
+        hasWord('update') ||
+        hasWord('change') ||
+        hasWord('modifica')) {
       return WorkshopOperation.modify;
     }
 
-    if (text.contains('validate') ||
-        text.contains('test') ||
-        text.contains('build')) {
+    if (hasWord('validate') ||
+        hasWord('test') ||
+        hasWord('build')) {
       return WorkshopOperation.validate;
     }
 
     return WorkshopOperation.create;
   }
+
+  static bool _matchesTaskId(String taskId, String localId) =>
+      taskId == 'task:$localId' || taskId.endsWith(':$localId');
 
   /// Aggiorna lo stato globale del progetto in base alle fasi completate.
   void _refreshPlanStatus(
@@ -402,15 +536,11 @@ final class WorkshopProjectExecutor {
         continue;
       }
 
-      final hasBlockedTask = phaseTasks.any(
-        (task) =>
-            plan.isTaskBlocked(task) &&
-            !task.completed,
-      );
+      if (phase.status == WorkshopProjectPhaseStatus.blocked) {
+        continue;
+      }
 
-      phase.status = hasBlockedTask
-          ? WorkshopProjectPhaseStatus.blocked
-          : WorkshopProjectPhaseStatus.inProgress;
+      phase.status = WorkshopProjectPhaseStatus.inProgress;
     }
 
     if (plan.phases.isNotEmpty &&

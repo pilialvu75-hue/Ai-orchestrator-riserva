@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dynamic_project_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_detector.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_planner.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
@@ -212,10 +214,12 @@ final class WorkshopDashboardController extends ChangeNotifier {
     required WorkshopEngine engine,
     WorkshopLocalToolchainService? localToolchainService,
     WorkshopBuildLab? buildLab,
+    WorkshopDynamicProjectPlanner? projectPlanner,
   })  : _engine = engine,
         _localToolchainService =
             localToolchainService ?? WorkshopLocalToolchainService(),
-        _buildLab = buildLab ?? WorkshopBuildLab() {
+        _buildLab = buildLab ?? WorkshopBuildLab(),
+        _projectPlanner = projectPlanner {
     _stageSubscription = _engine.stageStream.listen(
       _handleStageEvent,
     );
@@ -226,6 +230,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
   final WorkshopLocalToolchainService _localToolchainService;
 
   final WorkshopBuildLab _buildLab;
+
+  final WorkshopDynamicProjectPlanner? _projectPlanner;
 
   WorkshopDashboardControllerState _state =
       const WorkshopDashboardControllerState();
@@ -348,6 +354,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       );
     }
 
+    restoredPlan.workspaceProjectId = plan.workspaceProjectId;
     restoredPlan.status = plan.status;
     restoredPlan.updatedAt = plan.updatedAt;
     if (restoredPlan.status == WorkshopProjectStatus.completed) {
@@ -440,6 +447,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
     List<String> deliverables = const <String>[],
     List<String> validationCriteria = const <String>[],
     List<String> context = const <String>[],
+    String? workspaceProjectId,
   }) {
     _ensureNotDisposed();
 
@@ -479,6 +487,13 @@ final class WorkshopDashboardController extends ChangeNotifier {
       ),
     );
 
+    final productionPlan = const WorkshopProductionTaskPlanner().build(
+      instruction: normalizedInstruction,
+      requirements: requirements,
+      deliverables: deliverables,
+      validationCriteria: validationCriteria,
+    );
+
     _engine.createProjectPlan(
       request,
       domain: WorkshopProjectDomain.software,
@@ -487,29 +502,8 @@ final class WorkshopDashboardController extends ChangeNotifier {
       technologies: technologies,
       deliverables: deliverables,
       validationCriteria: validationCriteria,
-      phases: <WorkshopProjectPhase>[
-        WorkshopProjectPhase(
-          id: 'phase:implementation',
-          title: 'Implementazione',
-          description:
-              'Preparazione ed esecuzione della prima unità '
-              'di lavoro del progetto.',
-          taskIds: const <String>[
-            'task:initial-implementation',
-          ],
-          validationCriteria: validationCriteria,
-        ),
-      ],
-      tasks: <WorkshopProjectTask>[
-        WorkshopProjectTask(
-          id: 'task:initial-implementation',
-          title: 'Implementazione iniziale',
-          description: normalizedInstruction,
-          phaseId: 'phase:implementation',
-          affectedPaths: const <String>[],
-          validationCriteria: validationCriteria,
-        ),
-      ],
+      phases: productionPlan.phases,
+      tasks: productionPlan.tasks,
     );
 
     final plan = _engine.planOf(requestId);
@@ -519,6 +513,12 @@ final class WorkshopDashboardController extends ChangeNotifier {
         'WorkshopEngine created no project plan for '
         'request "$requestId".',
       );
+    }
+
+    final normalizedWorkspaceProjectId = workspaceProjectId?.trim();
+    if (normalizedWorkspaceProjectId != null &&
+        normalizedWorkspaceProjectId.isNotEmpty) {
+      plan.workspaceProjectId = normalizedWorkspaceProjectId;
     }
 
     _updateState(
@@ -542,6 +542,138 @@ final class WorkshopDashboardController extends ChangeNotifier {
     );
 
     return plan;
+  }
+
+  /// Plans and validates a request-specific project graph before opening a
+  /// WorkspaceSession.
+  ///
+  /// Invalid model output fails closed: WorkshopEngine receives no project and
+  /// no real workspace is created or mutated.
+  Future<WorkshopProjectPlan> startPlannedProduction({
+    required String title,
+    required String instruction,
+    List<String> requirements = const <String>[],
+    List<String> constraints = const <String>[],
+    List<String> technologies = const <String>[],
+    List<String> deliverables = const <String>[],
+    List<String> validationCriteria = const <String>[],
+    List<String> context = const <String>[],
+    String? workspaceProjectId,
+    bool isOffline = false,
+  }) async {
+    _ensureNotDisposed();
+
+    final planner = _projectPlanner;
+    if (planner == null) {
+      return startProduction(
+        title: title,
+        instruction: instruction,
+        requirements: requirements,
+        constraints: constraints,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
+        context: context,
+        workspaceProjectId: workspaceProjectId,
+      );
+    }
+
+    final normalizedTitle = title.trim();
+    final normalizedInstruction = instruction.trim();
+    if (normalizedTitle.isEmpty) {
+      throw ArgumentError.value(
+        title,
+        'title',
+        'Production title cannot be empty.',
+      );
+    }
+    if (normalizedInstruction.isEmpty) {
+      throw ArgumentError.value(
+        instruction,
+        'instruction',
+        'Production instruction cannot be empty.',
+      );
+    }
+
+    final requestId = 'dashboard:${_nextRequestIdentityMicros()}';
+    final request = WorkshopRequest(
+      id: requestId,
+      title: normalizedTitle,
+      instruction: normalizedInstruction,
+      source: WorkshopRequestSource.workshop,
+      operation: WorkshopOperation.create,
+      targetFiles: const <String>[],
+      constraints: constraints,
+      context: List<String>.unmodifiable(
+        context
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty),
+      ),
+    );
+
+    _setBusy(true);
+    try {
+      final dynamicPlan = await planner.plan(
+        request: request,
+        requirements: requirements,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
+        isOffline: isOffline,
+      );
+
+      _engine.createProjectPlan(
+        request,
+        domain: WorkshopProjectDomain.software,
+        requirements: requirements,
+        constraints: constraints,
+        technologies: technologies,
+        deliverables: deliverables,
+        validationCriteria: validationCriteria,
+        phases: dynamicPlan.phases,
+        tasks: dynamicPlan.tasks,
+      );
+
+      final plan = _engine.planOf(requestId);
+      if (plan == null) {
+        throw StateError(
+          'WorkshopEngine created no dynamic project plan for '
+          'request "$requestId".',
+        );
+      }
+
+      final normalizedWorkspaceProjectId = workspaceProjectId?.trim();
+      if (normalizedWorkspaceProjectId != null &&
+          normalizedWorkspaceProjectId.isNotEmpty) {
+        plan.workspaceProjectId = normalizedWorkspaceProjectId;
+      }
+
+      _updateState(
+        _state.copyWith(
+          requestId: requestId,
+          projectId: plan.id,
+          projectTitle: plan.title,
+          stage: WorkshopStage.planning,
+          lastOperationalStage: WorkshopStage.planning,
+          projectStatus: plan.status,
+          progress: plan.progress,
+          completedTasks: plan.completedTasks,
+          totalTasks: plan.totalTasks,
+          lastMessage:
+              'Piano dinamico validato: produzione preparata nel Cantiere.',
+          clearError: true,
+          clearBuildResult: true,
+          clearProjectApproval: true,
+          clearActiveTask: true,
+          isBusy: false,
+        ),
+      );
+
+      return plan;
+    } catch (error) {
+      _setError('Pianificazione del progetto fallita: $error');
+      rethrow;
+    }
   }
 
   /// Records the owner's explicit approval of the current project proposal.

@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 
@@ -30,6 +31,11 @@ final class WorkshopProposalWorkspaceStager {
       existingPaths: session.workspace.paths.toSet(),
     );
 
+    _validateTaskScope(
+      session: session,
+      proposal: proposal,
+    );
+
     _applier.applyProposal(
       session: session,
       proposal: proposal,
@@ -40,5 +46,43 @@ final class WorkshopProposalWorkspaceStager {
     }
 
     return proposal;
+  }
+
+  static void _validateTaskScope({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+  }) {
+    final request = session.context.request;
+    final targetFiles = request.targetFiles
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet();
+
+    if (targetFiles.isNotEmpty) {
+      for (final change in proposal.changes) {
+        final path = change.path.trim();
+        if (!targetFiles.contains(path)) {
+          throw FormatException(
+            'Workshop proposal path "$path" is outside the current '
+            'task targetFiles.',
+          );
+        }
+      }
+    }
+
+    if (request.operation == WorkshopOperation.create &&
+        targetFiles.contains('lib/main.dart') &&
+        !session.workspace.contains('lib/main.dart')) {
+      final materializesEntryPoint = proposal.changes.any(
+        (change) =>
+            change.path.trim() == 'lib/main.dart' && !change.isDeletion,
+      );
+      if (!materializesEntryPoint) {
+        throw const FormatException(
+          'Workshop create proposal must materialize required target '
+          '"lib/main.dart".',
+        );
+      }
+    }
   }
 }

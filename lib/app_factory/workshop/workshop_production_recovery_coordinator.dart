@@ -162,6 +162,21 @@ final class WorkshopProductionRecoveryCoordinator {
         projectApproval: snapshot.projectApproval,
       );
 
+      // A checkpoint can be captured in the safe boundary after one task was
+      // applied and before the next task was prepared. Reopening that project
+      // must not leave the Cantiere parked at a truthful 1/N progress with no
+      // executable handle. Preparing the next authoritative task creates only
+      // a fresh guarded WorkspaceSession: it does not run inference, approve or
+      // mutate the real workspace.
+      final restoredSummary = controller.projectSummary;
+      if (controller.state.activeTaskId == null &&
+          restoredSummary?.nextTaskId != null &&
+          restoredSummary?.status != WorkshopProjectStatus.completed &&
+          restoredSummary?.status != WorkshopProjectStatus.cancelled &&
+          restoredSummary?.status != WorkshopProjectStatus.blocked) {
+        await controller.prepareNextTask();
+      }
+
       // Migrate legacy single-slot recovery transparently to the project-scoped
       // catalogue the first time the owner explicitly resumes it.
       await saveCurrent(controller);
@@ -602,6 +617,7 @@ final class _WorkshopProductionSnapshot {
         'id': plan.id,
         'title': plan.title,
         'goal': plan.goal,
+        'workspaceProjectId': plan.workspaceProjectId,
         'domain': plan.domain.name,
         'status': plan.status.name,
         'createdAt': plan.createdAt.toUtc().toIso8601String(),
@@ -625,6 +641,7 @@ final class _WorkshopProductionSnapshot {
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
       goal: _requiredString(json, 'goal'),
+      workspaceProjectId: _nullableString(json['workspaceProjectId']),
       domain: _enumByName(
         WorkshopProjectDomain.values,
         json['domain'],

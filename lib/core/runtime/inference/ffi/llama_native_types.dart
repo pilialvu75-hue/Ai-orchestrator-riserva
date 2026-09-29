@@ -48,6 +48,21 @@ typedef LlbSessionStartGenNative = Int32 Function(
 );
 typedef LlbSessionStartGenDart = int Function(int, Pointer<Utf8>, int, double);
 
+typedef LlbSessionStartGenScopedNative = Int32 Function(
+  Int64,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Int32,
+  Float,
+);
+typedef LlbSessionStartGenScopedDart = int Function(
+  int,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  int,
+  double,
+);
+
 typedef LlbSessionPollTokenNative = Int32 Function(Int64, Pointer<Utf8>, Int32);
 typedef LlbSessionPollTokenDart = int Function(int, Pointer<Utf8>, int);
 

@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_dynamic_project_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_github_user_token_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
@@ -120,6 +121,9 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       dashboardController: WorkshopDashboardController(
         engine: engine,
         buildLab: buildLab,
+        projectPlanner: WorkshopDynamicProjectPlanner(
+          inference: stageInference,
+        ),
       ),
       preflight: preflight,
       taskLifecycle: lifecycle,
@@ -158,12 +162,14 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     String? reuseSnapshotsRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool isolateProjects = false,
   }) {
     final normalizedWorkspaceRootPath = workspaceRootPath.trim();
     final executor = WorkshopFactory.createProjectExecutor(
       workspaceRootPath: normalizedWorkspaceRootPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      isolateProjects: isolateProjects,
     );
     // Production Cantiere always has a real local/offline candidate. It is
     // fail-closed and becomes selectable only when its authoritative toolchain
@@ -250,6 +256,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
       reuseSnapshotsRootPath: reuseSnapshotsRootPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      isolateProjects: true,
     );
   }
 

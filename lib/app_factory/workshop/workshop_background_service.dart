@@ -1,85 +1,16 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+
+export 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 //import 'workshop_project_plan.dart';
 
-/// Stati persistibili del lavoro in background del Cantiere.
-///
-/// Questi stati sono volutamente indipendenti dalla UI.
-/// La UI può essere chiusa e riaperta senza cambiare il significato
-/// dello stato del progetto.
-enum WorkshopBackgroundStatus {
-  idle,
-  running,
-  paused,
-  waitingApproval,
-  completed,
-  failed,
-  cancelled,
-}
-
-/// Snapshot persistibile del lavoro del Cantiere.
-///
-/// In futuro questo oggetto verrà serializzato su storage persistente,
-/// così che il lavoro possa essere ripreso anche dopo una terminazione
-/// del processo.
-final class WorkshopBackgroundCheckpoint {
-  const WorkshopBackgroundCheckpoint({
-    required this.jobId,
-    required this.requestId,
-    required this.status,
-    required this.updatedAt,
-    this.projectId,
-    this.taskId,
-    this.completedTasks = 0,
-    this.totalTasks = 0,
-    this.message,
-    this.error,
-  });
-
-  final String jobId;
-  final String requestId;
-  final WorkshopBackgroundStatus status;
-  final DateTime updatedAt;
-
-  final String? projectId;
-  final String? taskId;
-
-  final int completedTasks;
-  final int totalTasks;
-
-  final String? message;
-  final String? error;
-
-  double get progress {
-    if (totalTasks <= 0) {
-      return 0;
-    }
-
-    final value = completedTasks / totalTasks;
-
-    if (value < 0) {
-      return 0;
-    }
-
-    if (value > 1) {
-      return 1;
-    }
-
-    return value;
-  }
-
-  bool get requiresUserApproval =>
-      status == WorkshopBackgroundStatus.waitingApproval;
-
-  bool get isTerminal =>
-      status == WorkshopBackgroundStatus.completed ||
-      status == WorkshopBackgroundStatus.failed ||
-      status == WorkshopBackgroundStatus.cancelled;
-}
-
 /// Evento prodotto dall'infrastruttura Background del Cantiere.
+///
+/// The persistable checkpoint contract lives in workshop_checkpoint_store.dart,
+/// while delivery semantics remain owned by the native/background service.
 final class WorkshopBackgroundEvent {
   const WorkshopBackgroundEvent({
     required this.checkpoint,
@@ -99,61 +30,6 @@ enum WorkshopBackgroundEventType {
   completed,
   failed,
   cancelled,
-}
-
-/// Astrazione minima per la persistenza dei checkpoint.
-///
-/// La prima implementazione in-memory permette di integrare il servizio
-/// senza aggiungere dipendenze alla build.
-///
-/// In seguito potremo sostituirla con SharedPreferences, SQLite o
-/// un archivio dedicato senza modificare il WorkshopEngine.
-abstract interface class WorkshopCheckpointStore {
-  Future<void> save(WorkshopBackgroundCheckpoint checkpoint);
-
-  Future<WorkshopBackgroundCheckpoint?> load(
-    String jobId,
-  );
-
-  Future<List<WorkshopBackgroundCheckpoint>> loadAll();
-
-  Future<void> remove(String jobId);
-}
-
-/// Store temporaneo in memoria.
-///
-/// È intenzionalmente semplice: serve come implementazione iniziale
-/// e soprattutto come punto di sostituzione per la persistenza reale.
-final class InMemoryWorkshopCheckpointStore
-    implements WorkshopCheckpointStore {
-  final Map<String, WorkshopBackgroundCheckpoint> _items =
-      <String, WorkshopBackgroundCheckpoint>{};
-
-  @override
-  Future<void> save(
-    WorkshopBackgroundCheckpoint checkpoint,
-  ) async {
-    _items[checkpoint.jobId] = checkpoint;
-  }
-
-  @override
-  Future<WorkshopBackgroundCheckpoint?> load(
-    String jobId,
-  ) async {
-    return _items[jobId];
-  }
-
-  @override
-  Future<List<WorkshopBackgroundCheckpoint>> loadAll() async {
-    return List.unmodifiable(_items.values);
-  }
-
-  @override
-  Future<void> remove(
-    String jobId,
-  ) async {
-    _items.remove(jobId);
-  }
 }
 
 /// Astrazione per le notifiche.

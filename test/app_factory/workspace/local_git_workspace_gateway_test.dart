@@ -5,6 +5,54 @@ import 'package:ai_orchestrator/app_factory/workspace/virtual_workspace.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('isolated project root can be created lazily when explicitly enabled',
+      () async {
+    final parent = await Directory.systemTemp.createTemp(
+      'cantiere-project-root-',
+    );
+    final projectRoot = Directory('${parent.path}/projects/project-one');
+
+    try {
+      expect(await projectRoot.exists(), isFalse);
+
+      final gateway = LocalGitWorkspaceGateway(
+        rootPath: projectRoot.path,
+        createRootIfMissing: true,
+      );
+
+      final info = await gateway.openWorkspace();
+      expect(info.repository, projectRoot.path);
+      expect(await projectRoot.exists(), isTrue);
+
+      await gateway.writeFile(
+        path: 'lib/main.dart',
+        content: 'void main() {}',
+      );
+      expect(await gateway.readFile('lib/main.dart'), 'void main() {}');
+    } finally {
+      if (await parent.exists()) {
+        await parent.delete(recursive: true);
+      }
+    }
+  });
+
+  test('missing root remains fail-closed by default', () async {
+    final parent = await Directory.systemTemp.createTemp(
+      'cantiere-missing-root-',
+    );
+    final missing = Directory('${parent.path}/missing');
+
+    try {
+      final gateway = LocalGitWorkspaceGateway(rootPath: missing.path);
+      await expectLater(gateway.openWorkspace(), throwsStateError);
+      expect(await missing.exists(), isFalse);
+    } finally {
+      if (await parent.exists()) {
+        await parent.delete(recursive: true);
+      }
+    }
+  });
+
   test('binary assets stay on disk and are skipped by text VirtualWorkspace',
       () async {
     final root = await Directory.systemTemp.createTemp(

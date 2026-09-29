@@ -120,6 +120,7 @@ final class DiagnosticsTelemetryPolicy {
   static const Set<String> _performanceTags = <String>{
     'FIRST_TOKEN_REAL',
     'GENERATION_END',
+    'KV_CACHE_REUSE',
   };
 
   static const Set<String> _alwaysPromoteTags = <String>{
@@ -242,6 +243,9 @@ final class DiagnosticsTelemetryPolicy {
     'n_ctx',
     'n_threads',
     'requested_layers',
+    'reused_tokens',
+    'prefilled_tokens',
+    'prompt_tokens',
     'token_index',
     'tokens',
     'tokens_generated',
@@ -276,8 +280,13 @@ final class DiagnosticsTelemetryPolicy {
 
     if (_performanceTags.contains(tag)) {
       final safe = _extractSafeProperties(entry.message);
-      if (!safe.containsKey('elapsed_ms') &&
-          !safe.containsKey('first_token_ms')) {
+      final hasLatencyMetric =
+          safe.containsKey('elapsed_ms') || safe.containsKey('first_token_ms');
+      final hasKvReuseMetrics =
+          tag == 'KV_CACHE_REUSE' &&
+          safe.containsKey('reused_tokens') &&
+          safe.containsKey('prefilled_tokens');
+      if (!hasLatencyMetric && !hasKvReuseMetrics) {
         return null;
       }
       return DiagnosticsTelemetryPromotion(

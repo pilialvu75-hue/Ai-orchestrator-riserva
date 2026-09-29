@@ -45,10 +45,13 @@ class _AndroidFfiNativeSessionSubsystem {
         sample,
         phi: modelId == 'phi3_5_mini' ||
             modelPath.toLowerCase().contains('phi-3.5'),
-        requestedGpuLayers: LlamaNativeDefaults.nGpuLayers,
+        requestedGpuLayers: _owner.requestedGpuLayers,
+        memoryConstrained: resources.isMemoryConstrained(modelId ?? modelPath),
       );
       var existingSessionId = _owner._nativeSessionsByModel[modelPath];
-      if (existingSessionId != null && sample?.pressured == true &&
+      if (existingSessionId != null &&
+          (sample?.pressured == true ||
+              resources.isMemoryConstrained(modelId ?? modelPath)) &&
           (bindings.sessionMetrics(existingSessionId)['context']! > profile.context ||
            bindings.sessionMetrics(existingSessionId)['micro_batch']! > profile.microBatch)) {
         // This runs inside the serial inference queue, before startGeneration.
@@ -144,7 +147,7 @@ class _AndroidFfiNativeSessionSubsystem {
         '[NATIVE_SESSION_LOAD_OFF_UI_BEGIN] modelId=${modelId ?? 'unknown'} model_path=$modelPath',
       );
       resources.readNative = null;
-      const desiredGpuLayers = LlamaNativeDefaults.nGpuLayers;
+      final desiredGpuLayers = _owner.requestedGpuLayers;
       _log('[RESOURCE_PROFILE] reason=${profile.reason} '
           'n_ctx=${profile.context} n_batch=${profile.batch} n_ubatch=${profile.microBatch}');
       _log('[GPU_INIT] path=$modelPath requested_gpu_layers=$desiredGpuLayers');

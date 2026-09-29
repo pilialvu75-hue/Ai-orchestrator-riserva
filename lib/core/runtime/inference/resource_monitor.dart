@@ -16,6 +16,7 @@ class ResourceSample {
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
+        batteryTemperatureDeciC = _number(data['batteryTempDeciC']),
         lowMemory = data['lowMemory'] == true,
         trimLevel = _number(data['trimLevel']) ?? 0;
 
@@ -24,9 +25,17 @@ class ResourceSample {
       totalBytes,
       thresholdBytes,
       rssBytes,
-      nativeHeapBytes;
+      nativeHeapBytes,
+      batteryTemperatureDeciC;
   final bool lowMemory;
   final int trimLevel;
+
+  /// Read-only Android battery temperature proxy in degrees Celsius.
+  ///
+  /// This is not SoC junction temperature and must not be presented as one.
+  double? get batteryTemperatureC => batteryTemperatureDeciC == null
+      ? null
+      : batteryTemperatureDeciC! / 10.0;
   static int? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value.toInt() : null;
 
@@ -64,7 +73,13 @@ class ResourceProfile {
     ResourceSample? sample, {
     required bool phi,
     int requestedGpuLayers = 0,
+    bool memoryConstrained = false,
   }) {
+    // Keep the learned budget after unloading restores free system RAM.
+    // Phi has a large KV cache: shrink it without disabling GPU offload.
+    if (phi && memoryConstrained) {
+      return const ResourceProfile(1536, 64, 16, 'phi_memory_recovery');
+    }
     if (sample?.pressured == true) {
       return const ResourceProfile(2048, 128, 32, 'pressure');
     }
@@ -116,6 +131,19 @@ class ResourceMonitor extends ChangeNotifier {
   Map<String, int> native = const {};
   Map<String, int> Function()? readNative;
   String phase = 'idle';
+  // Shared by chat/provider instances, bounded, and local to this process.
+  // A healthy post-release sample must not erase pressure learned under load.
+  final Set<String> _memoryConstrainedModels = <String>{};
+  bool isMemoryConstrained(String model) =>
+      _memoryConstrainedModels.contains(model);
+  void recordModelPressure(String model) {
+    if (model.isEmpty || _disposed) return;
+    if (_memoryConstrainedModels.length >= 16 &&
+        !_memoryConstrainedModels.contains(model)) {
+      _memoryConstrainedModels.remove(_memoryConstrainedModels.first);
+    }
+    _memoryConstrainedModels.add(model);
+  }
   Timer? _timer;
   Future<ResourceSample?>? _pending;
   Future<Map<Object?, Object?>?>? _sensorPending;
@@ -181,9 +209,11 @@ class ResourceMonitor extends ChangeNotifier {
         _logger(
           '[RESOURCE_SAMPLE] available_bytes=${reading.availableBytes ?? -1} '
           'rss_bytes=${reading.rssBytes ?? -1} native_heap_bytes=${reading.nativeHeapBytes ?? -1} '
+          'battery_temp_decic=${reading.batteryTemperatureDeciC ?? -1} '
           'critical=${reading.critical} phase=$phase '
           'gpu_layers=${native['gpu_layers'] ?? -1} '
           'decode_calls=${native['decode_calls'] ?? -1} '
+          'prefill_ms=${native['prefill_ms'] ?? -1} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '

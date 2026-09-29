@@ -52,12 +52,10 @@ final class WorkshopChangeProposalDecoder {
     final validationNotes = _stringList(payload, 'validationNotes');
     final warnings = _stringList(payload, 'warnings');
 
-    final rawChanges = payload['changes'];
-    if (rawChanges is! List || rawChanges.isEmpty) {
-      throw const FormatException(
-        'Workshop proposal must contain at least one file change.',
-      );
-    }
+    final rawChanges = _resolveRawChanges(
+      payload,
+      existingPaths: existingPaths,
+    );
 
     final changes = <WorkspaceFileChange>[];
     final seenPaths = <String>{};
@@ -141,6 +139,147 @@ final class WorkshopChangeProposalDecoder {
       validationNotes: validationNotes,
       warnings: warnings,
     );
+  }
+
+  static List<dynamic> _resolveRawChanges(
+    Map<String, dynamic> payload, {
+    required Set<String> existingPaths,
+  }) {
+    if (payload.containsKey('changes')) {
+      final canonical = payload['changes'];
+      if (canonical is List && canonical.isNotEmpty) {
+        return canonical;
+      }
+      if (canonical is Map && canonical.isNotEmpty) {
+        return <dynamic>[canonical];
+      }
+      throw const FormatException(
+        'Workshop proposal must contain at least one file change.',
+      );
+    }
+
+    const aliases = <String>['fileChanges', 'file_changes', 'files'];
+    final present = aliases
+        .where((key) => payload.containsKey(key) && payload[key] != null)
+        .toList(growable: false);
+
+    if (present.length != 1) {
+      throw const FormatException(
+        'Workshop proposal must contain at least one file change.',
+      );
+    }
+
+    final alias = present.single;
+    final value = payload[alias];
+    final entries = value is List
+        ? value
+        : value is Map
+            ? <dynamic>[value]
+            : const <dynamic>[];
+    if (entries.isEmpty) {
+      throw const FormatException(
+        'Workshop proposal must contain at least one file change.',
+      );
+    }
+
+    return entries
+        .map<dynamic>(
+          (raw) => _normalizeAliasedChange(
+            raw,
+            alias: alias,
+            existingPaths: existingPaths,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  static Map<String, dynamic> _normalizeAliasedChange(
+    dynamic raw, {
+    required String alias,
+    required Set<String> existingPaths,
+  }) {
+    if (raw is! Map) {
+      throw const FormatException(
+        'Each Workshop file change must be a JSON object.',
+      );
+    }
+    final source = Map<String, dynamic>.from(raw);
+
+    final path = _singleStringAlias(
+      source,
+      const <String>['path', 'filePath', 'file'],
+      label: 'path',
+    );
+    if (path == null) {
+      throw const FormatException(
+        'Workshop proposal field "path" is required.',
+      );
+    }
+
+    var type = _singleStringAlias(
+      source,
+      const <String>['type', 'operation', 'action'],
+      label: 'type',
+    );
+
+    final content = _singleStringAlias(
+      source,
+      const <String>['content', 'code', 'afterContent'],
+      label: 'content',
+      allowEmpty: true,
+    );
+
+    if (type == null && alias == 'files' && content != null) {
+      final normalizedPath = _normalizeRelativePath(path);
+      type = existingPaths.contains(normalizedPath)
+          ? 'modification'
+          : 'addition';
+    }
+
+    if (type == null) {
+      throw const FormatException(
+        'Workshop proposal field "type" is required.',
+      );
+    }
+
+    return <String, dynamic>{
+      'path': path,
+      'type': type,
+      if (content != null) 'content': content,
+    };
+  }
+
+  static String? _singleStringAlias(
+    Map<String, dynamic> payload,
+    List<String> keys, {
+    required String label,
+    bool allowEmpty = false,
+  }) {
+    final present = keys
+        .where((key) => payload.containsKey(key) && payload[key] != null)
+        .toList(growable: false);
+    if (present.isEmpty) {
+      return null;
+    }
+    if (present.length > 1) {
+      throw FormatException(
+        'Workshop proposal has ambiguous "$label" fields.',
+      );
+    }
+
+    final value = payload[present.single];
+    if (value is! String) {
+      throw FormatException(
+        'Workshop proposal field "$label" must be text.',
+      );
+    }
+    final normalized = value.trim();
+    if (!allowEmpty && normalized.isEmpty) {
+      throw FormatException(
+        'Workshop proposal field "$label" is required.',
+      );
+    }
+    return allowEmpty ? value : normalized;
   }
 
   static String _normalizeChangeType(

@@ -21,7 +21,10 @@ void main() {
     'production bundle shares preflight and prepared task role stack',
     () async {
       final workspaceGateway = _RecordingWorkspaceGateway(
-        files: <String, String>{'lib/app.dart': 'old'},
+        files: <String, String>{
+          'lib/main.dart': 'void main() {}',
+          'lib/app.dart': 'old',
+        },
       );
       final executor = WorkshopProjectExecutor(
         gateway: workspaceGateway,
@@ -68,6 +71,20 @@ void main() {
 
       expect(taskId, 'task:initial-implementation');
       expect(identical(executor.sessionForTask(taskId), session), isTrue);
+      expect(
+        session.context.request.targetFiles,
+        <String>['lib/main.dart', 'lib/app.dart'],
+      );
+      expect(
+        session.context.request.constraints.first,
+        startsWith('Task acceptance: '),
+      );
+      expect(
+        session.context.request.context,
+        contains(
+          startsWith('Task acceptance criteria: '),
+        ),
+      );
 
       final inference = await bundle.taskLifecycle.runPrepared(
         taskId: taskId,
@@ -108,8 +125,11 @@ void main() {
       expect(workspaceGateway.writeCalls, 1);
       expect(
         plan.status,
-        WorkshopProjectStatus.completed,
+        WorkshopProjectStatus.inProgress,
       );
+      expect(plan.completedTasks, 1);
+      expect(plan.totalTasks, 2);
+      expect(plan.nextAvailableTask?.id, 'task:acceptance-verification');
       expect(workspaceGateway.commitCalls, 0);
       expect(workspaceGateway.pushCalls, 0);
       expect(workspaceGateway.pullRequestCalls, 0);

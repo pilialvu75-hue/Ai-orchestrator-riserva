@@ -423,6 +423,144 @@ void main() {
       );
     });
 
+    test('accepts one canonical changes object as a one-item change set', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-single-change-object',
+        responseText: r'''
+{
+  "changes": {
+    "path": "lib/main.dart",
+    "type": "addition",
+    "content": "void main() {}"
+  }
+}
+''',
+      );
+
+      expect(proposal.changes, hasLength(1));
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(proposal.changes.single.isAddition, isTrue);
+    });
+
+    test('accepts one files object as a one-item equivalent change set', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-single-files-object',
+        responseText: r'''
+{
+  "files": {
+    "path": "lib/main.dart",
+    "content": "void main() {}"
+  }
+}
+''',
+        existingPaths: const <String>{'lib/main.dart'},
+      );
+
+      expect(proposal.changes, hasLength(1));
+      expect(proposal.changes.single.isModification, isTrue);
+    });
+
+    test('recovers fileChanges aliases without weakening validation', () {
+      final proposal = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-file-changes-alias',
+        responseText: r'''
+{
+  "fileChanges": [
+    {
+      "filePath": "lib/main.dart",
+      "action": "create",
+      "code": "void main() {}"
+    }
+  ]
+}
+''',
+      );
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(proposal.changes.single.isAddition, isTrue);
+      expect(proposal.changes.single.afterContent, 'void main() {}');
+    });
+
+    test('recovers files array by deriving add versus modify from workspace', () {
+      final added = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-files-add',
+        responseText: r'''
+{
+  "files": [
+    {"path": "lib/new.dart", "content": "void newFile() {}"}
+  ]
+}
+''',
+        existingPaths: const <String>{'lib/main.dart'},
+      );
+      final modified = WorkshopChangeProposalDecoder.decode(
+        requestId: 'request-files-modify',
+        responseText: r'''
+{
+  "files": [
+    {"path": "lib/main.dart", "content": "void main() {}"}
+  ]
+}
+''',
+        existingPaths: const <String>{'lib/main.dart'},
+      );
+
+      expect(added.changes.single.isAddition, isTrue);
+      expect(modified.changes.single.isModification, isTrue);
+    });
+
+    test('explicit empty canonical changes stays rejected even with alias data', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-empty-canonical',
+          responseText: r'''
+{
+  "changes": [],
+  "files": [
+    {"path": "lib/main.dart", "content": "void main() {}"}
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('ambiguous change aliases stay rejected', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-ambiguous-alias',
+          responseText: r'''
+{
+  "fileChanges": [
+    {"path": "lib/a.dart", "type": "addition", "content": "a"}
+  ],
+  "files": [
+    {"path": "lib/b.dart", "content": "b"}
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('aliased change recovery still enforces path safety', () {
+      expect(
+        () => WorkshopChangeProposalDecoder.decode(
+          requestId: 'request-alias-unsafe',
+          responseText: r'''
+{
+  "files": [
+    {"path": "../escape.dart", "content": "void main() {}"}
+  ]
+}
+''',
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('requires content for create and update operations', () {
       expect(
         () => WorkshopChangeProposalDecoder.decode(

@@ -1,9 +1,81 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/core/runtime/inference/android/native_generation_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Phi remembers pressure after unloading and uses a smaller next session',
+      () async {
+    var data = <Object?, Object?>{
+      'availableBytes': 892604416,
+      'thresholdBytes': 408944640,
+      'totalBytes': 7575265280,
+    };
+    final monitor = ResourceMonitor(
+      sampler: () async => data,
+      logger: (_) {},
+    );
+
+    final underLoad = await monitor.sample();
+    expect(underLoad!.pressured, isTrue);
+    monitor.recordModelPressure('phi3_5_mini');
+
+    data = <Object?, Object?>{
+      'availableBytes': 3970293760,
+      'thresholdBytes': 408944640,
+      'totalBytes': 7575265280,
+    };
+    final recovered = await monitor.sample();
+    expect(recovered!.pressured, isFalse);
+
+    final profile = ResourceProfile.select(
+      recovered,
+      phi: true,
+      requestedGpuLayers: 50,
+      memoryConstrained: monitor.isMemoryConstrained('phi3_5_mini'),
+    );
+    expect(
+      <int>[profile.context, profile.batch, profile.microBatch],
+      <int>[1536, 64, 16],
+    );
+    expect(profile.reason, 'phi_memory_recovery');
+    expect(
+      NativeGenerationBudget.generationReserve(
+        context: profile.context,
+        promptTokens: 1188,
+        requested: 1024,
+        safetyMargin: 32,
+      ),
+      316,
+    );
+    expect(monitor.isMemoryConstrained('nemotron3_nano_4b'), isFalse);
+
+    var cancelled = false;
+    monitor.addCriticalListener(() => cancelled = true);
+    data = <Object?, Object?>{
+      'availableBytes': 922714112,
+      'thresholdBytes': 408944640,
+      'trimLevel': 15,
+    };
+    expect((await monitor.sample())!.critical, isTrue);
+    expect(cancelled, isTrue);
+
+    monitor.dispose();
+  });
+
+  test('learned profiles do not change unrelated models or CPU defaults', () {
+    expect(
+      ResourceProfile.select(
+        null,
+        phi: false,
+        memoryConstrained: true,
+      ).context,
+      4096,
+    );
+    expect(ResourceProfile.select(null, phi: true).context, 2048);
+  });
+
   test('8 GiB phones use a smaller non-Phi allocation before pressure', () {
     final sample = ResourceSample({
       'totalBytes': 7575265280, 'availableBytes': 2255867904,
@@ -74,6 +146,19 @@ void main() {
     expect(guarded, isTrue);
     monitor.dispose();
   });
+  test('battery temperature is exposed only as the Android thermal proxy', () {
+    final sample = ResourceSample(<Object?, Object?>{
+      'batteryTempDeciC': 367,
+    });
+    expect(sample.batteryTemperatureDeciC, 367);
+    expect(sample.batteryTemperatureC, 36.7);
+    expect(
+      ResourceSample(<Object?, Object?>{'batteryTempDeciC': -1})
+          .batteryTemperatureC,
+      isNull,
+    );
+  });
+
   test('partial and non-finite samples do not claim normal memory', () {
     expect(ResourceSample({}).pressure, 'unknown');
     expect(ResourceSample({'availableBytes': double.infinity}).availableBytes,

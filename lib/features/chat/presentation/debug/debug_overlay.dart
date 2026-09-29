@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
+import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -9,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/local_benchmark_score_store.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
@@ -72,6 +75,9 @@ class _DebugOverlayState
   static const Duration _benchmarkTimeout =
       Duration(minutes: 12);
 
+  static const Duration _vulkanSweepTimeout =
+      Duration(minutes: 20);
+
   /// Numero massimo di righe copiate dal log persistente.
   ///
   /// Il file su disco serve per sopravvivere ai crash nativi e può
@@ -88,6 +94,9 @@ class _DebugOverlayState
 
   late final LocalModelBenchmarkRunner
       _localModelBenchmark;
+
+  late final LocalBenchmarkScoreStore
+      _benchmarkScoreStore;
 
   DebugLabRunStatus _status =
       DebugLabRunStatus.idle;
@@ -112,6 +121,11 @@ class _DebugOverlayState
         LocalModelBenchmarkRunner(
       runtimeProvider: _runtimeProvider,
       localAiRepository: _localAiRepository,
+    );
+
+    _benchmarkScoreStore =
+        LocalBenchmarkScoreStore(
+      di.sl<PreferencesService>(),
     );
 
     RuntimeEventLog.instance.emit(
@@ -418,14 +432,656 @@ class _DebugOverlayState
     );
   }
 
-  Future<void> _runLocalModelBenchmark() async {
+  Future<void> _showBenchmarkLabMenu() async {
+    if (_running) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF101723),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        Widget item({
+          required IconData icon,
+          required String title,
+          required String subtitle,
+          required bool available,
+          VoidCallback? onTap,
+        }) {
+          return Card(
+            color: const Color(0xFF161E2B),
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              enabled: available,
+              leading: Icon(
+                icon,
+                color: available ? Colors.lightBlueAccent : Colors.white38,
+              ),
+              title: Text(
+                title,
+                style: TextStyle(
+                  color: available ? Colors.white : Colors.white54,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                subtitle,
+                style: TextStyle(
+                  color: available ? Colors.white70 : Colors.white38,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: available
+                      ? const Color(0xFF123B2A)
+                      : const Color(0xFF2B3038),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  available ? 'Disponibile' : 'Da implementare',
+                  style: TextStyle(
+                    color: available
+                        ? const Color(0xFF6EE7A8)
+                        : Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              onTap: onTap,
+            ),
+          );
+        }
+
+        return SafeArea(
+          child: FractionallySizedBox(
+            heightFactor: 0.88,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Benchmark Lab',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Scegli il tipo di prova. I benchmark gia esistenti '
+                    'restano invariati; gli altri verranno collegati '
+                    'progressivamente.',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        item(
+                          icon: Icons.account_tree_outlined,
+                          title: 'Benchmark Orchestratore',
+                          subtitle:
+                              'Test di ruolo attuale. Selezione modelli e '
+                              'punteggio ruolo nel prossimo step.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(
+                              _showOrchestratorBenchmarkModelPicker(),
+                            );
+                          },
+                        ),
+                        item(
+                          icon: Icons.bolt_outlined,
+                          title: 'Benchmark rapido',
+                          subtitle:
+                              'Tutti i modelli pronti, pochi test '
+                              'rappresentativi e primo General Score.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runQuickGeneralBenchmark());
+                          },
+                        ),
+                        item(
+                          icon: Icons.fact_check_outlined,
+                          title: 'Benchmark qualita',
+                          subtitle:
+                              'Suite completa: accuratezza, istruzioni, '
+                              'contesto e hallucination.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.speed_outlined,
+                          title: 'Benchmark performance',
+                          subtitle:
+                              'First token, prefill, decode, warm/cold e '
+                              'tempo totale.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.memory_outlined,
+                          title: 'Vulkan 0 / 10 / 99',
+                          subtitle:
+                              'Confronto CPU, offload parziale e massimo '
+                              'offload GPU.',
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(
+                              _showVulkanBenchmarkModelPicker(),
+                            );
+                          },
+                        ),
+                        item(
+                          icon: Icons.thermostat_outlined,
+                          title: 'Stress termico',
+                          subtitle:
+                              'Run prolungato con temperatura, memoria e '
+                              'stabilita.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.storage_outlined,
+                          title: 'Memoria / Context',
+                          subtitle:
+                              'Contesti crescenti, KV cache, recovery e '
+                              'pressione memoria.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.translate_outlined,
+                          title: 'Multilingua',
+                          subtitle:
+                              'Confronto coerente in italiano, inglese, '
+                              'francese e spagnolo.',
+                          available: false,
+                        ),
+                        item(
+                          icon: Icons.shield_outlined,
+                          title: 'Stabilita',
+                          subtitle:
+                              'Inferenze consecutive, session reuse, switch '
+                              'modello e cancellazione.',
+                          available: false,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _runQuickGeneralBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello locale pronto per il benchmark.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'local_model_quick_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 4).clamp(8, 60).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.run(
+          modelIds: runnable.map((model) => model.id),
+          benchmarkCases: LocalModelBenchmarkRunner.quickCases,
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Rapido • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final catalogId = result.catalogModelId ?? result.modelId;
+          final model = byId[catalogId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.quick,
+            score: LocalBenchmarkScoring.quickScore(result),
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showQuickBenchmarkReport(report!);
+  }
+
+  Future<void> _showQuickBenchmarkReport(
+    LocalModelBenchmarkReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK RAPIDO')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in report.models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'general_quick_score=${LocalBenchmarkScoring.quickScore(model)}/100',
+        )
+        ..writeln('quality=${model.score}/${model.maxScore}')
+        ..writeln(
+          'avg_first_content_ms=${model.averageFirstContentMs.toStringAsFixed(0)}',
+        )
+        ..writeln(
+          'avg_decode_tokens_s=${model.averageDecodeTokensPerSecond.toStringAsFixed(2)}',
+        )
+        ..writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+    if (report.failures.isNotEmpty) {
+      buffer
+        ..writeln('failures=${report.failures.length}')
+        ..writeln();
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Benchmark rapido',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 420,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark rapido copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showOrchestratorBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Benchmark Orchestratore',
+      subtitle:
+          'Scegli i modelli da confrontare nel ruolo Orchestratore.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runLocalModelBenchmark(modelIds: modelIds);
+  }
+
+  Future<void> _showVulkanBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Vulkan 0 / 10 / 99',
+      subtitle:
+          'Scegli uno o più modelli. Per ciascuno verranno provati '
+          'CPU, offload parziale e massimo offload GPU.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runVulkanLayerSweep(modelIds: modelIds);
+  }
+
+  Future<List<String>?> _pickBenchmarkModels({
+    required String title,
+    required String subtitle,
+    required Iterable<String> defaultModelIds,
+  }) async {
+    if (_running) return null;
+
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return null;
+    }
+
+    if (!mounted) return null;
+
+    final scores = await _benchmarkScoreStore.loadForModels(candidates);
+    if (!mounted) return null;
+
+    final defaults = defaultModelIds.toSet();
+    final selected = <String>{};
+
+    void applyDefaults() {
+      selected.clear();
+      for (final candidate in candidates) {
+        if (defaults.contains(candidate.id) &&
+            LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
+          selected.add(candidate.id);
+        }
+      }
+      if (selected.isEmpty) {
+        for (final candidate in candidates) {
+          if (LocalModelBenchmarkRunner.isRunnableCandidate(candidate)) {
+            selected.add(candidate.id);
+            break;
+          }
+        }
+      }
+    }
+
+    applyDefaults();
+
+    return showModalBottomSheet<List<String>>(
+      context: context,
+      backgroundColor: const Color(0xFF101723),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final runnableCount = candidates
+                .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+                .length;
+
+            void selectDefaults() {
+              setSheetState(applyDefaults);
+            }
+
+            void selectAllRunnable() {
+              setSheetState(() {
+                selected
+                  ..clear()
+                  ..addAll(
+                    candidates
+                        .where(
+                          LocalModelBenchmarkRunner.isRunnableCandidate,
+                        )
+                        .map((model) => model.id),
+                  );
+              });
+            }
+
+            return SafeArea(
+              child: FractionallySizedBox(
+                heightFactor: 0.92,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$runnableCount/${candidates.length} modelli pronti • '
+                        '${selected.length} selezionati',
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          OutlinedButton(
+                            onPressed: selectDefaults,
+                            child: const Text('Predefiniti'),
+                          ),
+                          OutlinedButton(
+                            onPressed: runnableCount == 0
+                                ? null
+                                : selectAllRunnable,
+                            child: const Text('Tutti scaricati'),
+                          ),
+                          TextButton(
+                            onPressed: selected.isEmpty
+                                ? null
+                                : () => setSheetState(selected.clear),
+                            child: const Text('Nessuno'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: candidates.length,
+                          itemBuilder: (context, index) {
+                            final model = candidates[index];
+                            final runnable = LocalModelBenchmarkRunner
+                                .isRunnableCandidate(model);
+                            final checked = selected.contains(model.id);
+                            final size = model.sizeCategory?.trim();
+                            final sourceLabel = switch (model.source) {
+                              'local_import' => 'Importato',
+                              'custom_url' => 'URL personalizzato',
+                              _ => 'Catalogo',
+                            };
+                            final stateLabel = runnable
+                                ? 'Pronto'
+                                : model.isDownloaded
+                                    ? 'Non valido'
+                                    : 'Non scaricato';
+                            final storedScore = scores[model.id];
+                            final scoreLabel = storedScore?.generalScore == null
+                                ? 'Punteggio generale: —'
+                                : 'Punteggio generale: '
+                                    '${storedScore!.generalScore}/100 • '
+                                    '${storedScore.completedComponents}/'
+                                    '${LocalModelBenchmarkScore.totalComponents} suite';
+
+
+                            return Card(
+                              color: const Color(0xFF161E2B),
+                              margin: const EdgeInsets.only(bottom: 7),
+                              child: CheckboxListTile(
+                                value: checked,
+                                enabled: runnable,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                title: Text(
+                                  model.displayName,
+                                  style: TextStyle(
+                                    color: runnable
+                                        ? Colors.white
+                                        : Colors.white38,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${size == null || size.isEmpty ? "Dimensione n/d" : size}'
+                                  ' • $sourceLabel • $stateLabel\n'
+                                  '$scoreLabel',
+                                  style: TextStyle(
+                                    color: runnable
+                                        ? Colors.white60
+                                        : Colors.white30,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                onChanged: !runnable
+                                    ? null
+                                    : (value) {
+                                        setSheetState(() {
+                                          if (value == true) {
+                                            selected.add(model.id);
+                                          } else {
+                                            selected.remove(model.id);
+                                          }
+                                        });
+                                      },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () {
+                                final chosenIds = candidates
+                                    .where(
+                                      (model) => selected.contains(model.id),
+                                    )
+                                    .map((model) => model.id)
+                                    .toList(growable: false);
+                                Navigator.of(sheetContext).pop(chosenIds);
+                              },
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          selected.isEmpty
+                              ? 'Seleziona almeno un modello'
+                              : 'Avvia test (${selected.length})',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Duration _orchestratorBenchmarkTimeoutFor(
+    Iterable<String>? modelIds,
+  ) {
+    final modelCount = modelIds?.length ??
+        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+    final minutes = (modelCount * 6)
+        .clamp(_benchmarkTimeout.inMinutes, 60)
+        .toInt();
+    return Duration(minutes: minutes);
+  }
+  Future<void> _runLocalModelBenchmark({
+    Iterable<String>? modelIds,
+  }) async {
     LocalModelBenchmarkReport? report;
 
     await _runTest(
       testId: 'local_model_benchmark',
-      timeout: _benchmarkTimeout,
+      timeout: _orchestratorBenchmarkTimeoutFor(modelIds),
       action: () async {
         report = await _localModelBenchmark.run(
+          modelIds: modelIds,
           onProgress: (message) {
             if (!mounted) {
               return;
@@ -445,6 +1101,96 @@ class _DebugOverlayState
     await _showLocalModelBenchmarkReport(report!);
   }
 
+  Duration _vulkanSweepTimeoutFor(
+    Iterable<String>? modelIds,
+  ) {
+    final modelCount = modelIds?.length ??
+        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+    final minutes = (modelCount * 10)
+        .clamp(_vulkanSweepTimeout.inMinutes, 90)
+        .toInt();
+    return Duration(minutes: minutes);
+  }
+
+  Future<void> _runVulkanLayerSweep({
+    Iterable<String>? modelIds,
+  }) async {
+    VulkanLayerSweepReport? report;
+
+    await _runTest(
+      testId: 'vulkan_layer_sweep_0_10_99',
+      timeout: _vulkanSweepTimeoutFor(modelIds),
+      action: () async {
+        report = await _localModelBenchmark.runVulkanLayerSweep(
+          modelIds: modelIds,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = message;
+            });
+          },
+        );
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showVulkanLayerSweepReport(report!);
+  }
+
+  Future<void> _showVulkanLayerSweepReport(
+    VulkanLayerSweepReport report,
+  ) async {
+    final text = report.toPlainText();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Vulkan 0 / 10 / 99',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Sweep Vulkan copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _showLocalModelBenchmarkReport(
     LocalModelBenchmarkReport report,
   ) async {
@@ -456,7 +1202,7 @@ class _DebugOverlayState
         return AlertDialog(
           backgroundColor: const Color(0xFF101723),
           title: const Text(
-            'Phi vs Nemotron',
+            'Benchmark Orchestratore',
             style: TextStyle(
               color: Colors.white,
               fontSize: 14,
@@ -1034,14 +1780,18 @@ class _DebugOverlayState
             const SizedBox(
               height: 6,
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed:
                   _running
                       ? null
-                      : _runLocalModelBenchmark,
-              child:
+                      : _showBenchmarkLabMenu,
+              icon:
+                  const Icon(
+                Icons.science_outlined,
+              ),
+              label:
                   const Text(
-                'Benchmark Phi ↔ Nemotron',
+                'Benchmark Lab',
               ),
             ),
             const SizedBox(

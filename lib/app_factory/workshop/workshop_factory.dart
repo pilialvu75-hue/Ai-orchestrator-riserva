@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_tra
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_research_library_handoff.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_workspace_scope.dart';
 
 /// Composition root del Cantiere.
 ///
@@ -73,6 +74,7 @@ final class WorkshopFactory {
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool createRootIfMissing = false,
   }) {
     final normalizedPath = workspaceRootPath.trim();
 
@@ -96,6 +98,7 @@ final class WorkshopFactory {
       rootPath: normalizedPath,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
+      createRootIfMissing: createRootIfMissing,
     );
   }
 
@@ -122,15 +125,34 @@ final class WorkshopFactory {
     required String workspaceRootPath,
     bool includeHiddenFiles = false,
     int maxFileSizeBytes = 10 * 1024 * 1024,
+    bool isolateProjects = false,
   }) {
+    final normalizedRoot = workspaceRootPath.trim();
     final gateway = createWorkspaceGateway(
-      workspaceRootPath: workspaceRootPath,
+      workspaceRootPath: normalizedRoot,
       includeHiddenFiles: includeHiddenFiles,
       maxFileSizeBytes: maxFileSizeBytes,
     );
 
+    if (!isolateProjects) {
+      return WorkshopProjectExecutor(gateway: gateway);
+    }
+
+    String projectPath(String projectId) =>
+        WorkshopProjectWorkspaceScope.resolve(
+          workspaceRootPath: normalizedRoot,
+          projectId: projectId,
+        );
+
     return WorkshopProjectExecutor(
       gateway: gateway,
+      projectWorkspacePathResolver: projectPath,
+      projectGatewayFactory: (projectId) => createWorkspaceGateway(
+        workspaceRootPath: projectPath(projectId),
+        includeHiddenFiles: includeHiddenFiles,
+        maxFileSizeBytes: maxFileSizeBytes,
+        createRootIfMissing: true,
+      ),
     );
   }
 

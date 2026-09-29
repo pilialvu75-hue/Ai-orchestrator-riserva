@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inferenc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace_stager.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -38,8 +39,6 @@ final class WorkshopProposalImplementationRunner {
   static const int _primaryMaxTokens = 640;
   static const int _retryMaxTokens = 512;
   static const int _malformedOutputRetryMaxTokens = 768;
-  static const int _primaryArchitectChars = 900;
-  static const int _retryArchitectChars = 600;
   static const int _primaryWorkspaceChars = 1800;
   static const int _retryWorkspaceChars = 900;
   static const int _primaryContextChars = 360;
@@ -245,13 +244,20 @@ final class WorkshopProposalImplementationRunner {
         'chars=${result.text.length}',
       );
 
+      final structuralFeedback = <String>[
+        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
+          revisionFeedback.trim(),
+        'Previous Engineer proposal was rejected before review: '
+            '${error.message}',
+      ].join(' | ');
+
       final recovered = await _inference.completeWithIdentity(
         stage: WorkshopStage.implementation,
         prompt: _buildPrompt(
           session,
           preflight: preflight,
           resumeContext: resumeContext,
-          revisionFeedback: revisionFeedback,
+          revisionFeedback: structuralFeedback,
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
@@ -330,9 +336,8 @@ final class WorkshopProposalImplementationRunner {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
 
-    final architectPlan = _boundedText(
-      preflight?.architecture?.text ?? '',
-      compact ? _retryArchitectChars : _primaryArchitectChars,
+    final architectPlan = WorkshopTaskPlanProjection.project(
+      preflight?.architecture?.text,
     );
     final context = _boundedJoined(
       request.context,
@@ -346,12 +351,16 @@ final class WorkshopProposalImplementationRunner {
       revisionFeedback ?? '',
       compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
-    final workspaceFiles = _selectWorkspaceFiles(
+    final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
       maxChars:
           compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
+      allowOversizedTargetReplacement:
+          request.operation == WorkshopOperation.create,
     );
+    final workspaceFiles = workspaceSelection.files;
+    final replaceableTargets = workspaceSelection.replaceableTargets;
 
     final manifest = snapshot.keys.toList()..sort();
     final payload = compact
@@ -366,6 +375,8 @@ final class WorkshopProposalImplementationRunner {
             if (resumeContext != null)
               'resume': _compactResumeMetadata(resumeContext),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
+            if (replaceableTargets.isNotEmpty)
+              'replaceableTargets': replaceableTargets,
             'workspaceFiles': workspaceFiles,
           }
         : <String, Object?>{
@@ -381,6 +392,8 @@ final class WorkshopProposalImplementationRunner {
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
             if (resumeContext != null) 'resume': resumeContext.toMetadata(),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
+            if (replaceableTargets.isNotEmpty)
+              'replaceableTargets': replaceableTargets,
             'workspaceManifest': manifest.take(28).toList(),
             'workspaceFiles': workspaceFiles,
           };
@@ -398,9 +411,12 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. The explicit task instruction
-and constraints are authoritative; architectPlan is implementation guidance and
-must not override them. An empty request.targetFiles list on an initial create
+Use only workspaceFiles as existing file content. replaceableTargets, when
+present, are existing oversized starter files intentionally omitted from the
+prompt for a create task; you may replace those paths only with complete
+resulting file content, never infer or partially preserve their omitted prior
+content. The explicit task instruction and constraints are authoritative;
+architectPlan is implementation guidance and must not override them. An empty request.targetFiles list on an initial create
 task means paths were not preselected, not that no file may be changed. When
 gateFeedback is present, it is authoritative feedback about the previously
 rejected staged proposal. If that feedback identifies a mismatch between the
@@ -425,9 +441,13 @@ The explicit task instruction and constraints are authoritative. The Architect
 plan is model-authored implementation guidance and must not override or
 contradict the explicit task. If request.targetFiles is empty for an initial
 create task, paths were not preselected; it does not mean no file may be
-changed. Only current file contents included in workspaceFiles may be modified.
-Files listed only in workspaceManifest are informational; do not rewrite them.
-New files may be added only when required by the task or Architect plan. When
+changed. Only current file contents included in workspaceFiles may be modified, except
+paths listed in replaceableTargets. replaceableTargets are existing oversized
+starter files intentionally omitted from the prompt for this create task; they
+may be replaced only with complete resulting content, never partially edited or
+assumed from unseen prior text. Files listed only in workspaceManifest are
+informational; do not rewrite them. New files may be added only when required
+by the task or Architect plan. When
 gateFeedback is present, it is authoritative Reviewer/Validation feedback about
 the previous rejected staged proposal. Correct that concrete issue while keeping
 the current task bounded. If the feedback says the Architect plan or target
@@ -463,16 +483,18 @@ requested. Do not review, approve or apply.
       '[WORKSHOP_ENGINEER_PROMPT] '
       'request=${request.id} compact=$compact chars=${prompt.length} '
       'workspace_files=${workspaceFiles.length} '
+      'replaceable_targets=${replaceableTargets.length} '
       'architect_chars=${architectPlan.length}',
     );
 
     return prompt;
   }
 
-  Map<String, String> _selectWorkspaceFiles({
+  _WorkshopWorkspaceSelection _selectWorkspaceFiles({
     required Map<String, String> snapshot,
     required List<String> targetFiles,
     required int maxChars,
+    required bool allowOversizedTargetReplacement,
   }) {
     final ordered = <String>[];
     final seen = <String>{};
@@ -514,6 +536,7 @@ requested. Do not review, approve or apply.
 
     var used = 0;
     final selected = <String, String>{};
+    final replaceableTargets = <String>[];
     for (final path in ordered) {
       final content = snapshot[path] ?? '';
       final cost = path.length + content.length;
@@ -521,6 +544,10 @@ requested. Do not review, approve or apply.
         continue;
       }
       if (content.length > maxChars && targetFiles.contains(path)) {
+        if (allowOversizedTargetReplacement) {
+          replaceableTargets.add(path);
+          continue;
+        }
         throw StateError(
           'Workshop Engineer target file "$path" exceeds the local prompt '
           'budget; split the task before implementation.',
@@ -532,7 +559,11 @@ requested. Do not review, approve or apply.
       selected[path] = content;
       used += cost;
     }
-    return selected;
+    return _WorkshopWorkspaceSelection(
+      files: Map<String, String>.unmodifiable(selected),
+      replaceableTargets:
+          List<String>.unmodifiable(replaceableTargets),
+    );
   }
 
   static Map<String, Object?> _compactResumeMetadata(
@@ -559,7 +590,11 @@ requested. Do not review, approve or apply.
 
     final message = error.message.toString();
     return message == 'Workshop proposal field "explanation" is required.' ||
-        message == 'Workshop proposal field "explanation" must be text.';
+        message == 'Workshop proposal field "explanation" must be text.' ||
+        message.startsWith('Workshop proposal path "') ||
+        message ==
+            'Workshop create proposal must materialize required target '
+                '"lib/main.dart".';
   }
 
   static bool _isCriticalMemoryError(
@@ -623,26 +658,41 @@ requested. Do not review, approve or apply.
 
   static const String _systemPrompt =
       'You are the Engineer brain of the Cantiere. Implement only the bounded '
-      'task input and exact workspace file contents supplied. The Architect '
-      'plan is authoritative. Do not use Assistant memory or hidden project '
-      'state. Return only the requested structured JSON proposal and never '
-      'mutate the real repository directly.';
+      'task input and exact workspace file contents supplied. The explicit task '
+      'instruction, constraints and acceptance scope are authoritative; the '
+      'Architect plan is bounded implementation guidance and must not override '
+      'them. Do not use Assistant memory or hidden project state. Return only '
+      'the requested structured JSON proposal and never mutate the real '
+      'repository directly.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Engineer retrying after a local first-token stall. '
       'Use only the compact bounded input. Make the smallest valid change that '
-      'satisfies the Architect plan. Return only the requested JSON object. '
+      'satisfies the explicit task contract; use the Architect plan only as '
+      'bounded implementation guidance. Return only the requested JSON object. '
       'Do not review, approve, apply, or use Assistant state.';
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
       'response was incomplete, invalid JSON, or omitted a required proposal '
       'field. Use only the compact bounded input and satisfy the core required '
-      'behavior from the Architect plan. Return one complete JSON object with '
+      'behavior from the explicit task contract, using the Architect plan only '
+      'as bounded implementation guidance. Return one complete JSON object with '
       'a non-empty string field "explanation" and a non-empty "changes" array. '
       'Produce the smallest complete compilable change, preferably one concise '
       'file when possible. Finish valid JSON before optional features or UI '
       'polish. Every change type must be exactly addition, modification, or '
       'deletion; never combine enum values. Escape all file content as valid '
       'JSON strings. Do not review, approve, apply, or use Assistant state.';
+}
+
+
+final class _WorkshopWorkspaceSelection {
+  const _WorkshopWorkspaceSelection({
+    required this.files,
+    required this.replaceableTargets,
+  });
+
+  final Map<String, String> files;
+  final List<String> replaceableTargets;
 }

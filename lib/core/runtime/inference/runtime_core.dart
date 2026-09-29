@@ -185,6 +185,71 @@ class AndroidFfiRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 
+  /// Benchmark/debug-only metrics snapshot for the model's active native
+  /// session. This is a direct FFI read of numeric telemetry and avoids making
+  /// benchmark accuracy depend on the ResourceMonitor sampling cadence.
+  Map<String, int>? nativeSessionMetricsForModelPath(String modelPath) {
+    final sessionId = _nativeSessionsByModel[modelPath];
+    final bindings = _bindings;
+    if (sessionId == null || bindings == null) return null;
+    try {
+      if (bindings.sessionIsActive(sessionId) != 1) return null;
+      return Map<String, int>.unmodifiable(
+        bindings.sessionMetrics(sessionId)
+          ..removeWhere((key, value) => value < 0),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  int? _benchmarkGpuLayersOverride;
+
+  int get requestedGpuLayers =>
+      _benchmarkGpuLayersOverride ?? LlamaNativeDefaults.nGpuLayers;
+
+  int? get benchmarkGpuLayersOverride => _benchmarkGpuLayersOverride;
+
+  /// Debug-Lab-only physical GPU-layer override.
+  ///
+  /// The value is process-local, never persisted, and never changes the
+  /// production default. Existing native sessions are quiesced and released
+  /// before a different profile can be used so one benchmark profile cannot
+  /// inherit another profile's model/context allocation.
+  Future<void> setBenchmarkGpuLayersOverride(int? layers) async {
+    if (layers != null && layers != 0 && layers != 10 && layers != 99) {
+      throw ArgumentError.value(
+        layers,
+        'layers',
+        'Benchmark override supports only 0, 10 or 99 GPU layers.',
+      );
+    }
+    if (_activeInferenceSessions.isNotEmpty ||
+        monitor.state.status == LocalRuntimeStatus.inferencing ||
+        monitor.state.status == LocalRuntimeStatus.streaming) {
+      throw StateError(
+        'Cannot change benchmark GPU layers while local inference is active.',
+      );
+    }
+    if (_benchmarkGpuLayersOverride == layers) return;
+
+    final bindings = _bindings;
+    if (bindings != null && _nativeSessionsByModel.isNotEmpty) {
+      await _nativeSessionSubsystem.releaseAllNativeSessions(
+        bindings,
+        reason: 'benchmark_gpu_layers_change',
+      );
+      ResourceMonitor.instance.readNative = null;
+    }
+
+    _benchmarkGpuLayersOverride = layers;
+    _log(
+      '[BENCHMARK_GPU_PROFILE] requested_gpu_layers='
+      '${layers ?? LlamaNativeDefaults.nGpuLayers} '
+      'override=${layers == null ? 'production_default' : 'lab'}',
+    );
+  }
+
   LlamaFfiLibraryHandle? _libraryHandle;
   LlamaBridgeBindings? _bindings;
   int? _nativeSessionId;

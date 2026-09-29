@@ -43,6 +43,37 @@ void main() {
       expect(entrypoint, contains('llb_session_start_gen_unbudgeted'));
     });
 
+    test('scoped generation reuses only verified KV prefixes', () {
+      final header = _readNormalizedText('native/android/llama_bridge.h');
+      final bridge = _readNormalizedText('native/android/llama_bridge.cpp');
+      final entrypoint =
+          _readNormalizedText('native/android/llama_bridge_entrypoint.cpp');
+
+      expect(header, contains('llb_session_start_gen_scoped'));
+      expect(bridge, contains('prompt_cache_scope'));
+      expect(bridge, contains('cache_snapshot.scope != cache_scope'));
+      expect(bridge, contains('exact_prompt_regeneration'));
+      expect(bridge, contains('llama_memory_seq_rm(memory, 0, reused_tokens, -1)'));
+      expect(bridge, contains('llama_memory_clear(memory, true)'));
+      expect(bridge, contains('[KV_CACHE_REUSE]'));
+      expect(bridge, contains('reused_tokens'));
+      expect(bridge, contains('prefilled_tokens'));
+      expect(entrypoint, contains('llb_session_start_gen_scoped_unbudgeted'));
+    });
+
+    test('native metrics expose measured prompt prefill time', () {
+      final header = _readNormalizedText('native/android/llama_bridge.h');
+      final bridge = _readNormalizedText('native/android/llama_bridge.cpp');
+      final bindings = _readNormalizedText(
+        'lib/core/runtime/inference/ffi/llama_bindings.dart',
+      );
+
+      expect(header, contains('prompt-prefill milliseconds'));
+      expect(bridge, contains('telemetry_prefill_ms'));
+      expect(bridge, contains('case 7:'));
+      expect(bindings, contains("'prefill_ms': _sessionMetric(session, 7)"));
+    });
+
     test('Dart FFI contract requires the exact token count symbol', () {
       final nativeTypes = _readNormalizedText(
         'lib/core/runtime/inference/ffi/llama_native_types.dart',
