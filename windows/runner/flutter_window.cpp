@@ -4,6 +4,10 @@
 
 #include <optional>
 
+#include <flutter/method_channel.h>
+#include <flutter/plugin_registrar_windows.h>
+#include <flutter/standard_method_codec.h>
+
 #include "startup_trace.h"
 
 namespace {
@@ -35,6 +39,77 @@ bool IsWindows7() {
   if (rtl_get_version(&version) != 0) return false;
 
   return version.dwMajorVersion == 6 && version.dwMinorVersion == 1;
+}
+
+bool RegisterWin7PermissionCompatPlugin(flutter::FlutterEngine* engine) {
+  auto registrar_ref =
+      engine->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin");
+  if (registrar_ref == nullptr) {
+    startup_trace::Mark(
+        "27g Win7 permission compat registrar missing; continuing");
+    return false;
+  }
+
+  auto registrar = flutter::PluginRegistrarManager::GetInstance()
+                       ->GetRegistrar<flutter::PluginRegistrarWindows>(
+                           registrar_ref);
+  if (registrar == nullptr) {
+    startup_trace::Mark(
+        "27g Win7 permission compat registrar wrapper missing; continuing");
+    return false;
+  }
+
+  auto channel = std::make_unique<flutter::MethodChannel<>>(
+      registrar->messenger(), "flutter.baseflow.com/permissions/methods",
+      &flutter::StandardMethodCodec::GetInstance());
+
+  channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<>& call,
+         std::unique_ptr<flutter::MethodResult<>> result) {
+        const std::string& method = call.method_name();
+
+        if (method == "checkPermissionStatus") {
+          // permission_handler PermissionStatus.granted
+          result->Success(flutter::EncodableValue(1));
+          return;
+        }
+
+        if (method == "requestPermissions") {
+          flutter::EncodableMap response;
+          const auto* args =
+              std::get_if<flutter::EncodableList>(call.arguments());
+          if (args != nullptr) {
+            for (const auto& encoded : *args) {
+              if (const auto* permission = std::get_if<int>(&encoded)) {
+                response[flutter::EncodableValue(*permission)] =
+                    flutter::EncodableValue(1);
+              }
+            }
+          }
+          result->Success(flutter::EncodableValue(response));
+          return;
+        }
+
+        if (method == "checkServiceStatus") {
+          // Win7 has no modern WinRT permission-service contract. Report
+          // not-applicable rather than constructing Windows.Devices.Geolocation.
+          result->Success(flutter::EncodableValue(2));
+          return;
+        }
+
+        if (method == "shouldShowRequestPermissionRationale" ||
+            method == "openAppSettings") {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+
+        result->NotImplemented();
+      });
+
+  // Flutter's MethodChannel installs the messenger callback in
+  // SetMethodCallHandler; the channel object itself does not own plugin state.
+  startup_trace::Mark("27g Win7 permission compat channel registered");
+  return true;
 }
 
 bool BuildSiblingPath(const wchar_t* file_name, wchar_t (&path)[MAX_PATH]) {
@@ -168,7 +243,8 @@ void RegisterDynamicPlugins(flutter::FlutterEngine* engine) {
     if (is_windows_7 &&
         ::lstrcmpA(plugin.registry_name, "PermissionHandlerWindowsPlugin") == 0) {
       startup_trace::Mark(
-          "27g Win7: permission_handler quarantined after physical crash trace");
+          "27g Win7: replacing permission_handler WinRT plugin with compat channel");
+      RegisterWin7PermissionCompatPlugin(engine);
       continue;
     }
 
