@@ -15,6 +15,16 @@ import 'package:flutter/foundation.dart';
 
 typedef LocalModelBenchmarkProgress = void Function(String message);
 
+class _BenchmarkThermalGateFailure {
+  const _BenchmarkThermalGateFailure({
+    required this.code,
+    required this.message,
+  });
+
+  final String code;
+  final String message;
+}
+
 class LocalModelBenchmarkCase {
   const LocalModelBenchmarkCase({
     required this.id,
@@ -1569,14 +1579,14 @@ class LocalModelBenchmarkRunner {
         RuntimeEventLog.instance.emit(
           '[LOCAL_MODEL_BENCH_THERMAL_STOP] '
           'model=${model.effectiveRuntimeModelId} '
-          'reason=$thermalFailure',
+          'reason=${thermalFailure.code}',
         );
         failures.add(
           LocalModelBenchmarkFailure(
             modelId: model.effectiveRuntimeModelId,
             catalogModelId: model.id,
             displayName: model.displayName,
-            error: thermalFailure,
+            error: thermalFailure.message,
           ),
         );
         break;
@@ -2481,7 +2491,7 @@ class LocalModelBenchmarkRunner {
       failures: List<VulkanLayerSweepFailure>.unmodifiable(failures),
     );
   }
-  Future<String?> _prepareInterModelThermalGate({
+  Future<_BenchmarkThermalGateFailure?> _prepareInterModelThermalGate({
     required AiModel model,
     LocalModelBenchmarkProgress? onProgress,
   }) async {
@@ -2510,15 +2520,21 @@ class LocalModelBenchmarkRunner {
       if (state == 'ready') return null;
 
       if (state == 'stop') {
-        return 'Benchmark interrotto per sicurezza termica: '
-            'temperatura batteria proxy '
-            '${temperature == null ? 'n/a' : (temperature / 10).toStringAsFixed(1)}°C.';
+        return _BenchmarkThermalGateFailure(
+          code: 'temperature_cutoff',
+          message: 'Benchmark interrotto per sicurezza termica: '
+              'temperatura batteria proxy '
+              '${temperature == null ? 'n/a' : (temperature / 10).toStringAsFixed(1)}°C.',
+        );
       }
 
       if (sampleIndex == benchmarkThermalCooldownMaxSamples) {
-        return 'Benchmark interrotto: il dispositivo non è sceso sotto '
-            '${(thermalStartMaxBatteryTemperatureDeciC / 10).toStringAsFixed(1)}°C '
-            'entro la finestra di raffreddamento.';
+        return _BenchmarkThermalGateFailure(
+          code: 'cooldown_timeout',
+          message: 'Benchmark interrotto: il dispositivo non è sceso sotto '
+              '${(thermalStartMaxBatteryTemperatureDeciC / 10).toStringAsFixed(1)}°C '
+              'entro la finestra di raffreddamento.',
+        );
       }
 
       onProgress?.call(
