@@ -136,6 +136,52 @@ void main() {
     );
   });
 
+  test('DeepSeek-R1 gets a larger reasoning budget without changing ordinary models', () {
+    expect(
+      LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
+        LocalInferenceModelIds.deepSeekR1_1_5b,
+      ),
+      384,
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
+        LocalInferenceModelIds.phi35Mini,
+      ),
+      96,
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
+        'deepseek_coder_6_7b_instruct',
+      ),
+      96,
+      reason: 'DeepSeek Coder is not an R1 reasoning model.',
+    );
+  });
+
+  test('DeepSeek-R1 quality scoring sees only the final answer', () {
+    expect(
+      LocalModelBenchmarkRunner.benchmarkEvaluationResponse(
+        LocalInferenceModelIds.deepSeekR1_1_5b,
+        'calcolo interno e verifiche</think>\n323',
+      ),
+      '323',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkEvaluationResponse(
+        LocalInferenceModelIds.deepSeekR1_1_5b,
+        'calcolo ancora in corso senza chiusura',
+      ),
+      isNull,
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkEvaluationResponse(
+        LocalInferenceModelIds.phi35Mini,
+        '323',
+      ),
+      '323',
+    );
+  });
+
   test('quick benchmark keeps the intended small representative suite', () {
     expect(
       LocalModelBenchmarkRunner.quickCases.map((item) => item.id).toSet(),
