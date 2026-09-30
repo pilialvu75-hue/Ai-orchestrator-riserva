@@ -202,7 +202,7 @@ abstract final class WorkshopModelCatalogue {
     id: 'deepseek_coder_v2_lite_instruct',
     displayName: 'DeepSeek Coder V2 Lite Instruct',
     repository: 'tensorblock/DeepSeek-Coder-V2-Lite-Instruct-GGUF',
-    filename: 'DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf',
+    filename: 'DeepSeek-Coder-V2-Lite-Instruct-Q3_K_M.gguf',
     quantization: 'Q4_K_M',
     sizeBytes: 9653000000,
     source: AiModelSource.local,
@@ -213,7 +213,7 @@ abstract final class WorkshopModelCatalogue {
       AppAiRole.reviewer,
     },
     downloadUrl:
-        'https://huggingface.co/tensorblock/DeepSeek-Coder-V2-Lite-Instruct-GGUF/resolve/main/DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf',
+        'https://huggingface.co/tensorblock/DeepSeek-Coder-V2-Lite-Instruct-GGUF/resolve/main/DeepSeek-Coder-V2-Lite-Instruct-Q3_K_M.gguf',
     optional: true,
   );
 
