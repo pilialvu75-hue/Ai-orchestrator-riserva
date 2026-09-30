@@ -912,6 +912,33 @@ class _WorkshopDashboardPageState
               ListTile(
                 leading:
                     const Icon(
+                  Icons.home_outlined,
+                ),
+                title:
+                    const Text(
+                  'Menu principale',
+                ),
+                subtitle:
+                    const Text(
+                  'Torna alla home di AI Orchestrator',
+                ),
+                onTap: () {
+                  Navigator.of(
+                    context,
+                  ).pop();
+
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) {
+                      if (mounted) {
+                        Navigator.of(context).maybePop();
+                      }
+                    },
+                  );
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(
                   Icons.refresh,
                 ),
                 title:
