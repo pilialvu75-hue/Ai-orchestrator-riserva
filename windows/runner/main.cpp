@@ -167,11 +167,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   if (legacy_renderer) {
-    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
-    project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
+    // Flutter 3.44.x predates the DartProject renderer-control APIs added in
+    // later releases. Keep the engine's native renderer path for this version
+    // isolation test instead of introducing an incompatible runner API.
     startup_trace::Mark(
-        "08d legacy renderer: Impeller off, low-power GPU, platform UI thread");
+        "08d Flutter 3.44: native renderer retained for Win7 smoke");
   } else {
     startup_trace::Mark("08d renderer default retained");
   }
