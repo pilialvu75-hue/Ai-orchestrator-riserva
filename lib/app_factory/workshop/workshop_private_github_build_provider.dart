@@ -32,6 +32,16 @@ abstract final class WorkshopGeneratedAppIdentity {
 
   static String applicationIdFor(String projectId) =>
       '$organization.${projectNameFor(projectId)}';
+
+  static String displayNameFor(String? raw) {
+    final withoutControls = (raw ?? '')
+        .replaceAll(RegExp(r'[\u0000-\u001F\u007F]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (withoutControls.isEmpty) return 'Cantiere App';
+    if (withoutControls.length <= 80) return withoutControls;
+    return withoutControls.substring(0, 80).trimRight();
+  }
 }
 
 final class WorkshopPrivateGitHubBuildConfiguration {
@@ -156,6 +166,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         WorkshopGeneratedAppIdentity.projectNameFor(request.projectId);
     final generatedApplicationId =
         WorkshopGeneratedAppIdentity.applicationIdFor(request.projectId);
+    final generatedDisplayName =
+        WorkshopGeneratedAppIdentity.displayNameFor(request.appDisplayName);
     String? branch;
     String? token;
 
@@ -185,6 +197,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         remoteId: remoteId,
         generatedProjectName: generatedProjectName,
         generatedApplicationId: generatedApplicationId,
+        generatedDisplayName: generatedDisplayName,
       );
       branch = staged.branch;
       _throwIfCancelled(request.id);
@@ -194,6 +207,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         branch: staged.branch,
         remoteId: remoteId,
         projectName: generatedProjectName,
+        displayName: generatedDisplayName,
       );
 
       final deadline = _now().toUtc().add(timeout);
@@ -220,6 +234,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         expectedSourceCommit: staged.commitSha,
         expectedProjectName: generatedProjectName,
         expectedApplicationId: generatedApplicationId,
+        expectedDisplayName: generatedDisplayName,
       );
       final localArtifact = await _materializeArtifact(
         request: request,
@@ -314,6 +329,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required String remoteId,
     required String generatedProjectName,
     required String generatedApplicationId,
+    required String generatedDisplayName,
   }) async {
     final baseRef = await _getJson(
       'git/ref/heads/${_configuration.baseBranch}',
@@ -363,6 +379,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       'request_id': remoteId,
       'project_id': request.projectId,
       'project_name': generatedProjectName,
+      'display_name': generatedDisplayName,
       'application_id': generatedApplicationId,
       'target': request.target.name,
       'file_count': snapshot.files.length,
@@ -426,6 +443,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required String branch,
     required String remoteId,
     required String projectName,
+    required String displayName,
   }) async {
     final response = await _client.post(
       _api('actions/workflows/${Uri.encodeComponent(_configuration.workflowFile)}/dispatches'),
@@ -436,6 +454,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
           'request_id': remoteId,
           'source_root': '.cantiere-build/source',
           'project_name': projectName,
+          'display_name': displayName,
           'target': 'android',
         },
       }),
@@ -601,6 +620,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required String expectedSourceCommit,
     required String expectedProjectName,
     required String expectedApplicationId,
+    required String expectedDisplayName,
   }) async {
     final artifactsResponse = await _client.get(
       _api('actions/runs/$runId/artifacts'),
@@ -662,6 +682,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
 
     if (manifest['request_id'] != remoteId ||
         manifest['project_name'] != expectedProjectName ||
+        manifest['display_name'] != expectedDisplayName ||
         manifest['application_id'] != expectedApplicationId ||
         manifest['target'] != 'android' ||
         manifest['source_commit'] != expectedSourceCommit ||

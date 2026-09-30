@@ -219,6 +219,92 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "shareApk" -> {
+                    val apkPath = call.argument<String>("apkPath")
+                    if (apkPath.isNullOrBlank()) {
+                        result.error("INVALID_ARGUMENT", "apkPath is required", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val sourceApk = File(apkPath)
+                        if (!sourceApk.exists() || !sourceApk.canRead()) {
+                            result.error("FILE_NOT_FOUND", "APK file not found", null)
+                            return@setMethodCallHandler
+                        }
+
+                        val rawDisplayName =
+                            call.argument<String>("displayName")?.trim().orEmpty()
+                        val safeBaseName = rawDisplayName
+                            .replace(Regex("[^A-Za-z0-9._ -]+"), "_")
+                            .trim()
+                            .replace(Regex("\\s+"), "_")
+                            .take(80)
+                            .ifEmpty { "cantiere-app" }
+
+                        val shareDir = File(cacheDir, "apk-share").apply {
+                            if (!exists() && !mkdirs()) {
+                                throw IllegalStateException(
+                                    "Unable to create APK share cache directory"
+                                )
+                            }
+                        }
+                        val sharedApk = File(shareDir, safeBaseName + ".apk")
+                        if (sourceApk.canonicalPath != sharedApk.canonicalPath) {
+                            sourceApk.copyTo(sharedApk, overwrite = true)
+                        }
+                        if (!sharedApk.exists() ||
+                            !sharedApk.canRead() ||
+                            sharedApk.length() != sourceApk.length()
+                        ) {
+                            throw IllegalStateException("APK share copy is incomplete")
+                        }
+
+                        val apkUri = FileProvider.getUriForFile(
+                            this,
+                            "${packageName}.fileprovider",
+                            sharedApk
+                        )
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/vnd.android.package-archive"
+                            putExtra(Intent.EXTRA_STREAM, apkUri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            clipData = ClipData.newUri(contentResolver, "apk", apkUri)
+                        }
+                        val resolvedActivities = packageManager.queryIntentActivities(
+                            shareIntent,
+                            PackageManager.MATCH_DEFAULT_ONLY
+                        )
+                        if (resolvedActivities.isEmpty()) {
+                            result.error(
+                                "SHARE_TARGET_NOT_FOUND",
+                                "No app is available to receive the APK",
+                                null
+                            )
+                            return@setMethodCallHandler
+                        }
+                        resolvedActivities.forEach { activityInfo ->
+                            grantUriPermission(
+                                activityInfo.activityInfo.packageName,
+                                apkUri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+                        startActivity(
+                            Intent.createChooser(
+                                shareIntent,
+                                "Condividi APK"
+                            )
+                        )
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "SHARE_APK_ERROR",
+                            "Failed to share APK: ${e.message}",
+                            null
+                        )
+                    }
+                }
+
                 "openUnknownAppsSettings" -> {
                     try {
                         openUnknownAppsSettingsInternal()

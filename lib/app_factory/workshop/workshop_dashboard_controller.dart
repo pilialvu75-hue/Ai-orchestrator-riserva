@@ -937,6 +937,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       projectId: resolvedProjectId,
       projectPath: normalizedPath,
       target: target,
+      appDisplayName: _state.projectTitle,
       mode: mode,
       runTests: runTests,
       runAnalyzer: runAnalyzer,
