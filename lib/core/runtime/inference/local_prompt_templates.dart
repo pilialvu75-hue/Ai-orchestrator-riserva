@@ -489,7 +489,7 @@ class LocalPromptTemplates {
   /// IMPORTANTE:
   ///
   /// - NON usare ChatML Qwen.
-  /// - NON inserire EOS dopo il messaggio USER corrente.
+  /// - NON inserire EOS dopo i messaggi USER, inclusa la history.
   /// - I messaggi ASSISTANT già completati ricevono EOS.
   /// - La generazione corrente viene aperta con
   ///   <｜Assistant｜><think>\n.
@@ -527,9 +527,10 @@ class LocalPromptTemplates {
           break;
 
         case ChatRole.user:
+          // Official DeepSeek-R1-Distill chat template does not append EOS
+          // after user turns. EOS terminates completed assistant turns only.
           buffer.write(userTag);
           buffer.write(content);
-          buffer.write(eos);
           break;
 
         case ChatRole.assistant:
