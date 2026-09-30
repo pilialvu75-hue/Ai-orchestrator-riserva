@@ -140,21 +140,31 @@ void main() {
     expect(
       LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
         LocalInferenceModelIds.deepSeekR1_1_5b,
+        reasoningAware: true,
       ),
       384,
     );
     expect(
       LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
         LocalInferenceModelIds.phi35Mini,
+        reasoningAware: true,
       ),
       96,
     );
     expect(
       LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
         'deepseek_coder_6_7b_instruct',
+        reasoningAware: true,
       ),
       96,
       reason: 'DeepSeek Coder is not an R1 reasoning model.',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
+        LocalInferenceModelIds.deepSeekR1_1_5b,
+      ),
+      96,
+      reason: 'Performance-style calls keep the standard token budget.',
     );
   });
 
@@ -163,6 +173,7 @@ void main() {
       LocalModelBenchmarkRunner.benchmarkEvaluationResponse(
         LocalInferenceModelIds.deepSeekR1_1_5b,
         'calcolo interno e verifiche</think>\n323',
+        reasoningAware: true,
       ),
       '323',
     );
@@ -170,6 +181,7 @@ void main() {
       LocalModelBenchmarkRunner.benchmarkEvaluationResponse(
         LocalInferenceModelIds.deepSeekR1_1_5b,
         'calcolo ancora in corso senza chiusura',
+        reasoningAware: true,
       ),
       isNull,
     );
