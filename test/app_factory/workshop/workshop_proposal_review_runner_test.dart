@@ -53,6 +53,14 @@ void main() {
       expect(reviewer.lastPrompt, contains('"after":"new"'));
       expect(reviewer.lastPrompt, contains('SCOPE RULE:'));
       expect(reviewer.lastPrompt, contains('CONTRACT PRECEDENCE:'));
+      expect(
+        reviewer.lastPrompt,
+        contains('GENERIC FLUTTER SCAFFOLD CONTRACT'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('pubspec.yaml is absent from the staged diff'),
+      );
       expect(reviewer.lastPrompt, contains('UI LITERAL FIDELITY'));
       expect(reviewer.lastPrompt, contains('requested "+" becoming "+1"'));
       expect(
