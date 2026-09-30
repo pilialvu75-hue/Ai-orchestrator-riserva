@@ -149,6 +149,13 @@ void main() {
       ),
       96,
     );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
+        'deepseek_coder_6_7b_instruct',
+      ),
+      96,
+      reason: 'DeepSeek Coder is not an R1 reasoning model.',
+    );
   });
 
   test('DeepSeek-R1 quality scoring sees only the final answer', () {
