@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/models/android_ffi_runtime_model_ids.dart';
@@ -170,9 +169,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
-    final exists = await Isolate.run(
-      () => File(modelPath).existsSync(),
-    );
+    final exists = await File(modelPath).exists();
 
     if (!exists) {
       RuntimeEventLog.instance.emit('[MODEL_FOUND] status=missing_file modelId=${selectedModel.id} path=$modelPath');
@@ -183,9 +180,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
-    final fileSize = await Isolate.run(
-      () => File(modelPath).lengthSync(),
-    );
+    final fileSize = await File(modelPath).length();
 
     if (fileSize <= 0 ||
         fileSize > _maxModelFileSizeBytes) {
@@ -198,9 +193,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     final hasValidGgufHeader =
-        await Isolate.run(
-      () => _hasGgufHeader(modelPath),
-    );
+        await _hasGgufHeader(modelPath);
 
     if (!hasValidGgufHeader) {
       RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_gguf_header modelId=${selectedModel.id}');
@@ -304,9 +297,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
-        final modelExists = await Isolate.run(
-          () => File(modelPath).existsSync(),
-        );
+        final modelExists = await File(modelPath).exists();
 
         if (!modelExists) {
           clearRuntimeVerification();
@@ -323,9 +314,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         final isValidModelFile =
-            await Isolate.run(
-          () => _hasGgufHeader(modelPath),
-        );
+            await _hasGgufHeader(modelPath);
 
         if (!isValidModelFile) {
           clearRuntimeVerification();
@@ -634,24 +623,24 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     );
   }
 
-  static bool _hasGgufHeader(
+  static Future<bool> _hasGgufHeader(
     String modelPath,
-  ) {
+  ) async {
     final file = File(modelPath);
 
-    if (!file.existsSync()) {
+    if (!await file.exists()) {
       return false;
     }
 
     RandomAccessFile? accessFile;
 
     try {
-      accessFile = file.openSync(
+      accessFile = await file.open(
         mode: FileMode.read,
       );
 
       final header =
-          accessFile.readSync(4);
+          await accessFile.read(4);
 
       if (header.length < 4) {
         return false;
@@ -662,7 +651,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           header[2] == 0x55 &&
           header[3] == 0x46;
     } finally {
-      accessFile?.closeSync();
+      await accessFile?.close();
     }
   }
 
