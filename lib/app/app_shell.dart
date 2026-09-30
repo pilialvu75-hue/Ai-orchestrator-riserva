@@ -16,6 +16,8 @@ import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -88,10 +90,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _runWin7ModelDirectoryProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D46 model directory probe begin');
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      _appendWindowsSafeStartupBreadcrumb('D47 model directory returned');
+    } catch (error) {
+      _appendWindowsSafeStartupBreadcrumb('D4E model directory error');
+    }
+  }
+
+  Future<void> _runWin7ModelCatalogProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D48 model catalog probe begin');
+    try {
+      final catalog = await const BundledModelRegistryService().loadCatalog();
+      _appendWindowsSafeStartupBreadcrumb('D49 model catalog returned');
+    } catch (error) {
+      _appendWindowsSafeStartupBreadcrumb('D4F model catalog error');
+    }
+  }
+
   void _runWin7ModelProbe() {
-    _appendWindowsSafeStartupBreadcrumb(
-      'D50 manual probe begin: model catalog/load/update chain',
-    );
+    _appendWindowsSafeStartupBreadcrumb('D50 full model load probe begin');
     context.read<ModelDownloadBloc>().add(const LoadAvailableModels());
   }
 
@@ -460,8 +480,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         child: const Text('0 · Test solo clic (nessun servizio)'),
                       ),
                       OutlinedButton(
+                        onPressed: _runWin7ModelDirectoryProbe,
+                        child: const Text('0A · Test cartella modelli'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _runWin7ModelCatalogProbe,
+                        child: const Text('0B · Test catalogo modelli'),
+                      ),
+                      OutlinedButton(
                         onPressed: _runWin7ModelProbe,
-                        child: const Text('1 · Test modelli'),
+                        child: const Text('1 · Test modelli completo'),
                       ),
                       OutlinedButton(
                         onPressed: _runWin7UpdateProbe,
