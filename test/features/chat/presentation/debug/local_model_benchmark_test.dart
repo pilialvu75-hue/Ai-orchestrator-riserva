@@ -475,6 +475,46 @@ void main() {
     expect(LocalModelBenchmarkRunner.thermalMaxRiseDeciC, 80);
   });
 
+  test('multi-model thermal gate reuses conservative stress thresholds', () {
+    ResourceSample sample(int tempDeciC) => ResourceSample(<Object?, Object?>{
+          'availableBytes': 2 * 1024 * 1024 * 1024,
+          'totalBytes': 7575265280,
+          'thresholdBytes': 408944640,
+          'lowMemory': false,
+          'trimLevel': 0,
+          'batteryTemperatureDeciC': tempDeciC,
+        });
+
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalGateState(sample(419)),
+      'ready',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalGateState(sample(420)),
+      'cooldown',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalGateState(sample(449)),
+      'cooldown',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalGateState(sample(450)),
+      'stop',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalGateState(null),
+      'ready',
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalCooldownMaxSamples,
+      36,
+    );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalCooldownSampleDelay,
+      const Duration(seconds: 5),
+    );
+  });
+
   test('thermal result derives rise and performance retention', () {
     LocalModelBenchmarkCaseResult sample({
       required int firstMs,
