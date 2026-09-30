@@ -213,6 +213,35 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? stabilityScore(
+    LocalModelStabilityModelResult result,
+  ) {
+    if (!result.probeSetComplete || result.worstPressure == 'critical') {
+      return null;
+    }
+
+    final consecutive =
+        result.consecutivePassed /
+        LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions *
+        40;
+    final reuse = result.sessionReuseConfirmed == true ? 20.0 : 0.0;
+    final cancellation =
+        result.cancellationConfirmed == true ? 15.0 : 0.0;
+    final cancellationRecovery =
+        result.cancellationRecoveryPassed == true ? 15.0 : 0.0;
+    final switchRecovery =
+        result.switchRecoveryPassed == true ? 10.0 : 0.0;
+
+    return (consecutive +
+            reuse +
+            cancellation +
+            cancellationRecovery +
+            switchRecovery)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static int? thermalScore(LocalModelThermalModelResult result) {
     if (!result.thermalTelemetryComplete ||
         result.samples.isEmpty ||
