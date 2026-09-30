@@ -147,12 +147,18 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
-  static int memoryContextScore(
+  static int? memoryContextScore(
     LocalModelMemoryContextModelResult result,
   ) {
     final totalLevels =
         LocalModelBenchmarkRunner.memoryContextTargetCharacters.length;
-    if (totalLevels <= 0) return 0;
+    if (totalLevels <= 0 ||
+        result.stoppedEarly ||
+        result.attemptedContextLevels != totalLevels ||
+        result.worstPressure == 'unknown' ||
+        result.worstPressure == 'critical') {
+      return null;
+    }
 
     final recall =
         (result.passedContextLevels / totalLevels * 60).clamp(0, 60);
