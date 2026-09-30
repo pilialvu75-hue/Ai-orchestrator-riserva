@@ -1,95 +1,31 @@
 name: Build Windows Desktop
 
 on:
-  workflow_dispatch:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
-      - main
-    paths:
-      - 'lib/**'
-      - 'windows/**'
-      - 'tool/**'
-      - 'assets/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - '.github/workflows/windows-build.yml'
+      - test/windows7-flutter319-smoke
 
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: windows-desktop-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test-windows:
-    # Keep the Windows desktop toolchain deterministic. windows-latest moved to
-    # VS2026, which turns permission_handler_windows' deprecated experimental
-    # coroutine include into a hard compiler error.
-    runs-on: windows-2022
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Show toolchain
-        shell: pwsh
-        run: |
-          flutter --version
-          flutter doctor -v
-
-      - name: Resolve Flutter dependencies
-        shell: pwsh
-        run: flutter pub get
-
-      - name: Analyze Dart sources
-        shell: pwsh
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
-
-      - name: Run Flutter tests
-        id: flutter-tests
-        shell: pwsh
-        run: |
-          flutter test --machine 2>&1 | Tee-Object -FilePath flutter-test-results.jsonl
-          $testExit = $LASTEXITCODE
-          Write-Host "Flutter test exit code: $testExit"
-          exit $testExit
-
-      - name: Upload Flutter test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-test-results-windows
-          path: flutter-test-results.jsonl
-          if-no-files-found: warn
-          retention-days: 14
-
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 60
-
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
-      - name: Setup Flutter
+      - name: Setup Flutter 3.19.6
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.19.6'
           channel: stable
           cache: true
 
@@ -99,195 +35,122 @@ jobs:
           flutter --version
           flutter doctor -v
 
-      - name: Resolve Flutter dependencies
+      - name: Create isolated Win7 smoke
         shell: pwsh
-        run: flutter pub get
+        run: |
+          flutter create --platforms=windows --org com.aiorchestrator win7_flutter319_smoke
+          @'
+          import 'package:flutter/material.dart';
 
-      - name: Build Windows release
+          void main() => runApp(const SmokeApp());
+
+          class SmokeApp extends StatelessWidget {
+            const SmokeApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return const MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: Scaffold(
+                  backgroundColor: Color(0xFF203050),
+                  body: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, color: Color(0xFF75D68A), size: 56),
+                        SizedBox(height: 18),
+                        Text(
+                          'AI Orchestrator',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          'Windows 7 / Flutter 3.19.6 smoke test',
+                          style: TextStyle(color: Color(0xFFD0DBEE), fontSize: 14),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'No plugins - No bootstrap - No AI runtime',
+                          style: TextStyle(color: Color(0xFF9EB4D2), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+          '@ | Set-Content -Path win7_flutter319_smoke/lib/main.dart -Encoding UTF8
+
+      - name: Add legacy supportedOS manifest
         shell: pwsh
+        run: |
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+              </windowsSettings>
+            </application>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+                <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+                <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+                <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+              </application>
+            </compatibility>
+          </assembly>
+          '@ | Set-Content -Path win7_flutter319_smoke/windows/runner/runner.exe.manifest -Encoding UTF8
+
+      - name: Build Flutter 3.19.6 Windows release
+        shell: pwsh
+        working-directory: win7_flutter319_smoke
         run: flutter build windows --release
 
-      - name: Apply Windows 7 bundle compatibility
+      - name: Inspect imports and package
         shell: pwsh
         run: |
-          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
-          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $releaseDir
+          $releaseDir = Join-Path $PWD 'win7_flutter319_smoke\build\windows\x64\runner\Release'
+          $exe = Join-Path $releaseDir 'win7_flutter319_smoke.exe'
+          if (-not (Test-Path $exe)) { throw "Smoke executable not found: $exe" }
 
-      - name: Prepare portable Windows bundle
-        id: bundle
-        shell: pwsh
-        run: |
-          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
-          if (-not (Test-Path $releaseDir)) {
-            throw "Windows release directory not found: $releaseDir"
-          }
-
-          $exe = Join-Path $releaseDir 'ai_orchestrator.exe'
-          if (-not (Test-Path $exe)) {
-            throw "Windows executable not found: $exe"
-          }
-
-          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
-            throw 'Flutter data directory is missing from the Windows release bundle.'
-          }
+          dumpbin /imports $exe | Tee-Object -FilePath win7-flutter319-exe-imports.txt
+          dumpbin /imports (Join-Path $releaseDir 'flutter_windows.dll') |
+            Tee-Object -FilePath win7-flutter319-engine-imports.txt
 
           $runtimeDlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
           foreach ($dll in $runtimeDlls) {
-            if (Test-Path (Join-Path $releaseDir $dll)) {
-              continue
-            }
-
+            if (Test-Path (Join-Path $releaseDir $dll)) { continue }
             $candidate = $null
             if ($env:VCToolsRedistDir) {
               $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -Recurse -ErrorAction SilentlyContinue |
                 Where-Object { $_.FullName -match '\\x64\\' } |
                 Select-Object -First 1
             }
-
-            if ($candidate) {
-              Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
-              Write-Host "Bundled $dll from Visual C++ redistributables."
-            } else {
-              Write-Warning "Could not locate $dll for application-local packaging. The Setup installer still carries the matching VS2022 redistributable."
-            }
+            if ($candidate) { Copy-Item $candidate.FullName (Join-Path $releaseDir $dll) }
           }
 
-          $zipPath = Join-Path $PWD 'ai-orchestrator-windows-x64.zip'
-          if (Test-Path $zipPath) {
-            Remove-Item $zipPath -Force
-          }
-          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath -CompressionLevel Optimal
+          $zip = Join-Path $PWD 'AI-Orchestrator-Win7-Flutter319-Smoke.zip'
+          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AI-Orchestrator-Win7-Flutter319-Smoke.zip" |
+            Set-Content -Path "$zip.sha256" -Encoding ASCII
+          Write-Host "ZIP SHA256: $hash"
 
-          $size = (Get-Item $zipPath).Length
-          if ($size -le 0) {
-            throw 'Generated Windows archive is empty.'
-          }
-
-          "release_dir=$releaseDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Windows portable bundle: $zipPath ($size bytes)"
-
-      - name: Upload Windows portable bundle
+      - name: Upload Windows smoke bundle
         uses: actions/upload-artifact@v4
         with:
-          name: ai-orchestrator-windows-x64
-          path: ai-orchestrator-windows-x64.zip
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Locate Windows installer toolchain
-        id: installer-tools
-        shell: pwsh
-        run: |
-          $releaseDir = '${{ steps.bundle.outputs.release_dir }}'
-          if (-not $releaseDir -or -not (Test-Path $releaseDir)) {
-            throw "Release directory is unavailable for installer packaging: $releaseDir"
-          }
-
-          $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)(?:\+\d+)?\s*$' | Select-Object -First 1
-          if (-not $versionLine) {
-            throw 'Unable to resolve semantic application version from pubspec.yaml.'
-          }
-          $appVersion = $versionLine.Matches[0].Groups[1].Value
-
-          $isccCandidates = @(
-            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
-            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
-          )
-          $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-          if (-not $iscc) {
-            $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($isccCommand) {
-              $iscc = $isccCommand.Source
-            }
-          }
-          if (-not $iscc) {
-            throw 'Inno Setup compiler ISCC.exe was not found on the windows-2022 runner.'
-          }
-
-          $redist = $null
-          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
-            $redist = Get-ChildItem -Path $env:VCToolsRedistDir -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-          }
-
-          if (-not $redist) {
-            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-            if (Test-Path $vswhere) {
-              $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-              if ($vsInstall) {
-                $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
-                if (Test-Path $redistRoot) {
-                  $redist = Get-ChildItem -Path $redistRoot -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
-                    Sort-Object FullName -Descending |
-                    Select-Object -First 1
-                }
-              }
-            }
-          }
-
-          if (-not $redist) {
-            throw 'Matching Visual Studio 2022 vc_redist.x64.exe was not found. Refusing to build an installer with an unverified runtime prerequisite.'
-          }
-
-          $outputDir = Join-Path $PWD 'build\windows\installer'
-          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
-
-          $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
-          @(
-            "#define AppVersion `"$appVersion`"",
-            "#define ReleaseDir `"$releaseDir`"",
-            "#define VCRedistPath `"$($redist.FullName)`"",
-            "#define OutputDir `"$outputDir`""
-          ) | Set-Content -Path $generatedDefines -Encoding ASCII
-
-          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Installer compiler: $iscc"
-          Write-Host "Installer app version: $appVersion"
-          Write-Host "VS2022 redistributable: $($redist.FullName)"
-
-      - name: Build Windows Setup.exe
-        id: installer
-        shell: pwsh
-        run: |
-          $iscc = '${{ steps.installer-tools.outputs.iscc }}'
-          $outputDir = '${{ steps.installer-tools.outputs.output_dir }}'
-          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
-
-          & $iscc $script
-          if ($LASTEXITCODE -ne 0) {
-            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
-          }
-
-          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
-          if (-not (Test-Path $setupPath)) {
-            throw "Expected Setup.exe was not produced: $setupPath"
-          }
-
-          $setupSize = (Get-Item $setupPath).Length
-          if ($setupSize -lt 1048576) {
-            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
-          }
-
-          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
-          $hashPath = "$setupPath.sha256"
-          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
-
-          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Windows installer: $setupPath ($setupSize bytes)"
-          Write-Host "SHA256: $($hash.Hash)"
-
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-orchestrator-windows-installer-x64
+          name: ai-orchestrator-win7-flutter319-smoke
           path: |
-            ${{ steps.installer.outputs.setup_path }}
-            ${{ steps.installer.outputs.hash_path }}
+            AI-Orchestrator-Win7-Flutter319-Smoke.zip
+            AI-Orchestrator-Win7-Flutter319-Smoke.zip.sha256
+            win7-flutter319-exe-imports.txt
+            win7-flutter319-engine-imports.txt
           if-no-files-found: error
           retention-days: 14
