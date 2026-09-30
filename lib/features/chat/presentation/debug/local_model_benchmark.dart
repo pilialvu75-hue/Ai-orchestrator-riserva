@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provi
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -306,6 +307,113 @@ class LocalModelBenchmarkReport {
       for (final failure in failures) {
         buffer.writeln(
           '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
+class LocalModelStabilityModelResult {
+  const LocalModelStabilityModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.consecutiveSamples,
+    required this.sessionReuseConfirmed,
+    required this.cancellationConfirmed,
+    required this.cancellationRecoveryPassed,
+    required this.switchRecoveryPassed,
+    required this.switchPartnerModelId,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final List<LocalModelBenchmarkCaseResult> consecutiveSamples;
+  final bool? sessionReuseConfirmed;
+  final bool? cancellationConfirmed;
+  final bool? cancellationRecoveryPassed;
+  final bool? switchRecoveryPassed;
+  final String? switchPartnerModelId;
+
+  int get consecutivePassed => consecutiveSamples
+      .where(
+        (sample) =>
+            sample.maxScore > 0 && sample.score == sample.maxScore,
+      )
+      .length;
+
+  bool get probeSetComplete =>
+      consecutiveSamples.length ==
+          LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions &&
+      sessionReuseConfirmed != null &&
+      cancellationConfirmed != null &&
+      cancellationRecoveryPassed != null &&
+      switchRecoveryPassed != null &&
+      switchPartnerModelId != null;
+
+  String get worstPressure {
+    var sawKnown = false;
+    var sawHigh = false;
+    for (final sample in consecutiveSamples) {
+      for (final pressure in <String>[
+        sample.startPressure,
+        sample.endPressure,
+      ]) {
+        if (pressure == 'critical') return 'critical';
+        if (pressure == 'high') {
+          sawKnown = true;
+          sawHigh = true;
+        } else if (pressure == 'normal') {
+          sawKnown = true;
+        }
+      }
+    }
+    if (sawHigh) return 'high';
+    return sawKnown ? 'normal' : 'unknown';
+  }
+}
+
+class LocalModelStabilityReport {
+  const LocalModelStabilityReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelStabilityModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL STABILITY BENCHMARK')
+      ..writeln('created_at=\${createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in models) {
+      buffer
+        ..writeln('\${model.displayName} [\${model.modelId}]')
+        ..writeln(
+          'consecutive_passed=\${model.consecutivePassed}/'
+          '\${LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions} '
+          'session_reuse=\${model.sessionReuseConfirmed} '
+          'cancel_confirmed=\${model.cancellationConfirmed} '
+          'cancel_recovery=\${model.cancellationRecoveryPassed} '
+          'switch_recovery=\${model.switchRecoveryPassed} '
+          'switch_partner=\${model.switchPartnerModelId ?? 'none'} '
+          'pressure=\${model.worstPressure}',
+        )
+        ..writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- \${failure.displayName} [\${failure.modelId}]: \${failure.error}',
         );
       }
     }
