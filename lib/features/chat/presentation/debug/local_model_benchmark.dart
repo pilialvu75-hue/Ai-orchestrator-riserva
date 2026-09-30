@@ -990,6 +990,7 @@ class LocalModelBenchmarkRunner {
         _resourceMonitor = resourceMonitor ?? ResourceMonitor.instance;
 
   static const int _maxTokens = 96;
+  static const int _reasoningMaxTokens = 384;
   static const double _temperature = 0.5;
   static const Duration _betweenCases = Duration(milliseconds: 350);
   static const int _benchmarkLoadReserveFloorBytes = 512 * 1024 * 1024;
@@ -1010,6 +1011,39 @@ class LocalModelBenchmarkRunner {
       (model.localPath?.trim().isNotEmpty ?? false) &&
       (model.validationStatus == ModelValidationStatus.validatedOk ||
           model.validationStatus == ModelValidationStatus.updateAvailable);
+
+  static bool isReasoningBenchmarkModel(String modelId) {
+    final normalized = modelId.trim().toLowerCase();
+    return normalized.contains('deepseek_r1') ||
+        normalized.contains('deepseek-r1');
+  }
+
+  static int benchmarkMaxTokensForModel(String modelId) =>
+      isReasoningBenchmarkModel(modelId)
+          ? _reasoningMaxTokens
+          : _maxTokens;
+
+  /// Returns only the answer that can be scored for a benchmark.
+  ///
+  /// DeepSeek-R1 is prompted with an open <think> block. Its chain-of-thought
+  /// must not be mistaken for the answer. If the model never closes </think>
+  /// within the generation budget, the case is incomplete and receives no
+  /// quality credit rather than scoring reasoning text by accident.
+  static String? benchmarkEvaluationResponse(
+    String modelId,
+    String response,
+  ) {
+    final trimmed = response.trim();
+    if (trimmed.isEmpty) return null;
+    if (!isReasoningBenchmarkModel(modelId)) return trimmed;
+
+    final closingThink = trimmed.lastIndexOf('</think>');
+    if (closingThink < 0) return null;
+
+    final finalAnswer =
+        trimmed.substring(closingThink + '</think>'.length).trim();
+    return finalAnswer.isEmpty ? null : finalAnswer;
+  }
 
   /// Conservative free-memory budget used before a benchmark loads a new GGUF.
   ///
@@ -2604,7 +2638,9 @@ class LocalModelBenchmarkRunner {
         context: benchmarkCase.context,
         modelId: model.effectiveRuntimeModelId,
         modelPath: model.localPath,
-        maxTokens: _maxTokens,
+        maxTokens: benchmarkMaxTokensForModel(
+          model.effectiveRuntimeModelId,
+        ),
         temperature: _temperature,
         topP: 0.9,
         repeatPenalty: 1.1,
@@ -2674,6 +2710,22 @@ class LocalModelBenchmarkRunner {
       );
     }
 
+    final evaluationResponse = benchmarkEvaluationResponse(
+      model.effectiveRuntimeModelId,
+      response,
+    );
+    final responseForReport = evaluationResponse ??
+        (isReasoningBenchmarkModel(model.effectiveRuntimeModelId)
+            ? '[risposta finale non raggiunta entro il budget di reasoning]'
+            : response);
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_BENCH_REASONING_POLICY] '
+      'model=${model.effectiveRuntimeModelId} '
+      'max_tokens=${benchmarkMaxTokensForModel(model.effectiveRuntimeModelId)} '
+      'final_answer=${evaluationResponse != null}',
+    );
+
     if (firstContentMs < 0) {
       firstContentMs = stopwatch.elapsedMilliseconds;
     }
@@ -2695,10 +2747,14 @@ class LocalModelBenchmarkRunner {
 
     return LocalModelBenchmarkCaseResult(
       caseId: benchmarkCase.id,
-      response: response,
-      score: benchmarkCase.score(response),
+      response: responseForReport,
+      score: evaluationResponse == null
+          ? 0
+          : benchmarkCase.score(evaluationResponse),
       maxScore: benchmarkCase.maxScore,
-      forbiddenHits: benchmarkCase.forbiddenHits(response),
+      forbiddenHits: evaluationResponse == null
+          ? 0
+          : benchmarkCase.forbiddenHits(evaluationResponse),
       firstContentMs: firstContentMs,
       totalMs: stopwatch.elapsedMilliseconds,
       reportedTokens: reportedTokens,
