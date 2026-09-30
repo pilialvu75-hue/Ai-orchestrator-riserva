@@ -38,6 +38,26 @@ void main() {
       provider.requests.single.systemPrompt,
       contains('Se il messaggio corrente e in italiano, rispondi in italiano'),
     );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('builder remoto GitHub Actions'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('modalita locale/offline usa invece la toolchain locale'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('setup/download interno previsto dal prodotto'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('non prerequisiti manuali dell\'utente'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('non come prerequisito per generare o compilare'),
+    );
 
     await controller.send('seconda richiesta');
 

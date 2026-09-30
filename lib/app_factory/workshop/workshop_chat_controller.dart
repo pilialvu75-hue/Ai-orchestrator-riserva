@@ -73,9 +73,21 @@ final class WorkshopChatController extends ChangeNotifier {
         'deve descrivere il comportamento, i componenti principali e i criteri '
         'essenziali in massimo circa 180 parole. Non scrivere codice sorgente, '
         'JSON o blocchi Markdown nella proposta conversazionale: il codice viene '
-        'prodotto separatamente dall\'Engineer. Termina sempre l\'ultima frase '
-        'in modo completo. Non dichiarare mai che qualcosa e stato costruito, '
-        'testato o compilato se non e realmente avvenuto.',
+        'prodotto separatamente dall\'Engineer. Il Cantiere possiede gia la sua '
+        'infrastruttura di build. In modalita online usa il builder remoto GitHub '
+        'Actions configurato dal prodotto, che prepara Flutter/Java e compila '
+        'l\'artefatto. In modalita locale/offline usa invece la toolchain locale '
+        'gestita dal Cantiere solo quando e realmente installata e verificata. '
+        'Se la toolchain locale manca o non e pronta, dichiaralo come stato del '
+        'Cantiere e indirizza al setup/download interno previsto dal prodotto; '
+        'non chiedere all\'utente di configurare manualmente Android Studio, un '
+        'IDE o un emulatore. Flutter SDK, Dart SDK, JDK e Android SDK sono '
+        'dipendenze interne del Cantiere, non prerequisiti manuali dell\'utente. '
+        'Un dispositivo fisico puo essere citato solo come destinazione finale '
+        'per installazione e verifica dell\'APK, non come prerequisito per '
+        'generare o compilare. '
+        'Termina sempre l\'ultima frase in modo completo. Non dichiarare mai che '
+        'qualcosa e stato costruito, testato o compilato se non e realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'
