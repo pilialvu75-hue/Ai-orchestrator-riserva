@@ -92,6 +92,7 @@ final class WorkshopBuildRequest {
     required this.projectId,
     required this.projectPath,
     required this.target,
+    this.appDisplayName,
     this.mode = WorkshopBuildExecutionMode.automatic,
     this.runTests = true,
     this.runAnalyzer = true,
@@ -105,6 +106,7 @@ final class WorkshopBuildRequest {
   final String projectId;
   final String projectPath;
   final WorkshopBuildTarget target;
+  final String? appDisplayName;
 
   final WorkshopBuildExecutionMode mode;
 
