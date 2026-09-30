@@ -141,10 +141,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   std::vector<std::string> dart_arguments;
-  dart_arguments.reserve(command_line_arguments.size() + 1);
+  dart_arguments.reserve(command_line_arguments.size());
   if (IsWindows7()) {
-    dart_arguments.push_back("--windows7-ui-smoke-only");
-    startup_trace::Mark("08e Win7 bootstrap-free Dart UI smoke requested");
+    startup_trace::Mark("08e Win7 full Dart startup requested");
   }
   for (const auto& argument : command_line_arguments) {
     if (argument == "--win7-no-plugins") {
@@ -171,7 +170,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     // later releases. Keep the engine's native renderer path for this version
     // isolation test instead of introducing an incompatible runner API.
     startup_trace::Mark(
-        "08d Flutter 3.44: native renderer retained for Win7 smoke");
+        "08d Flutter 3.44: native renderer retained for Win7 full app");
   } else {
     startup_trace::Mark("08d renderer default retained");
   }
