@@ -535,8 +535,8 @@ class _DebugOverlayState
                           icon: Icons.account_tree_outlined,
                           title: 'Benchmark Orchestratore',
                           subtitle:
-                              'Test di ruolo attuale. Selezione modelli e '
-                              'punteggio ruolo nel prossimo step.',
+                              'Test di ruolo con General Score e punteggio '
+                              'Orchestratore separati.',
                           available: true,
                           onTap: () {
                             Navigator.of(sheetContext).pop();
@@ -1157,6 +1157,7 @@ class _DebugOverlayState
           'contesto, misura n_ctx/RAM/pressure e prova un recovery finale.',
       defaultModelIds:
           LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+      role: LocalBenchmarkRole.orchestrator,
     );
     if (modelIds == null || modelIds.isEmpty || !mounted) return;
     await _runMemoryContextBenchmark(modelIds: modelIds);
@@ -1837,6 +1838,7 @@ class _DebugOverlayState
     required String subtitle,
     required Iterable<String> defaultModelIds,
     bool singleSelection = false,
+    LocalBenchmarkRole? role,
   }) async {
     if (_running) return null;
 
@@ -1997,6 +1999,14 @@ class _DebugOverlayState
                                     '${storedScore!.generalScore}/100 • '
                                     '${storedScore.completedComponents}/'
                                     '${LocalModelBenchmarkScore.totalComponents} suite';
+                            final roleScore =
+                                role == null ? null : storedScore?.roleScore(role);
+                            final roleLabel = role == null
+                                ? null
+                                : role == LocalBenchmarkRole.orchestrator
+                                    ? 'Orchestratore: '
+                                        '${roleScore == null ? '—' : '$roleScore/100'}'
+                                    : null;
 
 
                             return Card(
@@ -2019,7 +2029,8 @@ class _DebugOverlayState
                                 subtitle: Text(
                                   '${size == null || size.isEmpty ? "Dimensione n/d" : size}'
                                   ' • $sourceLabel • $stateLabel\n'
-                                  '$scoreLabel',
+                                  '$scoreLabel'
+                                  '${roleLabel == null ? '' : '\n$roleLabel'}',
                                   style: TextStyle(
                                     color: runnable
                                         ? Colors.white60
@@ -2110,6 +2121,31 @@ class _DebugOverlayState
             });
           },
         );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final candidates =
+            await _localModelBenchmark.loadBenchmarkCandidates();
+        final byId = <String, AiModel>{
+          for (final model in candidates) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final score =
+              LocalBenchmarkScoring.orchestratorRoleScore(result);
+          if (score == null) continue;
+          final catalogId = result.catalogModelId ?? result.modelId;
+          final model = byId[catalogId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveRoleScore(
+            model: model,
+            role: LocalBenchmarkRole.orchestrator,
+            score: score,
+            updatedAt: completed.createdAt,
+          );
+        }
       },
     );
 
@@ -2213,7 +2249,20 @@ class _DebugOverlayState
   Future<void> _showLocalModelBenchmarkReport(
     LocalModelBenchmarkReport report,
   ) async {
-    final text = report.toPlainText();
+    final buffer = StringBuffer(report.toPlainText())
+      ..writeln()
+      ..writeln()
+      ..writeln('PUNTEGGIO ORCHESTRATORE');
+
+    for (final model in report.models) {
+      final score = LocalBenchmarkScoring.orchestratorRoleScore(model);
+      buffer.writeln(
+        '- ${model.displayName}: '
+        '${score == null ? 'n/a' : '$score/100'}',
+      );
+    }
+
+    final text = buffer.toString().trimRight();
 
     await showDialog<void>(
       context: context,
