@@ -115,6 +115,15 @@ jobs:
           $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
           & (Join-Path $PWD 'tool\verify_windows_dynamic_plugins.ps1') -ReleaseDir $releaseDir
 
+      - name: Inspect Flutter 3.29 PE imports
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $flutterDll = Join-Path $releaseDir 'flutter_windows.dll'
+          Write-Host '=== dumpbin /imports flutter_windows.dll ==='
+          & dumpbin.exe /imports $flutterDll
+          Write-Host '=== end imports ==='
+
       - name: Apply Windows 7 bundle compatibility
         shell: pwsh
         run: |
