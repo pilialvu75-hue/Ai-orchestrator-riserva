@@ -6,21 +6,84 @@ String? localModelBenchmarkPublicProjection({
   required String time,
 }) {
   if (event == 'LOCAL_MODEL_BENCH_BEGIN') {
-    final m = RegExp(
-      r'^models=[A-Za-z0-9_.,-]{1,240} cases=(\d{1,3}) '
+    final current = RegExp(
+      r'^models=([A-Za-z0-9_.,-]{1,480}) '
+      r'catalogs=([A-Za-z0-9_.,-]{1,480}) cases=(\d{1,3}) '
       r'max_tokens=(\d{1,6}) temperature=([0-9.]{1,8})$',
     ).firstMatch(rest);
-    if (m == null) return null;
+    if (current != null) {
+      return jsonEncode(<String, Object>{
+        'time': time,
+        'event': event,
+        'models': current[1]!.split(','),
+        'catalogs': current[2]!.split(','),
+        'cases': int.parse(current[3]!),
+        'max_tokens': int.parse(current[4]!),
+        'temperature': double.parse(current[5]!),
+      });
+    }
+
+    final legacy = RegExp(
+      r'^models=[A-Za-z0-9_.,-]{1,480} cases=(\d{1,3}) '
+      r'max_tokens=(\d{1,6}) temperature=([0-9.]{1,8})$',
+    ).firstMatch(rest);
+    if (legacy == null) return null;
     return jsonEncode(<String, Object>{
       'time': time,
       'event': event,
-      'cases': int.parse(m[1]!),
-      'max_tokens': int.parse(m[2]!),
-      'temperature': double.parse(m[3]!),
+      'cases': int.parse(legacy[1]!),
+      'max_tokens': int.parse(legacy[2]!),
+      'temperature': double.parse(legacy[3]!),
     });
   }
 
   if (event == 'LOCAL_MODEL_BENCH_CASE') {
+    final generic = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'(?:catalog=([A-Za-z0-9_.-]{1,120}) )?'
+      r'case=([A-Za-z0-9_.-]{1,120}) '
+      r'score=(\d{1,3})/(\d{1,3}) forbidden_hits=(\d{1,3}) '
+      r'first_content_ms=(\d{1,12}) total_ms=(\d{1,12}) '
+      r'prefill_ms=(-?\d{1,12}) '
+      r'reported_tokens=(\d{1,12}) decode_tokens_s=([0-9.]{1,16}) '
+      r'gpu_layers=(-?\d{1,6}) '
+      r'(?:n_ctx=(-?\d{1,6}) )?'
+      r'n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}) '
+      r'pressure=(unknown|normal|high|critical)->(unknown|normal|high|critical) '
+      r'start_available_bytes=(-?\d{1,15}) end_available_bytes=(-?\d{1,15}) '
+      r'start_battery_temp_decic=(-?\d{1,6}) end_battery_temp_decic=(-?\d{1,6}) '
+      r'session=(cold|warm|unknown)->(kept|released|unknown)$',
+    ).firstMatch(rest);
+    if (generic != null) {
+      return jsonEncode(<String, Object>{
+        'time': time,
+        'event': event,
+        'model': generic[1]!,
+        if (generic[2] != null) 'catalog': generic[2]!,
+        'case': generic[3]!,
+        'score': int.parse(generic[4]!),
+        'max_score': int.parse(generic[5]!),
+        'forbidden_hits': int.parse(generic[6]!),
+        'first_content_ms': int.parse(generic[7]!),
+        'total_ms': int.parse(generic[8]!),
+        'prefill_ms': int.parse(generic[9]!),
+        'reported_tokens': int.parse(generic[10]!),
+        'decode_tokens_s': double.parse(generic[11]!),
+        'gpu_layers': int.parse(generic[12]!),
+        if (generic[13] != null) 'n_ctx': int.parse(generic[13]!),
+        'n_batch': int.parse(generic[14]!),
+        'n_ubatch': int.parse(generic[15]!),
+        'start_pressure': generic[16]!,
+        'end_pressure': generic[17]!,
+        'start_available_bytes': int.parse(generic[18]!),
+        'end_available_bytes': int.parse(generic[19]!),
+        'start_battery_temp_decic': int.parse(generic[20]!),
+        'end_battery_temp_decic': int.parse(generic[21]!),
+        'session_start': generic[22]!,
+        'session_end': generic[23]!,
+      });
+    }
+
     final current = RegExp(
       r'^model=(phi3_5_mini|nemotron3_nano_4b) '
       r'case=(sdd_typo_first|vulkan_fact|ram_fact|arithmetic|ssd_direct|'
@@ -103,6 +166,38 @@ String? localModelBenchmarkPublicProjection({
   }
 
   if (event == 'LOCAL_MODEL_BENCH_MODEL_END') {
+    final generic = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'(?:catalog=([A-Za-z0-9_.-]{1,120}) )?'
+      r'quality=(\d{1,3})/(\d{1,3}) '
+      r'avg_first_content_ms=([0-9.]{1,16}) '
+      r'avg_total_ms=([0-9.]{1,16}) '
+      r'avg_prefill_ms=([0-9.]{1,16}) '
+      r'avg_decode_tokens_s=([0-9.]{1,16}) '
+      r'max_battery_temp_c=(na|[0-9.]{1,16}) '
+      r'battery_temp_delta_c=(na|-?[0-9.]{1,16}) '
+      r'sdd_repeat_consistent=(true|false|na)$',
+    ).firstMatch(rest);
+    if (generic != null) {
+      return jsonEncode(<String, Object>{
+        'time': time,
+        'event': event,
+        'model': generic[1]!,
+        if (generic[2] != null) 'catalog': generic[2]!,
+        'score': int.parse(generic[3]!),
+        'max_score': int.parse(generic[4]!),
+        'avg_first_content_ms': double.parse(generic[5]!),
+        'avg_total_ms': double.parse(generic[6]!),
+        'avg_prefill_ms': double.parse(generic[7]!),
+        'avg_decode_tokens_s': double.parse(generic[8]!),
+        if (generic[9] != 'na')
+          'max_battery_temp_c': double.parse(generic[9]!),
+        if (generic[10] != 'na')
+          'battery_temp_delta_c': double.parse(generic[10]!),
+        'sdd_repeat_consistent': generic[11]!,
+      });
+    }
+
     final current = RegExp(
       r'^model=(phi3_5_mini|nemotron3_nano_4b) '
       r'quality=(\d{1,3})/(\d{1,3}) '
@@ -156,14 +251,17 @@ String? localModelBenchmarkPublicProjection({
   }
 
   if (event == 'LOCAL_MODEL_BENCH_END') {
-    final m = RegExp(r'^models=(\d{1,3}) status=(success|failed)$')
-        .firstMatch(rest);
+    final m = RegExp(
+      r'^models=(\d{1,3})(?: failures=(\d{1,3}))? '
+      r'status=(success|failed|partial)$',
+    ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
       'time': time,
       'event': event,
       'models': int.parse(m[1]!),
-      'status': m[2]!,
+      if (m[2] != null) 'failures': int.parse(m[2]!),
+      'status': m[3]!,
     });
   }
 
@@ -181,6 +279,44 @@ String? localModelBenchmarkPublicProjection({
   }
 
   if (event == 'LOCAL_VULKAN_SWEEP_CASE') {
+    final generic = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'(?:catalog=([A-Za-z0-9_.-]{1,120}) )?'
+      r'requested_gpu_layers=(0|10|99) '
+      r'observed_gpu_layers=(-?\d{1,6}) '
+      r'repetition=(1|2) '
+      r'first_content_ms=(\d{1,12}) '
+      r'prefill_ms=(-?\d{1,12}) '
+      r'total_ms=(\d{1,12}) '
+      r'reported_tokens=(\d{1,12}) '
+      r'decode_tokens_s=([0-9.]{1,16}) '
+      r'pressure=(unknown|normal|high|critical)->(unknown|normal|high|critical) '
+      r'start_available_bytes=(-?\d{1,15}) end_available_bytes=(-?\d{1,15}) '
+      r'start_battery_temp_decic=(-?\d{1,6}) end_battery_temp_decic=(-?\d{1,6})$',
+    ).firstMatch(rest);
+    if (generic != null) {
+      return jsonEncode(<String, Object>{
+        'time': time,
+        'event': event,
+        'model': generic[1]!,
+        if (generic[2] != null) 'catalog': generic[2]!,
+        'requested_gpu_layers': int.parse(generic[3]!),
+        'observed_gpu_layers': int.parse(generic[4]!),
+        'repetition': int.parse(generic[5]!),
+        'first_content_ms': int.parse(generic[6]!),
+        'prefill_ms': int.parse(generic[7]!),
+        'total_ms': int.parse(generic[8]!),
+        'reported_tokens': int.parse(generic[9]!),
+        'decode_tokens_s': double.parse(generic[10]!),
+        'start_pressure': generic[11]!,
+        'end_pressure': generic[12]!,
+        'start_available_bytes': int.parse(generic[13]!),
+        'end_available_bytes': int.parse(generic[14]!),
+        'start_battery_temp_decic': int.parse(generic[15]!),
+        'end_battery_temp_decic': int.parse(generic[16]!),
+      });
+    }
+
     final m = RegExp(
       r'^model=(phi3_5_mini|nemotron3_nano_4b) '
       r'requested_gpu_layers=(0|10|99) '
