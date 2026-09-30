@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/benchmark_hardware_profile.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter/foundation.dart';
@@ -610,7 +611,7 @@ class LocalBenchmarkScoreStore {
       final sample = await ResourceMonitor.instance.sample();
       return sample?.benchmarkHardwareProfile ?? 'android|unknown';
     }
-    return 'platform:${defaultTargetPlatform.name}';
+    return benchmarkHardwareProfileForPlatform(defaultTargetPlatform.name);
   }
 
   Future<Map<String, LocalModelBenchmarkScore>> loadForModels(
