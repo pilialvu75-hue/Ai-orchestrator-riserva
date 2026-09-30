@@ -1140,6 +1140,134 @@ class LocalModelBenchmarkRunner {
   static const List<String> multilingualLanguages =
       <String>['it', 'en', 'fr', 'es'];
 
+  static const List<LocalModelBenchmarkCase> multilingualCases =
+      <LocalModelBenchmarkCase>[
+    LocalModelBenchmarkCase(
+      id: 'multilingual_it_instruction',
+      prompt:
+          'Rispondi esattamente con questa frase, senza aggiungere altro: '
+          'Il risultato è quindici',
+      requiredAnyGroups: <List<String>>[
+        <String>['risultato'],
+        <String>['quindici', '15'],
+      ],
+      exactAnswers: <String>['il risultato è quindici'],
+      forbiddenPhrases: <String>[
+        'the result',
+        'le résultat',
+        'el resultado',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_it_storage',
+      prompt:
+          'Rispondi esattamente con questa frase: '
+          'Un SSD usa memoria flash',
+      requiredAnyGroups: <List<String>>[
+        <String>['ssd'],
+        <String>['memoria flash'],
+      ],
+      exactAnswers: <String>['un ssd usa memoria flash'],
+      forbiddenPhrases: <String>[
+        'uses flash memory',
+        'utilise de la mémoire',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_en_instruction',
+      prompt:
+          'Reply with exactly this sentence and nothing else: '
+          'The result is fifteen',
+      requiredAnyGroups: <List<String>>[
+        <String>['result'],
+        <String>['fifteen', '15'],
+      ],
+      exactAnswers: <String>['the result is fifteen'],
+      forbiddenPhrases: <String>[
+        'il risultato',
+        'le résultat',
+        'el resultado',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_en_storage',
+      prompt:
+          'Reply with exactly this sentence: '
+          'An SSD uses flash memory',
+      requiredAnyGroups: <List<String>>[
+        <String>['ssd'],
+        <String>['flash memory'],
+      ],
+      exactAnswers: <String>['an ssd uses flash memory'],
+      forbiddenPhrases: <String>[
+        'memoria flash',
+        'mémoire flash',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_fr_instruction',
+      prompt:
+          'Réponds exactement avec cette phrase, sans rien ajouter : '
+          'Le résultat est quinze',
+      requiredAnyGroups: <List<String>>[
+        <String>['résultat'],
+        <String>['quinze', '15'],
+      ],
+      exactAnswers: <String>['le résultat est quinze'],
+      forbiddenPhrases: <String>[
+        'il risultato',
+        'the result',
+        'el resultado',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_fr_storage',
+      prompt:
+          'Réponds exactement avec cette phrase : '
+          'Un SSD utilise de la mémoire flash',
+      requiredAnyGroups: <List<String>>[
+        <String>['ssd'],
+        <String>['mémoire flash'],
+      ],
+      exactAnswers: <String>['un ssd utilise de la mémoire flash'],
+      forbiddenPhrases: <String>[
+        'uses flash memory',
+        'usa memoria flash',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_es_instruction',
+      prompt:
+          'Responde exactamente con esta frase, sin añadir nada: '
+          'El resultado es quince',
+      requiredAnyGroups: <List<String>>[
+        <String>['resultado'],
+        <String>['quince', '15'],
+      ],
+      exactAnswers: <String>['el resultado es quince'],
+      forbiddenPhrases: <String>[
+        'il risultato',
+        'the result',
+        'le résultat',
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_es_storage',
+      prompt:
+          'Responde exactamente con esta frase: '
+          'Un SSD usa memoria flash',
+      requiredAnyGroups: <List<String>>[
+        <String>['ssd'],
+        <String>['memoria flash'],
+      ],
+      exactAnswers: <String>['un ssd usa memoria flash'],
+      forbiddenPhrases: <String>[
+        'uses flash memory',
+        'utilise de la mémoire',
+      ],
+    ),
+  ];
+
   static const LocalModelBenchmarkCase performanceCase =
       LocalModelBenchmarkCase(
     id: 'performance_generation',
