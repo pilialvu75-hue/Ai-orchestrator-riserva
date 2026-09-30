@@ -141,7 +141,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   std::vector<std::string> dart_arguments;
-  dart_arguments.reserve(command_line_arguments.size());
+  dart_arguments.reserve(command_line_arguments.size() + 1);
+  if (IsWindows7()) {
+    dart_arguments.push_back("--windows7-static-first-frame");
+    startup_trace::Mark("08e Win7 static first-frame UI requested");
+  }
   for (const auto& argument : command_line_arguments) {
     if (argument == "--win7-no-plugins") {
       skip_plugins = true;
