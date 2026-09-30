@@ -843,6 +843,65 @@ void main() {
     );
   });
 
+  test('benchmark picker ranks ready models by General Score', () {
+    final high = model.copyWith(
+      id: 'high',
+      displayName: 'High',
+      fileName: 'high.gguf',
+      localPath: '/models/high.gguf',
+      sizeBytes: 8192,
+    );
+    final low = model.copyWith(
+      id: 'low',
+      displayName: 'Low',
+      fileName: 'low.gguf',
+      localPath: '/models/low.gguf',
+      sizeBytes: 4096,
+    );
+    final unscored = model.copyWith(
+      id: 'unscored',
+      displayName: 'Unscored',
+      fileName: 'unscored.gguf',
+      localPath: '/models/unscored.gguf',
+      sizeBytes: 1024,
+    );
+    final unavailable = model.copyWith(
+      id: 'unavailable',
+      displayName: 'Unavailable',
+      fileName: 'unavailable.gguf',
+      localPath: '',
+      isDownloaded: false,
+      sizeBytes: 512,
+    );
+
+    LocalModelBenchmarkScore stored(String id, int score) =>
+        LocalModelBenchmarkScore(
+          modelId: id,
+          fingerprint: id,
+          components: <LocalBenchmarkComponent,
+              LocalBenchmarkComponentScore>{
+            LocalBenchmarkComponent.quick: LocalBenchmarkComponentScore(
+              score: score,
+              updatedAt: DateTime.utc(2026, 9, 30),
+            ),
+          },
+        );
+
+    final ranked = LocalBenchmarkScoring.rankCandidatesByGeneralScore(
+      <AiModel>[unavailable, unscored, low, high],
+      <String, LocalModelBenchmarkScore>{
+        high.id: stored(high.id, 90),
+        low.id: stored(low.id, 70),
+        unavailable.id: stored(unavailable.id, 100),
+      },
+    );
+
+    expect(
+      ranked.map((item) => item.id),
+      <String>['high', 'low', 'unscored', 'unavailable'],
+    );
+  });
+
   test('general score averages only completed benchmark suites', () {
     final score = LocalModelBenchmarkScore(
       modelId: model.id,

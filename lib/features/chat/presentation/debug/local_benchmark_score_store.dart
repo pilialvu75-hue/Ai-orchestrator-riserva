@@ -109,6 +109,45 @@ class LocalModelBenchmarkScore {
 }
 
 abstract final class LocalBenchmarkScoring {
+  static List<AiModel> rankCandidatesByGeneralScore(
+    Iterable<AiModel> models,
+    Map<String, LocalModelBenchmarkScore> scores,
+  ) {
+    final ranked = List<AiModel>.of(models);
+    ranked.sort((a, b) {
+      final aRunnable = LocalModelBenchmarkRunner.isRunnableCandidate(a);
+      final bRunnable = LocalModelBenchmarkRunner.isRunnableCandidate(b);
+      if (aRunnable != bRunnable) {
+        return aRunnable ? -1 : 1;
+      }
+
+      final aStored = scores[a.id];
+      final bStored = scores[b.id];
+      final aGeneral = aStored?.generalScore;
+      final bGeneral = bStored?.generalScore;
+
+      if (aGeneral != bGeneral) {
+        if (aGeneral == null) return 1;
+        if (bGeneral == null) return -1;
+        final scoreOrder = bGeneral.compareTo(aGeneral);
+        if (scoreOrder != 0) return scoreOrder;
+      }
+
+      final completedOrder =
+          (bStored?.completedComponents ?? 0)
+              .compareTo(aStored?.completedComponents ?? 0);
+      if (completedOrder != 0) return completedOrder;
+
+      final sizeOrder = a.sizeBytes.compareTo(b.sizeBytes);
+      if (sizeOrder != 0) return sizeOrder;
+
+      return a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          );
+    });
+    return List<AiModel>.unmodifiable(ranked);
+  }
+
   static int quickScore(LocalModelBenchmarkModelResult result) {
     final quality = result.maxScore <= 0
         ? 0.0
