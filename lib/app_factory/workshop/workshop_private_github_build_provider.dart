@@ -14,6 +14,26 @@ typedef WorkshopBuildAccessTokenProvider = Future<String> Function();
 typedef WorkshopBuildDelay = Future<void> Function(Duration duration);
 typedef WorkshopBuildNow = DateTime Function();
 
+abstract final class WorkshopGeneratedAppIdentity {
+  static const String organization = 'ai.orchestrator.generated';
+
+  static String projectNameFor(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(
+        projectId,
+        'projectId',
+        'Generated app identity requires a non-empty project id.',
+      );
+    }
+    final digest = sha256.convert(utf8.encode(normalized)).toString();
+    return 'cantiere_${digest.substring(0, 12)}';
+  }
+
+  static String applicationIdFor(String projectId) =>
+      '$organization.${projectNameFor(projectId)}';
+}
+
 final class WorkshopPrivateGitHubBuildConfiguration {
   const WorkshopPrivateGitHubBuildConfiguration({
     required this.repository,
@@ -132,6 +152,10 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     }
 
     final remoteId = _remoteRequestId(request.id);
+    final generatedProjectName =
+        WorkshopGeneratedAppIdentity.projectNameFor(request.projectId);
+    final generatedApplicationId =
+        WorkshopGeneratedAppIdentity.applicationIdFor(request.projectId);
     String? branch;
     String? token;
 
@@ -159,6 +183,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         snapshot: snapshot,
         request: request,
         remoteId: remoteId,
+        generatedProjectName: generatedProjectName,
+        generatedApplicationId: generatedApplicationId,
       );
       branch = staged.branch;
       _throwIfCancelled(request.id);
@@ -167,6 +193,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         token: token,
         branch: staged.branch,
         remoteId: remoteId,
+        projectName: generatedProjectName,
       );
 
       final deadline = _now().toUtc().add(timeout);
@@ -191,6 +218,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         runId: runId,
         remoteId: remoteId,
         expectedSourceCommit: staged.commitSha,
+        expectedProjectName: generatedProjectName,
+        expectedApplicationId: generatedApplicationId,
       );
       final localArtifact = await _materializeArtifact(
         request: request,
@@ -283,6 +312,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required WorkshopBuildSourceSnapshot snapshot,
     required WorkshopBuildRequest request,
     required String remoteId,
+    required String generatedProjectName,
+    required String generatedApplicationId,
   }) async {
     final baseRef = await _getJson(
       'git/ref/heads/${_configuration.baseBranch}',
@@ -331,6 +362,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       'version': 1,
       'request_id': remoteId,
       'project_id': request.projectId,
+      'project_name': generatedProjectName,
+      'application_id': generatedApplicationId,
       'target': request.target.name,
       'file_count': snapshot.files.length,
       'source_bytes': snapshot.totalBytes,
@@ -392,6 +425,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required String token,
     required String branch,
     required String remoteId,
+    required String projectName,
   }) async {
     final response = await _client.post(
       _api('actions/workflows/${Uri.encodeComponent(_configuration.workflowFile)}/dispatches'),
@@ -401,6 +435,7 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
         'inputs': <String, String>{
           'request_id': remoteId,
           'source_root': '.cantiere-build/source',
+          'project_name': projectName,
           'target': 'android',
         },
       }),
@@ -564,6 +599,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     required int runId,
     required String remoteId,
     required String expectedSourceCommit,
+    required String expectedProjectName,
+    required String expectedApplicationId,
   }) async {
     final artifactsResponse = await _client.get(
       _api('actions/runs/$runId/artifacts'),
@@ -624,6 +661,8 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
     }
 
     if (manifest['request_id'] != remoteId ||
+        manifest['project_name'] != expectedProjectName ||
+        manifest['application_id'] != expectedApplicationId ||
         manifest['target'] != 'android' ||
         manifest['source_commit'] != expectedSourceCommit ||
         manifest['apk'] != 'app-release.apk') {
