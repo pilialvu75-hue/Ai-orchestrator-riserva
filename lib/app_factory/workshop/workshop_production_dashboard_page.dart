@@ -657,6 +657,44 @@ class _WorkshopProductionDashboardPageState
     }
   }
 
+  Future<void> _shareVerifiedArtifact() async {
+    final artifactPath = _buildResult?.artifactPath?.trim();
+    if (!_hasVerifiedArtifact ||
+        artifactPath == null ||
+        artifactPath.isEmpty ||
+        _mutationBusy) {
+      return;
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      final title =
+          widget.bundle.dashboardController.state.projectTitle?.trim();
+      final shared = await _androidIntentHandler.shareApk(
+        artifactPath,
+        displayName:
+            title == null || title.isEmpty ? 'cantiere-app' : title,
+      );
+      final shareError = shared.fold<String?>(
+        (failure) => failure.toString(),
+        (didOpen) => didOpen
+            ? null
+            : 'Android non ha aperto il pannello di condivisione.',
+      );
+      if (shareError != null && mounted) {
+        setState(() => _error = shareError);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
   Future<void> _installVerifiedArtifact() async {
     final artifactPath = _buildResult?.artifactPath?.trim();
     if (!_hasVerifiedArtifact ||
@@ -821,13 +859,21 @@ class _WorkshopProductionDashboardPageState
                     style: Theme.of(context).textTheme.labelMedium),
                 const SizedBox(height: 8),
                 if (!kIsWeb &&
-                    defaultTargetPlatform == TargetPlatform.android)
+                    defaultTargetPlatform == TargetPlatform.android) ...<Widget>[
                   OutlinedButton.icon(
                     onPressed:
                         _mutationBusy ? null : _installVerifiedArtifact,
                     icon: const Icon(Icons.install_mobile_outlined),
                     label: const Text('Installa APK'),
                   ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed:
+                        _mutationBusy ? null : _shareVerifiedArtifact,
+                    icon: const Icon(Icons.share_outlined),
+                    label: const Text('Condividi APK'),
+                  ),
+                ],
                 const SizedBox(height: 8),
               ],
               if (_mutationBusy)
