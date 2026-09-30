@@ -84,6 +84,7 @@ class LocalModelBenchmarkCaseResult {
     required this.observedGpuLayers,
     required this.observedBatch,
     required this.observedMicroBatch,
+    this.observedContext = 0,
     required this.startPressure,
     required this.endPressure,
     required this.startAvailableBytes,
@@ -106,6 +107,7 @@ class LocalModelBenchmarkCaseResult {
   final int observedGpuLayers;
   final int observedBatch;
   final int observedMicroBatch;
+  final int observedContext;
   final String startPressure;
   final String endPressure;
   final int? startAvailableBytes;
@@ -283,6 +285,7 @@ class LocalModelBenchmarkReport {
           'tokens=${item.reportedTokens} '
           'decode=${item.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
           'gpu=${item.observedGpuLayers} '
+          'ctx=${item.observedContext} '
           'batch=${item.observedBatch}/${item.observedMicroBatch} '
           'pressure=${item.startPressure}->${item.endPressure} '
           'battery_temp_c='
@@ -1597,6 +1600,7 @@ class LocalModelBenchmarkRunner {
     var observedGpuLayers = 0;
     var observedBatch = 0;
     var observedMicroBatch = 0;
+    var observedContext = 0;
 
     final sessionId =
         'debug-bench-${model.effectiveRuntimeModelId}-${benchmarkCase.id}-'
@@ -1625,6 +1629,7 @@ class LocalModelBenchmarkRunner {
       final gpuLayers = native['gpu_layers'] ?? 0;
       final batch = native['batch'] ?? 0;
       final microBatch = native['micro_batch'] ?? 0;
+      final context = native['context'] ?? 0;
       if (prefillMs >= 0) {
         observedPrefillMs = prefillMs;
       }
@@ -1636,6 +1641,9 @@ class LocalModelBenchmarkRunner {
       }
       if (microBatch > observedMicroBatch) {
         observedMicroBatch = microBatch;
+      }
+      if (context > observedContext) {
+        observedContext = context;
       }
 
       if (chunk.runtimeNotice != null) {
@@ -1707,6 +1715,7 @@ class LocalModelBenchmarkRunner {
       observedGpuLayers: observedGpuLayers,
       observedBatch: observedBatch,
       observedMicroBatch: observedMicroBatch,
+      observedContext: observedContext,
       startPressure: startSample?.pressure ?? 'unknown',
       endPressure: endSample?.pressure ?? 'unknown',
       startAvailableBytes: startSample?.availableBytes,
