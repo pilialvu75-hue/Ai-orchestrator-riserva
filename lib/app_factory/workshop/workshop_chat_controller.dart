@@ -325,7 +325,31 @@ final class WorkshopChatController extends ChangeNotifier {
 
     if (body.length < 120) return false;
 
-    return !RegExp(r'''[.!?…;:)"'\]\}]
+    const terminalChars = <String>{
+      '.',
+      '!',
+      '?',
+      '…',
+      ';',
+      ':',
+      ')',
+      ']',
+      '}',
+      '"',
+      "'",
+    };
+    return !terminalChars.contains(body.substring(body.length - 1));
+  }
+
+  static const String _truncationRetrySystemPrompt =
+      'Sei il Cantiere. La risposta precedente si e interrotta prima di '
+      'completarsi. Rispondi di nuovo nella stessa lingua usando esattamente '
+      'CLARIFY: oppure PROPOSAL:. Mantieni la risposta entro circa 140 parole, '
+      'senza codice sorgente, JSON o blocchi Markdown, e termina ogni frase. '
+      'Descrivi solo il piu piccolo MVP richiesto; non dichiarare che sia gia '
+      'stato costruito o testato.';
+
+  static _WorkshopParsedReply _parseReply(String rawText) {
     final normalized = rawText.trim();
     final upper = normalized.toUpperCase();
 
