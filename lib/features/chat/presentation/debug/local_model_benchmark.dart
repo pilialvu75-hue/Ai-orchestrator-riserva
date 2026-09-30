@@ -1685,6 +1685,171 @@ class LocalModelBenchmarkRunner {
     );
   }
 
+  Future<LocalModelStabilityReport> runStabilityBenchmark({
+    LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
+    bool continueOnModelError = true,
+  }) async {
+    final targets = await _resolveTargets(modelIds);
+    if (targets.length < 2) {
+      throw StateError(
+        'Stability benchmark requires at least two ready models '
+        'to verify model switching.',
+      );
+    }
+
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    if (androidRuntime == null) {
+      throw StateError(
+        'Stability benchmark currently requires the Android FFI runtime.',
+      );
+    }
+
+    final modelResults = <LocalModelStabilityModelResult>[];
+    final failures = <LocalModelBenchmarkFailure>[];
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_STABILITY_BEGIN] models=\${targets.length} '
+      'consecutive=$stabilityConsecutiveRepetitions',
+    );
+
+    try {
+      for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
+        final model = targets[modelIndex];
+        final partner = targets[(modelIndex + 1) % targets.length];
+
+        try {
+          await androidRuntime.resetBenchmarkNativeSessions();
+          await Future<void>.delayed(_betweenCases);
+
+          final consecutive = <LocalModelBenchmarkCaseResult>[];
+          for (var repetition = 1;
+              repetition <= stabilityConsecutiveRepetitions;
+              repetition++) {
+            onProgress?.call(
+              '\${model.displayName} consecutive '
+              '\$repetition/$stabilityConsecutiveRepetitions',
+            );
+            final result = await _runCase(
+              model: model,
+              benchmarkCase: stabilityCase,
+            );
+            consecutive.add(result);
+            if (repetition < stabilityConsecutiveRepetitions) {
+              await Future<void>.delayed(_betweenCases);
+            }
+          }
+
+          final sessionReuseConfirmed =
+              consecutive.isNotEmpty &&
+              consecutive.first.sessionStart == 'cold' &&
+              consecutive.skip(1).every(
+                    (sample) => sample.sessionStart == 'warm',
+                  );
+
+          onProgress?.call('\${model.displayName} cancellation');
+          final cancellationConfirmed =
+              await _runCancellationProbe(model: model);
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call('\${model.displayName} recovery after cancel');
+          final cancellationRecovery = await _runCase(
+            model: model,
+            benchmarkCase: stabilityRecoveryCase,
+          );
+          final cancellationRecoveryPassed =
+              cancellationRecovery.maxScore > 0 &&
+              cancellationRecovery.score == cancellationRecovery.maxScore;
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call(
+            '\${model.displayName} switch -> \${partner.displayName}',
+          );
+          final partnerSwitch = await _runCase(
+            model: partner,
+            benchmarkCase: stabilitySwitchCase,
+          );
+          final partnerSwitchPassed =
+              partnerSwitch.maxScore > 0 &&
+              partnerSwitch.score == partnerSwitch.maxScore;
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call('\${model.displayName} switch recovery');
+          final switchRecovery = await _runCase(
+            model: model,
+            benchmarkCase: stabilityRecoveryCase,
+          );
+          final switchRecoveryPassed =
+              partnerSwitchPassed &&
+              switchRecovery.maxScore > 0 &&
+              switchRecovery.score == switchRecovery.maxScore;
+
+          final modelResult = LocalModelStabilityModelResult(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            consecutiveSamples:
+                List<LocalModelBenchmarkCaseResult>.unmodifiable(consecutive),
+            sessionReuseConfirmed: sessionReuseConfirmed,
+            cancellationConfirmed: cancellationConfirmed,
+            cancellationRecoveryPassed: cancellationRecoveryPassed,
+            switchRecoveryPassed: switchRecoveryPassed,
+            switchPartnerModelId: partner.effectiveRuntimeModelId,
+          );
+          modelResults.add(modelResult);
+
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_STABILITY_MODEL_END] '
+            'model=\${model.effectiveRuntimeModelId} '
+            'consecutive=\${modelResult.consecutivePassed}/'
+            '$stabilityConsecutiveRepetitions '
+            'reuse=\$sessionReuseConfirmed '
+            'cancel=\$cancellationConfirmed '
+            'cancel_recovery=\$cancellationRecoveryPassed '
+            'switch_recovery=\$switchRecoveryPassed '
+            'partner=\${partner.effectiveRuntimeModelId} '
+            'pressure=\${modelResult.worstPressure}',
+          );
+        } on LocalModelBenchmarkCriticalResourceException {
+          rethrow;
+        } catch (error, stackTrace) {
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_STABILITY_FAILED] '
+            'model=\${model.effectiveRuntimeModelId} '
+            'error=\$error stack=\$stackTrace',
+          );
+          if (!continueOnModelError) rethrow;
+          failures.add(
+            LocalModelBenchmarkFailure(
+              modelId: model.effectiveRuntimeModelId,
+              catalogModelId: model.id,
+              displayName: model.displayName,
+              error: error.toString(),
+            ),
+          );
+        }
+      }
+    } finally {
+      await androidRuntime.resetBenchmarkNativeSessions();
+    }
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return LocalModelStabilityReport(
+      createdAt: DateTime.now(),
+      models:
+          List<LocalModelStabilityModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+    );
+  }
+
   Future<LocalModelPerformanceReport> runPerformanceBenchmark({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
