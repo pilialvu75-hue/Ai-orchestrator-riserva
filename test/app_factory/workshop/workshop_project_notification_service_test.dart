@@ -30,6 +30,27 @@ void main() {
     expect(snapshot.progressPercent, 100);
   });
 
+  test('surface exposes active-stage progress before first task completes', () {
+    const state = WorkshopDashboardControllerState(
+      requestId: 'request-stage',
+      projectId: 'project:stage',
+      projectTitle: 'Manga Kids',
+      projectStatus: WorkshopProjectStatus.inProgress,
+      stage: WorkshopStage.implementation,
+      progress: 0,
+      completedTasks: 0,
+      totalTasks: 2,
+    );
+
+    final snapshot =
+        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+
+    expect(snapshot.status, WorkshopProjectSurfaceStatus.active);
+    expect(snapshot.progressPercent, greaterThan(0));
+    expect(snapshot.progressPercent, lessThan(50));
+    expect(snapshot.stage, WorkshopStage.implementation.name);
+  });
+
   test('surface treats an explicit project error as terminal', () {
     const state = WorkshopDashboardControllerState(
       requestId: 'request-2',
