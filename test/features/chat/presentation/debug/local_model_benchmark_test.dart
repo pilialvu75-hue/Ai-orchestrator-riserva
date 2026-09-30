@@ -204,6 +204,35 @@ void main() {
     expect(result.minimumAvailableBytes, 1500);
   });
 
+  test('multilingual suite is balanced across four languages', () {
+    expect(
+      LocalModelBenchmarkRunner.multilingualLanguages,
+      const <String>['it', 'en', 'fr', 'es'],
+    );
+    expect(LocalModelBenchmarkRunner.multilingualCases.length, 8);
+
+    for (final language
+        in LocalModelBenchmarkRunner.multilingualLanguages) {
+      final cases = LocalModelBenchmarkRunner.multilingualCases
+          .where((item) => item.id.startsWith('multilingual_${language}_'))
+          .toList(growable: false);
+      expect(cases.length, 2);
+      expect(cases.fold<int>(0, (sum, item) => sum + item.maxScore), 2);
+    }
+  });
+
+  test('multilingual exact cases enforce the requested language phrase', () {
+    final french = LocalModelBenchmarkRunner.multilingualCases
+        .firstWhere((item) => item.id == 'multilingual_fr_exact');
+    final spanish = LocalModelBenchmarkRunner.multilingualCases
+        .firstWhere((item) => item.id == 'multilingual_es_exact');
+
+    expect(french.score('ciel bleu'), 1);
+    expect(french.score('blue sky'), 0);
+    expect(spanish.score('cielo azul'), 1);
+    expect(spanish.score('cielo blu'), 0);
+  });
+
   test('performance benchmark uses one cold and two warm passes', () {
     expect(LocalModelBenchmarkRunner.performanceWarmRepetitions, 2);
     expect(
