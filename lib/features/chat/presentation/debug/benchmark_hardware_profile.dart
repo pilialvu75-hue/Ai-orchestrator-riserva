@@ -1,7 +1,7 @@
-import 'benchmark_hardware_profile_stub.dart'
-    if (dart.library.io) 'benchmark_hardware_profile_io.dart' as platform;
+import 'package:ai_orchestrator/features/chat/presentation/debug/benchmark_hardware_profile_stub.dart'
+    if (dart.library.io) 'package:ai_orchestrator/features/chat/presentation/debug/benchmark_hardware_profile_io.dart' as platform;
 
-export 'benchmark_hardware_profile_common.dart'
+export 'package:ai_orchestrator/features/chat/presentation/debug/benchmark_hardware_profile_common.dart'
     show
         BenchmarkHardwareSnapshot,
         buildBenchmarkHardwareProfile,
