@@ -374,10 +374,11 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    final title =
-        (_pendingTitle?.trim().isNotEmpty ?? false)
-            ? _pendingTitle!.trim()
-            : 'Nuova produzione Cantiere';
+    final title = _pendingTitle?.trim();
+    if (title == null || title.isEmpty) {
+      _showError('Inserisci un nome per l\'app o il progetto.');
+      return;
+    }
 
     setState(() {
       _pendingConfirmation = false;
@@ -715,6 +716,10 @@ class _WorkshopDashboardPageState
                   _chatController.isBusy ||
                       dashboardState?.isBusy ==
                           true,
+              initialTitle: _pendingTitle ?? '',
+              onTitleChanged: (value) {
+                _pendingTitle = value;
+              },
               onConfirm:
                   _confirmProposal,
               onReject:
@@ -1489,11 +1494,15 @@ class _WorkshopProposalActions
     extends StatelessWidget {
   const _WorkshopProposalActions({
     required this.busy,
+    required this.initialTitle,
+    required this.onTitleChanged,
     required this.onConfirm,
     required this.onReject,
   });
 
   final bool busy;
+  final String initialTitle;
+  final ValueChanged<String> onTitleChanged;
   final VoidCallback onConfirm;
   final VoidCallback onReject;
 
@@ -1527,32 +1536,50 @@ class _WorkshopProposalActions
             ),
           ),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            const Expanded(
-              child: Text(
-                'Vuoi che proceda con questa proposta?',
+            TextFormField(
+              initialValue: initialTitle,
+              enabled: !busy,
+              maxLength: 48,
+              onChanged: onTitleChanged,
+              decoration: const InputDecoration(
+                labelText: 'Nome app / progetto',
+                helperText: 'Puoi modificare il nome prima di avviare la produzione.',
+                isDense: true,
               ),
             ),
-            const SizedBox(width: 8),
-            OutlinedButton(
-              onPressed:
-                  busy ? null : onReject,
-              child:
-                  const Text('No'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed:
-                  busy ? null : onConfirm,
-              icon:
-                  const Icon(
-                Icons.build_outlined,
-              ),
-              label:
-                  const Text(
-                'Sì, procedi',
-              ),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                const Expanded(
+                  child: Text(
+                    'Vuoi che proceda con questa proposta?',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed:
+                      busy ? null : onReject,
+                  child:
+                      const Text('No'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed:
+                      busy ? null : onConfirm,
+                  icon:
+                      const Icon(
+                    Icons.build_outlined,
+                  ),
+                  label:
+                      const Text(
+                    'Sì, procedi',
+                  ),
+                ),
+              ],
             ),
           ],
         ),
