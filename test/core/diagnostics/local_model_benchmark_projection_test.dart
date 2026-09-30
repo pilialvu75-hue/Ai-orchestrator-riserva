@@ -96,6 +96,37 @@ void main() {
     expect(decodedEnd['status'], 'partial');
   });
 
+  test('exports structured benchmark thermal gate without free text', () {
+    final gate = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_THERMAL_GATE] '
+      'model=qwen2_5_3b_instruct state=cooldown '
+      'sample=4/36 battery_temp_decic=438',
+    );
+    final stop = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_THERMAL_STOP] '
+      'model=qwen2_5_3b_instruct reason=cooldown_timeout',
+    );
+
+    final decodedGate = jsonDecode(gate!) as Map<String, dynamic>;
+    expect(decodedGate['event'], 'LOCAL_MODEL_BENCH_THERMAL_GATE');
+    expect(decodedGate['state'], 'cooldown');
+    expect(decodedGate['sample'], 4);
+    expect(decodedGate['max_samples'], 36);
+    expect(decodedGate['battery_temp_decic'], 438);
+
+    final decodedStop = jsonDecode(stop!) as Map<String, dynamic>;
+    expect(decodedStop['event'], 'LOCAL_MODEL_BENCH_THERMAL_STOP');
+    expect(decodedStop['reason'], 'cooldown_timeout');
+
+    expect(
+      publicLogProjection(
+        '$time [LOCAL_MODEL_BENCH_THERMAL_STOP] '
+        'model=qwen2_5_3b_instruct reason=testo libero',
+      ),
+      isNull,
+    );
+  });
+
   test('exports benchmark model summary and memory release safely', () {
     final summary = publicLogProjection(
       '$time [LOCAL_MODEL_BENCH_MODEL_END] '
