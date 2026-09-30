@@ -149,10 +149,17 @@ class _VulkanProfileAggregate {
 abstract final class LocalBenchmarkScoring {
   static List<AiModel> rankModelsByGeneralScore(
     Iterable<AiModel> models,
-    Map<String, LocalModelBenchmarkScore> scores,
-  ) {
+    Map<String, LocalModelBenchmarkScore> scores, {
+    bool Function(AiModel model)? isEligible,
+  }) {
     final ranked = List<AiModel>.of(models);
     ranked.sort((a, b) {
+      if (isEligible != null) {
+        final aEligible = isEligible(a);
+        final bEligible = isEligible(b);
+        if (aEligible != bEligible) return aEligible ? -1 : 1;
+      }
+
       final aScore = scores[a.id];
       final bScore = scores[b.id];
       final aGeneral = aScore?.generalScore;
@@ -185,7 +192,11 @@ abstract final class LocalBenchmarkScoring {
   }) {
     if (limit <= 0) return const <String>[];
 
-    final ranked = rankModelsByGeneralScore(models, scores);
+    final ranked = rankModelsByGeneralScore(
+      models,
+      scores,
+      isEligible: isEligible,
+    );
     return ranked
         .where((model) {
           if (scores[model.id]?.generalScore == null) return false;
