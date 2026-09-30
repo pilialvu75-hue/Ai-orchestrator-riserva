@@ -111,7 +111,8 @@ void main() {
     final reasoning = publicLogProjection(
       '$time [LOCAL_MODEL_BENCH_REASONING_POLICY] '
       'model=deepseek_r1_1_5b reasoning_aware=true '
-      'max_tokens=384 final_answer=true',
+      'max_tokens=768 final_answer=false '
+      'completion=budget_exhausted reported_tokens=768',
     );
 
     final decodedDuplicate =
@@ -129,8 +130,10 @@ void main() {
     final decodedReasoning =
         jsonDecode(reasoning!) as Map<String, dynamic>;
     expect(decodedReasoning['reasoning_aware'], isTrue);
-    expect(decodedReasoning['max_tokens'], 384);
-    expect(decodedReasoning['final_answer'], isTrue);
+    expect(decodedReasoning['max_tokens'], 768);
+    expect(decodedReasoning['final_answer'], isFalse);
+    expect(decodedReasoning['completion'], 'budget_exhausted');
+    expect(decodedReasoning['reported_tokens'], 768);
   });
 
   test('exports structured benchmark thermal gate without free text', () {
