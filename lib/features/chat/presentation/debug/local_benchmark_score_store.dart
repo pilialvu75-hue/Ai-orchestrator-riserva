@@ -193,6 +193,28 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int memoryContextScore(
+    LocalModelMemoryContextModelResult result,
+  ) {
+    final totalLevels =
+        LocalModelBenchmarkRunner.memoryContextTargetCharacters.length;
+    if (totalLevels <= 0) return 0;
+
+    final recall =
+        (result.passedContextLevels / totalLevels * 60).clamp(0, 60);
+    final recovery = result.recoveryPassed ? 20.0 : 0.0;
+    final pressure = switch (result.worstPressure) {
+      'normal' => 20.0,
+      'high' => 10.0,
+      _ => 0.0,
+    };
+
+    return (recall + recovery + pressure)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static int? thermalScore(LocalModelThermalModelResult result) {
     if (!result.thermalTelemetryComplete ||
         result.samples.isEmpty ||
