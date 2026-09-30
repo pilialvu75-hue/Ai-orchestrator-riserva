@@ -767,6 +767,221 @@ void main() {
     );
   });
 
+  test('Vulkan score is neutral when GPU matches CPU performance', () {
+    LocalModelBenchmarkCaseResult result({
+      required int observed,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'vulkan_fact',
+          response: 'Vulkan API Khronos',
+          score: 2,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: 1000,
+          totalMs: 5000,
+          reportedTokens: 40,
+          prefillMs: 800,
+          observedGpuLayers: observed,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 305,
+          sessionStart: 'cold',
+          sessionEnd: 'kept',
+        );
+
+    final samples = <VulkanLayerSweepSample>[
+      for (final repetition in <int>[1, 2]) ...<VulkanLayerSweepSample>[
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 0,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(observed: 0),
+        ),
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 10,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(observed: 10),
+        ),
+      ],
+    ];
+
+    final score = LocalBenchmarkScoring.vulkanScore(
+      VulkanLayerSweepReport(
+        createdAt: DateTime.utc(2026, 9, 30),
+        samples: samples,
+      ),
+      model.id,
+    );
+
+    expect(score, isNotNull);
+    expect(score!.score, 50);
+    expect(score.bestRequestedGpuLayers, 10);
+    expect(score.averageObservedGpuLayers, 10);
+  });
+
+  test('Vulkan score reaches 100 for a complete 2x GPU acceleration', () {
+    LocalModelBenchmarkCaseResult result({
+      required int firstMs,
+      required int totalMs,
+      required int prefillMs,
+      required int tokens,
+      required int observed,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'vulkan_fact',
+          response: 'Vulkan API Khronos',
+          score: 2,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: firstMs,
+          totalMs: totalMs,
+          reportedTokens: tokens,
+          prefillMs: prefillMs,
+          observedGpuLayers: observed,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 305,
+          sessionStart: 'cold',
+          sessionEnd: 'kept',
+        );
+
+    final samples = <VulkanLayerSweepSample>[
+      for (final repetition in <int>[1, 2]) ...<VulkanLayerSweepSample>[
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 0,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(
+            firstMs: 2000,
+            totalMs: 6000,
+            prefillMs: 800,
+            tokens: 40,
+            observed: 0,
+          ),
+        ),
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 99,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(
+            firstMs: 1000,
+            totalMs: 3000,
+            prefillMs: 400,
+            tokens: 40,
+            observed: 33,
+          ),
+        ),
+      ],
+    ];
+
+    final score = LocalBenchmarkScoring.vulkanScore(
+      VulkanLayerSweepReport(
+        createdAt: DateTime.utc(2026, 9, 30),
+        samples: samples,
+      ),
+      model.id,
+    );
+
+    expect(score, isNotNull);
+    expect(score!.score, 100);
+    expect(score.bestRequestedGpuLayers, 99);
+    expect(score.averageObservedGpuLayers, 33);
+  });
+
+  test('Vulkan score is absent when GPU repetitions are incomplete', () {
+    const cpu = LocalModelBenchmarkCaseResult(
+      caseId: 'vulkan_fact',
+      response: 'Vulkan API Khronos',
+      score: 2,
+      maxScore: 2,
+      forbiddenHits: 0,
+      firstContentMs: 1000,
+      totalMs: 5000,
+      reportedTokens: 40,
+      prefillMs: 800,
+      observedGpuLayers: 0,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 305,
+      sessionStart: 'cold',
+      sessionEnd: 'kept',
+    );
+    const gpu = LocalModelBenchmarkCaseResult(
+      caseId: 'vulkan_fact',
+      response: 'Vulkan API Khronos',
+      score: 2,
+      maxScore: 2,
+      forbiddenHits: 0,
+      firstContentMs: 800,
+      totalMs: 4000,
+      reportedTokens: 40,
+      prefillMs: 600,
+      observedGpuLayers: 10,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'normal',
+      endPressure: 'normal',
+      startAvailableBytes: 1000,
+      endAvailableBytes: 900,
+      startBatteryTemperatureDeciC: 300,
+      endBatteryTemperatureDeciC: 305,
+      sessionStart: 'cold',
+      sessionEnd: 'kept',
+    );
+
+    final score = LocalBenchmarkScoring.vulkanScore(
+      VulkanLayerSweepReport(
+        createdAt: DateTime.utc(2026, 9, 30),
+        samples: <VulkanLayerSweepSample>[
+          for (final repetition in <int>[1, 2])
+            VulkanLayerSweepSample(
+              requestedGpuLayers: 0,
+              modelId: model.effectiveRuntimeModelId,
+              catalogModelId: model.id,
+              displayName: model.displayName,
+              repetition: repetition,
+              result: cpu,
+            ),
+          VulkanLayerSweepSample(
+            requestedGpuLayers: 10,
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            repetition: 1,
+            result: gpu,
+          ),
+        ],
+      ),
+      model.id,
+    );
+
+    expect(score, isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
