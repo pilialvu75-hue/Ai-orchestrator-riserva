@@ -2139,8 +2139,15 @@ class _DebugOverlayState
   ) {
     final modelCount = modelIds?.length ??
         LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
-    final minutes = (modelCount * 6)
-        .clamp(_benchmarkTimeout.inMinutes, 60)
+    final activeModels = modelCount < 1 ? 1 : modelCount;
+    final workMinutes = activeModels * 6;
+    final cooldownMinutes = activeModels > 1
+        ? (activeModels - 1) *
+            LocalModelBenchmarkRunner
+                .benchmarkThermalCooldownMaxDuration.inMinutes
+        : 0;
+    final minutes = (workMinutes + cooldownMinutes)
+        .clamp(_benchmarkTimeout.inMinutes, 120)
         .toInt();
     return Duration(minutes: minutes);
   }
