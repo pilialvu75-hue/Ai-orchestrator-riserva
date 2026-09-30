@@ -147,6 +147,40 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? thermalScore(LocalModelThermalModelResult result) {
+    if (!result.thermalTelemetryComplete ||
+        result.samples.isEmpty ||
+        result.stoppedEarly) {
+      return null;
+    }
+
+    final rise = result.batteryTemperatureRiseC;
+    if (rise == null) return null;
+
+    final temperature = _lowerIsBetter(
+      rise,
+      best: 1.5,
+      worst: 8.0,
+    );
+    final decodeRetention = _higherIsBetter(
+      result.decodeRetention,
+      worst: 0.50,
+      best: 0.90,
+    );
+    final firstContentRetention = _lowerIsBetter(
+      result.firstContentSlowdown,
+      best: 1.20,
+      worst: 2.50,
+    );
+
+    return (temperature * 0.50 +
+            decodeRetention * 0.30 +
+            firstContentRetention * 0.20)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static double _lowerIsBetter(
     double value, {
     required double best,

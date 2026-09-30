@@ -443,6 +443,176 @@ class LocalModelPerformanceReport {
   }
 }
 
+class LocalModelThermalSample {
+  const LocalModelThermalSample({
+    required this.repetition,
+    required this.result,
+  });
+
+  final int repetition;
+  final LocalModelBenchmarkCaseResult result;
+}
+
+class LocalModelThermalModelResult {
+  const LocalModelThermalModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.baselineBatteryTemperatureDeciC,
+    required this.samples,
+    required this.stoppedEarly,
+    this.stopReason,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final int? baselineBatteryTemperatureDeciC;
+  final List<LocalModelThermalSample> samples;
+  final bool stoppedEarly;
+  final String? stopReason;
+
+  bool get thermalTelemetryComplete =>
+      baselineBatteryTemperatureDeciC != null &&
+      samples.isNotEmpty &&
+      samples.every(
+        (sample) => sample.result.endBatteryTemperatureDeciC != null,
+      );
+
+  double? get baselineBatteryTemperatureC =>
+      baselineBatteryTemperatureDeciC == null
+          ? null
+          : baselineBatteryTemperatureDeciC! / 10.0;
+
+  double? get maxBatteryTemperatureC {
+    if (!thermalTelemetryComplete) return null;
+    var maxDeciC = baselineBatteryTemperatureDeciC!;
+    for (final sample in samples) {
+      final start = sample.result.startBatteryTemperatureDeciC;
+      final end = sample.result.endBatteryTemperatureDeciC;
+      if (start != null && start > maxDeciC) maxDeciC = start;
+      if (end != null && end > maxDeciC) maxDeciC = end;
+    }
+    return maxDeciC / 10.0;
+  }
+
+  double? get batteryTemperatureRiseC {
+    final baseline = baselineBatteryTemperatureC;
+    final maxTemp = maxBatteryTemperatureC;
+    if (baseline == null || maxTemp == null) return null;
+    return maxTemp - baseline;
+  }
+
+  double get decodeRetention {
+    final first = _windowAverage(
+      samples.take(3).map((sample) => sample.result.decodeTokensPerSecond),
+    );
+    final last = _windowAverage(
+      samples.reversed
+          .take(3)
+          .map((sample) => sample.result.decodeTokensPerSecond),
+    );
+    if (first <= 0) return 0;
+    return last / first;
+  }
+
+  double get firstContentSlowdown {
+    final first = _windowAverage(
+      samples.take(3).map(
+            (sample) => sample.result.firstContentMs.toDouble(),
+          ),
+    );
+    final last = _windowAverage(
+      samples.reversed.take(3).map(
+            (sample) => sample.result.firstContentMs.toDouble(),
+          ),
+    );
+    if (first <= 0) return double.infinity;
+    return last / first;
+  }
+
+  static double _windowAverage(Iterable<double> values) {
+    final list = values.where((value) => value.isFinite).toList(growable: false);
+    if (list.isEmpty) return 0;
+    return list.reduce((a, b) => a + b) / list.length;
+  }
+}
+
+class LocalModelThermalReport {
+  const LocalModelThermalReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelThermalModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL THERMAL STRESS')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln(
+        'thermal_source=Android battery temperature proxy '
+        '(not SoC junction temperature)',
+      )
+      ..writeln();
+
+    for (final model in models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'baseline_temp_c='
+          '${model.baselineBatteryTemperatureC?.toStringAsFixed(1) ?? 'n/a'} '
+          'max_temp_c='
+          '${model.maxBatteryTemperatureC?.toStringAsFixed(1) ?? 'n/a'} '
+          'rise_c='
+          '${model.batteryTemperatureRiseC?.toStringAsFixed(1) ?? 'n/a'}',
+        )
+        ..writeln(
+          'decode_retention='
+          '${model.decodeRetention.toStringAsFixed(2)} '
+          'first_content_slowdown='
+          '${model.firstContentSlowdown.isFinite ? model.firstContentSlowdown.toStringAsFixed(2) : 'n/a'}',
+        )
+        ..writeln(
+          'completed_repetitions=${model.samples.length} '
+          'stopped_early=${model.stoppedEarly} '
+          'stop_reason=${model.stopReason ?? 'none'}',
+        );
+
+      for (final sample in model.samples) {
+        final result = sample.result;
+        buffer.writeln(
+          '- run=${sample.repetition} '
+          'first=${result.firstContentMs}ms '
+          'prefill=${result.prefillMs}ms '
+          'total=${result.totalMs}ms '
+          'decode=${result.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
+          'pressure=${result.startPressure}->${result.endPressure} '
+          'battery_temp_c='
+          '${result.startBatteryTemperatureDeciC == null ? 'n/a' : (result.startBatteryTemperatureDeciC! / 10).toStringAsFixed(1)}'
+          '->'
+          '${result.endBatteryTemperatureDeciC == null ? 'n/a' : (result.endBatteryTemperatureDeciC! / 10).toStringAsFixed(1)}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
 class VulkanLayerSweepSample {
   const VulkanLayerSweepSample({
     required this.requestedGpuLayers,
@@ -750,6 +920,11 @@ class LocalModelBenchmarkRunner {
   );
 
   static const int performanceWarmRepetitions = 2;
+  static const int thermalStressRepetitions = 10;
+  static const int thermalStartMaxBatteryTemperatureDeciC = 420;
+  static const int thermalStopBatteryTemperatureDeciC = 450;
+  static const int thermalMaxRiseDeciC = 80;
+  static const Duration thermalBetweenCases = Duration(milliseconds: 500);
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
@@ -1046,6 +1221,191 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       models:
           List<LocalModelPerformanceModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+    );
+  }
+
+  Future<LocalModelThermalReport> runThermalStressBenchmark({
+    required String modelId,
+    LocalModelBenchmarkProgress? onProgress,
+  }) async {
+    final targets = await _resolveTargets(<String>[modelId]);
+    if (targets.length != 1) {
+      throw StateError('Thermal stress requires exactly one model.');
+    }
+
+    final model = targets.single;
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    final failures = <LocalModelBenchmarkFailure>[];
+    final modelResults = <LocalModelThermalModelResult>[];
+
+    final baseline = await _resourceMonitor.sample();
+    if (baseline?.critical == true) {
+      throw const LocalModelBenchmarkCriticalResourceException(
+        'Thermal stress not started: critical memory pressure.',
+      );
+    }
+
+    final baselineTemp = baseline?.batteryTemperatureDeciC;
+    if (baselineTemp != null &&
+        baselineTemp >= thermalStartMaxBatteryTemperatureDeciC) {
+      throw LocalModelBenchmarkCriticalResourceException(
+        'Thermal stress not started: battery proxy already '
+        '${(baselineTemp / 10).toStringAsFixed(1)}°C.',
+      );
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_THERMAL_BEGIN] '
+      'model=${model.effectiveRuntimeModelId} '
+      'repetitions=$thermalStressRepetitions '
+      'baseline_battery_temp_decic=${baselineTemp ?? -1}',
+    );
+
+    try {
+      if (androidRuntime != null) {
+        await androidRuntime.resetBenchmarkNativeSessions();
+        await Future<void>.delayed(_betweenCases);
+      }
+
+      onProgress?.call('${model.displayName} warm-up');
+      await _runCase(
+        model: model,
+        benchmarkCase: performanceCase,
+      );
+
+      final samples = <LocalModelThermalSample>[];
+      var stoppedEarly = false;
+      String? stopReason;
+
+      for (var repetition = 1;
+          repetition <= thermalStressRepetitions;
+          repetition++) {
+        final before = await _resourceMonitor.sample();
+        if (before?.critical == true) {
+          stoppedEarly = true;
+          stopReason = 'critical_memory';
+          break;
+        }
+
+        final beforeTemp = before?.batteryTemperatureDeciC;
+        if (beforeTemp != null &&
+            beforeTemp >= thermalStopBatteryTemperatureDeciC) {
+          stoppedEarly = true;
+          stopReason = 'temperature_cutoff';
+          break;
+        }
+        if (baselineTemp != null &&
+            beforeTemp != null &&
+            beforeTemp - baselineTemp >= thermalMaxRiseDeciC) {
+          stoppedEarly = true;
+          stopReason = 'temperature_rise_cutoff';
+          break;
+        }
+
+        onProgress?.call(
+          '${model.displayName} stress '
+          '$repetition/$thermalStressRepetitions',
+        );
+
+        final result = await _runCase(
+          model: model,
+          benchmarkCase: performanceCase,
+        );
+        samples.add(
+          LocalModelThermalSample(
+            repetition: repetition,
+            result: result,
+          ),
+        );
+
+        final endTemp = result.endBatteryTemperatureDeciC;
+        if (result.endPressure == 'critical') {
+          stoppedEarly = true;
+          stopReason = 'critical_memory';
+          break;
+        }
+        if (endTemp != null &&
+            endTemp >= thermalStopBatteryTemperatureDeciC) {
+          stoppedEarly = true;
+          stopReason = 'temperature_cutoff';
+          break;
+        }
+        if (baselineTemp != null &&
+            endTemp != null &&
+            endTemp - baselineTemp >= thermalMaxRiseDeciC) {
+          stoppedEarly = true;
+          stopReason = 'temperature_rise_cutoff';
+          break;
+        }
+
+        if (repetition < thermalStressRepetitions) {
+          await Future<void>.delayed(thermalBetweenCases);
+        }
+      }
+
+      if (samples.isEmpty) {
+        throw StateError(
+          'Thermal stress produced no measurable stress samples.',
+        );
+      }
+
+      final result = LocalModelThermalModelResult(
+        modelId: model.effectiveRuntimeModelId,
+        catalogModelId: model.id,
+        displayName: model.displayName,
+        baselineBatteryTemperatureDeciC: baselineTemp,
+        samples: List<LocalModelThermalSample>.unmodifiable(samples),
+        stoppedEarly: stoppedEarly,
+        stopReason: stopReason,
+      );
+      modelResults.add(result);
+
+      RuntimeEventLog.instance.emit(
+        '[LOCAL_MODEL_THERMAL_END] '
+        'model=${model.effectiveRuntimeModelId} '
+        'samples=${samples.length} '
+        'rise_c=${result.batteryTemperatureRiseC?.toStringAsFixed(1) ?? 'na'} '
+        'decode_retention=${result.decodeRetention.toStringAsFixed(2)} '
+        'first_slowdown='
+        '${result.firstContentSlowdown.isFinite ? result.firstContentSlowdown.toStringAsFixed(2) : 'na'} '
+        'stopped_early=$stoppedEarly '
+        'reason=${stopReason ?? 'none'}',
+      );
+    } on LocalModelBenchmarkCriticalResourceException {
+      rethrow;
+    } catch (error, stackTrace) {
+      RuntimeEventLog.instance.emit(
+        '[LOCAL_MODEL_THERMAL_FAILED] '
+        'model=${model.effectiveRuntimeModelId} '
+        'error=$error stack=$stackTrace',
+      );
+      failures.add(
+        LocalModelBenchmarkFailure(
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          error: error.toString(),
+        ),
+      );
+    } finally {
+      if (androidRuntime != null) {
+        await androidRuntime.resetBenchmarkNativeSessions();
+      }
+    }
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return LocalModelThermalReport(
+      createdAt: DateTime.now(),
+      models: List<LocalModelThermalModelResult>.unmodifiable(modelResults),
       failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
     );
   }
