@@ -123,12 +123,19 @@ final class WorkshopProposalImplementationRunner {
         'chars=${result.text.length}',
       );
 
+      final structuralFeedback = <String>[
+        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
+          revisionFeedback.trim(),
+        'Previous Engineer proposal was rejected before review: '
+            '${error.message}',
+      ].join(' | ');
+
       final recovered = await _inference.complete(
         stage: WorkshopStage.implementation,
         prompt: _buildPrompt(
           session,
           preflight: preflight,
-          revisionFeedback: revisionFeedback,
+          revisionFeedback: structuralFeedback,
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
@@ -369,6 +376,9 @@ final class WorkshopProposalImplementationRunner {
               'title': _boundedText(request.title, 120),
               'instruction': _boundedText(request.instruction, 320),
               'targetFiles': request.targetFiles,
+              'targetFilesPolicy': request.targetFiles.isEmpty
+                  ? 'open_for_required_new_files'
+                  : 'hard_allowlist',
               if (constraints.isNotEmpty) 'constraints': constraints,
             },
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
@@ -386,6 +396,9 @@ final class WorkshopProposalImplementationRunner {
               'instruction': _boundedText(request.instruction, 560),
               'operation': request.operation.name,
               'targetFiles': request.targetFiles,
+              'targetFilesPolicy': request.targetFiles.isEmpty
+                  ? 'open_for_required_new_files'
+                  : 'hard_allowlist',
               if (constraints.isNotEmpty) 'constraints': constraints,
               if (context.isNotEmpty) 'context': context,
             },
@@ -416,9 +429,12 @@ present, are existing oversized starter files intentionally omitted from the
 prompt for a create task; you may replace those paths only with complete
 resulting file content, never infer or partially preserve their omitted prior
 content. The explicit task instruction and constraints are authoritative;
-architectPlan is implementation guidance and must not override them. An empty request.targetFiles list on an initial create
-task means paths were not preselected, not that no file may be changed. When
-gateFeedback is present, it is authoritative feedback about the previously
+architectPlan is implementation guidance and must not override them. When
+request.targetFiles is non-empty it is a HARD ALLOWLIST: every changes[].path
+MUST be exactly one of those paths. Never invent, split into, or add a
+supporting file outside that list. An empty request.targetFiles list on an
+initial create task means paths were not preselected, not that no file may be
+changed. When gateFeedback is present, it is authoritative feedback about the previously
 rejected staged proposal. If that feedback identifies a mismatch between the
 Architect plan/target files and the explicit task, correct the implementation
 toward the explicit task instead of repeating the mistaken plan. No markdown,
@@ -446,8 +462,11 @@ paths listed in replaceableTargets. replaceableTargets are existing oversized
 starter files intentionally omitted from the prompt for this create task; they
 may be replaced only with complete resulting content, never partially edited or
 assumed from unseen prior text. Files listed only in workspaceManifest are
-informational; do not rewrite them. New files may be added only when required
-by the task or Architect plan. When
+informational; do not rewrite them. When request.targetFiles is non-empty it
+is a HARD ALLOWLIST: every changes[].path MUST be exactly one of those paths.
+Do not invent, split into, or add supporting files outside that list, even if
+the Architect plan suggests one. New files may be added only when
+request.targetFiles is empty and the explicit task requires them. When
 gateFeedback is present, it is authoritative Reviewer/Validation feedback about
 the previous rejected staged proposal. Correct that concrete issue while keeping
 the current task bounded. If the feedback says the Architect plan or target
