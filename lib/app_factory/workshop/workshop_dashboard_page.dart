@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_contr
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_title_deriver.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
@@ -579,28 +580,8 @@ class _WorkshopDashboardPageState
     );
   }
 
-  String _deriveProjectTitle(
-    String? instruction,
-  ) {
-    final value =
-        instruction?.trim() ?? '';
-
-    if (value.isEmpty) {
-      return 'Nuova produzione Cantiere';
-    }
-
-    final normalized =
-        value.replaceAll(
-      RegExp(r'\s+'),
-      ' ',
-    );
-
-    if (normalized.length <= 48) {
-      return normalized;
-    }
-
-    return '${normalized.substring(0, 45)}...';
-  }
+  String _deriveProjectTitle(String? instruction) =>
+      WorkshopProjectTitleDeriver.derive(instruction);
 
   final FocusNode _messageFocusNode =
       FocusNode();

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +56,49 @@ InferenceService _buildInferenceService() {
     ),
     sessionManager: RuntimeSessionManager(),
   );
+}
+
+final class _BlockingBuildProvider implements WorkshopBuildProvider {
+  final Completer<void> release = Completer<void>();
+  int buildCalls = 0;
+
+  @override
+  WorkshopBuildExecutionMode get executionMode =>
+      WorkshopBuildExecutionMode.offlineLocal;
+
+  @override
+  Future<WorkshopToolchainInfo> inspectToolchain(
+    WorkshopBuildTarget target,
+  ) async {
+    return WorkshopToolchainInfo(
+      target: target,
+      status: WorkshopToolchainStatus.available,
+      executionMode: executionMode,
+      name: 'blocking test provider',
+    );
+  }
+
+  @override
+  Future<WorkshopBuildResult> build(WorkshopBuildRequest request) async {
+    buildCalls += 1;
+    await release.future;
+    final now = DateTime.now();
+    return WorkshopBuildResult(
+      requestId: request.id,
+      target: request.target,
+      status: WorkshopBuildStatus.succeeded,
+      startedAt: now,
+      finishedAt: now,
+      artifactPath: '${request.projectPath}/build/app.apk',
+      exitCode: 0,
+      testsPassed: true,
+      analysisPassed: true,
+      formatPassed: true,
+    );
+  }
+
+  @override
+  Future<void> cancel(String requestId) async {}
 }
 
 final class _CapturingBuildProvider implements WorkshopBuildProvider {
@@ -257,6 +301,65 @@ void main() {
         ),
       ),
     );
+  });
+
+
+  test('concurrent final builds for the same project are coalesced', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'workshop-build-coalesce-',
+    );
+    addTearDown(() async {
+      if (await workspace.exists()) {
+        await workspace.delete(recursive: true);
+      }
+    });
+
+    final provider = _BlockingBuildProvider();
+    final buildLab = WorkshopBuildLab(
+      providers: <WorkshopBuildProvider>[provider],
+    );
+    addTearDown(buildLab.dispose);
+
+    final bundle = WorkshopProductionLifecycleBundleFactory.createForWorkspace(
+      workspaceRootPath: workspace.path,
+      inferenceService: _buildInferenceService(),
+      buildLab: buildLab,
+      isolateProjects: true,
+    );
+    addTearDown(bundle.dashboardController.dispose);
+
+    final plan = bundle.dashboardController.startProduction(
+      title: 'Contatore Test',
+      instruction: 'Create the counter app once.',
+    );
+    _markPlanCompleted(plan);
+
+    final firstCoordinator =
+        WorkshopProductionTaskCoordinator(bundle: bundle);
+    final secondCoordinator =
+        WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final first = firstCoordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+    final second = secondCoordinator.buildWorkspace(
+      target: WorkshopBuildTarget.android,
+      mode: WorkshopBuildExecutionMode.offlineLocal,
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    expect(provider.buildCalls, 1);
+
+    provider.release.complete();
+    final results = await Future.wait(<Future<WorkshopBuildResult>>[
+      first,
+      second,
+    ]);
+
+    expect(results, hasLength(2));
+    expect(results.every((result) => result.succeeded), isTrue);
+    expect(provider.buildCalls, 1);
   });
 
   test('production build refuses an incomplete Cantiere project', () {

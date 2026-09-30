@@ -82,6 +82,8 @@ void main() {
         contains('explicit task instruction and constraints are authoritative'),
       );
       expect(engineer.lastPrompt, contains('Architect'));
+      expect(engineer.lastPrompt, contains('UI LITERAL FIDELITY'));
+      expect(engineer.lastPrompt, contains('"+" into "+1"'));
       expect(
         engineer.lastPrompt,
         contains('plan is model-authored implementation guidance'),
