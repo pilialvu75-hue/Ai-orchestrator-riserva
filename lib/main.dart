@@ -209,7 +209,13 @@ class _StartupAppState extends State<StartupApp> {
     }
 
     unawaited(recordAndroidProcessExitHistory());
-    unawaited(GitHubDiagnostics.instance.initialize());
+    if (!widget.windows7SafeAutostart) {
+      unawaited(GitHubDiagnostics.instance.initialize());
+    } else {
+      _appendWindowsDartStartupBreadcrumb(
+        'D25 GitHubDiagnostics auto-init deferred',
+      );
+    }
     RuntimeEventLog.instance.emit('[WINDOWS_SAFE_STARTUP_FIRST_FRAME_REACHED]');
   }
 
