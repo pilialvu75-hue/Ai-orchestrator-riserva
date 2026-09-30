@@ -250,6 +250,95 @@ String? localModelBenchmarkPublicProjection({
     });
   }
 
+  if (event == 'LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'catalog=([A-Za-z0-9_.-]{1,120}) '
+      r'reason=(same_physical_file)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'catalog': m[2]!,
+      'reason': m[3]!,
+    });
+  }
+
+  if (event == 'LOCAL_MODEL_BENCH_PREFLIGHT') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'model_bytes=(\d{1,15}) '
+      r'required_available_bytes=(\d{1,15}) '
+      r'available_bytes=(-?\d{1,15}) '
+      r'total_bytes=(-?\d{1,15}) '
+      r'pressure=(unknown|normal|high|critical)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'model_bytes': int.parse(m[2]!),
+      'required_available_bytes': int.parse(m[3]!),
+      'available_bytes': int.parse(m[4]!),
+      'total_bytes': int.parse(m[5]!),
+      'pressure': m[6]!,
+    });
+  }
+
+  if (event == 'LOCAL_MODEL_BENCH_REASONING_POLICY') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'reasoning_aware=(true|false) '
+      r'max_tokens=(\d{1,6}) '
+      r'final_answer=(true|false)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'reasoning_aware': m[2] == 'true',
+      'max_tokens': int.parse(m[3]!),
+      'final_answer': m[4] == 'true',
+    });
+  }
+
+  if (event == 'LOCAL_MODEL_BENCH_THERMAL_GATE') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'state=(ready|cooldown|stop) '
+      r'sample=(\d{1,3})/(\d{1,3}) '
+      r'battery_temp_decic=(-?\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'state': m[2]!,
+      'sample': int.parse(m[3]!),
+      'max_samples': int.parse(m[4]!),
+      'battery_temp_decic': int.parse(m[5]!),
+    });
+  }
+
+  if (event == 'LOCAL_MODEL_BENCH_THERMAL_STOP') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'reason=(temperature_cutoff|cooldown_timeout)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'reason': m[2]!,
+    });
+  }
+
   if (event == 'LOCAL_MODEL_BENCH_END') {
     final m = RegExp(
       r'^models=(\d{1,3})(?: failures=(\d{1,3}))? '
