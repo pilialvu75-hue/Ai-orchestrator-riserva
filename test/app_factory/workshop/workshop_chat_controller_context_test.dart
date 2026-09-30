@@ -38,6 +38,18 @@ void main() {
       provider.requests.single.systemPrompt,
       contains('Se il messaggio corrente e in italiano, rispondi in italiano'),
     );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('builder remoto GitHub Actions'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('Non chiedere mai all\'utente di installare Flutter SDK'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('non come prerequisito per generare o compilare'),
+    );
 
     await controller.send('seconda richiesta');
 
