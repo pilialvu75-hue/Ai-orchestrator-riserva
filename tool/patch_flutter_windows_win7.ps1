@@ -42,10 +42,14 @@ function Replace-ExactAsciiImport(
 
   if ($oldOffsets.Count -eq 0 -and $newOffsets.Count -eq 1) {
     Write-Host "$Original is already redirected to $Replacement."
-    return
+    return $true
+  }
+  if ($oldOffsets.Count -eq 0 -and $newOffsets.Count -eq 0) {
+    Write-Host "$Original is absent from this Flutter engine; redirect not required."
+    return $false
   }
   if ($oldOffsets.Count -ne 1) {
-    throw "Expected exactly one '$Original' import string, found $($oldOffsets.Count)."
+    throw "Expected zero or one '$Original' import string, found $($oldOffsets.Count)."
   }
   if ($newOffsets.Count -ne 0) {
     throw "Unexpected pre-existing '$Replacement' string count: $($newOffsets.Count)."
@@ -54,6 +58,7 @@ function Replace-ExactAsciiImport(
   $offset = $oldOffsets[0]
   [Array]::Copy($newName, 0, $Bytes, $offset, $newName.Length)
   Write-Host "Redirected $Original -> $Replacement at byte offset $offset"
+  return $true
 }
 
 $redirects = @(
@@ -65,8 +70,12 @@ $redirects = @(
 )
 
 $bytes = [IO.File]::ReadAllBytes($FlutterDll)
+$requiredAfterPatch = New-Object System.Collections.Generic.List[string]
 foreach ($redirect in $redirects) {
-  Replace-ExactAsciiImport $bytes $redirect[0] $redirect[1]
+  $wasApplied = Replace-ExactAsciiImport $bytes $redirect[0] $redirect[1]
+  if ($wasApplied) {
+    $requiredAfterPatch.Add([string]$redirect[1])
+  }
 }
 [IO.File]::WriteAllBytes($FlutterDll, $bytes)
 
@@ -76,9 +85,12 @@ foreach ($redirect in $redirects) {
   $newPattern = [Text.Encoding]::ASCII.GetBytes([string]$redirect[1])
   $oldCount = (Find-PatternOffsets $verified $oldPattern).Count
   $newCount = (Find-PatternOffsets $verified $newPattern).Count
-  if ($oldCount -ne 0 -or $newCount -ne 1) {
-    throw "Post-patch validation failed for $($redirect[0]): old=$oldCount new=$newCount."
+  if ($oldCount -ne 0) {
+    throw "Post-patch validation failed for $($redirect[0]): old import remains ($oldCount)."
+  }
+  if ($requiredAfterPatch.Contains([string]$redirect[1]) -and $newCount -ne 1) {
+    throw "Post-patch validation failed for $($redirect[1]): expected one redirected import, found $newCount."
   }
 }
 
-Write-Host 'Flutter Windows 7 import redirection validated for all known loader blockers.'
+Write-Host 'Flutter Windows 7 import redirection validated for imports present in this engine.'
