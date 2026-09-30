@@ -311,6 +311,25 @@ void main() {
     expect(result.firstContentSlowdown, closeTo(1.0, 0.1));
   });
 
+  test('stability probes use deterministic exact responses', () {
+    expect(LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions, 5);
+
+    expect(
+      LocalModelBenchmarkRunner.stabilityCase.score('STABLE-OK'),
+      LocalModelBenchmarkRunner.stabilityCase.maxScore,
+    );
+    expect(
+      LocalModelBenchmarkRunner.stabilityRecoveryCase.score('RECOVERY-OK'),
+      LocalModelBenchmarkRunner.stabilityRecoveryCase.maxScore,
+    );
+    expect(
+      LocalModelBenchmarkRunner.stabilitySwitchCase.score('SWITCH-OK'),
+      LocalModelBenchmarkRunner.stabilitySwitchCase.maxScore,
+    );
+
+    expect(LocalModelBenchmarkRunner.stabilityCase.score('altro'), 0);
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
