@@ -43,6 +43,38 @@ void main() {
     );
   });
 
+  test('exports handled desktop process failures without private text', () {
+    final start = publicLogProjection(
+      '$time [LOCAL_RUNTIME_ERROR] '
+      'stage=process_start reason=process_start_failed object=none',
+    );
+    final exit = publicLogProjection(
+      '$time [LOCAL_RUNTIME_ERROR] '
+      'stage=process_exit reason=process_exit object=none',
+    );
+
+    expect(
+      jsonDecode(start!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'LOCAL_RUNTIME_ERROR',
+        'stage': 'process_start',
+        'reason': 'process_start_failed',
+        'object': 'none',
+      },
+    );
+    expect(
+      jsonDecode(exit!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'LOCAL_RUNTIME_ERROR',
+        'stage': 'process_exit',
+        'reason': 'process_exit',
+        'object': 'none',
+      },
+    );
+  });
+
   test('rejects extended runtime diagnostics payloads', () {
     expect(
       publicLogProjection(
