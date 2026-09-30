@@ -247,6 +247,15 @@ CONTRACT PRECEDENCE:
    "unspecified_for_initial_create_task", an empty targetFiles list means the
    initial create task did not preselect files; it does NOT mean "no files are
    allowed" and is not by itself a validation failure.
+4. GENERIC FLUTTER SCAFFOLD CONTRACT: the remote/local Cantiere builder supplies
+   the baseline Flutter project configuration (including pubspec.yaml and the
+   platform scaffold) when the staged task only contributes app source. Do NOT
+   invalidate a create task merely because pubspec.yaml is absent from the
+   staged diff or because the task did not separately validate baseline
+   scaffold configuration. Require a pubspec.yaml change/validation only when
+   this task explicitly changes dependencies, assets, package metadata, SDK
+   constraints, or other project configuration, or when staged source imports a
+   third-party package that requires a declaration.
 
 If implementationPlan conflicts with the explicit instruction, validate the
 staged change against the explicit task and constraints. The context field is
