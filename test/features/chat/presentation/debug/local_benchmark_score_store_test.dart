@@ -373,6 +373,89 @@ void main() {
     expect(LocalBenchmarkScoring.thermalScore(missing), isNull);
   });
 
+  test('memory context score rewards recall with normal pressure', () {
+    LocalModelBenchmarkCaseResult sample(String id) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: id,
+          response: 'ok',
+          score: 2,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: 1200,
+          totalMs: 3000,
+          reportedTokens: 8,
+          prefillMs: 700,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1700,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        sample('memory_context_short'),
+        sample('memory_context_medium'),
+        sample('memory_context_long'),
+        sample('memory_context_recovery'),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.memoryContextScore(result), 100);
+  });
+
+  test('memory context score is absent when RAM pressure is unknown', () {
+    LocalModelBenchmarkCaseResult sample(
+      String id, {
+      String pressure = 'normal',
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: id,
+          response: 'ok',
+          score: 2,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: 1200,
+          totalMs: 3000,
+          reportedTokens: 8,
+          prefillMs: 700,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: pressure,
+          endPressure: pressure,
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1700,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        sample('memory_context_short'),
+        sample('memory_context_medium'),
+        sample('memory_context_long', pressure: 'unknown'),
+        sample('memory_context_recovery'),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.memoryContextScore(result), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
