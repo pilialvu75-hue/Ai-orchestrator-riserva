@@ -3,7 +3,6 @@ import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 class HighPerformanceChatList extends StatelessWidget {
@@ -260,7 +259,7 @@ class HighPerformanceChatList extends StatelessWidget {
 
     return ListView.builder(
       controller: controller,
-      scrollCacheExtent: const ScrollCacheExtent.pixels(1200.0),
+      cacheExtent: 1200.0,
       keyboardDismissBehavior:
           ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: 12),
