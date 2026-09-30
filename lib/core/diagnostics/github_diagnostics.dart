@@ -75,12 +75,22 @@ class GitHubDiagnostics extends ChangeNotifier {
       await _recoverDisk();
       RuntimeEventLog.instance.stream.listen((entry) {
         try {
-          if (enabled) _capture(entry.toString());
+          if (enabled) {
+            _capture(entry.toString());
+            if (_shouldSyncSoon(entry.tag)) {
+              Timer(const Duration(seconds: 2), () => unawaited(sync()));
+            }
+          }
         } catch (_) {
           // Diagnostic disk failures must never escape into the runtime.
           status = 'Spazio diagnostico locale non disponibile';
         }
       });
+      RuntimeEventLog.instance.emit(
+        '[DIAGNOSTICS_SESSION] '
+        'platform=${defaultTargetPlatform.name} '
+        'transport=github_releases enabled=$enabled',
+      );
       Timer.periodic(const Duration(seconds: 60), (_) => unawaited(sync()));
       status = enabled ? 'Pronto: invio automatico ogni minuto' : 'Disattivato';
     } catch (_) {
@@ -101,6 +111,31 @@ class GitHubDiagnostics extends ChangeNotifier {
     if (value) await _recoverDisk();
     status = value ? 'Invio automatico attivato' : 'Invio disattivato';
     notifyListeners();
+  }
+
+  bool _shouldSyncSoon(String tag) {
+    return tag == 'LOCAL_RUNTIME_ERROR' ||
+        tag == 'GENERATION_ERROR' ||
+        tag == 'MODEL_DOWNLOAD_FAILED' ||
+        tag == 'DOWNLOAD_FAILED' ||
+        tag == 'FORENSIC_UNCAUGHT_DART_EXCEPTION';
+  }
+
+  String get _sourceLabel {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'runtime+android-disk';
+      case TargetPlatform.windows:
+        return 'runtime+windows-disk';
+      case TargetPlatform.macOS:
+        return 'runtime+macos-disk';
+      case TargetPlatform.linux:
+        return 'runtime+linux-disk';
+      case TargetPlatform.iOS:
+        return 'runtime+ios-disk';
+      case TargetPlatform.fuchsia:
+        return 'runtime+fuchsia-disk';
+    }
   }
 
   void _capture(String raw) {
@@ -127,7 +162,7 @@ class GitHubDiagnostics extends ChangeNotifier {
 
   void _seal() {
     if (_pending.isEmpty || _directory == null) return;
-    final text = 'schema=1 build=$_build device=$installationId name=$deviceName platform=${defaultTargetPlatform.name} capture_session=$sessionId sources=runtime+android-disk\n${_pending.join('\n')}\n';
+    final text = 'schema=1 build=$_build device=$installationId name=$deviceName platform=${defaultTargetPlatform.name} capture_session=$sessionId sources=$_sourceLabel\n${_pending.join('\n')}\n';
     final bytes = utf8.encode(text);
     final hash = sha256.convert(bytes).toString();
     final crash = text.contains('ANDROID_PROCESS_EXIT_HISTORY') || text.contains('FORENSIC_UNCAUGHT_DART_EXCEPTION');
