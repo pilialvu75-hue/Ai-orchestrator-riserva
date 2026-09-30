@@ -45,6 +45,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UpdateManager _updateManager;
+  int? _registeredDesktopWorkspaceId;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   final WorkshopProjectNotificationService _workshopProjectNotifications =
       WorkshopProjectNotificationService();
@@ -76,6 +77,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final workspace = DesktopWorkspaceScope.maybeOf(context);
+    if (workspace != null && _registeredDesktopWorkspaceId != workspace.workspaceId) {
+      _registeredDesktopWorkspaceId = workspace.workspaceId;
+      workspace.registerBeforeClose(_parkAndDisposeWorkshopSession);
+    }
+  }
+
   void _onUpdateStateChanged() {
     final currentState = _updateManager.state.value;
     final latest = currentState.latestManifest;
@@ -104,11 +115,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _onWorkshopDashboardStateChanged() {
     final bundle = _workshopBundle;
     if (bundle == null) return;
+    final dashboardState = bundle.dashboardController.state;
     unawaited(
       _workshopProjectNotifications.sync(
-        bundle.dashboardController.state,
+        dashboardState,
       ),
     );
+    final title = dashboardState.projectTitle?.trim();
+    if (mounted && title != null && title.isNotEmpty) {
+      DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace(title);
+    }
   }
 
   Future<void> _flushWorkshopCheckpoint() async {
@@ -329,6 +345,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // Cantiere entry therefore starts neutral, while terminal notification
         // state remains visible to the owner.
         await _parkAndDisposeWorkshopSession();
+        if (mounted) {
+          DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace('AI Orchestrator');
+        }
       }
     } catch (error) {
       if (!mounted) return;
