@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/diagnostics/github_diagnostics.dart';
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:ai_orchestrator/core/runtime/inference/android_process_exit_diagnostics.dart';
@@ -59,11 +60,15 @@ void _emitForensicException(
   }
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final deferWindowsStartup =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  final windows7UiSmokeOnly = args.contains('--windows7-ui-smoke-only');
+  if (windows7UiSmokeOnly) {
+    _appendWindowsDartStartupBreadcrumb('D00 main entered smoke-only mode');
+  }
 
   // Preserve the established startup order everywhere except Windows. On
   // Windows the first frame is allowed to render before disk/plugin/service
@@ -122,7 +127,12 @@ Future<void> main() async {
 
   await runZonedGuarded(
     () async {
-      runApp(StartupApp(deferWindowsStartup: deferWindowsStartup));
+      runApp(
+        StartupApp(
+          deferWindowsStartup: deferWindowsStartup,
+          windows7UiSmokeOnly: windows7UiSmokeOnly,
+        ),
+      );
     },
     (Object error, StackTrace stackTrace) {
       _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
@@ -134,9 +144,11 @@ class StartupApp extends StatefulWidget {
   const StartupApp({
     super.key,
     required this.deferWindowsStartup,
+    required this.windows7UiSmokeOnly,
   });
 
   final bool deferWindowsStartup;
+  final bool windows7UiSmokeOnly;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -153,6 +165,15 @@ class _StartupAppState extends State<StartupApp> {
   @override
   void initState() {
     super.initState();
+    if (widget.windows7UiSmokeOnly) {
+      _appendWindowsDartStartupBreadcrumb('D10 StartupApp initState smoke-only');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _appendWindowsDartStartupBreadcrumb(
+          'D20 Dart post-frame callback reached smoke-only',
+        );
+      });
+      return;
+    }
     if (widget.deferWindowsStartup) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -205,6 +226,11 @@ class _StartupAppState extends State<StartupApp> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.windows7UiSmokeOnly) {
+      _appendWindowsDartStartupBreadcrumb('D15 smoke-only widget build');
+      return const _Windows7UiSmokeScreen();
+    }
+
     return AnimatedBuilder(
       animation: _transitionController,
       builder: (context, _) {
@@ -239,6 +265,64 @@ class _StartupAppState extends State<StartupApp> {
   }
 }
 
+void _appendWindowsDartStartupBreadcrumb(String message) {
+  try {
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData == null || localAppData.isEmpty) return;
+    final directory =
+        Directory('$localAppData\\AI-Orchestrator\\Diagnostics');
+    directory.createSync(recursive: true);
+    final file = File(
+      '${directory.path}\\AI-Orchestrator-dart-startup.log',
+    );
+    file.writeAsStringSync(
+      '${DateTime.now().toIso8601String()} $message\r\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (_) {}
+}
+
+class _Windows7UiSmokeScreen extends StatelessWidget {
+  const _Windows7UiSmokeScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Color(0xFF203050),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle, color: Color(0xFF75D68A), size: 52),
+              SizedBox(height: 16),
+              Text(
+                'AI Orchestrator',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Windows 7 Flutter UI smoke test',
+                style: TextStyle(color: Color(0xFFD0DBEE), fontSize: 14),
+              ),
+              SizedBox(height: 6),
+              Text(
+                'Bootstrap intentionally disabled',
+                style: TextStyle(color: Color(0xFF9EB4D2), fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 class _StartupErrorScreen extends StatelessWidget {
   const _StartupErrorScreen({
     required this.error,
