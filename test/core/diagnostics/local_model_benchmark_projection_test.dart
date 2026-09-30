@@ -96,6 +96,43 @@ void main() {
     expect(decodedEnd['status'], 'partial');
   });
 
+  test('exports structured benchmark safety decisions', () {
+    final duplicate = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED] '
+      'model=deepseek_r1_1_5b catalog=local_import_deepseek '
+      'reason=same_physical_file',
+    );
+    final preflight = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_PREFLIGHT] '
+      'model=deepseek_coder_6_7b_instruct '
+      'model_bytes=4083016640 required_available_bytes=5444022186 '
+      'available_bytes=1250000000 total_bytes=7575265280 pressure=high',
+    );
+    final reasoning = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_REASONING_POLICY] '
+      'model=deepseek_r1_1_5b reasoning_aware=true '
+      'max_tokens=384 final_answer=true',
+    );
+
+    final decodedDuplicate =
+        jsonDecode(duplicate!) as Map<String, dynamic>;
+    expect(decodedDuplicate['reason'], 'same_physical_file');
+    expect(decodedDuplicate['catalog'], 'local_import_deepseek');
+
+    final decodedPreflight =
+        jsonDecode(preflight!) as Map<String, dynamic>;
+    expect(decodedPreflight['model_bytes'], 4083016640);
+    expect(decodedPreflight['required_available_bytes'], 5444022186);
+    expect(decodedPreflight['available_bytes'], 1250000000);
+    expect(decodedPreflight['pressure'], 'high');
+
+    final decodedReasoning =
+        jsonDecode(reasoning!) as Map<String, dynamic>;
+    expect(decodedReasoning['reasoning_aware'], isTrue);
+    expect(decodedReasoning['max_tokens'], 384);
+    expect(decodedReasoning['final_answer'], isTrue);
+  });
+
   test('exports structured benchmark thermal gate without free text', () {
     final gate = publicLogProjection(
       '$time [LOCAL_MODEL_BENCH_THERMAL_GATE] '
