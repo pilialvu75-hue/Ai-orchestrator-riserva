@@ -35,27 +35,65 @@ void main() {
     expect(line, isNot(contains('response=')));
   });
 
-  test('rejects benchmark data for unknown model or case', () {
+  test('exports safe arbitrary model and case ids with catalogue identity', () {
+    final line = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_CASE] '
+      'model=qwen3_1_7b catalog=import_qwen3_1_7b_q4 '
+      'case=quality_logic_deduction score=1/1 forbidden_hits=0 '
+      'first_content_ms=321 total_ms=987 prefill_ms=120 reported_tokens=12 '
+      'decode_tokens_s=18.5 gpu_layers=29 n_ctx=2048 n_batch=128 n_ubatch=32 '
+      'pressure=normal->normal '
+      'start_available_bytes=1800000000 end_available_bytes=1600000000 '
+      'start_battery_temp_decic=351 end_battery_temp_decic=354 '
+      'session=cold->kept',
+    );
+
+    final decoded = jsonDecode(line!) as Map<String, dynamic>;
+    expect(decoded['model'], 'qwen3_1_7b');
+    expect(decoded['catalog'], 'import_qwen3_1_7b_q4');
+    expect(decoded['case'], 'quality_logic_deduction');
+    expect(decoded['n_ctx'], 2048);
+  });
+
+  test('rejects unsafe benchmark identifiers', () {
     expect(
       publicLogProjection(
         '$time [LOCAL_MODEL_BENCH_CASE] '
-        'model=private_model case=vulkan_fact score=2/2 forbidden_hits=0 '
+        'model=private/model case=vulkan_fact score=2/2 forbidden_hits=0 '
         'first_content_ms=1 total_ms=2 prefill_ms=1 reported_tokens=3 '
-        'decode_tokens_s=4.0 gpu_layers=5 n_batch=6 n_ubatch=7 '
-        'pressure=normal->normal',
+        'decode_tokens_s=4.0 gpu_layers=5 n_ctx=2048 n_batch=6 n_ubatch=7 '
+        'pressure=normal->normal '
+        'start_available_bytes=1000 end_available_bytes=900 '
+        'start_battery_temp_decic=300 end_battery_temp_decic=301 '
+        'session=warm->kept',
       ),
       isNull,
     );
+  });
+
+  test('exports current benchmark begin list and partial completion', () {
+    final begin = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_BEGIN] '
+      'models=llama_1b,qwen3_1_7b '
+      'catalogs=llama_1b,custom_qwen_q4 '
+      'cases=8 max_tokens=96 temperature=0.5',
+    );
+    final end = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_END] '
+      'models=1 failures=1 status=partial',
+    );
+
+    final decodedBegin = jsonDecode(begin!) as Map<String, dynamic>;
+    expect(decodedBegin['models'], <dynamic>['llama_1b', 'qwen3_1_7b']);
     expect(
-      publicLogProjection(
-        '$time [LOCAL_MODEL_BENCH_CASE] '
-        'model=phi3_5_mini case=private_case score=1/1 forbidden_hits=0 '
-        'first_content_ms=1 total_ms=2 prefill_ms=1 reported_tokens=3 '
-        'decode_tokens_s=4.0 gpu_layers=5 n_batch=6 n_ubatch=7 '
-        'pressure=normal->normal',
-      ),
-      isNull,
+      decodedBegin['catalogs'],
+      <dynamic>['llama_1b', 'custom_qwen_q4'],
     );
+
+    final decodedEnd = jsonDecode(end!) as Map<String, dynamic>;
+    expect(decodedEnd['models'], 1);
+    expect(decodedEnd['failures'], 1);
+    expect(decodedEnd['status'], 'partial');
   });
 
   test('exports benchmark model summary and memory release safely', () {
