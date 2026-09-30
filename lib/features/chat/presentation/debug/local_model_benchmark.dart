@@ -446,6 +446,164 @@ class LocalModelPerformanceReport {
   }
 }
 
+class LocalModelMemoryContextSample {
+  const LocalModelMemoryContextSample({
+    required this.levelId,
+    required this.targetCharacters,
+    required this.recovery,
+    required this.result,
+  });
+
+  final String levelId;
+  final int targetCharacters;
+  final bool recovery;
+  final LocalModelBenchmarkCaseResult result;
+
+  bool get passed =>
+      result.maxScore > 0 && result.score == result.maxScore;
+}
+
+class LocalModelMemoryContextModelResult {
+  const LocalModelMemoryContextModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.samples,
+    required this.stoppedEarly,
+    this.stopReason,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final List<LocalModelMemoryContextSample> samples;
+  final bool stoppedEarly;
+  final String? stopReason;
+
+  Iterable<LocalModelMemoryContextSample> get contextSamples =>
+      samples.where((sample) => !sample.recovery);
+
+  LocalModelMemoryContextSample? get recoverySample {
+    for (final sample in samples.reversed) {
+      if (sample.recovery) return sample;
+    }
+    return null;
+  }
+
+  int get passedContextLevels =>
+      contextSamples.where((sample) => sample.passed).length;
+
+  int get attemptedContextLevels => contextSamples.length;
+
+  bool get recoveryPassed => recoverySample?.passed == true;
+
+  int get maxObservedContext {
+    var value = 0;
+    for (final sample in samples) {
+      if (sample.result.observedContext > value) {
+        value = sample.result.observedContext;
+      }
+    }
+    return value;
+  }
+
+  int? get minimumAvailableBytes {
+    final values = <int>[
+      for (final sample in samples)
+        if (sample.result.startAvailableBytes != null)
+          sample.result.startAvailableBytes!,
+      for (final sample in samples)
+        if (sample.result.endAvailableBytes != null)
+          sample.result.endAvailableBytes!,
+    ];
+    if (values.isEmpty) return null;
+    return values.reduce((a, b) => a < b ? a : b);
+  }
+
+  String get worstPressure {
+    var sawKnown = false;
+    var sawHigh = false;
+    for (final sample in samples) {
+      for (final pressure in <String>[
+        sample.result.startPressure,
+        sample.result.endPressure,
+      ]) {
+        if (pressure == 'critical') return 'critical';
+        if (pressure == 'high') {
+          sawKnown = true;
+          sawHigh = true;
+        } else if (pressure == 'normal') {
+          sawKnown = true;
+        }
+      }
+    }
+    if (sawHigh) return 'high';
+    return sawKnown ? 'normal' : 'unknown';
+  }
+}
+
+class LocalModelMemoryContextReport {
+  const LocalModelMemoryContextReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelMemoryContextModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL MEMORY / CONTEXT BENCHMARK')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'context_passed=${model.passedContextLevels}/'
+          '${LocalModelBenchmarkRunner.memoryContextTargetCharacters.length} '
+          'recovery_passed=${model.recoveryPassed} '
+          'max_observed_ctx=${model.maxObservedContext} '
+          'worst_pressure=${model.worstPressure} '
+          'min_available_bytes=${model.minimumAvailableBytes ?? -1} '
+          'stopped_early=${model.stoppedEarly} '
+          'stop_reason=${model.stopReason ?? 'none'}',
+        );
+
+      for (final sample in model.samples) {
+        final result = sample.result;
+        buffer.writeln(
+          '- level=${sample.levelId} '
+          'target_chars=${sample.targetCharacters} '
+          'recovery=${sample.recovery} '
+          'passed=${sample.passed} '
+          'ctx=${result.observedContext} '
+          'prefill=${result.prefillMs}ms '
+          'first=${result.firstContentMs}ms '
+          'pressure=${result.startPressure}->${result.endPressure} '
+          'available=${result.startAvailableBytes ?? -1}->'
+          '${result.endAvailableBytes ?? -1}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
 class LocalModelThermalSample {
   const LocalModelThermalSample({
     required this.repetition,
