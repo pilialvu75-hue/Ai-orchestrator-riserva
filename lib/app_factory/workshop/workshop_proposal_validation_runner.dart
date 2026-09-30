@@ -234,6 +234,10 @@ implementationPlan, targetFiles and constraints.
 
 CONTRACT PRECEDENCE:
 1. The explicit task instruction and explicit constraints are authoritative.
+   UI LITERAL FIDELITY is a validation requirement: explicit visible strings,
+   labels, titles, units and symbols must remain verbatim unless the task
+   explicitly authorizes renaming. A substitution such as requested "+"
+   becoming "+1" is a requirement mismatch, not an equivalent implementation.
 2. implementationPlan is the exact bounded Architect projection supplied to
    the Engineer. It is model-authored guidance and must not override or
    contradict the explicit task. Do not infer requirements from omitted parts
