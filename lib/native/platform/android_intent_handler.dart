@@ -66,6 +66,33 @@ class AndroidIntentHandler {
     }
   }
 
+  /// Opens Android's share sheet for a verified APK.
+  ///
+  /// The native side exposes a private artifact through FileProvider and
+  /// stages a readable cache copy. [displayName] affects only the shared
+  /// filename, not the verified APK bytes.
+  Future<Either<Failure, bool>> shareApk(
+    String apkPath, {
+    String? displayName,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'shareApk',
+        <String, Object?>{
+          'apkPath': apkPath,
+          if (displayName != null) 'displayName': displayName,
+        },
+      );
+      return Right(result ?? false);
+    } on MissingPluginException {
+      return const Left(
+        IntentFailure('Android Intents not available on this platform'),
+      );
+    } on PlatformException catch (e) {
+      return Left(IntentFailure(e.message ?? 'PlatformException'));
+    }
+  }
+
   Future<Either<Failure, bool>> openUnknownAppsSettings() async {
     try {
       debugPrint('[INSTALL] Requesting unknown-apps settings screen');
