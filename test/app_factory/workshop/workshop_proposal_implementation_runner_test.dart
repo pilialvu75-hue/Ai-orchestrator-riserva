@@ -611,29 +611,50 @@ void main() {
       expect(workspaceGateway.deleteCalls, 0);
     });
 
-    test('malformed Engineer output is not materialized', () async {
+    test('retries Engineer proposal with no file changes', () async {
       final engineer = _StaticGateway(
-        result: const WorkshopInferenceResult(
-          text: '{"explanation":"missing changes","changes":[]}',
-          terminalState: InferenceTerminalState.success,
-        ),
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '{"explanation":"missing changes","changes":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
       );
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(workspaceGateway);
 
-      await expectLater(
-        WorkshopProposalImplementationRunner(
-          inference: _stageInference(_gateways(engineer)),
-        ).run(session: session),
-        throwsA(isA<FormatException>()),
-      );
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
 
-      expect(session.status, WorkspaceSessionStatus.ready);
-      expect(session.hasChanges, isFalse);
-      expect(session.workspace.read('lib/app.dart'), 'old');
-      expect(engineer.calls, 1);
+      expect(proposal.explanation, 'Recovered');
+      expect(proposal.changes.single.path, 'lib/app.dart');
+      expect(session.workspace.read('lib/app.dart'), 'new');
+      expect(engineer.calls, 2);
+      expect(
+        engineer.sessionIds,
+        <String>[
+          'workshop:implementation:implementation-runner-request',
+          'workshop:implementation:implementation-runner-request:retry-malformed-1',
+        ],
+      );
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(
+        engineer.prompts.last,
+        contains(
+          'Previous Engineer proposal was rejected before review: '
+          'Workshop proposal must contain at least one file change.',
+        ),
+      );
       expect(workspaceGateway.writeCalls, 0);
       expect(workspaceGateway.deleteCalls, 0);
     });
