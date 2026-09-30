@@ -1056,6 +1056,7 @@ class _WorkshopProjectBar
       totalTasks:
           dashboardState?.totalTasks ?? 0,
       stage: presentationStage,
+      actualStage: stage,
     );
 
     final progressPercent =
