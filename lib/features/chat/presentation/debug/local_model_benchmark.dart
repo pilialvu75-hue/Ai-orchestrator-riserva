@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provi
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/ffi/llama_native_types.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -299,6 +300,113 @@ class LocalModelBenchmarkReport {
         }
       }
       buffer.writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
+class LocalModelStabilityModelResult {
+  const LocalModelStabilityModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.consecutiveSamples,
+    required this.sessionReuseConfirmed,
+    required this.cancellationConfirmed,
+    required this.cancellationRecoveryPassed,
+    required this.switchRecoveryPassed,
+    required this.switchPartnerModelId,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final List<LocalModelBenchmarkCaseResult> consecutiveSamples;
+  final bool? sessionReuseConfirmed;
+  final bool? cancellationConfirmed;
+  final bool? cancellationRecoveryPassed;
+  final bool? switchRecoveryPassed;
+  final String? switchPartnerModelId;
+
+  int get consecutivePassed => consecutiveSamples
+      .where(
+        (sample) =>
+            sample.maxScore > 0 && sample.score == sample.maxScore,
+      )
+      .length;
+
+  bool get probeSetComplete =>
+      consecutiveSamples.length ==
+          LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions &&
+      sessionReuseConfirmed != null &&
+      cancellationConfirmed != null &&
+      cancellationRecoveryPassed != null &&
+      switchRecoveryPassed != null &&
+      switchPartnerModelId != null;
+
+  String get worstPressure {
+    var sawKnown = false;
+    var sawHigh = false;
+    for (final sample in consecutiveSamples) {
+      for (final pressure in <String>[
+        sample.startPressure,
+        sample.endPressure,
+      ]) {
+        if (pressure == 'critical') return 'critical';
+        if (pressure == 'high') {
+          sawKnown = true;
+          sawHigh = true;
+        } else if (pressure == 'normal') {
+          sawKnown = true;
+        }
+      }
+    }
+    if (sawHigh) return 'high';
+    return sawKnown ? 'normal' : 'unknown';
+  }
+}
+
+class LocalModelStabilityReport {
+  const LocalModelStabilityReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelStabilityModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL STABILITY BENCHMARK')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'consecutive_passed=${model.consecutivePassed}/'
+          '${LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions} '
+          'session_reuse=${model.sessionReuseConfirmed} '
+          'cancel_confirmed=${model.cancellationConfirmed} '
+          'cancel_recovery=${model.cancellationRecoveryPassed} '
+          'switch_recovery=${model.switchRecoveryPassed} '
+          'switch_partner=${model.switchPartnerModelId ?? 'none'} '
+          'pressure=${model.worstPressure}',
+        )
+        ..writeln();
     }
 
     if (failures.isNotEmpty) {
@@ -1150,6 +1258,25 @@ class LocalModelBenchmarkRunner {
   );
 
   static const int performanceWarmRepetitions = 2;
+  static const int stabilityConsecutiveRepetitions = 5;
+  static const LocalModelBenchmarkCase stabilityCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_exact',
+    prompt: 'Rispondi esattamente con STABLE-OK.',
+    exactAnswers: <String>['stable-ok'],
+  );
+  static const LocalModelBenchmarkCase stabilityRecoveryCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_recovery',
+    prompt: 'Rispondi esattamente con RECOVERY-OK.',
+    exactAnswers: <String>['recovery-ok'],
+  );
+  static const LocalModelBenchmarkCase stabilitySwitchCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_switch',
+    prompt: 'Rispondi esattamente con SWITCH-OK.',
+    exactAnswers: <String>['switch-ok'],
+  );
   static const int thermalStressRepetitions = 10;
   static const List<int> memoryContextTargetCharacters = <int>[
     1200,
@@ -1554,6 +1681,171 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       models:
           List<LocalModelMemoryContextModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+    );
+  }
+
+  Future<LocalModelStabilityReport> runStabilityBenchmark({
+    LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
+    bool continueOnModelError = true,
+  }) async {
+    final targets = await _resolveTargets(modelIds);
+    if (targets.length < 2) {
+      throw StateError(
+        'Stability benchmark requires at least two ready models '
+        'to verify model switching.',
+      );
+    }
+
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    if (androidRuntime == null) {
+      throw StateError(
+        'Stability benchmark currently requires the Android FFI runtime.',
+      );
+    }
+
+    final modelResults = <LocalModelStabilityModelResult>[];
+    final failures = <LocalModelBenchmarkFailure>[];
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_STABILITY_BEGIN] models=${targets.length} '
+      'consecutive=$stabilityConsecutiveRepetitions',
+    );
+
+    try {
+      for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
+        final model = targets[modelIndex];
+        final partner = targets[(modelIndex + 1) % targets.length];
+
+        try {
+          await androidRuntime.resetBenchmarkNativeSessions();
+          await Future<void>.delayed(_betweenCases);
+
+          final consecutive = <LocalModelBenchmarkCaseResult>[];
+          for (var repetition = 1;
+              repetition <= stabilityConsecutiveRepetitions;
+              repetition++) {
+            onProgress?.call(
+              '${model.displayName} consecutive '
+              '$repetition/$stabilityConsecutiveRepetitions',
+            );
+            final result = await _runCase(
+              model: model,
+              benchmarkCase: stabilityCase,
+            );
+            consecutive.add(result);
+            if (repetition < stabilityConsecutiveRepetitions) {
+              await Future<void>.delayed(_betweenCases);
+            }
+          }
+
+          final sessionReuseConfirmed =
+              consecutive.isNotEmpty &&
+              consecutive.first.sessionStart == 'cold' &&
+              consecutive.skip(1).every(
+                    (sample) => sample.sessionStart == 'warm',
+                  );
+
+          onProgress?.call('${model.displayName} cancellation');
+          final cancellationConfirmed =
+              await _runCancellationProbe(model: model);
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call('${model.displayName} recovery after cancel');
+          final cancellationRecovery = await _runCase(
+            model: model,
+            benchmarkCase: stabilityRecoveryCase,
+          );
+          final cancellationRecoveryPassed =
+              cancellationRecovery.maxScore > 0 &&
+              cancellationRecovery.score == cancellationRecovery.maxScore;
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call(
+            '${model.displayName} switch -> ${partner.displayName}',
+          );
+          final partnerSwitch = await _runCase(
+            model: partner,
+            benchmarkCase: stabilitySwitchCase,
+          );
+          final partnerSwitchPassed =
+              partnerSwitch.maxScore > 0 &&
+              partnerSwitch.score == partnerSwitch.maxScore;
+
+          await Future<void>.delayed(_betweenCases);
+          onProgress?.call('${model.displayName} switch recovery');
+          final switchRecovery = await _runCase(
+            model: model,
+            benchmarkCase: stabilityRecoveryCase,
+          );
+          final switchRecoveryPassed =
+              partnerSwitchPassed &&
+              switchRecovery.maxScore > 0 &&
+              switchRecovery.score == switchRecovery.maxScore;
+
+          final modelResult = LocalModelStabilityModelResult(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            consecutiveSamples:
+                List<LocalModelBenchmarkCaseResult>.unmodifiable(consecutive),
+            sessionReuseConfirmed: sessionReuseConfirmed,
+            cancellationConfirmed: cancellationConfirmed,
+            cancellationRecoveryPassed: cancellationRecoveryPassed,
+            switchRecoveryPassed: switchRecoveryPassed,
+            switchPartnerModelId: partner.effectiveRuntimeModelId,
+          );
+          modelResults.add(modelResult);
+
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_STABILITY_MODEL_END] '
+            'model=${model.effectiveRuntimeModelId} '
+            'consecutive=${modelResult.consecutivePassed}/'
+            '$stabilityConsecutiveRepetitions '
+            'reuse=$sessionReuseConfirmed '
+            'cancel=$cancellationConfirmed '
+            'cancel_recovery=$cancellationRecoveryPassed '
+            'switch_recovery=$switchRecoveryPassed '
+            'partner=${partner.effectiveRuntimeModelId} '
+            'pressure=${modelResult.worstPressure}',
+          );
+        } on LocalModelBenchmarkCriticalResourceException {
+          rethrow;
+        } catch (error, stackTrace) {
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_STABILITY_FAILED] '
+            'model=${model.effectiveRuntimeModelId} '
+            'error=$error stack=$stackTrace',
+          );
+          if (!continueOnModelError) rethrow;
+          failures.add(
+            LocalModelBenchmarkFailure(
+              modelId: model.effectiveRuntimeModelId,
+              catalogModelId: model.id,
+              displayName: model.displayName,
+              error: error.toString(),
+            ),
+          );
+        }
+      }
+    } finally {
+      await androidRuntime.resetBenchmarkNativeSessions();
+    }
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return LocalModelStabilityReport(
+      createdAt: DateTime.now(),
+      models:
+          List<LocalModelStabilityModelResult>.unmodifiable(modelResults),
       failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
     );
   }
@@ -2034,6 +2326,75 @@ class LocalModelBenchmarkRunner {
 
     return targets;
   }
+  Future<bool> _runCancellationProbe({
+    required AiModel model,
+  }) async {
+    final startSample = await _resourceMonitor.sample();
+    if (startSample?.critical == true) {
+      throw const LocalModelBenchmarkCriticalResourceException(
+        'Stability cancellation probe stopped: critical memory.',
+      );
+    }
+
+    final cancellationToken = CancellationToken();
+    var cancellationIssued = false;
+    var cancellationConfirmed = false;
+
+    final stream = _runtimeProvider.streamInference(
+      request: InferenceRequest(
+        sessionId:
+            'debug-stability-cancel-${model.effectiveRuntimeModelId}-'
+            '${DateTime.now().microsecondsSinceEpoch}',
+        prompt:
+            'Scrivi almeno 120 parole continue in italiano sui vantaggi '
+            'e limiti della memoria RAM nei computer moderni.',
+        modelId: model.effectiveRuntimeModelId,
+        modelPath: model.localPath,
+        maxTokens: 192,
+        temperature: 0.5,
+        topP: 0.9,
+        repeatPenalty: 1.1,
+        isOffline: true,
+      ),
+      cancellationToken: cancellationToken,
+    ).timeout(
+      const Duration(seconds: 90),
+      onTimeout: (sink) {
+        cancellationToken.cancel();
+        sink.add(
+          InferenceResponse.error(
+            'Stability cancellation probe timed out.',
+            state: InferenceTerminalState.timeout,
+          ),
+        );
+        sink.close();
+      },
+    );
+
+    await for (final chunk in stream) {
+      if (!chunk.isFinal &&
+          chunk.text.isNotEmpty &&
+          !cancellationIssued) {
+        cancellationIssued = true;
+        cancellationToken.cancel();
+      }
+
+      if (chunk.isFinal) {
+        cancellationConfirmed =
+            cancellationIssued &&
+            chunk.terminalState == InferenceTerminalState.cancelled;
+      }
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_STABILITY_CANCEL] '
+      'model=${model.effectiveRuntimeModelId} '
+      'issued=$cancellationIssued confirmed=$cancellationConfirmed',
+    );
+
+    return cancellationIssued && cancellationConfirmed;
+  }
+
   Future<LocalModelBenchmarkCaseResult> _runCase({
     required AiModel model,
     required LocalModelBenchmarkCase benchmarkCase,
