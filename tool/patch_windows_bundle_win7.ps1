@@ -108,24 +108,49 @@ Write-Host 'Windows 7 runner forbidden-symbol validation passed.'
 
 $flutterPath = Join-Path $ReleaseDir 'flutter_windows.dll'
 $flutterBytes = [IO.File]::ReadAllBytes($flutterPath)
-$flutterChecks = @(
-  @('WS2_32.dll', 0),
-  @('ws2fix.dll', 1),
-  @('ntdll.dll', 0),
-  @('nt7fx.dll', 1),
-  @('KERNEL32.dll', 0),
-  @('win7krnl.dll', 1),
-  @('api-ms-win-core-path-l1-1-0.dll', 0),
-  @('win7path-compatibility-shim.dll', 1),
-  @('api-ms-win-core-synch-l1-2-0.dll', 0),
-  @('ai-orchestrator-sync-win7fix.dll', 1)
+$flutterRedirects = @(
+  @('WS2_32.dll', 'ws2fix.dll'),
+  @('ntdll.dll', 'nt7fx.dll'),
+  @('KERNEL32.dll', 'win7krnl.dll'),
+  @('api-ms-win-core-path-l1-1-0.dll', 'win7path-compatibility-shim.dll'),
+  @('api-ms-win-core-synch-l1-2-0.dll', 'ai-orchestrator-sync-win7fix.dll')
 )
-foreach ($check in $flutterChecks) {
-  $count = Count-AsciiPattern $flutterBytes ([string]$check[0])
-  if ($count -ne [int]$check[1]) {
-    throw "Flutter compatibility validation failed for $($check[0]): expected $($check[1]), found $count."
+$flutterApplied = New-Object System.Collections.Generic.List[string]
+foreach ($redirect in $flutterRedirects) {
+  $oldCount = Count-AsciiPattern $flutterBytes ([string]$redirect[0])
+  $newCount = Count-AsciiPattern $flutterBytes ([string]$redirect[1])
+
+  if ($oldCount -eq 0 -and $newCount -eq 0) {
+    Write-Host "Flutter 3.29: $($redirect[0]) absent; redirect not required."
+    continue
+  }
+  if ($oldCount -eq 0 -and $newCount -eq 1) {
+    Write-Host "Flutter 3.29: $($redirect[0]) already redirected."
+    $flutterApplied.Add([string]$redirect[1])
+    continue
+  }
+  if ($oldCount -ne 1 -or $newCount -ne 0) {
+    throw "Flutter 3.29 import layout unexpected for $($redirect[0]): old=$oldCount new=$newCount."
+  }
+
+  Replace-ExactAsciiImport $flutterBytes $redirect[0] $redirect[1]
+  $flutterApplied.Add([string]$redirect[1])
+}
+[IO.File]::WriteAllBytes($flutterPath, $flutterBytes)
+
+$verifiedFlutter = [IO.File]::ReadAllBytes($flutterPath)
+foreach ($redirect in $flutterRedirects) {
+  $oldCount = Count-AsciiPattern $verifiedFlutter ([string]$redirect[0])
+  $newCount = Count-AsciiPattern $verifiedFlutter ([string]$redirect[1])
+  if ($oldCount -ne 0) {
+    throw "Flutter 3.29 compatibility validation failed: $($redirect[0]) remains ($oldCount)."
+  }
+  if ($flutterApplied.Contains([string]$redirect[1]) -and $newCount -ne 1) {
+    throw "Flutter 3.29 compatibility validation failed for $($redirect[1]): expected 1, found $newCount."
   }
 }
+$flutterHash = (Get-FileHash -Path $flutterPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "Patched Flutter 3.29 SHA256: $flutterHash"
 
 $onnxPath = Join-Path $ReleaseDir 'onnxruntime.dll'
 $onnxBytes = [IO.File]::ReadAllBytes($onnxPath)
