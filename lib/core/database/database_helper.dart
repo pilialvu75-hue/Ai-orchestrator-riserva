@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 
@@ -16,13 +17,26 @@ class DatabaseHelper {
 
   Future<Database> _initDatabase() async {
     _configurePlatformFactory();
-    final basePath = await getDatabasesPath();
+    final String basePath;
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      // sqflite_common_ffi can resolve getDatabasesPath() relative to the
+      // process working directory on desktop. Installed Windows builds run
+      // from Program Files, which is not writable by a standard user.
+      // Persist desktop databases in the per-user application support area.
+      final supportDirectory = await getApplicationSupportDirectory();
+      basePath = join(supportDirectory.path, 'database');
+    } else {
+      basePath = await getDatabasesPath();
+    }
+
     if (!kIsWeb) {
       final databaseDirectory = Directory(basePath);
       if (!await databaseDirectory.exists()) {
         await databaseDirectory.create(recursive: true);
       }
     }
+
     final dbPath = join(basePath, AppConstants.databaseName);
     return openDatabase(
       dbPath,
