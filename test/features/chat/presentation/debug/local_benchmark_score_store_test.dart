@@ -373,6 +373,103 @@ void main() {
     expect(LocalBenchmarkScoring.thermalScore(missing), isNull);
   });
 
+  test('memory context score combines recall, recovery and pressure', () {
+    LocalModelBenchmarkCaseResult sample({
+      required String id,
+      required int score,
+      String pressure = 'normal',
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: id,
+          response: 'ok',
+          score: score,
+          maxScore: 1,
+          forbiddenHits: 0,
+          firstContentMs: 1200,
+          totalMs: 3000,
+          reportedTokens: 8,
+          prefillMs: 700,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          observedContext: 2048,
+          startPressure: pressure,
+          endPressure: pressure,
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1700,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    LocalModelMemoryContextSample contextSample(
+      String id, {
+      required int score,
+      String pressure = 'normal',
+    }) =>
+        LocalModelMemoryContextSample(
+          levelId: id,
+          targetCharacters: 3600,
+          recovery: false,
+          result: sample(id: id, score: score, pressure: pressure),
+        );
+
+    final perfect = LocalModelMemoryContextModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      samples: <LocalModelMemoryContextSample>[
+        contextSample('l1', score: 1),
+        contextSample('l2', score: 1),
+        contextSample('l3', score: 1),
+        contextSample('l4', score: 1),
+        LocalModelMemoryContextSample(
+          levelId: 'recovery',
+          targetCharacters: 0,
+          recovery: true,
+          result: sample(id: 'recovery', score: 1),
+        ),
+      ],
+      stoppedEarly: false,
+    );
+
+    final pressured = LocalModelMemoryContextModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      samples: <LocalModelMemoryContextSample>[
+        contextSample('l1', score: 1, pressure: 'high'),
+        contextSample('l2', score: 1, pressure: 'high'),
+        contextSample('l3', score: 1, pressure: 'high'),
+        contextSample('l4', score: 0, pressure: 'high'),
+        LocalModelMemoryContextSample(
+          levelId: 'recovery',
+          targetCharacters: 0,
+          recovery: true,
+          result: sample(id: 'recovery', score: 1, pressure: 'high'),
+        ),
+      ],
+      stoppedEarly: false,
+    );
+
+    expect(LocalBenchmarkScoring.memoryContextScore(perfect), 100);
+    expect(LocalBenchmarkScoring.memoryContextScore(pressured), 75);
+  });
+
+  test('unknown memory pressure does not produce a General Score', () {
+    const result = LocalModelMemoryContextModelResult(
+      modelId: 'memory',
+      catalogModelId: 'memory',
+      displayName: 'Memory',
+      samples: <LocalModelMemoryContextSample>[],
+      stoppedEarly: true,
+      stopReason: 'no telemetry',
+    );
+
+    expect(LocalBenchmarkScoring.memoryContextScore(result), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(

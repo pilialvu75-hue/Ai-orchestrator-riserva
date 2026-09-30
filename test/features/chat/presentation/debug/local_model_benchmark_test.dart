@@ -102,6 +102,108 @@ void main() {
     expect(benchmarkCase.score('La risposta è 42'), 1);
   });
 
+  test('memory context targets grow progressively with distinct markers', () {
+    expect(
+      LocalModelBenchmarkRunner.memoryContextTargetCharacters,
+      const <int>[1200, 3600, 7200, 11000],
+    );
+
+    for (var index = 0;
+        index < LocalModelBenchmarkRunner.memoryContextTargetCharacters.length;
+        index++) {
+      final target =
+          LocalModelBenchmarkRunner.memoryContextTargetCharacters[index];
+      final benchmarkCase = LocalModelBenchmarkRunner.memoryContextCaseFor(
+        levelIndex: index,
+        targetCharacters: target,
+      );
+      final contextCharacters = benchmarkCase.context.fold<int>(
+        0,
+        (sum, turn) => sum + turn.content.length,
+      );
+      final marker =
+          '${LocalModelBenchmarkRunner.memoryContextMarkerPrefix}-'
+          '${index + 1}-Q7';
+
+      expect(benchmarkCase.id, 'memory_context_${target}_chars');
+      expect(contextCharacters, greaterThanOrEqualTo(target));
+      expect(benchmarkCase.score(marker), 1);
+      expect(benchmarkCase.score('codice-sbagliato'), 0);
+    }
+  });
+
+  test('memory context recovery is a separate short health check', () {
+    const recovery = LocalModelBenchmarkRunner.memoryContextRecoveryCase;
+    expect(recovery.context, isEmpty);
+    expect(recovery.score('RECOVERY-OK'), 1);
+    expect(recovery.score('errore'), 0);
+  });
+
+  test('memory context result tracks n_ctx, pressure and recovery', () {
+    LocalModelBenchmarkCaseResult sample({
+      required String id,
+      required int ctx,
+      required int score,
+      String pressure = 'normal',
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: id,
+          response: 'ok',
+          score: score,
+          maxScore: 1,
+          forbiddenHits: 0,
+          firstContentMs: 1000,
+          totalMs: 2000,
+          reportedTokens: 8,
+          prefillMs: 500,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          observedContext: ctx,
+          startPressure: pressure,
+          endPressure: pressure,
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1500,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelMemoryContextModelResult(
+      modelId: 'memory',
+      catalogModelId: 'memory',
+      displayName: 'Memory',
+      samples: <LocalModelMemoryContextSample>[
+        LocalModelMemoryContextSample(
+          levelId: 'l1',
+          targetCharacters: 1200,
+          recovery: false,
+          result: sample(id: 'l1', ctx: 1536, score: 1),
+        ),
+        LocalModelMemoryContextSample(
+          levelId: 'l2',
+          targetCharacters: 3600,
+          recovery: false,
+          result: sample(id: 'l2', ctx: 2048, score: 1, pressure: 'high'),
+        ),
+        LocalModelMemoryContextSample(
+          levelId: 'recovery',
+          targetCharacters: 0,
+          recovery: true,
+          result: sample(id: 'recovery', ctx: 2048, score: 1),
+        ),
+      ],
+      stoppedEarly: false,
+    );
+
+    expect(result.passedContextLevels, 2);
+    expect(result.recoveryPassed, isTrue);
+    expect(result.maxObservedContext, 2048);
+    expect(result.worstPressure, 'high');
+    expect(result.minimumAvailableBytes, 1500);
+  });
+
   test('performance benchmark uses one cold and two warm passes', () {
     expect(LocalModelBenchmarkRunner.performanceWarmRepetitions, 2);
     expect(

@@ -613,7 +613,13 @@ class _DebugOverlayState
                           subtitle:
                               'Contesti crescenti, KV cache, recovery e '
                               'pressione memoria.',
-                          available: false,
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(
+                              _showMemoryContextBenchmarkModelPicker(),
+                            );
+                          },
                         ),
                         item(
                           icon: Icons.translate_outlined,
@@ -1124,6 +1130,173 @@ class _DebugOverlayState
                   const SnackBar(
                     content:
                         Text('Benchmark performance copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showMemoryContextBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Memoria / Context',
+      subtitle:
+          'Scegli uno o più modelli. Il test aumenta progressivamente il '
+          'contesto, misura n_ctx/RAM/pressure e prova un recovery finale.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runMemoryContextBenchmark(modelIds: modelIds);
+  }
+
+  Future<void> _runMemoryContextBenchmark({
+    required List<String> modelIds,
+  }) async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final selected = <String, AiModel>{
+      for (final model in candidates)
+        if (modelIds.contains(model.id) &&
+            LocalModelBenchmarkRunner.isRunnableCandidate(model))
+          model.id: model,
+    };
+
+    if (selected.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello selezionato è pronto per il test.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelMemoryContextReport? report;
+
+    await _runTest(
+      testId: 'local_model_memory_context_benchmark',
+      timeout: Duration(
+        minutes: (selected.length * 10).clamp(20, 90).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.runMemoryContextBenchmark(
+          modelIds: selected.keys,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Memoria • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        for (final result in completed.models) {
+          final model = selected[result.catalogModelId];
+          if (model == null) continue;
+
+          final memoryScore =
+              LocalBenchmarkScoring.memoryContextScore(result);
+          if (memoryScore == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.memoryContext,
+            score: memoryScore,
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showMemoryContextBenchmarkReport(report!);
+  }
+
+  Future<void> _showMemoryContextBenchmarkReport(
+    LocalModelMemoryContextReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln(report.toPlainText())
+      ..writeln()
+      ..writeln('SCORING MEMORIA / CONTEXT')
+      ..writeln('pesi=recall:60 recovery:20 pressure:20')
+      ..writeln('pressure=normal:20 high:10 unknown/critical:0');
+
+    for (final model in report.models) {
+      final memoryScore = LocalBenchmarkScoring.memoryContextScore(model);
+      final reason = model.stoppedEarly
+          ? 'test interrotto: ${model.stopReason ?? 'errore'}'
+          : model.worstPressure == 'unknown'
+              ? 'telemetria RAM assente'
+              : model.worstPressure == 'critical'
+                  ? 'pressione RAM critica'
+                  : model.attemptedContextLevels !=
+                          LocalModelBenchmarkRunner
+                              .memoryContextTargetCharacters.length
+                      ? 'livelli incompleti'
+                      : null;
+      buffer.writeln(
+        memoryScore == null
+            ? '${model.displayName}: n/a (${reason ?? 'test non valido'})'
+            : '${model.displayName}: $memoryScore/100',
+      );
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Memoria / Context',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark memoria copiato negli appunti'),
                   ),
                 );
               },

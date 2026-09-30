@@ -84,6 +84,7 @@ class LocalModelBenchmarkCaseResult {
     required this.observedGpuLayers,
     required this.observedBatch,
     required this.observedMicroBatch,
+    this.observedContext = 0,
     required this.startPressure,
     required this.endPressure,
     required this.startAvailableBytes,
@@ -106,6 +107,7 @@ class LocalModelBenchmarkCaseResult {
   final int observedGpuLayers;
   final int observedBatch;
   final int observedMicroBatch;
+  final int observedContext;
   final String startPressure;
   final String endPressure;
   final int? startAvailableBytes;
@@ -283,6 +285,7 @@ class LocalModelBenchmarkReport {
           'tokens=${item.reportedTokens} '
           'decode=${item.decodeTokensPerSecond.toStringAsFixed(2)}tok/s '
           'gpu=${item.observedGpuLayers} '
+          'ctx=${item.observedContext} '
           'batch=${item.observedBatch}/${item.observedMicroBatch} '
           'pressure=${item.startPressure}->${item.endPressure} '
           'battery_temp_c='
@@ -428,6 +431,164 @@ class LocalModelPerformanceReport {
           'warm_session_confirmed=${model.warmSessionConfirmed}',
         )
         ..writeln();
+    }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
+class LocalModelMemoryContextSample {
+  const LocalModelMemoryContextSample({
+    required this.levelId,
+    required this.targetCharacters,
+    required this.recovery,
+    required this.result,
+  });
+
+  final String levelId;
+  final int targetCharacters;
+  final bool recovery;
+  final LocalModelBenchmarkCaseResult result;
+
+  bool get passed =>
+      result.maxScore > 0 && result.score == result.maxScore;
+}
+
+class LocalModelMemoryContextModelResult {
+  const LocalModelMemoryContextModelResult({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.samples,
+    required this.stoppedEarly,
+    this.stopReason,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final List<LocalModelMemoryContextSample> samples;
+  final bool stoppedEarly;
+  final String? stopReason;
+
+  Iterable<LocalModelMemoryContextSample> get contextSamples =>
+      samples.where((sample) => !sample.recovery);
+
+  LocalModelMemoryContextSample? get recoverySample {
+    for (final sample in samples.reversed) {
+      if (sample.recovery) return sample;
+    }
+    return null;
+  }
+
+  int get passedContextLevels =>
+      contextSamples.where((sample) => sample.passed).length;
+
+  int get attemptedContextLevels => contextSamples.length;
+
+  bool get recoveryPassed => recoverySample?.passed == true;
+
+  int get maxObservedContext {
+    var value = 0;
+    for (final sample in samples) {
+      if (sample.result.observedContext > value) {
+        value = sample.result.observedContext;
+      }
+    }
+    return value;
+  }
+
+  int? get minimumAvailableBytes {
+    final values = <int>[
+      for (final sample in samples)
+        if (sample.result.startAvailableBytes != null)
+          sample.result.startAvailableBytes!,
+      for (final sample in samples)
+        if (sample.result.endAvailableBytes != null)
+          sample.result.endAvailableBytes!,
+    ];
+    if (values.isEmpty) return null;
+    return values.reduce((a, b) => a < b ? a : b);
+  }
+
+  String get worstPressure {
+    var sawKnown = false;
+    var sawHigh = false;
+    for (final sample in samples) {
+      for (final pressure in <String>[
+        sample.result.startPressure,
+        sample.result.endPressure,
+      ]) {
+        if (pressure == 'critical') return 'critical';
+        if (pressure == 'high') {
+          sawKnown = true;
+          sawHigh = true;
+        } else if (pressure == 'normal') {
+          sawKnown = true;
+        }
+      }
+    }
+    if (sawHigh) return 'high';
+    return sawKnown ? 'normal' : 'unknown';
+  }
+}
+
+class LocalModelMemoryContextReport {
+  const LocalModelMemoryContextReport({
+    required this.createdAt,
+    required this.models,
+    this.failures = const <LocalModelBenchmarkFailure>[],
+  });
+
+  final DateTime createdAt;
+  final List<LocalModelMemoryContextModelResult> models;
+  final List<LocalModelBenchmarkFailure> failures;
+
+  String toPlainText() {
+    final buffer = StringBuffer()
+      ..writeln('LOCAL MODEL MEMORY / CONTEXT BENCHMARK')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in models) {
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'context_passed=${model.passedContextLevels}/'
+          '${LocalModelBenchmarkRunner.memoryContextTargetCharacters.length} '
+          'recovery_passed=${model.recoveryPassed} '
+          'max_observed_ctx=${model.maxObservedContext} '
+          'worst_pressure=${model.worstPressure} '
+          'min_available_bytes=${model.minimumAvailableBytes ?? -1} '
+          'stopped_early=${model.stoppedEarly} '
+          'stop_reason=${model.stopReason ?? 'none'}',
+        );
+
+      for (final sample in model.samples) {
+        final result = sample.result;
+        buffer.writeln(
+          '- level=${sample.levelId} '
+          'target_chars=${sample.targetCharacters} '
+          'recovery=${sample.recovery} '
+          'passed=${sample.passed} '
+          'ctx=${result.observedContext} '
+          'prefill=${result.prefillMs}ms '
+          'first=${result.firstContentMs}ms '
+          'pressure=${result.startPressure}->${result.endPressure} '
+          'available=${result.startAvailableBytes ?? -1}->'
+          '${result.endAvailableBytes ?? -1}',
+        );
+      }
+      buffer.writeln();
     }
 
     if (failures.isNotEmpty) {
@@ -921,6 +1082,21 @@ class LocalModelBenchmarkRunner {
 
   static const int performanceWarmRepetitions = 2;
   static const int thermalStressRepetitions = 10;
+  static const List<int> memoryContextTargetCharacters = <int>[
+    1200,
+    3600,
+    7200,
+    11000,
+  ];
+  static const String memoryContextMarkerPrefix = 'ORCH-MEM';
+  static const LocalModelBenchmarkCase memoryContextRecoveryCase =
+      LocalModelBenchmarkCase(
+    id: 'memory_context_recovery',
+    prompt: 'Rispondi con la parola RECOVERY-OK.',
+    requiredAnyGroups: <List<String>>[
+      <String>['recovery-ok'],
+    ],
+  );
   static const int thermalStartMaxBatteryTemperatureDeciC = 420;
   static const int thermalStopBatteryTemperatureDeciC = 450;
   static const int thermalMaxRiseDeciC = 80;
@@ -929,6 +1105,58 @@ class LocalModelBenchmarkRunner {
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
   final ResourceMonitor _resourceMonitor;
+
+  static LocalModelBenchmarkCase memoryContextCaseFor({
+    required int levelIndex,
+    required int targetCharacters,
+  }) {
+    final marker = '$memoryContextMarkerPrefix-${levelIndex + 1}-Q7';
+    final context = <ChatTurn>[
+      ChatTurn(
+        role: ChatRole.user,
+        content:
+            'Memorizza questo codice e conservalo fino alla domanda finale: '
+            '$marker',
+      ),
+      ChatTurn(
+        role: ChatRole.assistant,
+        content: 'Codice memorizzato.',
+      ),
+    ];
+
+    var characters = context.fold<int>(
+      0,
+      (sum, turn) => sum + turn.content.length,
+    );
+    var block = 1;
+    while (characters < targetCharacters) {
+      final userText =
+          'Blocco $block di contesto. Questo testo serve esclusivamente a '
+          'riempire in modo controllato la finestra di memoria del modello. '
+          'Contiene informazioni ordinarie su attività quotidiane, strumenti, '
+          'documenti e numeri non correlati al codice segreto. Numero blocco: '
+          '$block. Mantieni il contesto senza inventare collegamenti.';
+      final assistantText =
+          'Ricevuto il blocco $block. Continuo a conservare il contesto '
+          'precedente senza modificarne i dettagli.';
+      context
+        ..add(ChatTurn(role: ChatRole.user, content: userText))
+        ..add(ChatTurn(role: ChatRole.assistant, content: assistantText));
+      characters += userText.length + assistantText.length;
+      block++;
+    }
+
+    return LocalModelBenchmarkCase(
+      id: 'memory_context_${targetCharacters}_chars',
+      prompt:
+          'Qual era il codice che ti ho chiesto di memorizzare all’inizio? '
+          'Rispondi con il codice.',
+      context: List<ChatTurn>.unmodifiable(context),
+      requiredAnyGroups: <List<String>>[
+        <String>[marker.toLowerCase()],
+      ],
+    );
+  }
 
   Future<List<AiModel>> loadBenchmarkCandidates() async {
     final availableResult = await _localAiRepository.getAvailableModels();
@@ -1013,6 +1241,7 @@ class LocalModelBenchmarkRunner {
             'reported_tokens=${result.reportedTokens} '
             'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
             'gpu_layers=${result.observedGpuLayers} '
+            'n_ctx=${result.observedContext} '
             'n_batch=${result.observedBatch} '
             'n_ubatch=${result.observedMicroBatch} '
             'pressure=${result.startPressure}->${result.endPressure} '
@@ -1091,6 +1320,175 @@ class LocalModelBenchmarkRunner {
       failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
     );
   }
+  Future<LocalModelMemoryContextReport> runMemoryContextBenchmark({
+    LocalModelBenchmarkProgress? onProgress,
+    Iterable<String>? modelIds,
+    bool continueOnModelError = true,
+  }) async {
+    final targets = await _resolveTargets(modelIds);
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    final modelResults = <LocalModelMemoryContextModelResult>[];
+    final failures = <LocalModelBenchmarkFailure>[];
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_MEMORY_CONTEXT_BEGIN] models=${targets.length} '
+      'levels=${memoryContextTargetCharacters.join(',')}',
+    );
+
+    for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
+      final model = targets[modelIndex];
+      try {
+        if (androidRuntime != null) {
+          await androidRuntime.resetBenchmarkNativeSessions();
+          await Future<void>.delayed(_betweenCases);
+        }
+
+        final samples = <LocalModelMemoryContextSample>[];
+        var stoppedEarly = false;
+        String? stopReason;
+
+        for (var levelIndex = 0;
+            levelIndex < memoryContextTargetCharacters.length;
+            levelIndex++) {
+          final targetCharacters =
+              memoryContextTargetCharacters[levelIndex];
+          final benchmarkCase = memoryContextCaseFor(
+            levelIndex: levelIndex,
+            targetCharacters: targetCharacters,
+          );
+          onProgress?.call(
+            '${model.displayName} context '
+            '${levelIndex + 1}/${memoryContextTargetCharacters.length}',
+          );
+
+          try {
+            final result = await _runCase(
+              model: model,
+              benchmarkCase: benchmarkCase,
+            );
+            samples.add(
+              LocalModelMemoryContextSample(
+                levelId: benchmarkCase.id,
+                targetCharacters: targetCharacters,
+                recovery: false,
+                result: result,
+              ),
+            );
+
+            RuntimeEventLog.instance.emit(
+              '[LOCAL_MODEL_MEMORY_CONTEXT_LEVEL] '
+              'model=${model.effectiveRuntimeModelId} '
+              'level=${benchmarkCase.id} '
+              'target_chars=$targetCharacters '
+              'passed=${result.score == result.maxScore} '
+              'n_ctx=${result.observedContext} '
+              'pressure=${result.startPressure}->${result.endPressure} '
+              'available=${result.startAvailableBytes ?? -1}->'
+              '${result.endAvailableBytes ?? -1}',
+            );
+
+            if (result.endPressure == 'critical') {
+              throw LocalModelBenchmarkCriticalResourceException(
+                'Memory/context benchmark reached critical pressure.',
+              );
+            }
+          } on LocalModelBenchmarkCriticalResourceException {
+            rethrow;
+          } catch (error) {
+            stoppedEarly = true;
+            stopReason =
+                '${benchmarkCase.id}: ${error.toString()}';
+            break;
+          }
+
+          await Future<void>.delayed(_betweenCases);
+        }
+
+        onProgress?.call('${model.displayName} recovery');
+        try {
+          final recovery = await _runCase(
+            model: model,
+            benchmarkCase: memoryContextRecoveryCase,
+          );
+          samples.add(
+            LocalModelMemoryContextSample(
+              levelId: memoryContextRecoveryCase.id,
+              targetCharacters: 0,
+              recovery: true,
+              result: recovery,
+            ),
+          );
+          if (recovery.endPressure == 'critical') {
+            throw LocalModelBenchmarkCriticalResourceException(
+              'Memory/context recovery reached critical pressure.',
+            );
+          }
+        } on LocalModelBenchmarkCriticalResourceException {
+          rethrow;
+        } catch (error) {
+          stoppedEarly = true;
+          stopReason = stopReason == null
+              ? 'recovery: ${error.toString()}'
+              : '$stopReason; recovery: ${error.toString()}';
+        }
+
+        final result = LocalModelMemoryContextModelResult(
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          samples: List<LocalModelMemoryContextSample>.unmodifiable(samples),
+          stoppedEarly: stoppedEarly,
+          stopReason: stopReason,
+        );
+        modelResults.add(result);
+
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_MEMORY_CONTEXT_MODEL_END] '
+          'model=${model.effectiveRuntimeModelId} '
+          'passed=${result.passedContextLevels}/'
+          '${memoryContextTargetCharacters.length} '
+          'recovery=${result.recoveryPassed} '
+          'max_ctx=${result.maxObservedContext} '
+          'pressure=${result.worstPressure} '
+          'stopped_early=${result.stoppedEarly}',
+        );
+      } on LocalModelBenchmarkCriticalResourceException {
+        rethrow;
+      } catch (error, stackTrace) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_MEMORY_CONTEXT_FAILED] '
+          'model=${model.effectiveRuntimeModelId} '
+          'error=$error stack=$stackTrace',
+        );
+        if (!continueOnModelError) rethrow;
+        failures.add(
+          LocalModelBenchmarkFailure(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            error: error.toString(),
+          ),
+        );
+      }
+    }
+
+    final diagnostics = GitHubDiagnostics.instance;
+    await diagnostics.initialize();
+    if (diagnostics.enabled) {
+      await Future<void>.delayed(Duration.zero);
+      await diagnostics.sync();
+    }
+
+    return LocalModelMemoryContextReport(
+      createdAt: DateTime.now(),
+      models:
+          List<LocalModelMemoryContextModelResult>.unmodifiable(modelResults),
+      failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+    );
+  }
+
   Future<LocalModelPerformanceReport> runPerformanceBenchmark({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
@@ -1597,6 +1995,7 @@ class LocalModelBenchmarkRunner {
     var observedGpuLayers = 0;
     var observedBatch = 0;
     var observedMicroBatch = 0;
+    var observedContext = 0;
 
     final sessionId =
         'debug-bench-${model.effectiveRuntimeModelId}-${benchmarkCase.id}-'
@@ -1625,6 +2024,7 @@ class LocalModelBenchmarkRunner {
       final gpuLayers = native['gpu_layers'] ?? 0;
       final batch = native['batch'] ?? 0;
       final microBatch = native['micro_batch'] ?? 0;
+      final context = native['context'] ?? 0;
       if (prefillMs >= 0) {
         observedPrefillMs = prefillMs;
       }
@@ -1636,6 +2036,9 @@ class LocalModelBenchmarkRunner {
       }
       if (microBatch > observedMicroBatch) {
         observedMicroBatch = microBatch;
+      }
+      if (context > observedContext) {
+        observedContext = context;
       }
 
       if (chunk.runtimeNotice != null) {
@@ -1707,6 +2110,7 @@ class LocalModelBenchmarkRunner {
       observedGpuLayers: observedGpuLayers,
       observedBatch: observedBatch,
       observedMicroBatch: observedMicroBatch,
+      observedContext: observedContext,
       startPressure: startSample?.pressure ?? 'unknown',
       endPressure: endSample?.pressure ?? 'unknown',
       startAvailableBytes: startSample?.availableBytes,
