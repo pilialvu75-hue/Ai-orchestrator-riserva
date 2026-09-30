@@ -241,6 +241,14 @@ void Win32Window::SetChildContent(HWND content) {
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
 
+  // Win7 physical testing reached Flutter's first-frame callback while the
+  // parent remained black. Make the child HWND visibility explicit and force
+  // a paint instead of relying on implicit visibility/composition behavior.
+  ShowWindow(content, SW_SHOW);
+  RedrawWindow(content, nullptr, nullptr,
+               RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+  UpdateWindow(content);
+
   SetFocus(child_content_);
 }
 
