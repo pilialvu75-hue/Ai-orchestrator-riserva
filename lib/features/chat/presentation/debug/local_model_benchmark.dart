@@ -992,6 +992,11 @@ class LocalModelBenchmarkRunner {
   static const int _maxTokens = 96;
   static const double _temperature = 0.5;
   static const Duration _betweenCases = Duration(milliseconds: 350);
+  static const int _benchmarkLoadReserveFloorBytes = 512 * 1024 * 1024;
+  static const int _benchmarkLoadReserveDivisor = 3;
+  static const int _benchmarkPreflightSamples = 3;
+  static const Duration _benchmarkPreflightSampleDelay =
+      Duration(milliseconds: 200);
   static const List<int> vulkanSweepProfiles = <int>[0, 10, 99];
   static const int vulkanSweepRepetitions = 2;
 
@@ -1005,6 +1010,32 @@ class LocalModelBenchmarkRunner {
       (model.localPath?.trim().isNotEmpty ?? false) &&
       (model.validationStatus == ModelValidationStatus.validatedOk ||
           model.validationStatus == ModelValidationStatus.updateAvailable);
+
+  /// Conservative free-memory budget used before a benchmark loads a new GGUF.
+  ///
+  /// Loading can temporarily require substantially more than the GGUF file
+  /// itself because runtime buffers, KV cache and GPU/Vulkan staging coexist
+  /// with the mapped weights. The reserve is intentionally conservative for
+  /// automatic multi-model sweeps; a skipped model remains visible/selectable
+  /// in the UI and can be retried on hardware with more headroom.
+  static int minimumAvailableBytesForSafeBenchmarkLoad(AiModel model) {
+    final proportionalReserve = model.sizeBytes ~/ _benchmarkLoadReserveDivisor;
+    final reserve = proportionalReserve > _benchmarkLoadReserveFloorBytes
+        ? proportionalReserve
+        : _benchmarkLoadReserveFloorBytes;
+    return model.sizeBytes + reserve;
+  }
+
+  static bool hasSafeBenchmarkLoadHeadroom(
+    AiModel model,
+    ResourceSample? sample,
+  ) {
+    if (sample == null) return true;
+    if (sample.critical) return false;
+    final available = sample.availableBytes;
+    if (available == null || available <= 0) return true;
+    return available >= minimumAvailableBytesForSafeBenchmarkLoad(model);
+  }
 
   static const List<LocalModelBenchmarkCase> cases =
       <LocalModelBenchmarkCase>[
@@ -1441,6 +1472,25 @@ class LocalModelBenchmarkRunner {
       final model = targets[modelIndex];
 
       try {
+        final preflightFailure = await _prepareModelForBenchmarkLoad(model);
+        if (preflightFailure != null) {
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_MODEL_BENCH_MODEL_SKIPPED] '
+            'model=${model.effectiveRuntimeModelId} '
+            'reason=$preflightFailure',
+          );
+          failures.add(
+            LocalModelBenchmarkFailure(
+              modelId: model.effectiveRuntimeModelId,
+              catalogModelId: model.id,
+              displayName: model.displayName,
+              error: preflightFailure,
+            ),
+          );
+          onProgress?.call('${model.displayName} saltato: memoria insufficiente');
+          continue;
+        }
+
         final caseResults = <LocalModelBenchmarkCaseResult>[];
 
         RuntimeEventLog.instance.emit(
@@ -2336,6 +2386,56 @@ class LocalModelBenchmarkRunner {
       failures: List<VulkanLayerSweepFailure>.unmodifiable(failures),
     );
   }
+  Future<String?> _prepareModelForBenchmarkLoad(AiModel model) async {
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    if (androidRuntime == null) return null;
+
+    // Multi-model benchmarks must not measure the next load while the previous
+    // model still owns native/Vulkan memory. This also gives Android a stable
+    // point at which to report realistic free-memory headroom.
+    await androidRuntime.resetBenchmarkNativeSessions();
+
+    ResourceSample? bestSample;
+    for (var attempt = 0; attempt < _benchmarkPreflightSamples; attempt++) {
+      final sample = await _resourceMonitor.sample();
+      if (sample != null &&
+          (bestSample == null ||
+              (sample.availableBytes ?? -1) >
+                  (bestSample.availableBytes ?? -1))) {
+        bestSample = sample;
+      }
+      if (attempt + 1 < _benchmarkPreflightSamples) {
+        await Future<void>.delayed(_benchmarkPreflightSampleDelay);
+      }
+    }
+
+    final sample = bestSample;
+    final required = minimumAvailableBytesForSafeBenchmarkLoad(model);
+    final available = sample?.availableBytes;
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_BENCH_PREFLIGHT] '
+      'model=${model.effectiveRuntimeModelId} '
+      'model_bytes=${model.sizeBytes} '
+      'required_available_bytes=$required '
+      'available_bytes=${available ?? -1} '
+      'total_bytes=${sample?.totalBytes ?? -1} '
+      'pressure=${sample?.pressure ?? 'unknown'}',
+    );
+
+    if (sample?.critical == true) {
+      return 'Saltato per sicurezza: pressione memoria critica prima del caricamento.';
+    }
+    if (!hasSafeBenchmarkLoadHeadroom(model, sample)) {
+      return 'Saltato per sicurezza: GGUF ${model.sizeBytes} byte, '
+          'servono almeno $required byte liberi prima del caricamento, '
+          'disponibili ${available ?? -1}.';
+    }
+    return null;
+  }
+
   Future<List<AiModel>> _resolveTargets(
     Iterable<String>? requestedModelIds,
   ) async {
