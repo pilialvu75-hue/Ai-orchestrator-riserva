@@ -69,8 +69,13 @@ final class WorkshopChatController extends ChangeNotifier {
         'Se il messaggio corrente e in italiano, rispondi in italiano; non '
         'tradurlo in portoghese, spagnolo o altre lingue. Non chiedere conferma '
         'nella risposta: la conferma e gestita dall\'interfaccia del Cantiere. '
-        'Non dichiarare mai che qualcosa e stato costruito, testato o compilato '
-        'se non e realmente avvenuto.',
+        'La risposta conversazionale deve restare breve e completa: una proposta '
+        'deve descrivere il comportamento, i componenti principali e i criteri '
+        'essenziali in massimo circa 180 parole. Non scrivere codice sorgente, '
+        'JSON o blocchi Markdown nella proposta conversazionale: il codice viene '
+        'prodotto separatamente dall\'Engineer. Termina sempre l\'ultima frase '
+        'in modo completo. Non dichiarare mai che qualcosa e stato costruito, '
+        'testato o compilato se non e realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'
@@ -80,6 +85,8 @@ final class WorkshopChatController extends ChangeNotifier {
   final WorkshopInferenceGateway _inferenceGateway;
   final String _sessionId;
   final String _systemPrompt;
+
+  static const int _defaultConversationMaxTokens = 384;
 
   final List<ChatTurn> _messages = <ChatTurn>[];
 
@@ -186,20 +193,52 @@ final class WorkshopChatController extends ChangeNotifier {
               ),
       );
 
-      final result =
+      final effectiveMaxTokens =
+          maxTokens ?? _defaultConversationMaxTokens;
+      var result =
           await _inferenceGateway.complete(
         prompt: normalizedMessage,
         systemPrompt: _systemPrompt,
         context: context,
         sessionId: _sessionId,
         isOffline: isOffline,
-        maxTokens: maxTokens,
+        maxTokens: effectiveMaxTokens,
         temperature: temperature,
         topP: topP,
         repeatPenalty: repeatPenalty,
         modelId: modelId,
         modelPath: modelPath,
       );
+
+      if (_looksTruncated(
+        result,
+        maxTokens: effectiveMaxTokens,
+      )) {
+        result = await _inferenceGateway.complete(
+          prompt: normalizedMessage,
+          systemPrompt: _truncationRetrySystemPrompt,
+          context: context,
+          sessionId: '$_sessionId:retry-truncated-1',
+          isOffline: isOffline,
+          maxTokens: effectiveMaxTokens,
+          temperature: temperature ?? 0.2,
+          topP: topP,
+          repeatPenalty: repeatPenalty,
+          modelId: modelId,
+          modelPath: modelPath,
+        );
+
+        if (_looksTruncated(
+          result,
+          maxTokens: effectiveMaxTokens,
+        )) {
+          _lastError =
+              'La risposta del Cantiere si e interrotta prima di completarsi. '
+              'Riprova.';
+          _removeLastUserTurn();
+          return null;
+        }
+      }
 
       if (result.runtimeNotice != null &&
           result.runtimeNotice!
@@ -260,6 +299,212 @@ final class WorkshopChatController extends ChangeNotifier {
       _setBusy(false);
     }
   }
+
+  static bool _looksTruncated(
+    WorkshopInferenceResult result, {
+    required int maxTokens,
+  }) {
+    if (!result.isSuccessful || !result.hasText) return false;
+
+    final text = result.text.trim();
+    if (text.isEmpty) return false;
+
+    final codeFenceCount = RegExp(r'```').allMatches(text).length;
+    if (codeFenceCount.isOdd) return true;
+
+    final saturated =
+        maxTokens > 0 && result.tokensGenerated >= maxTokens - 2;
+    if (saturated) return true;
+
+    final upper = text.toUpperCase();
+    final body = upper.startsWith('PROPOSAL:')
+        ? text.substring('PROPOSAL:'.length).trim()
+        : upper.startsWith('CLARIFY:')
+            ? text.substring('CLARIFY:'.length).trim()
+            : text;
+
+    if (body.length < 120) return false;
+
+    return !RegExp(r'''[.!?…;:)"'\]\}]
+    final normalized = rawText.trim();
+    final upper = normalized.toUpperCase();
+
+    const clarifyPrefix = 'CLARIFY:';
+    const proposalPrefix = 'PROPOSAL:';
+
+    if (upper.startsWith(clarifyPrefix)) {
+      final content = normalized.substring(clarifyPrefix.length).trim();
+      return _WorkshopParsedReply(
+        kind: WorkshopChatReplyKind.clarification,
+        content: content.isEmpty ? normalized : content,
+      );
+    }
+
+    if (upper.startsWith(proposalPrefix)) {
+      final content = normalized.substring(proposalPrefix.length).trim();
+      return _WorkshopParsedReply(
+        kind: content.isEmpty
+            ? WorkshopChatReplyKind.clarification
+            : WorkshopChatReplyKind.proposal,
+        content: content.isEmpty ? normalized : content,
+      );
+    }
+
+    // Conservative compatibility fallback for models/builds that do not yet
+    // obey the explicit reply prefix. A response ending as a direct question
+    // is not safe to treat as an owner-approvable production proposal.
+    return _WorkshopParsedReply(
+      kind: normalized.endsWith('?')
+          ? WorkshopChatReplyKind.clarification
+          : WorkshopChatReplyKind.proposal,
+      content: normalized,
+    );
+  }
+
+  static bool _isTechnicalRuntimeError(String? rawError) {
+    final normalized = rawError?.trim();
+    return normalized != null &&
+        normalized.startsWith('AI_RUNTIME_ERROR|');
+  }
+
+  static String _userFacingInferenceError(String? rawError) {
+    final normalized = rawError?.trim();
+
+    if (normalized == null || normalized.isEmpty) {
+      return 'Il modello del Cantiere ha restituito un errore. Riprova.';
+    }
+
+    if (!normalized.startsWith('AI_RUNTIME_ERROR|')) {
+      return normalized;
+    }
+
+    if (normalized.contains('|stage=stalled|')) {
+      return 'Il modello del Cantiere si e fermato durante l\'elaborazione. '
+          'Riprova.';
+    }
+
+    if (normalized.contains('|stage=timeout|')) {
+      return 'Il modello del Cantiere ha impiegato troppo tempo a rispondere. '
+          'Riprova.';
+    }
+
+    if (normalized.contains('|stage=cancelled|')) {
+      return 'L\'elaborazione del Cantiere e stata annullata.';
+    }
+
+    return 'Il runtime del Cantiere non ha completato la risposta. Riprova.';
+  }
+
+  /// Aggiunge un turno di sistema visibile nella conversazione.
+  ///
+  /// I turni inseriti con [excludeFromContext] non vengono inviati al modello
+  /// nei messaggi successivi.
+  void addSystemMessage(
+    String message, {
+    bool excludeFromContext = true,
+  }) {
+    _ensureNotDisposed();
+
+    final normalizedMessage =
+        message.trim();
+
+    if (normalizedMessage.isEmpty) {
+      return;
+    }
+
+    _messages.add(
+      ChatTurn(
+        role: ChatRole.system,
+        content: normalizedMessage,
+        excludeFromContext: excludeFromContext,
+      ),
+    );
+
+    notifyListeners();
+  }
+
+  /// Cancella esclusivamente la memoria conversazionale della sessione.
+  ///
+  /// NON cancella la memoria persistente del progetto.
+  ///
+  /// Questo metodo implementa la regola:
+  ///
+  ///   fine sessione
+  ///        ↓
+  ///   memoria chat temporanea azzerata
+  ///
+  /// La Project Memory sarà gestita da un componente separato.
+  void clearConversation() {
+    _ensureNotDisposed();
+
+    _messages.clear();
+
+    _lastError = null;
+    _lastRuntimeNotice = null;
+    _lastModel = null;
+    _lastReplyKind = null;
+
+    notifyListeners();
+  }
+
+  /// Rimuove l'ultimo messaggio utente quando una richiesta non ha prodotto
+  /// una risposta valida.
+  ///
+  /// In questo modo la conversazione non conserva una richiesta che
+  /// il Cantiere non è riuscito a prendere in carico.
+  void _removeLastUserTurn() {
+    if (_messages.isNotEmpty &&
+        _messages.last.role ==
+            ChatRole.user) {
+      _messages.removeLast();
+    }
+
+    _lastReplyKind = null;
+    notifyListeners();
+  }
+
+  void _setBusy(
+    bool busy,
+  ) {
+    if (_disposed) {
+      return;
+    }
+
+    _isBusy = busy;
+    notifyListeners();
+  }
+
+  void _ensureNotDisposed() {
+    if (_disposed) {
+      throw StateError(
+        'WorkshopChatController has been disposed.',
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_disposed) {
+      return;
+    }
+
+    _disposed = true;
+
+    _messages.clear();
+
+    super.dispose();
+  }
+}
+'').hasMatch(body);
+  }
+
+  static const String _truncationRetrySystemPrompt =
+      'Sei il Cantiere. La risposta precedente si e interrotta prima di '
+      'completarsi. Rispondi di nuovo nella stessa lingua usando esattamente '
+      'CLARIFY: oppure PROPOSAL:. Mantieni la risposta entro circa 140 parole, '
+      'senza codice sorgente, JSON o blocchi Markdown, e termina ogni frase. '
+      'Descrivi solo il piu piccolo MVP richiesto; non dichiarare che sia gia '
+      'stato costruito o testato.';
 
   static _WorkshopParsedReply _parseReply(String rawText) {
     final normalized = rawText.trim();
