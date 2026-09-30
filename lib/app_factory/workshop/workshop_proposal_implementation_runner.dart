@@ -428,7 +428,12 @@ Use only workspaceFiles as existing file content. replaceableTargets, when
 present, are existing oversized starter files intentionally omitted from the
 prompt for a create task; you may replace those paths only with complete
 resulting file content, never infer or partially preserve their omitted prior
-content. The explicit task instruction and constraints are authoritative;
+content. The explicit task instruction and constraints are authoritative.
+UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
+or constraints verbatim unless the task explicitly asks to rename it. This
+includes button labels, titles, field labels, units and short symbols. Do not
+"improve" "+" into "+1", rename "Azzera", or otherwise substitute a visible
+string just because it seems equivalent.
 architectPlan is implementation guidance and must not override them. When
 request.targetFiles is non-empty it is a HARD ALLOWLIST: every changes[].path
 MUST be exactly one of those paths. Never invent, split into, or add a
@@ -453,7 +458,12 @@ explicitly request verified sensor integration.
 '''.trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
-The explicit task instruction and constraints are authoritative. The Architect
+The explicit task instruction and constraints are authoritative.
+UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
+or constraints verbatim unless the task explicitly asks to rename it. This
+includes button labels, titles, field labels, units and short symbols. Do not
+"improve" "+" into "+1", rename "Azzera", or otherwise substitute a visible
+string just because it seems equivalent. The Architect
 plan is model-authored implementation guidance and must not override or
 contradict the explicit task. If request.targetFiles is empty for an initial
 create task, paths were not preselected; it does not mean no file may be
