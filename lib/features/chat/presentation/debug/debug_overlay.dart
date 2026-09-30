@@ -1212,10 +1212,14 @@ class _DebugOverlayState
           final model = selected[result.catalogModelId];
           if (model == null) continue;
 
+          final memoryScore =
+              LocalBenchmarkScoring.memoryContextScore(result);
+          if (memoryScore == null) continue;
+
           await _benchmarkScoreStore.saveComponent(
             model: model,
             component: LocalBenchmarkComponent.memoryContext,
-            score: LocalBenchmarkScoring.memoryContextScore(result),
+            score: memoryScore,
             updatedAt: completed.createdAt,
           );
         }
@@ -1237,9 +1241,22 @@ class _DebugOverlayState
       ..writeln('pressure=normal:20 high:10 unknown/critical:0');
 
     for (final model in report.models) {
+      final memoryScore = LocalBenchmarkScoring.memoryContextScore(model);
+      final reason = model.stoppedEarly
+          ? 'test interrotto: ${model.stopReason ?? 'errore'}'
+          : model.worstPressure == 'unknown'
+              ? 'telemetria RAM assente'
+              : model.worstPressure == 'critical'
+                  ? 'pressione RAM critica'
+                  : model.attemptedContextLevels !=
+                          LocalModelBenchmarkRunner
+                              .memoryContextTargetCharacters.length
+                      ? 'livelli incompleti'
+                      : null;
       buffer.writeln(
-        '${model.displayName}: '
-        '${LocalBenchmarkScoring.memoryContextScore(model)}/100',
+        memoryScore == null
+            ? '${model.displayName}: n/a (${reason ?? 'test non valido'})'
+            : '${model.displayName}: $memoryScore/100',
       );
     }
 
