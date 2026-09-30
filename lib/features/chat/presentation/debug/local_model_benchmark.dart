@@ -1462,6 +1462,7 @@ class LocalModelBenchmarkRunner {
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_BEGIN] models=${targets.map((m) => m.effectiveRuntimeModelId).join(',')} '
+      'catalogs=${targets.map((m) => m.id).join(',')} '
       'cases=${selectedCases.length} max_tokens=$_maxTokens temperature=$_temperature',
     );
 
@@ -1496,6 +1497,7 @@ class LocalModelBenchmarkRunner {
           RuntimeEventLog.instance.emit(
             '[LOCAL_MODEL_BENCH_CASE] '
             'model=${model.effectiveRuntimeModelId} '
+            'catalog=${model.id} '
             'case=${benchmarkCase.id} '
             'score=${result.score}/${result.maxScore} '
             'forbidden_hits=${result.forbiddenHits} '
@@ -1532,6 +1534,7 @@ class LocalModelBenchmarkRunner {
         RuntimeEventLog.instance.emit(
           '[LOCAL_MODEL_BENCH_MODEL_END] '
           'model=${model.effectiveRuntimeModelId} '
+          'catalog=${model.id} '
           'quality=${modelResult.score}/${modelResult.maxScore} '
           'avg_first_content_ms=${modelResult.averageFirstContentMs.toStringAsFixed(0)} '
           'avg_total_ms=${modelResult.averageTotalMs.toStringAsFixed(0)} '
