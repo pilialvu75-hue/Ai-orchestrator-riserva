@@ -64,7 +64,7 @@ class _GitHubDiagnosticsPageState extends State<GitHubDiagnosticsPage> {
           Text('Ultimo invio riuscito: ${_service.lastUpload?.toLocal() ?? "mai"}'),
           const SizedBox(height: 12),
           const Text('Invia automaticamente eventi tecnici filtrati da Runtime Diagnostics e dal log crash su disco. '
-            'I dati pubblicati sono pubblici. Testi delle chat, percorsi, token e messaggi liberi delle eccezioni restano sul telefono.'),
+            'I dati pubblicati sono pubblici. Testi delle chat, percorsi, token e messaggi liberi delle eccezioni restano sul dispositivo.'),
           const SizedBox(height: 12),
           const Text('File fino a 1 MiB, archivio fino a 20 MiB per dispositivo. latest.txt contiene fino a 250 KiB. '
             'Invio ogni minuto mentre l’app è attiva; dopo un crash riprende al riavvio. '
