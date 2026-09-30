@@ -1258,6 +1258,25 @@ class LocalModelBenchmarkRunner {
   );
 
   static const int performanceWarmRepetitions = 2;
+  static const int stabilityConsecutiveRepetitions = 5;
+  static const LocalModelBenchmarkCase stabilityCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_exact',
+    prompt: 'Rispondi esattamente con STABLE-OK.',
+    exactAnswers: <String>['stable-ok'],
+  );
+  static const LocalModelBenchmarkCase stabilityRecoveryCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_recovery',
+    prompt: 'Rispondi esattamente con RECOVERY-OK.',
+    exactAnswers: <String>['recovery-ok'],
+  );
+  static const LocalModelBenchmarkCase stabilitySwitchCase =
+      LocalModelBenchmarkCase(
+    id: 'stability_switch',
+    prompt: 'Rispondi esattamente con SWITCH-OK.',
+    exactAnswers: <String>['switch-ok'],
+  );
   static const int thermalStressRepetitions = 10;
   static const List<int> memoryContextTargetCharacters = <int>[
     1200,
