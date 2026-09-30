@@ -1,0 +1,3 @@
+LIBRARY dxg7
+EXPORTS
+  CreateDXGIFactory2=CompatCreateDXGIFactory2

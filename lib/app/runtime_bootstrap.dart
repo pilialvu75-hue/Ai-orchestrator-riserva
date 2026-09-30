@@ -21,12 +21,31 @@ import 'package:ai_orchestrator/injection_container.dart' as di;
 class RuntimeBootstrap {
   const RuntimeBootstrap();
 
+  static Future<void>? _servicesInitialization;
+
   static const String _versionFallback = '1.0.12+12';
   static const VersionParser _versionParser = VersionParser();
 
   Future<void> initialize() async {
     debugPrint('[BOOT] init begin');
     RuntimeEventLog.instance.emit('[FORENSIC_DIAGNOSTICS_PIPELINE_VERIFIED]');
+
+    _servicesInitialization ??= _initializeServices();
+    try {
+      await _servicesInitialization;
+    } catch (_) {
+      // A one-time service bootstrap failure must be retryable. Clear only the
+      // failed Future; successful service initialization is preserved so Retry
+      // does not register GetIt services a second time after a warmup failure.
+      _servicesInitialization = null;
+      rethrow;
+    }
+
+    await _runWarmupChecks();
+    debugPrint('[BOOT] init complete');
+  }
+
+  Future<void> _initializeServices() async {
     final appVersion = await _resolveAppVersion();
 
     const openAiApiKey = String.fromEnvironment('OPENAI_API_KEY');
@@ -86,9 +105,6 @@ class RuntimeBootstrap {
     );
 
     await CloudRoutingBootstrap.configure(di.sl);
-
-    await _runWarmupChecks();
-    debugPrint('[BOOT] init complete');
   }
 
   Future<void> _initializeCustomCloudProviders() async {
