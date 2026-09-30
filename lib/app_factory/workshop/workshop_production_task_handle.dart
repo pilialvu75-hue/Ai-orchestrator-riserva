@@ -37,6 +37,13 @@ final class WorkshopProductionTaskCoordinator {
 
   final WorkshopProductionLifecycleBundle _bundle;
 
+  /// Process-wide coalescing for the same final build while it is still in
+  /// flight. Different UI/page/coordinator instances can observe the same
+  /// authoritative project, so an instance-local busy flag is not sufficient
+  /// to prevent duplicate remote dispatches.
+  static final Map<String, Future<WorkshopBuildResult>> _inFlightFinalBuilds =
+      <String, Future<WorkshopBuildResult>>{};
+
   /// Starts a project and prepares exactly its next task without running model
   /// inference and without mutating the real workspace.
   Future<WorkshopProductionTaskHandle> startAndPrepare({
@@ -350,6 +357,56 @@ final class WorkshopProductionTaskCoordinator {
       );
     }
 
+    final buildKey = _finalBuildKey(
+      plan: plan,
+      workspaceRootPath: workspaceRootPath,
+      target: target,
+      mode: mode,
+      runTests: runTests,
+      runAnalyzer: runAnalyzer,
+      runFormatter: runFormatter,
+      cleanBuild: cleanBuild,
+      arguments: arguments,
+    );
+
+    final alreadyRunning = _inFlightFinalBuilds[buildKey];
+    if (alreadyRunning != null) {
+      return alreadyRunning;
+    }
+
+    final buildFuture = _runFinalBuildOnce(
+      plan: plan,
+      workspaceRootPath: workspaceRootPath,
+      target: target,
+      mode: mode,
+      runTests: runTests,
+      runAnalyzer: runAnalyzer,
+      runFormatter: runFormatter,
+      cleanBuild: cleanBuild,
+      arguments: arguments,
+    );
+    _inFlightFinalBuilds[buildKey] = buildFuture;
+
+    try {
+      return await buildFuture;
+    } finally {
+      if (identical(_inFlightFinalBuilds[buildKey], buildFuture)) {
+        _inFlightFinalBuilds.remove(buildKey);
+      }
+    }
+  }
+
+  Future<WorkshopBuildResult> _runFinalBuildOnce({
+    required WorkshopProjectPlan plan,
+    required String workspaceRootPath,
+    required WorkshopBuildTarget target,
+    required WorkshopBuildExecutionMode mode,
+    required bool runTests,
+    required bool runAnalyzer,
+    required bool runFormatter,
+    required bool cleanBuild,
+    required List<String> arguments,
+  }) async {
     final result = await _bundle.dashboardController.buildProject(
       projectPath: workspaceRootPath,
       target: target,
@@ -376,6 +433,30 @@ final class WorkshopProductionTaskCoordinator {
     }
 
     return result;
+  }
+
+  static String _finalBuildKey({
+    required WorkshopProjectPlan plan,
+    required String workspaceRootPath,
+    required WorkshopBuildTarget target,
+    required WorkshopBuildExecutionMode mode,
+    required bool runTests,
+    required bool runAnalyzer,
+    required bool runFormatter,
+    required bool cleanBuild,
+    required List<String> arguments,
+  }) {
+    return <Object>[
+      plan.effectiveWorkspaceProjectId,
+      workspaceRootPath,
+      target.name,
+      mode.name,
+      runTests,
+      runAnalyzer,
+      runFormatter,
+      cleanBuild,
+      arguments.join('\u001f'),
+    ].join('\u001e');
   }
 
   Future<String?> _stageCertifiedLibraryReuseIfAvailable({
