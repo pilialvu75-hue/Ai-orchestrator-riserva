@@ -390,21 +390,21 @@ class LocalModelStabilityReport {
   String toPlainText() {
     final buffer = StringBuffer()
       ..writeln('LOCAL MODEL STABILITY BENCHMARK')
-      ..writeln('created_at=\${createdAt.toIso8601String()}')
+      ..writeln('created_at=${createdAt.toIso8601String()}')
       ..writeln();
 
     for (final model in models) {
       buffer
-        ..writeln('\${model.displayName} [\${model.modelId}]')
+        ..writeln('${model.displayName} [${model.modelId}]')
         ..writeln(
-          'consecutive_passed=\${model.consecutivePassed}/'
-          '\${LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions} '
-          'session_reuse=\${model.sessionReuseConfirmed} '
-          'cancel_confirmed=\${model.cancellationConfirmed} '
-          'cancel_recovery=\${model.cancellationRecoveryPassed} '
-          'switch_recovery=\${model.switchRecoveryPassed} '
-          'switch_partner=\${model.switchPartnerModelId ?? 'none'} '
-          'pressure=\${model.worstPressure}',
+          'consecutive_passed=${model.consecutivePassed}/'
+          '${LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions} '
+          'session_reuse=${model.sessionReuseConfirmed} '
+          'cancel_confirmed=${model.cancellationConfirmed} '
+          'cancel_recovery=${model.cancellationRecoveryPassed} '
+          'switch_recovery=${model.switchRecoveryPassed} '
+          'switch_partner=${model.switchPartnerModelId ?? 'none'} '
+          'pressure=${model.worstPressure}',
         )
         ..writeln();
     }
@@ -413,7 +413,7 @@ class LocalModelStabilityReport {
       buffer.writeln('failures:');
       for (final failure in failures) {
         buffer.writeln(
-          '- \${failure.displayName} [\${failure.modelId}]: \${failure.error}',
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
         );
       }
     }
@@ -1711,7 +1711,7 @@ class LocalModelBenchmarkRunner {
     final failures = <LocalModelBenchmarkFailure>[];
 
     RuntimeEventLog.instance.emit(
-      '[LOCAL_MODEL_STABILITY_BEGIN] models=\${targets.length} '
+      '[LOCAL_MODEL_STABILITY_BEGIN] models=${targets.length} '
       'consecutive=$stabilityConsecutiveRepetitions',
     );
 
@@ -1729,8 +1729,8 @@ class LocalModelBenchmarkRunner {
               repetition <= stabilityConsecutiveRepetitions;
               repetition++) {
             onProgress?.call(
-              '\${model.displayName} consecutive '
-              '\$repetition/$stabilityConsecutiveRepetitions',
+              '${model.displayName} consecutive '
+              '$repetition/$stabilityConsecutiveRepetitions',
             );
             final result = await _runCase(
               model: model,
@@ -1749,12 +1749,12 @@ class LocalModelBenchmarkRunner {
                     (sample) => sample.sessionStart == 'warm',
                   );
 
-          onProgress?.call('\${model.displayName} cancellation');
+          onProgress?.call('${model.displayName} cancellation');
           final cancellationConfirmed =
               await _runCancellationProbe(model: model);
 
           await Future<void>.delayed(_betweenCases);
-          onProgress?.call('\${model.displayName} recovery after cancel');
+          onProgress?.call('${model.displayName} recovery after cancel');
           final cancellationRecovery = await _runCase(
             model: model,
             benchmarkCase: stabilityRecoveryCase,
@@ -1765,7 +1765,7 @@ class LocalModelBenchmarkRunner {
 
           await Future<void>.delayed(_betweenCases);
           onProgress?.call(
-            '\${model.displayName} switch -> \${partner.displayName}',
+            '${model.displayName} switch -> ${partner.displayName}',
           );
           final partnerSwitch = await _runCase(
             model: partner,
@@ -1776,7 +1776,7 @@ class LocalModelBenchmarkRunner {
               partnerSwitch.score == partnerSwitch.maxScore;
 
           await Future<void>.delayed(_betweenCases);
-          onProgress?.call('\${model.displayName} switch recovery');
+          onProgress?.call('${model.displayName} switch recovery');
           final switchRecovery = await _runCase(
             model: model,
             benchmarkCase: stabilityRecoveryCase,
@@ -1802,23 +1802,23 @@ class LocalModelBenchmarkRunner {
 
           RuntimeEventLog.instance.emit(
             '[LOCAL_MODEL_STABILITY_MODEL_END] '
-            'model=\${model.effectiveRuntimeModelId} '
-            'consecutive=\${modelResult.consecutivePassed}/'
+            'model=${model.effectiveRuntimeModelId} '
+            'consecutive=${modelResult.consecutivePassed}/'
             '$stabilityConsecutiveRepetitions '
-            'reuse=\$sessionReuseConfirmed '
-            'cancel=\$cancellationConfirmed '
-            'cancel_recovery=\$cancellationRecoveryPassed '
-            'switch_recovery=\$switchRecoveryPassed '
-            'partner=\${partner.effectiveRuntimeModelId} '
-            'pressure=\${modelResult.worstPressure}',
+            'reuse=$sessionReuseConfirmed '
+            'cancel=$cancellationConfirmed '
+            'cancel_recovery=$cancellationRecoveryPassed '
+            'switch_recovery=$switchRecoveryPassed '
+            'partner=${partner.effectiveRuntimeModelId} '
+            'pressure=${modelResult.worstPressure}',
           );
         } on LocalModelBenchmarkCriticalResourceException {
           rethrow;
         } catch (error, stackTrace) {
           RuntimeEventLog.instance.emit(
             '[LOCAL_MODEL_STABILITY_FAILED] '
-            'model=\${model.effectiveRuntimeModelId} '
-            'error=\$error stack=\$stackTrace',
+            'model=${model.effectiveRuntimeModelId} '
+            'error=$error stack=$stackTrace',
           );
           if (!continueOnModelError) rethrow;
           failures.add(
