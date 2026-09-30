@@ -639,7 +639,11 @@ class _DebugOverlayState
                           subtitle:
                               'Inferenze consecutive, session reuse, switch '
                               'modello e cancellazione.',
-                          available: false,
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runStabilityBenchmark());
+                          },
                         ),
                       ],
                     ),
@@ -1637,6 +1641,172 @@ class _DebugOverlayState
     );
   }
 
+  Future<void> _runStabilityBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.length < 2) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Stabilita richiede almeno due modelli locali pronti '
+            'per verificare lo switch modello.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    LocalModelStabilityReport? report;
+
+    await _runTest(
+      testId: 'local_model_stability_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 12).clamp(25, 150).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.runStabilityBenchmark(
+          modelIds: runnable.map((model) => model.id),
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Stabilita • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final score = LocalBenchmarkScoring.stabilityScore(result);
+          if (score == null) continue;
+          final model = byId[result.catalogModelId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.stability,
+            score: score,
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showStabilityBenchmarkReport(report!);
+  }
+
+  Future<void> _showStabilityBenchmarkReport(
+    LocalModelStabilityReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK STABILITA')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln();
+
+    for (final model in report.models) {
+      final score = LocalBenchmarkScoring.stabilityScore(model);
+      buffer
+        ..writeln('${model.displayName} [${model.modelId}]')
+        ..writeln(
+          'stability_score=${score == null ? 'n/a' : '$score/100'} '
+          'consecutive=${model.consecutivePassed}/'
+          '${LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions}',
+        )
+        ..writeln(
+          'session_reuse=${model.sessionReuseConfirmed} '
+          'cancel_confirmed=${model.cancellationConfirmed} '
+          'cancel_recovery=${model.cancellationRecoveryPassed} '
+          'switch_recovery=${model.switchRecoveryPassed}',
+        )
+        ..writeln(
+          'switch_partner=${model.switchPartnerModelId ?? 'none'} '
+          'pressure=${model.worstPressure}',
+        )
+        ..writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Stabilita',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Benchmark stabilita copiato negli appunti',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
   Future<void> _showOrchestratorBenchmarkModelPicker() async {
     final modelIds = await _pickBenchmarkModels(
       title: 'Benchmark Orchestratore',
