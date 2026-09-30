@@ -206,6 +206,8 @@ EXPORTS
   SystemTimeToTzSpecificLocalTime=KERNEL32.SystemTimeToTzSpecificLocalTime
   GetTimeZoneInformation=KERNEL32.GetTimeZoneInformation
   GetSystemTimeAsFileTime=KERNEL32.GetSystemTimeAsFileTime
+  SystemTimeToFileTime=KERNEL32.SystemTimeToFileTime
+  TzSpecificLocalTimeToSystemTime=KERNEL32.TzSpecificLocalTimeToSystemTime
   CreateFileA=KERNEL32.CreateFileA
   VirtualFree=KERNEL32.VirtualFree
   GetSystemInfo=KERNEL32.GetSystemInfo
