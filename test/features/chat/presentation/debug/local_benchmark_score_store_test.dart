@@ -470,6 +470,83 @@ void main() {
     expect(LocalBenchmarkScoring.memoryContextScore(result), isNull);
   });
 
+  test('multilingual score averages four equal language subscores', () {
+    LocalModelBenchmarkCaseResult item(
+      String id, {
+      required int score,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: id,
+          response: 'ok',
+          score: score,
+          maxScore: 1,
+          forbiddenHits: 0,
+          firstContentMs: 1000,
+          totalMs: 2000,
+          reportedTokens: 8,
+          prefillMs: 500,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          observedContext: 2048,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1700,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        item('multilingual_it_exact', score: 1),
+        item('multilingual_it_fact', score: 1),
+        item('multilingual_en_exact', score: 1),
+        item('multilingual_en_fact', score: 0),
+        item('multilingual_fr_exact', score: 1),
+        item('multilingual_fr_fact', score: 1),
+        item('multilingual_es_exact', score: 0),
+        item('multilingual_es_fact', score: 0),
+      ],
+    );
+
+    expect(
+      LocalBenchmarkScoring.multilingualLanguageScore(result, 'it'),
+      100,
+    );
+    expect(
+      LocalBenchmarkScoring.multilingualLanguageScore(result, 'en'),
+      50,
+    );
+    expect(
+      LocalBenchmarkScoring.multilingualLanguageScore(result, 'fr'),
+      100,
+    );
+    expect(
+      LocalBenchmarkScoring.multilingualLanguageScore(result, 'es'),
+      0,
+    );
+    expect(LocalBenchmarkScoring.multilingualScore(result), 63);
+  });
+
+  test('multilingual score is invalid when a language is missing', () {
+    final result = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        perfectCase(),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.multilingualScore(result), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(

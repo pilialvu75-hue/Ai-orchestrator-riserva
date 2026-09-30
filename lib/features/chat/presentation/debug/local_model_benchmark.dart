@@ -1071,6 +1071,75 @@ class LocalModelBenchmarkRunner {
     ),
   ];
 
+  static const List<LocalModelBenchmarkCase> multilingualCases =
+      <LocalModelBenchmarkCase>[
+    LocalModelBenchmarkCase(
+      id: 'multilingual_it_exact',
+      prompt:
+          'Rispondi esattamente con queste due parole, senza aggiungere '
+          'altro: cielo blu',
+      exactAnswers: <String>['cielo blu'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_it_fact',
+      prompt:
+          'Di che colore è normalmente la neve? '
+          'Rispondi con una sola parola in italiano.',
+      requiredAnyGroups: <List<String>>[
+        <String>['bianca', 'bianco'],
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_en_exact',
+      prompt:
+          'Reply with exactly these two words and nothing else: blue sky',
+      exactAnswers: <String>['blue sky'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_en_fact',
+      prompt:
+          'What color is snow normally? Answer with one English word.',
+      requiredAnyGroups: <List<String>>[
+        <String>['white'],
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_fr_exact',
+      prompt:
+          'Réponds exactement avec ces deux mots, sans rien ajouter : '
+          'ciel bleu',
+      exactAnswers: <String>['ciel bleu'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_fr_fact',
+      prompt:
+          'De quelle couleur est normalement la neige ? '
+          'Réponds avec un seul mot en français.',
+      requiredAnyGroups: <List<String>>[
+        <String>['blanche', 'blanc'],
+      ],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_es_exact',
+      prompt:
+          'Responde exactamente con estas dos palabras, sin añadir nada: '
+          'cielo azul',
+      exactAnswers: <String>['cielo azul'],
+    ),
+    LocalModelBenchmarkCase(
+      id: 'multilingual_es_fact',
+      prompt:
+          '¿De qué color es normalmente la nieve? '
+          'Responde con una sola palabra en español.',
+      requiredAnyGroups: <List<String>>[
+        <String>['blanca', 'blanco'],
+      ],
+    ),
+  ];
+
+  static const List<String> multilingualLanguages =
+      <String>['it', 'en', 'fr', 'es'];
+
   static const LocalModelBenchmarkCase performanceCase =
       LocalModelBenchmarkCase(
     id: 'performance_generation',

@@ -175,6 +175,44 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? multilingualScore(
+    LocalModelBenchmarkModelResult result,
+  ) {
+    final languageScores = <int>[];
+    for (final language in LocalModelBenchmarkRunner.multilingualLanguages) {
+      final score = multilingualLanguageScore(result, language);
+      if (score == null) return null;
+      languageScores.add(score);
+    }
+    if (languageScores.isEmpty) return null;
+    return (languageScores.reduce((a, b) => a + b) /
+            languageScores.length)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
+  static int? multilingualLanguageScore(
+    LocalModelBenchmarkModelResult result,
+    String language,
+  ) {
+    final prefix = 'multilingual_${language}_';
+    final cases = result.cases
+        .where((item) => item.caseId.startsWith(prefix))
+        .toList(growable: false);
+    if (cases.length != 2) return null;
+
+    final maxScore =
+        cases.fold<int>(0, (sum, item) => sum + item.maxScore);
+    if (maxScore <= 0) return null;
+    final score = cases.fold<int>(0, (sum, item) => sum + item.score);
+
+    return (score / maxScore * 100)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static int? thermalScore(LocalModelThermalModelResult result) {
     if (!result.thermalTelemetryComplete ||
         result.samples.isEmpty ||
