@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
+import 'package:ai_orchestrator/app/desktop/desktop_workspace_scope.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
@@ -31,7 +32,12 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({
+    super.key,
+    this.openWorkshopOnStart = false,
+  });
+
+  final bool openWorkshopOnStart;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -61,6 +67,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       interval: AppConstants.updateCheckInterval,
     ));
     unawaited(_runtimeDiagnostics.validateOnStartup());
+    if (widget.openWorkshopOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_openWorkshop(context));
+        }
+      });
+    }
   }
 
   void _onUpdateStateChanged() {
@@ -262,6 +275,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _openWorkshop(BuildContext context) async {
     if (_openingWorkshop) return;
+    DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace('Cantiere');
     setState(() => _openingWorkshop = true);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
