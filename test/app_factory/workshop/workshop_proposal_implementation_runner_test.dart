@@ -186,6 +186,62 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+
+    test('out-of-scope create file retries inside hard target allowlist',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Split counter","changes":[{"path":"lib/contatore_test.dart","type":"addition","content":"class CounterApp {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Keep counter in entrypoint","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/main.dart': 'void main() { }'},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'counter-hard-allowlist',
+          title: 'Contatore Test',
+          instruction:
+              'Create the counter app in the requested Flutter entrypoint.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(
+        engineer.prompts.first,
+        contains('"targetFilesPolicy":"hard_allowlist"'),
+      );
+      expect(engineer.prompts.first, contains('HARD ALLOWLIST'));
+      expect(engineer.prompts.last, contains('lib/contatore_test.dart'));
+      expect(
+        engineer.prompts.last,
+        contains('outside the current task targetFiles'),
+      );
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('retries a local Engineer first-token stall with compact prompt',
         () async {
       final engineer = _StaticGateway(
