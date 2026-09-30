@@ -1058,6 +1058,118 @@ void main() {
     );
   });
 
+  test('General Score ranking prefers score then suite completeness', () {
+    AiModel candidate(String id, String name) => AiModel(
+          id: id,
+          displayName: name,
+          fileName: '$id.gguf',
+          downloadUrl: '',
+          version: '1.0.0',
+          sizeBytes: 2048,
+          description: 'benchmark candidate',
+          isDownloaded: true,
+          localPath: '/models/$id.gguf',
+          validationStatus: ModelValidationStatus.validatedOk,
+        );
+
+    LocalModelBenchmarkScore scoreFor(
+      AiModel candidate,
+      int score,
+      int components,
+    ) {
+      final entries = <LocalBenchmarkComponent, LocalBenchmarkComponentScore>{};
+      for (final component
+          in LocalBenchmarkComponent.values.take(components)) {
+        entries[component] = LocalBenchmarkComponentScore(
+          score: score,
+          updatedAt: DateTime.utc(2026, 9, 30),
+        );
+      }
+      return LocalModelBenchmarkScore(
+        modelId: candidate.id,
+        fingerprint: LocalBenchmarkScoreStore.fingerprintFor(candidate),
+        components: entries,
+      );
+    }
+
+    final alpha = candidate('alpha', 'Alpha');
+    final beta = candidate('beta', 'Beta');
+    final gamma = candidate('gamma', 'Gamma');
+    final unscored = candidate('unscored', 'Unscored');
+
+    final scores = <String, LocalModelBenchmarkScore>{
+      alpha.id: scoreFor(alpha, 80, 8),
+      beta.id: scoreFor(beta, 90, 2),
+      gamma.id: scoreFor(gamma, 90, 6),
+    };
+
+    final ranked = LocalBenchmarkScoring.rankModelsByGeneralScore(
+      <AiModel>[unscored, alpha, beta, gamma],
+      scores,
+    );
+
+    expect(
+      ranked.map((item) => item.id).toList(),
+      <String>['gamma', 'beta', 'alpha', 'unscored'],
+    );
+  });
+
+  test('Top General selection excludes unscored and ineligible models', () {
+    AiModel candidate(
+      String id,
+      String name, {
+      bool downloaded = true,
+    }) =>
+        AiModel(
+          id: id,
+          displayName: name,
+          fileName: '$id.gguf',
+          downloadUrl: '',
+          version: '1.0.0',
+          sizeBytes: 2048,
+          description: 'benchmark candidate',
+          isDownloaded: downloaded,
+          localPath: downloaded ? '/models/$id.gguf' : null,
+          validationStatus: downloaded
+              ? ModelValidationStatus.validatedOk
+              : ModelValidationStatus.notDownloaded,
+        );
+
+    LocalModelBenchmarkScore scoreFor(AiModel candidate, int score) =>
+        LocalModelBenchmarkScore(
+          modelId: candidate.id,
+          fingerprint: LocalBenchmarkScoreStore.fingerprintFor(candidate),
+          components: <LocalBenchmarkComponent, LocalBenchmarkComponentScore>{
+            LocalBenchmarkComponent.quick: LocalBenchmarkComponentScore(
+              score: score,
+              updatedAt: DateTime.utc(2026, 9, 30),
+            ),
+          },
+        );
+
+    final bestButUnavailable =
+        candidate('offline', 'Offline', downloaded: false);
+    final first = candidate('first', 'First');
+    final second = candidate('second', 'Second');
+    final unscored = candidate('unscored', 'Unscored');
+
+    final scores = <String, LocalModelBenchmarkScore>{
+      bestButUnavailable.id: scoreFor(bestButUnavailable, 99),
+      first.id: scoreFor(first, 92),
+      second.id: scoreFor(second, 88),
+    };
+
+    expect(
+      LocalBenchmarkScoring.topGeneralModelIds(
+        <AiModel>[bestButUnavailable, second, unscored, first],
+        scores,
+        limit: 3,
+        isEligible: (candidate) => candidate.isDownloaded,
+      ),
+      <String>['first', 'second'],
+    );
+  });
+
   test('general score averages only completed benchmark suites', () {
     final score = LocalModelBenchmarkScore(
       modelId: model.id,

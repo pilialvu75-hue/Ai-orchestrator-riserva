@@ -147,6 +147,66 @@ class _VulkanProfileAggregate {
 }
 
 abstract final class LocalBenchmarkScoring {
+  static List<AiModel> rankModelsByGeneralScore(
+    Iterable<AiModel> models,
+    Map<String, LocalModelBenchmarkScore> scores, {
+    bool Function(AiModel model)? isEligible,
+  }) {
+    final ranked = List<AiModel>.of(models);
+    ranked.sort((a, b) {
+      if (isEligible != null) {
+        final aEligible = isEligible(a);
+        final bEligible = isEligible(b);
+        if (aEligible != bEligible) return aEligible ? -1 : 1;
+      }
+
+      final aScore = scores[a.id];
+      final bScore = scores[b.id];
+      final aGeneral = aScore?.generalScore;
+      final bGeneral = bScore?.generalScore;
+
+      if (aGeneral == null && bGeneral != null) return 1;
+      if (aGeneral != null && bGeneral == null) return -1;
+
+      if (aGeneral != null && bGeneral != null) {
+        final scoreOrder = bGeneral.compareTo(aGeneral);
+        if (scoreOrder != 0) return scoreOrder;
+
+        final completenessOrder =
+            bScore!.completedComponents.compareTo(aScore!.completedComponents);
+        if (completenessOrder != 0) return completenessOrder;
+      }
+
+      return a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          );
+    });
+    return ranked;
+  }
+
+  static List<String> topGeneralModelIds(
+    Iterable<AiModel> models,
+    Map<String, LocalModelBenchmarkScore> scores, {
+    int limit = 3,
+    bool Function(AiModel model)? isEligible,
+  }) {
+    if (limit <= 0) return const <String>[];
+
+    final ranked = rankModelsByGeneralScore(
+      models,
+      scores,
+      isEligible: isEligible,
+    );
+    return ranked
+        .where((model) {
+          if (scores[model.id]?.generalScore == null) return false;
+          return isEligible == null || isEligible(model);
+        })
+        .take(limit)
+        .map((model) => model.id)
+        .toList(growable: false);
+  }
+
   static int quickScore(LocalModelBenchmarkModelResult result) {
     final quality = result.maxScore <= 0
         ? 0.0
