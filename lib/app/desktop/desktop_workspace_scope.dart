@@ -9,6 +9,7 @@ class DesktopWorkspaceScope extends InheritedWidget {
     required this.workspaceId,
     required this.openNewCantiereTab,
     required this.renameWorkspace,
+    required this.registerBeforeClose,
     required super.child,
     super.key,
   });
@@ -16,6 +17,7 @@ class DesktopWorkspaceScope extends InheritedWidget {
   final int workspaceId;
   final VoidCallback openNewCantiereTab;
   final ValueChanged<String> renameWorkspace;
+  final ValueChanged<Future<void> Function()> registerBeforeClose;
 
   static DesktopWorkspaceScope? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<DesktopWorkspaceScope>();
@@ -25,6 +27,7 @@ class DesktopWorkspaceScope extends InheritedWidget {
   bool updateShouldNotify(DesktopWorkspaceScope oldWidget) {
     return workspaceId != oldWidget.workspaceId ||
         openNewCantiereTab != oldWidget.openNewCantiereTab ||
-        renameWorkspace != oldWidget.renameWorkspace;
+        renameWorkspace != oldWidget.renameWorkspace ||
+        registerBeforeClose != oldWidget.registerBeforeClose;
   }
 }
