@@ -194,6 +194,91 @@ void main() {
     );
   });
 
+  test('benchmark candidates collapse only the same physical GGUF', () {
+    const builtIn = AiModel(
+      id: 'deepseek_r1_1_5b',
+      displayName: 'DeepSeek-R1 1.5B',
+      fileName: 'DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf',
+      downloadUrl: '',
+      version: '1.0.0',
+      sizeBytes: 1120000000,
+      description: 'catalog',
+      isDownloaded: true,
+      localPath: '/models/deepseek-r1-1.5b.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+    const importedSameFile = AiModel(
+      id: 'local_import_deepseek',
+      displayName: 'DeepSeek-R1-Distill-Qwen-1.5B-Q4 K M',
+      fileName: 'copy-name.gguf',
+      downloadUrl: '',
+      version: 'local',
+      sizeBytes: 1120000000,
+      description: 'import',
+      isDownloaded: true,
+      localPath: '/models/deepseek-r1-1.5b.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+      runtimeModelId: 'deepseek_r1_1_5b',
+      source: 'local_import',
+    );
+    const distinctCopy = AiModel(
+      id: 'local_import_deepseek_copy',
+      displayName: 'DeepSeek-R1 separate copy',
+      fileName: 'deepseek-copy.gguf',
+      downloadUrl: '',
+      version: 'local',
+      sizeBytes: 1120000000,
+      description: 'separate copy',
+      isDownloaded: true,
+      localPath: '/other/deepseek-r1-1.5b.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+      runtimeModelId: 'deepseek_r1_1_5b',
+      source: 'local_import',
+    );
+
+    final result =
+        LocalModelBenchmarkRunner.deduplicateBenchmarkCandidates(
+      const <AiModel>[builtIn, importedSameFile, distinctCopy],
+    );
+
+    expect(result.map((model) => model.id), <String>[
+      'deepseek_r1_1_5b',
+      'local_import_deepseek_copy',
+    ]);
+  });
+
+  test('benchmark candidates keep uninstalled entries visible', () {
+    const first = AiModel(
+      id: 'candidate_a',
+      displayName: 'Candidate A',
+      fileName: 'same.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 1,
+      description: 'a',
+      isDownloaded: false,
+      validationStatus: ModelValidationStatus.notDownloaded,
+    );
+    const second = AiModel(
+      id: 'candidate_b',
+      displayName: 'Candidate B',
+      fileName: 'same.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 1,
+      description: 'b',
+      isDownloaded: false,
+      validationStatus: ModelValidationStatus.notDownloaded,
+    );
+
+    final result =
+        LocalModelBenchmarkRunner.deduplicateBenchmarkCandidates(
+      const <AiModel>[first, second],
+    );
+
+    expect(result, hasLength(2));
+  });
+
   test('quick benchmark keeps the intended small representative suite', () {
     expect(
       LocalModelBenchmarkRunner.quickCases.map((item) => item.id).toSet(),
