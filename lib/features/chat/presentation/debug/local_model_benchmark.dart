@@ -1472,25 +1472,6 @@ class LocalModelBenchmarkRunner {
       final model = targets[modelIndex];
 
       try {
-        final preflightFailure = await _prepareModelForBenchmarkLoad(model);
-        if (preflightFailure != null) {
-          RuntimeEventLog.instance.emit(
-            '[LOCAL_MODEL_BENCH_MODEL_SKIPPED] '
-            'model=${model.effectiveRuntimeModelId} '
-            'reason=$preflightFailure',
-          );
-          failures.add(
-            LocalModelBenchmarkFailure(
-              modelId: model.effectiveRuntimeModelId,
-              catalogModelId: model.id,
-              displayName: model.displayName,
-              error: preflightFailure,
-            ),
-          );
-          onProgress?.call('${model.displayName} saltato: memoria insufficiente');
-          continue;
-        }
-
         final caseResults = <LocalModelBenchmarkCaseResult>[];
 
         RuntimeEventLog.instance.emit(
@@ -2570,9 +2551,24 @@ class LocalModelBenchmarkRunner {
         ? _runtimeProvider
         : null;
     final modelPath = model.localPath;
-    final hadSessionBefore = androidRuntime != null &&
+    var hadSessionBefore = androidRuntime != null &&
         modelPath != null &&
         androidRuntime.hasActiveNativeSessionForModelPath(modelPath);
+
+    if (androidRuntime != null && !hadSessionBefore) {
+      final preflightFailure = await _prepareModelForBenchmarkLoad(model);
+      if (preflightFailure != null) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_MODEL_SKIPPED] '
+          'model=${model.effectiveRuntimeModelId} '
+          'case=${benchmarkCase.id} '
+          'reason=$preflightFailure',
+        );
+        throw StateError(preflightFailure);
+      }
+      hadSessionBefore = modelPath != null &&
+          androidRuntime.hasActiveNativeSessionForModelPath(modelPath);
+    }
 
     final startSample = await _resourceMonitor.sample();
     if (startSample?.critical == true) {
