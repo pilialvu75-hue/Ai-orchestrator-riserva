@@ -102,6 +102,36 @@ void main() {
     expect(benchmarkCase.score('La risposta è 42'), 1);
   });
 
+  test('memory context suite grows context then returns to recovery', () {
+    final cases = LocalModelBenchmarkRunner.memoryContextCases;
+    expect(
+      cases.map((item) => item.id).toList(),
+      <String>[
+        'memory_context_short',
+        'memory_context_medium',
+        'memory_context_long',
+        'memory_context_recovery',
+      ],
+    );
+
+    expect(cases[0].context.length, 9);
+    expect(cases[1].context.length, 25);
+    expect(cases[2].context.length, 49);
+    expect(cases[3].context.length, 5);
+    expect(cases[2].context.length, greaterThan(cases[1].context.length));
+    expect(cases[3].context.length, lessThan(cases[0].context.length));
+  });
+
+  test('memory context cases require exact recall of the stored code', () {
+    final longCase = LocalModelBenchmarkRunner.memoryContextCases
+        .firstWhere((item) => item.id == 'memory_context_long');
+
+    expect(longCase.maxScore, 2);
+    expect(longCase.score('quarzo-73'), 2);
+    expect(longCase.score('Il codice era quarzo-73'), 1);
+    expect(longCase.score('ambra-17'), 0);
+  });
+
   test('performance benchmark uses one cold and two warm passes', () {
     expect(LocalModelBenchmarkRunner.performanceWarmRepetitions, 2);
     expect(
