@@ -6,25 +6,30 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentat
 
 void main() {
   group('WorkshopProgressPresentation', () {
-    test('does not invent fractional task completion from operational stage', () {
-      for (final stage in <WorkshopStage>[
-        WorkshopStage.requested,
-        WorkshopStage.analysis,
-        WorkshopStage.planning,
-        WorkshopStage.implementation,
-        WorkshopStage.review,
-        WorkshopStage.validation,
-      ]) {
-        expect(
-          WorkshopProgressPresentation.displayValue(
-            authoritativeProgress: 0,
-            completedTasks: 0,
-            totalTasks: 3,
-            stage: stage,
-          ),
-          0,
-        );
-      }
+    test('shows bounded progress inside the active task', () {
+      final requested = WorkshopProgressPresentation.displayValue(
+        authoritativeProgress: 0,
+        completedTasks: 0,
+        totalTasks: 2,
+        stage: WorkshopStage.requested,
+      );
+      final implementation = WorkshopProgressPresentation.displayValue(
+        authoritativeProgress: 0,
+        completedTasks: 0,
+        totalTasks: 2,
+        stage: WorkshopStage.implementation,
+      );
+      final validation = WorkshopProgressPresentation.displayValue(
+        authoritativeProgress: 0,
+        completedTasks: 0,
+        totalTasks: 2,
+        stage: WorkshopStage.validation,
+      );
+
+      expect(requested, greaterThan(0));
+      expect(implementation, greaterThan(requested));
+      expect(validation, greaterThan(implementation));
+      expect(validation, lessThan(0.5));
     });
 
     test('advances from real completed task count', () {
@@ -70,15 +75,14 @@ void main() {
       );
 
       expect(state.progressPresentationStage, WorkshopStage.requested);
-      expect(
-        WorkshopProgressPresentation.displayValue(
-          authoritativeProgress: state.progress,
-          completedTasks: state.completedTasks,
-          totalTasks: state.totalTasks,
-          stage: state.progressPresentationStage,
-        ),
-        0,
+      final displayed = WorkshopProgressPresentation.displayValue(
+        authoritativeProgress: state.progress,
+        completedTasks: state.completedTasks,
+        totalTasks: state.totalTasks,
+        stage: state.progressPresentationStage,
       );
+      expect(displayed, greaterThan(0));
+      expect(displayed, lessThan(1 / 3));
     });
 
     test('blocked UI can retain the last operational stage without fake progress',
