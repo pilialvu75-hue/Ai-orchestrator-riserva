@@ -537,6 +537,10 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
       }
     }
 
+    failedStep ??=
+        WorkshopPrivateBuildFailureClassifier.inferStepFromDiagnostics(
+      diagnostics,
+    );
     final code = WorkshopPrivateBuildFailureClassifier.codeForStep(failedStep);
     final stepLabel =
         failedStep == null || failedStep.isEmpty ? 'unknown step' : failedStep;
@@ -798,6 +802,13 @@ final class WorkshopPrivateGitHubBuildProvider implements WorkshopBuildProvider 
 /// bounded Cantiere repair loop. Toolchain/security/artifact infrastructure
 /// remains non-repairable by the model.
 abstract final class WorkshopPrivateBuildFailureClassifier {
+  static const List<String> _knownSteps = <String>[
+    'Validate staged source boundary',
+    'Resolve dependencies',
+    'Validate generated project',
+    'Build Android APK',
+  ];
+
   static String codeForStep(String? rawStep) {
     final step = rawStep?.trim() ?? '';
     switch (step) {
@@ -812,6 +823,52 @@ abstract final class WorkshopPrivateBuildFailureClassifier {
       default:
         return 'remote_infrastructure_failed';
     }
+  }
+
+  /// GitHub can report the workflow run as completed a moment before its Jobs
+  /// API exposes the failed step. Use bounded log signatures as a fallback so
+  /// a generated-project failure does not become a misleading "unknown step"
+  /// infrastructure error and skip the Cantiere repair loop.
+  static String? inferStepFromDiagnostics(String rawDiagnostics) {
+    final diagnostics = rawDiagnostics.trim();
+    if (diagnostics.isEmpty) return null;
+
+    for (final step in _knownSteps) {
+      if (diagnostics.contains(step)) return step;
+    }
+
+    final lower = diagnostics.toLowerCase();
+
+    if (lower.contains('cantiere_source_boundary:') ||
+        lower.contains('missing required flutter entry point lib/main.dart') ||
+        lower.contains('tests must live under test/, not lib/test/')) {
+      return 'Validate staged source boundary';
+    }
+
+    if (lower.contains('version solving failed') ||
+        lower.contains('because every version of') ||
+        lower.contains('pub get failed') ||
+        lower.contains('failed to update packages')) {
+      return 'Resolve dependencies';
+    }
+
+    if (lower.contains('issues found') ||
+        lower.contains('no issues found!') ||
+        lower.contains('analyzing ') ||
+        lower.contains('flutter test') ||
+        lower.contains('test failed') ||
+        lower.contains('some tests failed')) {
+      return 'Validate generated project';
+    }
+
+    if (lower.contains('gradle task assemblerelease failed') ||
+        lower.contains('flutter build apk') ||
+        lower.contains('execution failed for task') ||
+        lower.contains('could not build the precompiled application')) {
+      return 'Build Android APK';
+    }
+
+    return null;
   }
 }
 
