@@ -108,6 +108,44 @@ class LocalModelBenchmarkScore {
   static const int totalComponents = 8;
 }
 
+class LocalVulkanScore {
+  const LocalVulkanScore({
+    required this.score,
+    required this.bestRequestedGpuLayers,
+    required this.averageObservedGpuLayers,
+    required this.speedScore,
+    required this.qualityFactor,
+    required this.stabilityFactor,
+  });
+
+  final int score;
+  final int bestRequestedGpuLayers;
+  final int averageObservedGpuLayers;
+  final double speedScore;
+  final double qualityFactor;
+  final double stabilityFactor;
+}
+
+class _VulkanProfileAggregate {
+  const _VulkanProfileAggregate({
+    required this.averageObservedGpuLayers,
+    required this.firstContentMs,
+    required this.prefillMs,
+    required this.totalMs,
+    required this.decodeTokensPerSecond,
+    required this.qualityRatio,
+    required this.stabilityFactor,
+  });
+
+  final int averageObservedGpuLayers;
+  final double firstContentMs;
+  final double prefillMs;
+  final double totalMs;
+  final double decodeTokensPerSecond;
+  final double qualityRatio;
+  final double stabilityFactor;
+}
+
 abstract final class LocalBenchmarkScoring {
   static int quickScore(LocalModelBenchmarkModelResult result) {
     final quality = result.maxScore <= 0
@@ -331,6 +369,142 @@ abstract final class LocalBenchmarkScoring {
         .round()
         .clamp(0, 100)
         .toInt();
+  }
+
+  static LocalVulkanScore? vulkanScore(
+    VulkanLayerSweepReport report,
+    String catalogModelId,
+  ) {
+    final modelSamples = report.samples
+        .where((sample) => sample.catalogModelId == catalogModelId)
+        .toList(growable: false);
+    if (modelSamples.isEmpty) return null;
+
+    final cpu = _vulkanAggregate(modelSamples, 0);
+    if (cpu == null) return null;
+
+    LocalVulkanScore? best;
+    for (final requested in const <int>[10, 99]) {
+      final gpu = _vulkanAggregate(modelSamples, requested);
+      if (gpu == null || gpu.averageObservedGpuLayers <= 0) continue;
+
+      final firstScore = _relativeRatioScore(
+        cpu.firstContentMs > 0 && gpu.firstContentMs > 0
+            ? cpu.firstContentMs / gpu.firstContentMs
+            : 0,
+      );
+      final totalScore = _relativeRatioScore(
+        cpu.totalMs > 0 && gpu.totalMs > 0
+            ? cpu.totalMs / gpu.totalMs
+            : 0,
+      );
+      final prefillScore = _relativeRatioScore(
+        cpu.prefillMs > 0 && gpu.prefillMs > 0
+            ? cpu.prefillMs / gpu.prefillMs
+            : 0,
+      );
+      final decodeScore = _relativeRatioScore(
+        cpu.decodeTokensPerSecond > 0 && gpu.decodeTokensPerSecond > 0
+            ? gpu.decodeTokensPerSecond / cpu.decodeTokensPerSecond
+            : 0,
+      );
+
+      final speedScore =
+          (firstScore + totalScore + prefillScore + decodeScore) / 4;
+      final qualityFactor = cpu.qualityRatio <= 0
+          ? 1.0
+          : (gpu.qualityRatio / cpu.qualityRatio).clamp(0.0, 1.0);
+      final stabilityFactor =
+          cpu.stabilityFactor < gpu.stabilityFactor
+              ? cpu.stabilityFactor
+              : gpu.stabilityFactor;
+      final score =
+          (speedScore * qualityFactor * stabilityFactor)
+              .round()
+              .clamp(0, 100)
+              .toInt();
+
+      final candidate = LocalVulkanScore(
+        score: score,
+        bestRequestedGpuLayers: requested,
+        averageObservedGpuLayers: gpu.averageObservedGpuLayers,
+        speedScore: speedScore,
+        qualityFactor: qualityFactor,
+        stabilityFactor: stabilityFactor,
+      );
+      if (best == null || candidate.score > best.score) {
+        best = candidate;
+      }
+    }
+
+    return best;
+  }
+
+  static _VulkanProfileAggregate? _vulkanAggregate(
+    List<VulkanLayerSweepSample> samples,
+    int requestedGpuLayers,
+  ) {
+    final profile = samples
+        .where((sample) => sample.requestedGpuLayers == requestedGpuLayers)
+        .toList(growable: false);
+    if (profile.length < LocalModelBenchmarkRunner.vulkanSweepRepetitions) {
+      return null;
+    }
+
+    double average(double Function(VulkanLayerSweepSample sample) valueOf) =>
+        profile.map(valueOf).reduce((a, b) => a + b) / profile.length;
+
+    final validPrefill = profile
+        .map((sample) => sample.result.prefillMs)
+        .where((value) => value >= 0)
+        .toList(growable: false);
+    final prefill = validPrefill.length == profile.length
+        ? validPrefill.reduce((a, b) => a + b) / validPrefill.length
+        : 0.0;
+
+    final quality = average((sample) {
+      final result = sample.result;
+      if (result.maxScore <= 0) return 1.0;
+      return (result.score / result.maxScore).clamp(0.0, 1.0);
+    });
+
+    var stability = 1.0;
+    for (final sample in profile) {
+      final pressures = <String>[
+        sample.result.startPressure,
+        sample.result.endPressure,
+      ];
+      if (pressures.contains('critical')) {
+        stability = 0;
+        break;
+      }
+      if (pressures.contains('high') && stability > 0.85) {
+        stability = 0.85;
+      } else if (pressures.contains('unknown') && stability > 0.95) {
+        stability = 0.95;
+      }
+    }
+
+    return _VulkanProfileAggregate(
+      averageObservedGpuLayers:
+          average((sample) => sample.result.observedGpuLayers.toDouble())
+              .round(),
+      firstContentMs:
+          average((sample) => sample.result.firstContentMs.toDouble()),
+      prefillMs: prefill,
+      totalMs: average((sample) => sample.result.totalMs.toDouble()),
+      decodeTokensPerSecond:
+          average((sample) => sample.result.decodeTokensPerSecond),
+      qualityRatio: quality,
+      stabilityFactor: stability,
+    );
+  }
+
+  static double _relativeRatioScore(double ratio) {
+    if (!ratio.isFinite || ratio <= 0.5) return 0;
+    if (ratio < 1.0) return ((ratio - 0.5) * 100).clamp(0, 50);
+    if (ratio >= 1.5) return 100;
+    return (50 + (ratio - 1.0) * 100).clamp(50, 100);
   }
 
   static double _lowerIsBetter(

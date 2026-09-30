@@ -886,6 +886,7 @@ class VulkanLayerSweepSample {
   const VulkanLayerSweepSample({
     required this.requestedGpuLayers,
     required this.modelId,
+    required this.catalogModelId,
     required this.displayName,
     required this.repetition,
     required this.result,
@@ -893,19 +894,40 @@ class VulkanLayerSweepSample {
 
   final int requestedGpuLayers;
   final String modelId;
+  final String catalogModelId;
   final String displayName;
   final int repetition;
   final LocalModelBenchmarkCaseResult result;
+}
+
+class VulkanLayerSweepFailure {
+  const VulkanLayerSweepFailure({
+    required this.requestedGpuLayers,
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.repetition,
+    required this.error,
+  });
+
+  final int requestedGpuLayers;
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final int repetition;
+  final String error;
 }
 
 class VulkanLayerSweepReport {
   const VulkanLayerSweepReport({
     required this.createdAt,
     required this.samples,
+    this.failures = const <VulkanLayerSweepFailure>[],
   });
 
   final DateTime createdAt;
   final List<VulkanLayerSweepSample> samples;
+  final List<VulkanLayerSweepFailure> failures;
 
   String toPlainText() {
     final buffer = StringBuffer()
@@ -924,6 +946,7 @@ class VulkanLayerSweepReport {
         '- requested=${sample.requestedGpuLayers} '
         'observed=${result.observedGpuLayers} '
         'model=${sample.modelId} '
+        'catalog=${sample.catalogModelId} '
         'run=${sample.repetition} '
         'first=${result.firstContentMs}ms '
         'prefill=${result.prefillMs}ms '
@@ -939,6 +962,20 @@ class VulkanLayerSweepReport {
         'session=${result.sessionStart}->${result.sessionEnd}',
       );
     }
+
+    if (failures.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('failures:');
+      for (final failure in failures) {
+        buffer.writeln(
+          '- requested=${failure.requestedGpuLayers} '
+          'model=${failure.modelId} '
+          'catalog=${failure.catalogModelId} '
+          'run=${failure.repetition}: ${failure.error}',
+        );
+      }
+    }
+
     return buffer.toString().trimRight();
   }
 }
@@ -2172,6 +2209,7 @@ class LocalModelBenchmarkRunner {
   Future<VulkanLayerSweepReport> runVulkanLayerSweep({
     LocalModelBenchmarkProgress? onProgress,
     Iterable<String>? modelIds,
+    bool continueOnModelError = true,
   }) async {
     final runtime = _runtimeProvider;
     if (runtime is! AndroidFfiRuntimeProvider) {
@@ -2184,6 +2222,7 @@ class LocalModelBenchmarkRunner {
     final benchmarkCase =
         cases.firstWhere((item) => item.id == 'vulkan_fact');
     final samples = <VulkanLayerSweepSample>[];
+    final failures = <VulkanLayerSweepFailure>[];
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_VULKAN_SWEEP_BEGIN] profiles=0,10,99 '
@@ -2212,37 +2251,63 @@ class LocalModelBenchmarkRunner {
               '$repetition/$vulkanSweepRepetitions',
             );
 
-            final result = await _runCase(
-              model: model,
-              benchmarkCase: benchmarkCase,
-            );
-            samples.add(
-              VulkanLayerSweepSample(
-                requestedGpuLayers: requestedLayers,
-                modelId: model.effectiveRuntimeModelId,
-                displayName: model.displayName,
-                repetition: repetition,
-                result: result,
-              ),
-            );
+            try {
+              final result = await _runCase(
+                model: model,
+                benchmarkCase: benchmarkCase,
+              );
+              samples.add(
+                VulkanLayerSweepSample(
+                  requestedGpuLayers: requestedLayers,
+                  modelId: model.effectiveRuntimeModelId,
+                  catalogModelId: model.id,
+                  displayName: model.displayName,
+                  repetition: repetition,
+                  result: result,
+                ),
+              );
 
-            RuntimeEventLog.instance.emit(
-              '[LOCAL_VULKAN_SWEEP_CASE] '
-              'model=${model.effectiveRuntimeModelId} '
-              'requested_gpu_layers=$requestedLayers '
-              'observed_gpu_layers=${result.observedGpuLayers} '
-              'repetition=$repetition '
-              'first_content_ms=${result.firstContentMs} '
-              'prefill_ms=${result.prefillMs} '
-              'total_ms=${result.totalMs} '
-              'reported_tokens=${result.reportedTokens} '
-              'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
-              'pressure=${result.startPressure}->${result.endPressure} '
-              'start_available_bytes=${result.startAvailableBytes ?? -1} '
-              'end_available_bytes=${result.endAvailableBytes ?? -1} '
-              'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
-              'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1}',
-            );
+              RuntimeEventLog.instance.emit(
+                '[LOCAL_VULKAN_SWEEP_CASE] '
+                'model=${model.effectiveRuntimeModelId} '
+                'catalog=${model.id} '
+                'requested_gpu_layers=$requestedLayers '
+                'observed_gpu_layers=${result.observedGpuLayers} '
+                'repetition=$repetition '
+                'first_content_ms=${result.firstContentMs} '
+                'prefill_ms=${result.prefillMs} '
+                'total_ms=${result.totalMs} '
+                'reported_tokens=${result.reportedTokens} '
+                'decode_tokens_s=${result.decodeTokensPerSecond.toStringAsFixed(2)} '
+                'pressure=${result.startPressure}->${result.endPressure} '
+                'start_available_bytes=${result.startAvailableBytes ?? -1} '
+                'end_available_bytes=${result.endAvailableBytes ?? -1} '
+                'start_battery_temp_decic=${result.startBatteryTemperatureDeciC ?? -1} '
+                'end_battery_temp_decic=${result.endBatteryTemperatureDeciC ?? -1}',
+              );
+            } on LocalModelBenchmarkCriticalResourceException {
+              rethrow;
+            } catch (error, stackTrace) {
+              RuntimeEventLog.instance.emit(
+                '[LOCAL_VULKAN_SWEEP_CASE_FAILED] '
+                'model=${model.effectiveRuntimeModelId} '
+                'catalog=${model.id} '
+                'requested_gpu_layers=$requestedLayers '
+                'repetition=$repetition '
+                'error=$error stack=$stackTrace',
+              );
+              if (!continueOnModelError) rethrow;
+              failures.add(
+                VulkanLayerSweepFailure(
+                  requestedGpuLayers: requestedLayers,
+                  modelId: model.effectiveRuntimeModelId,
+                  catalogModelId: model.id,
+                  displayName: model.displayName,
+                  repetition: repetition,
+                  error: error.toString(),
+                ),
+              );
+            }
 
             await Future<void>.delayed(_betweenCases);
           }
@@ -2253,7 +2318,9 @@ class LocalModelBenchmarkRunner {
     }
 
     RuntimeEventLog.instance.emit(
-      '[LOCAL_VULKAN_SWEEP_END] samples=${samples.length} status=success',
+      '[LOCAL_VULKAN_SWEEP_END] samples=${samples.length} '
+      'failures=${failures.length} '
+      'status=${failures.isEmpty ? 'success' : 'partial'}',
     );
 
     final diagnostics = GitHubDiagnostics.instance;
@@ -2266,9 +2333,9 @@ class LocalModelBenchmarkRunner {
     return VulkanLayerSweepReport(
       createdAt: DateTime.now(),
       samples: List<VulkanLayerSweepSample>.unmodifiable(samples),
+      failures: List<VulkanLayerSweepFailure>.unmodifiable(failures),
     );
   }
-
   Future<List<AiModel>> _resolveTargets(
     Iterable<String>? requestedModelIds,
   ) async {
