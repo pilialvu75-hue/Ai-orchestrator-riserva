@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
+import 'package:ai_orchestrator/app/desktop/desktop_workspace_scope.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
@@ -31,7 +32,12 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({
+    super.key,
+    this.openWorkshopOnStart = false,
+  });
+
+  final bool openWorkshopOnStart;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -39,6 +45,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UpdateManager _updateManager;
+  int? _registeredDesktopWorkspaceId;
   late final LocalRuntimeDiagnosticsService _runtimeDiagnostics;
   final WorkshopProjectNotificationService _workshopProjectNotifications =
       WorkshopProjectNotificationService();
@@ -61,6 +68,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       interval: AppConstants.updateCheckInterval,
     ));
     unawaited(_runtimeDiagnostics.validateOnStartup());
+    if (widget.openWorkshopOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_openWorkshop(context));
+        }
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final workspace = DesktopWorkspaceScope.maybeOf(context);
+    if (workspace != null && _registeredDesktopWorkspaceId != workspace.workspaceId) {
+      _registeredDesktopWorkspaceId = workspace.workspaceId;
+      workspace.registerBeforeClose(_parkAndDisposeWorkshopSession);
+    }
   }
 
   void _onUpdateStateChanged() {
@@ -91,11 +115,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _onWorkshopDashboardStateChanged() {
     final bundle = _workshopBundle;
     if (bundle == null) return;
+    final dashboardState = bundle.dashboardController.state;
     unawaited(
       _workshopProjectNotifications.sync(
-        bundle.dashboardController.state,
+        dashboardState,
       ),
     );
+    final title = dashboardState.projectTitle?.trim();
+    if (mounted && title != null && title.isNotEmpty) {
+      DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace(title);
+    }
   }
 
   Future<void> _flushWorkshopCheckpoint() async {
@@ -262,6 +291,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _openWorkshop(BuildContext context) async {
     if (_openingWorkshop) return;
+    DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace('Cantiere');
     setState(() => _openingWorkshop = true);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -315,6 +345,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // Cantiere entry therefore starts neutral, while terminal notification
         // state remains visible to the owner.
         await _parkAndDisposeWorkshopSession();
+        if (mounted) {
+          DesktopWorkspaceScope.maybeOf(context)?.renameWorkspace('AI Orchestrator');
+        }
       }
     } catch (error) {
       if (!mounted) return;
