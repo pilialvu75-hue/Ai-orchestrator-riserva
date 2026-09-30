@@ -485,6 +485,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       } catch (error, stackTrace) {
         clearRuntimeVerification();
 
+        final diagnostic = _classifyRuntimeError(error);
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_RUNTIME_ERROR] '
+          'stage=${diagnostic.$1} '
+          'reason=${diagnostic.$2} '
+          'object=${diagnostic.$3}',
+        );
+
         debugPrint(
           '[$_localProviderTag] fatal error: $error\n$stackTrace',
         );
@@ -502,6 +510,35 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     }();
 
     return controller.stream;
+  }
+
+  static (String, String, String) _classifyRuntimeError(Object error) {
+    final text = error.toString().toLowerCase();
+
+    if (text.contains('is unsendable') ||
+        text.contains('illegal argument in isolate message')) {
+      var object = 'other';
+      if (text.contains('_customzone')) {
+        object = 'custom_zone';
+      } else if (text.contains('_controllerstream')) {
+        object = 'controller_stream';
+      } else if (text.contains('_controllersubscription')) {
+        object = 'controller_subscription';
+      } else if (text.contains('_timer')) {
+        object = 'timer';
+      }
+      return ('validation', 'unsendable_isolate_object', object);
+    }
+
+    if (error is ProcessException) {
+      return ('process_start', 'process_start_failed', 'none');
+    }
+
+    if (error is FileSystemException) {
+      return ('validation', 'io_error', 'none');
+    }
+
+    return ('unknown', 'other', 'none');
   }
 
   bool _isModelAllowedOnPlatform(String modelId) {
