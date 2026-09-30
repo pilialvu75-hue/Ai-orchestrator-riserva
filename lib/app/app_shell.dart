@@ -15,6 +15,7 @@ import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
+import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -85,6 +86,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         'D40 AppShell update/runtime auto-starts deferred',
       );
     }
+  }
+
+  void _runWin7ModelProbe() {
+    _appendWindowsSafeStartupBreadcrumb(
+      'D50 manual probe begin: model catalog/load/update chain',
+    );
+    context.read<ModelDownloadBloc>().add(const LoadAvailableModels());
+  }
+
+  void _runWin7UpdateProbe() {
+    _appendWindowsSafeStartupBreadcrumb(
+      'D60 manual probe begin: app update background checks',
+    );
+    unawaited(
+      _updateManager
+          .startBackgroundChecks(
+            interval: AppConstants.updateCheckInterval,
+          )
+          .then((_) => _appendWindowsSafeStartupBreadcrumb(
+                'D61 manual probe returned: app update background checks',
+              ))
+          .catchError((Object error) {
+        _appendWindowsSafeStartupBreadcrumb(
+          'D6E manual probe error: app update background checks: $error',
+        );
+      }),
+    );
+  }
+
+  void _runWin7RuntimeDiagnosticsProbe() {
+    _appendWindowsSafeStartupBreadcrumb(
+      'D70 manual probe begin: local runtime diagnostics',
+    );
+    unawaited(
+      _runtimeDiagnostics
+          .validateOnStartup()
+          .then((_) => _appendWindowsSafeStartupBreadcrumb(
+                'D71 manual probe returned: local runtime diagnostics',
+              ))
+          .catchError((Object error) {
+        _appendWindowsSafeStartupBreadcrumb(
+          'D7E manual probe error: local runtime diagnostics: $error',
+        );
+      }),
+    );
   }
 
   void _onUpdateStateChanged() {
@@ -389,6 +435,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (!widget.enableStartupServices) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Windows 7 — diagnostica avvio sicuro',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Auto-start sospesi. Prova un componente alla volta.',
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton(
+                        onPressed: _runWin7ModelProbe,
+                        child: const Text('1 · Test modelli'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _runWin7UpdateProbe,
+                        child: const Text('2 · Test aggiornamenti'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _runWin7RuntimeDiagnosticsProbe,
+                        child: const Text('3 · Test runtime diagnostics'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             Text('Assistente', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             FilledButton.icon(
