@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:flutter/foundation.dart';
 
 typedef LocalModelBenchmarkProgress = void Function(String message);
 
@@ -1460,13 +1461,48 @@ class LocalModelBenchmarkRunner {
     );
   }
 
+  static List<AiModel> deduplicateBenchmarkCandidates(
+    Iterable<AiModel> models,
+  ) {
+    final result = <AiModel>[];
+    final seenPhysicalPaths = <String>{};
+
+    for (final model in models) {
+      final rawPath = model.localPath?.trim();
+      if (rawPath == null || rawPath.isEmpty) {
+        result.add(model);
+        continue;
+      }
+
+      final normalizedPath = rawPath.replaceAll('\\', '/');
+      final physicalKey = defaultTargetPlatform == TargetPlatform.windows
+          ? normalizedPath.toLowerCase()
+          : normalizedPath;
+      if (!seenPhysicalPaths.add(physicalKey)) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED] '
+          'model=${model.effectiveRuntimeModelId} '
+          'catalog=${model.id} '
+          'reason=same_physical_file',
+        );
+        continue;
+      }
+
+      result.add(model);
+    }
+
+    return List<AiModel>.unmodifiable(result);
+  }
+
   Future<List<AiModel>> loadBenchmarkCandidates() async {
     final availableResult = await _localAiRepository.getAvailableModels();
     final available = availableResult.fold<List<AiModel>>(
       (failure) => throw StateError(
         'Model catalogue lookup failed: ${failure.message}',
       ),
-      (models) => List<AiModel>.of(models),
+      (models) => List<AiModel>.of(
+        deduplicateBenchmarkCandidates(models),
+      ),
     );
 
     available.sort((a, b) {
