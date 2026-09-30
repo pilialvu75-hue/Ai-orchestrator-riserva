@@ -65,6 +65,39 @@ bool BuildTracePath(wchar_t (&path)[MAX_PATH]) {
   return BuildTemporaryTracePath(path);
 }
 
+bool BuildPreviousTracePath(wchar_t (&path)[MAX_PATH]) {
+  const DWORD length =
+      ::GetEnvironmentVariableW(L"LOCALAPPDATA", path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    return false;
+  }
+  if (!AppendWide(path, L"\\AI-Orchestrator") || !EnsureDirectory(path)) {
+    return false;
+  }
+  if (!AppendWide(path, L"\\Diagnostics") || !EnsureDirectory(path)) {
+    return false;
+  }
+  return AppendWide(path, L"\\AI-Orchestrator-win7-startup.previous.log");
+}
+
+void RotatePreviousTrace() {
+  wchar_t current[MAX_PATH] = {};
+  wchar_t previous[MAX_PATH] = {};
+  if (!BuildPersistentTracePath(current) || !BuildPreviousTracePath(previous)) {
+    return;
+  }
+
+  const DWORD attributes = ::GetFileAttributesW(current);
+  if (attributes == INVALID_FILE_ATTRIBUTES ||
+      (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    return;
+  }
+
+  ::DeleteFileW(previous);
+  ::MoveFileExW(current, previous,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
 void AppendAndFlush(const char* stage) {
   if (stage == nullptr) {
     return;
@@ -242,6 +275,8 @@ void InstallFatalCapture() {
 namespace startup_trace {
 
 void Reset() {
+  RotatePreviousTrace();
+
   wchar_t path[MAX_PATH] = {};
   if (!BuildTracePath(path)) {
     return;
