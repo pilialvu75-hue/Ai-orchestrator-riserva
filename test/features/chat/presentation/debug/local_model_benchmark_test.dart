@@ -513,6 +513,10 @@ void main() {
       LocalModelBenchmarkRunner.benchmarkThermalCooldownSampleDelay,
       const Duration(seconds: 5),
     );
+    expect(
+      LocalModelBenchmarkRunner.benchmarkThermalCooldownMaxDuration,
+      const Duration(minutes: 3),
+    );
   });
 
   test('thermal result derives rise and performance retention', () {
