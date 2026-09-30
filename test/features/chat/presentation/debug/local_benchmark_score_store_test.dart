@@ -1132,7 +1132,7 @@ void main() {
           localPath: downloaded ? '/models/$id.gguf' : null,
           validationStatus: downloaded
               ? ModelValidationStatus.validatedOk
-              : ModelValidationStatus.pending,
+              : ModelValidationStatus.notDownloaded,
         );
 
     LocalModelBenchmarkScore scoreFor(AiModel candidate, int score) =>
