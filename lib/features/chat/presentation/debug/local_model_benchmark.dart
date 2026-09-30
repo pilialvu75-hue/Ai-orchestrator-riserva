@@ -1076,6 +1076,18 @@ class LocalModelBenchmarkRunner {
     return available >= minimumAvailableBytesForSafeBenchmarkLoad(model);
   }
 
+  static String benchmarkThermalGateState(ResourceSample? sample) {
+    final temperature = sample?.batteryTemperatureDeciC;
+    if (temperature == null) return 'ready';
+    if (temperature >= thermalStopBatteryTemperatureDeciC) {
+      return 'stop';
+    }
+    if (temperature >= thermalStartMaxBatteryTemperatureDeciC) {
+      return 'cooldown';
+    }
+    return 'ready';
+  }
+
   static const List<LocalModelBenchmarkCase> cases =
       <LocalModelBenchmarkCase>[
     LocalModelBenchmarkCase(
@@ -1404,6 +1416,9 @@ class LocalModelBenchmarkRunner {
   static const int thermalStopBatteryTemperatureDeciC = 450;
   static const int thermalMaxRiseDeciC = 80;
   static const Duration thermalBetweenCases = Duration(milliseconds: 500);
+  static const int benchmarkThermalCooldownMaxSamples = 36;
+  static const Duration benchmarkThermalCooldownSampleDelay =
+      Duration(seconds: 5);
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
@@ -1545,6 +1560,27 @@ class LocalModelBenchmarkRunner {
 
     for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
       final model = targets[modelIndex];
+
+      final thermalFailure = await _prepareInterModelThermalGate(
+        model: model,
+        onProgress: onProgress,
+      );
+      if (thermalFailure != null) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_THERMAL_STOP] '
+          'model=${model.effectiveRuntimeModelId} '
+          'reason=$thermalFailure',
+        );
+        failures.add(
+          LocalModelBenchmarkFailure(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            error: thermalFailure,
+          ),
+        );
+        break;
+      }
 
       try {
         final caseResults = <LocalModelBenchmarkCaseResult>[];
@@ -2445,6 +2481,56 @@ class LocalModelBenchmarkRunner {
       failures: List<VulkanLayerSweepFailure>.unmodifiable(failures),
     );
   }
+  Future<String?> _prepareInterModelThermalGate({
+    required AiModel model,
+    LocalModelBenchmarkProgress? onProgress,
+  }) async {
+    final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
+        ? _runtimeProvider
+        : null;
+    if (androidRuntime == null) return null;
+
+    await androidRuntime.resetBenchmarkNativeSessions();
+
+    for (var sampleIndex = 0;
+        sampleIndex <= benchmarkThermalCooldownMaxSamples;
+        sampleIndex++) {
+      final sample = await _resourceMonitor.sample();
+      final state = benchmarkThermalGateState(sample);
+      final temperature = sample?.batteryTemperatureDeciC;
+
+      RuntimeEventLog.instance.emit(
+        '[LOCAL_MODEL_BENCH_THERMAL_GATE] '
+        'model=${model.effectiveRuntimeModelId} '
+        'state=$state '
+        'sample=$sampleIndex/$benchmarkThermalCooldownMaxSamples '
+        'battery_temp_decic=${temperature ?? -1}',
+      );
+
+      if (state == 'ready') return null;
+
+      if (state == 'stop') {
+        return 'Benchmark interrotto per sicurezza termica: '
+            'temperatura batteria proxy '
+            '${temperature == null ? 'n/a' : (temperature / 10).toStringAsFixed(1)}°C.';
+      }
+
+      if (sampleIndex == benchmarkThermalCooldownMaxSamples) {
+        return 'Benchmark interrotto: il dispositivo non è sceso sotto '
+            '${(thermalStartMaxBatteryTemperatureDeciC / 10).toStringAsFixed(1)}°C '
+            'entro la finestra di raffreddamento.';
+      }
+
+      onProgress?.call(
+        '${model.displayName}: raffreddamento '
+        '${temperature == null ? '' : '(${(temperature / 10).toStringAsFixed(1)}°C)'}',
+      );
+      await Future<void>.delayed(benchmarkThermalCooldownSampleDelay);
+    }
+
+    return null;
+  }
+
   Future<String?> _prepareModelForBenchmarkLoad(AiModel model) async {
     final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
         ? _runtimeProvider
