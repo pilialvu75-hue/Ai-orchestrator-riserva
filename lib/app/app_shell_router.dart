@@ -20,7 +20,12 @@ AppShellTarget resolveAppShellTarget(
 }
 
 class AppShellRouter extends StatelessWidget {
-  const AppShellRouter({super.key});
+  const AppShellRouter({
+    super.key,
+    this.enableStartupServices = true,
+  });
+
+  final bool enableStartupServices;
 
   @override
   Widget build(BuildContext context) {
@@ -30,8 +35,10 @@ class AppShellRouter extends StatelessWidget {
     );
 
     return switch (target) {
-      AppShellTarget.windowsDesktop => const DesktopAppShell(),
-      AppShellTarget.standard => const AppShell(),
+      AppShellTarget.windowsDesktop =>
+        DesktopAppShell(enableStartupServices: enableStartupServices),
+      AppShellTarget.standard =>
+        AppShell(enableStartupServices: enableStartupServices),
     };
   }
 }

@@ -9,8 +9,14 @@ import 'package:ai_orchestrator/app/app_shell.dart';
 /// The desktop-specific navigation/workspace chrome is added in the next rings
 /// behind this stable platform boundary.
 class DesktopAppShell extends StatelessWidget {
-  const DesktopAppShell({super.key});
+  const DesktopAppShell({
+    super.key,
+    this.enableStartupServices = true,
+  });
+
+  final bool enableStartupServices;
 
   @override
-  Widget build(BuildContext context) => const AppShell();
+  Widget build(BuildContext context) =>
+      AppShell(enableStartupServices: enableStartupServices);
 }
