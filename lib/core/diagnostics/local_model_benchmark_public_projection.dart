@@ -306,6 +306,22 @@ String? localModelBenchmarkPublicProjection({
     });
   }
 
+  if (event == 'LOCAL_MODEL_BENCH_MODEL_SKIPPED') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,120}) '
+      r'case=([A-Za-z0-9_.-]{1,120}) '
+      r'reason=(critical_memory|insufficient_memory)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': time,
+      'event': event,
+      'model': m[1]!,
+      'case': m[2]!,
+      'reason': m[3]!,
+    });
+  }
+
   if (event == 'LOCAL_MODEL_BENCH_THERMAL_GATE') {
     final m = RegExp(
       r'^model=([A-Za-z0-9_.-]{1,120}) '
@@ -341,8 +357,9 @@ String? localModelBenchmarkPublicProjection({
 
   if (event == 'LOCAL_MODEL_BENCH_END') {
     final m = RegExp(
-      r'^models=(\d{1,3})(?: failures=(\d{1,3}))? '
-      r'status=(success|failed|partial)$',
+      r'^models=(\d{1,3})(?: failures=(\d{1,3}))?'
+      r'(?: skips=(\d{1,3}))? '
+      r'status=(success|failed|partial|skipped)$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
@@ -350,7 +367,8 @@ String? localModelBenchmarkPublicProjection({
       'event': event,
       'models': int.parse(m[1]!),
       if (m[2] != null) 'failures': int.parse(m[2]!),
-      'status': m[3]!,
+      if (m[3] != null) 'skips': int.parse(m[3]!),
+      'status': m[4]!,
     });
   }
 
