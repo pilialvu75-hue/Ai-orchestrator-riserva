@@ -1018,8 +1018,11 @@ class LocalModelBenchmarkRunner {
         normalized.contains('deepseek-r1');
   }
 
-  static int benchmarkMaxTokensForModel(String modelId) =>
-      isReasoningBenchmarkModel(modelId)
+  static int benchmarkMaxTokensForModel(
+    String modelId, {
+    bool reasoningAware = false,
+  }) =>
+      reasoningAware && isReasoningBenchmarkModel(modelId)
           ? _reasoningMaxTokens
           : _maxTokens;
 
@@ -1031,11 +1034,12 @@ class LocalModelBenchmarkRunner {
   /// quality credit rather than scoring reasoning text by accident.
   static String? benchmarkEvaluationResponse(
     String modelId,
-    String response,
-  ) {
+    String response, {
+    bool reasoningAware = false,
+  }) {
     final trimmed = response.trim();
     if (trimmed.isEmpty) return null;
-    if (!isReasoningBenchmarkModel(modelId)) return trimmed;
+    if (!reasoningAware || !isReasoningBenchmarkModel(modelId)) return trimmed;
 
     final closingThink = trimmed.lastIndexOf('</think>');
     if (closingThink < 0) return null;
@@ -1525,6 +1529,7 @@ class LocalModelBenchmarkRunner {
           final result = await _runCase(
             model: model,
             benchmarkCase: benchmarkCase,
+            reasoningAware: true,
           );
           caseResults.add(result);
 
@@ -2583,6 +2588,7 @@ class LocalModelBenchmarkRunner {
   Future<LocalModelBenchmarkCaseResult> _runCase({
     required AiModel model,
     required LocalModelBenchmarkCase benchmarkCase,
+    bool reasoningAware = false,
   }) async {
     final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
         ? _runtimeProvider
@@ -2640,6 +2646,7 @@ class LocalModelBenchmarkRunner {
         modelPath: model.localPath,
         maxTokens: benchmarkMaxTokensForModel(
           model.effectiveRuntimeModelId,
+          reasoningAware: reasoningAware,
         ),
         temperature: _temperature,
         topP: 0.9,
@@ -2713,16 +2720,22 @@ class LocalModelBenchmarkRunner {
     final evaluationResponse = benchmarkEvaluationResponse(
       model.effectiveRuntimeModelId,
       response,
+      reasoningAware: reasoningAware,
     );
     final responseForReport = evaluationResponse ??
-        (isReasoningBenchmarkModel(model.effectiveRuntimeModelId)
+        (reasoningAware &&
+                isReasoningBenchmarkModel(model.effectiveRuntimeModelId)
             ? '[risposta finale non raggiunta entro il budget di reasoning]'
             : response);
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_REASONING_POLICY] '
       'model=${model.effectiveRuntimeModelId} '
-      'max_tokens=${benchmarkMaxTokensForModel(model.effectiveRuntimeModelId)} '
+      'reasoning_aware=$reasoningAware '
+      'max_tokens=${benchmarkMaxTokensForModel(
+        model.effectiveRuntimeModelId,
+        reasoningAware: reasoningAware,
+      )} '
       'final_answer=${evaluationResponse != null}',
     );
 
