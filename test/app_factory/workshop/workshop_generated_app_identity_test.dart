@@ -41,6 +41,19 @@ void main() {
       );
     });
 
+    test('normalizes a human display name without changing project identity', () {
+      expect(
+        WorkshopGeneratedAppIdentity.displayNameFor(
+          '  Manga   Kids\nStudio  ',
+        ),
+        'Manga Kids Studio',
+      );
+      expect(
+        WorkshopGeneratedAppIdentity.displayNameFor('   '),
+        'Cantiere App',
+      );
+    });
+
     test('rejects an empty project id', () {
       expect(
         () => WorkshopGeneratedAppIdentity.projectNameFor('   '),
