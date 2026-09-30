@@ -1,0 +1,165 @@
+name: Windows 7 Flutter 3.19 Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/windows7-flutter319-smoke
+    paths:
+      - '.github/workflows/windows7-flutter319-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-flutter319-smoke:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter 3.19.6
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.6'
+          channel: stable
+          cache: true
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter doctor -v
+
+      - name: Create isolated smoke app
+        shell: pwsh
+        run: |
+          flutter create --platforms=windows --org com.aiorchestrator win7_flutter319_smoke
+          @'
+          import 'package:flutter/material.dart';
+
+          void main() {
+            runApp(const SmokeApp());
+          }
+
+          class SmokeApp extends StatelessWidget {
+            const SmokeApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return const MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: Scaffold(
+                  backgroundColor: Color(0xFF203050),
+                  body: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, color: Color(0xFF75D68A), size: 56),
+                        SizedBox(height: 18),
+                        Text(
+                          'AI Orchestrator',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          'Windows 7 / Flutter 3.19.6 smoke test',
+                          style: TextStyle(color: Color(0xFFD0DBEE), fontSize: 14),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'No plugins - No bootstrap - No AI runtime',
+                          style: TextStyle(color: Color(0xFF9EB4D2), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+          '@ | Set-Content -Path win7_flutter319_smoke/lib/main.dart -Encoding UTF8
+
+      - name: Add legacy Windows manifest declarations
+        shell: pwsh
+        run: |
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+              </windowsSettings>
+            </application>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+                <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+                <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+                <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+              </application>
+            </compatibility>
+          </assembly>
+          '@ | Set-Content -Path win7_flutter319_smoke/windows/runner/runner.exe.manifest -Encoding UTF8
+
+      - name: Build Flutter 3.19.6 Windows release
+        shell: pwsh
+        working-directory: win7_flutter319_smoke
+        run: flutter build windows --release
+
+      - name: Inspect imports
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'win7_flutter319_smoke\build\windows\x64\runner\Release'
+          $exe = Join-Path $releaseDir 'win7_flutter319_smoke.exe'
+          if (-not (Test-Path $exe)) { throw "Smoke executable not found: $exe" }
+          dumpbin /imports $exe | Tee-Object -FilePath win7-flutter319-exe-imports.txt
+          dumpbin /imports (Join-Path $releaseDir 'flutter_windows.dll') |
+            Tee-Object -FilePath win7-flutter319-engine-imports.txt
+
+      - name: Bundle VC runtime locally
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'win7_flutter319_smoke\build\windows\x64\runner\Release'
+          $runtimeDlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+          foreach ($dll in $runtimeDlls) {
+            if (Test-Path (Join-Path $releaseDir $dll)) { continue }
+            $candidate = $null
+            if ($env:VCToolsRedistDir) {
+              $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } |
+                Select-Object -First 1
+            }
+            if ($candidate) {
+              Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
+            }
+          }
+
+      - name: Create portable archive
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'win7_flutter319_smoke\build\windows\x64\runner\Release'
+          $zip = Join-Path $PWD 'AI-Orchestrator-Win7-Flutter319-Smoke.zip'
+          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AI-Orchestrator-Win7-Flutter319-Smoke.zip" |
+            Set-Content -Path "$zip.sha256" -Encoding ASCII
+          Write-Host "ZIP SHA256: $hash"
+
+      - name: Upload smoke bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-win7-flutter319-smoke
+          path: |
+            AI-Orchestrator-Win7-Flutter319-Smoke.zip
+            AI-Orchestrator-Win7-Flutter319-Smoke.zip.sha256
+            win7-flutter319-exe-imports.txt
+            win7-flutter319-engine-imports.txt
+          if-no-files-found: error
+          retention-days: 14
