@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:flutter/foundation.dart';
 
 typedef LocalModelBenchmarkProgress = void Function(String message);
 
@@ -1473,7 +1474,10 @@ class LocalModelBenchmarkRunner {
         continue;
       }
 
-      final physicalKey = rawPath.replaceAll('\\', '/').toLowerCase();
+      final normalizedPath = rawPath.replaceAll('\\', '/');
+      final physicalKey = defaultTargetPlatform == TargetPlatform.windows
+          ? normalizedPath.toLowerCase()
+          : normalizedPath;
       if (!seenPhysicalPaths.add(physicalKey)) {
         RuntimeEventLog.instance.emit(
           '[LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED] '
