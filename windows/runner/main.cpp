@@ -134,10 +134,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   startup_trace::Mark("08 after command line parsing");
 
   bool skip_plugins = false;
-  bool legacy_renderer = IsWindows7();
-  if (legacy_renderer) {
+  const bool is_windows_7 = IsWindows7();
+  if (is_windows_7) {
     startup_trace::Mark(
-        "08a Win7 detected; conservative renderer auto-enabled");
+        "08a Win7 detected; Flutter 3.29 legacy renderer is engine default");
   }
 
   std::vector<std::string> dart_arguments;
@@ -149,28 +149,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       continue;
     }
     if (argument == "--win7-no-impeller" ||
-        argument == "--win7-legacy-renderer") {
-      legacy_renderer = true;
-      startup_trace::Mark("08c legacy renderer explicitly requested");
-      continue;
-    }
-    if (argument == "--win7-default-renderer") {
-      legacy_renderer = false;
-      startup_trace::Mark("08c default renderer explicitly requested");
+        argument == "--win7-legacy-renderer" ||
+        argument == "--win7-default-renderer") {
+      startup_trace::Mark(
+          "08c Flutter 3.29 renderer flag accepted as diagnostic no-op");
       continue;
     }
     dart_arguments.push_back(argument);
   }
 
-  if (legacy_renderer) {
-    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
-    project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
-    startup_trace::Mark(
-        "08d legacy renderer: Impeller off, low-power GPU, platform UI thread");
-  } else {
-    startup_trace::Mark("08d renderer default retained");
-  }
+  startup_trace::Mark(
+      "08d Flutter 3.29 Windows renderer retained (pre-Impeller default)");
 
   project.set_dart_entrypoint_arguments(std::move(dart_arguments));
   startup_trace::Mark("09 after Dart entrypoint args");
