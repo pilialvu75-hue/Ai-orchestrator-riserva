@@ -147,6 +147,52 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? memoryContextScore(
+    LocalModelBenchmarkModelResult result,
+  ) {
+    const requiredCases = <String>{
+      'memory_context_short',
+      'memory_context_medium',
+      'memory_context_long',
+      'memory_context_recovery',
+    };
+
+    final byId = <String, LocalModelBenchmarkCaseResult>{
+      for (final item in result.cases) item.caseId: item,
+    };
+    if (!requiredCases.every(byId.containsKey)) return null;
+
+    final pressureScores = <double>[];
+    for (final id in requiredCases) {
+      final pressure = byId[id]!.endPressure;
+      final score = switch (pressure) {
+        'normal' => 100.0,
+        'high' => 55.0,
+        'critical' => 0.0,
+        _ => null,
+      };
+      if (score == null) return null;
+      pressureScores.add(score);
+    }
+
+    final recall = result.maxScore <= 0
+        ? 0.0
+        : (result.score / result.maxScore * 100).clamp(0.0, 100.0);
+
+    final longCase = byId['memory_context_long']!;
+    final longRecall = longCase.maxScore <= 0
+        ? 0.0
+        : (longCase.score / longCase.maxScore * 100).clamp(0.0, 100.0);
+
+    final pressure =
+        pressureScores.reduce((a, b) => a + b) / pressureScores.length;
+
+    return (recall * 0.70 + longRecall * 0.15 + pressure * 0.15)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static int? thermalScore(LocalModelThermalModelResult result) {
     if (!result.thermalTelemetryComplete ||
         result.samples.isEmpty ||
