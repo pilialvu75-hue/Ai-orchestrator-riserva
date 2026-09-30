@@ -59,6 +59,8 @@ String? publicLogProjection(String line) {
     'ANDROID_PROCESS_EXIT_HISTORY',
     'FORENSIC_UNCAUGHT_DART_EXCEPTION',
     'FORENSIC_GLOBAL_EXCEPTION_HANDLERS_INSTALLED',
+    'DIAGNOSTICS_SESSION',
+    'LOCAL_RUNTIME_ERROR',
     'DOWNLOAD_START',
     'DOWNLOAD_PROGRESS',
     'DOWNLOAD_COMPLETE',
@@ -198,6 +200,36 @@ String? publicLogProjection(String line) {
     return null;
   }
 
+  if (event == 'DIAGNOSTICS_SESSION') {
+    final m = RegExp(
+      r'^platform=(android|windows|linux|macOS|iOS|fuchsia) '
+      r'transport=github_releases enabled=(true|false)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'platform': m[1]!,
+      'transport': 'github_releases',
+      'enabled': m[2] == 'true',
+    });
+  }
+
+  if (event == 'LOCAL_RUNTIME_ERROR') {
+    final m = RegExp(
+      r'^stage=(validation|process_start|stream|process_exit|unknown) '
+      r'reason=(unsendable_isolate_object|process_start_failed|process_exit|io_error|other) '
+      r'object=(custom_zone|controller_stream|controller_subscription|timer|other|none)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'stage': m[1]!,
+      'reason': m[2]!,
+      'object': m[3]!,
+    });
+  }
   if (event == 'WORKSHOP_ENGINEER_PROMPT') {
     final m = RegExp(
       r'^request=[A-Za-z0-9._:-]{1,120} '
