@@ -133,6 +133,28 @@ void main() {
     expect(decodedReasoning['final_answer'], isTrue);
   });
 
+  test('exports RAM safety skip separately from benchmark failure', () {
+    final skip = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_MODEL_SKIPPED] '
+      'model=deepseek_r1_7b case=sdd_typo_first '
+      'reason=insufficient_memory',
+    );
+    final end = publicLogProjection(
+      '$time [LOCAL_MODEL_BENCH_END] '
+      'models=0 failures=0 skips=1 status=skipped',
+    );
+
+    final decodedSkip = jsonDecode(skip!) as Map<String, dynamic>;
+    expect(decodedSkip['event'], 'LOCAL_MODEL_BENCH_MODEL_SKIPPED');
+    expect(decodedSkip['reason'], 'insufficient_memory');
+
+    final decodedEnd = jsonDecode(end!) as Map<String, dynamic>;
+    expect(decodedEnd['models'], 0);
+    expect(decodedEnd['failures'], 0);
+    expect(decodedEnd['skips'], 1);
+    expect(decodedEnd['status'], 'skipped');
+  });
+
   test('exports structured benchmark thermal gate without free text', () {
     final gate = publicLogProjection(
       '$time [LOCAL_MODEL_BENCH_THERMAL_GATE] '
