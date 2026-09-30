@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/app/desktop/desktop_workspace_scope.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_read_aloud_button.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
@@ -503,6 +504,12 @@ class _WorkshopDashboardPageState
 
   Future<void> _startNewConversation() async {
     if (!mounted) {
+      return;
+    }
+
+    final desktopWorkspace = DesktopWorkspaceScope.maybeOf(context);
+    if (desktopWorkspace != null) {
+      desktopWorkspace.openNewCantiereTab();
       return;
     }
 
