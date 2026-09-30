@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_notification_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
@@ -28,6 +29,27 @@ void main() {
     expect(snapshot.status, WorkshopProjectSurfaceStatus.build);
     expect(snapshot.shouldRetainSession, isTrue);
     expect(snapshot.progressPercent, 100);
+  });
+
+  test('surface exposes active-stage progress before first task completes', () {
+    const state = WorkshopDashboardControllerState(
+      requestId: 'request-stage',
+      projectId: 'project:stage',
+      projectTitle: 'Manga Kids',
+      projectStatus: WorkshopProjectStatus.inProgress,
+      stage: WorkshopStage.implementation,
+      progress: 0,
+      completedTasks: 0,
+      totalTasks: 2,
+    );
+
+    final snapshot =
+        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+
+    expect(snapshot.status, WorkshopProjectSurfaceStatus.active);
+    expect(snapshot.progressPercent, greaterThan(0));
+    expect(snapshot.progressPercent, lessThan(50));
+    expect(snapshot.stage, WorkshopStage.implementation.name);
   });
 
   test('surface treats an explicit project error as terminal', () {

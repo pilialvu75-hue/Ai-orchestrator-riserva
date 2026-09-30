@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentation.dart';
 
 enum WorkshopProjectSurfaceStatus {
   idle,
@@ -44,8 +45,16 @@ final class WorkshopProjectSurfaceSnapshot {
     }
 
     final title = state.projectTitle?.trim();
+    final presentationProgress =
+        WorkshopProgressPresentation.displayValue(
+      authoritativeProgress: state.progress,
+      completedTasks: state.completedTasks,
+      totalTasks: state.totalTasks,
+      stage: state.progressPresentationStage ?? state.stage,
+      actualStage: state.stage,
+    );
     final progressPercent =
-        (state.progress.clamp(0.0, 1.0) * 100).round();
+        (presentationProgress.clamp(0.0, 1.0) * 100).round();
     final buildResult = state.lastBuildResult;
     final hasError = state.lastError?.trim().isNotEmpty == true;
 
