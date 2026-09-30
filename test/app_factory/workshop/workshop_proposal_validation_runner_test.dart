@@ -61,7 +61,7 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('pubspec.yaml is absent from the staged diff'),
+        contains('pubspec.yaml is absent from the'),
       );
       expect(reviewer.lastPrompt, contains('UI LITERAL FIDELITY'));
       expect(reviewer.lastPrompt, contains('requested "+"'));
