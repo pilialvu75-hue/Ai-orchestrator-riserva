@@ -173,6 +173,35 @@ class ModelDownloadService {
     ];
   }
 
+  /// Win7 diagnostic only: isolates the built-in model filesystem scan from
+  /// SharedPreferences and remote update checks. No production caller uses it.
+  Future<int> diagnosticScanBuiltInModels() async {
+    final modelsDir = await _modelsDirectory();
+    final catalog = await _bundledModelRegistryService.loadCatalog();
+    var found = 0;
+    for (final model in catalog) {
+      final fileName = model['fileName'] as String;
+      final file = File(p.join(modelsDir.path, fileName));
+      final resolution = await _pathResolver.resolveForRead(
+        fileName: fileName,
+        privateAbsolutePathHint: file.path,
+      );
+      if (resolution.exists) {
+        found++;
+      }
+    }
+    return found;
+  }
+
+  /// Win7 diagnostic only: isolates SharedPreferences plugin access.
+  Future<int> diagnosticReadStoredModelPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    var entries = 0;
+    if (prefs.getString(_customModelsKey) != null) entries++;
+    if (prefs.getString(_importedModelsKey) != null) entries++;
+    return entries;
+  }
+
   // ── Download ───────────────────────────────────────────────────────────────
 
   /// Downloads [model] using resumable `.part` storage.
