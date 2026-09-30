@@ -452,6 +452,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       ),
                       const SizedBox(height: 10),
                       OutlinedButton(
+                        onPressed: () {
+                          _appendWindowsSafeStartupBreadcrumb(
+                            'D45 inert interaction probe pressed: no subsystem invoked',
+                          );
+                        },
+                        child: const Text('0 · Test solo clic (nessun servizio)'),
+                      ),
+                      OutlinedButton(
                         onPressed: _runWin7ModelProbe,
                         child: const Text('1 · Test modelli'),
                       ),
