@@ -1429,6 +1429,10 @@ class LocalModelBenchmarkRunner {
   static const int benchmarkThermalCooldownMaxSamples = 36;
   static const Duration benchmarkThermalCooldownSampleDelay =
       Duration(seconds: 5);
+  static Duration get benchmarkThermalCooldownMaxDuration => Duration(
+        milliseconds: benchmarkThermalCooldownSampleDelay.inMilliseconds *
+            benchmarkThermalCooldownMaxSamples,
+      );
 
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
