@@ -53,6 +53,8 @@ void main() {
       expect(reviewer.lastPrompt, contains('"after":"new"'));
       expect(reviewer.lastPrompt, contains('SCOPE RULE:'));
       expect(reviewer.lastPrompt, contains('CONTRACT PRECEDENCE:'));
+      expect(reviewer.lastPrompt, contains('UI LITERAL FIDELITY'));
+      expect(reviewer.lastPrompt, contains('requested "+" becoming "+1"'));
       expect(
         reviewer.lastPrompt,
         contains('"targetFilesPolicy":"unspecified_for_initial_create_task"'),
