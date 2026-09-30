@@ -616,7 +616,9 @@ class _DebugOverlayState
                           available: true,
                           onTap: () {
                             Navigator.of(sheetContext).pop();
-                            unawaited(_runMemoryContextBenchmark());
+                            unawaited(
+                              _showMemoryContextBenchmarkModelPicker(),
+                            );
                           },
                         ),
                         item(
@@ -1139,7 +1141,22 @@ class _DebugOverlayState
     );
   }
 
-  Future<void> _runMemoryContextBenchmark() async {
+  Future<void> _showMemoryContextBenchmarkModelPicker() async {
+    final modelIds = await _pickBenchmarkModels(
+      title: 'Memoria / Context',
+      subtitle:
+          'Scegli uno o più modelli. Il test aumenta progressivamente il '
+          'contesto, misura n_ctx/RAM/pressure e prova un recovery finale.',
+      defaultModelIds:
+          LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
+    );
+    if (modelIds == null || modelIds.isEmpty || !mounted) return;
+    await _runMemoryContextBenchmark(modelIds: modelIds);
+  }
+
+  Future<void> _runMemoryContextBenchmark({
+    required List<String> modelIds,
+  }) async {
     List<AiModel> candidates;
     try {
       candidates = await _localModelBenchmark.loadBenchmarkCandidates();
@@ -1153,32 +1170,33 @@ class _DebugOverlayState
       return;
     }
 
-    final runnable = candidates
-        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
-        .toList(growable: false);
+    final selected = <String, AiModel>{
+      for (final model in candidates)
+        if (modelIds.contains(model.id) &&
+            LocalModelBenchmarkRunner.isRunnableCandidate(model))
+          model.id: model,
+    };
 
-    if (runnable.isEmpty) {
+    if (selected.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nessun modello locale pronto per il benchmark.'),
+          content: Text('Nessun modello selezionato è pronto per il test.'),
         ),
       );
       return;
     }
 
-    LocalModelBenchmarkReport? report;
+    LocalModelMemoryContextReport? report;
 
     await _runTest(
       testId: 'local_model_memory_context_benchmark',
       timeout: Duration(
-        minutes: (runnable.length * 8).clamp(12, 120).toInt(),
+        minutes: (selected.length * 10).clamp(20, 90).toInt(),
       ),
       action: () async {
-        report = await _localModelBenchmark.run(
-          modelIds: runnable.map((model) => model.id),
-          benchmarkCases: LocalModelBenchmarkRunner.memoryContextCases,
-          continueOnModelError: true,
+        report = await _localModelBenchmark.runMemoryContextBenchmark(
+          modelIds: selected.keys,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
@@ -1190,22 +1208,14 @@ class _DebugOverlayState
         final completed = report;
         if (completed == null) return;
 
-        final byId = <String, AiModel>{
-          for (final model in runnable) model.id: model,
-        };
-
         for (final result in completed.models) {
-          final catalogId = result.catalogModelId ?? result.modelId;
-          final model = byId[catalogId];
+          final model = selected[result.catalogModelId];
           if (model == null) continue;
-
-          final score = LocalBenchmarkScoring.memoryContextScore(result);
-          if (score == null) continue;
 
           await _benchmarkScoreStore.saveComponent(
             model: model,
             component: LocalBenchmarkComponent.memoryContext,
-            score: score,
+            score: LocalBenchmarkScoring.memoryContextScore(result),
             updatedAt: completed.createdAt,
           );
         }
@@ -1217,52 +1227,20 @@ class _DebugOverlayState
   }
 
   Future<void> _showMemoryContextBenchmarkReport(
-    LocalModelBenchmarkReport report,
+    LocalModelMemoryContextReport report,
   ) async {
     final buffer = StringBuffer()
-      ..writeln('BENCHMARK MEMORIA / CONTEXT')
-      ..writeln('created_at=${report.createdAt.toIso8601String()}')
-      ..writeln(
-        'score_weights=recall:70 long_recall:15 memory_pressure:15',
-      )
-      ..writeln();
+      ..writeln(report.toPlainText())
+      ..writeln()
+      ..writeln('SCORING MEMORIA / CONTEXT')
+      ..writeln('pesi=recall:60 recovery:20 pressure:20')
+      ..writeln('pressure=normal:20 high:10 unknown/critical:0');
 
     for (final model in report.models) {
-      final score = LocalBenchmarkScoring.memoryContextScore(model);
-      buffer
-        ..writeln('${model.displayName} [${model.modelId}]')
-        ..writeln(
-          score == null
-              ? 'memory_context_score=n/a (telemetria memoria incompleta)'
-              : 'memory_context_score=$score/100',
-        );
-
-      for (final item in model.cases) {
-        final startMb = item.startAvailableBytes == null
-            ? 'n/a'
-            : (item.startAvailableBytes! ~/ (1024 * 1024)).toString();
-        final endMb = item.endAvailableBytes == null
-            ? 'n/a'
-            : (item.endAvailableBytes! ~/ (1024 * 1024)).toString();
-        buffer.writeln(
-          '- ${item.caseId}: ${item.score}/${item.maxScore} '
-          'prefill=${item.prefillMs}ms '
-          'pressure=${item.startPressure}->${item.endPressure} '
-          'available_mb=$startMb->$endMb '
-          'session=${item.sessionStart}->${item.sessionEnd}',
-        );
-      }
-      buffer.writeln();
-    }
-
-    if (report.failures.isNotEmpty) {
-      buffer.writeln('MODELLI NON COMPLETATI');
-      for (final failure in report.failures) {
-        buffer.writeln(
-          '- ${failure.displayName} [${failure.modelId}]: ${failure.error}',
-        );
-      }
-      buffer.writeln();
+      buffer.writeln(
+        '${model.displayName}: '
+        '${LocalBenchmarkScoring.memoryContextScore(model)}/100',
+      );
     }
 
     final text = buffer.toString().trimRight();
