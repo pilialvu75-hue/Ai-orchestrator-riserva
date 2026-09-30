@@ -1460,13 +1460,45 @@ class LocalModelBenchmarkRunner {
     );
   }
 
+  static List<AiModel> deduplicateBenchmarkCandidates(
+    Iterable<AiModel> models,
+  ) {
+    final result = <AiModel>[];
+    final seenPhysicalPaths = <String>{};
+
+    for (final model in models) {
+      final rawPath = model.localPath?.trim();
+      if (rawPath == null || rawPath.isEmpty) {
+        result.add(model);
+        continue;
+      }
+
+      final physicalKey = rawPath.replaceAll('\\', '/').toLowerCase();
+      if (!seenPhysicalPaths.add(physicalKey)) {
+        RuntimeEventLog.instance.emit(
+          '[LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED] '
+          'model=${model.effectiveRuntimeModelId} '
+          'catalog=${model.id} '
+          'reason=same_physical_file',
+        );
+        continue;
+      }
+
+      result.add(model);
+    }
+
+    return List<AiModel>.unmodifiable(result);
+  }
+
   Future<List<AiModel>> loadBenchmarkCandidates() async {
     final availableResult = await _localAiRepository.getAvailableModels();
     final available = availableResult.fold<List<AiModel>>(
       (failure) => throw StateError(
         'Model catalogue lookup failed: ${failure.message}',
       ),
-      (models) => List<AiModel>.of(models),
+      (models) => List<AiModel>.of(
+        deduplicateBenchmarkCandidates(models),
+      ),
     );
 
     available.sort((a, b) {
