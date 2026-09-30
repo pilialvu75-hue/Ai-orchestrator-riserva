@@ -2178,6 +2178,7 @@ class _DebugOverlayState
       action: () async {
         report = await _localModelBenchmark.runVulkanLayerSweep(
           modelIds: modelIds,
+          continueOnModelError: true,
           onProgress: (message) {
             if (!mounted) return;
             setState(() {
@@ -2185,6 +2186,33 @@ class _DebugOverlayState
             });
           },
         );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+        final byId = <String, AiModel>{
+          for (final model in candidates) model.id: model,
+        };
+        final catalogIds = completed.samples
+            .map((sample) => sample.catalogModelId)
+            .toSet();
+
+        for (final catalogId in catalogIds) {
+          final model = byId[catalogId];
+          final score = LocalBenchmarkScoring.vulkanScore(
+            completed,
+            catalogId,
+          );
+          if (model == null || score == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.vulkan,
+            score: score.score,
+            updatedAt: completed.createdAt,
+          );
+        }
       },
     );
 
@@ -2195,7 +2223,42 @@ class _DebugOverlayState
   Future<void> _showVulkanLayerSweepReport(
     VulkanLayerSweepReport report,
   ) async {
-    final text = report.toPlainText();
+    final summary = StringBuffer()
+      ..writeln('VULKAN SCORE')
+      ..writeln(
+        'relative_to_cpu: 50=pari, >50=vantaggio GPU, <50=regressione',
+      );
+
+    final catalogIds = report.samples
+        .map((sample) => sample.catalogModelId)
+        .toSet();
+    for (final catalogId in catalogIds) {
+      final first = report.samples.firstWhere(
+        (sample) => sample.catalogModelId == catalogId,
+      );
+      final score = LocalBenchmarkScoring.vulkanScore(
+        report,
+        catalogId,
+      );
+      if (score == null) {
+        summary.writeln(
+          '- ${first.displayName}: vulkan_score=n/a '
+          '(sweep incompleto o GPU non osservata)',
+        );
+        continue;
+      }
+      summary.writeln(
+        '- ${first.displayName}: vulkan_score=${score.score}/100 '
+        'best_requested=${score.bestRequestedGpuLayers} '
+        'observed_gpu=${score.averageObservedGpuLayers} '
+        'speed=${score.speedScore.toStringAsFixed(1)} '
+        'quality_factor=${score.qualityFactor.toStringAsFixed(2)} '
+        'stability_factor=${score.stabilityFactor.toStringAsFixed(2)}',
+      );
+    }
+
+    final text = '${summary.toString().trimRight()}\n\n'
+        '${report.toPlainText()}';
 
     await showDialog<void>(
       context: context,
