@@ -627,7 +627,11 @@ class _DebugOverlayState
                           subtitle:
                               'Confronto coerente in italiano, inglese, '
                               'francese e spagnolo.',
-                          available: false,
+                          available: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_runMultilingualBenchmark());
+                          },
                         ),
                         item(
                           icon: Icons.shield_outlined,
@@ -1468,6 +1472,171 @@ class _DebugOverlayState
       },
     );
   }
+  Future<void> _runMultilingualBenchmark() async {
+    List<AiModel> candidates;
+    try {
+      candidates = await _localModelBenchmark.loadBenchmarkCandidates();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossibile caricare i modelli: $error'),
+        ),
+      );
+      return;
+    }
+
+    final runnable = candidates
+        .where(LocalModelBenchmarkRunner.isRunnableCandidate)
+        .toList(growable: false);
+
+    if (runnable.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessun modello locale pronto per il benchmark.'),
+        ),
+      );
+      return;
+    }
+
+    LocalModelBenchmarkReport? report;
+
+    await _runTest(
+      testId: 'local_model_multilingual_benchmark',
+      timeout: Duration(
+        minutes: (runnable.length * 8).clamp(15, 120).toInt(),
+      ),
+      action: () async {
+        report = await _localModelBenchmark.run(
+          modelIds: runnable.map((model) => model.id),
+          benchmarkCases: LocalModelBenchmarkRunner.multilingualCases,
+          continueOnModelError: true,
+          onProgress: (message) {
+            if (!mounted) return;
+            setState(() {
+              _statusMessage = 'Multilingua • $message';
+            });
+          },
+        );
+
+        final completed = report;
+        if (completed == null) return;
+
+        final byId = <String, AiModel>{
+          for (final model in runnable) model.id: model,
+        };
+
+        for (final result in completed.models) {
+          final score = LocalBenchmarkScoring.multilingualScore(result);
+          if (score == null) continue;
+          final catalogId = result.catalogModelId ?? result.modelId;
+          final model = byId[catalogId];
+          if (model == null) continue;
+
+          await _benchmarkScoreStore.saveComponent(
+            model: model,
+            component: LocalBenchmarkComponent.multilingual,
+            score: score,
+            updatedAt: completed.createdAt,
+          );
+        }
+      },
+    );
+
+    if (report == null || !mounted) return;
+    await _showMultilingualBenchmarkReport(report!);
+  }
+
+  Future<void> _showMultilingualBenchmarkReport(
+    LocalModelBenchmarkReport report,
+  ) async {
+    final buffer = StringBuffer()
+      ..writeln('BENCHMARK MULTILINGUA')
+      ..writeln('created_at=${report.createdAt.toIso8601String()}')
+      ..writeln('lingue=IT EN FR ES')
+      ..writeln('peso=25% per lingua')
+      ..writeln();
+
+    for (final model in report.models) {
+      final total = LocalBenchmarkScoring.multilingualScore(model);
+      buffer.writeln(
+        '${model.displayName} [${model.modelId}] '
+        'score=${total == null ? 'n/a' : '$total/100'}',
+      );
+      for (final language
+          in LocalModelBenchmarkRunner.multilingualLanguages) {
+        final score = LocalBenchmarkScoring.multilingualLanguageScore(
+          model,
+          language,
+        );
+        buffer.writeln(
+          '- ${language.toUpperCase()}: '
+          '${score == null ? 'n/a' : '$score/100'}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    if (report.failures.isNotEmpty) {
+      buffer.writeln('MODELLI NON COMPLETATI');
+      for (final failure in report.failures) {
+        buffer.writeln(
+          '- ${failure.displayName} [${failure.modelId}]: '
+          '${failure.error}',
+        );
+      }
+      buffer.writeln();
+    }
+
+    final text = buffer.toString().trimRight();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101723),
+          title: const Text(
+            'Multilingua',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Chiudi'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Benchmark multilingua copiato negli appunti'),
+                  ),
+                );
+              },
+              child: const Text('Copia'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _showOrchestratorBenchmarkModelPicker() async {
     final modelIds = await _pickBenchmarkModels(
       title: 'Benchmark Orchestratore',
