@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -55,6 +56,82 @@ void main() {
           validationStatus: ModelValidationStatus.invalidModel,
         ),
       ),
+      isFalse,
+    );
+  });
+
+  test('benchmark load preflight rejects a 6.7B GGUF without RAM headroom', () {
+    const large = AiModel(
+      id: 'deepseek_coder_6_7b_instruct',
+      displayName: 'DeepSeek Coder 6.7B',
+      fileName: 'deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 4083016640,
+      description: 'large benchmark model',
+      isDownloaded: true,
+      localPath: '/models/deepseek.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+    const medium = AiModel(
+      id: 'medium_4b',
+      displayName: 'Medium 4B',
+      fileName: 'medium.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 2400000000,
+      description: 'medium benchmark model',
+      isDownloaded: true,
+      localPath: '/models/medium.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+    final sample = ResourceSample(<Object?, Object?>{
+      'availableBytes': 4 * 1024 * 1024 * 1024,
+      'totalBytes': 7575265280,
+      'thresholdBytes': 408944640,
+      'lowMemory': false,
+      'trimLevel': 0,
+    });
+
+    expect(
+      LocalModelBenchmarkRunner.minimumAvailableBytesForSafeBenchmarkLoad(
+        large,
+      ),
+      greaterThan(sample.availableBytes!),
+    );
+    expect(
+      LocalModelBenchmarkRunner.hasSafeBenchmarkLoadHeadroom(large, sample),
+      isFalse,
+    );
+    expect(
+      LocalModelBenchmarkRunner.hasSafeBenchmarkLoadHeadroom(medium, sample),
+      isTrue,
+    );
+  });
+
+  test('benchmark load preflight rejects critical memory regardless of size', () {
+    const small = AiModel(
+      id: 'small',
+      displayName: 'Small',
+      fileName: 'small.gguf',
+      downloadUrl: '',
+      version: '1',
+      sizeBytes: 500000000,
+      description: 'small benchmark model',
+      isDownloaded: true,
+      localPath: '/models/small.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+    final critical = ResourceSample(<Object?, Object?>{
+      'availableBytes': 300 * 1024 * 1024,
+      'totalBytes': 7575265280,
+      'thresholdBytes': 408944640,
+      'lowMemory': true,
+      'trimLevel': 15,
+    });
+
+    expect(
+      LocalModelBenchmarkRunner.hasSafeBenchmarkLoadHeadroom(small, critical),
       isFalse,
     );
   });
