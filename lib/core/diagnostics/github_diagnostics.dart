@@ -13,6 +13,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/diagnostics/public_log_projection.dart';
+import 'package:ai_orchestrator/core/diagnostics/windows_native_trace_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Opt-in public diagnostics. Never uploads the original crash file.
@@ -75,12 +76,22 @@ class GitHubDiagnostics extends ChangeNotifier {
       await _recoverDisk();
       RuntimeEventLog.instance.stream.listen((entry) {
         try {
-          if (enabled) _capture(entry.toString());
+          if (enabled) {
+            _capture(entry.toString());
+            if (_shouldSyncSoon(entry.tag)) {
+              Timer(const Duration(seconds: 2), () => unawaited(sync()));
+            }
+          }
         } catch (_) {
           // Diagnostic disk failures must never escape into the runtime.
           status = 'Spazio diagnostico locale non disponibile';
         }
       });
+      RuntimeEventLog.instance.emit(
+        '[DIAGNOSTICS_SESSION] '
+        'platform=${defaultTargetPlatform.name} '
+        'transport=github_releases enabled=$enabled',
+      );
       Timer.periodic(const Duration(seconds: 60), (_) => unawaited(sync()));
       status = enabled ? 'Pronto: invio automatico ogni minuto' : 'Disattivato';
     } catch (_) {
@@ -103,6 +114,31 @@ class GitHubDiagnostics extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _shouldSyncSoon(String tag) {
+    return tag == 'LOCAL_RUNTIME_ERROR' ||
+        tag == 'GENERATION_ERROR' ||
+        tag == 'MODEL_DOWNLOAD_FAILED' ||
+        tag == 'DOWNLOAD_FAILED' ||
+        tag == 'FORENSIC_UNCAUGHT_DART_EXCEPTION';
+  }
+
+  String get _sourceLabel {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'runtime+android-disk';
+      case TargetPlatform.windows:
+        return 'runtime+windows-disk';
+      case TargetPlatform.macOS:
+        return 'runtime+macos-disk';
+      case TargetPlatform.linux:
+        return 'runtime+linux-disk';
+      case TargetPlatform.iOS:
+        return 'runtime+ios-disk';
+      case TargetPlatform.fuchsia:
+        return 'runtime+fuchsia-disk';
+    }
+  }
+
   void _capture(String raw) {
     final projected = publicLogProjection(raw);
     if (projected == null) return;
@@ -123,11 +159,52 @@ class GitHubDiagnostics extends ChangeNotifier {
     for (final line in const LineSplitter().convert(raw)) { _capture(line); }
     _seal();
     await _prefs!.setString('diagnostics.recovered', fingerprint);
+    await _recoverPlatformNativeDiagnostics();
+  }
+
+  Future<void> _recoverPlatformNativeDiagnostics() async {
+    if (!enabled || !Platform.isWindows) return;
+
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData == null || localAppData.trim().isEmpty) return;
+
+    final diagnosticsDirectory =
+        Directory('$localAppData\\AI-Orchestrator\\Diagnostics');
+
+    for (final entry in <(String, String)>[
+      ('current', 'AI-Orchestrator-win7-startup.log'),
+      ('previous', 'AI-Orchestrator-win7-startup.previous.log'),
+    ]) {
+      final file = File('${diagnosticsDirectory.path}\\${entry.$2}');
+      try {
+        if (!await file.exists()) continue;
+        final raw = await file.readAsString();
+        if (raw.trim().isEmpty) continue;
+
+        final fingerprint = sha256.convert(utf8.encode(raw)).toString();
+        final preferenceKey = 'diagnostics.windowsNativeRecovered.${entry.$1}';
+        if (_prefs!.getString(preferenceKey) == fingerprint) continue;
+
+        final projected = windowsNativeTracePublicProjection(
+          raw,
+          source: entry.$1,
+          capturedAt: DateTime.now(),
+        );
+        if (projected != null) {
+          _pending.add(projected);
+          _pendingBytes += projected.length + 1;
+          _seal();
+        }
+        await _prefs!.setString(preferenceKey, fingerprint);
+      } catch (_) {
+        // Native Windows trace recovery is best-effort and must not affect app startup.
+      }
+    }
   }
 
   void _seal() {
     if (_pending.isEmpty || _directory == null) return;
-    final text = 'schema=1 build=$_build device=$installationId name=$deviceName platform=${defaultTargetPlatform.name} capture_session=$sessionId sources=runtime+android-disk\n${_pending.join('\n')}\n';
+    final text = 'schema=1 build=$_build device=$installationId name=$deviceName platform=${defaultTargetPlatform.name} capture_session=$sessionId sources=$_sourceLabel\n${_pending.join('\n')}\n';
     final bytes = utf8.encode(text);
     final hash = sha256.convert(bytes).toString();
     final crash = text.contains('ANDROID_PROCESS_EXIT_HISTORY') || text.contains('FORENSIC_UNCAUGHT_DART_EXCEPTION');
@@ -183,6 +260,7 @@ class GitHubDiagnostics extends ChangeNotifier {
     notifyListeners();
     final client = http.Client();
     try {
+      await _recoverPlatformNativeDiagnostics();
       _seal();
       final files = _files();
       if (files.isEmpty) { status = 'Nessun nuovo evento da inviare'; return; }

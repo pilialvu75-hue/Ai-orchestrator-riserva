@@ -6,6 +6,54 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+  test('exports platform diagnostics session without device identity', () {
+    final line = publicLogProjection(
+      '$time [DIAGNOSTICS_SESSION] '
+      'platform=windows transport=github_releases enabled=true',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'DIAGNOSTICS_SESSION',
+        'platform': 'windows',
+        'transport': 'github_releases',
+        'enabled': true,
+      },
+    );
+  });
+
+  test('exports classified unsendable runtime object without exception text', () {
+    final line = publicLogProjection(
+      '$time [LOCAL_RUNTIME_ERROR] '
+      'stage=validation reason=unsendable_isolate_object '
+      'object=custom_zone',
+    );
+
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'LOCAL_RUNTIME_ERROR',
+        'stage': 'validation',
+        'reason': 'unsendable_isolate_object',
+        'object': 'custom_zone',
+      },
+    );
+  });
+
+  test('rejects extended runtime diagnostics payloads', () {
+    expect(
+      publicLogProjection(
+        '$time [LOCAL_RUNTIME_ERROR] '
+        'stage=validation reason=unsendable_isolate_object '
+        'object=timer message=private-path',
+      ),
+      isNull,
+    );
+  });
+
   test('never exports arbitrary crash text or credentials', () {
     final line = publicLogProjection(
       '$time [TTS_FAIL] secret=ghp_private /data/user/private '

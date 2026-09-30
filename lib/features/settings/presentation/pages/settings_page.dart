@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:ai_orchestrator/core/diagnostics/github_diagnostics_page.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
@@ -397,6 +398,23 @@ class _SettingsPageState extends State<SettingsPage> {
                       MaterialPageRoute<void>(
                         builder: (_) =>
                             const DiagnosticsConsolePage(),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _ModuleCard(
+                  icon: Icons.cloud_upload_outlined,
+                  title: 'Diagnostics remoto',
+                  subtitle: 'Invia log tecnici filtrati a Ai-orchestrator-diagnostics',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            const GitHubDiagnosticsPage(),
                       ),
                     );
                   },
