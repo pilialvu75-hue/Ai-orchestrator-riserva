@@ -134,7 +134,7 @@ class _TokenConfiguratorPageState extends State<TokenConfiguratorPage> {
 
           DropdownButtonFormField<MemoryWindowProfile>(
             key: const Key('memory-window-profile-dropdown'),
-            initialValue: _profile,
+            value: _profile,
             dropdownColor: const Color(0xFF151515),
             decoration: const InputDecoration(
               labelText: 'Memory profile',
