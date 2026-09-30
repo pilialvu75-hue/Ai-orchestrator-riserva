@@ -482,7 +482,7 @@ void main() {
           'thresholdBytes': 408944640,
           'lowMemory': false,
           'trimLevel': 0,
-          'batteryTemperatureDeciC': tempDeciC,
+          'batteryTempDeciC': tempDeciC,
         });
 
     expect(
