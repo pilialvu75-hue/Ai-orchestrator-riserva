@@ -17,6 +17,10 @@ enum LocalBenchmarkComponent {
   stability,
 }
 
+enum LocalBenchmarkRole {
+  orchestrator,
+}
+
 class LocalBenchmarkComponentScore {
   const LocalBenchmarkComponentScore({
     required this.score,
@@ -45,16 +49,48 @@ class LocalBenchmarkComponentScore {
   }
 }
 
+class LocalBenchmarkRoleScore {
+  const LocalBenchmarkRoleScore({
+    required this.score,
+    required this.updatedAt,
+  });
+
+  final int score;
+  final DateTime updatedAt;
+
+  Map<String, Object> toJson() => <String, Object>{
+        'score': score,
+        'updatedAt': updatedAt.toIso8601String(),
+      };
+
+  static LocalBenchmarkRoleScore? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final score = raw['score'];
+    final updatedAt = raw['updatedAt'];
+    if (score is! num || updatedAt is! String) return null;
+    final parsed = DateTime.tryParse(updatedAt);
+    if (parsed == null) return null;
+    return LocalBenchmarkRoleScore(
+      score: score.round().clamp(0, 100).toInt(),
+      updatedAt: parsed,
+    );
+  }
+}
+
 class LocalModelBenchmarkScore {
   const LocalModelBenchmarkScore({
     required this.modelId,
     required this.fingerprint,
     required this.components,
+    this.roleScores = const <LocalBenchmarkRole, LocalBenchmarkRoleScore>{},
   });
 
   final String modelId;
   final String fingerprint;
   final Map<LocalBenchmarkComponent, LocalBenchmarkComponentScore> components;
+  final Map<LocalBenchmarkRole, LocalBenchmarkRoleScore> roleScores;
+
+  int? roleScore(LocalBenchmarkRole role) => roleScores[role]?.score;
 
   int? get generalScore {
     if (components.isEmpty) return null;
@@ -242,6 +278,27 @@ abstract final class LocalBenchmarkScoring {
         .toInt();
   }
 
+  static int? orchestratorRoleScore(
+    LocalModelBenchmarkModelResult result,
+  ) {
+    final expectedCases = LocalModelBenchmarkRunner.cases;
+    if (result.cases.length != expectedCases.length || result.maxScore <= 0) {
+      return null;
+    }
+
+    final expectedIds = expectedCases.map((item) => item.id).toSet();
+    final actualIds = result.cases.map((item) => item.caseId).toSet();
+    if (actualIds.length != expectedIds.length ||
+        !actualIds.containsAll(expectedIds)) {
+      return null;
+    }
+
+    return (result.score / result.maxScore * 100)
+        .round()
+        .clamp(0, 100)
+        .toInt();
+  }
+
   static int? thermalScore(LocalModelThermalModelResult result) {
     if (!result.thermalTelemetryComplete ||
         result.samples.isEmpty ||
@@ -363,16 +420,29 @@ class LocalBenchmarkScoreStore {
       }
 
       final rawComponents = entry['components'];
-      if (rawComponents is! Map) continue;
-
       final components =
           <LocalBenchmarkComponent, LocalBenchmarkComponentScore>{};
-      for (final component in LocalBenchmarkComponent.values) {
-        final parsed = LocalBenchmarkComponentScore.fromJson(
-          rawComponents[component.name],
-        );
-        if (parsed != null) {
-          components[component] = parsed;
+      if (rawComponents is Map) {
+        for (final component in LocalBenchmarkComponent.values) {
+          final parsed = LocalBenchmarkComponentScore.fromJson(
+            rawComponents[component.name],
+          );
+          if (parsed != null) {
+            components[component] = parsed;
+          }
+        }
+      }
+
+      final rawRoles = entry['roles'];
+      final roleScores = <LocalBenchmarkRole, LocalBenchmarkRoleScore>{};
+      if (rawRoles is Map) {
+        for (final role in LocalBenchmarkRole.values) {
+          final parsed = LocalBenchmarkRoleScore.fromJson(
+            rawRoles[role.name],
+          );
+          if (parsed != null) {
+            roleScores[role] = parsed;
+          }
         }
       }
 
@@ -381,6 +451,8 @@ class LocalBenchmarkScoreStore {
         fingerprint: fingerprint as String,
         components: Map<LocalBenchmarkComponent,
             LocalBenchmarkComponentScore>.unmodifiable(components),
+        roleScores: Map<LocalBenchmarkRole,
+            LocalBenchmarkRoleScore>.unmodifiable(roleScores),
       );
     }
 
@@ -439,6 +511,70 @@ class LocalBenchmarkScoreStore {
     ).toJson();
 
     entry['components'] = components;
+    entry['updatedAt'] = (updatedAt ?? DateTime.now()).toIso8601String();
+    models[model.id] = entry;
+
+    root = <String, dynamic>{
+      'version': 2,
+      'models': models,
+    };
+    await _preferences.setString(_storageKey, jsonEncode(root));
+  }
+
+  Future<void> saveRoleScore({
+    required AiModel model,
+    required LocalBenchmarkRole role,
+    required int score,
+    DateTime? updatedAt,
+  }) async {
+    Map<String, dynamic> root;
+    final raw = _preferences.getString(_storageKey);
+    try {
+      final decoded = raw == null ? null : jsonDecode(raw);
+      root = decoded is Map<String, dynamic>
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+    } catch (_) {
+      root = <String, dynamic>{};
+    }
+
+    final models = root['models'] is Map
+        ? Map<String, dynamic>.from(root['models'] as Map)
+        : <String, dynamic>{};
+
+    final fingerprint = fingerprintFor(model);
+    final currentHardwareProfile = await hardwareProfile();
+    final existing = models[model.id];
+    Map<String, dynamic> entry;
+    final existingHardwareProfile =
+        existing is Map ? existing['hardwareProfile'] : null;
+    final hardwareCompatible = existingHardwareProfile == null ||
+        existingHardwareProfile == currentHardwareProfile;
+
+    if (existing is Map &&
+        existing['fingerprint'] == fingerprint &&
+        hardwareCompatible) {
+      entry = Map<String, dynamic>.from(existing);
+    } else {
+      entry = <String, dynamic>{
+        'modelId': model.id,
+        'fingerprint': fingerprint,
+        'hardwareProfile': currentHardwareProfile,
+        'components': <String, dynamic>{},
+        'roles': <String, dynamic>{},
+      };
+    }
+
+    entry['hardwareProfile'] = currentHardwareProfile;
+    final roles = entry['roles'] is Map
+        ? Map<String, dynamic>.from(entry['roles'] as Map)
+        : <String, dynamic>{};
+    roles[role.name] = LocalBenchmarkRoleScore(
+      score: score.clamp(0, 100).toInt(),
+      updatedAt: updatedAt ?? DateTime.now(),
+    ).toJson();
+
+    entry['roles'] = roles;
     entry['updatedAt'] = (updatedAt ?? DateTime.now()).toIso8601String();
     models[model.id] = entry;
 

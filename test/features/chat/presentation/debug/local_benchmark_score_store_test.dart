@@ -673,6 +673,100 @@ void main() {
     expect(LocalBenchmarkScoring.stabilityScore(critical), isNull);
   });
 
+  test('Orchestrator role score requires the complete current suite', () {
+    LocalModelBenchmarkCaseResult resultFor(
+      LocalModelBenchmarkCase benchmarkCase, {
+      bool pass = true,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: benchmarkCase.id,
+          response: pass ? 'pass' : 'fail',
+          score: pass ? benchmarkCase.maxScore : 0,
+          maxScore: benchmarkCase.maxScore,
+          forbiddenHits: 0,
+          firstContentMs: 1000,
+          totalMs: 2000,
+          reportedTokens: 8,
+          prefillMs: 500,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1800,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final perfect = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        for (final benchmarkCase in LocalModelBenchmarkRunner.cases)
+          resultFor(benchmarkCase),
+      ],
+    );
+
+    final incomplete = LocalModelBenchmarkModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      cases: <LocalModelBenchmarkCaseResult>[
+        resultFor(LocalModelBenchmarkRunner.cases.first),
+      ],
+    );
+
+    expect(LocalBenchmarkScoring.orchestratorRoleScore(perfect), 100);
+    expect(LocalBenchmarkScoring.orchestratorRoleScore(incomplete), isNull);
+  });
+
+  test('Orchestrator role score is persisted separately from General Score',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = storeFor(preferences);
+
+    await store.saveComponent(
+      model: model,
+      component: LocalBenchmarkComponent.quick,
+      score: 80,
+      updatedAt: DateTime.utc(2026, 9, 30, 1),
+    );
+    await store.saveRoleScore(
+      model: model,
+      role: LocalBenchmarkRole.orchestrator,
+      score: 92,
+      updatedAt: DateTime.utc(2026, 9, 30, 2),
+    );
+
+    final loaded = await store.loadForModels(const <AiModel>[model]);
+    final score = loaded[model.id];
+
+    expect(score?.generalScore, 80);
+    expect(score?.completedComponents, 1);
+    expect(score?.roleScore(LocalBenchmarkRole.orchestrator), 92);
+
+    await store.saveComponent(
+      model: model,
+      component: LocalBenchmarkComponent.quality,
+      score: 60,
+      updatedAt: DateTime.utc(2026, 9, 30, 3),
+    );
+
+    final reloaded = await store.loadForModels(const <AiModel>[model]);
+    expect(reloaded[model.id]?.generalScore, 70);
+    expect(
+      reloaded[model.id]?.roleScore(LocalBenchmarkRole.orchestrator),
+      92,
+    );
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
