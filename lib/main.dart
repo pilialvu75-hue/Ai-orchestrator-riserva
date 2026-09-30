@@ -66,8 +66,14 @@ Future<void> main(List<String> args) async {
   final deferWindowsStartup =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
   final windows7UiSmokeOnly = args.contains('--windows7-ui-smoke-only');
+  final windows7SafeAutostart = args.contains('--windows7-safe-autostart');
   if (windows7UiSmokeOnly) {
     _appendWindowsDartStartupBreadcrumb('D00 main entered smoke-only mode');
+  }
+  if (windows7SafeAutostart) {
+    _appendWindowsDartStartupBreadcrumb(
+      'D01 Win7 safe-autostart enabled: model/update/runtime checks deferred',
+    );
   }
 
   // Preserve the established startup order everywhere except Windows. On
@@ -131,6 +137,7 @@ Future<void> main(List<String> args) async {
         StartupApp(
           deferWindowsStartup: deferWindowsStartup,
           windows7UiSmokeOnly: windows7UiSmokeOnly,
+          windows7SafeAutostart: windows7SafeAutostart,
         ),
       );
     },
@@ -145,10 +152,12 @@ class StartupApp extends StatefulWidget {
     super.key,
     required this.deferWindowsStartup,
     required this.windows7UiSmokeOnly,
+    required this.windows7SafeAutostart,
   });
 
   final bool deferWindowsStartup;
   final bool windows7UiSmokeOnly;
+  final bool windows7SafeAutostart;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -241,7 +250,10 @@ class _StartupAppState extends State<StartupApp> {
           transitionBuilder: (child, animation) =>
               FadeTransition(opacity: animation, child: child),
           child: _transitionController.isReady
-              ? const AppRoot(key: ValueKey('ready'))
+              ? AppRoot(
+                  key: const ValueKey('ready'),
+                  windows7SafeAutostart: widget.windows7SafeAutostart,
+                )
               : MaterialApp(
                   key: const ValueKey('startup'),
                   debugShowCheckedModeBanner: false,
@@ -376,7 +388,12 @@ class _StartupErrorScreen extends StatelessWidget {
 }
 
 class AppRoot extends StatelessWidget {
-  const AppRoot({super.key});
+  const AppRoot({
+    super.key,
+    required this.windows7SafeAutostart,
+  });
+
+  final bool windows7SafeAutostart;
 
   @override
   Widget build(BuildContext context) {
@@ -388,8 +405,18 @@ class AppRoot extends StatelessWidget {
         BlocProvider<ProjectMemoryBloc>(
             create: (_) => di.sl<ProjectMemoryBloc>()),
         BlocProvider<ModelDownloadBloc>(
-            create: (_) => di.sl<ModelDownloadBloc>()
-              ..add(const LoadAvailableModels())),
+          create: (_) {
+            final bloc = di.sl<ModelDownloadBloc>();
+            if (!windows7SafeAutostart) {
+              bloc.add(const LoadAvailableModels());
+            } else {
+              _appendWindowsDartStartupBreadcrumb(
+                'D30 ModelDownloadBloc auto-load deferred',
+              );
+            }
+            return bloc;
+          },
+        ),
       ],
       child: ListenableBuilder(
         listenable: languageService,
@@ -424,7 +451,9 @@ class AppRoot extends StatelessWidget {
             ),
             home: AppLegalInitializer(
               eulaService: di.sl<EulaService>(),
-              child: const AppShellRouter(),
+              child: AppShellRouter(
+                enableStartupServices: !windows7SafeAutostart,
+              ),
             ),
           );
         },
