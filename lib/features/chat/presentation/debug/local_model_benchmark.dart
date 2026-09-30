@@ -2326,6 +2326,75 @@ class LocalModelBenchmarkRunner {
 
     return targets;
   }
+  Future<bool> _runCancellationProbe({
+    required AiModel model,
+  }) async {
+    final startSample = await _resourceMonitor.sample();
+    if (startSample?.critical == true) {
+      throw const LocalModelBenchmarkCriticalResourceException(
+        'Stability cancellation probe stopped: critical memory.',
+      );
+    }
+
+    final cancellationToken = CancellationToken();
+    var cancellationIssued = false;
+    var cancellationConfirmed = false;
+
+    final stream = _runtimeProvider.streamInference(
+      request: InferenceRequest(
+        sessionId:
+            'debug-stability-cancel-${model.effectiveRuntimeModelId}-'
+            '${DateTime.now().microsecondsSinceEpoch}',
+        prompt:
+            'Scrivi almeno 120 parole continue in italiano sui vantaggi '
+            'e limiti della memoria RAM nei computer moderni.',
+        modelId: model.effectiveRuntimeModelId,
+        modelPath: model.localPath,
+        maxTokens: 192,
+        temperature: 0.5,
+        topP: 0.9,
+        repeatPenalty: 1.1,
+        isOffline: true,
+      ),
+      cancellationToken: cancellationToken,
+    ).timeout(
+      const Duration(seconds: 90),
+      onTimeout: (sink) {
+        cancellationToken.cancel();
+        sink.add(
+          InferenceResponse.error(
+            'Stability cancellation probe timed out.',
+            state: InferenceTerminalState.timeout,
+          ),
+        );
+        sink.close();
+      },
+    );
+
+    await for (final chunk in stream) {
+      if (!chunk.isFinal &&
+          chunk.text.isNotEmpty &&
+          !cancellationIssued) {
+        cancellationIssued = true;
+        cancellationToken.cancel();
+      }
+
+      if (chunk.isFinal) {
+        cancellationConfirmed =
+            cancellationIssued &&
+            chunk.terminalState == InferenceTerminalState.cancelled;
+      }
+    }
+
+    RuntimeEventLog.instance.emit(
+      '[LOCAL_MODEL_STABILITY_CANCEL] '
+      'model=${model.effectiveRuntimeModelId} '
+      'issued=$cancellationIssued confirmed=$cancellationConfirmed',
+    );
+
+    return cancellationIssued && cancellationConfirmed;
+  }
+
   Future<LocalModelBenchmarkCaseResult> _runCase({
     required AiModel model,
     required LocalModelBenchmarkCase benchmarkCase,
