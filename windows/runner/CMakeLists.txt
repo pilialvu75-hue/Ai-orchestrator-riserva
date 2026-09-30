@@ -39,13 +39,6 @@ add_dependencies(
   dxg7fix
 )
 
-# Current Flutter/Dart desktop binaries contain loader-level dependencies that
-# first appeared after Windows 7. Keep the same proven Flutter-engine import
-# redirects while changing only plugin linkage for this candidate.
-add_custom_command(TARGET ${BINARY_NAME} PRE_LINK
-  COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-    -File "${CMAKE_SOURCE_DIR}/../tool/patch_flutter_windows_win7.ps1"
-    -FlutterDll "${FLUTTER_LIBRARY}"
-  COMMENT "Applying Windows 7 compatibility redirects to Flutter engine"
-  VERBATIM
-)
+# Flutter 3.29.3 import rewriting is applied to the completed release bundle
+# by patch_windows_bundle_win7.ps1. Keeping it out of PRE_LINK makes the
+# engine-specific import layout observable and verifiable in CI.
