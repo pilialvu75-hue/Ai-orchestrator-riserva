@@ -1860,6 +1860,11 @@ class _DebugOverlayState
     final scores = await _benchmarkScoreStore.loadForModels(candidates);
     if (!mounted) return null;
 
+    candidates = LocalBenchmarkScoring.rankCandidatesByGeneralScore(
+      candidates,
+      scores,
+    );
+
     final defaults = defaultModelIds.toSet();
     final selected = <String>{};
 
