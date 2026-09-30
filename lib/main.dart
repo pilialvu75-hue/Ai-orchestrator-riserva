@@ -59,11 +59,13 @@ void _emitForensicException(
   }
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final deferWindowsStartup =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  final windows7StaticFirstFrame =
+      args.contains('--windows7-static-first-frame');
 
   // Preserve the established startup order everywhere except Windows. On
   // Windows the first frame is allowed to render before disk/plugin/service
@@ -122,7 +124,12 @@ Future<void> main() async {
 
   await runZonedGuarded(
     () async {
-      runApp(StartupApp(deferWindowsStartup: deferWindowsStartup));
+      runApp(
+        StartupApp(
+          deferWindowsStartup: deferWindowsStartup,
+          windows7StaticFirstFrame: windows7StaticFirstFrame,
+        ),
+      );
     },
     (Object error, StackTrace stackTrace) {
       _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
@@ -134,9 +141,11 @@ class StartupApp extends StatefulWidget {
   const StartupApp({
     super.key,
     required this.deferWindowsStartup,
+    required this.windows7StaticFirstFrame,
   });
 
   final bool deferWindowsStartup;
+  final bool windows7StaticFirstFrame;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -222,7 +231,9 @@ class _StartupAppState extends State<StartupApp> {
                   themeMode: ThemeMode.dark,
                   darkTheme: ThemeData.dark(useMaterial3: true),
                   home: _startupError == null
-                      ? const SplashScreen()
+                      ? (widget.windows7StaticFirstFrame
+                          ? const _Windows7StaticFirstFrame()
+                          : const SplashScreen())
                       : _StartupErrorScreen(
                           error: _startupError!,
                           onRetry: () {
@@ -235,6 +246,58 @@ class _StartupAppState extends State<StartupApp> {
                 ),
         );
       },
+    );
+  }
+}
+
+class _Windows7StaticFirstFrame extends StatelessWidget {
+  const _Windows7StaticFirstFrame();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF111827),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_awesome,
+              color: Color(0xFF8AB4F8),
+              size: 44,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'AI Orchestrator',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Windows 7 safe startup',
+              style: TextStyle(
+                color: Color(0xFFB8C7E0),
+                fontSize: 13,
+              ),
+            ),
+            SizedBox(height: 20),
+            SizedBox(
+              width: 180,
+              child: LinearProgressIndicator(
+                value: 0.35,
+                minHeight: 3,
+                backgroundColor: Color(0x334B5563),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Color(0xFF8AB4F8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
