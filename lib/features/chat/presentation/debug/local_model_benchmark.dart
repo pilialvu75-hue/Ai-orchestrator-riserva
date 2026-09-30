@@ -1001,7 +1001,7 @@ class LocalModelBenchmarkRunner {
         _resourceMonitor = resourceMonitor ?? ResourceMonitor.instance;
 
   static const int _maxTokens = 96;
-  static const int _reasoningMaxTokens = 384;
+  static const int _reasoningMaxTokens = 768;
   static const double _temperature = 0.5;
   static const Duration _betweenCases = Duration(milliseconds: 350);
   static const int _benchmarkLoadReserveFloorBytes = 512 * 1024 * 1024;
@@ -2779,6 +2779,11 @@ class LocalModelBenchmarkRunner {
         'debug-bench-${model.effectiveRuntimeModelId}-${benchmarkCase.id}-'
         '${DateTime.now().microsecondsSinceEpoch}';
 
+    final maxTokens = benchmarkMaxTokensForModel(
+      model.effectiveRuntimeModelId,
+      reasoningAware: reasoningAware,
+    );
+
     await for (final chunk in _runtimeProvider.streamInference(
       request: InferenceRequest(
         sessionId: sessionId,
@@ -2786,10 +2791,7 @@ class LocalModelBenchmarkRunner {
         context: benchmarkCase.context,
         modelId: model.effectiveRuntimeModelId,
         modelPath: model.localPath,
-        maxTokens: benchmarkMaxTokensForModel(
-          model.effectiveRuntimeModelId,
-          reasoningAware: reasoningAware,
-        ),
+        maxTokens: maxTokens,
         temperature: _temperature,
         topP: 0.9,
         repeatPenalty: 1.1,
@@ -2870,15 +2872,24 @@ class LocalModelBenchmarkRunner {
             ? '[risposta finale non raggiunta entro il budget di reasoning]'
             : response);
 
+    final reasoningCompletion =
+        !reasoningAware ||
+                !isReasoningBenchmarkModel(model.effectiveRuntimeModelId)
+            ? 'not_applicable'
+            : evaluationResponse != null
+                ? 'final_answer'
+                : reportedTokens >= maxTokens - 4
+                    ? 'budget_exhausted'
+                    : 'eos_without_final';
+
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_REASONING_POLICY] '
       'model=${model.effectiveRuntimeModelId} '
       'reasoning_aware=$reasoningAware '
-      'max_tokens=${benchmarkMaxTokensForModel(
-        model.effectiveRuntimeModelId,
-        reasoningAware: reasoningAware,
-      )} '
-      'final_answer=${evaluationResponse != null}',
+      'max_tokens=$maxTokens '
+      'final_answer=${evaluationResponse != null} '
+      'completion=$reasoningCompletion '
+      'reported_tokens=$reportedTokens',
     );
 
     if (firstContentMs < 0) {

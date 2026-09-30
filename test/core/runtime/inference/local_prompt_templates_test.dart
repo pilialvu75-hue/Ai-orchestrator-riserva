@@ -51,6 +51,37 @@ void main() {
       expect(prompt, endsWith('<|im_start|>assistant\n'));
     });
 
+    test('DeepSeek history keeps EOS only on completed assistant turns', () {
+      final prompt = LocalPromptTemplates.compose(
+        modelId: LocalInferenceModelIds.deepSeekR1_1_5b,
+        prompt: 'domanda corrente',
+        systemPrompt: 'SYS',
+        context: const [
+          ChatTurn(role: ChatRole.user, content: 'domanda precedente'),
+          ChatTurn(
+            role: ChatRole.assistant,
+            content: 'ragionamento</think>risposta precedente',
+          ),
+        ],
+      );
+
+      expect(
+        prompt,
+        contains('<｜User｜>domanda precedente<｜Assistant｜>'
+            'risposta precedente<｜end▁of▁sentence｜>'),
+      );
+      expect(
+        prompt,
+        isNot(contains(
+          '<｜User｜>domanda precedente<｜end▁of▁sentence｜>',
+        )),
+      );
+      expect(
+        prompt,
+        endsWith('<｜User｜>domanda corrente<｜Assistant｜><think>\n'),
+      );
+    });
+
     test('uses the Phi-3 template for Phi-3.5 Mini', () {
       RuntimeEventLog.instance.clear();
       expect(

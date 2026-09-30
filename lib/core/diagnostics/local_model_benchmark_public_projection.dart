@@ -293,7 +293,9 @@ String? localModelBenchmarkPublicProjection({
       r'^model=([A-Za-z0-9_.-]{1,120}) '
       r'reasoning_aware=(true|false) '
       r'max_tokens=(\d{1,6}) '
-      r'final_answer=(true|false)$',
+      r'final_answer=(true|false)'
+      r'(?: completion=(final_answer|budget_exhausted|eos_without_final|not_applicable) '
+      r'reported_tokens=(\d{1,6}))?$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
@@ -303,6 +305,8 @@ String? localModelBenchmarkPublicProjection({
       'reasoning_aware': m[2] == 'true',
       'max_tokens': int.parse(m[3]!),
       'final_answer': m[4] == 'true',
+      if (m[5] != null) 'completion': m[5]!,
+      if (m[6] != null) 'reported_tokens': int.parse(m[6]!),
     });
   }
 

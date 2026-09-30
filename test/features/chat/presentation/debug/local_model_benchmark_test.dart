@@ -142,7 +142,7 @@ void main() {
         LocalInferenceModelIds.deepSeekR1_1_5b,
         reasoningAware: true,
       ),
-      384,
+      768,
     );
     expect(
       LocalModelBenchmarkRunner.benchmarkMaxTokensForModel(
