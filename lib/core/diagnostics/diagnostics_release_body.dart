@@ -38,8 +38,23 @@ String diagnosticsReleaseBody(String filteredBatch, {String previousBody = ''}) 
   final ordered = records.values.toList()
     ..sort((a, b) => (a['log']['time'] as String).compareTo(b['log']['time'] as String));
   bool important(Map<String, dynamic> record) {
+    final log = record['log'] as Map<String, dynamic>;
+    final event = log['event'] as String;
+    if (RegExp(r'FAIL|ERROR|TIMEOUT|STALL|BLOCKED|REJECTED|EXCEPTION|EXIT_HISTORY')
+        .hasMatch(event)) {
+      return true;
+    }
+    if (event == 'WINDOWS_NATIVE_TRACE') {
+      return log['fatal'] == true || log['clean_shutdown'] != true;
+    }
+    return false;
+  }
+
+  bool platformSignal(Map<String, dynamic> record) {
     final event = record['log']['event'] as String;
-    return RegExp(r'FAIL|ERROR|TIMEOUT|STALL|BLOCKED|REJECTED|EXCEPTION|EXIT_HISTORY').hasMatch(event);
+    return event == 'DIAGNOSTICS_SESSION' ||
+        event == 'LOCAL_RUNTIME_ERROR' ||
+        event == 'WINDOWS_NATIVE_TRACE';
   }
   bool benchmark(Map<String, dynamic> record) {
     final event = record['log']['event'] as String;
@@ -61,6 +76,8 @@ String diagnosticsReleaseBody(String filteredBatch, {String previousBody = ''}) 
       'non necessariamente del crash originale. Cronologia limitata; archivio nei file allegati.\n\n'
       '### Eventi recenti\n\n'
       '${tail(ordered, 28000)}\n'
+      '### Stato piattaforma / diagnostica remota\n\n'
+      '${tail(ordered.where(platformSignal), 12000)}\n'
       '### Benchmark locali\n\n'
       '${tail(ordered.where(benchmark), 12000)}\n'
       '### Ultimi errori e arresti (possono essere storici)\n\n'
