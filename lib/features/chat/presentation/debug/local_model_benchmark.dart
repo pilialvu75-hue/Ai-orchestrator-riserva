@@ -973,11 +973,15 @@ class VulkanLayerSweepReport {
     required this.createdAt,
     required this.samples,
     this.failures = const <VulkanLayerSweepFailure>[],
+    this.stoppedEarly = false,
+    this.stopReason,
   });
 
   final DateTime createdAt;
   final List<VulkanLayerSweepSample> samples;
   final List<VulkanLayerSweepFailure> failures;
+  final bool stoppedEarly;
+  final String? stopReason;
 
   String toPlainText() {
     final buffer = StringBuffer()
@@ -988,6 +992,8 @@ class VulkanLayerSweepReport {
       ..writeln(
         'thermal_source=Android battery temperature proxy (not SoC junction temperature)',
       )
+      ..writeln('stopped_early=$stoppedEarly')
+      ..writeln('stop_reason=${stopReason ?? 'none'}')
       ..writeln();
 
     for (final sample in samples) {
@@ -2440,6 +2446,8 @@ class LocalModelBenchmarkRunner {
         cases.firstWhere((item) => item.id == 'vulkan_fact');
     final samples = <VulkanLayerSweepSample>[];
     final failures = <VulkanLayerSweepFailure>[];
+    var stoppedEarly = false;
+    String? stopReason;
 
     RuntimeEventLog.instance.emit(
       '[LOCAL_VULKAN_SWEEP_BEGIN] profiles=0,10,99 '
@@ -2447,6 +2455,7 @@ class LocalModelBenchmarkRunner {
     );
 
     try {
+      sweep:
       for (var repetition = 1;
           repetition <= vulkanSweepRepetitions;
           repetition++) {
@@ -2463,6 +2472,25 @@ class LocalModelBenchmarkRunner {
           await runtime.setBenchmarkGpuLayersOverride(requestedLayers);
 
           for (final model in modelOrder) {
+            final thermalFailure = await _prepareInterModelThermalGate(
+              model: model,
+              onProgress: onProgress,
+            );
+            if (thermalFailure != null) {
+              stoppedEarly = true;
+              stopReason = thermalFailure.code;
+              RuntimeEventLog.instance.emit(
+                '[LOCAL_MODEL_BENCH_THERMAL_STOP] '
+                'model=${model.effectiveRuntimeModelId} '
+                'reason=${thermalFailure.code}',
+              );
+              onProgress?.call(
+                'Vulkan interrotto per sicurezza termica: '
+                '${thermalFailure.message}',
+              );
+              break sweep;
+            }
+
             onProgress?.call(
               'Vulkan $requestedLayers • ${model.displayName} '
               '$repetition/$vulkanSweepRepetitions',
@@ -2534,10 +2562,13 @@ class LocalModelBenchmarkRunner {
       await runtime.setBenchmarkGpuLayersOverride(null);
     }
 
+    final sweepStatus =
+        stoppedEarly || failures.isNotEmpty ? 'partial' : 'success';
+
     RuntimeEventLog.instance.emit(
       '[LOCAL_VULKAN_SWEEP_END] samples=${samples.length} '
       'failures=${failures.length} '
-      'status=${failures.isEmpty ? 'success' : 'partial'}',
+      'status=$sweepStatus',
     );
 
     final diagnostics = GitHubDiagnostics.instance;
@@ -2551,6 +2582,8 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       samples: List<VulkanLayerSweepSample>.unmodifiable(samples),
       failures: List<VulkanLayerSweepFailure>.unmodifiable(failures),
+      stoppedEarly: stoppedEarly,
+      stopReason: stopReason,
     );
   }
   Future<_BenchmarkThermalGateFailure?> _prepareInterModelThermalGate({
