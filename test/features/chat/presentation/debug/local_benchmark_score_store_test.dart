@@ -457,7 +457,7 @@ void main() {
     expect(LocalBenchmarkScoring.memoryContextScore(pressured), 75);
   });
 
-  test('unknown memory pressure is not rewarded', () {
+  test('unknown memory pressure does not produce a General Score', () {
     const result = LocalModelMemoryContextModelResult(
       modelId: 'memory',
       catalogModelId: 'memory',
@@ -467,7 +467,7 @@ void main() {
       stopReason: 'no telemetry',
     );
 
-    expect(LocalBenchmarkScoring.memoryContextScore(result), 0);
+    expect(LocalBenchmarkScoring.memoryContextScore(result), isNull);
   });
 
   test('score store persists matching model fingerprint', () async {
