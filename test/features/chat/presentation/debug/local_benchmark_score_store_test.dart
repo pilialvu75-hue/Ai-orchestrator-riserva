@@ -547,6 +547,132 @@ void main() {
     expect(LocalBenchmarkScoring.multilingualScore(result), isNull);
   });
 
+  test('stability score rewards complete consecutive and recovery probes', () {
+    LocalModelBenchmarkCaseResult sample({
+      required int index,
+      int score = 1,
+      String pressure = 'normal',
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'stability_$index',
+          response: 'STABLE-OK',
+          score: score,
+          maxScore: 1,
+          forbiddenHits: 0,
+          firstContentMs: 900,
+          totalMs: 1400,
+          reportedTokens: 4,
+          prefillMs: 350,
+          observedGpuLayers: 33,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: pressure,
+          endPressure: pressure,
+          startAvailableBytes: 2000,
+          endAvailableBytes: 1800,
+          startBatteryTemperatureDeciC: 320,
+          endBatteryTemperatureDeciC: 325,
+          sessionStart: index == 0 ? 'cold' : 'warm',
+          sessionEnd: 'kept',
+        );
+
+    final perfect = LocalModelStabilityModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      consecutiveSamples: <LocalModelBenchmarkCaseResult>[
+        for (var i = 0;
+            i < LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions;
+            i++)
+          sample(index: i),
+      ],
+      sessionReuseConfirmed: true,
+      cancellationConfirmed: true,
+      cancellationRecoveryPassed: true,
+      switchRecoveryPassed: true,
+      switchPartnerModelId: 'partner',
+    );
+
+    final degraded = LocalModelStabilityModelResult(
+      modelId: model.effectiveRuntimeModelId,
+      catalogModelId: model.id,
+      displayName: model.displayName,
+      consecutiveSamples: <LocalModelBenchmarkCaseResult>[
+        sample(index: 0),
+        sample(index: 1),
+        sample(index: 2),
+        sample(index: 3),
+        sample(index: 4, score: 0),
+      ],
+      sessionReuseConfirmed: true,
+      cancellationConfirmed: false,
+      cancellationRecoveryPassed: true,
+      switchRecoveryPassed: true,
+      switchPartnerModelId: 'partner',
+    );
+
+    expect(perfect.probeSetComplete, isTrue);
+    expect(LocalBenchmarkScoring.stabilityScore(perfect), 100);
+    expect(LocalBenchmarkScoring.stabilityScore(degraded), 77);
+  });
+
+  test('incomplete or critical stability run is not persisted as a score', () {
+    const incomplete = LocalModelStabilityModelResult(
+      modelId: 'stable',
+      catalogModelId: 'stable',
+      displayName: 'Stable',
+      consecutiveSamples: <LocalModelBenchmarkCaseResult>[],
+      sessionReuseConfirmed: null,
+      cancellationConfirmed: null,
+      cancellationRecoveryPassed: null,
+      switchRecoveryPassed: null,
+      switchPartnerModelId: null,
+    );
+
+    final criticalSample = LocalModelBenchmarkCaseResult(
+      caseId: 'stability',
+      response: 'STABLE-OK',
+      score: 1,
+      maxScore: 1,
+      forbiddenHits: 0,
+      firstContentMs: 900,
+      totalMs: 1400,
+      reportedTokens: 4,
+      prefillMs: 350,
+      observedGpuLayers: 33,
+      observedBatch: 128,
+      observedMicroBatch: 32,
+      startPressure: 'critical',
+      endPressure: 'critical',
+      startAvailableBytes: 300,
+      endAvailableBytes: 200,
+      startBatteryTemperatureDeciC: 330,
+      endBatteryTemperatureDeciC: 335,
+      sessionStart: 'warm',
+      sessionEnd: 'kept',
+    );
+    final critical = LocalModelStabilityModelResult(
+      modelId: 'stable',
+      catalogModelId: 'stable',
+      displayName: 'Stable',
+      consecutiveSamples: <LocalModelBenchmarkCaseResult>[
+        for (var i = 0;
+            i < LocalModelBenchmarkRunner.stabilityConsecutiveRepetitions;
+            i++)
+          criticalSample,
+      ],
+      sessionReuseConfirmed: true,
+      cancellationConfirmed: true,
+      cancellationRecoveryPassed: true,
+      switchRecoveryPassed: true,
+      switchPartnerModelId: 'partner',
+    );
+
+    expect(incomplete.probeSetComplete, isFalse);
+    expect(LocalBenchmarkScoring.stabilityScore(incomplete), isNull);
+    expect(LocalBenchmarkScoring.stabilityScore(critical), isNull);
+  });
+
   test('score store persists matching model fingerprint', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = PreferencesService(
