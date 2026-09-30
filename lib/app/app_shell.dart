@@ -29,8 +29,29 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_ha
 import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
+void _appendWindowsSafeStartupBreadcrumb(String message) {
+  try {
+    if (!Platform.isWindows) return;
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData == null || localAppData.isEmpty) return;
+    final directory =
+        Directory('$localAppData\\AI-Orchestrator\\Diagnostics');
+    directory.createSync(recursive: true);
+    File('${directory.path}\\AI-Orchestrator-dart-startup.log')
+        .writeAsStringSync(
+      '${DateTime.now().toIso8601String()} $message\r\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (_) {}
+}
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({
+    super.key,
+    this.enableStartupServices = true,
+  });
+
+  final bool enableStartupServices;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -53,11 +74,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _updateManager = di.sl<UpdateManager>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
-    _updateManager.state.addListener(_onUpdateStateChanged);
-    unawaited(_updateManager.startBackgroundChecks(
-      interval: AppConstants.updateCheckInterval,
-    ));
-    unawaited(_runtimeDiagnostics.validateOnStartup());
+    if (widget.enableStartupServices) {
+      _updateManager.state.addListener(_onUpdateStateChanged);
+      unawaited(_updateManager.startBackgroundChecks(
+        interval: AppConstants.updateCheckInterval,
+      ));
+      unawaited(_runtimeDiagnostics.validateOnStartup());
+    } else {
+      _appendWindowsSafeStartupBreadcrumb(
+        'D40 AppShell update/runtime auto-starts deferred',
+      );
+    }
   }
 
   void _onUpdateStateChanged() {
@@ -146,7 +173,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _updateManager.state.removeListener(_onUpdateStateChanged);
+    if (widget.enableStartupServices) {
+      _updateManager.state.removeListener(_onUpdateStateChanged);
+    }
     unawaited(_disposeWorkshopSession());
     super.dispose();
   }
