@@ -44,7 +44,15 @@ void main() {
     );
     expect(
       provider.requests.single.systemPrompt,
-      contains('Non chiedere mai all\'utente di installare Flutter SDK'),
+      contains('modalita locale/offline usa invece la toolchain locale'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('setup/download interno previsto dal prodotto'),
+    );
+    expect(
+      provider.requests.single.systemPrompt,
+      contains('non prerequisiti manuali dell\'utente'),
     );
     expect(
       provider.requests.single.systemPrompt,
