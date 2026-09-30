@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'benchmark_hardware_profile_common.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/benchmark_hardware_profile_common.dart';
 
 Future<String> collectBenchmarkHardwareProfile(String platformName) async {
   final normalized = platformName.toLowerCase();
@@ -70,7 +70,7 @@ Future<BenchmarkHardwareSnapshot> _windowsSnapshot() async {
   if (gpu.trim().isEmpty) {
     gpu = (await _runPowerShell(
           '(Get-CimInstance Win32_VideoController | '
-          'ForEach-Object { $_.Name }) -join ", "',
+          'ForEach-Object { \$_.Name }) -join ", "',
         )) ??
         '';
   }
