@@ -1860,6 +1860,12 @@ class _DebugOverlayState
     final scores = await _benchmarkScoreStore.loadForModels(candidates);
     if (!mounted) return null;
 
+    candidates = LocalBenchmarkScoring.rankModelsByGeneralScore(
+      candidates,
+      scores,
+      isEligible: LocalModelBenchmarkRunner.isRunnableCandidate,
+    );
+
     final defaults = defaultModelIds.toSet();
     final selected = <String>{};
 
@@ -1882,6 +1888,13 @@ class _DebugOverlayState
     }
 
     applyDefaults();
+
+    final topGeneralIds = LocalBenchmarkScoring.topGeneralModelIds(
+      candidates,
+      scores,
+      limit: singleSelection ? 1 : 3,
+      isEligible: LocalModelBenchmarkRunner.isRunnableCandidate,
+    );
 
     return showModalBottomSheet<List<String>>(
       context: context,
@@ -1957,6 +1970,21 @@ class _DebugOverlayState
                               onPressed: selectDefaults,
                               child: const Text('Predefiniti'),
                             ),
+                          if (topGeneralIds.isNotEmpty)
+                            OutlinedButton(
+                              onPressed: () {
+                                setSheetState(() {
+                                  selected
+                                    ..clear()
+                                    ..addAll(topGeneralIds);
+                                });
+                              },
+                              child: Text(
+                                singleSelection
+                                    ? 'Migliore generale'
+                                    : 'Top ${topGeneralIds.length} generali',
+                              ),
+                            ),
                           if (!singleSelection)
                             OutlinedButton(
                               onPressed: runnableCount == 0
@@ -1993,12 +2021,27 @@ class _DebugOverlayState
                                     ? 'Non valido'
                                     : 'Non scaricato';
                             final storedScore = scores[model.id];
+                            final scoredReadyModels = candidates
+                                .where(
+                                  (candidate) =>
+                                      LocalModelBenchmarkRunner
+                                          .isRunnableCandidate(candidate) &&
+                                      scores[candidate.id]?.generalScore != null,
+                                )
+                                .toList(growable: false);
+                            final rankIndex = storedScore?.generalScore == null
+                                ? -1
+                                : scoredReadyModels.indexWhere(
+                                    (candidate) => candidate.id == model.id,
+                                  );
+                            final generalRank = rankIndex < 0 ? null : rankIndex + 1;
                             final scoreLabel = storedScore?.generalScore == null
                                 ? 'Punteggio generale: —'
                                 : 'Punteggio generale: '
                                     '${storedScore!.generalScore}/100 • '
                                     '${storedScore.completedComponents}/'
-                                    '${LocalModelBenchmarkScore.totalComponents} suite';
+                                    '${LocalModelBenchmarkScore.totalComponents} suite'
+                                    '${generalRank == null ? '' : ' • #$generalRank'}';
                             final roleScore =
                                 role == null ? null : storedScore?.roleScore(role);
                             final roleLabel = role == null
