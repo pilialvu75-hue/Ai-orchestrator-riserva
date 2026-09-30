@@ -26,6 +26,43 @@ void main() {
     expect(body, contains('001999'));
   });
 
+  test('shows cross-platform diagnostics signals in a dedicated section', () {
+    final filtered =
+        'schema=1 build=2800 device=test platform=windows capture_session=desktop\n'
+        '${jsonEncode({
+          'time': '2026-09-30T15:00:00.000000',
+          'event': 'DIAGNOSTICS_SESSION',
+          'platform': 'windows',
+          'transport': 'github_releases',
+          'enabled': true,
+        })}\n'
+        '${jsonEncode({
+          'time': '2026-09-30T15:01:00.000000',
+          'event': 'LOCAL_RUNTIME_ERROR',
+          'stage': 'validation',
+          'reason': 'unsendable_isolate_object',
+          'object': 'custom_zone',
+        })}\n'
+        '${jsonEncode({
+          'time': '2026-09-30T15:02:00.000000',
+          'event': 'WINDOWS_NATIVE_TRACE',
+          'source': 'previous',
+          'last_stage': '24',
+          'fatal': true,
+          'clean_shutdown': false,
+          'exception_code': '0XC0000005',
+          'fault_module': 'ucrtbase.dll',
+        })}\n';
+
+    final body = diagnosticsReleaseBody(filtered);
+    expect(body, contains('### Stato piattaforma / diagnostica remota'));
+    expect(body, contains('DIAGNOSTICS_SESSION'));
+    expect(body, contains('LOCAL_RUNTIME_ERROR'));
+    expect(body, contains('WINDOWS_NATIVE_TRACE'));
+    expect(body, contains('### Ultimi errori e arresti'));
+    expect(body, contains('0XC0000005'));
+  });
+
   test('shows local benchmark events in a dedicated section', () {
     final filtered =
         'schema=1 build=2475 device=test capture_session=bench\n'
