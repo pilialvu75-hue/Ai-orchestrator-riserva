@@ -31,6 +31,42 @@ void main() {
       );
     });
 
+
+    test('recovers validation step from analyzer diagnostics', () {
+      const diagnostics = '''
+Analyzing app...
+   info • Constructors for public widgets should have a named 'key' parameter • lib/main.dart:4:3 • use_key_in_widget_constructors
+   info • Invalid use of a private type in a public API • lib/main.dart:14:3 • library_private_types_in_public_api
+3 issues found. (ran in 1.0s)
+''';
+
+      final step =
+          WorkshopPrivateBuildFailureClassifier.inferStepFromDiagnostics(
+        diagnostics,
+      );
+
+      expect(step, 'Validate generated project');
+      expect(
+        WorkshopPrivateBuildFailureClassifier.codeForStep(step),
+        'remote_validation_failed',
+      );
+    });
+
+    test('keeps unknown logs infrastructural', () {
+      const diagnostics = 'Runner lost contact with the server.';
+
+      expect(
+        WorkshopPrivateBuildFailureClassifier.inferStepFromDiagnostics(
+          diagnostics,
+        ),
+        isNull,
+      );
+      expect(
+        WorkshopPrivateBuildFailureClassifier.codeForStep(null),
+        'remote_infrastructure_failed',
+      );
+    });
+
     test('keeps toolchain and security failures infrastructural', () {
       for (final step in <String?>[
         'Validate dispatch inputs',
