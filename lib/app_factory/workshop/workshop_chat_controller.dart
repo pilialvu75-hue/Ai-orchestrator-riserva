@@ -69,8 +69,13 @@ final class WorkshopChatController extends ChangeNotifier {
         'Se il messaggio corrente e in italiano, rispondi in italiano; non '
         'tradurlo in portoghese, spagnolo o altre lingue. Non chiedere conferma '
         'nella risposta: la conferma e gestita dall\'interfaccia del Cantiere. '
-        'Non dichiarare mai che qualcosa e stato costruito, testato o compilato '
-        'se non e realmente avvenuto.',
+        'La risposta conversazionale deve restare breve e completa: una proposta '
+        'deve descrivere il comportamento, i componenti principali e i criteri '
+        'essenziali in massimo circa 180 parole. Non scrivere codice sorgente, '
+        'JSON o blocchi Markdown nella proposta conversazionale: il codice viene '
+        'prodotto separatamente dall\'Engineer. Termina sempre l\'ultima frase '
+        'in modo completo. Non dichiarare mai che qualcosa e stato costruito, '
+        'testato o compilato se non e realmente avvenuto.',
   })  : _inferenceGateway = inferenceGateway,
         _sessionId = sessionId.trim().isEmpty
             ? 'workshop'
@@ -80,6 +85,8 @@ final class WorkshopChatController extends ChangeNotifier {
   final WorkshopInferenceGateway _inferenceGateway;
   final String _sessionId;
   final String _systemPrompt;
+
+  static const int _defaultConversationMaxTokens = 384;
 
   final List<ChatTurn> _messages = <ChatTurn>[];
 
@@ -186,20 +193,52 @@ final class WorkshopChatController extends ChangeNotifier {
               ),
       );
 
-      final result =
+      final effectiveMaxTokens =
+          maxTokens ?? _defaultConversationMaxTokens;
+      var result =
           await _inferenceGateway.complete(
         prompt: normalizedMessage,
         systemPrompt: _systemPrompt,
         context: context,
         sessionId: _sessionId,
         isOffline: isOffline,
-        maxTokens: maxTokens,
+        maxTokens: effectiveMaxTokens,
         temperature: temperature,
         topP: topP,
         repeatPenalty: repeatPenalty,
         modelId: modelId,
         modelPath: modelPath,
       );
+
+      if (_looksTruncated(
+        result,
+        maxTokens: effectiveMaxTokens,
+      )) {
+        result = await _inferenceGateway.complete(
+          prompt: normalizedMessage,
+          systemPrompt: _truncationRetrySystemPrompt,
+          context: context,
+          sessionId: '$_sessionId:retry-truncated-1',
+          isOffline: isOffline,
+          maxTokens: effectiveMaxTokens,
+          temperature: temperature ?? 0.2,
+          topP: topP,
+          repeatPenalty: repeatPenalty,
+          modelId: modelId,
+          modelPath: modelPath,
+        );
+
+        if (_looksTruncated(
+          result,
+          maxTokens: effectiveMaxTokens,
+        )) {
+          _lastError =
+              'La risposta del Cantiere si e interrotta prima di completarsi. '
+              'Riprova.';
+          _removeLastUserTurn();
+          return null;
+        }
+      }
 
       if (result.runtimeNotice != null &&
           result.runtimeNotice!
@@ -260,6 +299,55 @@ final class WorkshopChatController extends ChangeNotifier {
       _setBusy(false);
     }
   }
+
+  static bool _looksTruncated(
+    WorkshopInferenceResult result, {
+    required int maxTokens,
+  }) {
+    if (!result.isSuccessful || !result.hasText) return false;
+
+    final text = result.text.trim();
+    if (text.isEmpty) return false;
+
+    final codeFenceCount = RegExp(r'```').allMatches(text).length;
+    if (codeFenceCount.isOdd) return true;
+
+    final saturated =
+        maxTokens > 0 && result.tokensGenerated >= maxTokens - 2;
+    if (saturated) return true;
+
+    final upper = text.toUpperCase();
+    final body = upper.startsWith('PROPOSAL:')
+        ? text.substring('PROPOSAL:'.length).trim()
+        : upper.startsWith('CLARIFY:')
+            ? text.substring('CLARIFY:'.length).trim()
+            : text;
+
+    if (body.length < 120) return false;
+
+    const terminalChars = <String>{
+      '.',
+      '!',
+      '?',
+      '…',
+      ';',
+      ':',
+      ')',
+      ']',
+      '}',
+      '"',
+      "'",
+    };
+    return !terminalChars.contains(body.substring(body.length - 1));
+  }
+
+  static const String _truncationRetrySystemPrompt =
+      'Sei il Cantiere. La risposta precedente si e interrotta prima di '
+      'completarsi. Rispondi di nuovo nella stessa lingua usando esattamente '
+      'CLARIFY: oppure PROPOSAL:. Mantieni la risposta entro circa 140 parole, '
+      'senza codice sorgente, JSON o blocchi Markdown, e termina ogni frase. '
+      'Descrivi solo il piu piccolo MVP richiesto; non dichiarare che sia gia '
+      'stato costruito o testato.';
 
   static _WorkshopParsedReply _parseReply(String rawText) {
     final normalized = rawText.trim();

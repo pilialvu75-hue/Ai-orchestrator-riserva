@@ -81,6 +81,51 @@ void main() {
     controller.dispose();
   });
 
+
+  test('Workshop retries a clearly truncated conversational proposal once',
+      () async {
+    final provider = _ScriptedReplyProvider(<InferenceResponse>[
+      InferenceResponse.finalChunk(
+        text:
+            'PROPOSAL: Creo una app Contatore Test con un numero centrale, '
+            'pulsante piu e pulsante Azzera. Il progetto restera senza package '
+            'esterni e sara pronto per essere compilato e testato su',
+        tokensGenerated: 384,
+        model: 'fake-workshop',
+      ),
+      InferenceResponse.finalChunk(
+        text:
+            'PROPOSAL: Creo una app Contatore Test con numero centrale, '
+            'pulsante + e pulsante Azzera, senza package esterni. '
+            'La produzione generera il minimo progetto Flutter richiesto.',
+        tokensGenerated: 38,
+        model: 'fake-workshop',
+      ),
+    ]);
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('crea contatore');
+
+    expect(result, isNotNull);
+    expect(result!.content, endsWith('richiesto.'));
+    expect(controller.lastResponseReadyForApproval, isTrue);
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.first.maxTokens, 384);
+    expect(provider.requests.last.maxTokens, 384);
+    expect(
+      provider.requests.last.sessionId,
+      'workshop:retry-truncated-1',
+    );
+    expect(
+      provider.requests.last.systemPrompt,
+      contains('senza codice sorgente'),
+    );
+
+    controller.dispose();
+  });
+
   test('Workshop collector does not duplicate cumulative final snapshot',
       () async {
     final provider = _CumulativeSnapshotProvider();
@@ -105,6 +150,27 @@ void main() {
 
 }
 
+
+
+final class _ScriptedReplyProvider implements RuntimeInferenceProvider {
+  _ScriptedReplyProvider(this.responses);
+
+  final List<InferenceResponse> responses;
+  final List<InferenceRequest> requests = <InferenceRequest>[];
+  int _index = 0;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    requests.add(request);
+    if (_index >= responses.length) {
+      throw StateError('Unexpected Workshop chat retry.');
+    }
+    yield responses[_index++];
+  }
+}
 
 final class _SingleReplyProvider implements RuntimeInferenceProvider {
   _SingleReplyProvider(this.reply);

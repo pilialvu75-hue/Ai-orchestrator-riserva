@@ -303,6 +303,7 @@ class WorkshopInferenceGateway {
     String? runtimeNotice;
     InferenceTerminalState? terminalState;
     String? errorMessage;
+    var tokensGenerated = 0;
 
     await for (final response in responses) {
       if (response.model != null && response.model!.trim().isNotEmpty) {
@@ -312,6 +313,10 @@ class WorkshopInferenceGateway {
       if (response.runtimeNotice != null &&
           response.runtimeNotice!.trim().isNotEmpty) {
         runtimeNotice = response.runtimeNotice;
+      }
+
+      if (response.tokensGenerated > tokensGenerated) {
+        tokensGenerated = response.tokensGenerated;
       }
 
       if (response.text.isNotEmpty) {
@@ -348,6 +353,7 @@ class WorkshopInferenceGateway {
       runtimeNotice: runtimeNotice,
       terminalState: terminalState,
       errorMessage: errorMessage,
+      tokensGenerated: tokensGenerated,
     );
   }
 }
@@ -360,6 +366,7 @@ class WorkshopInferenceResult {
     this.runtimeNotice,
     this.terminalState,
     this.errorMessage,
+    this.tokensGenerated = 0,
   });
 
   final String text;
@@ -367,6 +374,7 @@ class WorkshopInferenceResult {
   final String? runtimeNotice;
   final InferenceTerminalState? terminalState;
   final String? errorMessage;
+  final int tokensGenerated;
 
   bool get hasText => text.trim().isNotEmpty;
 
@@ -381,6 +389,7 @@ class WorkshopInferenceResult {
         'textLength=${text.length}, '
         'model=$model, '
         'terminalState=$terminalState, '
+        'tokensGenerated=$tokensGenerated, '
         'hasError=$hasError'
         ')';
   }
