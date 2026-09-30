@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 
@@ -18,14 +17,43 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     _configurePlatformFactory();
     final String basePath;
-    if (!kIsWeb &&
-        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      // sqflite_common_ffi can resolve getDatabasesPath() relative to the
-      // process working directory on desktop. Installed Windows builds run
-      // from Program Files, which is not writable by a standard user.
-      // Persist desktop databases in the per-user application support area.
-      final supportDirectory = await getApplicationSupportDirectory();
-      basePath = join(supportDirectory.path, 'database');
+    if (!kIsWeb && Platform.isWindows) {
+      // sqflite_common_ffi may resolve getDatabasesPath() relative to the
+      // process working directory on desktop. Installed builds run from
+      // Program Files, which is not writable by a standard user.
+      //
+      // Resolve a per-user path directly from the Windows environment instead
+      // of path_provider so database access also works in pure Dart tests and
+      // during early startup before Flutter platform channels are available.
+      final environment = Platform.environment;
+      final userDataRoot =
+          environment['LOCALAPPDATA'] ??
+          environment['APPDATA'] ??
+          (environment['USERPROFILE'] == null
+              ? null
+              : join(environment['USERPROFILE']!, 'AppData', 'Local'));
+      if (userDataRoot == null || userDataRoot.trim().isEmpty) {
+        throw FileSystemException(
+          'Unable to resolve a writable Windows user data directory.',
+        );
+      }
+      basePath = join(userDataRoot, 'AI Orchestrator', 'database');
+    } else if (!kIsWeb && Platform.isLinux) {
+      final environment = Platform.environment;
+      final xdgDataHome = environment['XDG_DATA_HOME'];
+      final home = environment['HOME'];
+      if (xdgDataHome != null && xdgDataHome.trim().isNotEmpty) {
+        basePath = join(xdgDataHome, 'ai_orchestrator', 'database');
+      } else if (home != null && home.trim().isNotEmpty) {
+        basePath = join(home, '.local', 'share', 'ai_orchestrator', 'database');
+      } else {
+        basePath = await getDatabasesPath();
+      }
+    } else if (!kIsWeb && Platform.isMacOS) {
+      final home = Platform.environment['HOME'];
+      basePath = home != null && home.trim().isNotEmpty
+          ? join(home, 'Library', 'Application Support', 'AI Orchestrator', 'database')
+          : await getDatabasesPath();
     } else {
       basePath = await getDatabasesPath();
     }
