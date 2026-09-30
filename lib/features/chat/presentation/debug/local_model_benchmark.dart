@@ -240,6 +240,33 @@ class LocalModelBenchmarkFailure {
   final String error;
 }
 
+class LocalModelBenchmarkSkip {
+  const LocalModelBenchmarkSkip({
+    required this.modelId,
+    required this.catalogModelId,
+    required this.displayName,
+    required this.reason,
+  });
+
+  final String modelId;
+  final String catalogModelId;
+  final String displayName;
+  final String reason;
+}
+
+class LocalModelBenchmarkSafetySkipException implements Exception {
+  const LocalModelBenchmarkSafetySkipException({
+    required this.code,
+    required this.message,
+  });
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class LocalModelBenchmarkCriticalResourceException implements Exception {
   const LocalModelBenchmarkCriticalResourceException(this.message);
 
@@ -253,11 +280,13 @@ class LocalModelBenchmarkReport {
     required this.createdAt,
     required this.models,
     this.failures = const <LocalModelBenchmarkFailure>[],
+    this.skips = const <LocalModelBenchmarkSkip>[],
   });
 
   final DateTime createdAt;
   final List<LocalModelBenchmarkModelResult> models;
   final List<LocalModelBenchmarkFailure> failures;
+  final List<LocalModelBenchmarkSkip> skips;
 
   String toPlainText({bool includeResponses = true}) {
     final buffer = StringBuffer()
@@ -309,6 +338,16 @@ class LocalModelBenchmarkReport {
         if (includeResponses) {
           buffer.writeln('  response=${item.response.replaceAll('\n', ' ')}');
         }
+      }
+      buffer.writeln();
+    }
+
+    if (skips.isNotEmpty) {
+      buffer.writeln('MODELLI SALTATI (SICUREZZA):');
+      for (final skip in skips) {
+        buffer.writeln(
+          '- ${skip.displayName} [${skip.modelId}]: ${skip.reason}',
+        );
       }
       buffer.writeln();
     }
@@ -1571,6 +1610,7 @@ class LocalModelBenchmarkRunner {
 
     final modelResults = <LocalModelBenchmarkModelResult>[];
     final failures = <LocalModelBenchmarkFailure>[];
+    final skips = <LocalModelBenchmarkSkip>[];
 
     for (var modelIndex = 0; modelIndex < targets.length; modelIndex++) {
       final model = targets[modelIndex];
@@ -1669,6 +1709,16 @@ class LocalModelBenchmarkRunner {
           'battery_temp_delta_c=${modelResult.batteryTemperatureDeltaC?.toStringAsFixed(1) ?? 'na'} '
           'sdd_repeat_consistent=${modelResult.repeatedSddOutcomeConsistent?.toString() ?? 'na'}',
         );
+      } on LocalModelBenchmarkSafetySkipException catch (skip) {
+        skips.add(
+          LocalModelBenchmarkSkip(
+            modelId: model.effectiveRuntimeModelId,
+            catalogModelId: model.id,
+            displayName: model.displayName,
+            reason: skip.message,
+          ),
+        );
+        onProgress?.call('${model.displayName}: saltato per sicurezza RAM');
       } on LocalModelBenchmarkCriticalResourceException {
         rethrow;
       } catch (error, stackTrace) {
@@ -1693,10 +1743,17 @@ class LocalModelBenchmarkRunner {
       }
     }
 
+    final runStatus = failures.isNotEmpty
+        ? 'partial'
+        : modelResults.isEmpty && skips.isNotEmpty
+            ? 'skipped'
+            : 'success';
+
     RuntimeEventLog.instance.emit(
       '[LOCAL_MODEL_BENCH_END] models=${modelResults.length} '
       'failures=${failures.length} '
-      'status=${failures.isEmpty ? 'success' : 'partial'}',
+      'skips=${skips.length} '
+      'status=$runStatus',
     );
 
     final diagnostics = GitHubDiagnostics.instance;
@@ -1710,6 +1767,7 @@ class LocalModelBenchmarkRunner {
       createdAt: DateTime.now(),
       models: List<LocalModelBenchmarkModelResult>.unmodifiable(modelResults),
       failures: List<LocalModelBenchmarkFailure>.unmodifiable(failures),
+      skips: List<LocalModelBenchmarkSkip>.unmodifiable(skips),
     );
   }
   Future<LocalModelMemoryContextReport> runMemoryContextBenchmark({
@@ -2551,7 +2609,9 @@ class LocalModelBenchmarkRunner {
     return null;
   }
 
-  Future<String?> _prepareModelForBenchmarkLoad(AiModel model) async {
+  Future<LocalModelBenchmarkSafetySkipException?> _prepareModelForBenchmarkLoad(
+    AiModel model,
+  ) async {
     final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
         ? _runtimeProvider
         : null;
@@ -2591,12 +2651,18 @@ class LocalModelBenchmarkRunner {
     );
 
     if (sample?.critical == true) {
-      return 'Saltato per sicurezza: pressione memoria critica prima del caricamento.';
+      return const LocalModelBenchmarkSafetySkipException(
+        code: 'critical_memory',
+        message: 'Saltato per sicurezza: pressione memoria critica prima del caricamento.',
+      );
     }
     if (!hasSafeBenchmarkLoadHeadroom(model, sample)) {
-      return 'Saltato per sicurezza: GGUF ${model.sizeBytes} byte, '
-          'servono almeno $required byte liberi prima del caricamento, '
-          'disponibili ${available ?? -1}.';
+      return LocalModelBenchmarkSafetySkipException(
+        code: 'insufficient_memory',
+        message: 'Saltato per sicurezza RAM: GGUF ${model.sizeBytes} byte, '
+            'servono almeno $required byte liberi prima del caricamento, '
+            'disponibili ${available ?? -1}.',
+      );
     }
     return null;
   }
@@ -2747,9 +2813,9 @@ class LocalModelBenchmarkRunner {
           '[LOCAL_MODEL_BENCH_MODEL_SKIPPED] '
           'model=${model.effectiveRuntimeModelId} '
           'case=${benchmarkCase.id} '
-          'reason=$preflightFailure',
+          'reason=${preflightFailure.code}',
         );
-        throw StateError(preflightFailure);
+        throw preflightFailure;
       }
       hadSessionBefore = modelPath != null &&
           androidRuntime.hasActiveNativeSessionForModelPath(modelPath);

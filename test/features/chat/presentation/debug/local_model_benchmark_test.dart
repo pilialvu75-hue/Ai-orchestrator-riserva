@@ -648,6 +648,26 @@ void main() {
     );
   });
 
+  test('report labels safety skips without treating them as failures', () {
+    final report = LocalModelBenchmarkReport(
+      createdAt: DateTime.utc(2026, 10, 1),
+      models: const <LocalModelBenchmarkModelResult>[],
+      skips: const <LocalModelBenchmarkSkip>[
+        LocalModelBenchmarkSkip(
+          modelId: 'deepseek_coder_6_7b_instruct',
+          catalogModelId: 'deepseek_coder_6_7b_instruct',
+          displayName: 'DeepSeek Coder 6.7B',
+          reason: 'Saltato per sicurezza RAM',
+        ),
+      ],
+    );
+
+    final text = report.toPlainText(includeResponses: false);
+    expect(text, contains('MODELLI SALTATI (SICUREZZA)'));
+    expect(text, contains('Saltato per sicurezza RAM'));
+    expect(text, isNot(contains('failures:')));
+  });
+
   test('report omits responses when requested', () {
     const item = LocalModelBenchmarkCaseResult(
       caseId: 'sample',
