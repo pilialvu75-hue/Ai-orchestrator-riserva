@@ -689,8 +689,11 @@ class _DebugOverlayState
 
     await _runTest(
       testId: 'local_model_quick_benchmark',
-      timeout: Duration(
-        minutes: (runnable.length * 4).clamp(8, 60).toInt(),
+      timeout: _multiModelBenchmarkTimeout(
+        modelCount: runnable.length,
+        workMinutesPerModel: 4,
+        minMinutes: 8,
+        maxMinutes: 120,
       ),
       action: () async {
         report = await _localModelBenchmark.run(
@@ -844,8 +847,11 @@ class _DebugOverlayState
 
     await _runTest(
       testId: 'local_model_quality_benchmark',
-      timeout: Duration(
-        minutes: (runnable.length * 7).clamp(12, 90).toInt(),
+      timeout: _multiModelBenchmarkTimeout(
+        modelCount: runnable.length,
+        workMinutesPerModel: 7,
+        minMinutes: 12,
+        maxMinutes: 150,
       ),
       action: () async {
         report = await _localModelBenchmark.run(
@@ -2134,22 +2140,36 @@ class _DebugOverlayState
     );
   }
 
-  Duration _orchestratorBenchmarkTimeoutFor(
-    Iterable<String>? modelIds,
-  ) {
-    final modelCount = modelIds?.length ??
-        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+  Duration _multiModelBenchmarkTimeout({
+    required int modelCount,
+    required int workMinutesPerModel,
+    required int minMinutes,
+    required int maxMinutes,
+  }) {
     final activeModels = modelCount < 1 ? 1 : modelCount;
-    final workMinutes = activeModels * 6;
+    final workMinutes = activeModels * workMinutesPerModel;
     final cooldownMinutes = activeModels > 1
         ? (activeModels - 1) *
             LocalModelBenchmarkRunner
                 .benchmarkThermalCooldownMaxDuration.inMinutes
         : 0;
     final minutes = (workMinutes + cooldownMinutes)
-        .clamp(_benchmarkTimeout.inMinutes, 120)
+        .clamp(minMinutes, maxMinutes)
         .toInt();
     return Duration(minutes: minutes);
+  }
+
+  Duration _orchestratorBenchmarkTimeoutFor(
+    Iterable<String>? modelIds,
+  ) {
+    final modelCount = modelIds?.length ??
+        LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds.length;
+    return _multiModelBenchmarkTimeout(
+      modelCount: modelCount,
+      workMinutesPerModel: 6,
+      minMinutes: _benchmarkTimeout.inMinutes,
+      maxMinutes: 120,
+    );
   }
   Future<void> _runLocalModelBenchmark({
     Iterable<String>? modelIds,
