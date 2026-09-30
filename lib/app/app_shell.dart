@@ -17,7 +17,7 @@ import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart'
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/bundled_model_registry_service.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -107,6 +107,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _appendWindowsSafeStartupBreadcrumb('D49 model catalog returned');
     } catch (error) {
       _appendWindowsSafeStartupBreadcrumb('D4F model catalog error');
+    }
+  }
+
+  Future<void> _runWin7BuiltInScanProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D4A built-in model scan begin');
+    try {
+      final found = await di.sl<ModelDownloadService>().diagnosticScanBuiltInModels();
+      _appendWindowsSafeStartupBreadcrumb('D4B built-in model scan returned');
+    } catch (_) {
+      _appendWindowsSafeStartupBreadcrumb('D4C built-in model scan error');
+    }
+  }
+
+  Future<void> _runWin7ModelPrefsProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D4D model preferences probe begin');
+    try {
+      final entries = await di.sl<ModelDownloadService>().diagnosticReadStoredModelPreferences();
+      _appendWindowsSafeStartupBreadcrumb('D4E model preferences returned');
+    } catch (_) {
+      _appendWindowsSafeStartupBreadcrumb('D4F model preferences error');
     }
   }
 
@@ -486,6 +506,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       OutlinedButton(
                         onPressed: _runWin7ModelCatalogProbe,
                         child: const Text('0B · Test catalogo modelli'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _runWin7BuiltInScanProbe,
+                        child: const Text('0C · Test scansione file modelli'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _runWin7ModelPrefsProbe,
+                        child: const Text('0D · Test preferenze modelli'),
                       ),
                       OutlinedButton(
                         onPressed: _runWin7ModelProbe,
