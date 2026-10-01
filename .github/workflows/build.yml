@@ -1,4 +1,5 @@
 name: Build & Release APK
+run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.fast_test && 'Android FAST TEST') || github.event.head_commit.message || github.event.pull_request.title || 'Build & Release APK' }}
 
 on:
   push:
@@ -8,6 +9,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      fast_test:
+        description: 'Fast Android beta test: keep release APK, tests and native ABI gate; skip AAB and CodeQL.'
+        required: false
+        default: false
+        type: boolean
 
 # MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
@@ -36,6 +43,7 @@ jobs:
       JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
       GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8
       SIGNING_DIR: /tmp/android-signing
+      FAST_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.fast_test && 'true' || 'false' }}
 
     steps:
       - name: Checkout repository
@@ -63,13 +71,19 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Cache native build (CMake/Ninja objects + FetchContent)
+      - name: Cache native CMake build tree
         uses: actions/cache@v5
         with:
-          path: |
-            android/app/.cxx
-            ~/.cache/ccache
-          key: native-${{ runner.os }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+          path: android/app/.cxx
+          key: native-cmake-${{ runner.os }}-ndk29-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+
+      - name: Cache native compiler objects (ccache)
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: native-ccache-${{ runner.os }}-ndk29-${{ hashFiles('.gitmodules', 'native/android/CMakeLists.txt') }}
+          restore-keys: |
+            native-ccache-${{ runner.os }}-ndk29-
 
       - name: Install Android SDK cmdline-tools 16.0
         run: |
@@ -96,7 +110,7 @@ jobs:
       - name: Install Android NDK
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
 
       - name: Install glslc (required to compile ggml Vulkan shaders)
         run: |
@@ -111,10 +125,14 @@ jobs:
           sudo apt-get install -y glslc ccache
           glslc --version
           ccache --version
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          ccache --zero-stats
 
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
       - name: Initialize CodeQL (C++ & Android Native)
+        if: env.FAST_TEST != 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: 'cpp, java-kotlin'
@@ -366,7 +384,12 @@ jobs:
             --build-number="${{ steps.version.outputs.version_code }}" \
             2>&1 | tee release_apk_build.log
 
+      - name: Report native compiler cache
+        if: always()
+        run: ccache --show-stats | tee ccache_stats.log || true
+
       - name: Build signed release AAB
+        if: env.FAST_TEST != 'true'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -384,6 +407,7 @@ jobs:
       # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
       # A questo punto CodeQL ha catturato la compilazione di llama.cpp e dei servizi Java.
       - name: Perform CodeQL Final Analysis
+        if: env.FAST_TEST != 'true'
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:multi"
@@ -419,7 +443,7 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$RELEASE_AAB_PATH" ] || [ ! -f "$RELEASE_AAB_PATH" ]; then
+          if [ "$FAST_TEST" != "true" ] && { [ -z "$RELEASE_AAB_PATH" ] || [ ! -f "$RELEASE_AAB_PATH" ]; }; then
             echo "::error::Release AAB not found"
             exit 1
           fi
@@ -497,6 +521,7 @@ jobs:
             release_apk_build.log
             release_aab_build.log
             release_outputs.log
+            ccache_stats.log
             keystore_decode.log
             keystore_validation.log
             BUILD_README_IT.md
@@ -506,7 +531,20 @@ jobs:
             runtime_bridge_exports_legacy.log
             runtime_bridge_nm_exports.log
 
+      - name: Upload fast Android test artifact
+        if: env.FAST_TEST == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: AI-Orchestrator-android-fast-test-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
+          retention-days: 7
+          path: |
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            BUILD_README_IT.md
+            release_apk_build.log
+            ccache_stats.log
+
       - name: Upload signed release artifacts
+        if: env.FAST_TEST != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
@@ -528,8 +566,20 @@ jobs:
             git log --pretty=format:'- %s (%h)' -n 20
           } > RELEASE_NOTES.md
 
+      - name: Create fast Android beta release
+        if: github.event_name == 'workflow_dispatch' && env.FAST_TEST == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AI-Orchestrator Android FAST TEST ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
+          body_path: RELEASE_NOTES.md
+          prerelease: true
+          files: |
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            BUILD_README_IT.md
+
       - name: Create GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.FAST_TEST != 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
