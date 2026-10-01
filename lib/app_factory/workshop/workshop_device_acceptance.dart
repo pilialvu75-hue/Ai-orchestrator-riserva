@@ -39,6 +39,10 @@ final class WorkshopDeviceAcceptanceReceipt {
     required this.totalTasks,
     required this.executionStatus,
     required this.reviewApproved,
+    this.reviewSummary,
+    this.reviewFindings = const <String>[],
+    this.reviewWarnings = const <String>[],
+    this.stagedDiffSha256,
     required this.validationValid,
     required this.buildStatus,
     required this.formatPassed,
@@ -76,6 +80,11 @@ final class WorkshopDeviceAcceptanceReceipt {
   final int totalTasks;
   final String executionStatus;
   final bool? reviewApproved;
+  final String? reviewSummary;
+  final List<String> reviewFindings;
+  final List<String> reviewWarnings;
+  /// Privacy-preserving fingerprint of the staged file paths/types/content.
+  final String? stagedDiffSha256;
   final bool? validationValid;
   final String? buildStatus;
   final bool? formatPassed;
@@ -107,6 +116,10 @@ final class WorkshopDeviceAcceptanceReceipt {
         'totalTasks': totalTasks,
         'executionStatus': executionStatus,
         'reviewApproved': reviewApproved,
+        'reviewSummary': reviewSummary,
+        'reviewFindings': reviewFindings,
+        'reviewWarnings': reviewWarnings,
+        'stagedDiffSha256': stagedDiffSha256,
         'validationValid': validationValid,
         'buildStatus': buildStatus,
         'formatPassed': formatPassed,
@@ -170,6 +183,10 @@ final class WorkshopDeviceAcceptanceReceipt {
       totalTasks: _int(json['totalTasks']),
       executionStatus: json['executionStatus']?.toString() ?? 'unknown',
       reviewApproved: _boolOrNull(json['reviewApproved']),
+      reviewSummary: json['reviewSummary']?.toString(),
+      reviewFindings: _stringList(json['reviewFindings']),
+      reviewWarnings: _stringList(json['reviewWarnings']),
+      stagedDiffSha256: json['stagedDiffSha256']?.toString(),
       validationValid: _boolOrNull(json['validationValid']),
       buildStatus: json['buildStatus']?.toString(),
       formatPassed: _boolOrNull(json['formatPassed']),
@@ -198,6 +215,10 @@ final class WorkshopDeviceAcceptanceReceipt {
 
   static bool? _boolOrNull(Object? value) =>
       value is bool ? value : null;
+
+  static List<String> _stringList(Object? value) => value is List
+      ? List<String>.unmodifiable(value.map((item) => item.toString()))
+      : const <String>[];
 }
 
 abstract final class WorkshopAcceptanceFingerprint {
