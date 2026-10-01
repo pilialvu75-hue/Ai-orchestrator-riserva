@@ -1,20 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_apply_approval_gate.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_artifact_digest.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_repair.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_device_acceptance.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
 
 /// Production shell for the guarded Cantiere pipeline.
@@ -52,6 +60,10 @@ class _WorkshopProductionDashboardPageState
   late final WorkshopBuildRepairPreparer _repairPreparer;
   late final AndroidIntentHandler _androidIntentHandler;
   WorkshopBuildResult? _buildResult;
+  WorkshopDeviceAcceptanceReceipt? _acceptanceReceipt;
+  bool _installAttempted = false;
+  bool _installerOpened = false;
+  bool? _apkInstallationVerificationPassed;
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
   String? _error;
@@ -66,6 +78,7 @@ class _WorkshopProductionDashboardPageState
     _buildResult = widget.bundle.dashboardController.state.lastBuildResult;
     widget.bundle.dashboardController.addListener(_onLifecycleChanged);
     widget.executionController.addListener(_onLifecycleChanged);
+    unawaited(_restoreDeviceAcceptance());
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleAutoAdvance());
   }
 
@@ -706,6 +719,9 @@ class _WorkshopProductionDashboardPageState
 
     setState(() {
       _mutationBusy = true;
+      _installAttempted = true;
+      _installerOpened = false;
+      _apkInstallationVerificationPassed = null;
       _error = null;
     });
 
@@ -726,27 +742,193 @@ class _WorkshopProductionDashboardPageState
 
       if (verificationError != null) {
         if (mounted) {
-          setState(() => _error = verificationError);
+          setState(() {
+            _apkInstallationVerificationPassed = false;
+            _error = verificationError;
+          });
         }
+        await _persistDeviceAcceptance(generatedAppOpened: null);
         return;
       }
 
+      if (mounted) {
+        setState(() => _apkInstallationVerificationPassed = true);
+      }
+
       final opened = await _androidIntentHandler.openApkInstaller(artifactPath);
+      final didOpen = opened.fold<bool>(
+        (_) => false,
+        (value) => value,
+      );
       final installError = opened.fold<String?>(
         (failure) => failure.toString(),
-        (didOpen) => didOpen
+        (value) => value
             ? null
             : 'Android non ha aperto il programma di installazione.',
       );
 
-      if (installError != null && mounted) {
-        setState(() => _error = installError);
+      if (mounted) {
+        setState(() {
+          _installerOpened = didOpen;
+          if (installError != null) {
+            _error = installError;
+          }
+        });
       }
+      await _persistDeviceAcceptance(generatedAppOpened: null);
     } finally {
       if (mounted) {
         setState(() => _mutationBusy = false);
       }
     }
+  }
+
+  Future<void> _restoreDeviceAcceptance() async {
+    final store = await WorkshopDeviceAcceptanceStore.open();
+    final receipt = store.loadLatest();
+    if (!mounted || receipt == null) return;
+
+    final projectId =
+        widget.bundle.dashboardController.state.projectId?.trim();
+    if (projectId == null ||
+        projectId.isEmpty ||
+        receipt.projectId != projectId) {
+      return;
+    }
+
+    setState(() {
+      _acceptanceReceipt = receipt;
+      _installAttempted = receipt.installAttempted;
+      _installerOpened = receipt.installerOpened;
+      if (receipt.failureStage ==
+          WorkshopDeviceAcceptanceFailureStage.build) {
+        _apkInstallationVerificationPassed = false;
+      }
+    });
+  }
+
+  Future<WorkshopDeviceAcceptanceReceipt>
+      _createDeviceAcceptanceReceipt({
+    required bool? generatedAppOpened,
+  }) async {
+    final dashboard = widget.bundle.dashboardController.state;
+    final execution = widget.executionController.state;
+    final inference = _currentInferenceResult;
+    final build = _buildResult;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final hostVersion =
+        '${packageInfo.version}+${packageInfo.buildNumber}';
+    final artifactSha = await WorkshopArtifactDigest.sha256File(
+      build?.artifactPath,
+    );
+    final plan = _activePlan;
+    final completedProject = plan != null &&
+        plan.tasks.isNotEmpty &&
+        plan.tasks.every((task) => task.completed);
+
+    final classification = WorkshopDeviceAcceptanceClassifier.classify(
+      executionStatus: execution.status,
+      executionError: execution.error,
+      inferenceResult: inference,
+      buildResult: build,
+      buildVerified: _hasVerifiedArtifact &&
+          _apkInstallationVerificationPassed != false,
+      installAttempted: _installAttempted,
+      installerOpened: _installerOpened,
+      generatedAppOpened: generatedAppOpened,
+    );
+
+    return WorkshopDeviceAcceptanceReceipt(
+      recordedAtUtc: DateTime.now().toUtc(),
+      status: classification.status,
+      failureStage: classification.failureStage,
+      hostVersion: hostVersion,
+      hostCommitSha: WorkshopHostBuildIdentity.commitSha,
+      platform: defaultTargetPlatform.name,
+      projectId: dashboard.projectId?.trim() ?? '',
+      requestId: dashboard.requestId?.trim() ?? '',
+      modelAssignments: Map<String, String>.unmodifiable(
+        <String, String>{
+          for (final assignment in widget.modelAssignments)
+            assignment.role.id: assignment.modelId,
+        },
+      ),
+      promptSha256: WorkshopAcceptanceFingerprint.sha256Text(
+        plan?.goal,
+      ),
+      completedTasks: dashboard.completedTasks,
+      totalTasks: dashboard.totalTasks,
+      executionStatus: execution.status.name,
+      reviewApproved:
+          inference?.review.approved ?? (completedProject ? true : null),
+      validationValid:
+          inference?.validation?.valid ?? (completedProject ? true : null),
+      buildStatus: build?.status.name,
+      formatPassed: build?.formatPassed,
+      analysisPassed: build?.analysisPassed,
+      testsPassed: build?.testsPassed,
+      artifactSha256: artifactSha,
+      installAttempted: _installAttempted,
+      installerOpened: _installerOpened,
+      generatedAppOpened: generatedAppOpened,
+    );
+  }
+
+  Future<void> _persistDeviceAcceptance({
+    required bool? generatedAppOpened,
+  }) async {
+    final receipt = await _createDeviceAcceptanceReceipt(
+      generatedAppOpened: generatedAppOpened,
+    );
+    final store = await WorkshopDeviceAcceptanceStore.open();
+    await store.save(receipt);
+    if (!mounted) return;
+
+    setState(() => _acceptanceReceipt = receipt);
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_DEVICE_ACCEPTANCE] '
+      'status=${receipt.status.name} '
+      'failure_stage=${receipt.failureStage.name} '
+      'completed_tasks=${receipt.completedTasks} '
+      'total_tasks=${receipt.totalTasks} '
+      'install_attempted=${receipt.installAttempted} '
+      'installer_opened=${receipt.installerOpened} '
+      'app_opened=${receipt.generatedAppOpened?.toString() ?? 'unknown'} '
+      'host_commit=${receipt.hostCommitSha} '
+      'artifact_sha=${receipt.artifactSha256 ?? 'none'}',
+    );
+  }
+
+  Future<void> _confirmGeneratedAppOpened(bool opened) async {
+    await _persistDeviceAcceptance(generatedAppOpened: opened);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          opened
+              ? 'Accettazione fisica registrata: app generata avviata.'
+              : 'Accettazione fisica registrata: problema di avvio.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _copyDeviceAcceptanceReport() async {
+    final receipt = await _createDeviceAcceptanceReceipt(
+      generatedAppOpened: _acceptanceReceipt?.generatedAppOpened,
+    );
+    final store = await WorkshopDeviceAcceptanceStore.open();
+    await store.save(receipt);
+    await Clipboard.setData(
+      ClipboardData(text: receipt.toPrettyJson()),
+    );
+    if (!mounted) return;
+    setState(() => _acceptanceReceipt = receipt);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Report di accettazione copiato.'),
+      ),
+    );
   }
 
   String? get _activeTaskId =>
@@ -851,6 +1033,14 @@ class _WorkshopProductionDashboardPageState
                 Text(shownError,
                     style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _mutationBusy
+                      ? null
+                      : _copyDeviceAcceptanceReport,
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: const Text('Copia report accettazione'),
+                ),
+                const SizedBox(height: 8),
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
                 Text('APK verificato pronto: ${_buildResult!.artifactPath}',
@@ -873,6 +1063,47 @@ class _WorkshopProductionDashboardPageState
                     icon: const Icon(Icons.share_outlined),
                     label: const Text('Condividi APK'),
                   ),
+                  if (_installerOpened &&
+                      _acceptanceReceipt?.generatedAppOpened == null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.icon(
+                          onPressed: _mutationBusy
+                              ? null
+                              : () => _confirmGeneratedAppOpened(true),
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: const Text('App generata avviata'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _mutationBusy
+                              ? null
+                              : () => _confirmGeneratedAppOpened(false),
+                          icon: const Icon(Icons.error_outline),
+                          label: const Text('Problema all’avvio'),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (_acceptanceReceipt != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Accettazione dispositivo: '
+                      '${_acceptanceReceipt!.status.name} / '
+                      '${_acceptanceReceipt!.failureStage.name}',
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _mutationBusy
+                          ? null
+                          : _copyDeviceAcceptanceReport,
+                      icon: const Icon(Icons.copy_all_outlined),
+                      label: const Text('Copia report accettazione'),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 8),
               ],

@@ -78,6 +78,7 @@ String? publicLogProjection(String line) {
     'WORKSHOP_VALIDATION_RETRY',
     'WORKSHOP_VALIDATION_VERDICT',
     'WORKSHOP_GATE_REPAIR',
+    'WORKSHOP_DEVICE_ACCEPTANCE',
     'LOCAL_MODEL_BENCH_BEGIN',
     'LOCAL_MODEL_BENCH_DUPLICATE_SKIPPED',
     'LOCAL_MODEL_BENCH_PREFLIGHT',
@@ -353,6 +354,32 @@ String? publicLogProjection(String line) {
       'summary_chars': int.parse(m[3]!),
       'issues': int.parse(m[4]!),
       'warnings': int.parse(m[5]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_DEVICE_ACCEPTANCE') {
+    final m = RegExp(
+      r'^status=(pending|passed|failed) '
+      r'failure_stage=(none|modelRuntime|parsing|review|validation|build|install|launch) '
+      r'completed_tasks=(\d{1,4}) total_tasks=(\d{1,4}) '
+      r'install_attempted=(true|false) installer_opened=(true|false) '
+      r'app_opened=(true|false|unknown) '
+      r'host_commit=([0-9a-f]{40}|unknown) '
+      r'artifact_sha=([0-9a-f]{64}|none)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'status': m[1]!,
+      'failure_stage': m[2]!,
+      'completed_tasks': int.parse(m[3]!),
+      'total_tasks': int.parse(m[4]!),
+      'install_attempted': m[5] == 'true',
+      'installer_opened': m[6] == 'true',
+      'app_opened': m[7]!,
+      'host_commit': m[8]!,
+      'artifact_sha': m[9]!,
     });
   }
 
