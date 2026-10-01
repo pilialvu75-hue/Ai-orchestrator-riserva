@@ -29,9 +29,9 @@ void main() {
       expect(entry['fileName'], 'Spark-X2.5-4B-Q4_K_M.gguf');
       expect(
         entry['downloadUrl'],
-        'https://huggingface.co/XHToken/Spark-X2.5-4B-GGUF/resolve/main/Spark-X2.5-4B-Q4_K_M.gguf',
+        'https://huggingface.co/sizzlebop/Spark-X2.5-4B-GGUF/resolve/main/Spark-X2.5-4B-Q4_K_M.gguf',
       );
-      expect(entry['sizeBytes'], 2600000000);
+      expect(entry['sizeBytes'], 2420000000);
       expect(entry['platformTarget'], 'android');
       expect(entry['sizeCategory'], '4B');
     });
