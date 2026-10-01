@@ -240,8 +240,13 @@ CONTRACT PRECEDENCE:
    becoming "+1" is a requirement mismatch, not an equivalent implementation.
 2. implementationPlan is the exact bounded Architect projection supplied to
    the Engineer. It is model-authored guidance and must not override or
-   contradict the explicit task. Do not infer requirements from omitted parts
-   of the unavailable full Architect response.
+   contradict the explicit task. Treat plan items as requirements for THIS
+   validation only when the explicit current task instruction or constraints
+   also require them. In particular, do NOT invalidate the current staged
+   increment for missing tests, documentation, cleanup, validation work or
+   follow-up features mentioned only in implementationPlan; those may belong
+   to later bounded tasks. Do not infer requirements from omitted parts of the
+   unavailable full Architect response.
 3. targetFiles is a hard restriction only when targetFilesPolicy is
    "explicit_scope". When targetFilesPolicy is
    "unspecified_for_initial_create_task", an empty targetFiles list means the
