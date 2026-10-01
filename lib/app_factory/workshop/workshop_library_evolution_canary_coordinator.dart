@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_claim_adapter.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_inference_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_research_library_handoff.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 
