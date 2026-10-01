@@ -23,7 +23,7 @@ void main() {
       expect(entry['sizeBytes'], 5027784224);
     });
 
-    test('Spark-X2.5 4B exposes the official Q4_K_M download', () {
+    test('Spark-X2.5 4B points to the verified Q4_K_M mirror', () {
       final entry = manifest['spark_x2_5_4b'] as Map<String, dynamic>;
 
       expect(entry['fileName'], 'Spark-X2.5-4B-Q4_K_M.gguf');
