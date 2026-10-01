@@ -111,6 +111,65 @@ void main() {
       );
     });
 
+    test('create follow-up task keeps lib/main.dart in hard scope',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'existing app'},
+      );
+      final executor = WorkshopProjectExecutor(gateway: gateway);
+      final plan = WorkshopProjectPlan(
+        id: 'project:create-followup-scope',
+        title: 'Manga Kids',
+        goal: 'Create the app',
+        status: WorkshopProjectStatus.inProgress,
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:dynamic',
+            title: 'Implementation',
+            description: 'Implement product',
+            taskIds: const <String>['task:first', 'task:followup'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:first',
+            title: 'Initial app',
+            description: 'Materialize the initial app.',
+            phaseId: 'phase:dynamic',
+            affectedPaths: const <String>['lib/main.dart'],
+            completed: true,
+          ),
+          WorkshopProjectTask(
+            id: 'task:followup',
+            title: 'Follow-up UI',
+            description: 'Complete the requested UI.',
+            phaseId: 'phase:dynamic',
+            dependencies: const <String>['task:first'],
+            affectedPaths: const <String>['lib/app.dart'],
+          ),
+        ],
+      );
+      const projectRequest = WorkshopRequest(
+        id: 'dashboard:create-followup-scope',
+        title: 'Manga Kids',
+        instruction: 'Create a new Flutter app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      );
+
+      final session = await executor.prepareNextTask(
+        plan,
+        projectRequest: projectRequest,
+      );
+
+      expect(session, isNotNull);
+      expect(session!.context.request.operation, WorkshopOperation.create);
+      expect(
+        session.context.request.targetFiles,
+        <String>['lib/main.dart', 'lib/app.dart'],
+      );
+    });
+
     test('dynamic dependency-free root task inherits owner create operation',
         () async {
       final gateway = _RecordingGateway(files: <String, String>{});
