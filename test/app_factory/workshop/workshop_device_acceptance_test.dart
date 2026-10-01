@@ -183,6 +183,10 @@ void main() {
       totalTasks: 3,
       executionStatus: 'succeeded',
       reviewApproved: true,
+      reviewSummary: 'review passed',
+      reviewFindings: const <String>['bounded finding'],
+      reviewWarnings: const <String>['bounded warning'],
+      stagedDiffSha256: List<String>.filled(64, 'c').join(),
       validationValid: true,
       buildStatus: 'succeeded',
       formatPassed: true,
@@ -201,6 +205,10 @@ void main() {
     expect(restored, isNotNull);
     expect(restored!.toJson(), receipt.toJson());
     expect(restored.toPrettyJson(), contains('"promptSha256"'));
+    expect(restored!.reviewSummary, 'review passed');
+    expect(restored.reviewFindings, <String>['bounded finding']);
+    expect(restored.reviewWarnings, <String>['bounded warning']);
+    expect(restored.stagedDiffSha256, hasLength(64));
     expect(
       restored.toPrettyJson(),
       isNot(contains('Create a counter app.')),
