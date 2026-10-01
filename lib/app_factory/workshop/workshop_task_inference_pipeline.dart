@@ -63,7 +63,7 @@ final class WorkshopTaskInferencePipeline {
   final WorkshopProposalReviewRunner _reviewRunner;
   final WorkshopProposalValidationRunner _validationRunner;
 
-  static const int _maxGateRepairAttempts = 1;
+  // A gate rejection is authoritative; bounded retries only give the Engineer\n  // another chance to satisfy the same unchanged review/validation gates.\n  // Physical Manga Kids evidence showed the first repair can make progress yet\n  // still miss explicit task constraints, so permit one final corrective pass.\n  static const int _maxGateRepairAttempts = 2;
 
   Future<WorkshopTaskInferenceResult> run({
     required WorkspaceSession session,
