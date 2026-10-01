@@ -594,6 +594,21 @@ void main() {
     expect(LocalModelBenchmarkRunner.stabilityCase.score('altro'), 0);
   });
 
+  test('Vulkan report preserves controlled thermal stop', () {
+    final report = VulkanLayerSweepReport(
+      createdAt: DateTime.utc(2026, 10, 1),
+      samples: const <VulkanLayerSweepSample>[],
+      stoppedEarly: true,
+      stopReason: 'temperature_cutoff',
+    );
+
+    final text = report.toPlainText();
+    expect(text, contains('stopped_early=true'));
+    expect(text, contains('stop_reason=temperature_cutoff'));
+    expect(report.stoppedEarly, isTrue);
+    expect(report.stopReason, 'temperature_cutoff');
+  });
+
   test('Vulkan rubric rewards API/Khronos and penalizes hallucinations', () {
     final benchmarkCase = LocalModelBenchmarkRunner.cases
         .firstWhere((item) => item.id == 'vulkan_fact');
