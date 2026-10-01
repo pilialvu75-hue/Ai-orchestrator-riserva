@@ -157,6 +157,112 @@ void main() {
     );
     expect(workspaceGateway.writeCalls, 0);
   });
+
+  test('resume path repairs empty proposal after runtime retry with stable identity',
+      () async {
+    final provider = _ResumeThreeCallProvider();
+    final stageInference = WorkshopStageRoleInference(
+      executor: WorkshopRoleInferenceExecutor(
+        router: WorkshopRoleInferenceRouter(
+          gateways: <AppAiRole, WorkshopInferenceGateway>{
+            for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+              role: WorkshopInferenceGateway(provider: provider),
+          },
+        ),
+      ),
+    );
+    final workspaceGateway = _MemoryWorkspaceGateway(
+      files: <String, String>{'lib/app.dart': 'old'},
+    );
+    final session = WorkspaceSession(
+      request: const WorkshopRequest(
+        id: 'request-resume-three-call',
+        title: 'Recover implementation',
+        instruction: 'Finish the prepared change',
+        targetFiles: <String>['lib/app.dart'],
+      ),
+      gateway: workspaceGateway,
+    );
+    await session.initialize();
+
+    const resume = WorkshopResumeContext(
+      executionId: 'execution-three-call',
+      attemptId: 'attempt-three-call',
+      projectId: 'project-three-call',
+      taskId: 'task-three-call',
+      sessionId: 'session-three-call',
+      objective: 'Recover the implementation safely',
+      phase: 'implementation',
+      checkpointId: 'checkpoint-three-call',
+    );
+
+    final proposal = await WorkshopProposalImplementationRunner(
+      inference: stageInference,
+    ).runWithResumeContext(session: session, resumeContext: resume);
+
+    expect(proposal.explanation, 'Recovered');
+    expect(session.workspace.read('lib/app.dart'), 'recovered');
+    expect(provider.requests, hasLength(3));
+    expect(
+      provider.requests.map((request) => request.maxTokens).toList(),
+      <int?>[640, 512, 768],
+    );
+    expect(
+      provider.requests.map((request) => request.sessionId).toList(),
+      <String>[
+        'session-three-call',
+        'session-three-call:engineer-retry-1',
+        'session-three-call:engineer-retry-malformed-1',
+      ],
+    );
+    for (final request in provider.requests) {
+      expect(request.requestId, 'request-resume-three-call');
+      expect(request.projectId, 'project-three-call');
+      expect(request.taskId, 'task-three-call');
+      expect(request.executionId, 'execution-three-call');
+      expect(request.attemptId, 'attempt-three-call');
+      expect(request.checkpointId, 'checkpoint-three-call');
+    }
+    expect(workspaceGateway.writeCalls, 0);
+  });
+}
+
+final class _ResumeThreeCallProvider implements RuntimeInferenceProvider {
+  final List<InferenceRequest> requests = <InferenceRequest>[];
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) {
+    final index = requests.length;
+    requests.add(request);
+    if (index == 0) {
+      return Stream<InferenceResponse>.value(
+        const InferenceResponse(
+          text: '',
+          timestamp: 1,
+          isFinal: true,
+          terminalState: InferenceTerminalState.timeout,
+          errorMessage: 'timeout',
+        ),
+      );
+    }
+    final text = index == 1
+        ? '{"explanation":"missing changes","changes":[]}'
+        : '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"recovered"}],"validationNotes":[],"warnings":[]}';
+    return Stream<InferenceResponse>.fromIterable(
+      <InferenceResponse>[
+        InferenceResponse(text: text, timestamp: 1),
+        const InferenceResponse(
+          text: '',
+          timestamp: 2,
+          isFinal: true,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ],
+    );
+  }
 }
 
 final class _RecordingProvider implements RuntimeInferenceProvider {
