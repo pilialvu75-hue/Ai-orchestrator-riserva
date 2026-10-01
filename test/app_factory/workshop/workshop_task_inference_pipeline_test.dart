@@ -161,7 +161,7 @@ void main() {
       expect(realGateway.deleteCalls, 0);
     });
 
-    test('second Reviewer rejection remains authoritative and blocked',
+    test('third Reviewer rejection remains authoritative and blocked',
         () async {
       final callOrder = <AppAiRole>[];
       final engineer = _QueueGateway(
@@ -170,12 +170,14 @@ void main() {
         results: <WorkshopInferenceResult>[
           _success(_proposalJson),
           _success(_repairedProposalJson),
+          _success(_repairedProposalJson),
         ],
       );
       final reviewer = _QueueGateway(
         role: AppAiRole.reviewer,
         callOrder: callOrder,
         results: <WorkshopInferenceResult>[
+          _success(_rejectedReviewJson),
           _success(_rejectedReviewJson),
           _success(_rejectedReviewJson),
         ],
@@ -199,11 +201,14 @@ void main() {
       expect(result.review.approved, isFalse);
       expect(result.validation, isNull);
       expect(session.status, WorkspaceSessionStatus.blocked);
-      expect(engineer.calls, 2);
-      expect(reviewer.calls, 2);
+      expect(engineer.calls, 3);
+      expect(reviewer.calls, 3);
+      expect(engineer.prompts[2], contains('gateFeedback'));
       expect(
         callOrder,
         <AppAiRole>[
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
           AppAiRole.engineer,
           AppAiRole.reviewer,
           AppAiRole.engineer,
