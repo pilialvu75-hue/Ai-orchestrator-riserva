@@ -373,6 +373,7 @@ final class WorkshopProposalImplementationRunner {
             'request': <String, Object?>{
               'title': _boundedText(request.title, 120),
               'instruction': _boundedText(request.instruction, 320),
+              'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               'targetFilesPolicy': request.targetFiles.isEmpty
                   ? 'open_for_required_new_files'
@@ -427,6 +428,10 @@ present, are existing oversized starter files intentionally omitted from the
 prompt for a create task; you may replace those paths only with complete
 resulting file content, never infer or partially preserve their omitted prior
 content. The explicit task instruction and constraints are authoritative.
+This is an implementation proposal, so changes MUST contain at least one real
+file change that implements the current task. Never return an empty changes
+array. For operation "create", materialize the smallest runnable current-task
+increment even when the workspace already contains starter scaffold files.
 UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
 or constraints verbatim unless the task explicitly asks to rename it. This
 includes button labels, titles, field labels, units and short symbols. Do not
