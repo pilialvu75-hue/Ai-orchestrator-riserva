@@ -182,9 +182,9 @@
   "spark_x2_5_4b": {
     "displayName": "Spark-X2.5 4B",
     "fileName": "Spark-X2.5-4B-Q4_K_M.gguf",
-    "downloadUrl": "https://huggingface.co/XHToken/Spark-X2.5-4B-GGUF/resolve/main/Spark-X2.5-4B-Q4_K_M.gguf",
+    "downloadUrl": "https://huggingface.co/sizzlebop/Spark-X2.5-4B-GGUF/resolve/main/Spark-X2.5-4B-Q4_K_M.gguf",
     "version": "1.0.0",
-    "sizeBytes": 2600000000,
+    "sizeBytes": 2420000000,
     "description": "Spark-X2.5 4B Q4_K_M. Modello compatto per reasoning, coding, tool use e agenti; aggiunto come candidato scaricabile per Benchmark Lab, con validazione runtime da eseguire sul dispositivo.",
     "platformTarget": "android",
     "sizeCategory": "4B"
