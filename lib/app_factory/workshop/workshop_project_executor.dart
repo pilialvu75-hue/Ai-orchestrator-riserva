@@ -449,16 +449,15 @@ final class WorkshopProjectExecutor {
     required WorkshopOperation operation,
   }) {
     if (operation != WorkshopOperation.create ||
-        plan.completedTasks != 0 ||
         task.affectedPaths.contains('lib/main.dart')) {
       return task.affectedPaths;
     }
 
-    // A create task starts from an empty/new project boundary. Older persisted
-    // dynamic plans may predate the planner invariant and omit lib/main.dart
-    // even though the Engineer correctly needs to materialize the Flutter
-    // entry point. Repair that scope deterministically instead of forcing the
-    // model into an impossible retry loop at 0% progress.
+    // A create project keeps one isolated workspace across its bounded tasks.
+    // A later task may legitimately need to update the already-materialized
+    // Flutter entry point even when an older/dynamic persisted plan omitted it
+    // from affectedPaths. Keep lib/main.dart in scope for every create task so
+    // the Engineer cannot be trapped by a stale hard allowlist after task 1.
     return List<String>.unmodifiable(
       <String>['lib/main.dart', ...task.affectedPaths],
     );
