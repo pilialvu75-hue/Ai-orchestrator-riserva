@@ -655,6 +655,11 @@ void main() {
           'Workshop proposal must contain at least one file change.',
         ),
       );
+      expect(engineer.prompts.last, contains('"operation":"create"'));
+      expect(
+        engineer.prompts.last,
+        contains('Never return an empty changes'),
+      );
       expect(workspaceGateway.writeCalls, 0);
       expect(workspaceGateway.deleteCalls, 0);
     });
