@@ -861,6 +861,19 @@ class _WorkshopProductionDashboardPageState
       executionStatus: execution.status.name,
       reviewApproved:
           inference?.review.approved ?? (completedProject ? true : null),
+      reviewSummary: inference?.review.summary.trim(),
+      reviewFindings:
+          List<String>.unmodifiable(inference?.review.findings ?? const <String>[]),
+      reviewWarnings:
+          List<String>.unmodifiable(inference?.review.warnings ?? const <String>[]),
+      stagedDiffSha256: inference == null
+          ? null
+          : WorkshopAcceptanceFingerprint.sha256Text(
+              inference.proposal.changes
+                  .map((change) => change.toJson())
+                  .toList(growable: false)
+                  .toString(),
+            ),
       validationValid:
           inference?.validation?.valid ?? (completedProject ? true : null),
       buildStatus: build?.status.name,
