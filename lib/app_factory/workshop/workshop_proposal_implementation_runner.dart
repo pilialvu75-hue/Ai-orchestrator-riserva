@@ -109,8 +109,7 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
-      if (didRetry ||
-          cancellationToken?.isCancelled == true ||
+      if (cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
@@ -236,8 +235,7 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
-      if (didRetry ||
-          cancellationToken?.isCancelled == true ||
+      if (cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
