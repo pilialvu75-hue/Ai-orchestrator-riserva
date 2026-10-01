@@ -71,6 +71,14 @@ void main() {
         reviewer.lastPrompt,
         contains('explicit task instruction and explicit constraints are authoritative'),
       );
+      expect(
+        reviewer.lastPrompt,
+        contains('do NOT reject the current staged increment for'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('missing tests, documentation, cleanup, validation work'),
+      );
       expect(reviewer.lastPrompt, contains('does NOT mean'));
       expect(reviewer.lastPrompt, contains('no files are'));
       expect(

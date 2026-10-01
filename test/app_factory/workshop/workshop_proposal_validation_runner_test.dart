@@ -76,6 +76,14 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
+        contains('do NOT invalidate the current staged'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('missing tests, documentation, cleanup, validation work'),
+      );
+      expect(
+        reviewer.lastPrompt,
         contains('not by itself a validation failure'),
       );
       expect(
