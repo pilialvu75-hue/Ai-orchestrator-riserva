@@ -658,6 +658,53 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
       expect(workspaceGateway.deleteCalls, 0);
     });
+
+    test('repairs empty proposal after a runtime retry', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.timeout,
+            errorMessage: 'timeout',
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text: '{"explanation":"missing changes","changes":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered after runtime retry","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(workspaceGateway);
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.explanation, 'Recovered after runtime retry');
+      expect(session.workspace.read('lib/app.dart'), 'new');
+      expect(engineer.calls, 3);
+      expect(engineer.maxTokensValues, <int?>[640, 512, 768]);
+      expect(
+        engineer.sessionIds,
+        <String>[
+          'workshop:implementation:implementation-runner-request',
+          'workshop:implementation:implementation-runner-request:retry-1',
+          'workshop:implementation:implementation-runner-request:retry-malformed-1',
+        ],
+      );
+      expect(workspaceGateway.writeCalls, 0);
+      expect(workspaceGateway.deleteCalls, 0);
+    });
   });
 }
 
