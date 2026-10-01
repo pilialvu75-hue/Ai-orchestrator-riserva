@@ -137,11 +137,11 @@ class AppConstants {
       'displayName': 'Spark-X2.5 4B',
       'fileName': 'Spark-X2.5-4B-Q4_K_M.gguf',
       'downloadUrl':
-          'https://huggingface.co/XHToken/'
+          'https://huggingface.co/sizzlebop/'
           'Spark-X2.5-4B-GGUF/resolve/main/'
           'Spark-X2.5-4B-Q4_K_M.gguf',
       'version': '1.0.0',
-      'sizeBytes': 2600000000,
+      'sizeBytes': 2420000000,
       'description':
           'Spark-X2.5 4B (Q4_K_M) – downloadable Benchmark Lab candidate '
           'for reasoning, coding, tool use and agentic workloads. Runtime '
