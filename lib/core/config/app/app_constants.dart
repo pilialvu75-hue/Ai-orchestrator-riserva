@@ -133,6 +133,23 @@ class AppConstants {
       'sizeCategory': '1B',
     },
     {
+      'id': 'spark_x2_5_4b',
+      'displayName': 'Spark-X2.5 4B',
+      'fileName': 'Spark-X2.5-4B-Q4_K_M.gguf',
+      'downloadUrl':
+          'https://huggingface.co/XHToken/'
+          'Spark-X2.5-4B-GGUF/resolve/main/'
+          'Spark-X2.5-4B-Q4_K_M.gguf',
+      'version': '1.0.0',
+      'sizeBytes': 2600224352,
+      'description':
+          'Spark-X2.5 4B (Q4_K_M) – downloadable Benchmark Lab candidate '
+          'for reasoning, coding, tool use and agentic workloads. Runtime '
+          'validation is intentionally still required before production use.',
+      'platformTarget': 'android',
+      'sizeCategory': '4B',
+    },
+    {
       'id': 'phi3_5_mini',
       'displayName': 'Phi-3.5 Mini Instruct',
       'fileName': 'Phi-3.5-mini-instruct-Q4_K_M.gguf',

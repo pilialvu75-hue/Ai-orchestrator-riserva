@@ -23,6 +23,19 @@ void main() {
       expect(entry['sizeBytes'], 5027784224);
     });
 
+    test('Spark-X2.5 4B points to the official Q4_K_M download', () {
+      final entry = manifest['spark_x2_5_4b'] as Map<String, dynamic>;
+
+      expect(entry['fileName'], 'Spark-X2.5-4B-Q4_K_M.gguf');
+      expect(
+        entry['downloadUrl'],
+        'https://huggingface.co/XHToken/Spark-X2.5-4B-GGUF/resolve/main/Spark-X2.5-4B-Q4_K_M.gguf',
+      );
+      expect(entry['sizeBytes'], 2600224352);
+      expect(entry['platformTarget'], 'android');
+      expect(entry['sizeCategory'], '4B');
+    });
+
     test('DeepSeek Coder points to a live Q4_K_M mirror', () {
       final entry =
           manifest['deepseek_coder_6_7b_instruct'] as Map<String, dynamic>;
