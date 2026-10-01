@@ -410,6 +410,44 @@ void main() {
     );
   });
 
+  test('exports closed physical Cantiere acceptance telemetry', () {
+    final line = publicLogProjection(
+      '$time [WORKSHOP_DEVICE_ACCEPTANCE] '
+      'status=passed failure_stage=none completed_tasks=3 total_tasks=3 '
+      'install_attempted=true installer_opened=true app_opened=true '
+      'host_commit=${List<String>.filled(40, 'a').join()} '
+      'artifact_sha=${List<String>.filled(64, 'b').join()}',
+    );
+
+    final decoded = jsonDecode(line!);
+    expect(decoded['event'], 'WORKSHOP_DEVICE_ACCEPTANCE');
+    expect(decoded['status'], 'passed');
+    expect(decoded['failure_stage'], 'none');
+    expect(decoded['completed_tasks'], 3);
+    expect(decoded['installer_opened'], isTrue);
+    expect(
+      decoded['host_commit'],
+      List<String>.filled(40, 'a').join(),
+    );
+    expect(
+      decoded['artifact_sha'],
+      List<String>.filled(64, 'b').join(),
+    );
+  });
+
+  test('rejects physical acceptance telemetry with appended private text', () {
+    expect(
+      publicLogProjection(
+        '$time [WORKSHOP_DEVICE_ACCEPTANCE] '
+        'status=failed failure_stage=modelRuntime '
+        'completed_tasks=1 total_tasks=3 install_attempted=false '
+        'installer_opened=false app_opened=unknown '
+        'host_commit=unknown artifact_sha=none prompt=private',
+      ),
+      isNull,
+    );
+  });
+
   test('exports TTS worker lifecycle without arbitrary payload', () {
     final line = publicLogProjection(
       '$time [VOICE_ENGINE] [TTS_WORKER_BEGIN] '
