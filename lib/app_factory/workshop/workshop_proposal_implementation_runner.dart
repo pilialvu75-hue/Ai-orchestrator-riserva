@@ -109,8 +109,7 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
-      if (didRetry ||
-          cancellationToken?.isCancelled == true ||
+      if (cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
@@ -118,7 +117,7 @@ final class WorkshopProposalImplementationRunner {
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
-        'attempt=2 reason=malformed_output '
+        'attempt=${didRetry ? 3 : 2} reason=malformed_output '
         'terminal=${result.terminalState?.name ?? 'none'} '
         'chars=${result.text.length}',
       );
@@ -236,8 +235,7 @@ final class WorkshopProposalImplementationRunner {
     try {
       return _stageResult(session: session, result: result);
     } on FormatException catch (error) {
-      if (didRetry ||
-          cancellationToken?.isCancelled == true ||
+      if (cancellationToken?.isCancelled == true ||
           !_isRetryableProposalFormatException(error)) {
         rethrow;
       }
@@ -246,7 +244,7 @@ final class WorkshopProposalImplementationRunner {
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
         'execution=${resumeContext.executionId} '
-        'attempt=2 reason=malformed_output '
+        'attempt=${didRetry ? 3 : 2} reason=malformed_output '
         'terminal=${result.terminalState?.name ?? 'none'} '
         'chars=${result.text.length}',
       );
