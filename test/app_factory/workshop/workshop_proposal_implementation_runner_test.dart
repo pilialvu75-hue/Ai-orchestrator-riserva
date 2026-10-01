@@ -630,7 +630,10 @@ void main() {
       final workspaceGateway = _RecordingWorkspaceGateway(
         files: <String, String>{'lib/app.dart': 'old'},
       );
-      final session = await _session(workspaceGateway);
+      final session = await _session(
+        workspaceGateway,
+        operation: WorkshopOperation.create,
+      );
 
       final proposal = await WorkshopProposalImplementationRunner(
         inference: _stageInference(_gateways(engineer)),
@@ -737,14 +740,18 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway engineer) {
   };
 }
 
-Future<WorkspaceSession> _session(_RecordingWorkspaceGateway gateway) async {
+Future<WorkspaceSession> _session(
+  _RecordingWorkspaceGateway gateway, {
+  WorkshopOperation operation = WorkshopOperation.analyse,
+}) async {
   final session = WorkspaceSession(
-    request: const WorkshopRequest(
+    request: WorkshopRequest(
       id: 'implementation-runner-request',
       title: 'Implement staged change',
       instruction: 'Update the app implementation safely',
-      targetFiles: <String>['lib/app.dart'],
-      constraints: <String>['Do not introduce regressions'],
+      operation: operation,
+      targetFiles: const <String>['lib/app.dart'],
+      constraints: const <String>['Do not introduce regressions'],
     ),
     gateway: gateway,
   );
