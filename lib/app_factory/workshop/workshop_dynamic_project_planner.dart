@@ -258,8 +258,18 @@ final class WorkshopDynamicProjectPlanner {
       ..writeln('- every task has at least one validation criterion')
       ..writeln('- paths are relative repository paths only')
       ..writeln(
+        '- for Flutter create work, each task affectedPaths must list every '
+        'source file that task may create or modify; do not rely on paths '
+        'mentioned only in title, description or requirements',
+      )
+      ..writeln(
         '- for Flutter create work, the implementation task must include '
         'lib/main.dart so the approved source owns the runnable entry point',
+      )
+      ..writeln(
+        '- keep bounded tasks self-contained: if a task may introduce a new '
+        'screen/helper file, include that exact repository path in that task '
+        'affectedPaths before execution',
       )
       ..writeln(
         '- Flutter widget/unit tests belong under test/, never lib/test/',
