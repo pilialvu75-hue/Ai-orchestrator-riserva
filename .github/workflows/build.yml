@@ -1,5 +1,5 @@
 name: Build & Release APK
-run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.fast_test && 'Android FAST TEST') || github.event.head_commit.message || github.event.pull_request.title || 'Build & Release APK' }}
+run-name: ${{ ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.fast_test)) && 'Android FAST TEST') || github.event.pull_request.title || 'Build & Release APK' }}
 
 on:
   push:
@@ -43,7 +43,9 @@ jobs:
       JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
       GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8
       SIGNING_DIR: /tmp/android-signing
-      FAST_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.fast_test && 'true' || 'false' }}
+      # Temporary test phase: every main push produces a fast beta automatically.
+      # A manual workflow_dispatch with fast_test=false still produces the full stable release.
+      FAST_TEST: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.fast_test)) && 'true' || 'false' }}
 
     steps:
       - name: Checkout repository
@@ -89,7 +91,13 @@ jobs:
         run: |
           set -euo pipefail
           export ANDROID_CUSTOM_CMDLINE="${ANDROID_SDK_ROOT}/cmdline-tools"
-          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          curl --http1.1 -fL \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 2 \
+            --connect-timeout 20 \
+            https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip \
+            -o /tmp/tools.zip
           mkdir -p "$ANDROID_CUSTOM_CMDLINE"
           rm -rf "$ANDROID_CUSTOM_CMDLINE/latest" /tmp/cmdline-extract
           unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
