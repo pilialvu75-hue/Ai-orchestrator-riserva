@@ -789,6 +789,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
   int calls = 0;
   String? lastPrompt;
   final List<String> prompts = <String>[];
+  final List<String?> systemPrompts = <String?>[];
   final List<String> sessionIds = <String>[];
   final List<int?> maxTokensValues = <int?>[];
   final List<bool> cancellationTokenWasNull = <bool>[];
@@ -812,6 +813,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     calls += 1;
     lastPrompt = prompt;
     prompts.add(prompt);
+    systemPrompts.add(systemPrompt);
     sessionIds.add(sessionId);
     maxTokensValues.add(maxTokens);
     cancellationTokenWasNull.add(cancellationToken == null);
