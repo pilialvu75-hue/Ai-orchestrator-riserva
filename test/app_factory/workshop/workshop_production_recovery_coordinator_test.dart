@@ -349,6 +349,54 @@ void main() {
 
 
   test(
+    'removes only the selected saved project from the catalogue',
+    () async {
+      final coordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+      );
+      final controller = _controllerFor(workspace.path);
+
+      controller.startProduction(
+        title: 'Delete me',
+        instruction: 'Create a disposable project.',
+      );
+      final deletedProjectId = controller.state.projectId!;
+      await coordinator.saveCurrent(controller);
+
+      controller.forgetProduction();
+      controller.startProduction(
+        title: 'Keep me',
+        instruction: 'Create a project that must remain.',
+      );
+      final keptProjectId = controller.state.projectId!;
+      await coordinator.saveCurrent(controller);
+
+      await coordinator.removeProject(deletedProjectId);
+
+      final projects = await coordinator.listSavedProjects();
+      expect(projects, hasLength(1));
+      expect(projects.single.projectId, keptProjectId);
+      expect(projects.single.title, 'Keep me');
+
+      final deletedController = _controllerFor(workspace.path);
+      expect(
+        await coordinator.restoreProject(
+          deletedController,
+          projectId: deletedProjectId,
+        ),
+        isFalse,
+      );
+
+      controller.dispose();
+      deletedController.dispose();
+    },
+  );
+
+  test(
     'serializes concurrent explicit checkpoint saves without losing projects',
     () async {
       final store = _BlockingWorkshopCheckpointStore();
