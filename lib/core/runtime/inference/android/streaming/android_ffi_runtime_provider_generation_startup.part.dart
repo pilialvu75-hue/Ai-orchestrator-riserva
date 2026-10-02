@@ -327,6 +327,15 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       safetyMargin: LlamaNativeDefaults.promptTokenSafetyMargin,
     );
     if (effectiveGenerationReserve == 0) {
+      AndroidFfiRuntimeProvider._log(
+        '[RUNTIME_FAILURE_DIAGNOSTIC] stage=prompt_budget'
+        ' reason=base_prompt_exceeds_context runtime=android_ffi'
+        ' context_capacity=$actualContext'
+        ' prompt_tokens=$basePromptTokens'
+        ' requested_max_tokens=$budgetRequestedMaxTokens'
+        ' generation_reserve=$effectiveGenerationReserve'
+        ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}',
+      );
       _updateRuntimeStatus(LocalRuntimeStatus.failed,
         message: 'Prompt exceeds the local context capacity.');
       AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
@@ -357,6 +366,17 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
     );
 
     if (!tokenBudget.fitsRequestedBudget || tokenBudget.promptTokens < 0) {
+      AndroidFfiRuntimeProvider._log(
+        '[RUNTIME_FAILURE_DIAGNOSTIC] stage=prompt_budget'
+        ' reason=context_trim_exhausted runtime=android_ffi'
+        ' context_capacity=$actualContext'
+        ' prompt_tokens=${tokenBudget.promptTokens}'
+        ' max_prompt_tokens=$maxPromptTokens'
+        ' requested_max_tokens=$budgetRequestedMaxTokens'
+        ' generation_reserve=$effectiveGenerationReserve'
+        ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}'
+        ' trimmed_turns=${tokenBudget.trimmedTurns}',
+      );
       _updateRuntimeStatus(LocalRuntimeStatus.failed,
         message: 'Prompt exceeds the local context capacity.');
       AndroidFfiRuntimeProvider._finishWithRuntimeError(controller,
