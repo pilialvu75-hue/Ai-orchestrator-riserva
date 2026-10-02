@@ -45,6 +45,31 @@ void main() {
       );
     });
 
+    test('promotes bounded runtime failure evidence without raw message', () {
+      final promotion = DiagnosticsTelemetryPolicy.promote(
+        _entry(
+          'RUNTIME_FAILURE_DIAGNOSTIC',
+          '[RUNTIME_FAILURE_DIAGNOSTIC] stage=prompt_budget '
+          'reason=base_prompt_exceeds_context runtime=android_ffi '
+          'context_capacity=2048 prompt_tokens=1730 requested_max_tokens=512 '
+          'generation_reserve=0 safety_margin=64 secret=private',
+          category: RuntimeEventCategory.inference,
+        ),
+      );
+
+      expect(promotion, isNotNull);
+      expect(promotion!.properties['stage'], 'prompt_budget');
+      expect(promotion.properties['reason'], 'base_prompt_exceeds_context');
+      expect(promotion.properties['runtime'], 'android_ffi');
+      expect(promotion.properties['context_capacity'], 2048);
+      expect(promotion.properties['prompt_tokens'], 1730);
+      expect(promotion.properties['requested_max_tokens'], 512);
+      expect(promotion.properties['generation_reserve'], 0);
+      expect(promotion.properties['safety_margin'], 64);
+      expect(promotion.properties, isNot(contains('secret')));
+      expect(promotion.properties.values.join(' '), isNot(contains('private')));
+    });
+
     test('keeps normal runtime transitions local only', () {
       final promotion = DiagnosticsTelemetryPolicy.promote(
         _entry(
