@@ -301,21 +301,36 @@ class ModelManagementService {
 
   Future<void> exportAllRuntimeModels({
     required void Function(double progress) onProgress,
+    String? destinationDirectory,
   }) async {
-    if (!Platform.isAndroid) {
+    late final Directory publicDir;
+
+    if (Platform.isAndroid) {
+      final hasPermission = await _checkAndRequestStoragePermissions();
+      if (!hasPermission) {
+        throw const ModelDownloadFailureException(
+          'Permessi storage negati. Abilita l’accesso ai file e riprova.',
+        );
+      }
+      publicDir = await _pathResolver.ensurePublicModelsDirectory();
+    } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      final selected = destinationDirectory?.trim();
+      if (selected == null || selected.isEmpty) {
+        throw const ModelDownloadFailureException(
+          'Seleziona una cartella di destinazione per il backup.',
+        );
+      }
+      publicDir = Directory(
+        p.join(selected, 'AiOrchestrator', 'models'),
+      );
+      if (!await publicDir.exists()) {
+        await publicDir.create(recursive: true);
+      }
+    } else {
       throw const ModelDownloadFailureException(
-        'Esportazione disponibile solo su Android.',
+        'Esportazione modelli non supportata su questa piattaforma.',
       );
     }
-
-    final hasPermission = await _checkAndRequestStoragePermissions();
-    if (!hasPermission) {
-      throw const ModelDownloadFailureException(
-        'Permessi storage negati. Abilita l’accesso ai file e riprova.',
-      );
-    }
-
-    final publicDir = await _pathResolver.ensurePublicModelsDirectory();
     final copyJobs = <_ExportCopyJob>[];
     final seenDestinations = <String>{};
 
