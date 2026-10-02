@@ -287,6 +287,54 @@ void main() {
       expect(architect.lastSystemPrompt, contains('Never infer sensors, GPS'));
     });
 
+    test('retries incomplete Orchestrator once with compact bounded prompt',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final orchestrator = _RecordingGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: callOrder,
+        result: _success('compact scope analysis'),
+      )..scriptedResults = <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage: 'runtime failure',
+          ),
+          _success('compact scope analysis'),
+        ];
+      final architect = _RecordingGateway(
+        role: AppAiRole.architect,
+        callOrder: callOrder,
+        result: _success('implementation plan'),
+      );
+
+      final result = await WorkshopPreflightInferencePipeline(
+        inference: _stageInference(<AppAiRole, WorkshopInferenceGateway>{
+          AppAiRole.workshopOrchestrator: orchestrator,
+          AppAiRole.architect: architect,
+          AppAiRole.engineer: _unused(AppAiRole.engineer, callOrder),
+          AppAiRole.reviewer: _unused(AppAiRole.reviewer, callOrder),
+        }),
+      ).run(request: _request);
+
+      expect(result.readyForImplementation, isTrue);
+      expect(orchestrator.calls, 2);
+      expect(architect.calls, 1);
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.architect,
+        ],
+      );
+      expect(orchestrator.lastSessionId,
+          'workshop:preflight-request:preflight:analysis:retry-1');
+      expect(orchestrator.lastPrompt, contains('CANTIERE ORCHESTRATOR RETRY'));
+      expect(orchestrator.lastPrompt, isNot(contains(_request.context.first)));
+      expect(architect.lastPrompt, contains('compact scope analysis'));
+    });
+
     test('stops before Architect when Orchestrator inference fails', () async {
       final callOrder = <AppAiRole>[];
       final orchestrator = _RecordingGateway(
@@ -316,7 +364,14 @@ void main() {
       expect(result.analysisReady, isFalse);
       expect(result.architecture, isNull);
       expect(result.readyForImplementation, isFalse);
-      expect(callOrder, <AppAiRole>[AppAiRole.workshopOrchestrator]);
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.workshopOrchestrator,
+        ],
+      );
+      expect(orchestrator.calls, 2);
       expect(architect.calls, 0);
     });
   });
@@ -365,6 +420,7 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
   final AppAiRole role;
   final List<AppAiRole> callOrder;
   final WorkshopInferenceResult result;
+  List<WorkshopInferenceResult>? scriptedResults;
   int calls = 0;
   String? lastPrompt;
   String? lastSystemPrompt;
@@ -392,6 +448,10 @@ final class _RecordingGateway extends WorkshopInferenceGateway {
     lastSystemPrompt = systemPrompt;
     lastSessionId = sessionId;
     lastIsOffline = isOffline;
+    final scripted = scriptedResults;
+    if (scripted != null && calls <= scripted.length) {
+      return scripted[calls - 1];
+    }
     return result;
   }
 }
