@@ -389,6 +389,32 @@ void main() {
     );
   });
 
+  test('malformed retry uses a minimal deterministic JSON contract', () async {
+    final provider = _ScriptedProvider(<String>[
+      'not-json',
+      _singlePlan(),
+    ]);
+    final planner = _planner(provider);
+
+    await planner.plan(
+      request: const WorkshopRequest(
+        id: 'compact-repair-contract',
+        title: 'Manga Kids repair',
+        instruction: 'Repair the final Android build.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.update,
+        targetFiles: <String>['lib/main.dart'],
+      ),
+    );
+
+    final retry = provider.requests.last;
+    expect(retry.maxTokens, 640);
+    expect(retry.prompt, contains('exactly 1 phase and exactly 1 task'));
+    expect(retry.prompt, contains('close every quote, array and object'));
+    expect(retry.prompt, isNot(contains('1 to 4 phases; 1 to 12 tasks total')));
+    expect(retry.prompt, isNot(contains('substantial app work may use multiple')));
+  });
+
   test('invalid planning output fails before WorkshopEngine project mutation',
       () async {
     final provider = _ScriptedProvider(<String>['bad', 'still-bad']);
