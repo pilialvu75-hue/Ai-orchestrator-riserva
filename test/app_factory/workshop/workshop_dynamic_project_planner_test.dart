@@ -381,7 +381,7 @@ void main() {
     );
     expect(
       provider.requests.last.prompt,
-      contains('retry mode: prefer exactly 1 phase and 1 task'),
+      contains('RETRY CONTRACT: return exactly 1 phase and exactly 1 task'),
     );
     expect(
       provider.requests.last.prompt,
