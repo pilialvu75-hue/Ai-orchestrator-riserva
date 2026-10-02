@@ -193,6 +193,26 @@ class ModelDownloadService {
     return found;
   }
 
+  /// Win7 diagnostic only: extends the safe 0C filesystem-resolution probe
+  /// through GGUF header validation. It performs no SharedPreferences or network work.
+  Future<int> diagnosticValidateBuiltInModels() async {
+    final modelsDir = await _modelsDirectory();
+    final catalog = await _bundledModelRegistryService.loadCatalog();
+    var validated = 0;
+    for (final model in catalog) {
+      final fileName = model['fileName'] as String;
+      final file = File(p.join(modelsDir.path, fileName));
+      final resolution = await _pathResolver.resolveForRead(
+        fileName: fileName,
+        privateAbsolutePathHint: file.path,
+      );
+      if (!resolution.exists) continue;
+      final result = await _validateModelFileDetailed(resolution.file);
+      if (result.status == ModelValidationStatus.validatedOk) validated++;
+    }
+    return validated;
+  }
+
   /// Win7 diagnostic only: isolates SharedPreferences plugin access.
   Future<int> diagnosticReadStoredModelPreferences() async {
     final prefs = await SharedPreferences.getInstance();

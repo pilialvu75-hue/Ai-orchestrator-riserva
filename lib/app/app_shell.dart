@@ -120,6 +120,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _runWin7ModelValidationProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D4G model validation begin');
+    try {
+      await di.sl<ModelDownloadService>().diagnosticValidateBuiltInModels();
+      _appendWindowsSafeStartupBreadcrumb('D4H model validation returned');
+    } catch (_) {
+      _appendWindowsSafeStartupBreadcrumb('D4I model validation error');
+    }
+  }
+
   Future<void> _runWin7ModelPrefsProbe() async {
     _appendWindowsSafeStartupBreadcrumb('D4D model preferences probe begin');
     try {
@@ -515,6 +525,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         onPressed: _runWin7ModelPrefsProbe,
                         child: const Text('0D · Test preferenze modelli'),
                       ),
+                      OutlinedButton(
+                        onPressed: _runWin7ModelValidationProbe,
+                        child: const Text('0E · Test validazione GGUF'),
+                      ),
+
                       OutlinedButton(
                         onPressed: _runWin7ModelProbe,
                         child: const Text('1 · Test modelli completo'),
