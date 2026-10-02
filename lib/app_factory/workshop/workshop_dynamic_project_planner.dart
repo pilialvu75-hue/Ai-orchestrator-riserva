@@ -250,7 +250,25 @@ final class WorkshopDynamicProjectPlanner {
         '"affectedPaths":[],"validationCriteria":["..."]}]}',
       )
       ..writeln()
-      ..writeln('Rules:')
+      ..writeln('Rules:');
+
+    if (compact) {
+      buffer
+        ..writeln(
+          '- retry mode: prefer exactly 1 phase and 1 task when that can '
+          'represent the requested work',
+        )
+        ..writeln(
+          '- keep titles, descriptions and validation criteria terse so the '
+          'complete JSON fits the response budget',
+        )
+        ..writeln(
+          '- output the JSON object only: no preface, suffix, comments, '
+          'Markdown or code fences',
+        );
+    }
+
+    buffer
       ..writeln('- ids are local lowercase slugs: [a-z][a-z0-9_-]*')
       ..writeln('- 1 to 4 phases; 1 to 12 tasks total')
       ..writeln('- dependencies may reference only ids in this JSON')
@@ -494,7 +512,101 @@ final class WorkshopDynamicProjectPlanDecoder {
         value = value.substring(firstNewline + 1, lastFence).trim();
       }
     }
-    return value;
+
+    // Preserve strict validation for already-valid JSON roots. Recovery is only
+    // used when the model wrapped an otherwise complete project object in brief
+    // prose or another non-JSON envelope.
+    try {
+      jsonDecode(value);
+      return value;
+    } on FormatException {
+      return _firstProjectJsonObject(value) ?? value;
+    }
+  }
+
+  static String? _firstProjectJsonObject(String value) {
+    final starts = <int>[];
+    var inString = false;
+    var escaped = false;
+
+    for (var index = 0; index < value.length; index += 1) {
+      final codeUnit = value.codeUnitAt(index);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (codeUnit == 0x5c) {
+          escaped = true;
+        } else if (codeUnit == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+      if (codeUnit == 0x22) {
+        inString = true;
+      } else if (codeUnit == 0x7b) {
+        starts.add(index);
+      }
+    }
+
+    for (final start in starts) {
+      final candidate = _balancedObjectFrom(value, start);
+      if (candidate == null) {
+        continue;
+      }
+      try {
+        final decoded = jsonDecode(candidate);
+        if (decoded is Map &&
+            decoded.containsKey('phases') &&
+            decoded.containsKey('tasks')) {
+          return candidate;
+        }
+      } on FormatException {
+        // Try the next object start. Nested complete project objects remain
+        // recoverable even when an outer wrapper was truncated.
+      }
+    }
+
+    return null;
+  }
+
+  static String? _balancedObjectFrom(String value, int start) {
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+
+    for (var index = start; index < value.length; index += 1) {
+      final codeUnit = value.codeUnitAt(index);
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (codeUnit == 0x5c) {
+          escaped = true;
+        } else if (codeUnit == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (codeUnit == 0x22) {
+        inString = true;
+        continue;
+      }
+      if (codeUnit == 0x7b) {
+        depth += 1;
+        continue;
+      }
+      if (codeUnit != 0x7d || depth == 0) {
+        continue;
+      }
+
+      depth -= 1;
+      if (depth == 0) {
+        return value.substring(start, index + 1);
+      }
+    }
+
+    return null;
   }
 
   static List<dynamic> _list(Object? value, String field) {

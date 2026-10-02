@@ -178,6 +178,31 @@ void main() {
     expect(plan.tasks, hasLength(1));
   });
 
+  test('accepts complete project JSON wrapped in model commentary', () {
+    final raw = 'Here is the requested plan:\n${_singlePlan()}\nDone.';
+    final plan = decoder.decode(raw, requestId: 'request-5b');
+
+    expect(plan.tasks, hasLength(1));
+    expect(plan.phases, hasLength(1));
+  });
+
+  test('recovers a complete project object inside a truncated outer wrapper', () {
+    final raw = 'prefix {"plan": ${_singlePlan()}';
+    final plan = decoder.decode(raw, requestId: 'request-5bb');
+
+    expect(plan.tasks, hasLength(1));
+    expect(plan.phases, hasLength(1));
+  });
+
+  test('keeps valid non-object JSON fail-closed', () {
+    final wrapped = jsonEncode(<Object>[jsonDecode(_singlePlan())]);
+
+    expect(
+      () => decoder.decode(wrapped, requestId: 'request-5c'),
+      throwsFormatException,
+    );
+  });
+
   test('planner preserves explicit offline mode to Architect inference', () async {
     final provider = _ScriptedProvider(<String>[_singlePlan()]);
     final planner = _planner(provider);
@@ -310,6 +335,26 @@ void main() {
     expect(provider.requests, hasLength(1));
   });
 
+  test('planner accepts wrapped Architect JSON without spending retry', () async {
+    final provider = _ScriptedProvider(<String>[
+      'Plan follows:\n${_singlePlan()}\nEnd of plan.',
+    ]);
+    final planner = _planner(provider);
+
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'wrapped-plan-request',
+        title: 'Wrapped plan',
+        instruction: 'Create the requested app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      ),
+    );
+
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(1));
+  });
+
   test('planner retries one malformed Architect response', () async {
     final provider = _ScriptedProvider(<String>[
       'not-json',
@@ -330,6 +375,18 @@ void main() {
     expect(plan.tasks, hasLength(1));
     expect(provider.requests, hasLength(2));
     expect(provider.requests.last.sessionId, contains('retry-1'));
+    expect(
+      provider.requests.first.prompt,
+      isNot(contains('retry mode: prefer exactly 1 phase and 1 task')),
+    );
+    expect(
+      provider.requests.last.prompt,
+      contains('retry mode: prefer exactly 1 phase and 1 task'),
+    );
+    expect(
+      provider.requests.last.prompt,
+      contains('output the JSON object only: no preface, suffix'),
+    );
   });
 
   test('invalid planning output fails before WorkshopEngine project mutation',
