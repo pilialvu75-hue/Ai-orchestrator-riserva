@@ -75,7 +75,7 @@ jobs:
           uname -a
 
       - name: Resolve Flutter dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Analyze Dart sources
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
@@ -123,7 +123,7 @@ jobs:
         run: flutter config --enable-linux-desktop
 
       - name: Resolve Flutter dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Build bundled llama.cpp runtime
         run: bash native/linux/build_llama_cli.sh
