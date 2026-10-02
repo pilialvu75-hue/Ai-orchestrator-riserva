@@ -4,3 +4,12 @@
 *.keystore
 __pycache__/
 *.pyc
+/.dart_tool/
+/build/
+/.flutter-plugins
+/.flutter-plugins-dependencies
+/.pub-cache/
+/android/.gradle/
+/linux/flutter/ephemeral/
+/windows/flutter/ephemeral/
+/macos/Flutter/ephemeral/

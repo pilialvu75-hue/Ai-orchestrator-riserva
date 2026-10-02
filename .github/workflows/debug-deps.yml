@@ -9,12 +9,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
+          flutter-version: '3.47.5'
           channel: stable
 
       - name: Flutter pub get
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Show record dependency tree
         run: flutter pub deps --style=compact | grep -E "record|sherpa"

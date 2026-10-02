@@ -99,8 +99,9 @@ jobs:
 
       - name: Setup Flutter
         if: steps.signing.outputs.ready == 'true'
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
+          flutter-version: '3.47.5'
           channel: stable
           cache: true
 
@@ -157,7 +158,7 @@ jobs:
 
       - name: Resolve Flutter dependencies
         if: steps.signing.outputs.ready == 'true'
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Validate versioned Xcode project
         if: steps.signing.outputs.ready == 'true'
