@@ -392,7 +392,7 @@ void main() {
   test('malformed retry uses a minimal deterministic JSON contract', () async {
     final provider = _ScriptedProvider(<String>[
       'not-json',
-      _singlePlan(),
+      _singlePlan(affectedPaths: const <String>['lib/main.dart']),
     ]);
     final planner = _planner(provider);
 
@@ -413,6 +413,28 @@ void main() {
     expect(retry.prompt, contains('close every quote, array and object'));
     expect(retry.prompt, isNot(contains('1 to 4 phases; 1 to 12 tasks total')));
     expect(retry.prompt, isNot(contains('substantial app work may use multiple')));
+  });
+
+  test('planner rejects paths outside explicit request targetFiles', () async {
+    final provider = _ScriptedProvider(<String>[
+      _singlePlan(affectedPaths: const <String>['lib/other.dart']),
+      _singlePlan(affectedPaths: const <String>['lib/other.dart']),
+    ]);
+    final planner = _planner(provider);
+
+    await expectLater(
+      planner.plan(
+        request: const WorkshopRequest(
+          id: 'target-scope-request',
+          title: 'Scoped repair',
+          instruction: 'Repair only the requested file.',
+          source: WorkshopRequestSource.workshop,
+          operation: WorkshopOperation.fix,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+      ),
+      throwsFormatException,
+    );
   });
 
   test('invalid planning output fails before WorkshopEngine project mutation',
