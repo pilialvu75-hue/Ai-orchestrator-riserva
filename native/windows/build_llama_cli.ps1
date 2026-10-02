@@ -14,6 +14,27 @@ if (-not (Test-Path (Join-Path $sourceDir 'CMakeLists.txt'))) {
   throw "llama.cpp submodule is missing at $sourceDir"
 }
 
+# cpp-httplib 0.44 has a compile-time Windows 10 floor even when building
+# llama-completion only. The helper does not use the HTTP server path, so keep
+# the pinned submodule and remove only that preprocessor guard in the CI worktree.
+# The final executable is then checked for known post-Windows-7 imports below.
+$httplibHeader = Join-Path $sourceDir 'vendor\cpp-httplib\httplib.h'
+$httplib = Get-Content -Raw -Path $httplibHeader
+$guard = @'
+#ifdef _WIN32
+#if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0A00
+#error                                                                         \
+    "cpp-httplib doesn't support Windows 8 or lower. Please use Windows 10 or later."
+#endif
+#endif
+'@
+if (-not $httplib.Contains($guard)) {
+  throw 'Expected cpp-httplib Windows-version guard was not found; refusing an unverified patch.'
+}
+$httplib = $httplib.Replace($guard, '')
+Set-Content -Path $httplibHeader -Value $httplib -Encoding UTF8
+Write-Host 'Removed cpp-httplib compile-only Windows 10 guard for the bundled completion helper.'
+
 cmake -S $sourceDir -B $BuildDir `
   -A x64 `
   -DBUILD_SHARED_LIBS=OFF `
@@ -52,6 +73,43 @@ $helper = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $helper) {
   throw "llama-completion.exe was not produced in the expected build directories."
 }
+
+# Reject known loader-time imports introduced after Windows 7. This keeps the
+# shared Windows bundle honest even though the helper is being exercised first
+# on Windows 8.1.
+$helperBytes = [IO.File]::ReadAllBytes($helper)
+$forbiddenImports = @(
+  'WaitOnAddress',
+  'WakeByAddressSingle',
+  'WakeByAddressAll',
+  'GetCurrentThreadStackLimits',
+  'GetSystemTimePreciseAsFileTime',
+  'GetProcessMitigationPolicy',
+  'CreateFile2',
+  'PathCchCanonicalize',
+  'PathCchCombine',
+  'PathCchRemoveBackslash',
+  'RtlAddGrowableFunctionTable',
+  'RtlDeleteGrowableFunctionTable'
+)
+foreach ($symbol in $forbiddenImports) {
+  $needle = [Text.Encoding]::ASCII.GetBytes($symbol)
+  $found = $false
+  for ($i = 0; $i -le $helperBytes.Length - $needle.Length -and -not $found; $i++) {
+    $match = $true
+    for ($j = 0; $j -lt $needle.Length; $j++) {
+      if ($helperBytes[$i + $j] -ne $needle[$j]) {
+        $match = $false
+        break
+      }
+    }
+    if ($match) { $found = $true }
+  }
+  if ($found) {
+    throw "Bundled llama helper contains unsupported Windows import/symbol '$symbol'."
+  }
+}
+Write-Host 'Bundled llama helper legacy-Windows forbidden-symbol validation passed.'
 
 & $helper --version
 if ($LASTEXITCODE -ne 0) {
