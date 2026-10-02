@@ -15,8 +15,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 final class WorkshopBuildRepairPolicy {
   const WorkshopBuildRepairPolicy({
     this.maxRepairAttempts = 2,
-    this.maxDiagnosticChars = 6000,
-    this.maxGoalChars = 4000,
+    this.maxDiagnosticChars = 1800,
+    this.maxGoalChars = 1200,
     this.maxFingerprintEvidenceChars = 1200,
   })  : assert(maxRepairAttempts >= 0),
         assert(maxDiagnosticChars > 0),
@@ -193,7 +193,7 @@ final class WorkshopBuildRepairPlanner {
       );
     }
 
-    final originalGoal = _boundedTail(
+    final originalGoal = _boundedHead(
       failedPlan.goal.trim(),
       policy.maxGoalChars,
       omittedLabel: 'original goal characters',
@@ -312,6 +312,20 @@ final class WorkshopBuildRepairPlanner {
 
   String _normalizeWhitespace(String value) =>
       value.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  String _boundedHead(
+    String value,
+    int maxChars, {
+    required String omittedLabel,
+  }) {
+    if (value.length <= maxChars) {
+      return value;
+    }
+
+    final omitted = value.length - maxChars;
+    final head = value.substring(0, maxChars);
+    return '$head\n[... $omitted $omittedLabel omitted ...]';
+  }
 
   String _boundedTail(
     String value,
