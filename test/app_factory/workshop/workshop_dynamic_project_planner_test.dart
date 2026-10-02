@@ -402,7 +402,7 @@ void main() {
         title: 'Manga Kids repair',
         instruction: 'Repair the final Android build.',
         source: WorkshopRequestSource.workshop,
-        operation: WorkshopOperation.update,
+        operation: WorkshopOperation.fix,
         targetFiles: <String>['lib/main.dart'],
       ),
     );
