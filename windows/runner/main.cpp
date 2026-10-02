@@ -36,10 +36,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   bool skip_plugins = false;
   std::vector<std::string> dart_arguments;
   dart_arguments.reserve(command_line_arguments.size() + 1);
-  OSVERSIONINFOW version_info = {};
-  version_info.dwOSVersionInfoSize = sizeof(version_info);
-  if (::GetVersionExW(&version_info) &&
-      version_info.dwMajorVersion == 6 && version_info.dwMinorVersion == 1) {
+  // Win7 compatibility shims are app-local and loaded only for the legacy target.
+  // Reuse that established signal without importing post-Win7 APIs.
+  if (::GetModuleHandleW(L"win7krnl.dll") != nullptr) {
     dart_arguments.push_back("--windows7-safe-autostart");
     startup_trace::Mark("08b Win7 safe-autostart diagnostic mode enabled");
   }
