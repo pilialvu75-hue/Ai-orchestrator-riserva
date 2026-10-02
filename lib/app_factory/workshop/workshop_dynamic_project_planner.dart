@@ -176,6 +176,20 @@ final class WorkshopDynamicProjectPlanner {
     WorkshopDynamicProjectPlan plan,
     WorkshopRequest request,
   ) {
+    if (request.targetFiles.isNotEmpty) {
+      final allowed = request.targetFiles.toSet();
+      for (final task in plan.tasks) {
+        final outsideScope =
+            task.affectedPaths.where((path) => !allowed.contains(path)).toList();
+        if (outsideScope.isNotEmpty) {
+          throw FormatException(
+            'Project plan affectedPaths escape request targetFiles: '
+            '${outsideScope.join(', ')}.',
+          );
+        }
+      }
+    }
+
     if (request.operation != WorkshopOperation.create || plan.tasks.isEmpty) {
       return plan;
     }
