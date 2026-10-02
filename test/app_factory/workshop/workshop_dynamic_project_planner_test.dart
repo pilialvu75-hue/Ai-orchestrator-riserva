@@ -385,7 +385,7 @@ void main() {
     );
     expect(
       provider.requests.last.prompt,
-      contains('output the JSON object only: no preface, suffix'),
+      contains('output one complete JSON object only; close every quote'),
     );
   });
 
