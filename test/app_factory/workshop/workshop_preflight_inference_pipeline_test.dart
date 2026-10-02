@@ -364,7 +364,14 @@ void main() {
       expect(result.analysisReady, isFalse);
       expect(result.architecture, isNull);
       expect(result.readyForImplementation, isFalse);
-      expect(callOrder, <AppAiRole>[AppAiRole.workshopOrchestrator]);
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.workshopOrchestrator,
+          AppAiRole.workshopOrchestrator,
+        ],
+      );
+      expect(orchestrator.calls, 2);
       expect(architect.calls, 0);
     });
   });
