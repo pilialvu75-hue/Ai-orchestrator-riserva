@@ -416,7 +416,7 @@ class _WorkshopProductionDashboardPageState
       return;
     }
 
-    final selectedProjectId = await showModalBottomSheet<String>(
+    final selection = await showModalBottomSheet<_SavedProjectSelection>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -463,9 +463,35 @@ class _WorkshopProductionDashboardPageState
                   subtitle: Text(
                     '${project.status.name} · $percent% · $updatedLabel',
                   ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(project.projectId),
+                  trailing: PopupMenuButton<_SavedProjectMenuAction>(
+                    tooltip: 'Gestisci progetto',
+                    onSelected: (action) {
+                      if (action == _SavedProjectMenuAction.delete) {
+                        Navigator.of(sheetContext).pop(
+                          _SavedProjectSelection.delete(
+                            projectId: project.projectId,
+                            title: project.title,
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (_) => const <PopupMenuEntry<_SavedProjectMenuAction>>[
+                      PopupMenuItem<_SavedProjectMenuAction>(
+                        value: _SavedProjectMenuAction.delete,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline),
+                          title: Text('Cancella'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () => Navigator.of(sheetContext).pop(
+                    _SavedProjectSelection.open(
+                      projectId: project.projectId,
+                      title: project.title,
+                    ),
+                  ),
                 ),
               );
             },
@@ -474,12 +500,82 @@ class _WorkshopProductionDashboardPageState
       },
     );
 
-    if (selectedProjectId == null || !mounted) {
+    if (selection == null || !mounted) {
       return;
     }
 
     final dashboardController = widget.bundle.dashboardController;
     final currentProjectId = dashboardController.state.projectId?.trim();
+
+    if (selection.action == _SavedProjectMenuAction.delete) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Cancella progetto?'),
+          content: Text(
+            'Vuoi cancellare “${selection.title}” dai progetti salvati? '
+            'Questa operazione non può essere annullata.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Annulla'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Cancella'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) {
+        return;
+      }
+
+      setState(() {
+        _mutationBusy = true;
+        _error = null;
+      });
+      try {
+        if (currentProjectId == selection.projectId) {
+          if (widget.executionController.state.isRunning) {
+            throw StateError(
+              'Attendi la fine dell’esecuzione prima di cancellare il progetto.',
+            );
+          }
+          await widget.executionController.abandonCurrentExecution();
+          widget.executionController.reset();
+          dashboardController.forgetProduction();
+          widget.executionController.clearBuildRepairChain();
+          _buildResult = null;
+        }
+
+        await recovery.removeProject(selection.projectId);
+        widget.chatController.addSystemMessage(
+          'Progetto “${selection.title}” cancellato dai progetti salvati.',
+        );
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Progetto “${selection.title}” cancellato.')),
+          );
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _error = 'Cancellazione del progetto non riuscita: $error';
+          });
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _mutationBusy = false);
+        }
+      }
+      return;
+    }
+
+    final selectedProjectId = selection.projectId;
     if (currentProjectId == selectedProjectId) {
       return;
     }
@@ -1185,6 +1281,38 @@ class _WorkshopProductionDashboardPageState
       ),
     );
   }
+}
+
+enum _SavedProjectMenuAction { open, delete }
+
+final class _SavedProjectSelection {
+  const _SavedProjectSelection._({
+    required this.projectId,
+    required this.title,
+    required this.action,
+  });
+
+  const _SavedProjectSelection.open({
+    required String projectId,
+    required String title,
+  }) : this._(
+          projectId: projectId,
+          title: title,
+          action: _SavedProjectMenuAction.open,
+        );
+
+  const _SavedProjectSelection.delete({
+    required String projectId,
+    required String title,
+  }) : this._(
+          projectId: projectId,
+          title: title,
+          action: _SavedProjectMenuAction.delete,
+        );
+
+  final String projectId;
+  final String title;
+  final _SavedProjectMenuAction action;
 }
 
 abstract final class WorkshopFinalBuildRetryPolicy {
