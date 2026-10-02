@@ -25,7 +25,7 @@ jobs:
           cache: true
 
       - name: Resolve dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Analyze Web entrypoint
         run: |
