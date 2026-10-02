@@ -57,8 +57,9 @@ jobs:
             libasound2-dev liblzma-dev
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
+          flutter-version: '3.47.5'
           channel: stable
           cache: true
 
@@ -74,7 +75,7 @@ jobs:
           uname -a
 
       - name: Resolve Flutter dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze Dart sources
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
@@ -112,8 +113,9 @@ jobs:
             libasound2-dev liblzma-dev curl xvfb file binutils
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
+          flutter-version: '3.47.5'
           channel: stable
           cache: true
 
@@ -121,7 +123,7 @@ jobs:
         run: flutter config --enable-linux-desktop
 
       - name: Resolve Flutter dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build bundled llama.cpp runtime
         run: bash native/linux/build_llama_cli.sh
