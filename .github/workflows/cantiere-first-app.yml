@@ -51,7 +51,7 @@ jobs:
           cache: true
 
       - name: Resolve AI Orchestrator dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Analyze first-app acceptance smoke
         run: |
