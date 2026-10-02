@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/roadmap-cant-audit-08-lock-toolchain
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
