@@ -663,6 +663,14 @@ void main() {
         engineer.prompts.last,
         contains('Never return an empty changes'),
       );
+      expect(
+        engineer.systemPrompts.last,
+        contains('targetFiles are a hard allowlist'),
+      );
+      expect(
+        engineer.systemPrompts.last,
+        contains('fold that behavior into an allowed target file'),
+      );
       expect(workspaceGateway.writeCalls, 0);
       expect(workspaceGateway.deleteCalls, 0);
     });
