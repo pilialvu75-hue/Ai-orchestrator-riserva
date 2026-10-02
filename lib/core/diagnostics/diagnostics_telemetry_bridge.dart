@@ -133,6 +133,7 @@ final class DiagnosticsTelemetryPolicy {
     'WEBSEARCH_HTTP_TIMEOUT',
     'WEBSEARCH_PROVIDER_FALLBACK',
     'ANDROID_PROCESS_EXIT_UNAVAILABLE',
+    'RUNTIME_FAILURE_DIAGNOSTIC',
   };
 
   static const Map<String, Set<String>> _safeEnumValues =
@@ -195,7 +196,9 @@ final class DiagnosticsTelemetryPolicy {
     },
     'reason': <String>{
       'authentication',
+      'base_prompt_exceeds_context',
       'completed',
+      'context_trim_exhausted',
       'dispatch',
       'empty_output',
       'incomplete_output',
@@ -207,6 +210,15 @@ final class DiagnosticsTelemetryPolicy {
       'rate_limit',
       'timeout',
       'unsupported',
+    },
+    'runtime': <String>{
+      'android_ffi',
+      'desktop_process',
+      'unknown',
+    },
+    'stage': <String>{
+      'prompt_budget',
+      'unknown',
     },
     'status': <String>{
       'cancelled',
@@ -237,8 +249,10 @@ final class DiagnosticsTelemetryPolicy {
   };
 
   static const Set<String> _safeNumericKeys = <String>{
+    'context_capacity',
     'elapsed_ms',
     'first_token_ms',
+    'generation_reserve',
     'n_batch',
     'n_ctx',
     'n_threads',
@@ -246,6 +260,10 @@ final class DiagnosticsTelemetryPolicy {
     'reused_tokens',
     'prefilled_tokens',
     'prompt_tokens',
+    'max_prompt_tokens',
+    'requested_max_tokens',
+    'safety_margin',
+    'trimmed_turns',
     'token_index',
     'tokens',
     'tokens_generated',
