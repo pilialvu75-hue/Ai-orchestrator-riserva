@@ -54,7 +54,7 @@ jobs:
 
       - name: Resolve Flutter dependencies
         shell: pwsh
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Analyze Dart sources
         shell: pwsh
@@ -103,7 +103,7 @@ jobs:
 
       - name: Resolve Flutter dependencies
         shell: pwsh
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Build Windows release
         shell: pwsh
