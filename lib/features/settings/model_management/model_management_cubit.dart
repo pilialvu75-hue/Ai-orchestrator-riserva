@@ -99,7 +99,8 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
           exportProgress: 1,
           exportMessage: destinationDirectory == null
               ? 'Esportazione completata! Ora puoi disinstallare l’app in sicurezza.'
-              : 'Backup completato in $destinationDirectory\\AiOrchestrator\\models',
+              : 'Backup completato nella cartella selezionata '
+                  '(AiOrchestrator/models).',
         ),
       );
       await scanIntegrity();
