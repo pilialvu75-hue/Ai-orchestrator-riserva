@@ -230,7 +230,7 @@ void main() {
 
       expect(
         request.instruction,
-        contains('ORIGINAL PRODUCT GOAL (trusted project state):\ngoal-goal-goal-'),
+        contains('ORIGINAL PRODUCT GOAL:\ngoal-goal-goal-'),
       );
       expect(request.instruction, contains('original goal characters omitted'));
       expect(request.instruction, contains('diagnostic characters omitted'));
