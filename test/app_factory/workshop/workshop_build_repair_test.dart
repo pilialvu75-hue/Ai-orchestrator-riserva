@@ -206,6 +206,38 @@ void main() {
       );
     });
 
+    test('default repair request stays bounded for local planning context', () {
+      const planner = WorkshopBuildRepairPlanner();
+      final plan = WorkshopProjectPlan(
+        id: 'project:test',
+        title: 'Large repair',
+        goal: List<String>.filled(700, 'goal').join('-'),
+        requirements: const <String>['Preserve the generated app behavior.'],
+        constraints: const <String>['Keep the existing workspace.'],
+        validationCriteria: const <String>['Build succeeds.'],
+      );
+      final failed = _build(
+        status: WorkshopBuildStatus.failed,
+        errors: const <String>['local_build_failed'],
+        stderr: List<String>.filled(1600, 'diagnostic').join('|'),
+      );
+
+      final request = planner.createRepairRequest(
+        failedPlan: plan,
+        failedBuild: failed,
+        repairNumber: 1,
+      );
+
+      expect(
+        request.instruction,
+        contains('ORIGINAL PRODUCT GOAL:\ngoal-goal-goal-'),
+      );
+      expect(request.instruction, contains('original goal characters omitted'));
+      expect(request.instruction, contains('diagnostic characters omitted'));
+      expect(request.instruction.length, lessThan(4000));
+      expect(request.instruction, startsWith('BUILD REPAIR ATTEMPT: 1'));
+    });
+
     test('rejects repair request for infrastructure failure', () {
       const planner = WorkshopBuildRepairPlanner();
       final plan = WorkshopProjectPlan(
