@@ -186,6 +186,14 @@ void main() {
     expect(plan.phases, hasLength(1));
   });
 
+  test('recovers a complete project object inside a truncated outer wrapper', () {
+    final raw = 'prefix {"plan": ${_singlePlan()}';
+    final plan = decoder.decode(raw, requestId: 'request-5bb');
+
+    expect(plan.tasks, hasLength(1));
+    expect(plan.phases, hasLength(1));
+  });
+
   test('keeps valid non-object JSON fail-closed', () {
     final wrapped = jsonEncode(<Object>[jsonDecode(_singlePlan())]);
 
@@ -367,6 +375,18 @@ void main() {
     expect(plan.tasks, hasLength(1));
     expect(provider.requests, hasLength(2));
     expect(provider.requests.last.sessionId, contains('retry-1'));
+    expect(
+      provider.requests.first.prompt,
+      isNot(contains('retry mode: prefer exactly 1 phase and 1 task')),
+    );
+    expect(
+      provider.requests.last.prompt,
+      contains('retry mode: prefer exactly 1 phase and 1 task'),
+    );
+    expect(
+      provider.requests.last.prompt,
+      contains('output the JSON object only: no preface, suffix'),
+    );
   });
 
   test('invalid planning output fails before WorkshopEngine project mutation',
