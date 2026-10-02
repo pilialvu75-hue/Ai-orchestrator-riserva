@@ -48,7 +48,7 @@ dependencies:
 
   sherpa_onnx: 1.13.6
   record: ^5.2.1
-  mp_audio_stream: any
+  mp_audio_stream: 0.3.0
 
   archive: ^3.6.1
 
