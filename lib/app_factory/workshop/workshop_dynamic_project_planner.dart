@@ -525,12 +525,56 @@ final class WorkshopDynamicProjectPlanDecoder {
   }
 
   static String? _firstProjectJsonObject(String value) {
-    var depth = 0;
-    var start = -1;
+    final starts = <int>[];
     var inString = false;
     var escaped = false;
 
     for (var index = 0; index < value.length; index += 1) {
+      final codeUnit = value.codeUnitAt(index);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (codeUnit == 0x5c) {
+          escaped = true;
+        } else if (codeUnit == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+      if (codeUnit == 0x22) {
+        inString = true;
+      } else if (codeUnit == 0x7b) {
+        starts.add(index);
+      }
+    }
+
+    for (final start in starts) {
+      final candidate = _balancedObjectFrom(value, start);
+      if (candidate == null) {
+        continue;
+      }
+      try {
+        final decoded = jsonDecode(candidate);
+        if (decoded is Map &&
+            decoded.containsKey('phases') &&
+            decoded.containsKey('tasks')) {
+          return candidate;
+        }
+      } on FormatException {
+        // Try the next object start. Nested complete project objects remain
+        // recoverable even when an outer wrapper was truncated.
+      }
+    }
+
+    return null;
+  }
+
+  static String? _balancedObjectFrom(String value, int start) {
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+
+    for (var index = start; index < value.length; index += 1) {
       final codeUnit = value.codeUnitAt(index);
 
       if (inString) {
@@ -549,9 +593,6 @@ final class WorkshopDynamicProjectPlanDecoder {
         continue;
       }
       if (codeUnit == 0x7b) {
-        if (depth == 0) {
-          start = index;
-        }
         depth += 1;
         continue;
       }
@@ -560,22 +601,9 @@ final class WorkshopDynamicProjectPlanDecoder {
       }
 
       depth -= 1;
-      if (depth != 0 || start < 0) {
-        continue;
+      if (depth == 0) {
+        return value.substring(start, index + 1);
       }
-
-      final candidate = value.substring(start, index + 1);
-      try {
-        final decoded = jsonDecode(candidate);
-        if (decoded is Map &&
-            decoded.containsKey('phases') &&
-            decoded.containsKey('tasks')) {
-          return candidate;
-        }
-      } on FormatException {
-        // Keep scanning for the next complete object.
-      }
-      start = -1;
     }
 
     return null;
