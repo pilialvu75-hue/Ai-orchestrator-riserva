@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
@@ -61,7 +62,23 @@ class _ModelManagementView extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: state.exportingAll
                       ? null
-                      : () => cubit.exportAllModelsToPublicStorage(),
+                      : () async {
+                          String? destinationDirectory;
+                          if (!Platform.isAndroid) {
+                            destinationDirectory =
+                                await FilePicker.platform.getDirectoryPath(
+                              dialogTitle:
+                                  'Scegli dove salvare il backup dei modelli',
+                            );
+                            if (destinationDirectory == null ||
+                                destinationDirectory.trim().isEmpty) {
+                              return;
+                            }
+                          }
+                          await cubit.exportAllModelsToPublicStorage(
+                            destinationDirectory: destinationDirectory,
+                          );
+                        },
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF34D399),
                     foregroundColor: Colors.black,
@@ -80,7 +97,9 @@ class _ModelManagementView extends StatelessWidget {
                   label: Text(
                     state.exportingAll
                         ? 'Esportazione in corso...'
-                        : 'Esporta Tutti i Modelli nello Storage Pubblico',
+                        : Platform.isAndroid
+                            ? 'Esporta Tutti i Modelli nello Storage Pubblico'
+                            : 'Esporta Tutti i Modelli in una Cartella',
                   ),
                 ),
                 if (state.exportingAll) ...[
