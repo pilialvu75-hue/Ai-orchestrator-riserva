@@ -228,6 +228,10 @@ void main() {
         repairNumber: 1,
       );
 
+      expect(
+        request.instruction,
+        contains('ORIGINAL PRODUCT GOAL (trusted project state):\ngoal-goal-goal-'),
+      );
       expect(request.instruction, contains('original goal characters omitted'));
       expect(request.instruction, contains('diagnostic characters omitted'));
       expect(request.instruction.length, lessThan(4000));
