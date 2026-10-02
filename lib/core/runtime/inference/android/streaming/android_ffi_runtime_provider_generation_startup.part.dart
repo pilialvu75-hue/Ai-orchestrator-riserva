@@ -334,7 +334,8 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
         ' prompt_tokens=$basePromptTokens'
         ' requested_max_tokens=$budgetRequestedMaxTokens'
         ' generation_reserve=$effectiveGenerationReserve'
-        ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}',
+        ' safety_margin=${LlamaNativeDefaults.promptTokenSafetyMargin}'
+        ' trimmed_turns=0',
       );
       _updateRuntimeStatus(LocalRuntimeStatus.failed,
         message: 'Prompt exceeds the local context capacity.');
