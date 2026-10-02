@@ -71,7 +71,9 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     emit(state.copyWith(repairingAll: false));
   }
 
-  Future<void> exportAllModelsToPublicStorage() async {
+  Future<void> exportAllModelsToPublicStorage({
+    String? destinationDirectory,
+  }) async {
     emit(
       state.copyWith(
         exportingAll: true,
@@ -81,6 +83,7 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
     );
     try {
       await _service.exportAllRuntimeModels(
+        destinationDirectory: destinationDirectory,
         onProgress: (progress) {
           emit(
             state.copyWith(
@@ -94,8 +97,10 @@ class ModelManagementCubit extends Cubit<ModelManagementState> {
         state.copyWith(
           exportingAll: false,
           exportProgress: 1,
-          exportMessage:
-              'Esportazione completata! Ora puoi disinstallare l’app in sicurezza.',
+          exportMessage: destinationDirectory == null
+              ? 'Esportazione completata! Ora puoi disinstallare l’app in sicurezza.'
+              : 'Backup completato nella cartella selezionata '
+                  '(AiOrchestrator/models).',
         ),
       );
       await scanIntegrity();
