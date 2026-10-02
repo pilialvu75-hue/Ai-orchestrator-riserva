@@ -70,6 +70,25 @@ void main() {
       expect(promotion.properties.values.join(' '), isNot(contains('private')));
     });
 
+    test('promotes context-trim exhaustion metrics', () {
+      final promotion = DiagnosticsTelemetryPolicy.promote(
+        _entry(
+          'RUNTIME_FAILURE_DIAGNOSTIC',
+          '[RUNTIME_FAILURE_DIAGNOSTIC] stage=prompt_budget '
+          'reason=context_trim_exhausted runtime=android_ffi '
+          'context_capacity=2048 prompt_tokens=1990 max_prompt_tokens=1472 '
+          'requested_max_tokens=512 generation_reserve=512 safety_margin=64 '
+          'trimmed_turns=4',
+          category: RuntimeEventCategory.inference,
+        ),
+      );
+
+      expect(promotion, isNotNull);
+      expect(promotion!.properties['reason'], 'context_trim_exhausted');
+      expect(promotion.properties['max_prompt_tokens'], 1472);
+      expect(promotion.properties['trimmed_turns'], 4);
+    });
+
     test('keeps normal runtime transitions local only', () {
       final promotion = DiagnosticsTelemetryPolicy.promote(
         _entry(
