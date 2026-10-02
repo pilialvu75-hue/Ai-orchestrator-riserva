@@ -30,7 +30,7 @@ final class WorkshopDynamicProjectPlanner {
         _decoder = decoder;
 
   static const int _primaryMaxTokens = 768;
-  static const int _retryMaxTokens = 512;
+  static const int _retryMaxTokens = 640;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopDynamicProjectPlanDecoder _decoder;
@@ -255,17 +255,25 @@ final class WorkshopDynamicProjectPlanner {
     if (compact) {
       buffer
         ..writeln(
-          '- retry mode: prefer exactly 1 phase and 1 task when that can '
-          'represent the requested work',
+          '- RETRY CONTRACT: return exactly 1 phase and exactly 1 task',
         )
         ..writeln(
-          '- keep titles, descriptions and validation criteria terse so the '
-          'complete JSON fits the response budget',
+          '- use ids "implementation" and "implement"; both dependsOn arrays '
+          'must be []',
         )
         ..writeln(
-          '- output the JSON object only: no preface, suffix, comments, '
-          'Markdown or code fences',
+          '- keep title/description/validationCriteria short; use exactly one '
+          'validation criterion',
+        )
+        ..writeln(
+          '- output one complete JSON object only; close every quote, array '
+          'and object; no preface, suffix, comments, Markdown or code fences',
+        )
+        ..writeln(
+          '- affectedPaths must contain only the minimum explicit files needed '
+          'for this repair and must obey the requested targetFiles',
         );
+      return buffer.toString();
     }
 
     buffer
@@ -312,8 +320,9 @@ final class WorkshopDynamicProjectPlanner {
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Architect repairing malformed project-plan output. '
-      'Return strict JSON only, using the supplied schema. Keep the graph small '
-      'and do not invent capabilities.';
+      'Return one complete strict JSON object only. Use exactly one phase and '
+      'one task, keep every string terse, close every JSON delimiter, and do '
+      'not invent capabilities.';
 }
 
 final class WorkshopDynamicProjectPlanDecoder {
