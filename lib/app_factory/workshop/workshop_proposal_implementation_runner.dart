@@ -714,8 +714,12 @@ requested. Do not review, approve or apply.
       'as bounded implementation guidance. Return one complete JSON object with '
       'a non-empty string field "explanation" and a non-empty "changes" array. '
       'Produce the smallest complete compilable change, preferably one concise '
-      'file when possible. Finish valid JSON before optional features or UI '
-      'polish. Every change type must be exactly addition, modification, or '
+      'file when possible. The compact input targetFiles are a hard allowlist: '
+      'never invent a path outside them. If the rejected proposal used an '
+      'outside path, fold that behavior into an allowed target file instead '
+      'of proposing the outside file again. Finish valid JSON before optional '
+      'features or UI polish. Every change type must be exactly addition, '
+      'modification, or '
       'deletion; never combine enum values. Escape all file content as valid '
       'JSON strings. Do not review, approve, apply, or use Assistant state.';
 }

@@ -203,6 +203,31 @@ void main() {
   });
 
 
+  test('create planner tells Architect to declare every task source path',
+      () async {
+    final provider = _ScriptedProvider(<String>[_singlePlan()]);
+    final planner = _planner(provider);
+
+    await planner.plan(
+      request: const WorkshopRequest(
+        id: 'create-scope-contract',
+        title: 'Manga Kids',
+        instruction: 'Create a Flutter drawing app.',
+        source: WorkshopRequestSource.workshop,
+        operation: WorkshopOperation.create,
+      ),
+    );
+
+    expect(
+      provider.requests.single.prompt,
+      contains('each task affectedPaths must list every source file'),
+    );
+    expect(
+      provider.requests.single.prompt,
+      contains('include that exact repository path in that task affectedPaths'),
+    );
+  });
+
   test('create planner deterministically adds lib/main.dart to root task',
       () async {
     final provider = _ScriptedProvider(<String>[
