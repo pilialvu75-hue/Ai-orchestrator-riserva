@@ -35,6 +35,47 @@ $httplib = $httplib.Replace($guard, '')
 Set-Content -Path $httplibHeader -Value $httplib -Encoding UTF8
 Write-Host 'Removed cpp-httplib compile-only Windows 10 guard for the bundled completion helper.'
 
+# cpp-httplib's mmap helper also uses Windows 8/10-only App APIs. Replace only
+# those three file-mapping calls with equivalent Win7 APIs in the CI worktree.
+$httplibSource = Join-Path $sourceDir 'vendor\cpp-httplib\httplib.cpp'
+$httplibCpp = Get-Content -Raw -Path $httplibSource
+$oldFileOpen = @'
+  hFile_ =
+      ::CreateFile2(wpath.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, NULL);
+'@
+$newFileOpen = @'
+  hFile_ = ::CreateFileW(
+      wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+'@
+$oldMapping = @'
+  hMapping_ =
+      ::CreateFileMappingFromApp(hFile_, NULL, PAGE_READONLY, size_, NULL);
+'@
+$newMapping = @'
+  hMapping_ = ::CreateFileMappingW(hFile_, NULL, PAGE_READONLY, 0, 0, NULL);
+'@
+$oldView = @'
+  addr_ = ::MapViewOfFileFromApp(hMapping_, FILE_MAP_READ, 0, 0);
+'@
+$newView = @'
+  addr_ = ::MapViewOfFile(hMapping_, FILE_MAP_READ, 0, 0, 0);
+'@
+
+foreach ($replacement in @(
+  @($oldFileOpen, $newFileOpen),
+  @($oldMapping, $newMapping),
+  @($oldView, $newView)
+)) {
+  if (-not $httplibCpp.Contains($replacement[0])) {
+    throw 'Expected cpp-httplib Windows file-mapping block was not found; refusing an unverified patch.'
+  }
+  $httplibCpp = $httplibCpp.Replace($replacement[0], $replacement[1])
+}
+Set-Content -Path $httplibSource -Value $httplibCpp -Encoding UTF8
+Write-Host 'Replaced cpp-httplib App-only file mapping calls with Win7-compatible APIs.'
+
 cmake -S $sourceDir -B $BuildDir `
   -A x64 `
   -DBUILD_SHARED_LIBS=OFF `
