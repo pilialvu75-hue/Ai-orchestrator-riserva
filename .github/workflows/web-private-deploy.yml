@@ -84,7 +84,7 @@ jobs:
           cache: true
 
       - name: Resolve dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get --enforce-lockfile --enforce-lockfile
 
       - name: Run focused Web tests
         run: flutter test test/app_factory/workshop/web/
