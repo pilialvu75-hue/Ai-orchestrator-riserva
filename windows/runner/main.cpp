@@ -6,6 +6,16 @@
 #include "startup_trace.h"
 #include "utils.h"
 
+namespace {
+bool IsWindows7Runtime() {
+  HMODULE kernel32 = ::GetModuleHandleW(L"kernel32.dll");
+  if (kernel32 == nullptr) return false;
+  // Present on Windows 8+ and absent on Windows 7. Resolve dynamically so
+  // the runner never imports a post-Win7 symbol.
+  return ::GetProcAddress(kernel32, "GetSystemTimePreciseAsFileTime") == nullptr;
+}
+}  // namespace
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   startup_trace::Reset();
@@ -35,7 +45,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   bool skip_plugins = false;
   std::vector<std::string> dart_arguments;
-  dart_arguments.reserve(command_line_arguments.size());
+  dart_arguments.reserve(command_line_arguments.size() + 1);
+  if (IsWindows7Runtime()) {
+    dart_arguments.push_back("--windows7-safe-autostart");
+    startup_trace::Mark("08b Win7 safe-autostart diagnostic mode enabled");
+  }
   for (const auto& argument : command_line_arguments) {
     if (argument == "--win7-no-plugins") {
       skip_plugins = true;
