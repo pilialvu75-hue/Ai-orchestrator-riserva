@@ -186,9 +186,41 @@ final class WorkshopPreflightInferencePipeline {
       );
     }
 
-    if (!analysis.isSuccessful || !analysis.hasText) {
+    var resolvedAnalysis = analysis;
+    if ((!resolvedAnalysis.isSuccessful || !resolvedAnalysis.hasText) &&
+        _shouldRetryAnalysis(
+          resolvedAnalysis,
+          cancellationToken: cancellationToken,
+        )) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_PREFLIGHT_RETRY] request=${request.id} '
+        'stage=orchestrator attempt=2 '
+        'terminal=${resolvedAnalysis.terminalState?.name ?? 'none'}',
+      );
+
+      resolvedAnalysis = await _inference.complete(
+        stage: WorkshopStage.analysis,
+        prompt: _compactAnalysisRetryPrompt(
+          request,
+          target: resolvedTarget,
+        ),
+        systemPrompt:
+            'You are the Cantiere Orchestrator retrying an incomplete analysis. '
+            'Return only a concise scope analysis: objective, explicit files, '
+            'constraints, risks and acceptance criteria. Preserve the current '
+            'request exactly. Do not invent capabilities, write files, approve '
+            'changes, or use Assistant state.',
+        sessionId: 'workshop:${request.id}:preflight:analysis:retry-1',
+        isOffline: isOffline,
+        maxTokens: 384,
+        temperature: 0.1,
+        cancellationToken: cancellationToken,
+      );
+    }
+
+    if (!resolvedAnalysis.isSuccessful || !resolvedAnalysis.hasText) {
       final result = WorkshopPreflightInferenceResult(
-        analysis: analysis,
+        analysis: resolvedAnalysis,
         reuseDecision: reuseDecision,
         webEvidence: webEvidence,
       );
@@ -202,7 +234,7 @@ final class WorkshopPreflightInferencePipeline {
       stage: WorkshopStage.planning,
       prompt: _architecturePrompt(
         request: request,
-        analysis: analysis.text,
+        analysis: resolvedAnalysis.text,
         target: resolvedTarget,
         reusedAsset: reuseDecision.asset,
         webEvidence: webEvidence,
@@ -231,7 +263,7 @@ final class WorkshopPreflightInferencePipeline {
         stage: WorkshopStage.planning,
         prompt: _compactArchitectureRetryPrompt(
           request: request,
-          analysis: analysis.text,
+          analysis: resolvedAnalysis.text,
           target: resolvedTarget,
           reusedAsset: reuseDecision.asset,
         ),
@@ -253,7 +285,7 @@ final class WorkshopPreflightInferencePipeline {
     }
 
     final result = WorkshopPreflightInferenceResult(
-      analysis: analysis,
+      analysis: resolvedAnalysis,
       architecture: architecture,
       reuseDecision: reuseDecision,
       webEvidence: webEvidence,
@@ -565,6 +597,37 @@ final class WorkshopPreflightInferencePipeline {
             'implementation/content, preserve provenance, and require a '
             'verified compatible licence before verbatim reuse. Do not write '
             'files, approve/apply changes, or use Assistant state.';
+  }
+
+  static bool _shouldRetryAnalysis(
+    WorkshopInferenceResult result, {
+    required CancellationToken? cancellationToken,
+  }) {
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
+        result.terminalState == InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+    return !result.isSuccessful || !result.hasText;
+  }
+
+  static String _compactAnalysisRetryPrompt(
+    WorkshopRequest request, {
+    String? target,
+  }) {
+    final buffer = StringBuffer()
+      ..writeln('CANTIERE ORCHESTRATOR RETRY')
+      ..writeln('title: ${request.title}')
+      ..writeln('operation: ${request.operation.name}')
+      ..writeln('instruction: ${request.instruction}')
+      ..writeln('targetFiles: ${request.targetFiles.join(', ')}')
+      ..writeln('constraints: ${request.constraints.join(' | ')}');
+    _appendTargetBuildContract(buffer, target);
+    buffer.writeln(
+      'Return a terse analysis containing only objective, explicit scope, '
+      'constraints, risks and acceptance criteria.',
+    );
+    return buffer.toString();
   }
 
   static bool _shouldRetryArchitecture(
