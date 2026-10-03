@@ -77,6 +77,8 @@ String? publicLogProjection(String line) {
     'WORKSHOP_REVIEW_PROMPT',
     'WORKSHOP_REVIEW_RETRY',
     'WORKSHOP_REVIEW_VERDICT',
+    'WORKSHOP_REVIEW_BATCH_VERDICT',
+    'WORKSHOP_REVIEW_JSON',
     'WORKSHOP_VALIDATION_PROMPT',
     'WORKSHOP_VALIDATION_RETRY',
     'WORKSHOP_VALIDATION_VERDICT',
@@ -325,24 +327,29 @@ String? publicLogProjection(String line) {
   if (event == 'WORKSHOP_REVIEW_PROMPT' ||
       event == 'WORKSHOP_VALIDATION_PROMPT') {
     final m = RegExp(
-      r'^compact=(true|false) chars=(\d{1,9}) files=(\d{1,6}) '
-      r'plan_chars=(\d{1,9})$',
+      r'^compact=(true|false) (?:batch=(\d{1,3})/(\d{1,3}) )?'
+      r'chars=(\d{1,9}) files=(\d{1,6}) '
+      r'(?:coverage=([a-f0-9]{8}) )?plan_chars=(\d{1,9})$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': event,
       'compact': m[1] == 'true',
-      'chars': int.parse(m[2]!),
-      'files': int.parse(m[3]!),
-      'plan_chars': int.parse(m[4]!),
+      if (m[2] != null) 'batch': int.parse(m[2]!),
+      if (m[3] != null) 'batches': int.parse(m[3]!),
+      'chars': int.parse(m[4]!),
+      'files': int.parse(m[5]!),
+      if (m[6] != null) 'coverage': m[6]!,
+      'plan_chars': int.parse(m[7]!),
     });
   }
 
   if (event == 'WORKSHOP_REVIEW_RETRY' ||
       event == 'WORKSHOP_VALIDATION_RETRY') {
     final m = RegExp(
-      r'^attempt=(\d{1,3}) '
+      r'^(?:batch=(\d{1,3})/(\d{1,3}) )?attempt=(\d{1,3}) '
+      r'(?:reason=(runtime|malformed_output) )?'
       r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none) '
       r'chars=(\d{1,9})$',
     ).firstMatch(rest);
@@ -350,13 +357,65 @@ String? publicLogProjection(String line) {
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': event,
-      'attempt': int.parse(m[1]!),
-      'terminal': m[2]!,
+      if (m[1] != null) 'batch': int.parse(m[1]!),
+      if (m[2] != null) 'batches': int.parse(m[2]!),
+      'attempt': int.parse(m[3]!),
+      if (m[4] != null) 'reason': m[4]!,
+      'terminal': m[5]!,
+      'chars': int.parse(m[6]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_REVIEW_JSON') {
+    final m = RegExp(
+      r'^batch=(\d{1,3})/(\d{1,3}) '
+      r'rejected=invalid_verdict chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'batch': int.parse(m[1]!),
+      'batches': int.parse(m[2]!),
+      'rejected': 'invalid_verdict',
       'chars': int.parse(m[3]!),
     });
   }
 
+  if (event == 'WORKSHOP_REVIEW_BATCH_VERDICT') {
+    final m = RegExp(
+      r'^batch=(\d{1,3})/(\d{1,3}) approved=(true|false) '
+      r'files=(\d{1,6}) coverage=([a-f0-9]{8})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'batch': int.parse(m[1]!),
+      'batches': int.parse(m[2]!),
+      'approved': m[3] == 'true',
+      'files': int.parse(m[4]!),
+      'coverage': m[5]!,
+    });
+  }
+
   if (event == 'WORKSHOP_REVIEW_VERDICT') {
+    final batchVerdict = RegExp(
+      r'^approved=(true|false) files=(\d{1,6}) batches=(\d{1,3}) '
+      r'coverage=([a-f0-9]{8}) findings=(\d{1,6}) warnings=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (batchVerdict != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': event,
+        'approved': batchVerdict[1] == 'true',
+        'files': int.parse(batchVerdict[2]!),
+        'batches': int.parse(batchVerdict[3]!),
+        'coverage': batchVerdict[4]!,
+        'findings': int.parse(batchVerdict[5]!),
+        'warnings': int.parse(batchVerdict[6]!),
+      });
+    }
     final m = RegExp(
       r'^approved=(true|false) summary_chars=(\d{1,9}) '
       r'findings=(\d{1,6}) warnings=(\d{1,6})$',
