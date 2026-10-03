@@ -67,9 +67,14 @@ abstract final class WorkshopStructuredJson {
     return normalized;
   }
 
-  /// Repairs only malformed JSON escaping inside Engineer file-content values.
-  /// Every other field remains strict JSON and is validated by the normal
-  /// Workshop proposal decoder.
+  /// Repairs malformed JSON escaping only inside known free-text Engineer
+  /// fields. Structural proposal fields (path, type, changes, etc.) remain
+  /// strict JSON and are still validated by the normal Workshop decoder.
+  ///
+  /// Local models occasionally emit a literal newline or an unescaped quote in
+  /// optional metadata such as `summary` before otherwise valid `changes`.
+  /// Treating those metadata fields like `content` avoids throwing away a
+  /// complete proposal while preserving all downstream safety gates.
   static String? repairMalformedContentStrings(String responseText) {
     final normalized = responseText.trim();
     if (normalized.isEmpty || normalized.length > 65536) {
@@ -84,7 +89,7 @@ abstract final class WorkshopStructuredJson {
 
     final objectText = normalized.substring(firstBrace, lastBrace + 1);
     final budget = _WorkshopJsonRepairBudget(256);
-    return _repairContentFields(
+    return _repairKnownStringFields(
       objectText,
       searchStart: 0,
       depth: 0,
@@ -92,7 +97,7 @@ abstract final class WorkshopStructuredJson {
     );
   }
 
-  static String? _repairContentFields(
+  static String? _repairKnownStringFields(
     String text, {
     required int searchStart,
     required int depth,
@@ -104,15 +109,17 @@ abstract final class WorkshopStructuredJson {
         return text;
       }
     } on FormatException {
-      // Continue with the narrowly-scoped content repair.
+      // Continue with the narrowly-scoped free-text repair.
     }
 
-    if (depth >= 8 || !budget.consume()) {
+    if (depth >= 12 || !budget.consume()) {
       return null;
     }
 
     final searchText = text.substring(searchStart);
-    final match = RegExp(r'"content"\s*:\s*"').firstMatch(searchText);
+    final match = RegExp(
+      r'"(?:summary|explanation|analysis|content)"\s*:\s*"',
+    ).firstMatch(searchText);
     if (match == null) {
       return null;
     }
@@ -139,11 +146,11 @@ abstract final class WorkshopStructuredJson {
         return null;
       }
 
-      final escapedContent = _escapeLooseJsonString(
+      final escapedValue = _escapeLooseJsonString(
         text.substring(valueStart, valueEnd),
       );
       final candidate =
-          '${text.substring(0, valueStart)}$escapedContent${text.substring(valueEnd)}';
+          '${text.substring(0, valueStart)}$escapedValue${text.substring(valueEnd)}';
 
       try {
         final decoded = jsonDecode(candidate);
@@ -151,12 +158,12 @@ abstract final class WorkshopStructuredJson {
           return candidate;
         }
       } on FormatException {
-        // A later content field may need the same bounded repair.
+        // A later known free-text field may need the same bounded repair.
       }
 
-      final repaired = _repairContentFields(
+      final repaired = _repairKnownStringFields(
         candidate,
-        searchStart: valueStart + escapedContent.length + 1,
+        searchStart: valueStart + escapedValue.length + 1,
         depth: depth + 1,
         budget: budget,
       );
@@ -254,6 +261,7 @@ abstract final class WorkshopStructuredJson {
 
   static bool _isHex4(String value) =>
       RegExp(r'^[0-9A-Fa-f]{4}$').hasMatch(value);
+
   static String? _balancedObjectAt(String text, int start) {
     var depth = 0;
     var inString = false;
@@ -267,7 +275,7 @@ abstract final class WorkshopStructuredJson {
           escaped = false;
           continue;
         }
-        if (char == r'\\') {
+        if (char == r'\') {
           escaped = true;
           continue;
         }
