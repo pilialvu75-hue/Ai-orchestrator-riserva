@@ -275,7 +275,7 @@ abstract final class WorkshopStructuredJson {
           escaped = false;
           continue;
         }
-        if (char == '\\') {
+        if (char == r'\\') {
           escaped = true;
           continue;
         }
