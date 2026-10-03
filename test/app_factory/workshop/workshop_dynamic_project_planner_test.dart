@@ -233,6 +233,8 @@ void main() {
     'First: ${_singlePlan()} Second: ${_singlePlan(affectedPaths: <String>[
           'lib/other.dart'
         ])}',
+    '```json\n[${_singlePlan()}]\n```',
+    '```json\n{"plan":${_singlePlan()}}\n```',
     '```json\n${_singlePlan()}\n```\n```json\n${_singlePlan()}\n```',
     _singlePlan().substring(0, _singlePlan().length - 2),
     _singlePlan().replaceFirst('"dependsOn":[]', '"dependsOn":[,]'),

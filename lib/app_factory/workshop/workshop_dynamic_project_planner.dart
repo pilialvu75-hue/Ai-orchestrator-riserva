@@ -592,7 +592,21 @@ final class WorkshopDynamicProjectPlanDecoder {
       throw const FormatException(
           'Project plan response exceeds recovery bounds.');
     }
-    final value = raw.trim();
+    var value = raw.trim();
+    // Strip only one complete Markdown envelope. A valid array/wrapper inside
+    // that envelope must still fail root validation instead of being searched
+    // for a nested plan. Multiple fenced alternatives remain ambiguous.
+    const fence = '```';
+    if (value.startsWith(fence) && value.endsWith(fence)) {
+      final firstNewline = value.indexOf('\n');
+      if (firstNewline >= 0 && firstNewline < value.length - fence.length) {
+        final body =
+            value.substring(firstNewline + 1, value.length - fence.length);
+        if (!RegExp(r'^\s*```', multiLine: true).hasMatch(body)) {
+          value = body.trim();
+        }
+      }
+    }
     // Valid roots still go through strict semantic validation. In particular,
     // never extract an object from an already-valid array or wrapper object.
     try {
