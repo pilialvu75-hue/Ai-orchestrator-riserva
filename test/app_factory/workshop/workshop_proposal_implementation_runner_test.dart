@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
@@ -19,7 +23,8 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   group('WorkshopProposalImplementationRunner', () {
-    test('routes only to Engineer and stages proposal for review without writes',
+    test(
+        'routes only to Engineer and stages proposal for review without writes',
         () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -74,7 +79,8 @@ void main() {
       );
       expect(
         engineer.lastPrompt,
-        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
+        contains(
+            'ACCEPTANCE: show visible user feedback for walking progress.'),
       );
       expect(engineer.lastPrompt, contains('[bounded middle omitted]'));
       expect(
@@ -187,7 +193,6 @@ void main() {
       expect(session.workspace.read('lib/main.dart'), isNot('void main() {}'));
       expect(workspaceGateway.writeCalls, 0);
     });
-
 
     test('out-of-scope create file retries inside hard target allowlist',
         () async {
@@ -315,6 +320,112 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    for (final error in <String>[
+      'AI_RUNTIME_ERROR|stage=prompt_budget|message=Prompt exceeds the local context capacity.',
+      'Prompt exceeds the local context capacity.',
+    ]) {
+      test('retries Engineer context rejection once: $error', () async {
+        RuntimeEventLog.instance.clear();
+        final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+              text: '',
+              terminalState: InferenceTerminalState.failed,
+              errorMessage: error),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ]);
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+          'lib/app.dart': 'old',
+          'lib/unrelated.dart': 'unrelated' * 2000,
+        });
+        final session = await _session(gateway);
+        final plan = 'START contract\n${'middle ' * 3000}\nEND acceptance';
+        final proposal = await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+            session: session,
+            preflight: WorkshopPreflightInferenceResult(
+              analysis: const WorkshopInferenceResult(
+                  text: 'analysis',
+                  terminalState: InferenceTerminalState.success),
+              architecture: WorkshopInferenceResult(
+                  text: plan, terminalState: InferenceTerminalState.success),
+            ));
+        expect(proposal.explanation, 'Recovered');
+        expect(engineer.calls, 2);
+        expect(engineer.maxTokensValues, <int?>[640, 512]);
+        final retry = engineer.prompts.last;
+        final encoded = retry.split('\n')[1];
+        final payload = jsonDecode(encoded) as Map<String, dynamic>;
+        expect(
+            payload['architectPlan'], WorkshopTaskPlanProjection.project(plan));
+        expect(
+            payload['workspaceFiles'], <String, String>{'lib/app.dart': 'old'});
+        expect(retry, contains('END acceptance'));
+        expect(retry.length, lessThan(4000));
+        expect(retry.length, lessThan(engineer.prompts.first.length));
+        expect(
+            RuntimeEventLog.instance.entries.any(
+                (e) => e.message.contains('attempt=2 reason=prompt_budget')),
+            isTrue);
+        expect(session.status, WorkspaceSessionStatus.review);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
+    for (final terminal in <InferenceTerminalState>[
+      InferenceTerminalState.failed,
+      InferenceTerminalState.cancelled,
+      InferenceTerminalState.modelUnavailable,
+    ]) {
+      test('prompt budget remains bounded and terminal for ${terminal.name}',
+          () async {
+        final result = WorkshopInferenceResult(
+            text: '',
+            terminalState: terminal,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=prompt_budget|message=Prompt exceeds the local context capacity.');
+        final engineer =
+            _StaticGateway(results: <WorkshopInferenceResult>[result, result]);
+        final gateway = _RecordingWorkspaceGateway(
+            files: <String, String>{'lib/app.dart': 'old'});
+        final session = await _session(gateway);
+        await expectLater(
+            WorkshopProposalImplementationRunner(
+              inference: _stageInference(_gateways(engineer)),
+            ).run(session: session),
+            throwsStateError);
+        expect(
+            engineer.calls, terminal == InferenceTerminalState.failed ? 2 : 1);
+        expect(session.workspace.read('lib/app.dart'), 'old');
+        expect(session.hasChanges, isFalse);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
+    test('caller cancellation suppresses prompt-budget retry', () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage: 'AI_RUNTIME_ERROR|stage=prompt_budget'),
+        cancelTokenOnCalls: const <int>{0},
+      );
+      final session = await _session(_RecordingWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'}));
+      await expectLater(
+          WorkshopProposalImplementationRunner(
+            inference: _stageInference(_gateways(engineer)),
+          ).run(session: session, cancellationToken: CancellationToken()),
+          throwsStateError);
+      expect(engineer.calls, 1);
+      expect(session.hasChanges, isFalse);
+    });
+
     test('retries critical-memory Engineer with a fresh runtime token',
         () async {
       final engineer = _StaticGateway(
@@ -395,7 +506,8 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('retries syntactically truncated Engineer JSON with larger compact budget',
+    test(
+        'retries syntactically truncated Engineer JSON with larger compact budget',
         () async {
       final engineer = _StaticGateway(
         results: <WorkshopInferenceResult>[
@@ -497,7 +609,8 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('does not retry valid changes only because metadata is missing', () async {
+    test('does not retry valid changes only because metadata is missing',
+        () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
           text:
@@ -868,7 +981,8 @@ final class _RecordingWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> createBranch(String branchName) async {}
 
   @override
-  Future<void> writeFile({required String path, required String content}) async {
+  Future<void> writeFile(
+      {required String path, required String content}) async {
     writeCalls += 1;
     _files[path] = content;
   }

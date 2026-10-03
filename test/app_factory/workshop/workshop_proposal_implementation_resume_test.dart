@@ -91,6 +91,87 @@ void main() {
     expect(workspaceGateway.writeCalls, 0);
   });
 
+  for (final mode in <String>[
+    'recover',
+    'repeat',
+    'cancelled',
+    'unavailable',
+    'caller_cancelled'
+  ]) {
+    test('resume prompt-budget $mode keeps identity and bounds', () async {
+      final provider = _PromptBudgetProvider(mode);
+      final inference = WorkshopStageRoleInference(
+          executor: WorkshopRoleInferenceExecutor(
+        router: WorkshopRoleInferenceRouter(
+            gateways: <AppAiRole, WorkshopInferenceGateway>{
+              for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+                role: WorkshopInferenceGateway(provider: provider),
+            }),
+      ));
+      final gateway = _MemoryWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'});
+      final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'request-budget',
+            title: 'Continue',
+            instruction: 'Finish the change',
+            targetFiles: <String>['lib/app.dart'],
+          ),
+          gateway: gateway);
+      await session.initialize();
+      final resume = WorkshopResumeContext(
+        executionId: 'execution-budget',
+        attemptId: 'attempt-budget',
+        projectId: 'project-budget',
+        taskId: 'task-budget',
+        sessionId: 'session-budget',
+        checkpointId: 'checkpoint-budget',
+        objective: 'Finish safely',
+        phase: 'implementation',
+        completedSteps: <String>['completed ' * 3000],
+        remainingWork: <String>['remaining ' * 3000],
+        verified: <String>['verified ' * 3000],
+      );
+      final token = CancellationToken();
+      if (mode == 'caller_cancelled') token.cancel();
+      final future = WorkshopProposalImplementationRunner(inference: inference)
+          .runWithResumeContext(
+              session: session,
+              resumeContext: resume,
+              cancellationToken: token);
+      if (mode == 'recover') {
+        final proposal = await future;
+        expect(proposal.changes.single.path, 'lib/app.dart');
+        expect(session.workspace.read('lib/app.dart'), 'recovered');
+        expect(session.status, WorkspaceSessionStatus.review);
+      } else {
+        await expectLater(future, throwsStateError);
+        expect(session.workspace.read('lib/app.dart'), 'old');
+        expect(session.hasChanges, isFalse);
+      }
+      final retry = mode == 'recover' || mode == 'repeat';
+      expect(provider.requests, hasLength(retry ? 2 : 1));
+      if (retry) {
+        expect(provider.requests.last.sessionId,
+            'session-budget:engineer-retry-1');
+        expect(provider.requests.last.maxTokens, 512);
+        expect(provider.requests.last.prompt.length, lessThan(4000));
+        expect(
+            provider.requests.last.prompt, isNot(contains('remaining ' * 100)));
+      }
+      for (final request in provider.requests) {
+        expect(request.requestId, 'request-budget');
+        expect(request.projectId, 'project-budget');
+        expect(request.taskId, 'task-budget');
+        expect(request.executionId, 'execution-budget');
+        expect(request.attemptId, 'attempt-budget');
+        expect(request.checkpointId, 'checkpoint-budget');
+      }
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+  }
+
   test('resume path reuses summary when Engineer omits explanation', () async {
     final provider = _RetryRecordingProvider();
     final stageInference = WorkshopStageRoleInference(
@@ -148,7 +229,8 @@ void main() {
       <int?>[640],
     );
     expect(
-      provider.requests.every((request) => request.executionId == 'execution-schema'),
+      provider.requests
+          .every((request) => request.executionId == 'execution-schema'),
       isTrue,
     );
     expect(
@@ -158,7 +240,8 @@ void main() {
     expect(workspaceGateway.writeCalls, 0);
   });
 
-  test('resume path repairs empty proposal after runtime retry with stable identity',
+  test(
+      'resume path repairs empty proposal after runtime retry with stable identity',
       () async {
     final provider = _ResumeThreeCallProvider();
     final stageInference = WorkshopStageRoleInference(
@@ -225,6 +308,36 @@ void main() {
     }
     expect(workspaceGateway.writeCalls, 0);
   });
+}
+
+final class _PromptBudgetProvider implements RuntimeInferenceProvider {
+  _PromptBudgetProvider(this.mode);
+  final String mode;
+  final List<InferenceRequest> requests = <InferenceRequest>[];
+
+  @override
+  TokenStream streamInference(
+      {required InferenceRequest request,
+      required CancellationToken cancellationToken}) {
+    requests.add(request);
+    if (requests.length == 1 || mode == 'repeat') {
+      return Stream<InferenceResponse>.value(InferenceResponse.error(
+        'AI_RUNTIME_ERROR|stage=prompt_budget|message=Prompt exceeds the local context capacity.',
+        state: mode == 'cancelled'
+            ? InferenceTerminalState.cancelled
+            : mode == 'unavailable'
+                ? InferenceTerminalState.modelUnavailable
+                : InferenceTerminalState.failed,
+      ));
+    }
+    return Stream<InferenceResponse>.value(const InferenceResponse(
+      text:
+          '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"recovered"}]}',
+      timestamp: 1,
+      isFinal: true,
+      terminalState: InferenceTerminalState.success,
+    ));
+  }
 }
 
 final class _ResumeThreeCallProvider implements RuntimeInferenceProvider {
@@ -346,7 +459,8 @@ final class _MemoryWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> createBranch(String branchName) async {}
 
   @override
-  Future<void> writeFile({required String path, required String content}) async {
+  Future<void> writeFile(
+      {required String path, required String content}) async {
     writeCalls += 1;
     _files[path] = content;
   }
@@ -372,5 +486,6 @@ final class _MemoryWorkspaceGateway implements GitWorkspaceGateway {
     required String body,
     required String headBranch,
     required String baseBranch,
-  }) async => 'pr';
+  }) async =>
+      'pr';
 }

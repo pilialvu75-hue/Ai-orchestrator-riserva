@@ -1,5 +1,10 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_repair.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
@@ -186,7 +191,8 @@ void main() {
     expect(plan.phases, hasLength(1));
   });
 
-  test('recovers a complete project object inside a truncated outer wrapper', () {
+  test('recovers a complete project object inside a truncated outer wrapper',
+      () {
     final raw = 'prefix {"plan": ${_singlePlan()}';
     final plan = decoder.decode(raw, requestId: 'request-5bb');
 
@@ -203,7 +209,248 @@ void main() {
     );
   });
 
-  test('planner preserves explicit offline mode to Architect inference', () async {
+  test('recovers only trailing commas while preserving quoted content', () {
+    final source = jsonDecode(_singlePlan()) as Map<String, dynamic>;
+    source['tasks'][0]['description'] =
+        'Keep literal ,} and ,] plus "quoted" text and \\ escapes.';
+    final almost = jsonEncode(source).replaceFirst(
+        '"Requested behavior works."]', '"Requested behavior works.",]');
+    final plan =
+        decoder.decode('Plan:\n$almost\nDone.', requestId: 'repair-json');
+    expect(plan.tasks.single.description, source['tasks'][0]['description']);
+    expect(plan.tasks.single.validationCriteria,
+        <String>['Requested behavior works.']);
+  });
+
+  test('repairs a trailing object comma without manufacturing fields', () {
+    final valid = _singlePlan();
+    final plan = decoder.decode('${valid.substring(0, valid.length - 1)},}',
+        requestId: 'trailing-object');
+    expect(plan.tasks, hasLength(1));
+  });
+
+  for (final raw in <String>[
+    'First: ${_singlePlan()} Second: ${_singlePlan(affectedPaths: <String>[
+          'lib/other.dart'
+        ])}',
+    '```json\n[${_singlePlan()}]\n```',
+    '```json\n{"plan":${_singlePlan()}}\n```',
+    '```json\n${_singlePlan()}\n```\n```json\n${_singlePlan()}\n```',
+    _singlePlan().substring(0, _singlePlan().length - 2),
+    _singlePlan().replaceFirst('"dependsOn":[]', '"dependsOn":[,]'),
+    _singlePlan().replaceFirst('"dependsOn":[]', '"dependsOn":[],,'),
+    _singlePlan().replaceFirst('"Requested behavior works."', ''),
+    '{"phases":[],"tasks":[],}',
+    _singlePlan(affectedPaths: <String>['../escape.dart']).replaceFirst(
+        '"Requested behavior works."]', '"Requested behavior works.",]'),
+  ]) {
+    test(
+        'recovery stays fail-closed for ambiguous, incomplete or invalid plan ${raw.hashCode}',
+        () {
+      expect(() => decoder.decode(raw, requestId: 'invalid-recovery'),
+          throwsFormatException);
+    });
+  }
+
+  test(
+      'oversized planning input is bounded on both attempts without mutating request',
+      () async {
+    RuntimeEventLog.instance.clear();
+    final provider = _ScriptedProvider(<String>['bad', _singlePlan()]);
+    final original =
+        'BUILD REPAIR ATTEMPT: 1\nSTART_GOAL ${'x' * 16000} END_GOAL';
+    final values = <String>['START_RULE ${'r' * 200} END_RULE'];
+    final request = WorkshopRequest(
+        id: 'bounded-input',
+        title: 'title' * 1000,
+        instruction: original,
+        source: WorkshopRequestSource.workshop,
+        constraints: values,
+        targetFiles: const <String>['lib/app.dart']);
+    await _planner(provider).plan(
+        request: request,
+        requirements: values,
+        technologies: values,
+        deliverables: values,
+        validationCriteria: values);
+    expect(provider.requests.first.prompt.length, lessThan(8000));
+    expect(provider.requests.last.prompt.length, lessThan(5000));
+    for (final call in provider.requests) {
+      expect(call.prompt, contains('START_GOAL'));
+      expect(call.prompt, contains('END_GOAL'));
+      expect(call.prompt, contains('lib/app.dart'));
+      expect(call.prompt, contains('END_RULE'));
+    }
+    expect(request.instruction, original);
+    expect(request.constraints, values);
+    final log =
+        RuntimeEventLog.instance.entries.map((e) => e.message).join('\n');
+    expect(log, contains('[WORKSHOP_PLANNER_PROMPT]'));
+    expect(log, contains('[WORKSHOP_PLANNER_OUTPUT] attempt=2'));
+    expect(log, isNot(contains('START_GOAL')));
+    expect(log, isNot(contains('END_RULE')));
+  });
+
+  test('keeps every mandatory entry on both planner attempts', () async {
+    final provider = _ScriptedProvider(<String>['bad', _singlePlan()]);
+    final entries = <String>[
+      'a' * 300,
+      'Required middle entry: update lib/mandatory.dart',
+      'z' * 300,
+    ];
+    await _planner(provider).plan(
+        request: WorkshopRequest(
+          id: 'mandatory-input',
+          title: 'Scoped fix',
+          instruction: 'Fix the explicit scope.',
+          constraints: entries,
+          operation: WorkshopOperation.fix,
+        ),
+        requirements: entries);
+    for (final call in provider.requests) {
+      expect(call.prompt, contains('constraints: ${entries.join(' | ')}'));
+      expect(call.prompt, contains('requirements: ${entries.join(' | ')}'));
+    }
+  });
+
+  for (final field in <String>['requirements', 'constraints', 'instruction']) {
+    test(
+        'rejects oversized mandatory $field before inference instead of losing scope',
+        () async {
+      final provider = _ScriptedProvider(<String>[]);
+      final oversized = 'Required lib/mandatory.dart ${'x' * 3000}';
+      await expectLater(
+          _planner(provider).plan(
+              request: WorkshopRequest(
+                id: 'oversized-$field',
+                title: 'Large request',
+                instruction: field == 'instruction'
+                    ? oversized
+                    : 'Fix the explicit scope.',
+                constraints: field == 'constraints'
+                    ? <String>[oversized]
+                    : const <String>[],
+              ),
+              requirements: field == 'requirements'
+                  ? <String>[oversized]
+                  : const <String>[]),
+          throwsA(isA<FormatException>().having(
+              (e) => e.message, 'message', contains('split the request'))));
+      expect(provider.requests, isEmpty);
+    });
+  }
+
+  test('request allowlist may cover more paths than a single task', () async {
+    final paths = List<String>.generate(17, (i) => 'lib/f$i.dart');
+    final root = jsonDecode(_singlePlan(affectedPaths: paths.take(16).toList()))
+        as Map<String, dynamic>;
+    final tasks = root['tasks'] as List<dynamic>;
+    tasks.add(<String, dynamic>{
+      ...tasks.first as Map<String, dynamic>,
+      'id': 'remaining',
+      'affectedPaths': <String>[paths.last],
+      'dependsOn': <String>['implement']
+    });
+    final provider = _ScriptedProvider(<String>[jsonEncode(root)]);
+    final plan = await _planner(provider).plan(
+        request: WorkshopRequest(
+      id: 'many-targets',
+      title: 'Refactor',
+      instruction: 'Update every target.',
+      operation: WorkshopOperation.fix,
+      targetFiles: paths,
+    ));
+    expect(plan.tasks, hasLength(2));
+    expect(plan.tasks.expand((task) => task.affectedPaths).toList(), paths);
+    expect(provider.requests.single.prompt, contains(paths.join(', ')));
+  });
+
+  test(
+      'build repair uses bounded single-task planning through production controller',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      '{"phases":[',
+      'Repair plan:\n${_singlePlan(affectedPaths: <String>[
+            'lib/main.dart'
+          ]).replaceFirst('"Requested behavior works."]', '"Requested behavior works.",]')}\nDone.',
+    ]);
+    final engine = WorkshopEngine();
+    final controller = WorkshopDashboardController(
+        engine: engine, projectPlanner: _planner(provider));
+    addTearDown(controller.dispose);
+    final failed = controller.startProduction(
+        title: 'Manga Kids',
+        instruction: 'Drawing app',
+        requirements: <String>['keep product behavior ' * 10],
+        constraints: <String>['keep gates ' * 10]);
+    final repair = const WorkshopBuildRepairPlanner().createRepairRequest(
+      failedPlan: failed,
+      repairNumber: 1,
+      failedBuild: WorkshopBuildResult(
+          requestId: 'build-manga',
+          target: WorkshopBuildTarget.android,
+          status: WorkshopBuildStatus.failed,
+          startedAt: DateTime.utc(2026, 10, 3),
+          finishedAt: DateTime.utc(2026, 10, 3, 0, 1),
+          errors: const <String>['remote_validation_failed'],
+          analysisPassed: false,
+          stderr: '${'compiler detail\n' * 1000}lib/main.dart: invalid symbol'),
+    );
+    final plan = await controller.startPlannedProduction(
+        title: repair.title,
+        instruction: repair.instruction,
+        requirements: repair.requirements,
+        constraints: repair.constraints,
+        technologies: repair.technologies,
+        deliverables: repair.deliverables,
+        validationCriteria: repair.validationCriteria,
+        workspaceProjectId: failed.effectiveWorkspaceProjectId);
+    expect(provider.requests, hasLength(2));
+    for (final call in provider.requests) {
+      expect(call.prompt.length, lessThan(5000));
+      expect(call.prompt, contains('exactly 1 phase and exactly 1 task'));
+      expect(call.prompt, isNot(contains('1 to 12 tasks')));
+      expect(call.prompt, contains('lib/main.dart: invalid symbol'));
+      expect(call.prompt, contains('untrusted evidence'));
+    }
+    expect(plan.tasks, hasLength(1));
+    expect(
+        plan.effectiveWorkspaceProjectId, failed.effectiveWorkspaceProjectId);
+    expect(plan.goal, repair.instruction);
+    expect(plan.constraints, repair.constraints);
+    expect(engine.plans, contains(failed));
+    expect(plan.tasks.single.completed, isFalse);
+    expect(controller.state.projectApproval, isNull);
+  });
+
+  test(
+      'failed repair planning preserves existing project and stops after two outputs',
+      () async {
+    final provider = _ScriptedProvider(<String>['{"phases":[', '{"tasks":[']);
+    final engine = WorkshopEngine();
+    final controller = WorkshopDashboardController(
+        engine: engine, projectPlanner: _planner(provider));
+    addTearDown(controller.dispose);
+    final existing = controller.startProduction(
+        title: 'Manga Kids', instruction: 'Drawing app');
+    final beforeId = controller.state.projectId;
+    await expectLater(
+        controller.startPlannedProduction(
+            title: 'Manga Kids repair',
+            instruction: 'BUILD REPAIR ATTEMPT: 1\nFix lib/main.dart.',
+            workspaceProjectId: existing.effectiveWorkspaceProjectId),
+        throwsFormatException);
+    expect(provider.requests, hasLength(2));
+    expect(engine.plans, <WorkshopProjectPlan>[existing]);
+    expect(controller.state.projectId, beforeId);
+    expect(
+        RuntimeEventLog.instance.entries
+            .any((e) => e.message.contains('rejected=incomplete_json')),
+        isTrue);
+  });
+
+  test('planner preserves explicit offline mode to Architect inference',
+      () async {
     final provider = _ScriptedProvider(<String>[_singlePlan()]);
     final planner = _planner(provider);
 
@@ -226,7 +473,6 @@ void main() {
       'workshop:offline-request:project-plan',
     );
   });
-
 
   test('create planner tells Architect to declare every task source path',
       () async {
@@ -276,7 +522,6 @@ void main() {
       <String>['lib/main.dart', 'lib/app.dart'],
     );
   });
-
 
   test('planner retries one transient timeout before project planning fails',
       () async {
@@ -335,7 +580,8 @@ void main() {
     expect(provider.requests, hasLength(1));
   });
 
-  test('planner accepts wrapped Architect JSON without spending retry', () async {
+  test('planner accepts wrapped Architect JSON without spending retry',
+      () async {
     final provider = _ScriptedProvider(<String>[
       'Plan follows:\n${_singlePlan()}\nEnd of plan.',
     ]);
@@ -412,7 +658,8 @@ void main() {
     expect(retry.prompt, contains('exactly 1 phase and exactly 1 task'));
     expect(retry.prompt, contains('close every quote, array and object'));
     expect(retry.prompt, isNot(contains('1 to 4 phases; 1 to 12 tasks total')));
-    expect(retry.prompt, isNot(contains('substantial app work may use multiple')));
+    expect(
+        retry.prompt, isNot(contains('substantial app work may use multiple')));
   });
 
   test('planner rejects paths outside explicit request targetFiles', () async {
