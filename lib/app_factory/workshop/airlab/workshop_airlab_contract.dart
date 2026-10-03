@@ -1,3 +1,5 @@
+import 'workshop_airlab_execution_correlation.dart';
+
 enum WorkshopAirLabAvailability {
   available,
   unavailable,
@@ -90,6 +92,7 @@ class WorkshopAirLabTaskRequest {
     this.inputs = const <WorkshopAirLabTaskInput>[],
     this.requestedArtifacts = const <String>[],
     this.context = const <String, dynamic>{},
+    this.executionCorrelation,
   });
 
   final String task;
@@ -101,20 +104,38 @@ class WorkshopAirLabTaskRequest {
   final List<WorkshopAirLabTaskInput> inputs;
   final List<String> requestedArtifacts;
   final Map<String, dynamic> context;
+  final WorkshopAirLabExecutionCorrelation? executionCorrelation;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        'task': task,
-        'project_id': projectId,
-        'target': target,
-        'mode': mode,
-        'task_family': taskFamily,
-        'task_kind': taskKind,
-        if (inputs.isNotEmpty)
-          'inputs': inputs.map((input) => input.toJson()).toList(growable: false),
-        if (requestedArtifacts.isNotEmpty)
-          'requested_artifacts': requestedArtifacts,
-        if (context.isNotEmpty) 'context': context,
-      };
+  Map<String, dynamic> toJson() {
+    final correlation = executionCorrelation;
+    if (correlation != null) {
+      if (correlation.projectId != projectId.trim()) {
+        throw const FormatException(
+          'AIrLab execution_correlation.project_id must match project_id.',
+        );
+      }
+      if (correlation.operationId != taskKind.trim().toLowerCase()) {
+        throw const FormatException(
+          'AIrLab execution_correlation.operation_id must match task_kind.',
+        );
+      }
+    }
+
+    return <String, dynamic>{
+      'task': task,
+      'project_id': projectId,
+      'target': target,
+      'mode': mode,
+      'task_family': taskFamily,
+      'task_kind': taskKind,
+      if (inputs.isNotEmpty)
+        'inputs': inputs.map((input) => input.toJson()).toList(growable: false),
+      if (requestedArtifacts.isNotEmpty)
+        'requested_artifacts': requestedArtifacts,
+      if (context.isNotEmpty) 'context': context,
+      if (correlation != null) 'execution_correlation': correlation.toJson(),
+    };
+  }
 }
 
 class WorkshopAirLabArtifact {
