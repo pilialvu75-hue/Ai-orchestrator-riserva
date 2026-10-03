@@ -109,12 +109,24 @@ class WorkshopAirLabTaskRequest {
   Map<String, dynamic> toJson() {
     final correlation = executionCorrelation;
     if (correlation != null) {
-      if (correlation.projectId != projectId.trim()) {
+      final normalizedProjectId = projectId.trim();
+      final normalizedTaskKind = taskKind.trim().toLowerCase();
+      if (projectId != normalizedProjectId) {
+        throw const FormatException(
+          'AIrLab correlated project_id must already be canonical.',
+        );
+      }
+      if (taskKind != normalizedTaskKind) {
+        throw const FormatException(
+          'AIrLab correlated task_kind must already be canonical.',
+        );
+      }
+      if (correlation.projectId != projectId) {
         throw const FormatException(
           'AIrLab execution_correlation.project_id must match project_id.',
         );
       }
-      if (correlation.operationId != taskKind.trim().toLowerCase()) {
+      if (correlation.operationId != taskKind) {
         throw const FormatException(
           'AIrLab execution_correlation.operation_id must match task_kind.',
         );
