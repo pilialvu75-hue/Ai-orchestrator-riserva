@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_bounded_http_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
@@ -27,6 +28,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_servi
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
+import 'package:http/http.dart' as http;
 
 final class WorkshopProductionLifecycleBundle {
   const WorkshopProductionLifecycleBundle({
@@ -274,6 +276,10 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
           requirePrivateRepository: true,
         ),
         accessTokenProvider: tokenProvider.call,
+        client: WorkshopBoundedHttpClient(
+          inner: http.Client(),
+          timeout: const Duration(seconds: 20),
+        ),
       ),
     ];
   }
