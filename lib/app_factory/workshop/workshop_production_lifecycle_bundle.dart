@@ -1,19 +1,17 @@
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_bounded_http_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_provider_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_durable_private_github_build_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dynamic_project_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_github_user_token_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_private_github_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_capture_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
@@ -21,15 +19,12 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library_stor
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_stable_build_request_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_verified_local_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
-import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
-import 'package:http/http.dart' as http;
 
 final class WorkshopProductionLifecycleBundle {
   const WorkshopProductionLifecycleBundle({
@@ -238,7 +233,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
 
     final resolvedBuildProviders = buildLab != null || buildProviders.isNotEmpty
         ? buildProviders
-        : _defaultPrivateBuildProviders();
+        : _defaultPrivateBuildProviders(preferences);
 
     return createForWorkspace(
       workspaceRootPath: normalizedWorkspaceRootPath,
@@ -263,26 +258,12 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     );
   }
 
-  static Iterable<WorkshopBuildProvider> _defaultPrivateBuildProviders() {
-    final tokenProvider = WorkshopGitHubUserTokenProvider(
-      clientIdProvider: ModuleLibraryGitHubConfigStore().loadClientId,
-    );
-
+  static Iterable<WorkshopBuildProvider> _defaultPrivateBuildProviders(
+    PreferencesService preferences,
+  ) {
     return <WorkshopBuildProvider>[
-      WorkshopStableBuildRequestProvider(
-        inner: WorkshopPrivateGitHubBuildProvider(
-          configuration: const WorkshopPrivateGitHubBuildConfiguration(
-            repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
-            workflowFile: 'build-cantiere-android.yml',
-            baseBranch: 'main',
-            requirePrivateRepository: true,
-          ),
-          accessTokenProvider: tokenProvider.call,
-          client: WorkshopBoundedHttpClient(
-            inner: http.Client(),
-            timeout: const Duration(seconds: 20),
-          ),
-        ),
+      WorkshopDurablePrivateGitHubBuildFactory.create(
+        preferences: preferences,
       ),
     ];
   }
