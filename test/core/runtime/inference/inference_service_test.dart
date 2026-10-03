@@ -127,13 +127,30 @@ void main() {
               attemptId: 'attempt',
               checkpointId: 'checkpoint')
           .drain<void>();
+      await gateway
+          .stream(prompt: 'default preflight', sessionId: 'default')
+          .drain<void>();
+      await gateway
+          .stream(prompt: 'only budget', sessionId: 'budget', maxTokens: 320)
+          .drain<void>();
+      await gateway
+          .stream(
+              prompt: 'only temperature',
+              sessionId: 'temperature',
+              temperature: 0.05)
+          .drain<void>();
       await service
           .stream(const InferenceRequest(
               prompt: 'ordinary chat', sessionId: 'chat'))
           .drain<void>();
-      expect(seen.map((r) => r.maxTokens), [768, 640, 512, 768]);
-      expect(seen.map((r) => r.temperature), [0.2, 0.1, 0.15, 0.5]);
-      expect(seen.take(3).every((r) => r.preserveGenerationSettings), isTrue);
+      expect(seen.map((r) => r.maxTokens), [768, 640, 512, 768, 320, 768, 768]);
+      expect(seen.map((r) => r.temperature),
+          [0.2, 0.1, 0.15, 0.5, 0.5, 0.05, 0.5]);
+      expect(
+          seen
+              .take(3)
+              .every((r) => r.preserveMaxTokens && r.preserveTemperature),
+          isTrue);
       expect(seen.map((r) => r.modelId).toSet(), {model.id});
       expect(seen[2].requestId, 'request');
       expect(seen[2].projectId, 'project');

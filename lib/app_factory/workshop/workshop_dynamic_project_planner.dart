@@ -499,12 +499,13 @@ final class WorkshopDynamicProjectPlanDecoder {
                   'Apply the smallest correction preserving all original requirements and constraints.',
               'dependsOn': <String>[],
               'affectedPaths': paths,
-              'validationCriteria': validationCriteria.isNotEmpty
-                  ? validationCriteria
-                  : <String>[
-                      'Preserve all project validation criteria; reviewer and validation must approve.',
-                      'The previously failing build stage must pass without disabling any gate.',
-                    ],
+              'validationCriteria': <String>[
+                'Preserve every project acceptance criterion; this task summary never replaces them.',
+                'The previously failing build stage must pass without disabling any gate.',
+                ...validationCriteria.take(_maxCriteria - 2).map((criterion) =>
+                    WorkshopDynamicProjectPlanner._excerpt(
+                        criterion, _maxCriterionChars)),
+              ],
             },
           ],
         }),

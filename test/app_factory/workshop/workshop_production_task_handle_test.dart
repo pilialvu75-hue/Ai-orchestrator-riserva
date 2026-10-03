@@ -43,10 +43,15 @@ void main() {
     final bundle = WorkshopProductionLifecycleBundleFactory.create(
         projectExecutor: executor, roleGateways: gateways);
     addTearDown(bundle.dashboardController.dispose);
+    final originalCriteria = <String>[
+      'Existing drawings remain readable.',
+      ...List.generate(7, (i) => 'Required criterion $i.'),
+      'Long required criterion: ${'preserve drawing data ' * 15}END_ACCEPTANCE',
+    ];
     final original = bundle.dashboardController.startProduction(
         title: 'Manga Kids',
         instruction: 'Keep drawings',
-        validationCriteria: ['Existing drawings remain readable.']);
+        validationCriteria: originalCriteria);
     final handle = await WorkshopBuildRepairPreparer(bundle: bundle).prepare(
         failedPlan: original,
         repairNumber: 1,
@@ -65,7 +70,14 @@ void main() {
     expect(bundle.dashboardController.engine.plans, contains(original));
     expect(handle.session.context.request.targetFiles, ['lib/app.dart']);
     expect(handle.session.context.request.constraints.join(' '),
-        contains('Existing drawings remain readable.'));
+        contains(originalCriteria.join(' | ')));
+    expect(handle.plan.validationCriteria, containsAll(originalCriteria));
+    expect(handle.plan.tasks.single.validationCriteria.length,
+        lessThanOrEqualTo(8));
+    expect(
+        handle.plan.tasks.single.validationCriteria
+            .every((c) => c.length <= 240),
+        isTrue);
     expect(handle.plan.tasks.single.completed, isFalse);
     expect(bundle.dashboardController.state.projectApproval, isNull);
     expect(workspace.files['lib/app.dart'], 'old');

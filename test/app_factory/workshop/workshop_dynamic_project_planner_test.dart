@@ -470,7 +470,8 @@ void main() {
     expect(plan.tasks, hasLength(1));
     expect(plan.tasks.single.affectedPaths, ['lib/main.dart']);
     expect(plan.validationCriteria, repair.validationCriteria);
-    expect(plan.tasks.single.validationCriteria, repair.validationCriteria);
+    expect(plan.tasks.single.validationCriteria,
+        containsAll(repair.validationCriteria));
     expect(
         plan.effectiveWorkspaceProjectId, failed.effectiveWorkspaceProjectId);
     expect(plan.goal, repair.instruction);
