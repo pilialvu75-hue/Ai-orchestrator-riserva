@@ -23,6 +23,7 @@ object ProcessExitDiagnostics {
 
     fun register(context: Context, engine: FlutterEngine) {
         val app = context.applicationContext
+        ManagedCrashDiagnostics.install(app)
         val messenger = engine.dartExecutor.binaryMessenger
         MethodChannel(
             messenger,
@@ -53,6 +54,9 @@ object ProcessExitDiagnostics {
                                 ApplicationExitInfo.REASON_USER_REQUESTED -> "user_requested"
                                 else -> "other_or_unknown"
                             },
+                            "managed_cause" to if (info.reason == ApplicationExitInfo.REASON_CRASH) {
+                                ManagedCrashDiagnostics.categoryForExit(app, info.timestamp)
+                            } else null,
                             "status" to info.status,
                             "description" to info.description?.take(1024),
                             "abort_message" to readAbortMessage(info),

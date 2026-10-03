@@ -59,6 +59,18 @@ jobs:
           dart analyze tool/cantiere_local_build_smoke.dart
           flutter analyze test/app_factory/workshop/cantiere_first_app_smoke_test.dart
 
+      - name: Run Cantiere physical-failure regressions
+        run: |
+          flutter test --reporter expanded \
+            test/app_factory/workshop/workshop_dynamic_project_planner_test.dart \
+            test/app_factory/workshop/workshop_build_repair_test.dart \
+            test/app_factory/workshop/workshop_production_task_handle_test.dart \
+            test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart \
+            test/app_factory/workshop/workshop_proposal_implementation_resume_test.dart \
+            test/app_factory/workshop/workshop_project_notification_service_test.dart \
+            test/core/runtime/inference/inference_service_test.dart \
+            test/core/diagnostics/public_log_projection_test.dart
+
       - name: Create deterministic Android starter workspace
         id: workspace
         shell: bash

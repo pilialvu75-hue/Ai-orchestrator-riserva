@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Foreground process-liveness lease shared by user-started Cloud and Cantiere
@@ -162,23 +163,34 @@ class CloudBackgroundExecutionService : Service() {
                     ?.getIntExtra(EXTRA_WORKSHOP_LEASES, 0)
                     ?.coerceAtLeast(0)
                     ?: 0
-                startForeground(
-                    FOREGROUND_NOTIFICATION_ID,
-                    buildNotification(
-                        cloudLeases = cloudLeases,
-                        workshopLeases = workshopLeases,
-                        projectId = intent?.getStringExtra(EXTRA_WORKSHOP_PROJECT_ID),
-                        projectTitle = intent?.getStringExtra(EXTRA_WORKSHOP_TITLE),
-                        progress = intent?.getIntExtra(EXTRA_WORKSHOP_PROGRESS, 0) ?: 0,
-                        completedTasks =
-                            intent?.getIntExtra(EXTRA_WORKSHOP_COMPLETED_TASKS, 0) ?: 0,
-                        totalTasks =
-                            intent?.getIntExtra(EXTRA_WORKSHOP_TOTAL_TASKS, 0) ?: 0,
-                        stage = intent?.getStringExtra(EXTRA_WORKSHOP_STAGE),
-                        surfaceStatus =
-                            intent?.getStringExtra(EXTRA_WORKSHOP_SURFACE_STATUS),
-                    ),
-                )
+                try {
+                    startForeground(
+                        FOREGROUND_NOTIFICATION_ID,
+                        buildNotification(
+                            cloudLeases = cloudLeases,
+                            workshopLeases = workshopLeases,
+                            projectId = intent?.getStringExtra(EXTRA_WORKSHOP_PROJECT_ID),
+                            projectTitle = intent?.getStringExtra(EXTRA_WORKSHOP_TITLE),
+                            progress = intent?.getIntExtra(EXTRA_WORKSHOP_PROGRESS, 0) ?: 0,
+                            completedTasks =
+                                intent?.getIntExtra(EXTRA_WORKSHOP_COMPLETED_TASKS, 0) ?: 0,
+                            totalTasks =
+                                intent?.getIntExtra(EXTRA_WORKSHOP_TOTAL_TASKS, 0) ?: 0,
+                            stage = intent?.getStringExtra(EXTRA_WORKSHOP_STAGE),
+                            surfaceStatus =
+                                intent?.getStringExtra(EXTRA_WORKSHOP_SURFACE_STATUS),
+                        ),
+                    )
+                } catch (error: IllegalStateException) {
+                    // Promotion runs asynchronously, outside the MethodChannel
+                    // try/catch. Android may revoke start eligibility while the
+                    // activity moves to the background. Do not crash Flutter.
+                    Log.w("CloudBackgroundExecution", "foreground_promotion_rejected", error)
+                    stopServiceForeground()
+                } catch (error: SecurityException) {
+                    Log.w("CloudBackgroundExecution", "foreground_permission_rejected", error)
+                    stopServiceForeground()
+                }
             }
         }
         return START_NOT_STICKY

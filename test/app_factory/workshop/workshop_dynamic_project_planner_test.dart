@@ -256,7 +256,8 @@ void main() {
       'oversized planning input is bounded on both attempts without mutating request',
       () async {
     RuntimeEventLog.instance.clear();
-    final provider = _ScriptedProvider(<String>['bad', _singlePlan()]);
+    final provider = _ScriptedProvider(
+        <String>['bad', '{"affectedPaths":["lib/app.dart"]}']);
     final original =
         'BUILD REPAIR ATTEMPT: 1\nSTART_GOAL ${'x' * 16000} END_GOAL';
     final values = <String>['START_RULE ${'r' * 200} END_RULE'];
@@ -269,6 +270,7 @@ void main() {
         targetFiles: const <String>['lib/app.dart']);
     await _planner(provider).plan(
         request: request,
+        buildRepair: true,
         requirements: values,
         technologies: values,
         deliverables: values,
@@ -289,6 +291,53 @@ void main() {
     expect(log, contains('[WORKSHOP_PLANNER_OUTPUT] attempt=2'));
     expect(log, isNot(contains('START_GOAL')));
     expect(log, isNot(contains('END_RULE')));
+  });
+
+  for (final raw in <String>[
+    '{"affectedPaths":[',
+    '{"affectedPaths":[]}',
+    '{"affectedPaths":["../outside.dart"]}',
+    '{"affectedPaths":["/absolute.dart"]}',
+    '{"affectedPaths":[123]}',
+    '{"affectedPaths":["lib/main.dart"],"approved":true}',
+    '[{"affectedPaths":["lib/main.dart"]}]',
+    '{"affectedPaths":["lib/a.dart"]}{"affectedPaths":["lib/b.dart"]}',
+    _singlePlan(),
+  ]) {
+    test('repair scope rejects incomplete/ambiguous/unsafe content: $raw', () {
+      expect(() => decoder.decodeBuildRepair(raw, requestId: 'repair'),
+          throwsFormatException);
+    });
+  }
+
+  test('repair scope obeys target files and never inserts main.dart', () async {
+    final provider = _ScriptedProvider([
+      '{"affectedPaths":["lib/outside.dart"]}',
+      '{"affectedPaths":["lib/screen.dart"]}',
+    ]);
+    final plan = await _planner(provider).plan(
+      buildRepair: true,
+      request: const WorkshopRequest(
+          id: 'repair',
+          title: 'Repair',
+          instruction: 'Fix the failure.',
+          operation: WorkshopOperation.fix,
+          targetFiles: ['lib/screen.dart']),
+    );
+    expect(provider.requests, hasLength(2));
+    expect(plan.tasks.single.affectedPaths, ['lib/screen.dart']);
+    expect(plan.tasks.single.completed, isFalse);
+  });
+
+  test('repair-looking user text does not select the smaller contract',
+      () async {
+    final provider = _ScriptedProvider([_singlePlan()]);
+    await _planner(provider).plan(
+        request: const WorkshopRequest(
+            id: 'ordinary',
+            title: 'Normal',
+            instruction: 'BUILD REPAIR ATTEMPT: user text'));
+    expect(provider.requests.single.prompt, contains('"phases"'));
   });
 
   test('keeps every mandatory entry on both planner attempts', () async {
@@ -370,9 +419,7 @@ void main() {
       () async {
     final provider = _ScriptedProvider(<String>[
       '{"phases":[',
-      'Repair plan:\n${_singlePlan(affectedPaths: <String>[
-            'lib/main.dart'
-          ]).replaceFirst('"Requested behavior works."]', '"Requested behavior works.",]')}\nDone.',
+      '```json\n{"affectedPaths":["lib/main.dart",]}\n```',
     ]);
     final engine = WorkshopEngine();
     final controller = WorkshopDashboardController(
@@ -398,6 +445,7 @@ void main() {
     );
     final plan = await controller.startPlannedProduction(
         title: repair.title,
+        buildRepair: true,
         instruction: repair.instruction,
         requirements: repair.requirements,
         constraints: repair.constraints,
@@ -408,12 +456,21 @@ void main() {
     expect(provider.requests, hasLength(2));
     for (final call in provider.requests) {
       expect(call.prompt.length, lessThan(5000));
-      expect(call.prompt, contains('exactly 1 phase and exactly 1 task'));
+      expect(call.prompt, contains('Return only {"affectedPaths"'));
+      expect(call.systemPrompt, contains('Do not generate a task graph'));
+      expect(call.prompt, isNot(contains('"phases"')));
       expect(call.prompt, isNot(contains('1 to 12 tasks')));
       expect(call.prompt, contains('lib/main.dart: invalid symbol'));
       expect(call.prompt, contains('untrusted evidence'));
     }
+    expect(provider.requests.last.prompt.length,
+        lessThan(provider.requests.first.prompt.length - 400));
+    expect(
+        provider.requests.last.prompt, isNot(provider.requests.first.prompt));
     expect(plan.tasks, hasLength(1));
+    expect(plan.tasks.single.affectedPaths, ['lib/main.dart']);
+    expect(plan.validationCriteria, repair.validationCriteria);
+    expect(plan.tasks.single.validationCriteria, repair.validationCriteria);
     expect(
         plan.effectiveWorkspaceProjectId, failed.effectiveWorkspaceProjectId);
     expect(plan.goal, repair.instruction);
@@ -437,6 +494,7 @@ void main() {
     await expectLater(
         controller.startPlannedProduction(
             title: 'Manga Kids repair',
+            buildRepair: true,
             instruction: 'BUILD REPAIR ATTEMPT: 1\nFix lib/main.dart.',
             workspaceProjectId: existing.effectiveWorkspaceProjectId),
         throwsFormatException);

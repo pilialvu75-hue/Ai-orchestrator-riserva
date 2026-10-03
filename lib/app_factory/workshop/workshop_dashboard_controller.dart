@@ -559,6 +559,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
     List<String> validationCriteria = const <String>[],
     List<String> context = const <String>[],
     String? workspaceProjectId,
+    bool buildRepair = false,
     bool isOffline = false,
   }) async {
     _ensureNotDisposed();
@@ -601,7 +602,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
       title: normalizedTitle,
       instruction: normalizedInstruction,
       source: WorkshopRequestSource.workshop,
-      operation: WorkshopOperation.create,
+      operation: buildRepair ? WorkshopOperation.fix : WorkshopOperation.create,
       targetFiles: const <String>[],
       constraints: constraints,
       context: List<String>.unmodifiable(
@@ -619,6 +620,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
         technologies: technologies,
         deliverables: deliverables,
         validationCriteria: validationCriteria,
+        buildRepair: buildRepair,
         isOffline: isOffline,
       );
 

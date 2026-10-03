@@ -150,6 +150,7 @@ class WorkshopInferenceGateway {
       isOffline: isOffline,
       maxTokens: maxTokens ?? InferenceRequest.maxTokensForModel(modelId),
       temperature: temperature ?? InferenceRequest.temperatureForModel(modelId),
+      preserveGenerationSettings: true,
       topP: topP,
       repeatPenalty: repeatPenalty,
       modelId: modelId,

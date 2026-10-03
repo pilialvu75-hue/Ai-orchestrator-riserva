@@ -612,14 +612,12 @@ class InferenceService {
     return request.copyWith(
       modelId: effectiveModelId,
       modelPath: selectedModel.localPath,
-      maxTokens:
-          InferenceRequest.maxTokensForModel(
-        effectiveModelId,
-      ),
-      temperature:
-          InferenceRequest.temperatureForModel(
-        effectiveModelId,
-      ),
+      maxTokens: request.preserveGenerationSettings
+          ? request.maxTokens
+          : InferenceRequest.maxTokensForModel(effectiveModelId),
+      temperature: request.preserveGenerationSettings
+          ? request.temperature
+          : InferenceRequest.temperatureForModel(effectiveModelId),
     );
   }
 

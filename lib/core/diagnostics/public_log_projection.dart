@@ -676,6 +676,17 @@ String? publicLogProjection(String line) {
     try {
       final data = jsonDecode(rest);
       if (data is Map) {
+        final cause = data['managed_cause'];
+        if (const <String>{
+          'foreground_start_timeout',
+          'foreground_start_disallowed',
+          'foreground_bad_notification',
+          'security_exception',
+          'managed_other',
+        }.contains(cause)) {
+          result['managed_cause'] = cause;
+        }
+
         for (final key in <String>[
           'timestamp_ms',
           'reason_code',

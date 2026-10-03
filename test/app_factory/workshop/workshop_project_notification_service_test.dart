@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,8 +25,7 @@ void main() {
       totalTasks: 2,
     );
 
-    final snapshot =
-        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+    final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     expect(snapshot.status, WorkshopProjectSurfaceStatus.build);
     expect(snapshot.shouldRetainSession, isTrue);
@@ -43,8 +44,7 @@ void main() {
       totalTasks: 2,
     );
 
-    final snapshot =
-        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+    final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     expect(snapshot.status, WorkshopProjectSurfaceStatus.active);
     expect(snapshot.progressPercent, greaterThan(0));
@@ -64,8 +64,7 @@ void main() {
       lastError: 'planning failed',
     );
 
-    final snapshot =
-        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+    final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     expect(snapshot.status, WorkshopProjectSurfaceStatus.failed);
     expect(snapshot.shouldRetainSession, isFalse);
@@ -92,11 +91,80 @@ void main() {
       ),
     );
 
-    final snapshot =
-        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+    final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     expect(snapshot.status, WorkshopProjectSurfaceStatus.completed);
     expect(snapshot.shouldRetainSession, isFalse);
+  });
+
+  test(
+      'restored terminal state never starts a foreground lease and is deduplicated',
+      () async {
+    const channel = MethodChannel('test/terminal_notification');
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    final service = WorkshopProjectNotificationService(
+        channel: channel,
+        platformOverride: TargetPlatform.android,
+        permissionRequester: () async {});
+    const failed = WorkshopDashboardControllerState(
+        projectId: 'persistent-manga',
+        projectTitle: 'Manga Kids',
+        completedTasks: 2,
+        totalTasks: 2,
+        progress: 1,
+        lastError: 'Project plan is not valid JSON.');
+    await Future.wait(
+        [service.sync(failed), service.sync(failed), service.sync(failed)]);
+    expect(calls.map((c) => c.method), ['finishWorkshopProject']);
+    const running = WorkshopDashboardControllerState(
+        projectId: 'persistent-manga',
+        projectTitle: 'Manga Kids',
+        projectStatus: WorkshopProjectStatus.inProgress);
+    await service.sync(running);
+    await service.sync(failed);
+    expect(calls.map((c) => c.method), [
+      'finishWorkshopProject',
+      'beginWorkshopProject',
+      'finishWorkshopProject'
+    ]);
+  });
+
+  test(
+      'overlapping dashboard callbacks finish after a pending begin exactly once',
+      () async {
+    const channel = MethodChannel('test/overlapping_notification');
+    final calls = <String>[];
+    final permission = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    final service = WorkshopProjectNotificationService(
+        channel: channel,
+        platformOverride: TargetPlatform.android,
+        permissionRequester: () => permission.future);
+    final active = service.sync(const WorkshopDashboardControllerState(
+        projectId: 'manga', projectStatus: WorkshopProjectStatus.inProgress));
+    const failed = WorkshopDashboardControllerState(
+        projectId: 'manga', lastError: 'failed');
+    final finish = service.sync(failed);
+    final duplicate = service.sync(failed);
+    final clear = service.clear();
+    permission.complete();
+    await Future.wait([active, finish, duplicate, clear]);
+    expect(calls, ['beginWorkshopProject', 'finishWorkshopProject']);
   });
 
   test('Android notification service begins, updates and finishes project',

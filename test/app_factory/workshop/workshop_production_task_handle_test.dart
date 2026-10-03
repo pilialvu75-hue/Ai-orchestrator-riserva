@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_repair.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
@@ -25,6 +27,51 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
+  test(
+      'real build repair preparer selects compact scope and preserves the workspace and gates',
+      () async {
+    final workspace =
+        _RecordingWorkspaceGateway(files: {'lib/app.dart': 'old'});
+    final executor = WorkshopProjectExecutor(gateway: workspace);
+    final calls = <AppAiRole>[];
+    final gateways = _gateways(calls);
+    final architect = _QueueGateway(
+        role: AppAiRole.architect,
+        calls: calls,
+        results: [_success('{"affectedPaths":["lib/app.dart"]}')]);
+    gateways[AppAiRole.architect] = architect;
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+        projectExecutor: executor, roleGateways: gateways);
+    addTearDown(bundle.dashboardController.dispose);
+    final original = bundle.dashboardController.startProduction(
+        title: 'Manga Kids',
+        instruction: 'Keep drawings',
+        validationCriteria: ['Existing drawings remain readable.']);
+    final handle = await WorkshopBuildRepairPreparer(bundle: bundle).prepare(
+        failedPlan: original,
+        repairNumber: 1,
+        failedBuild: WorkshopBuildResult(
+            requestId: 'failed-build',
+            target: WorkshopBuildTarget.android,
+            status: WorkshopBuildStatus.failed,
+            startedAt: DateTime.utc(2026, 10, 3),
+            finishedAt: DateTime.utc(2026, 10, 3),
+            errors: ['remote_validation_failed'],
+            stderr: 'lib/app.dart: invalid symbol'));
+    expect(calls, [AppAiRole.architect]);
+    expect(architect.lastPrompt, contains('Return only {"affectedPaths"'));
+    expect(handle.plan.effectiveWorkspaceProjectId,
+        original.effectiveWorkspaceProjectId);
+    expect(bundle.dashboardController.engine.plans, contains(original));
+    expect(handle.session.context.request.targetFiles, ['lib/app.dart']);
+    expect(handle.session.context.request.constraints.join(' '),
+        contains('Existing drawings remain readable.'));
+    expect(handle.plan.tasks.single.completed, isFalse);
+    expect(bundle.dashboardController.state.projectApproval, isNull);
+    expect(workspace.files['lib/app.dart'], 'old');
+    expect(workspace.writeCalls, 0);
+  });
+
   test('production task handle keeps one session through approval and apply',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
@@ -50,7 +97,8 @@ void main() {
 
     expect(requestId, isNotNull);
     expect(handle.taskId, endsWith(':initial-implementation'));
-    expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
+    expect(identical(executor.sessionForTask(handle.taskId), handle.session),
+        isTrue);
     expect(workspaceGateway.writeCalls, 0);
 
     final inference = await coordinator.runPrepared(handle: handle);
@@ -204,7 +252,8 @@ void main() {
     expect(identical(handle.plan, plan), isTrue);
     expect(handle.taskId, 'task:initial-implementation');
     expect(identical(handle.session, session), isTrue);
-    expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
+    expect(identical(executor.sessionForTask(handle.taskId), handle.session),
+        isTrue);
     expect(workspaceGateway.writeCalls, 0);
     expect(workspaceGateway.commitCalls, 0);
     expect(workspaceGateway.pushCalls, 0);
@@ -283,7 +332,8 @@ void main() {
     );
 
     expect(result.readyForApproval, isTrue);
-    expect(identical(executor.sessionForTask(handle.taskId), handle.session), isTrue);
+    expect(identical(executor.sessionForTask(handle.taskId), handle.session),
+        isTrue);
     expect(workspaceGateway.files['lib/app.dart'], 'old');
     expect(workspaceGateway.writeCalls, 0);
     expect(
@@ -354,7 +404,8 @@ void main() {
       handle.session.workspace.snapshot['lib/certified_storage.dart'],
       'class CertifiedStorage {}\n',
     );
-    expect(workspaceGateway.files.containsKey('lib/certified_storage.dart'), isFalse);
+    expect(workspaceGateway.files.containsKey('lib/certified_storage.dart'),
+        isFalse);
     expect(workspaceGateway.writeCalls, 0);
     expect(
       calls,
@@ -414,7 +465,8 @@ void main() {
     expect(libraryClient.loadStateCalls, 0);
     expect(libraryClient.loadPackageCalls, 0);
     expect(
-      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      handle.session.workspace.snapshot
+          .containsKey('lib/certified_storage.dart'),
       isFalse,
     );
     expect(workspaceGateway.writeCalls, 0);
@@ -462,7 +514,8 @@ void main() {
     expect(libraryClient.loadStateCalls, 1);
     expect(libraryClient.loadPackageCalls, 0);
     expect(
-      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      handle.session.workspace.snapshot
+          .containsKey('lib/certified_storage.dart'),
       isFalse,
     );
     expect(workspaceGateway.writeCalls, 0);
@@ -716,7 +769,8 @@ final class _NoopProvider implements RuntimeInferenceProvider {
   TokenStream streamInference({
     required InferenceRequest request,
     required CancellationToken cancellationToken,
-  }) => const Stream.empty();
+  }) =>
+      const Stream.empty();
 }
 
 final class _RecordingWorkspaceGateway implements GitWorkspaceGateway {
@@ -749,7 +803,8 @@ final class _RecordingWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> createBranch(String branchName) async {}
 
   @override
-  Future<void> writeFile({required String path, required String content}) async {
+  Future<void> writeFile(
+      {required String path, required String content}) async {
     writeCalls += 1;
     files[path] = content;
   }
