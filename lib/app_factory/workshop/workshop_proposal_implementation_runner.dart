@@ -58,7 +58,8 @@ final class WorkshopProposalImplementationRunner {
   }) async {
     _validateSession(session, preflight: preflight);
 
-    final revisionSuffix = revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
+    final revisionSuffix =
+        revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
     final sessionId =
         'workshop:implementation:${session.context.request.id}$revisionSuffix';
 
@@ -82,11 +83,10 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     )) {
       didRetry = true;
-      final memoryPressureRetry = _isCriticalMemoryError(result);
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
-        'attempt=2 reason=${memoryPressureRetry ? 'memory_pressure' : 'runtime'} '
+        'attempt=2 reason=${_retryReason(result)} '
         'terminal=${result.terminalState?.name ?? 'none'}',
       );
 
@@ -172,7 +172,8 @@ final class WorkshopProposalImplementationRunner {
       );
     }
 
-    final revisionSuffix = revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
+    final revisionSuffix =
+        revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
     var result = await _inference.completeWithIdentity(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
@@ -200,12 +201,11 @@ final class WorkshopProposalImplementationRunner {
       cancellationToken: cancellationToken,
     )) {
       didRetry = true;
-      final memoryPressureRetry = _isCriticalMemoryError(result);
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_ENGINEER_RETRY] '
         'request=${session.context.request.id} '
         'execution=${resumeContext.executionId} '
-        'attempt=2 reason=${memoryPressureRetry ? 'memory_pressure' : 'runtime'} '
+        'attempt=2 reason=${_retryReason(result)} '
         'terminal=${result.terminalState?.name ?? 'none'}',
       );
 
@@ -266,7 +266,8 @@ final class WorkshopProposalImplementationRunner {
           compact: true,
         ),
         systemPrompt: _malformedOutputRetrySystemPrompt,
-        sessionId: '${resumeContext.sessionId}$revisionSuffix:engineer-retry-malformed-1',
+        sessionId:
+            '${resumeContext.sessionId}$revisionSuffix:engineer-retry-malformed-1',
         isOffline: isOffline,
         maxTokens: _malformedOutputRetryMaxTokens,
         requestId: session.context.request.id,
@@ -359,8 +360,7 @@ final class WorkshopProposalImplementationRunner {
     final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
-      maxChars:
-          compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
+      maxChars: compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
       allowOversizedTargetReplacement:
           request.operation == WorkshopOperation.create,
     );
@@ -419,46 +419,29 @@ $encoded
 Return ONLY JSON:
 {"explanation":"required","changes":[{"path":"relative/path","type":"addition","content":"full content"}],"validationNotes":[],"warnings":[]}
 
-For every change, type MUST be exactly one string: "addition", "modification",
-or "deletion". Never copy a list or combine values with "|" or "/".
-Every path must be workspace-relative like "lib/main.dart": never prefix it
-with "./", never use "../", and never use an absolute path.
-Use only workspaceFiles as existing file content. replaceableTargets, when
-present, are existing oversized starter files intentionally omitted from the
-prompt for a create task; you may replace those paths only with complete
-resulting file content, never infer or partially preserve their omitted prior
-content. The explicit task instruction and constraints are authoritative.
-This is an implementation proposal, so changes MUST contain at least one real
-file change that implements the current task. Never return an empty changes
-array. For operation "create", materialize the smallest runnable current-task
-increment even when the workspace already contains starter scaffold files.
-UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
-or constraints verbatim unless the task explicitly asks to rename it. This
-includes button labels, titles, field labels, units and short symbols. Do not
-"improve" "+" into "+1", rename "Azzera", or otherwise substitute a visible
-string just because it seems equivalent.
-architectPlan is implementation guidance and must not override them. When
-request.targetFiles is non-empty it is a HARD ALLOWLIST: every changes[].path
-MUST be exactly one of those paths. Never invent, split into, or add a
-supporting file outside that list. An empty request.targetFiles list on an
-initial create task means paths were not preselected, not that no file may be
-changed. When gateFeedback is present, it is authoritative feedback about the previously
-rejected staged proposal. If that feedback identifies a mismatch between the
-Architect plan/target files and the explicit task, correct the implementation
-toward the explicit task instead of repeating the mistaken plan. No markdown,
-review, approval or apply. For deletion omit content.
-Every content
-value must be a valid JSON string with line breaks, double quotes and
-backslashes escaped according to JSON. Prefer Flutter/Dart SDK-only code for
-the smallest MVP. If you import a third-party package that is not already
-declared by the project, include a matching pubspec.yaml addition/modification
-in the same proposal; never emit an undeclared package import or an unused
-import. Generated Dart must be clean under default flutter analyze lints.
-When UI-visible state changes inside a StatefulWidget, trigger a rebuild with
-setState or an already-declared equivalent state mechanism. Do not invent or
-simulate sensor/health measurements as real tracking when the task did not
-explicitly request verified sensor integration.
-'''.trim()
+changes MUST contain at least one real file change. Never return an empty changes
+array. type must be exactly "addition", "modification" or "deletion".
+Use workspace-relative paths: no "./", "../" or absolute paths.
+request.targetFiles is a HARD ALLOWLIST when non-empty; an empty list permits
+only files required by the explicit task. Do not invent supporting files outside it.
+Only workspaceFiles supplies existing content. replaceableTargets are oversized
+starter files omitted for operation "create": replace them only with complete
+resulting content; never infer or partially preserve omitted content.
+For "create", materialize the smallest runnable task increment even over a scaffold.
+The explicit task instruction and constraints are authoritative; architectPlan
+is guidance and must not override them. gateFeedback is authoritative feedback
+on the rejected proposal, never approval. Correct the reported mismatch.
+UI LITERAL FIDELITY: preserve labels, titles, units and symbols verbatim; never
+"improve" "+" into "+1" or rename "Azzera" without an explicit request.
+For addition/modification supply complete content as a valid JSON string with
+quotes, newlines and backslashes escaped. For deletion omit content.
+Prefer SDK-only Flutter/Dart. Any undeclared third-party import requires its
+matching pubspec.yaml change within the allowlist. No unused imports; satisfy
+flutter analyze lints. Rebuild changed StatefulWidget state with setState or an
+already-declared equivalent. Never simulate real sensor/health measurements.
+Return only JSON; no Markdown, review, approval, apply or Assistant state.
+'''
+            .trim()
         : '''
 Implement exactly one Cantiere task from the bounded input below.
 The explicit task instruction and constraints are authoritative.
@@ -509,7 +492,8 @@ and UI-visible StatefulWidget mutations must trigger a rebuild with setState or
 an already-declared equivalent mechanism. Do not invent or simulate sensor or
 health measurements as real tracking unless verified integration was explicitly
 requested. Do not review, approve or apply.
-'''.trim();
+'''
+            .trim();
 
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_ENGINEER_PROMPT] '
@@ -553,15 +537,14 @@ requested. Do not review, approve or apply.
       addPath(path);
     }
 
-    final remainingPaths = snapshot.keys
-        .where((path) => !seen.contains(path))
-        .toList()
-      ..sort((left, right) {
-        final leftLib = left.startsWith('lib/') ? 0 : 1;
-        final rightLib = right.startsWith('lib/') ? 0 : 1;
-        final byPriority = leftLib.compareTo(rightLib);
-        return byPriority != 0 ? byPriority : left.compareTo(right);
-      });
+    final remainingPaths =
+        snapshot.keys.where((path) => !seen.contains(path)).toList()
+          ..sort((left, right) {
+            final leftLib = left.startsWith('lib/') ? 0 : 1;
+            final rightLib = right.startsWith('lib/') ? 0 : 1;
+            final byPriority = leftLib.compareTo(rightLib);
+            return byPriority != 0 ? byPriority : left.compareTo(right);
+          });
     for (final path in remainingPaths) {
       addPath(path);
     }
@@ -593,8 +576,7 @@ requested. Do not review, approve or apply.
     }
     return _WorkshopWorkspaceSelection(
       files: Map<String, String>.unmodifiable(selected),
-      replaceableTargets:
-          List<String>.unmodifiable(replaceableTargets),
+      replaceableTargets: List<String>.unmodifiable(replaceableTargets),
     );
   }
 
@@ -603,15 +585,24 @@ requested. Do not review, approve or apply.
   ) {
     return <String, Object?>{
       'objective': _boundedText(resume.objective, 180),
-      'phase': resume.phase,
+      'phase': _boundedText(resume.phase, 80),
       if (resume.completedSteps.isNotEmpty)
-        'completedSteps': resume.completedSteps.take(4).toList(),
+        'completedSteps': resume.completedSteps
+            .take(4)
+            .map((value) => _boundedText(value, 80))
+            .toList(),
       if (resume.remainingWork.isNotEmpty)
-        'remainingWork': resume.remainingWork.take(4).toList(),
+        'remainingWork': resume.remainingWork
+            .take(4)
+            .map((value) => _boundedText(value, 80))
+            .toList(),
       if (resume.nextStep != null && resume.nextStep!.trim().isNotEmpty)
         'nextStep': _boundedText(resume.nextStep!, 180),
       if (resume.verified.isNotEmpty)
-        'verified': resume.verified.take(4).toList(),
+        'verified': resume.verified
+            .take(4)
+            .map((value) => _boundedText(value, 80))
+            .toList(),
     };
   }
 
@@ -623,8 +614,7 @@ requested. Do not review, approve or apply.
     final message = error.message.toString();
     return message == 'Workshop proposal field "explanation" is required.' ||
         message == 'Workshop proposal field "explanation" must be text.' ||
-        message ==
-            'Workshop proposal must contain at least one file change.' ||
+        message == 'Workshop proposal must contain at least one file change.' ||
         message.startsWith('Workshop proposal path "') ||
         message ==
             'Workshop create proposal must materialize required target '
@@ -651,17 +641,14 @@ requested. Do not review, approve or apply.
     // A caller cancellation is authoritative. The Workshop gateway now
     // forwards it one-way to a per-inference runtime token, so an internal
     // critical-memory cancellation cannot poison this outer task token.
-    if (cancellationToken?.isCancelled == true) {
-      return false;
-    }
-
-    if (_isCriticalMemoryError(result)) {
-      return true;
-    }
-
-    if (result.terminalState == InferenceTerminalState.cancelled ||
+    if (cancellationToken?.isCancelled == true ||
+        result.terminalState == InferenceTerminalState.cancelled ||
         result.terminalState == InferenceTerminalState.modelUnavailable) {
       return false;
+    }
+
+    if (_isCriticalMemoryError(result) || _isPromptBudgetError(result)) {
+      return true;
     }
 
     if (result.terminalState == InferenceTerminalState.timeout) {
@@ -672,6 +659,18 @@ requested. Do not review, approve or apply.
     return error.contains('stalled') ||
         error.contains('timeout') ||
         error.contains('timed out');
+  }
+
+  static bool _isPromptBudgetError(WorkshopInferenceResult result) {
+    final error = (result.errorMessage ?? '').toLowerCase();
+    return error.contains('stage=prompt_budget') ||
+        error.contains('prompt exceeds the local context capacity');
+  }
+
+  static String _retryReason(WorkshopInferenceResult result) {
+    if (_isPromptBudgetError(result)) return 'prompt_budget';
+    if (_isCriticalMemoryError(result)) return 'memory_pressure';
+    return 'runtime';
   }
 
   static String _boundedText(String raw, int maxChars) {
@@ -700,7 +699,7 @@ requested. Do not review, approve or apply.
       'repository directly.';
 
   static const String _retrySystemPrompt =
-      'You are the Cantiere Engineer retrying after a local first-token stall. '
+      'You are the Cantiere Engineer retrying after a local runtime or prompt-budget failure. '
       'Use only the compact bounded input. Make the smallest valid change that '
       'satisfies the explicit task contract; use the Architect plan only as '
       'bounded implementation guidance. Return only the requested JSON object. '
@@ -723,7 +722,6 @@ requested. Do not review, approve or apply.
       'deletion; never combine enum values. Escape all file content as valid '
       'JSON strings. Do not review, approve, apply, or use Assistant state.';
 }
-
 
 final class _WorkshopWorkspaceSelection {
   const _WorkshopWorkspaceSelection({
