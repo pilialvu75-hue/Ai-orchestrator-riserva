@@ -28,7 +28,7 @@ class WorkshopWebApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AI-Orchestrator Cantiere Web',
+      title: 'Aivexus — Cantiere Web',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
       darkTheme: ThemeData(

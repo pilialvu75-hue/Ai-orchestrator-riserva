@@ -38,7 +38,7 @@ void main() {
     );
   });
 
-  testWidgets('W1 shell exposes Cantiere only', (tester) async {
+  testWidgets('W1 shell exposes Aivexus Cantiere only', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: WorkshopWebShell(
@@ -56,6 +56,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Aivexus'), findsOneWidget);
     expect(find.text('Cantiere Web'), findsOneWidget);
     expect(find.textContaining('Browser startup ready'), findsOneWidget);
     expect(find.text('Durable browser storage'), findsOneWidget);
