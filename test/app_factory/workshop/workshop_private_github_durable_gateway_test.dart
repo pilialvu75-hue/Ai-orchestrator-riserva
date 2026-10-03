@@ -179,8 +179,6 @@ void main() {
         return http.Response('unexpected: ${request.method} $path', 500);
       });
 
-      // A new gateway instance models app/process restart: no in-memory staged
-      // commit or run id is carried over from the dispatching process.
       final recovered = await _gateway(client).discoverRun(
         request: _request(workspace.path),
         correlationId: correlation,
@@ -283,6 +281,7 @@ void main() {
 
     test('invalid generated source fails definitively before dispatch', () async {
       await File('${workspace.path}/lib/main.dart').delete();
+      await File('${workspace.path}/pubspec.yaml').writeAsString('name: demo\n');
       final client = MockClient((request) async {
         if (_isRepositoryRoot(request.url.path)) {
           return http.Response('{"private":true}', 200);
@@ -329,8 +328,7 @@ WorkshopBuildRequest _request(String path) {
 }
 
 bool _isRepositoryRoot(String path) {
-  return path ==
-      '/repos/pilialvu75-hue/AI-Orchestrator-Module-Library';
+  return path == '/repos/pilialvu75-hue/AI-Orchestrator-Module-Library';
 }
 
 String _remoteId(String correlationId) {
