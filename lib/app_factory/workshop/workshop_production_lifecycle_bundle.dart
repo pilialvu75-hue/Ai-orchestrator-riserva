@@ -21,6 +21,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library_stor
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_source_snapshot_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_stable_build_request_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_approval_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_verified_local_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_factory.dart';
@@ -268,17 +269,19 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     );
 
     return <WorkshopBuildProvider>[
-      WorkshopPrivateGitHubBuildProvider(
-        configuration: const WorkshopPrivateGitHubBuildConfiguration(
-          repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
-          workflowFile: 'build-cantiere-android.yml',
-          baseBranch: 'main',
-          requirePrivateRepository: true,
-        ),
-        accessTokenProvider: tokenProvider.call,
-        client: WorkshopBoundedHttpClient(
-          inner: http.Client(),
-          timeout: const Duration(seconds: 20),
+      WorkshopStableBuildRequestProvider(
+        inner: WorkshopPrivateGitHubBuildProvider(
+          configuration: const WorkshopPrivateGitHubBuildConfiguration(
+            repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
+            workflowFile: 'build-cantiere-android.yml',
+            baseBranch: 'main',
+            requirePrivateRepository: true,
+          ),
+          accessTokenProvider: tokenProvider.call,
+          client: WorkshopBoundedHttpClient(
+            inner: http.Client(),
+            timeout: const Duration(seconds: 20),
+          ),
         ),
       ),
     ];
