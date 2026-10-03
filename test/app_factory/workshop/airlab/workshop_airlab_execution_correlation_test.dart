@@ -66,7 +66,8 @@ void main() {
 
     test('tampered idempotency key is rejected', () {
       final payload = Map<String, dynamic>.from(_correlation().toJson());
-      payload['idempotency_key'] = 'airlab:v1:${'0' * 64}';
+      payload['idempotency_key'] =
+          'airlab:v1:${List<String>.filled(64, '0').join()}';
 
       expect(
         () => WorkshopAirLabExecutionCorrelation.fromJson(payload),
