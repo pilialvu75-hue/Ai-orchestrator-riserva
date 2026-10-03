@@ -105,9 +105,40 @@ jobs:
         shell: pwsh
         run: flutter pub get --enforce-lockfile --enforce-lockfile
 
+      - name: Ensure llama.cpp submodule
+        shell: pwsh
+        run: git submodule update --init --recursive third_party/llama.cpp
+
+      - name: Build bundled llama.cpp helper
+        id: llama-helper
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'native\windows\build_llama_cli.ps1')
+          $helperCandidates = @(
+            (Join-Path $PWD 'build\llama-windows\bin\Release\llama-completion.exe'),
+            (Join-Path $PWD 'build\llama-windows\bin\llama-completion.exe'),
+            (Join-Path $PWD 'build\llama-windows\Release\llama-completion.exe')
+          )
+          $helper = $helperCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $helper) {
+            throw 'Bundled llama-completion.exe was not produced.'
+          }
+          "helper_path=$helper" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Build Windows release
         shell: pwsh
-        run: flutter build windows --release
+        run: |
+          flutter build windows --release
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $helper = '${{ steps.llama-helper.outputs.helper_path }}'
+          Copy-Item $helper (Join-Path $releaseDir 'llama-completion.exe') -Force
+          if (-not (Test-Path (Join-Path $releaseDir 'llama-completion.exe')) {
+            throw 'llama-completion.exe is missing from the Windows release bundle.'
+          }
+          & (Join-Path $releaseDir 'llama-completion.exe') --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled llama-completion.exe failed its version smoke test with exit code $LASTEXITCODE."
+          }
 
       - name: Apply Windows 7 bundle compatibility
         shell: pwsh

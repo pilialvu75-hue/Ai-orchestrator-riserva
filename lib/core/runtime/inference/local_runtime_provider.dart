@@ -358,7 +358,15 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           );
         } on ProcessException catch (e) {
           clearRuntimeVerification();
-          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=ffi_binding_failed detail=${e.message}');
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_RUNTIME_ERROR] '
+            'stage=process_start '
+            'reason=process_start_failed '
+            'object=none',
+          );
+          RuntimeEventLog.instance.emit(
+            '[VALIDATION_FAILURE] reason=ffi_binding_failed detail=${e.message}',
+          );
 
           controller.add(
             InferenceResponse.error(
@@ -451,7 +459,18 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         if (exitCode != 0 &&
             fullText.isEmpty) {
           clearRuntimeVerification();
-          RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=process_exit_code exitCode=$exitCode');
+          RuntimeEventLog.instance.emit(
+            '[LOCAL_RUNTIME_ERROR] '
+            'stage=process_exit '
+            'reason=process_exit '
+            'object=none',
+          );
+          RuntimeEventLog.instance.emit(
+            '[INFERENCE_ERROR] '
+            'session=${request.sessionId} '
+            'reason=process_exit_code '
+            'exitCode=$exitCode',
+          );
 
           final stderr =
               stderrBuffer.toString().trim();
@@ -600,18 +619,20 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return envPath.trim();
     }
 
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS || Platform.isWindows) {
       final executableDirectory =
           File(Platform.resolvedExecutable).parent.path;
+      final helperName =
+          Platform.isWindows ? 'llama-completion.exe' : 'llama-completion';
       final bundledHelper = File(
-        '$executableDirectory${Platform.pathSeparator}llama-completion',
+        '$executableDirectory${Platform.pathSeparator}$helperName',
       );
       if (bundledHelper.existsSync()) {
         return bundledHelper.path;
       }
     }
 
-    return 'llama-cli';
+    return Platform.isWindows ? 'llama-completion.exe' : 'llama-cli';
   }
 
   List<String> _buildArgs(
