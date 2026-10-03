@@ -71,7 +71,7 @@ class WorkshopWebShell extends StatelessWidget {
               padding: const EdgeInsets.all(24),
               children: [
                 const Text(
-                  'AI-Orchestrator',
+                  'Aivexus',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.white54,
