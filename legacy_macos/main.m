@@ -5,7 +5,6 @@ static NSString * const AOSelectedModelDefaultsKey = @"AOSelectedModelPath";
 static NSString * const AODarkThemeDefaultsKey = @"AODarkThemeEnabled";
 static const NSInteger AOLabelTag = 7101;
 static const NSInteger AOInputTag = 7102;
-static const NSInteger AOTranscriptTag = 7103;
 
 @interface AOBackgroundView : NSView
 @property(nonatomic, strong) NSColor *fillColor;
@@ -143,7 +142,6 @@ static const NSInteger AOTranscriptTag = 7103;
     self.transcriptView.selectable = YES;
     self.transcriptView.font = [NSFont systemFontOfSize:13.0];
     self.transcriptView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    self.transcriptView.tag = AOTranscriptTag;
     scroll.documentView = self.transcriptView;
     [content addSubview:scroll];
 
@@ -312,7 +310,7 @@ static const NSInteger AOTranscriptTag = 7103;
             field.drawsBackground = YES;
             field.backgroundColor = inputBackground;
         }
-    } else if ([view isKindOfClass:[NSTextView class]] && view.tag == AOTranscriptTag) {
+    } else if ([view isKindOfClass:[NSTextView class]] && view == self.transcriptView) {
         NSTextView *textView = (NSTextView *)view;
         textView.textColor = textColor;
         textView.backgroundColor = transcriptBackground;
