@@ -19,7 +19,8 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   group('WorkshopTaskInferencePipeline', () {
-    test('runs Engineer then Reviewer review and validation without real writes',
+    test(
+        'runs Engineer then Reviewer review and validation without real writes',
         () async {
       final callOrder = <AppAiRole>[];
       final stages = <WorkshopStage>[];
@@ -100,6 +101,55 @@ void main() {
       expect(realGateway.commitCalls, 0);
       expect(realGateway.pushCalls, 0);
       expect(realGateway.pullRequestCalls, 0);
+    });
+
+    test(
+        'Engineer recovery then truncated Reviewer recovers without repeating task',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: callOrder,
+        results: [
+          _success('{"explanation":"unfinished'),
+          _success(_proposalJson)
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: callOrder,
+        results: [
+          _success('{\n "'),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
+        ],
+      );
+      final gateway =
+          _RecordingWorkspaceGateway(files: {'lib/app.dart': 'old'});
+      final session = await _session(gateway);
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(_gateways(
+          engineer: engineer,
+          reviewer: reviewer,
+          callOrder: callOrder,
+        )),
+      ).run(session: session);
+      expect(result.review.approved, isTrue);
+      expect(result.validation?.valid, isTrue);
+      expect(engineer.calls, 2);
+      expect(reviewer.calls, 3); // Review, compact review, then validation.
+      expect(callOrder, [
+        AppAiRole.engineer,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ]);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+      expect(gateway.commitCalls, 0);
+      expect(gateway.pushCalls, 0);
     });
 
     test('Reviewer rejection triggers one Engineer revision and re-review',
@@ -378,6 +428,37 @@ final class _QueueGateway extends WorkshopInferenceGateway {
   int calls = 0;
 
   @override
+  Future<WorkshopInferenceResult> completeWithFirstTokenTimeout({
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = true,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? modelId,
+    String? modelPath,
+    CancellationToken? cancellationToken,
+  }) =>
+      complete(
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        modelId: modelId,
+        modelPath: modelPath,
+        cancellationToken: cancellationToken,
+      );
+
+  @override
   Future<WorkshopInferenceResult> complete({
     required String prompt,
     String? systemPrompt,
@@ -443,7 +524,8 @@ final class _RecordingWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> createBranch(String branchName) async {}
 
   @override
-  Future<void> writeFile({required String path, required String content}) async {
+  Future<void> writeFile(
+      {required String path, required String content}) async {
     writeCalls += 1;
     _files[path] = content;
   }

@@ -477,6 +477,65 @@ void main() {
     expect(jsonDecode(repair)['attempt'], 1);
   });
 
+  test('exports current batch Reviewer telemetry with closed fields', () {
+    final events = <String, Map<String, Object>>{
+      '[WORKSHOP_REVIEW_PROMPT] compact=true batch=1/2 chars=1800 '
+          'files=2 coverage=abcd0123 plan_chars=900': {
+        'compact': true,
+        'batch': 1,
+        'batches': 2,
+        'chars': 1800,
+        'files': 2,
+        'coverage': 'abcd0123',
+        'plan_chars': 900,
+      },
+      '[WORKSHOP_REVIEW_RETRY] batch=1/2 attempt=2 '
+          'reason=malformed_output terminal=success chars=3': {
+        'batch': 1,
+        'batches': 2,
+        'attempt': 2,
+        'reason': 'malformed_output',
+        'terminal': 'success',
+        'chars': 3,
+      },
+      '[WORKSHOP_REVIEW_JSON] batch=1/2 rejected=invalid_verdict chars=3': {
+        'batch': 1,
+        'batches': 2,
+        'rejected': 'invalid_verdict',
+        'chars': 3,
+      },
+      '[WORKSHOP_REVIEW_BATCH_VERDICT] batch=1/2 approved=true '
+          'files=2 coverage=abcd0123': {
+        'batch': 1,
+        'batches': 2,
+        'approved': true,
+        'files': 2,
+        'coverage': 'abcd0123',
+      },
+      '[WORKSHOP_REVIEW_VERDICT] approved=true files=3 batches=2 '
+          'coverage=abcd0123 findings=0 warnings=1': {
+        'approved': true,
+        'files': 3,
+        'batches': 2,
+        'coverage': 'abcd0123',
+        'findings': 0,
+        'warnings': 1,
+      },
+    };
+    for (final entry in events.entries) {
+      final projected = jsonDecode(publicLogProjection('$time ${entry.key}')!);
+      for (final field in entry.value.entries) {
+        expect(projected[field.key], field.value, reason: entry.key);
+      }
+      expect(publicLogProjection('$time ${entry.key} raw=private'), isNull);
+      expect(publicLogProjection('$time ${entry.key}\nprivate'), isNull);
+    }
+    expect(
+        publicLogProjection('$time [WORKSHOP_REVIEW_JSON] '
+            'batch=1/2 rejected=private chars=3'),
+        isNull);
+  });
+
   test('rejects extended Reviewer telemetry that could carry private text', () {
     expect(
       publicLogProjection(

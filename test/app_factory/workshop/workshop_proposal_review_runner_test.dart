@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
@@ -12,13 +14,15 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inferen
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   group('WorkshopProposalReviewRunner', () {
-    test('routes staged diff only to Reviewer and advances approval to validation',
+    test(
+        'routes staged diff only to Reviewer and advances approval to validation',
         () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -69,7 +73,8 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('explicit task instruction and explicit constraints are authoritative'),
+        contains(
+            'explicit task instruction and explicit constraints are authoritative'),
       );
       expect(
         reviewer.lastPrompt,
@@ -97,7 +102,8 @@ void main() {
       expect(reviewer.lastPrompt, contains('Architect bounded task plan'));
       expect(
         reviewer.lastPrompt,
-        contains('ACCEPTANCE: show visible user feedback for walking progress.'),
+        contains(
+            'ACCEPTANCE: show visible user feedback for walking progress.'),
       );
       expect(reviewer.lastPrompt, contains('[bounded middle omitted]'));
       expect(reviewer.lastPrompt, isNot(contains('true|false')));
@@ -167,6 +173,151 @@ void main() {
         reviewer.promptsSeen,
         everyElement(contains('[bounded middle omitted]')),
       );
+    });
+
+    for (final invalid in <String>[
+      '{\n "', // The +2979 screenshot's unterminated-string error shape.
+      '{"approved":"true","summary":"wrong boolean"}',
+      '{"approved":true,"summary":""}',
+    ]) {
+      test('recovers an invalid Reviewer verdict once: $invalid', () async {
+        RuntimeEventLog.instance.clear();
+        final reviewer = _StaticGateway(
+          result: const WorkshopInferenceResult(text: ''),
+          sequence: <WorkshopInferenceResult>[
+            WorkshopInferenceResult(
+              text: invalid,
+              terminalState: InferenceTerminalState.success,
+            ),
+            const WorkshopInferenceResult(
+              text: '{"approved":true,"summary":"Checked staged code"}',
+              terminalState: InferenceTerminalState.success,
+            ),
+          ],
+        );
+        final session = await _reviewSession();
+        final verdict = await WorkshopProposalReviewRunner(
+          inference: _stageInference(_gateways(reviewer)),
+        ).run(session: session);
+
+        expect(verdict.approved, isTrue);
+        expect(session.status, WorkspaceSessionStatus.validation);
+        expect(session.isApplyApproved, isFalse);
+        expect(reviewer.calls, 2);
+        expect(reviewer.temperaturesSeen, <double?>[null, 0.1]);
+        expect(reviewer.maxTokensSeen, <int?>[256, 192]);
+        expect(reviewer.promptsSeen.last.length,
+            lessThan(reviewer.promptsSeen.first.length - 1800));
+        Map<String, dynamic> input(String prompt) => jsonDecode(prompt
+            .split('Workshop input JSON:\n')
+            .last
+            .split('\n\nReturn')
+            .first) as Map<String, dynamic>;
+        final primary = input(reviewer.promptsSeen.first);
+        final compact = input(reviewer.promptsSeen.last);
+        for (final key in <String>[
+          'instruction',
+          'constraints',
+          'targetFiles',
+          'coverageManifest',
+          'reviewBatch',
+          'changes',
+        ]) {
+          expect(compact[key], primary[key], reason: key);
+        }
+        expect(
+            RuntimeEventLog.instance.entries.any((entry) =>
+                entry.tag == 'WORKSHOP_REVIEW_RETRY' &&
+                entry.message.contains('reason=malformed_output')),
+            isTrue);
+      });
+    }
+
+    for (final runtimeFirst in <bool>[false, true]) {
+      test(
+          'second invalid verdict stays fail-closed; runtimeFirst=$runtimeFirst',
+          () async {
+        const incomplete = WorkshopInferenceResult(
+          text: '{\n "',
+          terminalState: InferenceTerminalState.success,
+        );
+        final reviewer = _StaticGateway(result: incomplete, sequence: [
+          runtimeFirst
+              ? const WorkshopInferenceResult(
+                  text: '', terminalState: InferenceTerminalState.timeout)
+              : incomplete,
+          incomplete,
+        ]);
+        final session = await _reviewSession();
+        await expectLater(
+            WorkshopProposalReviewRunner(
+              inference: _stageInference(_gateways(reviewer)),
+            ).run(session: session),
+            throwsA(isA<FormatException>()));
+        expect(reviewer.calls, 2);
+        expect(session.status, WorkspaceSessionStatus.review);
+        expect(session.workspace.read('lib/app.dart'), 'new');
+        expect(session.isApplyApproved, isFalse);
+      });
+    }
+
+    for (final terminal in <InferenceTerminalState>[
+      InferenceTerminalState.cancelled,
+      InferenceTerminalState.modelUnavailable,
+    ]) {
+      test('never retries terminal ${terminal.name}', () async {
+        final reviewer = _StaticGateway(
+            result: WorkshopInferenceResult(
+          text: '{\n "',
+          terminalState: terminal,
+        ));
+        final session = await _reviewSession();
+        await expectLater(
+            WorkshopProposalReviewRunner(
+              inference: _stageInference(_gateways(reviewer)),
+            ).run(session: session),
+            throwsA(isA<StateError>()));
+        expect(reviewer.calls, 1);
+        expect(session.status, WorkspaceSessionStatus.review);
+      });
+    }
+
+    test('caller cancellation prevents malformed-output recovery', () async {
+      final token = CancellationToken();
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+            text: '{\n "', terminalState: InferenceTerminalState.success),
+        onCall: (_) => token.cancel(),
+      );
+      final session = await _reviewSession();
+      await expectLater(
+          WorkshopProposalReviewRunner(
+            inference: _stageInference(_gateways(reviewer)),
+          ).run(session: session, cancellationToken: token),
+          throwsA(isA<StateError>()));
+      expect(reviewer.calls, 1);
+      expect(session.status, WorkspaceSessionStatus.review);
+    });
+
+    test('recovered rejection remains authoritative', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(text: ''),
+        sequence: const [
+          WorkshopInferenceResult(
+              text: '{\n "', terminalState: InferenceTerminalState.success),
+          WorkshopInferenceResult(
+              text: '{"approved":false,"summary":"Regression found"}',
+              terminalState: InferenceTerminalState.success),
+        ],
+      );
+      final session = await _reviewSession();
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.approved, isFalse);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+      expect(reviewer.calls, 2);
     });
 
     test('reviews every staged file before aggregate approval', () async {
@@ -257,7 +408,8 @@ void main() {
       expect(session.isApplyApproved, isFalse);
       expect(reviewer.calls, 2);
       expect(
-        reviewer.promptsSeen.any((prompt) => prompt.contains('"after":"new-5"')),
+        reviewer.promptsSeen
+            .any((prompt) => prompt.contains('"after":"new-5"')),
         isFalse,
       );
     });
@@ -409,6 +561,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
   String? lastPrompt;
   final List<String> promptsSeen = <String>[];
   final List<int?> maxTokensSeen = <int?>[];
+  final List<double?> temperaturesSeen = <double?>[];
   final List<String> sessionIdsSeen = <String>[];
   final List<Duration?> firstTokenTimeoutsSeen = <Duration?>[];
 
@@ -432,6 +585,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     lastPrompt = prompt;
     promptsSeen.add(prompt);
     maxTokensSeen.add(maxTokens);
+    temperaturesSeen.add(temperature);
     sessionIdsSeen.add(sessionId);
     firstTokenTimeoutsSeen.add(null);
     onCall?.call(index);
@@ -462,6 +616,7 @@ final class _StaticGateway extends WorkshopInferenceGateway {
     lastPrompt = prompt;
     promptsSeen.add(prompt);
     maxTokensSeen.add(maxTokens);
+    temperaturesSeen.add(temperature);
     sessionIdsSeen.add(sessionId);
     firstTokenTimeoutsSeen.add(firstTokenTimeout);
     onCall?.call(index);
@@ -508,7 +663,8 @@ final class _RecordingWorkspaceGateway implements GitWorkspaceGateway {
   Future<void> createBranch(String branchName) async {}
 
   @override
-  Future<void> writeFile({required String path, required String content}) async {
+  Future<void> writeFile(
+      {required String path, required String content}) async {
     throw StateError('Review must not write the real workspace.');
   }
 

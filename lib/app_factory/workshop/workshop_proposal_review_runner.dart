@@ -71,8 +71,7 @@ final class WorkshopProposalReviewRunner {
     }
 
     final coverage = _coverageManifest(session);
-    final batchCount =
-        (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
+    final batchCount = (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
     final summaries = <String>[];
     final findings = <String>[];
     final warnings = <String>[];
@@ -156,12 +155,11 @@ final class WorkshopProposalReviewRunner {
     required CancellationToken? cancellationToken,
   }) async {
     final requestId = session.context.request.id;
-    final batchSuffix = batchCount == 1
-        ? ''
-        : ':batch-${batchIndex + 1}-of-$batchCount';
+    final batchSuffix =
+        batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount';
     final sessionId = 'workshop:review:$requestId$batchSuffix';
 
-    var result = await _inference.complete(
+    final result = await _inference.complete(
       stage: WorkshopStage.review,
       prompt: _buildPrompt(
         session,
@@ -178,37 +176,77 @@ final class WorkshopProposalReviewRunner {
       cancellationToken: cancellationToken,
     );
 
-    if (_shouldRetryReviewer(
+    var retryReason = 'runtime';
+    if (!_shouldRetryReviewer(
       result,
       cancellationToken: cancellationToken,
     )) {
-      RuntimeEventLog.instance.emit(
-        '[WORKSHOP_REVIEW_RETRY] '
-        'batch=${batchIndex + 1}/$batchCount '
-        'attempt=2 terminal=${result.terminalState?.name ?? 'none'} '
-        'chars=${result.text.length}',
-      );
-
-      result = await _inference.completeWithFirstTokenTimeout(
-        stage: WorkshopStage.review,
-        prompt: _buildPrompt(
-          session,
-          implementationPlan: implementationPlan,
-          batch: batch,
+      try {
+        return _decodeBatchResult(
+          result: result,
           batchIndex: batchIndex,
           batchCount: batchCount,
+          fileCount: batch.length,
           coverage: coverage,
-          compact: true,
-        ),
-        firstTokenTimeout: _retryFirstTokenTimeout,
-        systemPrompt: _retrySystemPrompt,
-        sessionId: '$sessionId:retry-1',
-        isOffline: isOffline,
-        maxTokens: _retryMaxTokens,
-        cancellationToken: cancellationToken,
-      );
+          cancellationToken: cancellationToken,
+        );
+      } on FormatException {
+        if (cancellationToken?.isCancelled == true) rethrow;
+        retryReason = 'malformed_output';
+      }
     }
 
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_RETRY] '
+      'batch=${batchIndex + 1}/$batchCount '
+      'attempt=2 reason=$retryReason '
+      'terminal=${result.terminalState?.name ?? 'none'} '
+      'chars=${result.text.length}',
+    );
+
+    // Runtime and format failures share ONE retry budget per batch. A second
+    // invalid response is terminal; no approval or partial JSON is invented.
+    final recovered = await _inference.completeWithFirstTokenTimeout(
+      stage: WorkshopStage.review,
+      prompt: _buildPrompt(
+        session,
+        implementationPlan: implementationPlan,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        coverage: coverage,
+        compact: true,
+      ),
+      firstTokenTimeout: _retryFirstTokenTimeout,
+      systemPrompt: _retrySystemPrompt,
+      sessionId: '$sessionId:retry-1',
+      isOffline: isOffline,
+      maxTokens: _retryMaxTokens,
+      temperature: 0.1,
+      cancellationToken: cancellationToken,
+    );
+
+    return _decodeBatchResult(
+      result: recovered,
+      batchIndex: batchIndex,
+      batchCount: batchCount,
+      fileCount: batch.length,
+      coverage: coverage,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  WorkshopReviewVerdict _decodeBatchResult({
+    required WorkshopInferenceResult result,
+    required int batchIndex,
+    required int batchCount,
+    required int fileCount,
+    required _WorkshopReviewCoverageManifest coverage,
+    required CancellationToken? cancellationToken,
+  }) {
+    if (cancellationToken?.isCancelled == true) {
+      throw StateError('Workshop Reviewer was cancelled.');
+    }
     if (!result.isSuccessful) {
       final detail = result.errorMessage?.trim();
       throw StateError(
@@ -224,12 +262,22 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
-    final verdict = _gate.decode(result.text);
+    final WorkshopReviewVerdict verdict;
+    try {
+      verdict = _gate.decode(result.text);
+    } on FormatException {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_JSON] '
+        'batch=${batchIndex + 1}/$batchCount '
+        'rejected=invalid_verdict chars=${result.text.length}',
+      );
+      rethrow;
+    }
 
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_REVIEW_BATCH_VERDICT] '
       'batch=${batchIndex + 1}/$batchCount '
-      'approved=${verdict.approved} files=${batch.length} '
+      'approved=${verdict.approved} files=$fileCount '
       'coverage=${coverage.fingerprint}',
     );
 
@@ -260,8 +308,7 @@ final class WorkshopProposalReviewRunner {
         },
     ];
 
-    final contextBudget =
-        compact ? _retryContextChars : _primaryContextChars;
+    final contextBudget = compact ? _retryContextChars : _primaryContextChars;
     final taskContext = request.context
         .map((item) => item.trim())
         .where(
@@ -298,7 +345,31 @@ final class WorkshopProposalReviewRunner {
       'changes': changes,
     };
 
-    final prompt = '''
+    final prompt = compact
+        ? '''
+Review only the current staged batch. Check correctness, regressions, unsafe or
+incomplete edits. Review every reviewBatch.paths entry against the unchanged
+coverageManifest; other batches are not approved by this verdict.
+The explicit instruction and constraints are authoritative, including literal
+UI strings, labels, titles, units and symbols. Architect implementationPlan is
+guidance only: do not add future features, tests or documentation requirements
+from it or from background context. targetFiles is a hard allowlist only for
+explicit_scope; an empty list for unspecified_for_initial_create_task is not
+itself a rejection. The builder supplies the baseline Flutter scaffold and
+pubspec.yaml. Require configuration changes only for explicit configuration
+work or added dependencies/assets. Reject if the supplied evidence cannot
+establish correctness; never assume omitted content is safe.
+
+Workshop input JSON:
+${jsonEncode(payload)}
+
+Return one complete JSON object only, without fences or prose:
+{"approved":false,"summary":"brief reason","findings":[],"warnings":[]}
+approved must be a boolean based on your review; summary must be non-empty.
+findings and warnings must be lists of strings. Keep the verdict concise.
+'''
+            .trim()
+        : '''
 Review the staged Workshop change batch below for correctness, regressions,
 requirement compliance and unsafe or incomplete edits.
 
@@ -364,7 +435,8 @@ Return ONLY one JSON object with this exact contract:
 
 The "approved" field MUST be one JSON boolean: true or false. Never output a string, an alternatives list, or values joined by a separator.
 Do not return markdown fences or any text outside the JSON object.
-'''.trim();
+'''
+            .trim();
 
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_REVIEW_PROMPT] '
@@ -464,7 +536,7 @@ Do not return markdown fences or any text outside the JSON object.
       'verdict only.';
 
   static const String _retrySystemPrompt =
-      'You are the Cantiere Reviewer retrying after a local runtime failure. '
+      'You are the Cantiere Reviewer retrying after a runtime or invalid-verdict failure. '
       'Use only the compact bounded task and diff supplied. Decide only whether '
       'this current increment is correct and safe. Return the required JSON '
       'verdict only; do not use project-wide future requirements.';
@@ -484,4 +556,3 @@ final class _WorkshopReviewCoverageManifest {
         'files': files,
       };
 }
-

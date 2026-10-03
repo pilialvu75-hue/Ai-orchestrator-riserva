@@ -67,6 +67,9 @@ jobs:
             test/app_factory/workshop/workshop_production_task_handle_test.dart \
             test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart \
             test/app_factory/workshop/workshop_proposal_implementation_resume_test.dart \
+            test/app_factory/workshop/workshop_proposal_review_runner_test.dart \
+            test/app_factory/workshop/workshop_proposal_review_gate_test.dart \
+            test/app_factory/workshop/workshop_task_inference_pipeline_test.dart \
             test/app_factory/workshop/workshop_project_notification_service_test.dart \
             test/core/runtime/inference/inference_service_test.dart \
             test/core/diagnostics/public_log_projection_test.dart
