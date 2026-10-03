@@ -125,6 +125,10 @@ final class WorkshopProjectExecutor {
       projectPath: null,
       targetFiles: targetFiles,
       constraints: <String>[
+        // Task criteria may be bounded summaries. Carry the complete original
+        // project acceptance into every normal/resumed execution and gate.
+        if (plan.validationCriteria.isNotEmpty)
+          'Project acceptance: ${plan.validationCriteria.join(' | ')}',
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(
@@ -222,6 +226,10 @@ final class WorkshopProjectExecutor {
       operation: operation,
       targetFiles: targetFiles,
       constraints: <String>[
+        // Task criteria may be bounded summaries. Carry the complete original
+        // project acceptance into every normal/resumed execution and gate.
+        if (plan.validationCriteria.isNotEmpty)
+          'Project acceptance: ${plan.validationCriteria.join(' | ')}',
         if (task.validationCriteria.isNotEmpty)
           'Task acceptance: ${task.validationCriteria.join(' | ')}',
         ...WorkshopConstraints.defaults.map(

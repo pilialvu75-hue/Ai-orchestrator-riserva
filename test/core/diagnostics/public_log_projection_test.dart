@@ -87,6 +87,27 @@ void main() {
     expect(line, isNot(contains('private')));
   });
 
+  test('exports closed managed crash categories without exception text', () {
+    for (final cause in [
+      'foreground_start_timeout',
+      'foreground_start_disallowed',
+      'foreground_bad_notification',
+      'security_exception',
+      'managed_other',
+      'private exception message'
+    ]) {
+      final line = publicLogProjection('$time [ANDROID_PROCESS_EXIT_HISTORY] '
+          '${jsonEncode({
+            'reason_code': 4,
+            'managed_cause': cause,
+            'description': 'private exception message'
+          })}');
+      expect(jsonDecode(line!)['managed_cause'],
+          cause.startsWith('private') ? isNull : cause);
+      expect(line, isNot(contains('private')));
+    }
+  });
+
   test('exports only canonical Cloud provider attempts', () {
     final line = publicLogProjection(
       '$time [TOKEN_STREAM] [TOKEN_STREAM] notice session=default '

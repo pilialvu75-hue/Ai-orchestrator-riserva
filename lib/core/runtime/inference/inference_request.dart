@@ -28,6 +28,8 @@ class InferenceRequest {
     this.isOffline = false,
     this.maxTokens = defaultMaxTokens,
     this.temperature = defaultTemperature,
+    this.preserveMaxTokens = false,
+    this.preserveTemperature = false,
     this.topP = 0.9,
     this.repeatPenalty = 1.1,
     this.modelId,
@@ -51,6 +53,11 @@ class InferenceRequest {
   final bool isOffline;
   final int maxTokens;
   final double temperature;
+
+  /// Structured callers own their bounded token/sampling policy. Ordinary
+  /// chat keeps the historical per-model defaults when this is false.
+  final bool preserveMaxTokens;
+  final bool preserveTemperature;
   final double topP;
   final double repeatPenalty;
   final String? modelId;
@@ -186,6 +193,8 @@ class InferenceRequest {
     bool? isOffline,
     int? maxTokens,
     double? temperature,
+    bool? preserveMaxTokens,
+    bool? preserveTemperature,
     double? topP,
     double? repeatPenalty,
     String? modelId,
@@ -209,6 +218,8 @@ class InferenceRequest {
       isOffline: isOffline ?? this.isOffline,
       maxTokens: maxTokens ?? this.maxTokens,
       temperature: temperature ?? this.temperature,
+      preserveMaxTokens: preserveMaxTokens ?? this.preserveMaxTokens,
+      preserveTemperature: preserveTemperature ?? this.preserveTemperature,
       topP: topP ?? this.topP,
       repeatPenalty: repeatPenalty ?? this.repeatPenalty,
       modelId: modelId ?? this.modelId,

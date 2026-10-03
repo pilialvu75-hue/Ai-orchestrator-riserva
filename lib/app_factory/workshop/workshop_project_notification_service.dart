@@ -45,8 +45,7 @@ final class WorkshopProjectSurfaceSnapshot {
     }
 
     final title = state.projectTitle?.trim();
-    final presentationProgress =
-        WorkshopProgressPresentation.displayValue(
+    final presentationProgress = WorkshopProgressPresentation.displayValue(
       authoritativeProgress: state.progress,
       completedTasks: state.completedTasks,
       totalTasks: state.totalTasks,
@@ -63,22 +62,17 @@ final class WorkshopProjectSurfaceSnapshot {
       status = WorkshopProjectSurfaceStatus.failed;
     } else if (buildResult != null) {
       status = switch (buildResult.status) {
-        WorkshopBuildStatus.succeeded =>
-          WorkshopProjectSurfaceStatus.completed,
-        WorkshopBuildStatus.cancelled =>
-          WorkshopProjectSurfaceStatus.cancelled,
-        WorkshopBuildStatus.failed =>
-          WorkshopProjectSurfaceStatus.failed,
+        WorkshopBuildStatus.succeeded => WorkshopProjectSurfaceStatus.completed,
+        WorkshopBuildStatus.cancelled => WorkshopProjectSurfaceStatus.cancelled,
+        WorkshopBuildStatus.failed => WorkshopProjectSurfaceStatus.failed,
         _ => WorkshopProjectSurfaceStatus.build,
       };
     } else {
       status = switch (state.projectStatus) {
         WorkshopProjectStatus.cancelled =>
           WorkshopProjectSurfaceStatus.cancelled,
-        WorkshopProjectStatus.blocked =>
-          WorkshopProjectSurfaceStatus.blocked,
-        WorkshopProjectStatus.completed =>
-          WorkshopProjectSurfaceStatus.build,
+        WorkshopProjectStatus.blocked => WorkshopProjectSurfaceStatus.blocked,
+        WorkshopProjectStatus.completed => WorkshopProjectSurfaceStatus.build,
         _ => WorkshopProjectSurfaceStatus.active,
       };
     }
@@ -90,8 +84,7 @@ final class WorkshopProjectSurfaceSnapshot {
       progressPercent: progressPercent,
       completedTasks: state.completedTasks,
       totalTasks: state.totalTasks,
-      stage:
-          (state.progressPresentationStage ?? state.stage)?.name ?? '',
+      stage: (state.progressPresentationStage ?? state.stage)?.name ?? '',
     );
   }
 
@@ -159,20 +152,27 @@ final class WorkshopProjectNotificationService {
 
   String? _activeProjectId;
   String? _lastPayloadSignature;
+  String? _lastTerminalSignature;
+  Future<void> _pending = Future<void>.value();
   bool _permissionRequested = false;
 
   bool get _isAndroid =>
       !kIsWeb &&
       (_platformOverride ?? defaultTargetPlatform) == TargetPlatform.android;
 
-  Future<void> sync(WorkshopDashboardControllerState state) async {
+  Future<void> sync(WorkshopDashboardControllerState state) {
+    // Dashboard listeners do not await sync. Serialize begin/update/finish so
+    // a slow permission dialog or channel reply cannot resurrect a dead lease.
+    return _pending = _pending.then((_) => _sync(state));
+  }
+
+  Future<void> _sync(WorkshopDashboardControllerState state) async {
     if (!_isAndroid) return;
 
-    final snapshot =
-        WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
+    final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     if (snapshot.isIdle) {
-      await clear();
+      await _clear();
       return;
     }
 
@@ -203,16 +203,10 @@ final class WorkshopProjectNotificationService {
         .map((entry) => entry.key + '=' + entry.value.toString())
         .join('|');
 
-    if (_activeProjectId == null) {
-      await _invokeBestEffort('beginWorkshopProject', payload);
-      _activeProjectId = projectId;
-      _lastPayloadSignature = signature;
-    } else if (_lastPayloadSignature != signature && !snapshot.isTerminal) {
-      await _invokeBestEffort('updateWorkshopProject', payload);
-      _lastPayloadSignature = signature;
-    }
-
     if (snapshot.isTerminal) {
+      if (_lastTerminalSignature == signature) return;
+      // Restoring a failed/completed project must never start a foreground
+      // service only to immediately stop it, particularly in the background.
       await _invokeBestEffort(
         'finishWorkshopProject',
         <String, Object>{
@@ -222,11 +216,26 @@ final class WorkshopProjectNotificationService {
       );
       _activeProjectId = null;
       _lastPayloadSignature = null;
+      _lastTerminalSignature = signature;
+      return;
+    }
+
+    _lastTerminalSignature = null;
+    if (_activeProjectId == null) {
+      await _invokeBestEffort('beginWorkshopProject', payload);
+      _activeProjectId = projectId;
+      _lastPayloadSignature = signature;
+    } else if (_lastPayloadSignature != signature) {
+      await _invokeBestEffort('updateWorkshopProject', payload);
+      _lastPayloadSignature = signature;
     }
   }
 
-  Future<void> clear() async {
+  Future<void> clear() => _pending = _pending.then((_) => _clear());
+
+  Future<void> _clear() async {
     if (!_isAndroid) return;
+    _lastTerminalSignature = null;
     final projectId = _activeProjectId;
     if (projectId == null) return;
     await _invokeBestEffort(

@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider_adapter.dart';
+
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
@@ -77,27 +80,112 @@ void main() {
   }
 
   group('InferenceService routing', () {
+    test(
+        'Workshop settings survive gateway, role adapter and local model resolution',
+        () async {
+      final seen = <InferenceRequest>[];
+      final model = validModel.copyWith(id: 'qwen2_5_3b_instruct');
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: model,
+        localRuntimeProvider:
+            FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+          seen.add(request);
+          yield InferenceResponse.finalChunk(text: '{}', tokensGenerated: 1);
+        }),
+        cloudRuntimeProvider: buildCloudProvider(),
+      );
+      final gateway = WorkshopInferenceGateway(
+          provider: WorkshopInferenceProviderAdapter(
+        inferenceService: service,
+        modelId: model.id,
+      ));
+      await gateway
+          .stream(
+              prompt: 'plan',
+              sessionId: 'plan',
+              maxTokens: 768,
+              temperature: 0.2)
+          .drain<void>();
+      await gateway
+          .stream(
+              prompt: 'compact plan',
+              sessionId: 'retry',
+              maxTokens: 640,
+              temperature: 0.1)
+          .drain<void>();
+      await gateway
+          .streamWithIdentity(
+              prompt: 'compact Engineer',
+              sessionId: 'resume',
+              maxTokens: 512,
+              temperature: 0.15,
+              requestId: 'request',
+              projectId: 'project',
+              taskId: 'task',
+              executionId: 'execution',
+              attemptId: 'attempt',
+              checkpointId: 'checkpoint')
+          .drain<void>();
+      await gateway
+          .stream(prompt: 'default preflight', sessionId: 'default')
+          .drain<void>();
+      await gateway
+          .stream(prompt: 'only budget', sessionId: 'budget', maxTokens: 320)
+          .drain<void>();
+      await gateway
+          .stream(
+              prompt: 'only temperature',
+              sessionId: 'temperature',
+              temperature: 0.05)
+          .drain<void>();
+      await service
+          .stream(const InferenceRequest(
+              prompt: 'ordinary chat', sessionId: 'chat'))
+          .drain<void>();
+      expect(seen.map((r) => r.maxTokens), [768, 640, 512, 768, 320, 768, 768]);
+      expect(seen.map((r) => r.temperature),
+          [0.2, 0.1, 0.15, 0.5, 0.5, 0.05, 0.5]);
+      expect(
+          seen
+              .take(3)
+              .every((r) => r.preserveMaxTokens && r.preserveTemperature),
+          isTrue);
+      expect(seen.map((r) => r.modelId).toSet(), {model.id});
+      expect(seen[2].requestId, 'request');
+      expect(seen[2].projectId, 'project');
+      expect(seen[2].taskId, 'task');
+      expect(seen[2].executionId, 'execution');
+      expect(seen[2].attemptId, 'attempt');
+      expect(seen[2].checkpointId, 'checkpoint');
+    });
+
     test('re-reads selected model for each request in the same chat', () async {
-      var selected = validModel.copyWith(id: 'phi3_5_mini',
-          localPath: '/tmp/phi.gguf');
+      var selected =
+          validModel.copyWith(id: 'phi3_5_mini', localPath: '/tmp/phi.gguf');
       final seenModels = <String?>[];
       final seenPaths = <String?>[];
       final service = InferenceService(
         loadSelectedModel: () async => selected,
         loadRuntimeMode: () async => AiRuntimeMode.local,
-        runtimeProvider: FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        runtimeProvider:
+            FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
           seenModels.add(request.modelId);
           seenPaths.add(request.modelPath);
-          yield InferenceResponse.finalChunk(text: 'OK', tokensGenerated: 1,
-              model: request.modelId);
+          yield InferenceResponse.finalChunk(
+              text: 'OK', tokensGenerated: 1, model: request.modelId);
         }),
         cloudRuntimeProvider: buildCloudProvider(),
         sessionManager: RuntimeSessionManager(),
       );
-      await service.stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch')).toList();
-      selected = validModel.copyWith(id: 'nemotron3_nano_4b',
-          localPath: '/tmp/nemotron.gguf');
-      await service.stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch')).toList();
+      await service
+          .stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch'))
+          .toList();
+      selected = validModel.copyWith(
+          id: 'nemotron3_nano_4b', localPath: '/tmp/nemotron.gguf');
+      await service
+          .stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'switch'))
+          .toList();
       expect(seenModels, ['phi3_5_mini', 'nemotron3_nano_4b']);
       expect(seenPaths, ['/tmp/phi.gguf', '/tmp/nemotron.gguf']);
     });
@@ -105,17 +193,21 @@ void main() {
     test('local error timing retains the requested model', () async {
       RuntimeEventLog.instance.clear();
       final service = buildService(
-        mode: AiRuntimeMode.local, selectedModel: validModel,
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel,
         localRuntimeProvider: FakeLocalRuntimeProvider(responses: [
           InferenceResponse.error('Memory pressure'),
         ]),
         cloudRuntimeProvider: buildCloudProvider(),
       );
-      final responses = await service.stream(const InferenceRequest(
-          prompt: 'Ciao', sessionId: 'memory')).toList();
+      final responses = await service
+          .stream(const InferenceRequest(prompt: 'Ciao', sessionId: 'memory'))
+          .toList();
       expect(responses.last.isError, isTrue);
-      final timing = RuntimeEventLog.instance.entries.map((e) => e.message)
-          .where((e) => e.startsWith('[INFERENCE_TIMING]')).single;
+      final timing = RuntimeEventLog.instance.entries
+          .map((e) => e.message)
+          .where((e) => e.startsWith('[INFERENCE_TIMING]'))
+          .single;
       expect(timing, contains('model=gemma_2b mode=local'));
       expect(timing, contains('first_content_ms=-1'));
       expect(timing, contains('outcome=error'));
@@ -148,12 +240,16 @@ void main() {
       expect(response.text, 'Hello world');
       expect(response.model, 'gemma_2b');
       expect(response.tokensGenerated, 2);
-      final events = RuntimeEventLog.instance.entries.map((e) => e.message).toList();
-      expect(events, contains('[STREAM_TOKEN_COUNT] session=local-stream attempt=1 tokens=2 chunks=2'));
-      expect(events.where((e) => e.startsWith('[INFERENCE_TIMING]')).single,
-        allOf(contains('model=gemma_2b mode=local'),
-          contains('reported_tokens=2 text_chunks=2 outcome=success')));
-
+      final events =
+          RuntimeEventLog.instance.entries.map((e) => e.message).toList();
+      expect(
+          events,
+          contains(
+              '[STREAM_TOKEN_COUNT] session=local-stream attempt=1 tokens=2 chunks=2'));
+      expect(
+          events.where((e) => e.startsWith('[INFERENCE_TIMING]')).single,
+          allOf(contains('model=gemma_2b mode=local'),
+              contains('reported_tokens=2 text_chunks=2 outcome=success')));
     });
 
     test(
@@ -211,7 +307,8 @@ void main() {
       );
 
       final streamFuture = service
-          .stream(const InferenceRequest(sessionId: 'cancel-s1', prompt: 'hello'))
+          .stream(
+              const InferenceRequest(sessionId: 'cancel-s1', prompt: 'hello'))
           .toList();
       await Future<void>.delayed(const Duration(milliseconds: 10));
       service.cancel('cancel-s1');
@@ -246,11 +343,13 @@ void main() {
       );
 
       final firstStream = service
-          .stream(const InferenceRequest(sessionId: 'session-1', prompt: 'hello'))
+          .stream(
+              const InferenceRequest(sessionId: 'session-1', prompt: 'hello'))
           .toList();
       await Future<void>.delayed(const Duration(milliseconds: 10));
       final secondChunks = await service
-          .stream(const InferenceRequest(sessionId: 'session-2', prompt: 'world'))
+          .stream(
+              const InferenceRequest(sessionId: 'session-2', prompt: 'world'))
           .take(1)
           .toList();
       final firstChunks = await firstStream;
@@ -477,7 +576,8 @@ Top results:
       expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
 
-    test('offline local search tags never execute the web tool and recover locally',
+    test(
+        'offline local search tags never execute the web tool and recover locally',
         () async {
       final searchTool = _FakeWebSearchTool(
         const ToolResult(
