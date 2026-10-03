@@ -257,8 +257,9 @@ void main() {
       () async {
     RuntimeEventLog.instance.clear();
     final provider = _ScriptedProvider(<String>['bad', _singlePlan()]);
-    final original = 'START_GOAL ${'x' * 16000} END_GOAL';
-    final values = <String>['START_RULE ${'r' * 16000} END_RULE'];
+    final original =
+        'BUILD REPAIR ATTEMPT: 1\nSTART_GOAL ${'x' * 16000} END_GOAL';
+    final values = <String>['START_RULE ${'r' * 200} END_RULE'];
     final request = WorkshopRequest(
         id: 'bounded-input',
         title: 'title' * 1000,
@@ -290,6 +291,80 @@ void main() {
     expect(log, isNot(contains('END_RULE')));
   });
 
+  test('keeps every mandatory entry on both planner attempts', () async {
+    final provider = _ScriptedProvider(<String>['bad', _singlePlan()]);
+    final entries = <String>[
+      'a' * 300,
+      'Required middle entry: update lib/mandatory.dart',
+      'z' * 300,
+    ];
+    await _planner(provider).plan(
+        request: WorkshopRequest(
+          id: 'mandatory-input',
+          title: 'Scoped fix',
+          instruction: 'Fix the explicit scope.',
+          constraints: entries,
+          operation: WorkshopOperation.fix,
+        ),
+        requirements: entries);
+    for (final call in provider.requests) {
+      expect(call.prompt, contains('constraints: ${entries.join(' | ')}'));
+      expect(call.prompt, contains('requirements: ${entries.join(' | ')}'));
+    }
+  });
+
+  for (final field in <String>['requirements', 'constraints', 'instruction']) {
+    test(
+        'rejects oversized mandatory $field before inference instead of losing scope',
+        () async {
+      final provider = _ScriptedProvider(<String>[]);
+      final oversized = 'Required lib/mandatory.dart ${'x' * 3000}';
+      await expectLater(
+          _planner(provider).plan(
+              request: WorkshopRequest(
+                id: 'oversized-$field',
+                title: 'Large request',
+                instruction: field == 'instruction'
+                    ? oversized
+                    : 'Fix the explicit scope.',
+                constraints: field == 'constraints'
+                    ? <String>[oversized]
+                    : const <String>[],
+              ),
+              requirements: field == 'requirements'
+                  ? <String>[oversized]
+                  : const <String>[]),
+          throwsA(isA<FormatException>().having(
+              (e) => e.message, 'message', contains('split the request'))));
+      expect(provider.requests, isEmpty);
+    });
+  }
+
+  test('request allowlist may cover more paths than a single task', () async {
+    final paths = List<String>.generate(17, (i) => 'lib/f$i.dart');
+    final root = jsonDecode(_singlePlan(affectedPaths: paths.take(16).toList()))
+        as Map<String, dynamic>;
+    final tasks = root['tasks'] as List<dynamic>;
+    tasks.add(<String, dynamic>{
+      ...tasks.first as Map<String, dynamic>,
+      'id': 'remaining',
+      'affectedPaths': <String>[paths.last],
+      'dependsOn': <String>['implement']
+    });
+    final provider = _ScriptedProvider(<String>[jsonEncode(root)]);
+    final plan = await _planner(provider).plan(
+        request: WorkshopRequest(
+      id: 'many-targets',
+      title: 'Refactor',
+      instruction: 'Update every target.',
+      operation: WorkshopOperation.fix,
+      targetFiles: paths,
+    ));
+    expect(plan.tasks, hasLength(2));
+    expect(plan.tasks.expand((task) => task.affectedPaths).toList(), paths);
+    expect(provider.requests.single.prompt, contains(paths.join(', ')));
+  });
+
   test(
       'build repair uses bounded single-task planning through production controller',
       () async {
@@ -306,8 +381,8 @@ void main() {
     final failed = controller.startProduction(
         title: 'Manga Kids',
         instruction: 'Drawing app',
-        requirements: <String>['keep product behavior ' * 1000],
-        constraints: <String>['keep gates ' * 1000]);
+        requirements: <String>['keep product behavior ' * 10],
+        constraints: <String>['keep gates ' * 10]);
     final repair = const WorkshopBuildRepairPlanner().createRepairRequest(
       failedPlan: failed,
       repairNumber: 1,

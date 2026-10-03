@@ -24,7 +24,8 @@ void main() {
     );
   });
 
-  test('exports classified unsendable runtime object without exception text', () {
+  test('exports classified unsendable runtime object without exception text',
+      () {
     final line = publicLogProjection(
       '$time [LOCAL_RUNTIME_ERROR] '
       'stage=validation reason=unsendable_isolate_object '
@@ -361,6 +362,68 @@ void main() {
     expect(line, isNot(contains('private-execution')));
   });
 
+  test('exports Engineer prompt-budget recovery metrics without private IDs',
+      () {
+    final retry = publicLogProjection('$time [WORKSHOP_ENGINEER_RETRY] '
+        'request=private-request execution=private-execution attempt=2 '
+        'reason=prompt_budget terminal=failed');
+    final decoded = jsonDecode(retry!) as Map<String, dynamic>;
+    expect(decoded['reason'], 'prompt_budget');
+    expect(decoded['attempt'], 2);
+    expect(retry, isNot(contains('private')));
+    final prompt = publicLogProjection('$time [WORKSHOP_ENGINEER_PROMPT] '
+        'request=private-request compact=true chars=3300 workspace_files=1 '
+        'replaceable_targets=2 architect_chars=900');
+    final metrics = jsonDecode(prompt!) as Map<String, dynamic>;
+    expect(metrics['replaceable_targets'], 2);
+    expect(metrics['architect_chars'], 900);
+    expect(prompt, isNot(contains('private')));
+    expect(
+        publicLogProjection('$time [WORKSHOP_ENGINEER_RETRY] '
+            'request=req attempt=2 reason=prompt_budget terminal=failed prompt=private'),
+        isNull);
+  });
+
+  test('exports only closed planner metrics and JSON recovery categories', () {
+    const events = <String, Map<String, Object>>{
+      '[WORKSHOP_PLANNER_PROMPT] attempt=2 build_repair=true chars=3210':
+          <String, Object>{'attempt': 2, 'build_repair': true, 'chars': 3210},
+      '[WORKSHOP_PLANNER_OUTPUT] attempt=2 terminal=success chars=512':
+          <String, Object>{'attempt': 2, 'terminal': 'success', 'chars': 512},
+      '[WORKSHOP_PLANNER_JSON] recovery=trailing_comma': <String, Object>{
+        'recovery': 'trailing_comma'
+      },
+      '[WORKSHOP_PLANNER_JSON] recovery=single_object': <String, Object>{
+        'recovery': 'single_object'
+      },
+      '[WORKSHOP_PLANNER_JSON] rejected=ambiguous_objects': <String, Object>{
+        'rejected': 'ambiguous_objects'
+      },
+      '[WORKSHOP_PLANNER_JSON] rejected=incomplete_json': <String, Object>{
+        'rejected': 'incomplete_json'
+      },
+      '[WORKSHOP_PLANNER_JSON] rejected=invalid_json': <String, Object>{
+        'rejected': 'invalid_json'
+      },
+    };
+    for (final entry in events.entries) {
+      final projected = publicLogProjection('$time ${entry.key}');
+      final decoded = jsonDecode(projected!) as Map<String, dynamic>;
+      for (final field in entry.value.entries) {
+        expect(decoded[field.key], field.value);
+      }
+      expect(publicLogProjection('$time ${entry.key} raw=private'), isNull);
+    }
+    for (final payload in <String>[
+      '[WORKSHOP_PLANNER_PROMPT] attempt=3 build_repair=true chars=200',
+      '[WORKSHOP_PLANNER_OUTPUT] attempt=2 terminal=private chars=20',
+      '[WORKSHOP_PLANNER_JSON] recovery=private',
+      '[WORKSHOP_PLANNER_JSON] rejected=invalid_json\nprivate output',
+    ]) {
+      expect(publicLogProjection('$time $payload'), isNull);
+    }
+  });
+
   test('exports bounded Reviewer and Validation telemetry', () {
     final reviewPrompt = publicLogProjection(
       '$time [WORKSHOP_REVIEW_PROMPT] compact=false chars=2150 '
@@ -465,9 +528,11 @@ void main() {
   });
 
   test('exports only closed TTS failure reasons', () {
-    final known = publicLogProjection('$time [VOICE_ENGINE] [TTS_FAIL] reason=non_finite_pcm');
+    final known = publicLogProjection(
+        '$time [VOICE_ENGINE] [TTS_FAIL] reason=non_finite_pcm');
     expect(jsonDecode(known!)['error'], 'non_finite_pcm');
-    final private = publicLogProjection('$time [VOICE_ENGINE] [TTS_FAIL] reason=private-secret');
+    final private = publicLogProjection(
+        '$time [VOICE_ENGINE] [TTS_FAIL] reason=private-secret');
     expect(private, isNot(contains('private-secret')));
   });
 }

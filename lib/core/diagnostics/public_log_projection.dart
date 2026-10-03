@@ -5,8 +5,8 @@ import 'package:ai_orchestrator/core/diagnostics/local_model_benchmark_public_pr
 /// Public export is a projection, never a redacted copy of arbitrary text.
 /// Unknown tags and all free-form payloads are discarded.
 String? publicLogProjection(String line) {
-  final timestamp = RegExp(r'^\[(\d{4}-\d\d-\d\dT[\d:.+Z-]+)\]')
-      .firstMatch(line);
+  final timestamp =
+      RegExp(r'^\[(\d{4}-\d\d-\d\dT[\d:.+Z-]+)\]').firstMatch(line);
   if (timestamp == null) return null;
   const events = <String>{
     'VOICE_ICON_TAP',
@@ -71,6 +71,9 @@ String? publicLogProjection(String line) {
     'MODEL_DOWNLOAD_FAILED',
     'WORKSHOP_ENGINEER_PROMPT',
     'WORKSHOP_ENGINEER_RETRY',
+    'WORKSHOP_PLANNER_PROMPT',
+    'WORKSHOP_PLANNER_OUTPUT',
+    'WORKSHOP_PLANNER_JSON',
     'WORKSHOP_REVIEW_PROMPT',
     'WORKSHOP_REVIEW_RETRY',
     'WORKSHOP_REVIEW_VERDICT',
@@ -241,7 +244,8 @@ String? publicLogProjection(String line) {
     final m = RegExp(
       r'^request=[A-Za-z0-9._:-]{1,120} '
       r'compact=(true|false) chars=(\d{1,9}) '
-      r'workspace_files=(\d{1,6}) architect_chars=(\d{1,9})$',
+      r'workspace_files=(\d{1,6}) '
+      r'(?:replaceable_targets=(\d{1,6}) )?architect_chars=(\d{1,9})$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
@@ -250,7 +254,8 @@ String? publicLogProjection(String line) {
       'compact': m[1] == 'true',
       'chars': int.parse(m[2]!),
       'workspace_files': int.parse(m[3]!),
-      'architect_chars': int.parse(m[4]!),
+      if (m[4] != null) 'replaceable_targets': int.parse(m[4]!),
+      'architect_chars': int.parse(m[5]!),
     });
   }
 
@@ -259,7 +264,7 @@ String? publicLogProjection(String line) {
       r'^request=[A-Za-z0-9._:-]{1,120} '
       r'(?:execution=[A-Za-z0-9._:-]{1,120} )?'
       r'attempt=(\d{1,3}) '
-      r'(?:reason=(runtime|malformed_output|memory_pressure) )?'
+      r'(?:reason=(runtime|malformed_output|memory_pressure|prompt_budget) )?'
       r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none)'
       r'(?: chars=(\d{1,9}))?$',
     ).firstMatch(rest);
@@ -271,6 +276,49 @@ String? publicLogProjection(String line) {
       if (m[2] != null) 'reason': m[2]!,
       'terminal': m[3]!,
       if (m[4] != null) 'chars': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_PLANNER_PROMPT') {
+    final m = RegExp(
+      r'^attempt=(1|2) build_repair=(true|false) chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'attempt': int.parse(m[1]!),
+      'build_repair': m[2] == 'true',
+      'chars': int.parse(m[3]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_PLANNER_OUTPUT') {
+    final m = RegExp(
+      r'^attempt=(1|2) terminal=(success|timeout|failed|cancelled|modelUnavailable|none) '
+      r'chars=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'attempt': int.parse(m[1]!),
+      'terminal': m[2]!,
+      'chars': int.parse(m[3]!),
+    });
+  }
+
+  if (event == 'WORKSHOP_PLANNER_JSON') {
+    final m = RegExp(
+      r'^(?:recovery=(trailing_comma|single_object)|'
+      r'rejected=(ambiguous_objects|incomplete_json|invalid_json))$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      if (m[1] != null) 'recovery': m[1]!,
+      if (m[2] != null) 'rejected': m[2]!,
     });
   }
 
@@ -445,10 +493,16 @@ String? publicLogProjection(String line) {
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode({
-      'time': timestamp[1]!, 'event': event, 'model': m[1]!, 'mode': m[2]!,
-      'attempt': int.parse(m[3]!), 'first_content_ms': int.parse(m[4]!),
-      'total_ms': int.parse(m[5]!), 'reported_tokens': int.parse(m[6]!),
-      'text_chunks': int.parse(m[7]!), 'outcome': m[8]!,
+      'time': timestamp[1]!,
+      'event': event,
+      'model': m[1]!,
+      'mode': m[2]!,
+      'attempt': int.parse(m[3]!),
+      'first_content_ms': int.parse(m[4]!),
+      'total_ms': int.parse(m[5]!),
+      'reported_tokens': int.parse(m[6]!),
+      'text_chunks': int.parse(m[7]!),
+      'outcome': m[8]!,
     });
   }
   if (event == 'RESOURCE_SAMPLE') {
