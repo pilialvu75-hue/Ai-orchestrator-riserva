@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
@@ -100,10 +101,12 @@ final class WorkshopTaskInferencePipeline {
   /// Continues an already prepared task from the authoritative semantic state
   /// supplied by the Cantiere.
   ///
-  /// Only the Engineer stage consumes the resume context and execution
-  /// identity. Review and validation keep their existing contracts and inspect
-  /// the proposal staged into the same WorkspaceSession. No second workspace,
-  /// task state or provider-owned conversation is created here.
+  /// A failed attempt can already have staged a complete Engineer proposal.
+  /// In that case [WorkspaceSession.status] is `review` (or `validation` if the
+  /// review gate had already approved). Re-entering Engineer would both violate
+  /// its ready/working precondition and needlessly rewrite a staged proposal.
+  /// Resume those authoritative gate states in place instead. Only ready or
+  /// working sessions re-enter Engineer with the durable execution identity.
   Future<WorkshopTaskInferenceResult> runWithResumeContext({
     required WorkspaceSession session,
     required WorkshopResumeContext resumeContext,
@@ -112,6 +115,17 @@ final class WorkshopTaskInferencePipeline {
     CancellationToken? cancellationToken,
     void Function(WorkshopStage stage)? onStage,
   }) async {
+    if (session.status == WorkspaceSessionStatus.review ||
+        session.status == WorkspaceSessionStatus.validation) {
+      return _resumeStagedGateState(
+        session: session,
+        preflight: preflight,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+        onStage: onStage,
+      );
+    }
+
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
     onStage?.call(WorkshopStage.implementation);
@@ -132,6 +146,94 @@ final class WorkshopTaskInferencePipeline {
       isOffline: isOffline,
       cancellationToken: cancellationToken,
       onStage: onStage,
+    );
+  }
+
+  /// Resumes only the gate that was interrupted after Engineer staging.
+  ///
+  /// The original Engineer proposal object is not persisted separately from the
+  /// VirtualWorkspace on this pre-checkpoint failure path, so reconstruct a
+  /// side-effect-free proposal view from the authoritative staged diff. This is
+  /// sufficient for the result/checkpoint contract and never mutates the real
+  /// workspace. We intentionally do not launch an automatic Engineer revision
+  /// from this recovered gate path: the exact pre-Engineer revision baseline is
+  /// no longer available, and guessing it could discard certified/reused staged
+  /// changes. An explicit gate rejection therefore remains authoritative.
+  Future<WorkshopTaskInferenceResult> _resumeStagedGateState({
+    required WorkspaceSession session,
+    WorkshopPreflightInferenceResult? preflight,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
+  }) async {
+    final proposal = _proposalFromCurrentDiff(session);
+    final implementationPlan = preflight?.architecture?.text;
+
+    late final WorkshopReviewVerdict review;
+    if (session.status == WorkspaceSessionStatus.review) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_RESUME] request=${session.context.request.id} '
+        'phase=review files=${proposal.changes.length}',
+      );
+      onStage?.call(WorkshopStage.review);
+      review = await _reviewRunner.run(
+        session: session,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+      if (!review.approved) {
+        return WorkshopTaskInferenceResult(
+          proposal: proposal,
+          review: review,
+        );
+      }
+    } else {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_RESUME] request=${session.context.request.id} '
+        'phase=validation files=${proposal.changes.length}',
+      );
+      review = const WorkshopReviewVerdict(
+        approved: true,
+        summary: 'Review approval preserved by WorkspaceSession validation state.',
+      );
+    }
+
+    onStage?.call(WorkshopStage.validation);
+    final validation = await _validationRunner.run(
+      session: session,
+      implementationPlan: implementationPlan,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+
+    return WorkshopTaskInferenceResult(
+      proposal: proposal,
+      review: review,
+      validation: validation,
+    );
+  }
+
+  static WorkshopChangeProposal _proposalFromCurrentDiff(
+    WorkspaceSession session,
+  ) {
+    final diff = WorkspaceDiff.compare(
+      before: session.workspace.originalSnapshot,
+      after: session.workspace.snapshot,
+    );
+    if (diff.isEmpty) {
+      throw StateError(
+        'Workshop gate resume requires staged workspace changes.',
+      );
+    }
+
+    return WorkshopChangeProposal(
+      requestId: session.context.request.id,
+      explanation: 'Recovered staged proposal for gate-only retry.',
+      changes: List<WorkspaceFileChange>.unmodifiable(diff.changes),
+      validationNotes: const <String>[
+        'Proposal reconstructed from authoritative VirtualWorkspace diff.',
+      ],
     );
   }
 
