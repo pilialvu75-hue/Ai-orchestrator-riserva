@@ -1,1 +1,181 @@
-placeholder
+name: Publish macOS High Sierra Legacy Release
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/macos-high-sierra-release.yml'
+      - 'legacy_macos/**'
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+  push:
+    branches:
+      - main
+    paths:
+      - 'legacy_macos/**'
+      - 'native/macos_legacy/**'
+      - 'third_party/llama.cpp'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-high-sierra-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-publisher:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Validate legacy publisher contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f legacy_macos/Info.plist
+          test -f legacy_macos/build_app.sh
+          test -f native/macos_legacy/build_llama_cli.sh
+          command -v gh >/dev/null
+          command -v ditto >/dev/null
+          command -v shasum >/dev/null
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' legacy_macos/Info.plist)"
+          build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' legacy_macos/Info.plist)"
+          [[ "$short_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$build_version" =~ ^[0-9]+$ ]]
+          grep -q 'AI-Orchestrator-High-Sierra-x86_64.zip' .github/workflows/macos-high-sierra-release.yml
+          echo "Legacy release publisher contract valid for ${short_version} (${build_version})."
+
+  publish-legacy:
+    if: github.event_name == 'push'
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve legacy release identity
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' legacy_macos/Info.plist)"
+          build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' legacy_macos/Info.plist)"
+          [[ "$short_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$build_version" =~ ^[0-9]+$ ]]
+          tag="macos-legacy-v${short_version}-${build_version}"
+          echo "short_version=$short_version" >> "$GITHUB_OUTPUT"
+          echo "build_version=$build_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Publishing High Sierra legacy release $tag from $GITHUB_SHA"
+
+      - name: Build High Sierra CPU-only llama runtime
+        run: bash native/macos_legacy/build_llama_cli.sh
+
+      - name: Inspect runtime compatibility contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="$PWD/build/llama-macos-high-sierra/bin/llama-cli"
+          test -x "$helper"
+          test "$(lipo -archs "$helper")" = "x86_64"
+          deps="$(otool -L "$helper" | awk '/^\t/{print}')"
+          if grep -Eq '/(opt/homebrew|usr/local|Users|private|Volumes)/' <<<"$deps"; then
+            echo "Non-portable dependency in legacy helper" >&2
+            printf '%s\n' "$deps" >&2
+            exit 1
+          fi
+
+      - name: Build lightweight High Sierra app
+        run: bash legacy_macos/build_app.sh
+
+      - name: Verify packaged app contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$PWD/build/macos-high-sierra-app/AI Orchestrator Legacy.app"
+          executable="$app/Contents/MacOS/AI Orchestrator Legacy"
+          helper="$app/Contents/Resources/llama-cli"
+          test -d "$app"
+          test "$(lipo -archs "$executable")" = "x86_64"
+          test "$(lipo -archs "$helper")" = "x86_64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = "10.13"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = '${{ steps.version.outputs.short_version }}'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = '${{ steps.version.outputs.build_version }}'
+          codesign --verify --deep --strict "$app"
+          "$executable" --self-test
+
+      - name: Package permanent release asset
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$PWD/build/macos-high-sierra-release"
+          mkdir -p "$output"
+          zip="$output/AI-Orchestrator-High-Sierra-x86_64.zip"
+          digest="$zip.sha256"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$PWD/build/macos-high-sierra-app/AI Orchestrator Legacy.app" \
+            "$zip"
+          shasum -a 256 "$zip" > "$digest"
+          test -s "$zip"
+          test -s "$digest"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update permanent GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          zip='${{ steps.package.outputs.zip }}'
+          digest='${{ steps.package.outputs.digest }}'
+          title="AI Orchestrator Legacy ${{ steps.version.outputs.short_version }} (${{ steps.version.outputs.build_version }}) — macOS High Sierra"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$zip" "$digest" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "$zip" "$digest" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "Native AppKit build for macOS High Sierra 10.13 on Intel x86_64. CPU-only legacy runtime. Includes SHA-256 sidecar. This is the permanent Legacy update channel; it is intentionally separate from the modern macOS release line." \
+              --latest=false
+          fi
+
+      - name: Verify permanent release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          grep -Fxq 'AI-Orchestrator-High-Sierra-x86_64.zip' <<<"$assets"
+          grep -Fxq 'AI-Orchestrator-High-Sierra-x86_64.zip.sha256' <<<"$assets"
+          echo "Permanent Legacy release ready: $tag"
+
+      - name: Preserve CI copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Orchestrator-High-Sierra-release-${{ steps.version.outputs.short_version }}-${{ steps.version.outputs.build_version }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.digest }}
+          if-no-files-found: error
+          retention-days: 14
