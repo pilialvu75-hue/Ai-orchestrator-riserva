@@ -173,6 +173,24 @@ class ModelDownloadService {
     ];
   }
 
+  /// Win7 diagnostic only: parses persisted custom/imported model metadata.
+  /// It performs no file refresh/validation and no network work.
+  Future<int> diagnosticParseStoredModelEntries() async {
+    final custom = await loadCustomModelEntries();
+    final imported = await loadImportedModelEntries();
+    return custom.length + imported.length;
+  }
+
+  /// Win7 diagnostic only: extends persisted metadata parsing through refresh
+  /// and validation of custom/imported model paths. It performs no network work.
+  Future<int> diagnosticRefreshStoredModelEntries() async {
+    final custom = await loadCustomModelEntries();
+    final imported = await loadImportedModelEntries();
+    final refreshedCustom = await Future.wait(custom.map(_refreshStoredModel));
+    final refreshedImported = await Future.wait(imported.map(_refreshStoredModel));
+    return refreshedCustom.length + refreshedImported.length;
+  }
+
   // ── Download ───────────────────────────────────────────────────────────────
 
   /// Downloads [model] using resumable `.part` storage.

@@ -10,7 +10,9 @@ import 'package:ai_orchestrator/app/desktop/desktop_workspace_scope.dart';
 /// New Cantiere conversations requested from a desktop workspace open in a new
 /// tab instead of replacing the current project.
 class DesktopAppShell extends StatefulWidget {
-  const DesktopAppShell({super.key});
+  const DesktopAppShell({super.key, this.enableStartupServices = true});
+
+  final bool enableStartupServices;
 
   @override
   State<DesktopAppShell> createState() => _DesktopAppShellState();
@@ -250,6 +252,7 @@ class _DesktopAppShellState extends State<DesktopAppShell> {
                             settings: const RouteSettings(name: 'home'),
                             builder: (_) => AppShell(
                               openWorkshopOnStart: workspace.startInWorkshop,
+                              enableStartupServices: widget.enableStartupServices,
                             ),
                           ),
                         ),
