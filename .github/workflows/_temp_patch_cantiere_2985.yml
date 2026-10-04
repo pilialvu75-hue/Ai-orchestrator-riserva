@@ -12,172 +12,22 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: cantiere/build-repair-oversized-target-2985
           fetch-depth: 0
-      - name: Apply minimal build-repair patch
+      - name: Apply bounded patch
+        run: python3 .github/temp_patch_cantiere_2985.py
+      - name: Commit patched files and remove temporary patch tooling
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          runner = Path('lib/app_factory/workshop/workshop_proposal_implementation_runner.dart')
-          text = runner.read_text()
-
-          def replace_once(old, new):
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'runner anchor count {count}, expected 1: {old[:80]!r}')
-              text = text.replace(old, new, 1)
-
-          replace_once(
-              '  static const int _retryWorkspaceChars = 900;\n',
-              '  static const int _retryWorkspaceChars = 900;\n'
-              '  static const int _buildRepairTargetChars = 6400;\n',
-          )
-
-          replace_once(
-              "    final feedback = _boundedText(\n"
-              "      revisionFeedback ?? '',\n"
-              "      compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,\n"
-              "    );\n"
-              "    final workspaceSelection = _selectWorkspaceFiles(\n"
-              "      snapshot: snapshot,\n"
-              "      targetFiles: request.targetFiles,\n"
-              "      maxChars: compact ? _retryWorkspaceChars : _primaryWorkspaceChars,\n"
-              "      allowOversizedTargetReplacement:\n"
-              "          request.operation == WorkshopOperation.create,\n"
-              "    );\n",
-              "    final feedback = _boundedText(\n"
-              "      revisionFeedback ?? '',\n"
-              "      compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,\n"
-              "    );\n"
-              "    final boundedBuildRepair = _isBoundedBuildRepair(request);\n"
-              "    final workspaceSelection = _selectWorkspaceFiles(\n"
-              "      snapshot: snapshot,\n"
-              "      targetFiles: request.targetFiles,\n"
-              "      maxChars: compact ? _retryWorkspaceChars : _primaryWorkspaceChars,\n"
-              "      allowOversizedTargetReplacement:\n"
-              "          request.operation == WorkshopOperation.create,\n"
-              "      oversizedTargetReadLimit:\n"
-              "          boundedBuildRepair ? _buildRepairTargetChars : null,\n"
-              "    );\n",
-          )
-
-          replace_once(
-              "    required int maxChars,\n"
-              "    required bool allowOversizedTargetReplacement,\n"
-              "  }) {\n",
-              "    required int maxChars,\n"
-              "    required bool allowOversizedTargetReplacement,\n"
-              "    int? oversizedTargetReadLimit,\n"
-              "  }) {\n",
-          )
-
-          replace_once(
-              "      if (content.length > maxChars && targetFiles.contains(path)) {\n"
-              "        if (allowOversizedTargetReplacement) {\n"
-              "          replaceableTargets.add(path);\n"
-              "          continue;\n"
-              "        }\n"
-              "        throw StateError(\n"
-              "          'Workshop Engineer target file \"$path\" exceeds the local prompt '\n"
-              "          'budget; split the task before implementation.',\n"
-              "        );\n"
-              "      }\n",
-              "      if (content.length > maxChars && targetFiles.contains(path)) {\n"
-              "        if (allowOversizedTargetReplacement) {\n"
-              "          replaceableTargets.add(path);\n"
-              "          continue;\n"
-              "        }\n"
-              "        final readLimit = oversizedTargetReadLimit;\n"
-              "        if (readLimit != null && content.length <= readLimit) {\n"
-              "          selected[path] = content;\n"
-              "          used += cost;\n"
-              "          continue;\n"
-              "        }\n"
-              "        throw StateError(\n"
-              "          'Workshop Engineer target file \"$path\" exceeds the local prompt '\n"
-              "          'budget; split the task before implementation.',\n"
-              "        );\n"
-              "      }\n",
-          )
-
-          replace_once(
-              "  static Map<String, Object?> _compactResumeMetadata(\n",
-              "  static bool _isBoundedBuildRepair(WorkshopRequest request) {\n"
-              "    if (request.operation != WorkshopOperation.fix ||\n"
-              "        request.targetFiles.length != 1) {\n"
-              "      return false;\n"
-              "    }\n"
-              "\n"
-              "    return request.title == 'Correzione build mirata' ||\n"
-              "        request.instruction\n"
-              "            .toUpperCase()\n"
-              "            .startsWith('BUILD REPAIR ATTEMPT:');\n"
-              "  }\n"
-              "\n"
-              "  static Map<String, Object?> _compactResumeMetadata(\n",
-          )
-
-          runner.write_text(text)
-
-          test_file = Path('test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart')
-          tests = test_file.read_text()
-          marker = "    test('out-of-scope create file retries inside hard target allowlist',\n"
-          if tests.count(marker) != 1:
-              raise SystemExit(f'test marker count {tests.count(marker)}, expected 1')
-          regression = r'''    test('bounded build repair reads one oversized target without blind replacement',
-        () async {
-      final engineer = _StaticGateway(
-        result: const WorkshopInferenceResult(
-          text:
-              '{"summary":"Repair main","explanation":"Preserve existing app while fixing build","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}],"validationNotes":[],"warnings":[]}',
-          terminalState: InferenceTerminalState.success,
-          model: 'engineer-model',
-        ),
-      );
-      final oversizedMain = '${List<String>.filled(2600, 'x').join()}BUILD_REPAIR_TAIL';
-      final workspaceGateway = _RecordingWorkspaceGateway(
-        files: <String, String>{'lib/main.dart': oversizedMain},
-      );
-      final session = WorkspaceSession(
-        request: const WorkshopRequest(
-          id: 'bounded-build-repair-oversized-target',
-          title: 'Correzione build mirata',
-          instruction: 'BUILD REPAIR ATTEMPT: repair the existing entry point.',
-          operation: WorkshopOperation.fix,
-          targetFiles: <String>['lib/main.dart'],
-        ),
-        gateway: workspaceGateway,
-      );
-      await session.initialize();
-
-      final proposal = await WorkshopProposalImplementationRunner(
-        inference: _stageInference(_gateways(engineer)),
-      ).run(session: session);
-
-      expect(proposal.changes.single.path, 'lib/main.dart');
-      expect(engineer.calls, 1);
-      expect(engineer.lastPrompt, contains('BUILD_REPAIR_TAIL'));
-      expect(engineer.lastPrompt, isNot(contains('"replaceableTargets":[')));
-      expect(workspaceGateway.writeCalls, 0);
-    });
-
-'''
-          tests = tests.replace(marker, regression + marker, 1)
-          test_file.write_text(tests)
-          PY
-
           git diff --check
           git diff --stat
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add lib/app_factory/workshop/workshop_proposal_implementation_runner.dart test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart
+          git rm .github/temp_patch_cantiere_2985.py .github/workflows/_temp_patch_cantiere_2985.yml
           git commit -m 'fix(cantiere): read bounded oversized target during build repair'
           git push origin HEAD:cantiere/build-repair-oversized-target-2985
