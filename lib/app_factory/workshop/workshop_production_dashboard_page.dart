@@ -92,8 +92,7 @@ class _WorkshopProductionDashboardPageState
   void _onLifecycleChanged() {
     if (!mounted) return;
     setState(() {
-      _buildResult =
-          widget.bundle.dashboardController.state.lastBuildResult;
+      _buildResult = widget.bundle.dashboardController.state.lastBuildResult;
     });
     _scheduleAutoAdvance();
   }
@@ -167,8 +166,8 @@ class _WorkshopProductionDashboardPageState
         final summary = rawSummary == null || rawSummary.isEmpty
             ? null
             : rawSummary.length <= 240
-                ? rawSummary
-                : '${rawSummary.substring(0, 240)}…';
+            ? rawSummary
+            : '${rawSummary.substring(0, 240)}…';
         setState(() {
           _error = summary == null
               ? 'Il task è stato elaborato ma non ha superato la revisione.'
@@ -238,29 +237,39 @@ class _WorkshopProductionDashboardPageState
                 children: <Widget>[
                   Text('Reviewer: ${result.review.summary}'),
                   const SizedBox(height: 8),
-                  Text('Validazione: ${validation?.summary ?? 'non disponibile'}'),
+                  Text(
+                    'Validazione: ${validation?.summary ?? 'non disponibile'}',
+                  ),
                   const SizedBox(height: 16),
-                  Text('File modificati (${files.length})',
-                      style: Theme.of(dialogContext).textTheme.titleSmall),
+                  Text(
+                    'File modificati (${files.length})',
+                    style: Theme.of(dialogContext).textTheme.titleSmall,
+                  ),
                   const SizedBox(height: 8),
                   if (files.isEmpty)
                     const Text('Nessuna modifica staged.')
                   else
-                    ...files.map((file) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text('${file.changeType.name}: ${file.path}'),
-                        )),
+                    ...files.map(
+                      (file) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text('${file.changeType.name}: ${file.path}'),
+                      ),
+                    ),
                   if (result.review.findings.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 12),
-                    Text('Osservazioni Reviewer',
-                        style: Theme.of(dialogContext).textTheme.titleSmall),
+                    Text(
+                      'Osservazioni Reviewer',
+                      style: Theme.of(dialogContext).textTheme.titleSmall,
+                    ),
                     ...result.review.findings.map(Text.new),
                   ],
                   if (result.review.warnings.isNotEmpty ||
                       (validation?.warnings.isNotEmpty ?? false)) ...<Widget>[
                     const SizedBox(height: 12),
-                    Text('Avvisi',
-                        style: Theme.of(dialogContext).textTheme.titleSmall),
+                    Text(
+                      'Avvisi',
+                      style: Theme.of(dialogContext).textTheme.titleSmall,
+                    ),
                     ...result.review.warnings.map(Text.new),
                     ...?validation?.warnings.map(Text.new),
                   ],
@@ -274,13 +283,14 @@ class _WorkshopProductionDashboardPageState
               child: const Text('Chiudi'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(dialogContext)
-                  .pop(WorkshopApplyDecision.reject),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(WorkshopApplyDecision.reject),
               child: const Text('Rifiuta'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext)
-                  .pop(WorkshopApplyDecision.approve),
+              onPressed: () =>
+                  Navigator.of(dialogContext)
+                      .pop(WorkshopApplyDecision.approve),
               child: const Text('Approva e continua'),
             ),
           ],
@@ -298,7 +308,9 @@ class _WorkshopProductionDashboardPageState
       await _applyApprovedTask();
     } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Decisione sulle modifiche non riuscita: $error');
+        setState(
+          () => _error = 'Decisione sulle modifiche non riuscita: $error',
+        );
       }
     }
   }
@@ -323,18 +335,20 @@ class _WorkshopProductionDashboardPageState
       widget.executionController.resetForNextTask();
 
       if (!_projectReadyForBuild) {
-        final session = await widget.bundle.dashboardController.prepareNextTask();
+        final session = await widget.bundle.dashboardController
+            .prepareNextTask();
         if (!mounted) return;
         if (session == null && !_projectReadyForBuild) {
           setState(() {
-            _error =
-                'Il progetto non è completo e non esiste un altro task eseguibile.';
+            _error = 'Il progetto non è completo e non esiste un altro task eseguibile.';
           });
         }
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Applicazione delle modifiche non riuscita: $error');
+        setState(
+          () => _error = 'Applicazione delle modifiche non riuscita: $error',
+        );
       }
     } finally {
       if (mounted) {
@@ -389,6 +403,57 @@ class _WorkshopProductionDashboardPageState
         });
       }
       return false;
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
+  Future<void> _deleteSavedProject(WorkshopSavedProjectSummary project) async {
+    final recovery = widget.recoveryCoordinator;
+    if (recovery == null || _mutationBusy) {
+      return;
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      final dashboardController = widget.bundle.dashboardController;
+      final activeProjectId = dashboardController.state.projectId?.trim();
+      if (activeProjectId == project.projectId) {
+        await widget.executionController.cancelAndWait();
+        await widget.executionController.abandonCurrentExecution();
+        if (widget.executionController.state.status !=
+            WorkshopProductionExecutionStatus.idle) {
+          widget.executionController.reset();
+        }
+        dashboardController.forgetProduction();
+        widget.executionController.clearBuildRepairChain();
+      }
+
+      await recovery.removeProject(project.projectId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _buildResult = null;
+        _error = null;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Progetto “${project.title}” eliminato.')),
+        );
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Eliminazione del progetto non riuscita: $error';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() => _mutationBusy = false);
@@ -463,7 +528,19 @@ class _WorkshopProductionDashboardPageState
                   subtitle: Text(
                     '${project.status.name} · $percent% · $updatedLabel',
                   ),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      IconButton(
+                        tooltip: 'Elimina progetto',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () =>
+                            Navigator.of(sheetContext)
+                                .pop('delete:${project.projectId}'),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
                   onTap: () =>
                       Navigator.of(sheetContext).pop(project.projectId),
                 ),
@@ -475,6 +552,45 @@ class _WorkshopProductionDashboardPageState
     );
 
     if (selectedProjectId == null || !mounted) {
+      return;
+    }
+
+    const deletePrefix = 'delete:';
+    if (selectedProjectId.startsWith(deletePrefix)) {
+      final projectId = selectedProjectId.substring(deletePrefix.length);
+      WorkshopSavedProjectSummary? selectedProject;
+      for (final candidate in projects) {
+        if (candidate.projectId == projectId) {
+          selectedProject = candidate;
+          break;
+        }
+      }
+      if (selectedProject == null) {
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Elimina progetto'),
+          content: Text(
+            'Eliminare definitivamente “${selectedProject!.title}”? '
+            'Il progetto salvato non potrà essere ripreso.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Annulla'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Elimina'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && mounted) {
+        await _deleteSavedProject(selectedProject);
+      }
       return;
     }
 
@@ -590,11 +706,13 @@ class _WorkshopProductionDashboardPageState
 
       if (assessment.isRepairable) {
         final rootProjectId =
-            widget.executionController.buildRepairRootProjectId ?? failedPlan.id;
-        final reservation = widget.executionController.reserveBuildRepairAttempt(
-          rootProjectId: rootProjectId,
-          failureSignature: planner.failureSignature(result),
-        );
+            widget.executionController.buildRepairRootProjectId ??
+            failedPlan.id;
+        final reservation = widget.executionController
+            .reserveBuildRepairAttempt(
+              rootProjectId: rootProjectId,
+              failureSignature: planner.failureSignature(result),
+            );
 
         if (reservation == WorkshopBuildRepairReservation.repeatedFailure) {
           setState(() {
@@ -656,11 +774,13 @@ class _WorkshopProductionDashboardPageState
         _error = assessment.disposition == WorkshopBuildDisposition.cancelled
             ? 'Build finale annullata.'
             : 'Build finale non riparabile automaticamente: '
-                '${assessment.reason ?? result.message ?? result.status.name}';
+                  '${assessment.reason ?? result.message ?? result.status.name}';
       });
     } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Build finale del progetto non riuscita: $error');
+        setState(
+          () => _error = 'Build finale del progetto non riuscita: $error',
+        );
       }
     } finally {
       if (mounted) {
@@ -685,12 +805,11 @@ class _WorkshopProductionDashboardPageState
     });
 
     try {
-      final title =
-          widget.bundle.dashboardController.state.projectTitle?.trim();
+      final title = widget.bundle.dashboardController.state.projectTitle
+          ?.trim();
       final shared = await _androidIntentHandler.shareApk(
         artifactPath,
-        displayName:
-            title == null || title.isEmpty ? 'cantiere-app' : title,
+        displayName: title == null || title.isEmpty ? 'cantiere-app' : title,
       );
       final shareError = shared.fold<String?>(
         (failure) => failure.toString(),
@@ -756,10 +875,7 @@ class _WorkshopProductionDashboardPageState
       }
 
       final opened = await _androidIntentHandler.openApkInstaller(artifactPath);
-      final didOpen = opened.fold<bool>(
-        (_) => false,
-        (value) => value,
-      );
+      final didOpen = opened.fold<bool>((_) => false, (value) => value);
       final installError = opened.fold<String?>(
         (failure) => failure.toString(),
         (value) => value
@@ -788,8 +904,7 @@ class _WorkshopProductionDashboardPageState
     final receipt = store.loadLatest();
     if (!mounted || receipt == null) return;
 
-    final projectId =
-        widget.bundle.dashboardController.state.projectId?.trim();
+    final projectId = widget.bundle.dashboardController.state.projectId?.trim();
     if (projectId == null ||
         projectId.isEmpty ||
         receipt.projectId != projectId) {
@@ -800,15 +915,13 @@ class _WorkshopProductionDashboardPageState
       _acceptanceReceipt = receipt;
       _installAttempted = receipt.installAttempted;
       _installerOpened = receipt.installerOpened;
-      if (receipt.failureStage ==
-          WorkshopDeviceAcceptanceFailureStage.build) {
+      if (receipt.failureStage == WorkshopDeviceAcceptanceFailureStage.build) {
         _apkInstallationVerificationPassed = false;
       }
     });
   }
 
-  Future<WorkshopDeviceAcceptanceReceipt>
-      _createDeviceAcceptanceReceipt({
+  Future<WorkshopDeviceAcceptanceReceipt> _createDeviceAcceptanceReceipt({
     required bool? generatedAppOpened,
   }) async {
     final dashboard = widget.bundle.dashboardController.state;
@@ -816,13 +929,13 @@ class _WorkshopProductionDashboardPageState
     final inference = _currentInferenceResult;
     final build = _buildResult;
     final packageInfo = await PackageInfo.fromPlatform();
-    final hostVersion =
-        '${packageInfo.version}+${packageInfo.buildNumber}';
+    final hostVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
     final artifactSha = await WorkshopArtifactDigest.sha256File(
       build?.artifactPath,
     );
     final plan = _activePlan;
-    final completedProject = plan != null &&
+    final completedProject =
+        plan != null &&
         plan.tasks.isNotEmpty &&
         plan.tasks.every((task) => task.completed);
 
@@ -831,8 +944,8 @@ class _WorkshopProductionDashboardPageState
       executionError: execution.error,
       inferenceResult: inference,
       buildResult: build,
-      buildVerified: _hasVerifiedArtifact &&
-          _apkInstallationVerificationPassed != false,
+      buildVerified:
+          _hasVerifiedArtifact && _apkInstallationVerificationPassed != false,
       installAttempted: _installAttempted,
       installerOpened: _installerOpened,
       generatedAppOpened: generatedAppOpened,
@@ -847,15 +960,11 @@ class _WorkshopProductionDashboardPageState
       platform: defaultTargetPlatform.name,
       projectId: dashboard.projectId?.trim() ?? '',
       requestId: dashboard.requestId?.trim() ?? '',
-      modelAssignments: Map<String, String>.unmodifiable(
-        <String, String>{
-          for (final assignment in widget.modelAssignments)
-            assignment.role.id: assignment.modelId,
-        },
-      ),
-      promptSha256: WorkshopAcceptanceFingerprint.sha256Text(
-        plan?.goal,
-      ),
+      modelAssignments: Map<String, String>.unmodifiable(<String, String>{
+        for (final assignment in widget.modelAssignments)
+          assignment.role.id: assignment.modelId,
+      }),
+      promptSha256: WorkshopAcceptanceFingerprint.sha256Text(plan?.goal),
       completedTasks: dashboard.completedTasks,
       totalTasks: dashboard.totalTasks,
       executionStatus: execution.status.name,
@@ -946,15 +1055,11 @@ class _WorkshopProductionDashboardPageState
     );
     final store = await WorkshopDeviceAcceptanceStore.open();
     await store.save(receipt);
-    await Clipboard.setData(
-      ClipboardData(text: receipt.toPrettyJson()),
-    );
+    await Clipboard.setData(ClipboardData(text: receipt.toPrettyJson()));
     if (!mounted) return;
     setState(() => _acceptanceReceipt = receipt);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Report di accettazione copiato.'),
-      ),
+      const SnackBar(content: Text('Report di accettazione copiato.')),
     );
   }
 
@@ -985,7 +1090,9 @@ class _WorkshopProductionDashboardPageState
   WorkshopProductionTaskHandle? get _currentHandle {
     final handle = widget.executionController.state.handle;
     final activeTaskId = _activeTaskId;
-    if (handle == null || activeTaskId == null || handle.taskId != activeTaskId) {
+    if (handle == null ||
+        activeTaskId == null ||
+        handle.taskId != activeTaskId) {
       return null;
     }
     return handle;
@@ -1022,6 +1129,20 @@ class _WorkshopProductionDashboardPageState
             chatController: widget.chatController,
             closeProjectForNewConversation: _closeProjectForNewConversation,
             openProjects: _openSavedProjects,
+            savePendingPrompt: widget.recoveryCoordinator == null
+                ? null
+                : (instruction, title) =>
+                      widget.recoveryCoordinator!.savePendingPrompt(
+                        instruction: instruction,
+                        title: title,
+                      ),
+            loadPendingPrompt: widget.recoveryCoordinator?.loadPendingPrompt,
+            clearPendingPrompt: widget.recoveryCoordinator?.clearPendingPrompt,
+            persistCurrentProject: widget.recoveryCoordinator == null
+                ? null
+                : () => widget.recoveryCoordinator!.saveCurrent(
+                    widget.bundle.dashboardController,
+                  ),
             modelAssignments: widget.modelAssignments,
             productionBusy: productionBusy,
           ),
@@ -1043,8 +1164,11 @@ class _WorkshopProductionDashboardPageState
     }
 
     final lifecycleError = execution.error;
-    final shownError = _error ??
-        (lifecycleError == null ? null : 'Esecuzione non riuscita: $lifecycleError');
+    final shownError =
+        _error ??
+        (lifecycleError == null
+            ? null
+            : 'Esecuzione non riuscita: $lifecycleError');
 
     return SafeArea(
       top: false,
@@ -1057,41 +1181,43 @@ class _WorkshopProductionDashboardPageState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               if (shownError != null) ...<Widget>[
-                Text(shownError,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                Text(
+                  shownError,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: _mutationBusy
-                      ? null
-                      : _copyDeviceAcceptanceReport,
+                  onPressed: _mutationBusy ? null : _copyDeviceAcceptanceReport,
                   icon: const Icon(Icons.receipt_long_outlined),
                   label: const Text('Copia report accettazione'),
                 ),
                 const SizedBox(height: 8),
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
-                Text('APK verificato pronto: ${_buildResult!.artifactPath}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium),
+                Text(
+                  'APK verificato pronto: ${_buildResult!.artifactPath}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
                 const SizedBox(height: 8),
                 if (!kIsWeb &&
-                    defaultTargetPlatform == TargetPlatform.android) ...<Widget>[
+                    defaultTargetPlatform ==
+                        TargetPlatform.android) ...<Widget>[
                   OutlinedButton.icon(
-                    onPressed:
-                        _mutationBusy ? null : _installVerifiedArtifact,
+                    onPressed: _mutationBusy ? null : _installVerifiedArtifact,
                     icon: const Icon(Icons.install_mobile_outlined),
                     label: const Text('Installa APK'),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed:
-                        _mutationBusy ? null : _shareVerifiedArtifact,
+                    onPressed: _mutationBusy ? null : _shareVerifiedArtifact,
                     icon: const Icon(Icons.share_outlined),
                     label: const Text('Condividi APK'),
                   ),
                   if (_installerOpened &&
-                      _acceptanceReceipt?.generatedAppOpened == null) ...<Widget>[
+                      _acceptanceReceipt?.generatedAppOpened ==
+                          null) ...<Widget>[
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -1135,18 +1261,24 @@ class _WorkshopProductionDashboardPageState
                 const SizedBox(height: 8),
               ],
               if (_mutationBusy)
-                const FilledButton(onPressed: null, child: Text('Cantiere in esecuzione…'))
+                const FilledButton(
+                  onPressed: null,
+                  child: Text('Cantiere in esecuzione…'),
+                )
               else if (execution.isRunning)
                 FilledButton.icon(
-                  onPressed: execution.status ==
+                  onPressed:
+                      execution.status ==
                           WorkshopProductionExecutionStatus.cancelling
                       ? null
                       : widget.executionController.cancel,
                   icon: const Icon(Icons.stop_circle_outlined),
-                  label: Text(execution.status ==
-                          WorkshopProductionExecutionStatus.cancelling
-                      ? 'Annullamento in corso…'
-                      : 'Annulla esecuzione'),
+                  label: Text(
+                    execution.status ==
+                            WorkshopProductionExecutionStatus.cancelling
+                        ? 'Annullamento in corso…'
+                        : 'Annulla esecuzione',
+                  ),
                 )
               else if (handle != null && result?.readyForApproval == true)
                 FilledButton.icon(

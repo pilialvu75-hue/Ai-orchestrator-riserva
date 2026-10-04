@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_background_service
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 /// Persists the active Cantiere production through the existing Workshop
@@ -47,6 +48,8 @@ final class WorkshopProductionRecoveryCoordinator {
   static const String _legacyJobId = 'workshop-production:active:v1';
   static const String _projectJobPrefix = 'workshop-production:project:v2:';
   static const String _payloadPrefix = 'workshop-production-state-v1:';
+  static const String _draftJobId = 'workshop-production:draft:v1';
+  static const String _draftPayloadPrefix = 'workshop-production-draft-v1:';
 
   final WorkshopCheckpointStore _checkpointStore;
 
@@ -108,17 +111,12 @@ final class WorkshopProductionRecoveryCoordinator {
   /// Backward-compatible explicit restore of the most recently saved project.
   ///
   /// AppShell deliberately does not call this during Cantiere startup.
-  Future<bool> restore(
-    WorkshopDashboardController controller,
-  ) async {
+  Future<bool> restore(WorkshopDashboardController controller) async {
     final projects = await listSavedProjects();
     if (projects.isEmpty) {
       return false;
     }
-    return restoreProject(
-      controller,
-      projectId: projects.first.projectId,
-    );
+    return restoreProject(controller, projectId: projects.first.projectId);
   }
 
   /// Restores exactly the project selected by the owner.
@@ -132,12 +130,15 @@ final class WorkshopProductionRecoveryCoordinator {
     }
 
     final checkpoints = await _checkpointStore.loadAll();
-    final candidates = checkpoints
-        .where((checkpoint) =>
-            _isProductionCheckpoint(checkpoint.jobId) &&
-            checkpoint.status != WorkshopBackgroundStatus.cancelled)
-        .toList(growable: false)
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final candidates =
+        checkpoints
+            .where(
+              (checkpoint) =>
+                  _isProductionCheckpoint(checkpoint.jobId) &&
+                  checkpoint.status != WorkshopBackgroundStatus.cancelled,
+            )
+            .toList(growable: false)
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     for (final checkpoint in candidates) {
       late final _WorkshopProductionSnapshot snapshot;
@@ -193,9 +194,7 @@ final class WorkshopProductionRecoveryCoordinator {
   ///
   /// State writes are serialized to avoid SharedPreferences read/modify/write
   /// races when several controller notifications arrive close together.
-  void attach(
-    WorkshopDashboardController controller,
-  ) {
+  void attach(WorkshopDashboardController controller) {
     if (identical(_controller, controller)) {
       return;
     }
@@ -210,9 +209,7 @@ final class WorkshopProductionRecoveryCoordinator {
     _controller = controller;
 
     final listener = () {
-      _queueSnapshot(
-        _WorkshopProductionSnapshot.capture(controller),
-      );
+      _queueSnapshot(_WorkshopProductionSnapshot.capture(controller));
     };
 
     _listener = listener;
@@ -220,9 +217,7 @@ final class WorkshopProductionRecoveryCoordinator {
   }
 
   /// Flushes the current controller state and stops observing it.
-  Future<void> detach({
-    bool flushCurrent = true,
-  }) async {
+  Future<void> detach({bool flushCurrent = true}) async {
     final controller = _controller;
     final listener = _listener;
 
@@ -234,31 +229,85 @@ final class WorkshopProductionRecoveryCoordinator {
     _listener = null;
 
     if (flushCurrent && controller != null) {
-      _queueSnapshot(
-        _WorkshopProductionSnapshot.capture(controller),
-      );
+      _queueSnapshot(_WorkshopProductionSnapshot.capture(controller));
     }
 
     await _writeTail;
   }
 
   /// Persists the latest authoritative production state immediately.
-  Future<void> saveCurrent(
-    WorkshopDashboardController controller,
-  ) async {
-    final snapshot =
-        _WorkshopProductionSnapshot.capture(controller);
+  Future<void> saveCurrent(WorkshopDashboardController controller) async {
+    final snapshot = _WorkshopProductionSnapshot.capture(controller);
 
+    await _runSerializedPersistence(() => _persistSnapshot(snapshot));
+  }
+
+  Future<void> savePendingPrompt({
+    required String instruction,
+    required String title,
+  }) async {
+    final normalizedInstruction = instruction.trim();
+    final normalizedTitle = title.trim();
+    if (normalizedInstruction.isEmpty || normalizedTitle.isEmpty) {
+      throw ArgumentError(
+        'Workshop pending prompt requires instruction and title.',
+      );
+    }
+
+    final updatedAt = DateTime.now().toUtc();
     await _runSerializedPersistence(
-      () => _persistSnapshot(snapshot),
+      () => _checkpointStore.save(
+        WorkshopBackgroundCheckpoint(
+          jobId: _draftJobId,
+          requestId: 'draft:${updatedAt.microsecondsSinceEpoch}',
+          status: WorkshopBackgroundStatus.paused,
+          updatedAt: updatedAt,
+          message:
+              '$_draftPayloadPrefix${jsonEncode(<String, Object?>{'instruction': normalizedInstruction, 'title': normalizedTitle})}',
+        ),
+      ),
     );
   }
+
+  Future<WorkshopPendingPromptDraft?> loadPendingPrompt() async {
+    final checkpoint = await _checkpointStore.load(_draftJobId);
+    final raw = checkpoint?.message?.trim();
+    if (checkpoint == null ||
+        raw == null ||
+        !raw.startsWith(_draftPayloadPrefix)) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw.substring(_draftPayloadPrefix.length));
+      if (decoded is! Map) {
+        return null;
+      }
+      final map = Map<String, dynamic>.from(decoded);
+      final instruction = map['instruction']?.toString().trim() ?? '';
+      final title = map['title']?.toString().trim() ?? '';
+      if (instruction.isEmpty || title.isEmpty) {
+        return null;
+      }
+      return WorkshopPendingPromptDraft(
+        instruction: instruction,
+        title: title,
+        updatedAt: checkpoint.updatedAt.toUtc(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearPendingPrompt() =>
+      _runSerializedPersistence(() => _checkpointStore.remove(_draftJobId));
 
   Future<void> clear() async {
     await _runSerializedPersistence(() async {
       final checkpoints = await _checkpointStore.loadAll();
       for (final checkpoint in checkpoints) {
-        if (_isProductionCheckpoint(checkpoint.jobId)) {
+        if (_isProductionCheckpoint(checkpoint.jobId) ||
+            checkpoint.jobId == _draftJobId) {
           await _checkpointStore.remove(checkpoint.jobId);
         }
       }
@@ -318,9 +367,7 @@ final class WorkshopProductionRecoveryCoordinator {
     }
   }
 
-  void _queueSnapshot(
-    _WorkshopProductionSnapshot? snapshot,
-  ) {
+  void _queueSnapshot(_WorkshopProductionSnapshot? snapshot) {
     final previous = _writeTail;
 
     _writeTail = () async {
@@ -337,9 +384,7 @@ final class WorkshopProductionRecoveryCoordinator {
     }();
   }
 
-  Future<void> _persistSnapshot(
-    _WorkshopProductionSnapshot? snapshot,
-  ) async {
+  Future<void> _persistSnapshot(_WorkshopProductionSnapshot? snapshot) async {
     // A neutral Cantiere view is not a request to delete parked projects.
     if (snapshot == null) {
       return;
@@ -367,8 +412,7 @@ final class WorkshopProductionRecoveryCoordinator {
         taskId: snapshot.activeTaskId,
         completedTasks: snapshot.plan.completedTasks,
         totalTasks: snapshot.plan.totalTasks,
-        message:
-            '$_payloadPrefix${jsonEncode(snapshot.toJson())}',
+        message: '$_payloadPrefix${jsonEncode(snapshot.toJson())}',
       ),
     );
 
@@ -400,7 +444,6 @@ final class WorkshopProductionRecoveryCoordinator {
       await _checkpointStore.remove(_legacyJobId);
     }
   }
-
 }
 
 final class _WorkshopProductionSnapshot {
@@ -450,13 +493,13 @@ final class _WorkshopProductionSnapshot {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'version': 1,
-        'request': _encodeRequest(request),
-        'plan': _encodePlan(plan),
-        'stage': stage?.name,
-        'activeTaskId': activeTaskId,
-        'projectApproval': projectApproval?.toJson(),
-      };
+    'version': 1,
+    'request': _encodeRequest(request),
+    'plan': _encodePlan(plan),
+    'stage': stage?.name,
+    'activeTaskId': activeTaskId,
+    'projectApproval': projectApproval?.toJson(),
+  };
 
   static _WorkshopProductionSnapshot decode(
     String? encoded, {
@@ -464,17 +507,13 @@ final class _WorkshopProductionSnapshot {
   }) {
     final raw = encoded?.trim();
 
-    if (raw == null ||
-        raw.isEmpty ||
-        !raw.startsWith(payloadPrefix)) {
+    if (raw == null || raw.isEmpty || !raw.startsWith(payloadPrefix)) {
       throw const FormatException(
         'Workshop production recovery payload is missing.',
       );
     }
 
-    final decoded = jsonDecode(
-      raw.substring(payloadPrefix.length),
-    );
+    final decoded = jsonDecode(raw.substring(payloadPrefix.length));
 
     if (decoded is! Map) {
       throw const FormatException(
@@ -495,9 +534,7 @@ final class _WorkshopProductionSnapshot {
     final request = _decodeRequest(
       Map<String, dynamic>.from(root['request'] as Map),
     );
-    final plan = _decodePlan(
-      Map<String, dynamic>.from(root['plan'] as Map),
-    );
+    final plan = _decodePlan(Map<String, dynamic>.from(root['plan'] as Map));
 
     if (plan.id != 'project:${request.id}') {
       throw FormatException(
@@ -506,12 +543,8 @@ final class _WorkshopProductionSnapshot {
       );
     }
 
-    final activeTaskId = _nullableString(
-      root['activeTaskId'],
-    );
-    final projectApproval = _decodeProjectApproval(
-      root['projectApproval'],
-    );
+    final activeTaskId = _nullableString(root['activeTaskId']);
+    final projectApproval = _decodeProjectApproval(root['projectApproval']);
 
     if (projectApproval != null &&
         projectApproval.projectId.trim() != plan.id.trim()) {
@@ -521,8 +554,7 @@ final class _WorkshopProductionSnapshot {
       );
     }
 
-    if (activeTaskId != null &&
-        plan.taskById(activeTaskId) == null) {
+    if (activeTaskId != null && plan.taskById(activeTaskId) == null) {
       throw FormatException(
         'Recovered Workshop task $activeTaskId does not exist.',
       );
@@ -531,18 +563,13 @@ final class _WorkshopProductionSnapshot {
     return _WorkshopProductionSnapshot(
       request: request,
       plan: plan,
-      stage: _nullableEnumByName(
-        WorkshopStage.values,
-        root['stage'],
-      ),
+      stage: _nullableEnumByName(WorkshopStage.values, root['stage']),
       activeTaskId: activeTaskId,
       projectApproval: projectApproval,
     );
   }
 
-  static WorkshopProjectApprovalEvidence? _decodeProjectApproval(
-    Object? raw,
-  ) {
+  static WorkshopProjectApprovalEvidence? _decodeProjectApproval(Object? raw) {
     if (raw == null) {
       return null;
     }
@@ -561,19 +588,13 @@ final class _WorkshopProductionSnapshot {
     return WorkshopProjectApprovalEvidence(
       projectId: projectId,
       approvalId: approvalId,
-      approvedAt: _date(
-        json['approvedAt'],
-        'projectApproval.approvedAt',
-      ),
+      approvedAt: _date(json['approvedAt'], 'projectApproval.approvedAt'),
       approvedBy: approvedBy,
-      derivedFromApprovalId:
-          _nullableString(json['derivedFromApprovalId']),
+      derivedFromApprovalId: _nullableString(json['derivedFromApprovalId']),
     );
   }
 
-  static Map<String, dynamic> _encodeRequest(
-    WorkshopRequest request,
-  ) =>
+  static Map<String, dynamic> _encodeRequest(WorkshopRequest request) =>
       <String, dynamic>{
         'id': request.id,
         'title': request.title,
@@ -586,9 +607,7 @@ final class _WorkshopProductionSnapshot {
         'context': request.context,
       };
 
-  static WorkshopRequest _decodeRequest(
-    Map<String, dynamic> json,
-  ) {
+  static WorkshopRequest _decodeRequest(Map<String, dynamic> json) {
     return WorkshopRequest(
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
@@ -610,9 +629,7 @@ final class _WorkshopProductionSnapshot {
     );
   }
 
-  static Map<String, dynamic> _encodePlan(
-    WorkshopProjectPlan plan,
-  ) =>
+  static Map<String, dynamic> _encodePlan(WorkshopProjectPlan plan) =>
       <String, dynamic>{
         'id': plan.id,
         'title': plan.title,
@@ -634,9 +651,7 @@ final class _WorkshopProductionSnapshot {
         'tasks': plan.tasks.map(_encodeTask).toList(growable: false),
       };
 
-  static WorkshopProjectPlan _decodePlan(
-    Map<String, dynamic> json,
-  ) {
+  static WorkshopProjectPlan _decodePlan(Map<String, dynamic> json) {
     return WorkshopProjectPlan(
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
@@ -662,18 +677,12 @@ final class _WorkshopProductionSnapshot {
       deliverables: _strings(json['deliverables']),
       validationCriteria: _strings(json['validationCriteria']),
       risks: _strings(json['risks']),
-      phases: _maps(json['phases'])
-          .map(_decodePhase)
-          .toList(growable: false),
-      tasks: _maps(json['tasks'])
-          .map(_decodeTask)
-          .toList(growable: false),
+      phases: _maps(json['phases']).map(_decodePhase).toList(growable: false),
+      tasks: _maps(json['tasks']).map(_decodeTask).toList(growable: false),
     );
   }
 
-  static Map<String, dynamic> _encodePhase(
-    WorkshopProjectPhase phase,
-  ) =>
+  static Map<String, dynamic> _encodePhase(WorkshopProjectPhase phase) =>
       <String, dynamic>{
         'id': phase.id,
         'title': phase.title,
@@ -686,9 +695,7 @@ final class _WorkshopProductionSnapshot {
         'validationCriteria': phase.validationCriteria,
       };
 
-  static WorkshopProjectPhase _decodePhase(
-    Map<String, dynamic> json,
-  ) {
+  static WorkshopProjectPhase _decodePhase(Map<String, dynamic> json) {
     return WorkshopProjectPhase(
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
@@ -710,9 +717,7 @@ final class _WorkshopProductionSnapshot {
     );
   }
 
-  static Map<String, dynamic> _encodeTask(
-    WorkshopProjectTask task,
-  ) =>
+  static Map<String, dynamic> _encodeTask(WorkshopProjectTask task) =>
       <String, dynamic>{
         'id': task.id,
         'title': task.title,
@@ -725,9 +730,7 @@ final class _WorkshopProductionSnapshot {
         'validationCriteria': task.validationCriteria,
       };
 
-  static WorkshopProjectTask _decodeTask(
-    Map<String, dynamic> json,
-  ) {
+  static WorkshopProjectTask _decodeTask(Map<String, dynamic> json) {
     return WorkshopProjectTask(
       id: _requiredString(json, 'id'),
       title: _requiredString(json, 'title'),
@@ -745,10 +748,7 @@ final class _WorkshopProductionSnapshot {
     );
   }
 
-  static String _requiredString(
-    Map<String, dynamic> json,
-    String key,
-  ) {
+  static String _requiredString(Map<String, dynamic> json, String key) {
     final value = _nullableString(json[key]);
 
     if (value == null) {
@@ -792,9 +792,7 @@ final class _WorkshopProductionSnapshot {
     final parsed = DateTime.tryParse(value?.toString() ?? '');
 
     if (parsed == null) {
-      throw FormatException(
-        'Workshop production recovery $field is invalid.',
-      );
+      throw FormatException('Workshop production recovery $field is invalid.');
     }
 
     return parsed.toUtc();
@@ -815,9 +813,7 @@ final class _WorkshopProductionSnapshot {
       }
     }
 
-    throw FormatException(
-      'Workshop production recovery $field is invalid.',
-    );
+    throw FormatException('Workshop production recovery $field is invalid.');
   }
 
   static T? _nullableEnumByName<T extends Enum>(
@@ -836,8 +832,6 @@ final class _WorkshopProductionSnapshot {
       }
     }
 
-    throw FormatException(
-      'Unknown Workshop production recovery enum: $name',
-    );
+    throw FormatException('Unknown Workshop production recovery enum: $name');
   }
 }
