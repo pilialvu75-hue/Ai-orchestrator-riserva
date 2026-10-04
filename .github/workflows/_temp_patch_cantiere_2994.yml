@@ -1,0 +1,114 @@
+name: temp-cantiere-2994-patch
+
+on:
+  push:
+    branches:
+      - cantiere/build-repair-multitarget-2994
+    paths:
+      - .github/workflows/_temp_patch_cantiere_2994.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cantiere/build-repair-multitarget-2994
+          fetch-depth: 0
+      - name: Apply bounded multi-target repair patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runner = Path('lib/app_factory/workshop/workshop_proposal_implementation_runner.dart')
+          text = runner.read_text()
+          old = '''  static bool _isBoundedBuildRepair(WorkshopRequest request) {
+    if (request.operation != WorkshopOperation.fix ||
+        request.targetFiles.length != 1) {
+      return false;
+    }
+
+    return request.title == 'Correzione build mirata' ||
+        request.instruction
+            .toUpperCase()
+            .startsWith('BUILD REPAIR ATTEMPT:');
+  }
+'''
+          new = '''  static bool _isBoundedBuildRepair(WorkshopRequest request) {
+    if (request.operation != WorkshopOperation.fix ||
+        request.targetFiles.isEmpty) {
+      return false;
+    }
+
+    return request.title == 'Correzione build mirata' ||
+        request.instruction
+            .toUpperCase()
+            .startsWith('BUILD REPAIR ATTEMPT:');
+  }
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'runner anchor count {text.count(old)}, expected 1')
+          runner.write_text(text.replace(old, new, 1))
+
+          test_file = Path('test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart')
+          tests = test_file.read_text()
+          marker = "    test('out-of-scope create file retries inside hard target allowlist',\n"
+          if tests.count(marker) != 1:
+              raise SystemExit(f'test marker count {tests.count(marker)}, expected 1')
+          regression = r'''    test('bounded build repair may read one oversized target from a legacy multi-target scope',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"summary":"Repair main","explanation":"Preserve existing app while fixing build","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
+      );
+      final oversizedMain = '${List<String>.filled(2600, 'x').join()}LEGACY_REPAIR_TAIL';
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/main.dart': oversizedMain,
+          'lib/app.dart': 'class ExistingApp {}',
+        },
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'legacy-multitarget-build-repair',
+          title: 'Correzione build mirata',
+          instruction: 'BUILD REPAIR ATTEMPT: 1 repair the persisted project.',
+          operation: WorkshopOperation.fix,
+          targetFiles: <String>['lib/main.dart', 'lib/app.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(engineer.calls, 1);
+      expect(engineer.lastPrompt, contains('LEGACY_REPAIR_TAIL'));
+      expect(engineer.lastPrompt, isNot(contains('"replaceableTargets":[')));
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
+'''
+          test_file.write_text(tests.replace(marker, regression + marker, 1))
+          PY
+
+          git diff --check
+          git diff --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/app_factory/workshop/workshop_proposal_implementation_runner.dart test/app_factory/workshop/workshop_proposal_implementation_runner_test.dart
+          git rm .github/workflows/_temp_patch_cantiere_2994.yml
+          git commit -m 'fix(cantiere): support persisted multi-target build repair'
+          git push origin HEAD:cantiere/build-repair-multitarget-2994
