@@ -11,14 +11,39 @@ already protected by Cloudflare Access.
 The deployment workflow is intentionally manual. A Git push must never publish
 the private Web product automatically during development/stabilization.
 
+## Two-phase bootstrap and deployment
+
+The manual **Web Private Deploy** workflow has two operations:
+
+1. `bootstrap_pages` creates the empty Cloudflare Pages project if it does not
+   already exist. It never builds or uploads the Cantiere Web application.
+2. `deploy_private` proves Cloudflare Access is fail-closed, then builds and
+   uploads the private Web application.
+
+This split allows the Pages project to be created from GitHub Actions without
+using the Cloudflare dashboard for project creation, while preserving the rule
+that no real application assets are uploaded before Access is active.
+
+### Bootstrap confirmation
+
+Run the workflow with:
+
+- operation: `bootstrap_pages`
+- confirmation: `BOOTSTRAP_EMPTY_PAGES`
+
+The bootstrap is idempotent: if the configured project already exists, the job
+exits successfully without changing or deploying it.
+
 ## Cloudflare setup prerequisite
 
 Before the first real application deployment:
 
-1. Create the Cloudflare Pages project without uploading the Cantiere build.
-2. In Workers & Pages, enable an Access policy for the Pages project.
-3. In Cloudflare Zero Trust, configure the Pages Access application so the
-   production `<project>.pages.dev` hostname is protected.
+1. Run `bootstrap_pages` to create the Cloudflare Pages project without
+   uploading the Cantiere build.
+2. In Workers & Pages / Zero Trust, enable an Access policy for the Pages
+   project.
+3. Configure the Pages Access application so the production
+   `<project>.pages.dev` hostname is protected.
 4. Re-enable/keep the preview Access application for
    `*.<project>.pages.dev` so immutable and branch preview URLs are protected.
 5. Configure an Allow policy containing only the intended authenticated user(s).
@@ -26,10 +51,10 @@ Before the first real application deployment:
 6. Do not add provider keys, GitHub tokens, model credentials or user identity
    values to source code.
 
-The workflow probes both the production hostname and an unused preview-style
-hostname before uploading real assets. Both must redirect to a Cloudflare
-Access login boundary. A public 200/404 response fails the deployment before
-the Cantiere build is uploaded.
+The deploy operation probes both the production hostname and an unused
+preview-style hostname before uploading real assets. Both must redirect to a
+Cloudflare Access login boundary. A public 200/404 response fails the deployment
+before the Cantiere build is uploaded.
 
 ## GitHub configuration
 
@@ -48,10 +73,12 @@ metadata. No Cloudflare credential is passed to the Flutter build.
 
 ## Deployment
 
-Run **Web Private Deploy** manually and enter the exact confirmation phrase
-shown by the workflow.
+After Access is configured, run **Web Private Deploy** manually with:
 
-The job:
+- operation: `deploy_private`
+- confirmation: `DEPLOY_PRIVATE_CANTIERE`
+
+The deploy job:
 
 1. fails unless the Cloudflare configuration values exist;
 2. proves Access blocks the production and wildcard-preview hostnames;
