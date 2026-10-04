@@ -194,6 +194,43 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('bounded build repair reads one oversized target without blind replacement',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"summary":"Repair main","explanation":"Preserve existing app while fixing build","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}],"validationNotes":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
+      );
+      final oversizedMain = '${List<String>.filled(2600, 'x').join()}BUILD_REPAIR_TAIL';
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/main.dart': oversizedMain},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'bounded-build-repair-oversized-target',
+          title: 'Correzione build mirata',
+          instruction: 'BUILD REPAIR ATTEMPT: repair the existing entry point.',
+          operation: WorkshopOperation.fix,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(engineer.calls, 1);
+      expect(engineer.lastPrompt, contains('BUILD_REPAIR_TAIL'));
+      expect(engineer.lastPrompt, isNot(contains('"replaceableTargets":[')));
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('out-of-scope create file retries inside hard target allowlist',
         () async {
       final engineer = _StaticGateway(
