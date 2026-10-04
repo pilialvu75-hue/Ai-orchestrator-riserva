@@ -1,0 +1,565 @@
+name: temp-cantiere-prompt-recovery
+on:
+  push:
+    branches:
+      - cantiere/project-delete-and-prompt-crash-hardening
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cantiere/project-delete-and-prompt-crash-hardening
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Apply bounded hardening patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_one(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: anchor count {count}, expected 1')
+              p.write_text(text.replace(old, new, 1))
+
+          recovery = 'lib/app_factory/workshop/workshop_production_recovery_coordinator.dart'
+          replace_one(
+              recovery,
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';\nimport 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';\n",
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';\nimport 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';\nimport 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';\n",
+          )
+          replace_one(
+              recovery,
+              "  static const String _projectJobPrefix = 'workshop-production:project:v2:';\n  static const String _payloadPrefix = 'workshop-production-state-v1:';\n",
+              "  static const String _projectJobPrefix = 'workshop-production:project:v2:';\n  static const String _payloadPrefix = 'workshop-production-state-v1:';\n  static const String _draftJobId = 'workshop-production:draft:v1';\n  static const String _draftPayloadPrefix = 'workshop-production-draft-v1:';\n",
+          )
+          replace_one(
+              recovery,
+              "  Future<void> clear() async {\n",
+              r'''  Future<void> savePendingPrompt({
+    required String instruction,
+    required String title,
+  }) async {
+    final normalizedInstruction = instruction.trim();
+    final normalizedTitle = title.trim();
+    if (normalizedInstruction.isEmpty || normalizedTitle.isEmpty) {
+      throw ArgumentError('Workshop pending prompt requires instruction and title.');
+    }
+
+    final updatedAt = DateTime.now().toUtc();
+    await _runSerializedPersistence(
+      () => _checkpointStore.save(
+        WorkshopBackgroundCheckpoint(
+          jobId: _draftJobId,
+          requestId: 'draft:${updatedAt.microsecondsSinceEpoch}',
+          status: WorkshopBackgroundStatus.paused,
+          updatedAt: updatedAt,
+          message: '$_draftPayloadPrefix${jsonEncode(<String, Object?>{
+            'instruction': normalizedInstruction,
+            'title': normalizedTitle,
+          })}',
+        ),
+      ),
+    );
+  }
+
+  Future<WorkshopPendingPromptDraft?> loadPendingPrompt() async {
+    final checkpoint = await _checkpointStore.load(_draftJobId);
+    final raw = checkpoint?.message?.trim();
+    if (checkpoint == null ||
+        raw == null ||
+        !raw.startsWith(_draftPayloadPrefix)) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw.substring(_draftPayloadPrefix.length));
+      if (decoded is! Map) {
+        return null;
+      }
+      final map = Map<String, dynamic>.from(decoded);
+      final instruction = map['instruction']?.toString().trim() ?? '';
+      final title = map['title']?.toString().trim() ?? '';
+      if (instruction.isEmpty || title.isEmpty) {
+        return null;
+      }
+      return WorkshopPendingPromptDraft(
+        instruction: instruction,
+        title: title,
+        updatedAt: checkpoint.updatedAt.toUtc(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearPendingPrompt() =>
+      _runSerializedPersistence(() => _checkpointStore.remove(_draftJobId));
+
+  Future<void> clear() async {
+''',
+          )
+          replace_one(
+              recovery,
+              "      for (final checkpoint in checkpoints) {\n        if (_isProductionCheckpoint(checkpoint.jobId)) {\n          await _checkpointStore.remove(checkpoint.jobId);\n        }\n      }\n",
+              "      for (final checkpoint in checkpoints) {\n        if (_isProductionCheckpoint(checkpoint.jobId) ||\n            checkpoint.jobId == _draftJobId) {\n          await _checkpointStore.remove(checkpoint.jobId);\n        }\n      }\n",
+          )
+
+          dashboard = 'lib/app_factory/workshop/workshop_dashboard_page.dart'
+          replace_one(
+              dashboard,
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';\n",
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';\nimport 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';\n",
+          )
+          replace_one(
+              dashboard,
+              "    Future<bool> Function()? closeProjectForNewConversation,\n    Future<void> Function()? openProjects,\n    List<WorkshopModelAssignment>? modelAssignments,\n",
+              "    Future<bool> Function()? closeProjectForNewConversation,\n    Future<void> Function()? openProjects,\n    Future<void> Function(String instruction, String title)? savePendingPrompt,\n    Future<WorkshopPendingPromptDraft?> Function()? loadPendingPrompt,\n    Future<void> Function()? clearPendingPrompt,\n    Future<void> Function()? persistCurrentProject,\n    List<WorkshopModelAssignment>? modelAssignments,\n",
+          )
+          replace_one(
+              dashboard,
+              "        _closeProjectForNewConversation = closeProjectForNewConversation,\n        _openProjects = openProjects,\n        _modelAssignments =\n",
+              "        _closeProjectForNewConversation = closeProjectForNewConversation,\n        _openProjects = openProjects,\n        _savePendingPrompt = savePendingPrompt,\n        _loadPendingPrompt = loadPendingPrompt,\n        _clearPendingPrompt = clearPendingPrompt,\n        _persistCurrentProject = persistCurrentProject,\n        _modelAssignments =\n",
+          )
+          replace_one(
+              dashboard,
+              "  final Future<bool> Function()? _closeProjectForNewConversation;\n  final Future<void> Function()? _openProjects;\n",
+              "  final Future<bool> Function()? _closeProjectForNewConversation;\n  final Future<void> Function()? _openProjects;\n  final Future<void> Function(String instruction, String title)?\n      _savePendingPrompt;\n  final Future<WorkshopPendingPromptDraft?> Function()? _loadPendingPrompt;\n  final Future<void> Function()? _clearPendingPrompt;\n  final Future<void> Function()? _persistCurrentProject;\n",
+          )
+          replace_one(
+              dashboard,
+              "        if (mounted) {\n          _addWelcomeMessage();\n        }\n",
+              "        if (mounted) {\n          _addWelcomeMessage();\n          _restorePendingPromptDraft();\n        }\n",
+          )
+          replace_one(
+              dashboard,
+              "  Future<void> _sendMessage() async {\n",
+              r'''  Future<void> _restorePendingPromptDraft() async {
+    final load = widget._loadPendingPrompt;
+    if (load == null || _dashboardController?.state.hasProject == true) {
+      return;
+    }
+
+    try {
+      final draft = await load();
+      if (!mounted ||
+          draft == null ||
+          _dashboardController?.state.hasProject == true) {
+        return;
+      }
+      final instruction = draft.instruction.trim();
+      final title = draft.title.trim();
+      if (instruction.isEmpty || title.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _pendingConfirmation = false;
+        _pendingInstruction = instruction;
+        _pendingTitle = title;
+        _pendingApprovedProposal = null;
+        if (_messageController.text.trim().isEmpty) {
+          _messageController.text = instruction;
+          _messageController.selection = TextSelection.collapsed(
+            offset: _messageController.text.length,
+          );
+        }
+      });
+      _chatController.addSystemMessage(
+        'Bozza recuperata dopo l’interruzione. Premi invia per riprovare.',
+        excludeFromContext: true,
+      );
+    } catch (error) {
+      if (mounted) {
+        _showError('Recupero della bozza non riuscito: $error');
+      }
+    }
+  }
+
+  Future<void> _sendMessage() async {
+''',
+          )
+          replace_one(
+              dashboard,
+              "    _pendingApprovedProposal = null;\n\n    _messageController.clear();\n\n    final result =\n",
+              r'''    _pendingApprovedProposal = null;
+
+    final savePendingPrompt = widget._savePendingPrompt;
+    if (savePendingPrompt != null) {
+      try {
+        await savePendingPrompt(
+          _pendingInstruction!,
+          _pendingTitle!,
+        );
+      } catch (error) {
+        if (mounted) {
+          _showError(
+            'Il prompt non è stato inviato perché la bozza non può essere salvata: $error',
+          );
+        }
+        return;
+      }
+    }
+
+    _messageController.clear();
+
+    final result =
+''',
+          )
+          replace_one(
+              dashboard,
+              "      controller.approveCurrentProject();\n\n      _chatController.addSystemMessage(\n",
+              r'''      controller.approveCurrentProject();
+
+      final persistCurrentProject = widget._persistCurrentProject;
+      if (persistCurrentProject != null) {
+        await persistCurrentProject();
+        await widget._clearPendingPrompt?.call();
+      }
+
+      _chatController.addSystemMessage(
+''',
+          )
+          replace_one(
+              dashboard,
+              "    _chatController.clearConversation();\n    _addWelcomeMessage();\n\n    _messageController.clear();\n",
+              r'''    await widget._clearPendingPrompt?.call();
+
+    _chatController.clearConversation();
+    _addWelcomeMessage();
+
+    _messageController.clear();
+''',
+          )
+
+          production = 'lib/app_factory/workshop/workshop_production_dashboard_page.dart'
+          old_sheet_tail = r'''                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(project.projectId),
+'''
+          new_sheet_tail = r'''                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      IconButton(
+                        tooltip: 'Elimina progetto',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => Navigator.of(sheetContext)
+                            .pop('delete:${project.projectId}'),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(project.projectId),
+'''
+          replace_one(production, old_sheet_tail, new_sheet_tail)
+          replace_one(
+              production,
+              "    if (selectedProjectId == null || !mounted) {\n      return;\n    }\n\n    final dashboardController = widget.bundle.dashboardController;\n",
+              r'''    if (selectedProjectId == null || !mounted) {
+      return;
+    }
+
+    const deletePrefix = 'delete:';
+    if (selectedProjectId.startsWith(deletePrefix)) {
+      final projectId = selectedProjectId.substring(deletePrefix.length);
+      final project = projects.where((item) => item.projectId == projectId).firstOrNull;
+      if (project == null) {
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Elimina progetto'),
+          content: Text(
+            'Eliminare definitivamente “${project.title}”? '
+            'Il progetto salvato non potrà essere ripreso.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Annulla'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Elimina'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && mounted) {
+        await _deleteSavedProject(project);
+      }
+      return;
+    }
+
+    final dashboardController = widget.bundle.dashboardController;
+''',
+          )
+          # Avoid relying on Iterable.firstOrNull extensions in stable Dart.
+          p = Path(production)
+          text = p.read_text()
+          text = text.replace(
+              "      final project = projects.where((item) => item.projectId == projectId).firstOrNull;\n      if (project == null) {\n        return;\n      }\n",
+              "      WorkshopSavedProjectSummary? project;\n      for (final candidate in projects) {\n        if (candidate.projectId == projectId) {\n          project = candidate;\n          break;\n        }\n      }\n      if (project == null) {\n        return;\n      }\n",
+              1,
+          )
+          p.write_text(text)
+          replace_one(
+              production,
+              "  Future<void> _openSavedProjects() async {\n",
+              r'''  Future<void> _deleteSavedProject(
+    WorkshopSavedProjectSummary project,
+  ) async {
+    final recovery = widget.recoveryCoordinator;
+    if (recovery == null || _mutationBusy) {
+      return;
+    }
+
+    setState(() {
+      _mutationBusy = true;
+      _error = null;
+    });
+
+    try {
+      final dashboardController = widget.bundle.dashboardController;
+      final activeProjectId = dashboardController.state.projectId?.trim();
+      if (activeProjectId == project.projectId) {
+        await widget.executionController.cancelAndWait();
+        await widget.executionController.abandonCurrentExecution();
+        if (widget.executionController.state.status !=
+            WorkshopProductionExecutionStatus.idle) {
+          widget.executionController.reset();
+        }
+        dashboardController.forgetProduction();
+        widget.executionController.clearBuildRepairChain();
+      }
+
+      await recovery.removeProject(project.projectId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _buildResult = null;
+        _error = null;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Progetto “${project.title}” eliminato.')),
+        );
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Eliminazione del progetto non riuscita: $error';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _mutationBusy = false);
+      }
+    }
+  }
+
+  Future<void> _openSavedProjects() async {
+''',
+          )
+          replace_one(
+              production,
+              "            closeProjectForNewConversation: _closeProjectForNewConversation,\n            openProjects: _openSavedProjects,\n            modelAssignments: widget.modelAssignments,\n",
+              r'''            closeProjectForNewConversation: _closeProjectForNewConversation,
+            openProjects: _openSavedProjects,
+            savePendingPrompt: widget.recoveryCoordinator == null
+                ? null
+                : (instruction, title) =>
+                    widget.recoveryCoordinator!.savePendingPrompt(
+                      instruction: instruction,
+                      title: title,
+                    ),
+            loadPendingPrompt: widget.recoveryCoordinator?.loadPendingPrompt,
+            clearPendingPrompt: widget.recoveryCoordinator?.clearPendingPrompt,
+            persistCurrentProject: widget.recoveryCoordinator == null
+                ? null
+                : () => widget.recoveryCoordinator!
+                    .saveCurrent(widget.bundle.dashboardController),
+            modelAssignments: widget.modelAssignments,
+''',
+          )
+
+          recovery_test = 'test/app_factory/workshop/workshop_production_recovery_coordinator_test.dart'
+          replace_one(
+              recovery_test,
+              "  test(\n    'serializes concurrent explicit checkpoint saves without losing projects',\n",
+              r'''  test(
+    'persists pending prompt outside the project catalogue and clears it',
+    () async {
+      final coordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+      );
+
+      await coordinator.savePendingPrompt(
+        instruction: 'Crea una nuova app Manga Kids.',
+        title: 'Manga Kids',
+      );
+
+      final draft = await coordinator.loadPendingPrompt();
+      expect(draft, isNotNull);
+      expect(draft!.instruction, 'Crea una nuova app Manga Kids.');
+      expect(draft.title, 'Manga Kids');
+      expect(await coordinator.listSavedProjects(), isEmpty);
+
+      await coordinator.clearPendingPrompt();
+      expect(await coordinator.loadPendingPrompt(), isNull);
+    },
+  );
+
+  test(
+    'serializes concurrent explicit checkpoint saves without losing projects',
+''',
+          )
+
+          dashboard_test = 'test/app_factory/workshop/workshop_dashboard_page_lifecycle_test.dart'
+          replace_one(
+              dashboard_test,
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';\n",
+              "import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';\nimport 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';\n",
+          )
+          replace_one(
+              dashboard_test,
+              "  testWidgets('injected Workshop chat survives route disposal', (tester) async {\n",
+              r'''  testWidgets(
+      'saves a fresh prompt before inference and restores it after restart',
+      (tester) async {
+    const prompt = 'Crea una nuova app Manga Kids con preferiti.';
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      sessionId: 'crash-safe-prompt-save',
+    );
+    addTearDown(chat.dispose);
+
+    String? savedInstruction;
+    String? savedTitle;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          savePendingPrompt: (instruction, title) async {
+            savedInstruction = instruction;
+            savedTitle = title;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), prompt);
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    expect(savedInstruction, prompt);
+    expect(savedTitle, isNotEmpty);
+    expect(provider.requests, hasLength(1));
+
+    final restartedChat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: _CapturingProvider()),
+      sessionId: 'crash-safe-prompt-restore',
+    );
+    addTearDown(restartedChat.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: restartedChat,
+          loadPendingPrompt: () async => WorkshopPendingPromptDraft(
+            instruction: savedInstruction!,
+            title: savedTitle!,
+            updatedAt: DateTime.now().toUtc(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, prompt);
+    expect(find.textContaining('Bozza recuperata'), findsOneWidget);
+  });
+
+  testWidgets('injected Workshop chat survives route disposal', (tester) async {
+''',
+          )
+          replace_one(
+              dashboard_test,
+              "    var closeCalls = 0;\n\n    await tester.pumpWidget(\n      MaterialApp(\n        home: WorkshopDashboardPage(\n          chatController: chat,\n          dashboardController: dashboard,\n          closeProjectForNewConversation: () async {\n",
+              r'''    var closeCalls = 0;
+    var draftSaves = 0;
+    var projectPersists = 0;
+    var draftClears = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WorkshopDashboardPage(
+          chatController: chat,
+          dashboardController: dashboard,
+          savePendingPrompt: (instruction, title) async {
+            draftSaves += 1;
+          },
+          persistCurrentProject: () async {
+            projectPersists += 1;
+          },
+          clearPendingPrompt: () async {
+            draftClears += 1;
+          },
+          closeProjectForNewConversation: () async {
+''',
+          )
+          # The anchor above matches the first suitable lifecycle test; add durable assertions
+          # only to the later prompt test by locating its final provider assertion block.
+          marker = "    expect(provider.requests, hasLength(1));\n  });\n\n  testWidgets(\n      'clarification stays conversational and approval keeps original request',"
+          replacement = "    expect(provider.requests, hasLength(1));\n    expect(draftSaves, 1);\n    expect(projectPersists, 1);\n    expect(draftClears, 1);\n  });\n\n  testWidgets(\n      'clarification stays conversational and approval keeps original request',"
+          replace_one(dashboard_test, marker, replacement)
+          PY
+
+          dart format \
+            lib/app_factory/workshop/workshop_pending_prompt_draft.dart \
+            lib/app_factory/workshop/workshop_production_recovery_coordinator.dart \
+            lib/app_factory/workshop/workshop_dashboard_page.dart \
+            lib/app_factory/workshop/workshop_production_dashboard_page.dart \
+            test/app_factory/workshop/workshop_production_recovery_coordinator_test.dart \
+            test/app_factory/workshop/workshop_dashboard_page_lifecycle_test.dart
+          flutter pub get
+          flutter test \
+            test/app_factory/workshop/workshop_production_recovery_coordinator_test.dart \
+            test/app_factory/workshop/workshop_dashboard_page_lifecycle_test.dart
+          flutter analyze \
+            lib/app_factory/workshop/workshop_pending_prompt_draft.dart \
+            lib/app_factory/workshop/workshop_production_recovery_coordinator.dart \
+            lib/app_factory/workshop/workshop_dashboard_page.dart \
+            lib/app_factory/workshop/workshop_production_dashboard_page.dart
+          git diff --check
+          git diff --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            lib/app_factory/workshop/workshop_pending_prompt_draft.dart \
+            lib/app_factory/workshop/workshop_production_recovery_coordinator.dart \
+            lib/app_factory/workshop/workshop_dashboard_page.dart \
+            lib/app_factory/workshop/workshop_production_dashboard_page.dart \
+            test/app_factory/workshop/workshop_production_recovery_coordinator_test.dart \
+            test/app_factory/workshop/workshop_dashboard_page_lifecycle_test.dart
+          git rm .github/workflows/temp_cantiere_prompt_recovery.yml
+          git commit -m 'fix(cantiere): preserve fresh prompts and expose project deletion'
+          git push origin HEAD:cantiere/project-delete-and-prompt-crash-hardening
