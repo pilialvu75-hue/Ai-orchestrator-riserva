@@ -59,7 +59,6 @@ jobs:
           set -euo pipefail
 
           project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}"
-          projects_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects"
           response="$(mktemp)"
 
           status="$(curl -sS --connect-timeout 10 --max-time 30 \
@@ -80,27 +79,26 @@ jobs:
             exit 1
           fi
 
-          payload="$(jq -nc \
-            --arg name "${CLOUDFLARE_PAGES_PROJECT}" \
-            --arg branch "main" \
-            '{name: $name, production_branch: $branch}')"
+          rm -f "${response}"
 
-          create_status="$(curl -sS --connect-timeout 10 --max-time 30 \
-            -X POST \
+          npx --yes wrangler@4 pages project create "${CLOUDFLARE_PAGES_PROJECT}" \
+            --production-branch main
+
+          verify_response="$(mktemp)"
+          verify_status="$(curl -sS --connect-timeout 10 --max-time 30 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H 'Content-Type: application/json' \
-            --data "${payload}" \
-            -o "${response}" -w '%{http_code}' "${projects_url}" || true)"
+            -o "${verify_response}" -w '%{http_code}' "${project_url}" || true)"
 
-          if [[ "${create_status}" != "200" && "${create_status}" != "201" ]]; then
-            echo "Pages project bootstrap failed (HTTP ${create_status})."
-            jq -r '.errors[]?.message // empty' "${response}" || true
-            rm -f "${response}"
+          if [[ "${verify_status}" != "200" ]]; then
+            echo "Wrangler returned but the Pages project cannot be verified (HTTP ${verify_status})."
+            jq -r '.errors[]?.message // empty' "${verify_response}" || true
+            rm -f "${verify_response}"
             exit 1
           fi
 
-          rm -f "${response}"
-          echo "Empty Pages project created. No Web assets were uploaded."
+          rm -f "${verify_response}"
+          echo "Empty Pages project created and verified. No Web assets were uploaded."
 
       - name: Record next gate
         shell: bash
