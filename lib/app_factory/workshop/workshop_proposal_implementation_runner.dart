@@ -41,6 +41,7 @@ final class WorkshopProposalImplementationRunner {
   static const int _malformedOutputRetryMaxTokens = 768;
   static const int _primaryWorkspaceChars = 1800;
   static const int _retryWorkspaceChars = 900;
+  static const int _buildRepairTargetChars = 6400;
   static const int _primaryContextChars = 360;
   static const int _retryContextChars = 220;
   static const int _primaryConstraintChars = 360;
@@ -357,12 +358,15 @@ final class WorkshopProposalImplementationRunner {
       revisionFeedback ?? '',
       compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
+    final boundedBuildRepair = _isBoundedBuildRepair(request);
     final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
       maxChars: compact ? _retryWorkspaceChars : _primaryWorkspaceChars,
       allowOversizedTargetReplacement:
           request.operation == WorkshopOperation.create,
+      oversizedTargetReadLimit:
+          boundedBuildRepair ? _buildRepairTargetChars : null,
     );
     final workspaceFiles = workspaceSelection.files;
     final replaceableTargets = workspaceSelection.replaceableTargets;
@@ -511,6 +515,7 @@ requested. Do not review, approve or apply.
     required List<String> targetFiles,
     required int maxChars,
     required bool allowOversizedTargetReplacement,
+    int? oversizedTargetReadLimit,
   }) {
     final ordered = <String>[];
     final seen = <String>{};
@@ -563,6 +568,12 @@ requested. Do not review, approve or apply.
           replaceableTargets.add(path);
           continue;
         }
+        final readLimit = oversizedTargetReadLimit;
+        if (readLimit != null && content.length <= readLimit) {
+          selected[path] = content;
+          used += cost;
+          continue;
+        }
         throw StateError(
           'Workshop Engineer target file "$path" exceeds the local prompt '
           'budget; split the task before implementation.',
@@ -578,6 +589,18 @@ requested. Do not review, approve or apply.
       files: Map<String, String>.unmodifiable(selected),
       replaceableTargets: List<String>.unmodifiable(replaceableTargets),
     );
+  }
+
+  static bool _isBoundedBuildRepair(WorkshopRequest request) {
+    if (request.operation != WorkshopOperation.fix ||
+        request.targetFiles.length != 1) {
+      return false;
+    }
+
+    return request.title == 'Correzione build mirata' ||
+        request.instruction
+            .toUpperCase()
+            .startsWith('BUILD REPAIR ATTEMPT:');
   }
 
   static Map<String, Object?> _compactResumeMetadata(
