@@ -194,7 +194,7 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
-    test('bounded build repair reads one oversized target without blind replacement',
+    test('bounded build repair reads oversized target from legacy multi-target scope',
         () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -206,7 +206,7 @@ void main() {
       );
       final oversizedMain = '${List<String>.filled(2600, 'x').join()}BUILD_REPAIR_TAIL';
       final workspaceGateway = _RecordingWorkspaceGateway(
-        files: <String, String>{'lib/main.dart': oversizedMain},
+        files: <String, String>{'lib/main.dart': oversizedMain, 'lib/app.dart': 'class ExistingApp {}'},
       );
       final session = WorkspaceSession(
         request: const WorkshopRequest(
@@ -214,7 +214,7 @@ void main() {
           title: 'Correzione build mirata',
           instruction: 'BUILD REPAIR ATTEMPT: repair the existing entry point.',
           operation: WorkshopOperation.fix,
-          targetFiles: <String>['lib/main.dart'],
+          targetFiles: <String>['lib/main.dart', 'lib/app.dart'],
         ),
         gateway: workspaceGateway,
       );

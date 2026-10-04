@@ -593,7 +593,7 @@ requested. Do not review, approve or apply.
 
   static bool _isBoundedBuildRepair(WorkshopRequest request) {
     if (request.operation != WorkshopOperation.fix ||
-        request.targetFiles.length != 1) {
+        request.targetFiles.isEmpty) {
       return false;
     }
 
