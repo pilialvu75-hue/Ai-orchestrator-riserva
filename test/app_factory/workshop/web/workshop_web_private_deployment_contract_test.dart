@@ -37,10 +37,19 @@ void main() {
         r'${CLOUDFLARE_ACCOUNT_ID}/pages/projects',
       ),
     );
-    expect(workflow, contains("'{name: \$name, production_branch: \$branch}'"));
     expect(
       workflow,
-      contains('Empty Pages project created. No Web assets were uploaded.'),
+      contains(
+        'npx --yes wrangler@4 pages project create '
+        r'"${CLOUDFLARE_PAGES_PROJECT}"',
+      ),
+    );
+    expect(workflow, contains('--production-branch main'));
+    expect(
+      workflow,
+      contains(
+        'Empty Pages project created and verified. No Web assets were uploaded.',
+      ),
     );
     expect(
       workflow,
