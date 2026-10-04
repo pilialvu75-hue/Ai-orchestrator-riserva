@@ -1,0 +1,37 @@
+name: temp-cantiere-prompt-recovery-runner4
+on: push
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cantiere/project-delete-and-prompt-crash-hardening
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Patch source
+        run: python3 .github/scripts/temp_cantiere_prompt_recovery.py
+      - name: Format
+        run: dart format lib/app_factory/workshop/workshop_pending_prompt_draft.dart lib/app_factory/workshop/workshop_production_recovery_coordinator.dart lib/app_factory/workshop/workshop_dashboard_page.dart lib/app_factory/workshop/workshop_production_dashboard_page.dart
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Analyze touched source
+        run: flutter analyze lib/app_factory/workshop/workshop_pending_prompt_draft.dart lib/app_factory/workshop/workshop_production_recovery_coordinator.dart lib/app_factory/workshop/workshop_dashboard_page.dart lib/app_factory/workshop/workshop_production_dashboard_page.dart
+      - name: Run focused regressions
+        run: flutter test test/app_factory/workshop/workshop_dashboard_page_lifecycle_test.dart test/app_factory/workshop/workshop_production_recovery_coordinator_test.dart
+      - name: Commit clean source diff
+        shell: bash
+        run: |
+          git diff --check
+          git diff --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/app_factory/workshop/workshop_pending_prompt_draft.dart lib/app_factory/workshop/workshop_production_recovery_coordinator.dart lib/app_factory/workshop/workshop_dashboard_page.dart lib/app_factory/workshop/workshop_production_dashboard_page.dart
+          git rm .github/scripts/temp_cantiere_prompt_recovery.py .github/workflows/temp_cantiere_prompt_recovery.yml .github/workflows/temp_cantiere_prompt_recovery_runner.yml .github/workflows/temp_cantiere_prompt_recovery_runner2.yml .github/workflows/temp_cantiere_prompt_recovery_runner3.yml .github/workflows/temp_cantiere_prompt_recovery_runner4.yml
+          git commit -m 'fix(cantiere): persist fresh prompts and expose project deletion'
+          git push origin HEAD:cantiere/project-delete-and-prompt-crash-hardening
