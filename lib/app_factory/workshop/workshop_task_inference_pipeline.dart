@@ -79,7 +79,7 @@ final class WorkshopTaskInferencePipeline {
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
     onStage?.call(WorkshopStage.implementation);
-    final proposal = await _implementationRunner.run(
+    final proposal = await _runInitialImplementation(
       session: session,
       preflight: preflight,
       isOffline: isOffline,
@@ -115,7 +115,7 @@ final class WorkshopTaskInferencePipeline {
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
     onStage?.call(WorkshopStage.implementation);
-    final proposal = await _implementationRunner.runWithResumeContext(
+    final proposal = await _runInitialImplementationWithResumeContext(
       session: session,
       resumeContext: resumeContext,
       preflight: preflight,
@@ -133,6 +133,77 @@ final class WorkshopTaskInferencePipeline {
       cancellationToken: cancellationToken,
       onStage: onStage,
     );
+  }
+
+  Future<WorkshopChangeProposal> _runInitialImplementation({
+    required WorkspaceSession session,
+    required WorkshopPreflightInferenceResult? preflight,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) async {
+    try {
+      return await _implementationRunner.run(
+        session: session,
+        preflight: preflight,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+    } on FormatException catch (error) {
+      if (!_shouldRetryRepeatedEmptyCreate(
+        session: session,
+        error: error,
+        cancellationToken: cancellationToken,
+      )) {
+        rethrow;
+      }
+
+      _emitEmptyCreateRecovery(session.context.request);
+      return _implementationRunner.run(
+        session: session,
+        preflight: preflight,
+        revisionFeedback: _emptyCreateRecoveryFeedback(session.context.request),
+        revisionAttempt: 1,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+    }
+  }
+
+  Future<WorkshopChangeProposal> _runInitialImplementationWithResumeContext({
+    required WorkspaceSession session,
+    required WorkshopResumeContext resumeContext,
+    required WorkshopPreflightInferenceResult? preflight,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) async {
+    try {
+      return await _implementationRunner.runWithResumeContext(
+        session: session,
+        resumeContext: resumeContext,
+        preflight: preflight,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+    } on FormatException catch (error) {
+      if (!_shouldRetryRepeatedEmptyCreate(
+        session: session,
+        error: error,
+        cancellationToken: cancellationToken,
+      )) {
+        rethrow;
+      }
+
+      _emitEmptyCreateRecovery(session.context.request);
+      return _implementationRunner.runWithResumeContext(
+        session: session,
+        resumeContext: resumeContext,
+        preflight: preflight,
+        revisionFeedback: _emptyCreateRecoveryFeedback(session.context.request),
+        revisionAttempt: 1,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+    }
   }
 
   Future<WorkshopTaskInferenceResult> _reviewAndValidate({
@@ -263,6 +334,39 @@ final class WorkshopTaskInferencePipeline {
       revisionAttempt: attempt,
       isOffline: isOffline,
       cancellationToken: cancellationToken,
+    );
+  }
+
+  static bool _shouldRetryRepeatedEmptyCreate({
+    required WorkspaceSession session,
+    required FormatException error,
+    CancellationToken? cancellationToken,
+  }) {
+    return cancellationToken?.isCancelled != true &&
+        session.context.request.operation == WorkshopOperation.create &&
+        error.message.toString() ==
+            'Workshop proposal must contain at least one file change.';
+  }
+
+  static String _emptyCreateRecoveryFeedback(WorkshopRequest request) {
+    final targets = request.targetFiles;
+    final preferredTarget = targets.contains('lib/main.dart')
+        ? 'lib/main.dart'
+        : targets.isNotEmpty
+            ? targets.first
+            : 'lib/main.dart';
+    return 'The Engineer already returned an empty changes array after its '
+        'structured-output repair. This is a CREATE task and must materialize '
+        'code now. Return at least one real file change. Prefer one complete '
+        'compilable change to "$preferredTarget". When targetFiles is non-empty, '
+        'use only an allowed target. Do not answer with explanation-only text, '
+        'planning, or an empty changes array.';
+  }
+
+  static void _emitEmptyCreateRecovery(WorkshopRequest request) {
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_EMPTY_CREATE_RECOVERY] request=${request.id} '
+      'targets=${request.targetFiles.length}',
     );
   }
 
