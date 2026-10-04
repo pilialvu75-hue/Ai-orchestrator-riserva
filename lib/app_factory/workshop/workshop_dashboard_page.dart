@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_title_deri
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_progress_presentation.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_selection_page.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -63,21 +64,34 @@ class WorkshopDashboardPage extends StatefulWidget {
     WorkshopChatController? chatController,
     Future<bool> Function()? closeProjectForNewConversation,
     Future<void> Function()? openProjects,
+    Future<void> Function(String instruction, String title)? savePendingPrompt,
+    Future<WorkshopPendingPromptDraft?> Function()? loadPendingPrompt,
+    Future<void> Function()? clearPendingPrompt,
+    Future<void> Function()? persistCurrentProject,
     List<WorkshopModelAssignment>? modelAssignments,
     this.productionBusy = false,
-  })  : _emissionController = emissionController,
-        _dashboardController = dashboardController,
-        _chatController = chatController,
-        _closeProjectForNewConversation = closeProjectForNewConversation,
-        _openProjects = openProjects,
-        _modelAssignments =
-            modelAssignments ?? WorkshopModelAssignments.defaults;
+  }) : _emissionController = emissionController,
+       _dashboardController = dashboardController,
+       _chatController = chatController,
+       _closeProjectForNewConversation = closeProjectForNewConversation,
+       _openProjects = openProjects,
+       _savePendingPrompt = savePendingPrompt,
+       _loadPendingPrompt = loadPendingPrompt,
+       _clearPendingPrompt = clearPendingPrompt,
+       _persistCurrentProject = persistCurrentProject,
+       _modelAssignments =
+           modelAssignments ?? WorkshopModelAssignments.defaults;
 
   final WorkshopAppEmissionController? _emissionController;
   final WorkshopDashboardController? _dashboardController;
   final WorkshopChatController? _chatController;
   final Future<bool> Function()? _closeProjectForNewConversation;
   final Future<void> Function()? _openProjects;
+  final Future<void> Function(String instruction, String title)?
+  _savePendingPrompt;
+  final Future<WorkshopPendingPromptDraft?> Function()? _loadPendingPrompt;
+  final Future<void> Function()? _clearPendingPrompt;
+  final Future<void> Function()? _persistCurrentProject;
 
   /// True while the production lifecycle is executing a task, build or repair.
   /// Conversation input is locked only for this interval; project controls and
@@ -90,30 +104,21 @@ class WorkshopDashboardPage extends StatefulWidget {
   final List<WorkshopModelAssignment> _modelAssignments;
 
   @override
-  State<WorkshopDashboardPage> createState() =>
-      _WorkshopDashboardPageState();
+  State<WorkshopDashboardPage> createState() => _WorkshopDashboardPageState();
 }
 
-class _WorkshopDashboardPageState
-    extends State<WorkshopDashboardPage> {
-  late final WorkshopAppEmissionController
-      _emissionController;
+class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
+  late final WorkshopAppEmissionController _emissionController;
 
-  late final WorkshopDashboardController?
-      _dashboardController;
+  late final WorkshopDashboardController? _dashboardController;
 
-  late final WorkshopChatController
-      _chatController;
+  late final WorkshopChatController _chatController;
 
   late final bool _ownsChatController;
 
-  final TextEditingController
-      _messageController =
-      TextEditingController();
+  final TextEditingController _messageController = TextEditingController();
 
-  final ScrollController
-      _scrollController =
-      ScrollController();
+  final ScrollController _scrollController = ScrollController();
 
   bool _pendingConfirmation = false;
 
@@ -121,17 +126,14 @@ class _WorkshopDashboardPageState
   String? _pendingTitle;
   String? _pendingApprovedProposal;
 
-
   @override
   void initState() {
     super.initState();
 
     _emissionController =
-        widget._emissionController ??
-            WorkshopAppEmissionController();
+        widget._emissionController ?? WorkshopAppEmissionController();
 
-    _dashboardController =
-        widget._dashboardController;
+    _dashboardController = widget._dashboardController;
 
     /*
      * Il gateway viene creato attraverso il WorkshopFactory.
@@ -144,47 +146,34 @@ class _WorkshopDashboardPageState
      * L'InferenceService può essere condiviso come infrastruttura
      * di basso livello, ma la selezione del modello rimane isolata.
      */
-    _ownsChatController =
-        widget._chatController == null;
+    _ownsChatController = widget._chatController == null;
 
     _chatController =
         widget._chatController ??
-            WorkshopChatController(
-              inferenceGateway:
-                  WorkshopFactory.createInferenceGateway(
-                assignments:
-                    widget._modelAssignments,
-              ),
-              sessionId:
-                  'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
-            );
+        WorkshopChatController(
+          inferenceGateway: WorkshopFactory.createInferenceGateway(
+            assignments: widget._modelAssignments,
+          ),
+          sessionId: 'workshop-chat:${DateTime.now().microsecondsSinceEpoch}',
+        );
 
-    _chatController.addListener(
-      _onChatChanged,
-    );
+    _chatController.addListener(_onChatChanged);
 
-    _dashboardController?.addListener(
-      _onDashboardChanged,
-    );
+    _dashboardController?.addListener(_onDashboardChanged);
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) {
-        if (mounted) {
-          _addWelcomeMessage();
-        }
-      },
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _addWelcomeMessage();
+        _restorePendingPromptDraft();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _chatController.removeListener(
-      _onChatChanged,
-    );
+    _chatController.removeListener(_onChatChanged);
 
-    _dashboardController?.removeListener(
-      _onDashboardChanged,
-    );
+    _dashboardController?.removeListener(_onDashboardChanged);
 
     _messageController.dispose();
     _scrollController.dispose();
@@ -207,11 +196,9 @@ class _WorkshopDashboardPageState
 
     setState(() {});
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) {
-        _scrollChatToBottom();
-      },
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollChatToBottom();
+    });
   }
 
   void _onDashboardChanged() {
@@ -236,12 +223,52 @@ class _WorkshopDashboardPageState
     );
   }
 
-  Future<void> _sendMessage() async {
-    final message =
-        _messageController.text.trim();
+  Future<void> _restorePendingPromptDraft() async {
+    final load = widget._loadPendingPrompt;
+    if (load == null || _dashboardController?.state.hasProject == true) {
+      return;
+    }
 
-    if (message.isEmpty ||
-        _chatController.isBusy) {
+    try {
+      final draft = await load();
+      if (!mounted ||
+          draft == null ||
+          _dashboardController?.state.hasProject == true) {
+        return;
+      }
+      final instruction = draft.instruction.trim();
+      final title = draft.title.trim();
+      if (instruction.isEmpty || title.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _pendingConfirmation = false;
+        _pendingInstruction = instruction;
+        _pendingTitle = title;
+        _pendingApprovedProposal = null;
+        if (_messageController.text.trim().isEmpty) {
+          _messageController.text = instruction;
+          _messageController.selection = TextSelection.collapsed(
+            offset: _messageController.text.length,
+          );
+        }
+      });
+      _chatController.addSystemMessage(
+        'Bozza recuperata dopo l’interruzione. Premi invia per riprovare.',
+        excludeFromContext: true,
+      );
+    } catch (error) {
+      if (mounted) {
+        _showError('Recupero della bozza non riuscito: $error');
+      }
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final message = _messageController.text.trim();
+
+    if (message.isEmpty || _chatController.isBusy) {
       return;
     }
 
@@ -251,16 +278,26 @@ class _WorkshopDashboardPageState
 
     _pendingConfirmation = false;
     _pendingInstruction ??= message;
-    _pendingTitle ??=
-        _deriveProjectTitle(_pendingInstruction);
+    _pendingTitle ??= _deriveProjectTitle(_pendingInstruction);
     _pendingApprovedProposal = null;
+
+    final savePendingPrompt = widget._savePendingPrompt;
+    if (savePendingPrompt != null) {
+      try {
+        await savePendingPrompt(_pendingInstruction!, _pendingTitle!);
+      } catch (error) {
+        if (mounted) {
+          _showError(
+            'Il prompt non è stato inviato perché la bozza non può essere salvata: $error',
+          );
+        }
+        return;
+      }
+    }
 
     _messageController.clear();
 
-    final result =
-        await _chatController.send(
-      message,
-    );
+    final result = await _chatController.send(message);
 
     if (!mounted) {
       return;
@@ -353,24 +390,17 @@ class _WorkshopDashboardPageState
   }
 
   Future<void> _confirmProposal() async {
-    final controller =
-        _dashboardController;
+    final controller = _dashboardController;
 
     if (controller == null) {
-      _showError(
-        'Il controller del Cantiere non è collegato.',
-      );
+      _showError('Il controller del Cantiere non è collegato.');
       return;
     }
 
-    final instruction =
-        _pendingInstruction?.trim();
+    final instruction = _pendingInstruction?.trim();
 
-    if (instruction == null ||
-        instruction.isEmpty) {
-      _showError(
-        'Non è disponibile una richiesta da avviare.',
-      );
+    if (instruction == null || instruction.isEmpty) {
+      _showError('Non è disponibile una richiesta da avviare.');
       return;
     }
 
@@ -393,11 +423,18 @@ class _WorkshopDashboardPageState
         context: approvedProposal == null || approvedProposal.isEmpty
             ? const <String>[]
             : <String>[
-                WorkshopPreflightInferencePipeline
-                    .approvedProposalContextEntry(approvedProposal),
+                WorkshopPreflightInferencePipeline.approvedProposalContextEntry(
+                  approvedProposal,
+                ),
               ],
       );
       controller.approveCurrentProject();
+
+      final persistCurrentProject = widget._persistCurrentProject;
+      if (persistCurrentProject != null) {
+        await persistCurrentProject();
+        await widget._clearPendingPrompt?.call();
+      }
 
       _chatController.addSystemMessage(
         'Proposta approvata. '
@@ -426,9 +463,7 @@ class _WorkshopDashboardPageState
         _pendingApprovedProposal = null;
       });
 
-      _showMessage(
-        'Produzione approvata e preparazione avviata.',
-      );
+      _showMessage('Produzione approvata e preparazione avviata.');
     } catch (error) {
       if (!mounted) {
         return;
@@ -436,9 +471,7 @@ class _WorkshopDashboardPageState
 
       _pendingConfirmation = true;
 
-      _showError(
-        'Impossibile avviare la produzione: $error',
-      );
+      _showError('Impossibile avviare la produzione: $error');
     }
   }
 
@@ -452,34 +485,23 @@ class _WorkshopDashboardPageState
       _pendingApprovedProposal = null;
     });
 
-    _messageController.text =
-        'No. Voglio modificare la proposta: ';
+    _messageController.text = 'No. Voglio modificare la proposta: ';
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) {
-        if (mounted) {
-          FocusScope.of(context)
-              .requestFocus(
-            _messageFocusNode,
-          );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(_messageFocusNode);
 
-          _messageController.selection =
-              TextSelection.fromPosition(
-            TextPosition(
-              offset:
-                  _messageController.text.length,
-            ),
-          );
-        }
-      },
-    );
+        _messageController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _messageController.text.length),
+        );
+      }
+    });
   }
 
   Future<void> _openModelSelection() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            const WorkshopModelSelectionPage(),
+        builder: (_) => const WorkshopModelSelectionPage(),
       ),
     );
 
@@ -571,41 +593,32 @@ class _WorkshopDashboardPageState
       _pendingApprovedProposal = null;
     });
 
+    await widget._clearPendingPrompt?.call();
+
     _chatController.clearConversation();
     _addWelcomeMessage();
 
     _messageController.clear();
 
-    _showMessage(
-      'Nuova conversazione del Cantiere.',
-    );
+    _showMessage('Nuova conversazione del Cantiere.');
   }
 
   String _deriveProjectTitle(String? instruction) =>
       WorkshopProjectTitleDeriver.derive(instruction);
 
-  final FocusNode _messageFocusNode =
-      FocusNode();
+  final FocusNode _messageFocusNode = FocusNode();
 
-  void _showMessage(
-    String message,
-  ) {
+  void _showMessage(String message) {
     if (!mounted) {
       return;
     }
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _showError(
-    String message,
-  ) {
+  void _showError(String message) {
     if (!mounted) {
       return;
     }
@@ -613,11 +626,7 @@ class _WorkshopDashboardPageState
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior:
-              SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
@@ -626,13 +635,11 @@ class _WorkshopDashboardPageState
       return;
     }
 
-    final position =
-        _scrollController.position;
+    final position = _scrollController.position;
 
     _scrollController.animateTo(
       position.maxScrollExtent,
-      duration:
-          const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
   }
@@ -647,233 +654,142 @@ class _WorkshopDashboardPageState
 
   @override
   Widget build(BuildContext context) {
-    final emissionState =
-        _emissionController.state;
+    final emissionState = _emissionController.state;
 
-    final packages =
-        _emissionController.recent(
-      limit: 20,
-    );
+    final packages = _emissionController.recent(limit: 20);
 
-    final dashboardState =
-        _dashboardController?.state;
+    final dashboardState = _dashboardController?.state;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Cantiere',
-        ),
+        title: const Text('Cantiere'),
         actions: <Widget>[
           IconButton(
-            tooltip:
-                'Modelli AI del Cantiere',
-            onPressed:
-                _openModelSelection,
-            icon:
-                const Icon(
-              Icons.psychology_outlined,
-            ),
+            tooltip: 'Modelli AI del Cantiere',
+            onPressed: _openModelSelection,
+            icon: const Icon(Icons.psychology_outlined),
           ),
           IconButton(
-            tooltip:
-                'Nuova conversazione',
-            onPressed:
-                _startNewConversation,
-            icon:
-                const Icon(
-              Icons.add_comment_outlined,
-            ),
+            tooltip: 'Nuova conversazione',
+            onPressed: _startNewConversation,
+            icon: const Icon(Icons.add_comment_outlined),
           ),
           IconButton(
-            tooltip:
-                'Aggiorna',
+            tooltip: 'Aggiorna',
             onPressed: _refresh,
-            icon:
-                const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh),
           ),
         ],
       ),
       body: Column(
         children: <Widget>[
           _WorkshopProjectBar(
-            dashboardState:
-                dashboardState,
-            chatController:
-                _chatController,
+            dashboardState: dashboardState,
+            chatController: _chatController,
           ),
           Expanded(
-            child:
-                _WorkshopConversationView(
-              controller:
-                  _chatController,
-              scrollController:
-                  _scrollController,
+            child: _WorkshopConversationView(
+              controller: _chatController,
+              scrollController: _scrollController,
             ),
           ),
           if (_pendingConfirmation)
             _WorkshopProposalActions(
-              busy:
-                  _chatController.isBusy ||
-                      dashboardState?.isBusy ==
-                          true,
+              busy: _chatController.isBusy || dashboardState?.isBusy == true,
               initialTitle: _pendingTitle ?? '',
               onTitleChanged: (value) {
                 _pendingTitle = value;
               },
-              onConfirm:
-                  _confirmProposal,
-              onReject:
-                  _rejectProposal,
+              onConfirm: _confirmProposal,
+              onReject: _rejectProposal,
             ),
           _WorkshopComposer(
-            controller:
-                _messageController,
-            focusNode:
-                _messageFocusNode,
+            controller: _messageController,
+            focusNode: _messageFocusNode,
             busy:
                 _chatController.isBusy ||
-                    dashboardState?.isBusy == true ||
-                    widget.productionBusy,
-            busyHint:
-                widget.productionBusy
-                    ? 'Cantiere in esecuzione…'
-                    : null,
-            onSend:
-                _sendMessage,
+                dashboardState?.isBusy == true ||
+                widget.productionBusy,
+            busyHint: widget.productionBusy ? 'Cantiere in esecuzione…' : null,
+            onSend: _sendMessage,
           ),
           _WorkshopBottomStatus(
-            chatController:
-                _chatController,
-            dashboardState:
-                dashboardState,
+            chatController: _chatController,
+            dashboardState: dashboardState,
           ),
         ],
       ),
       drawer: Drawer(
-        child:
-            SafeArea(
+        child: SafeArea(
           child: ListView(
-            padding:
-                const EdgeInsets.only(
-              top: 12,
-            ),
+            padding: const EdgeInsets.only(top: 12),
             children: <Widget>[
               const DrawerHeader(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  mainAxisAlignment:
-                      MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: <Widget>[
-                    Icon(
-                      Icons.construction,
-                      size: 42,
-                    ),
+                    Icon(Icons.construction, size: 42),
                     SizedBox(height: 6),
                     Text(
                       'Cantiere',
                       style: TextStyle(
                         fontSize: 24,
-                        fontWeight:
-                            FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     SizedBox(height: 4),
-                    Text(
-                      'Factory / Code Studio',
-                    ),
+                    Text('Factory / Code Studio'),
                   ],
                 ),
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.chat_outlined,
-                ),
-                title:
-                    const Text(
-                  'Conversazione',
-                ),
+                leading: const Icon(Icons.chat_outlined),
+                title: const Text('Conversazione'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.folder_copy_outlined,
-                ),
-                title:
-                    const Text(
-                  'Progetti',
-                ),
-                subtitle:
-                    const Text(
-                  'Riprendi un progetto salvato',
-                ),
+                leading: const Icon(Icons.folder_copy_outlined),
+                title: const Text('Progetti'),
+                subtitle: const Text('Riprendi un progetto salvato'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
                   widget._openProjects?.call();
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.psychology_outlined,
-                ),
-                title:
-                    const Text(
-                  'Modelli AI',
-                ),
+                leading: const Icon(Icons.psychology_outlined),
+                title: const Text('Modelli AI'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
                   _openModelSelection();
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.extension_outlined,
-                ),
-                title:
-                    const Text(
-                  'Moduli',
-                ),
+                leading: const Icon(Icons.extension_outlined),
+                title: const Text('Moduli'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          const ModuleLibraryPage(),
+                      builder: (_) => const ModuleLibraryPage(),
                     ),
                   );
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.inventory_2_outlined,
-                ),
-                title:
-                    Text(
+                leading: const Icon(Icons.inventory_2_outlined),
+                title: Text(
                   'App emesse '
                   '(${packages.length})',
                 ),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
                   _showMessage(
                     packages.isEmpty
@@ -883,65 +799,34 @@ class _WorkshopDashboardPageState
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.bug_report_outlined,
-                ),
-                title:
-                    const Text(
-                  'Diagnostica',
-                ),
+                leading: const Icon(Icons.bug_report_outlined),
+                title: const Text('Diagnostica'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
-                  _showDiagnostics(
-                    emissionState,
-                  );
+                  _showDiagnostics(emissionState);
                 },
               ),
               const Divider(),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.home_outlined,
-                ),
-                title:
-                    const Text(
-                  'Menu principale',
-                ),
-                subtitle:
-                    const Text(
-                  'Torna alla home di AI Orchestrator',
-                ),
+                leading: const Icon(Icons.home_outlined),
+                title: const Text('Menu principale'),
+                subtitle: const Text('Torna alla home di AI Orchestrator'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
-                  WidgetsBinding.instance.addPostFrameCallback(
-                    (_) {
-                      if (mounted) {
-                        Navigator.of(context).maybePop();
-                      }
-                    },
-                  );
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      Navigator.of(context).maybePop();
+                    }
+                  });
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(
-                  Icons.refresh,
-                ),
-                title:
-                    const Text(
-                  'Nuova conversazione',
-                ),
+                leading: const Icon(Icons.refresh),
+                title: const Text('Nuova conversazione'),
                 onTap: () {
-                  Navigator.of(
-                    context,
-                  ).pop();
+                  Navigator.of(context).pop();
 
                   _startNewConversation();
                 },
@@ -953,12 +838,8 @@ class _WorkshopDashboardPageState
     );
   }
 
-  void _showDiagnostics(
-    WorkshopAppEmissionState state,
-  ) {
-    final diagnostics =
-        _emissionController
-            .diagnostics();
+  void _showDiagnostics(WorkshopAppEmissionState state) {
+    final diagnostics = _emissionController.diagnostics();
 
     showModalBottomSheet<void>(
       context: context,
@@ -967,39 +848,21 @@ class _WorkshopDashboardPageState
       builder: (context) {
         return SafeArea(
           child: Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
-              16,
-              8,
-              16,
-              24,
-            ),
-            child:
-                SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: SingleChildScrollView(
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
                     'Diagnostica Cantiere',
-                    style:
-                        Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(
-                          fontWeight:
-                              FontWeight.bold,
-                        ),
+                    style: Theme.of(context).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
                   ...diagnostics.entries.map(
-                    (entry) =>
-                        _WorkshopInfoRow(
+                    (entry) => _WorkshopInfoRow(
                       label: entry.key,
-                      value:
-                          _formatDiagnosticValue(
-                        entry.value,
-                      ),
+                      value: _formatDiagnosticValue(entry.value),
                     ),
                   ),
                 ],
@@ -1011,9 +874,7 @@ class _WorkshopDashboardPageState
     );
   }
 
-  String _formatDiagnosticValue(
-    Object? value,
-  ) {
+  String _formatDiagnosticValue(Object? value) {
     if (value == null) {
       return '—';
     }
@@ -1022,129 +883,84 @@ class _WorkshopDashboardPageState
   }
 }
 
-class _WorkshopProjectBar
-    extends StatelessWidget {
+class _WorkshopProjectBar extends StatelessWidget {
   const _WorkshopProjectBar({
     required this.dashboardState,
     required this.chatController,
   });
 
-  final WorkshopDashboardControllerState?
-      dashboardState;
+  final WorkshopDashboardControllerState? dashboardState;
 
-  final WorkshopChatController
-      chatController;
+  final WorkshopChatController chatController;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
-    final stage =
-        dashboardState?.stage;
+    final stage = dashboardState?.stage;
 
     final presentationStage =
-        dashboardState?.progressPresentationStage ??
-            stage;
+        dashboardState?.progressPresentationStage ?? stage;
 
-    final model =
-        chatController.lastModel;
+    final model = chatController.lastModel;
 
-    final progress =
-        WorkshopProgressPresentation.displayValue(
-      authoritativeProgress:
-          dashboardState?.progress ?? 0,
-      completedTasks:
-          dashboardState?.completedTasks ?? 0,
-      totalTasks:
-          dashboardState?.totalTasks ?? 0,
+    final progress = WorkshopProgressPresentation.displayValue(
+      authoritativeProgress: dashboardState?.progress ?? 0,
+      completedTasks: dashboardState?.completedTasks ?? 0,
+      totalTasks: dashboardState?.totalTasks ?? 0,
       stage: presentationStage,
       actualStage: stage,
     );
 
-    final progressPercent =
-        (progress * 100).round();
+    final progressPercent = (progress * 100).round();
 
     return Material(
       elevation: 1,
-      color:
-          theme.colorScheme.surface,
+      color: theme.colorScheme.surface,
       child: Padding(
-        padding:
-            const EdgeInsets.fromLTRB(
-          16,
-          10,
-          16,
-          10,
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
                 Container(
                   width: 9,
                   height: 9,
-                  decoration:
-                      BoxDecoration(
-                    color:
-                        dashboardState?.isBusy ==
-                                true
-                            ? theme
-                                .colorScheme
-                                .tertiary
-                            : theme
-                                .colorScheme
-                                .primary,
-                    shape:
-                        BoxShape.circle,
+                  decoration: BoxDecoration(
+                    color: dashboardState?.isBusy == true
+                        ? theme.colorScheme.tertiary
+                        : theme.colorScheme.primary,
+                    shape: BoxShape.circle,
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    dashboardState
-                            ?.projectTitle ??
-                        'Nuova produzione',
+                    dashboardState?.projectTitle ?? 'Nuova produzione',
                     maxLines: 1,
-                    overflow:
-                        TextOverflow.ellipsis,
-                    style:
-                        theme.textTheme.titleSmall
-                            ?.copyWith(
-                      fontWeight:
-                          FontWeight.w700,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                if (model != null &&
-                    model.trim().isNotEmpty)
+                if (model != null && model.trim().isNotEmpty)
                   Flexible(
                     child: Padding(
-                      padding:
-                          const EdgeInsets.only(
-                        left: 8,
-                      ),
+                      padding: const EdgeInsets.only(left: 8),
                       child: Text(
                         model,
                         maxLines: 1,
-                        overflow:
-                            TextOverflow.ellipsis,
-                        style: theme
-                            .textTheme
-                            .bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
                       ),
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 7),
-            _WorkshopStageStrip(
-              currentStage: presentationStage,
-            ),
+            _WorkshopStageStrip(currentStage: presentationStage),
             if (dashboardState?.hasProject == true) ...<Widget>[
               const SizedBox(height: 7),
               Row(
@@ -1161,8 +977,9 @@ class _WorkshopProjectBar
                             fit: StackFit.expand,
                             children: <Widget>[
                               ColoredBox(
-                                color: theme.colorScheme.onSurface
-                                    .withValues(alpha: 0.16),
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.16,
+                                ),
                               ),
                               Align(
                                 alignment: Alignment.centerLeft,
@@ -1181,10 +998,7 @@ class _WorkshopProjectBar
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    '$progressPercent%',
-                    style: theme.textTheme.labelSmall,
-                  ),
+                  Text('$progressPercent%', style: theme.textTheme.labelSmall),
                 ],
               ),
             ],
@@ -1195,18 +1009,13 @@ class _WorkshopProjectBar
   }
 }
 
-class _WorkshopStageStrip
-    extends StatelessWidget {
-  const _WorkshopStageStrip({
-    required this.currentStage,
-  });
+class _WorkshopStageStrip extends StatelessWidget {
+  const _WorkshopStageStrip({required this.currentStage});
 
   final WorkshopStage? currentStage;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     final labels = <String>[
       'Idea',
       'Analisi',
@@ -1216,61 +1025,35 @@ class _WorkshopStageStrip
       'Build',
     ];
 
-    final activeIndex =
-        _stageIndex(currentStage);
+    final activeIndex = _stageIndex(currentStage);
 
     return SizedBox(
       height: 6,
       child: Row(
-        children: List<Widget>.generate(
-          labels.length,
-          (index) {
-            final active =
-                activeIndex >= index;
+        children: List<Widget>.generate(labels.length, (index) {
+          final active = activeIndex >= index;
 
-            return Expanded(
-              child: Padding(
-                padding:
-                    EdgeInsets.only(
-                  right:
-                      index ==
-                              labels.length -
-                                  1
-                          ? 0
-                          : 3,
-                ),
-                child:
-                    DecoratedBox(
-                  decoration:
-                      BoxDecoration(
-                    color: active
-                        ? Theme.of(
-                            context,
-                          )
-                            .colorScheme
-                            .primary
-                        : Theme.of(
-                            context,
-                          )
-                            .colorScheme
-                            .surfaceContainerHighest,
-                    borderRadius:
-                        BorderRadius.circular(
-                      20,
-                    ),
-                  ),
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: index == labels.length - 1 ? 0 : 3,
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: active
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(20),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
 
-  int _stageIndex(
-    WorkshopStage? stage,
-  ) {
+  int _stageIndex(WorkshopStage? stage) {
     if (stage == null) {
       return 0;
     }
@@ -1298,126 +1081,73 @@ class _WorkshopStageStrip
   }
 }
 
-class _WorkshopConversationView
-    extends StatelessWidget {
+class _WorkshopConversationView extends StatelessWidget {
   const _WorkshopConversationView({
     required this.controller,
     required this.scrollController,
   });
 
-  final WorkshopChatController
-      controller;
+  final WorkshopChatController controller;
 
-  final ScrollController
-      scrollController;
+  final ScrollController scrollController;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final messages =
-        controller.messages;
+  Widget build(BuildContext context) {
+    final messages = controller.messages;
 
     if (messages.isEmpty) {
-      return const Center(
-        child: Text(
-          'Scrivi cosa vuoi costruire.',
-        ),
-      );
+      return const Center(child: Text('Scrivi cosa vuoi costruire.'));
     }
 
     return ListView.builder(
-      controller:
-          scrollController,
-      padding:
-          const EdgeInsets.fromLTRB(
-        12,
-        18,
-        12,
-        16,
-      ),
-      physics:
-          const AlwaysScrollableScrollPhysics(),
-      itemCount:
-          messages.length,
-      itemBuilder:
-          (context, index) {
-        final turn =
-            messages[index];
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(12, 18, 12, 16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      itemCount: messages.length,
+      itemBuilder: (context, index) {
+        final turn = messages[index];
 
-        return _WorkshopChatBubble(
-          turn: turn,
-        );
+        return _WorkshopChatBubble(turn: turn);
       },
     );
   }
 }
 
-class _WorkshopChatBubble
-    extends StatelessWidget {
-  const _WorkshopChatBubble({
-    required this.turn,
-  });
+class _WorkshopChatBubble extends StatelessWidget {
+  const _WorkshopChatBubble({required this.turn});
 
   final ChatTurn turn;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
-    final isUser =
-        turn.role ==
-            ChatRole.user;
+    final isUser = turn.role == ChatRole.user;
 
-    final isSystem =
-        turn.role ==
-            ChatRole.system;
+    final isSystem = turn.role == ChatRole.system;
 
     if (isSystem) {
       return Padding(
-        padding:
-            const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 8,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Container(
-          padding:
-              const EdgeInsets.all(12),
-          decoration:
-              BoxDecoration(
-            color: theme
-                .colorScheme
-                .surfaceContainerHighest
-                .withValues(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
               alpha: 0.6,
             ),
-            borderRadius:
-                BorderRadius.circular(
-              14,
-            ),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Icon(
                 Icons.construction_outlined,
                 size: 18,
-                color: theme
-                    .colorScheme
-                    .primary,
+                color: theme.colorScheme.primary,
               ),
               const SizedBox(width: 9),
               Expanded(
-                child: Text(
-                  turn.content,
-                  style: theme
-                      .textTheme
-                      .bodyMedium,
-                ),
+                child: Text(turn.content, style: theme.textTheme.bodyMedium),
               ),
             ],
           ),
@@ -1426,52 +1156,20 @@ class _WorkshopChatBubble
     }
 
     return Align(
-      alignment: isUser
-          ? Alignment.centerRight
-          : Alignment.centerLeft,
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints:
-            const BoxConstraints(
-          maxWidth: 640,
-        ),
-        margin:
-            const EdgeInsets.only(
-          bottom: 10,
-        ),
-        padding:
-            const EdgeInsets.fromLTRB(
-          15,
-          11,
-          15,
-          11,
-        ),
-        decoration:
-            BoxDecoration(
+        constraints: const BoxConstraints(maxWidth: 640),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(15, 11, 15, 11),
+        decoration: BoxDecoration(
           color: isUser
-              ? theme
-                  .colorScheme
-                  .primaryContainer
-              : theme
-                  .colorScheme
-                  .surfaceContainerHighest,
-          borderRadius:
-              BorderRadius.only(
-            topLeft:
-                const Radius.circular(
-              18,
-            ),
-            topRight:
-                const Radius.circular(
-              18,
-            ),
-            bottomLeft:
-                Radius.circular(
-              isUser ? 18 : 4,
-            ),
-            bottomRight:
-                Radius.circular(
-              isUser ? 4 : 18,
-            ),
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isUser ? 18 : 4),
+            bottomRight: Radius.circular(isUser ? 4 : 18),
           ),
         ),
         child: Column(
@@ -1479,7 +1177,8 @@ class _WorkshopChatBubble
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Text(turn.content, style: theme.textTheme.bodyLarge),
-            if (turn.role == ChatRole.assistant && turn.content.trim().isNotEmpty)
+            if (turn.role == ChatRole.assistant &&
+                turn.content.trim().isNotEmpty)
               Align(
                 alignment: Alignment.centerRight,
                 child: WorkshopReadAloudButton(text: turn.content),
@@ -1491,8 +1190,7 @@ class _WorkshopChatBubble
   }
 }
 
-class _WorkshopProposalActions
-    extends StatelessWidget {
+class _WorkshopProposalActions extends StatelessWidget {
   const _WorkshopProposalActions({
     required this.busy,
     required this.initialTitle,
@@ -1508,33 +1206,16 @@ class _WorkshopProposalActions
   final VoidCallback onReject;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
     return Material(
-      color:
-          theme.colorScheme.surface,
+      color: theme.colorScheme.surface,
       child: Container(
-        padding:
-            const EdgeInsets.fromLTRB(
-          12,
-          8,
-          12,
-          8,
-        ),
-        decoration:
-            BoxDecoration(
-          border:
-              Border(
-            top:
-                BorderSide(
-              color: theme
-                  .colorScheme
-                  .outlineVariant,
-            ),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: theme.colorScheme.outlineVariant),
           ),
         ),
         child: Column(
@@ -1557,29 +1238,18 @@ class _WorkshopProposalActions
             Row(
               children: <Widget>[
                 const Expanded(
-                  child: Text(
-                    'Vuoi che proceda con questa proposta?',
-                  ),
+                  child: Text('Vuoi che proceda con questa proposta?'),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton(
-                  onPressed:
-                      busy ? null : onReject,
-                  child:
-                      const Text('No'),
+                  onPressed: busy ? null : onReject,
+                  child: const Text('No'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
-                  onPressed:
-                      busy ? null : onConfirm,
-                  icon:
-                      const Icon(
-                    Icons.build_outlined,
-                  ),
-                  label:
-                      const Text(
-                    'Sì, procedi',
-                  ),
+                  onPressed: busy ? null : onConfirm,
+                  icon: const Icon(Icons.build_outlined),
+                  label: const Text('Sì, procedi'),
                 ),
               ],
             ),
@@ -1590,8 +1260,7 @@ class _WorkshopProposalActions
   }
 }
 
-class _WorkshopComposer
-    extends StatelessWidget {
+class _WorkshopComposer extends StatelessWidget {
   const _WorkshopComposer({
     required this.controller,
     required this.focusNode,
@@ -1600,8 +1269,7 @@ class _WorkshopComposer
     this.busyHint,
   });
 
-  final TextEditingController
-      controller;
+  final TextEditingController controller;
 
   final FocusNode focusNode;
 
@@ -1612,72 +1280,43 @@ class _WorkshopComposer
   final VoidCallback onSend;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
     return SafeArea(
       top: false,
       child: Padding(
-        padding:
-            const EdgeInsets.fromLTRB(
-          10,
-          6,
-          10,
-          6,
-        ),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
         child: Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: <Widget>[
             Expanded(
               child: TextField(
-                controller:
-                    controller,
-                focusNode:
-                    focusNode,
+                controller: controller,
+                focusNode: focusNode,
                 minLines: 1,
                 maxLines: 6,
-                textInputAction:
-                    TextInputAction.newline,
-                enabled:
-                    !busy,
-                onSubmitted:
-                    (_) {
+                textInputAction: TextInputAction.newline,
+                enabled: !busy,
+                onSubmitted: (_) {
                   if (!busy) {
                     onSend();
                   }
                 },
-                decoration:
-                    InputDecoration(
-                  hintText:
-                      busy && busyHint != null
-                          ? busyHint
-                          : 'Scrivi al Cantiere...',
-                  filled:
-                      true,
-                  fillColor: theme
-                      .colorScheme
-                      .surfaceContainerHighest
-                      .withValues(
-                    alpha: 0.65,
-                  ),
-                  contentPadding:
-                      const EdgeInsets
-                          .symmetric(
+                decoration: InputDecoration(
+                  hintText: busy && busyHint != null
+                      ? busyHint
+                      : 'Scrivi al Cantiere...',
+                  filled: true,
+                  fillColor: theme.colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.65),
+                  contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 12,
                   ),
-                  border:
-                      OutlineInputBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                      24,
-                    ),
-                    borderSide:
-                        BorderSide.none,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
@@ -1687,29 +1326,18 @@ class _WorkshopComposer
               width: 48,
               height: 48,
               child: FilledButton(
-                onPressed:
-                    busy
-                        ? null
-                        : onSend,
-                style:
-                    FilledButton.styleFrom(
-                  shape:
-                      const CircleBorder(),
-                  padding:
-                      EdgeInsets.zero,
+                onPressed: busy ? null : onSend,
+                style: FilledButton.styleFrom(
+                  shape: const CircleBorder(),
+                  padding: EdgeInsets.zero,
                 ),
                 child: busy
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child:
-                            CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(
-                        Icons.send,
-                      ),
+                    : const Icon(Icons.send),
               ),
             ),
           ],
@@ -1719,98 +1347,56 @@ class _WorkshopComposer
   }
 }
 
-class _WorkshopBottomStatus
-    extends StatelessWidget {
+class _WorkshopBottomStatus extends StatelessWidget {
   const _WorkshopBottomStatus({
     required this.chatController,
     required this.dashboardState,
   });
 
-  final WorkshopChatController
-      chatController;
+  final WorkshopChatController chatController;
 
-  final WorkshopDashboardControllerState?
-      dashboardState;
+  final WorkshopDashboardControllerState? dashboardState;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
     if (chatController.hasError) {
       return Container(
         width: double.infinity,
-        padding:
-            const EdgeInsets.fromLTRB(
-          14,
-          7,
-          14,
-          8,
-        ),
-        color:
-            theme.colorScheme.errorContainer,
+        padding: const EdgeInsets.fromLTRB(14, 7, 14, 8),
+        color: theme.colorScheme.errorContainer,
         child: Text(
           chatController.lastError!,
-          style:
-              theme.textTheme.bodySmall
-                  ?.copyWith(
-            color: theme
-                .colorScheme
-                .onErrorContainer,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onErrorContainer,
           ),
         ),
       );
     }
 
-    if (dashboardState?.lastError !=
-        null) {
+    if (dashboardState?.lastError != null) {
       return Container(
         width: double.infinity,
-        padding:
-            const EdgeInsets.fromLTRB(
-          14,
-          7,
-          14,
-          8,
-        ),
-        color:
-            theme.colorScheme.errorContainer,
+        padding: const EdgeInsets.fromLTRB(14, 7, 14, 8),
+        color: theme.colorScheme.errorContainer,
         child: Text(
           dashboardState!.lastError!,
-          style:
-              theme.textTheme.bodySmall
-                  ?.copyWith(
-            color: theme
-                .colorScheme
-                .onErrorContainer,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onErrorContainer,
           ),
         ),
       );
     }
 
-    if (chatController
-            .lastRuntimeNotice !=
-        null) {
+    if (chatController.lastRuntimeNotice != null) {
       return Container(
         width: double.infinity,
-        padding:
-            const EdgeInsets.fromLTRB(
-          14,
-          7,
-          14,
-          8,
-        ),
-        color:
-            theme
-                .colorScheme
-                .secondaryContainer,
+        padding: const EdgeInsets.fromLTRB(14, 7, 14, 8),
+        color: theme.colorScheme.secondaryContainer,
         child: Text(
-          chatController
-              .lastRuntimeNotice!,
-          style:
-              theme.textTheme.bodySmall,
+          chatController.lastRuntimeNotice!,
+          style: theme.textTheme.bodySmall,
         ),
       );
     }
@@ -1819,46 +1405,27 @@ class _WorkshopBottomStatus
   }
 }
 
-class _WorkshopInfoRow
-    extends StatelessWidget {
-  const _WorkshopInfoRow({
-    required this.label,
-    required this.value,
-  });
+class _WorkshopInfoRow extends StatelessWidget {
+  const _WorkshopInfoRow({required this.label, required this.value});
 
   final String label;
   final String value;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.only(
-        bottom: 8,
-      ),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           SizedBox(
             width: 110,
             child: Text(
               label,
-              style: const TextStyle(
-                fontWeight:
-                    FontWeight.w600,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(
-            child: SelectableText(
-              value.isEmpty
-                  ? '—'
-                  : value,
-            ),
-          ),
+          Expanded(child: SelectableText(value.isEmpty ? '—' : value)),
         ],
       ),
     );
