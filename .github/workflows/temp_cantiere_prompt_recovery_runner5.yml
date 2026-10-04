@@ -32,10 +32,28 @@ jobs:
           from pathlib import Path
           page = Path('lib/app_factory/workshop/workshop_dashboard_page.dart')
           text = page.read_text()
-          old = "    _chatController.clearConversation();\n    _addWelcomeMessage();\n"
-          new = "    await widget._clearPendingPrompt?.call();\n\n    _chatController.clearConversation();\n    _addWelcomeMessage();\n"
+          old = '''    _chatController.clearConversation();
+    _addWelcomeMessage();
+
+    _messageController.clear();
+
+    _showMessage(
+      'Nuova conversazione del Cantiere.',
+    );
+'''
+          new = '''    await widget._clearPendingPrompt?.call();
+
+    _chatController.clearConversation();
+    _addWelcomeMessage();
+
+    _messageController.clear();
+
+    _showMessage(
+      'Nuova conversazione del Cantiere.',
+    );
+'''
           if text.count(old) != 1:
-              raise SystemExit(f'new conversation draft clear anchor count={text.count(old)}')
+              raise SystemExit(f'new conversation anchor count={text.count(old)}')
           page.write_text(text.replace(old, new, 1))
           PY
       - name: Format
@@ -55,6 +73,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add lib/app_factory/workshop/workshop_pending_prompt_draft.dart lib/app_factory/workshop/workshop_production_recovery_coordinator.dart lib/app_factory/workshop/workshop_dashboard_page.dart lib/app_factory/workshop/workshop_production_dashboard_page.dart
-          git rm .github/scripts/temp_cantiere_prompt_recovery.py .github/workflows/temp_cantiere_prompt_recovery.yml .github/workflows/temp_cantiere_prompt_recovery_runner.yml .github/workflows/temp_cantiere_prompt_recovery_runner2.yml .github/workflows/temp_cantiere_prompt_recovery_runner3.yml .github/workflows/temp_cantiere_prompt_recovery_runner4.yml .github/workflows/temp_cantiere_prompt_recovery_runner5.yml
+          git rm .github/scripts/temp_cantiere_prompt_recovery.py .github/workflows/temp_cantiere_prompt_recovery.yml .github/workflows/temp_cantiere_prompt_recovery_runner.yml .github/workflows/temp_cantiere_prompt_recovery_runner2.yml .github/workflows/temp_cantiere_prompt_recovery_runner3.yml .github/workflows/temp_cantiere_prompt_recovery_runner4.yml .github/workflows/temp_cantiere_prompt_recovery_runner5.yml .github/workflows/temp_cantiere_prompt_recovery_runner6.yml
           git commit -m 'fix(cantiere): persist fresh prompts and expose project deletion'
           git push origin HEAD:cantiere/project-delete-and-prompt-crash-hardening
