@@ -1,0 +1,7 @@
+name: temp-probe-2994
+on: push
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
