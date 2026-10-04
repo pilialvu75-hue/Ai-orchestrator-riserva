@@ -22,6 +22,32 @@ void main() {
     expect(workflow, contains('/cdn-cgi/access/'));
   });
 
+  test('W2 bootstrap creates only an empty Pages project', () {
+    final workflow = File(
+      '.github/workflows/web-private-deploy.yml',
+    ).readAsStringSync();
+
+    expect(workflow, contains('bootstrap_pages'));
+    expect(workflow, contains('BOOTSTRAP_EMPTY_PAGES'));
+    expect(workflow, contains('bootstrap-pages:'));
+    expect(
+      workflow,
+      contains(
+        'https://api.cloudflare.com/client/v4/accounts/'
+        r'${CLOUDFLARE_ACCOUNT_ID}/pages/projects',
+      ),
+    );
+    expect(workflow, contains("'{name: \$name, production_branch: \$branch}'"));
+    expect(
+      workflow,
+      contains('Empty Pages project created. No Web assets were uploaded.'),
+    );
+    expect(
+      workflow,
+      contains("if: \${{ inputs.operation == 'deploy_private' }}"),
+    );
+  });
+
   test('W2 static headers prevent indexing and basic browser embedding', () {
     final headers = File('web/_headers').readAsStringSync();
 
