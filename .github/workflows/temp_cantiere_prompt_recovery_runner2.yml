@@ -1,0 +1,33 @@
+name: temp-cantiere-prompt-recovery-runner2
+on: push
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cantiere/project-delete-and-prompt-crash-hardening
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Execute patch payload
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/temp_cantiere_prompt_recovery.yml')
+          lines = p.read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if line.strip() == 'run: |') + 1
+          payload = [line[10:] if line.startswith('          ') else line for line in lines[start:]]
+          script = '\n'.join(payload) + '\n'
+          script = script.replace(
+              'git rm .github/workflows/temp_cantiere_prompt_recovery.yml',
+              'git rm .github/workflows/temp_cantiere_prompt_recovery.yml .github/workflows/temp_cantiere_prompt_recovery_runner.yml .github/workflows/temp_cantiere_prompt_recovery_runner2.yml',
+          )
+          Path('/tmp/cantiere-prompt-recovery.sh').write_text(script)
+          PY
+          bash -euxo pipefail /tmp/cantiere-prompt-recovery.sh
