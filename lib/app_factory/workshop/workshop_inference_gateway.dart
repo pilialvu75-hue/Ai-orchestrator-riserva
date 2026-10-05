@@ -251,6 +251,58 @@ class WorkshopInferenceGateway {
     );
   }
 
+  /// Completion path that combines execution-continuity identity with a
+  /// bounded caller-selected first-token timeout.
+  ///
+  /// This is used by bounded runtime retries that must keep the same Cantiere
+  /// project/task/execution identity while allowing a proven slow first token
+  /// more time. The historical identity method remains unchanged.
+  Future<WorkshopInferenceResult> completeWithIdentityAndFirstTokenTimeout({
+    required String prompt,
+    required Duration firstTokenTimeout,
+    String? systemPrompt,
+    List<ChatTurn> context = const <ChatTurn>[],
+    String sessionId = 'workshop',
+    bool isOffline = false,
+    int? maxTokens,
+    double? temperature,
+    double topP = 0.9,
+    double repeatPenalty = 1.1,
+    String? modelId,
+    String? modelPath,
+    String? requestId,
+    String? projectId,
+    String? taskId,
+    String? executionId,
+    String? attemptId,
+    String? checkpointId,
+    CancellationToken? cancellationToken,
+  }) {
+    return _collect(
+      _streamInternal(
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        modelId: modelId,
+        modelPath: modelPath,
+        requestId: requestId,
+        projectId: projectId,
+        taskId: taskId,
+        executionId: executionId,
+        attemptId: attemptId,
+        checkpointId: checkpointId,
+        firstTokenTimeoutOverride: firstTokenTimeout,
+        cancellationToken: cancellationToken,
+      ),
+    );
+  }
+
   /// Convenience completion path that preserves execution-continuity identity.
   Future<WorkshopInferenceResult> completeWithIdentity({
     required String prompt,
