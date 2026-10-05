@@ -17,6 +17,9 @@ final class WorkshopRoleInferenceExecutor {
 
   final WorkshopRoleInferenceRouter _router;
 
+  static const Duration _engineerRetryFirstTokenTimeout =
+      Duration(seconds: 75);
+
   Set<AppAiRole> get roles => _router.roles;
 
   WorkshopInferenceGateway gatewayFor(AppAiRole role) =>
@@ -36,6 +39,23 @@ final class WorkshopRoleInferenceExecutor {
     CancellationToken? cancellationToken,
   }) {
     final gateway = _router.gatewayFor(role);
+
+    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId) &&
+        gateway.runtimeType == WorkshopInferenceGateway) {
+      return gateway.completeWithFirstTokenTimeout(
+        prompt: prompt,
+        firstTokenTimeout: _engineerRetryFirstTokenTimeout,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        cancellationToken: cancellationToken,
+      );
+    }
 
     return gateway.complete(
       prompt: prompt,
@@ -107,6 +127,29 @@ final class WorkshopRoleInferenceExecutor {
   }) {
     final gateway = _router.gatewayFor(role);
 
+    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId) &&
+        gateway.runtimeType == WorkshopInferenceGateway) {
+      return gateway.completeWithIdentityAndFirstTokenTimeout(
+        prompt: prompt,
+        firstTokenTimeout: _engineerRetryFirstTokenTimeout,
+        systemPrompt: systemPrompt,
+        context: context,
+        sessionId: sessionId,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        topP: topP,
+        repeatPenalty: repeatPenalty,
+        requestId: requestId,
+        projectId: projectId,
+        taskId: taskId,
+        executionId: executionId,
+        attemptId: attemptId,
+        checkpointId: checkpointId,
+        cancellationToken: cancellationToken,
+      );
+    }
+
     return gateway.completeWithIdentity(
       prompt: prompt,
       systemPrompt: systemPrompt,
@@ -125,5 +168,17 @@ final class WorkshopRoleInferenceExecutor {
       checkpointId: checkpointId,
       cancellationToken: cancellationToken,
     );
+  }
+
+  static bool _isEngineerRuntimeRetry({
+    required AppAiRole role,
+    required String sessionId,
+  }) {
+    if (role != AppAiRole.engineer) {
+      return false;
+    }
+
+    return sessionId.endsWith(':retry-1') ||
+        sessionId.endsWith(':engineer-retry-1');
   }
 }
