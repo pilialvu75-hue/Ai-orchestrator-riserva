@@ -342,10 +342,13 @@ final class WorkshopTaskInferencePipeline {
     required FormatException error,
     CancellationToken? cancellationToken,
   }) {
+    final message = error.message.toString();
     return cancellationToken?.isCancelled != true &&
         session.context.request.operation == WorkshopOperation.create &&
-        error.message.toString() ==
-            'Workshop proposal must contain at least one file change.';
+        (message == 'Workshop proposal must contain at least one file change.' ||
+            message ==
+                'Workshop create proposal must materialize required target '
+                    '"lib/main.dart".');
   }
 
   static String _emptyCreateRecoveryFeedback(WorkshopRequest request) {
@@ -355,12 +358,14 @@ final class WorkshopTaskInferencePipeline {
         : targets.isNotEmpty
             ? targets.first
             : 'lib/main.dart';
-    return 'The Engineer already returned an empty changes array after its '
-        'structured-output repair. This is a CREATE task and must materialize '
-        'code now. Return at least one real file change. Prefer one complete '
-        'compilable change to "$preferredTarget". When targetFiles is non-empty, '
-        'use only an allowed target. Do not answer with explanation-only text, '
-        'planning, or an empty changes array.';
+    return 'The Engineer already failed CREATE materialization after its '
+        'structured-output repair. This final recovery must produce at least '
+        'one real file change. If "lib/main.dart" is in targetFiles and does '
+        'not yet exist, changes MUST include one complete non-deletion change '
+        'to "lib/main.dart". Prefer one complete compilable change to '
+        '"$preferredTarget". When targetFiles is non-empty, use only an allowed '
+        'target. Do not answer with explanation-only text, planning, an empty '
+        'changes array, or a proposal that omits the required entry point.';
   }
 
   static void _emitEmptyCreateRecovery(WorkshopRequest request) {
