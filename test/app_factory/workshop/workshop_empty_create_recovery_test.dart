@@ -79,9 +79,91 @@ void main() {
     expect(session.workspace.read('lib/main.dart'), 'void main() {}');
     expect(
       engineer.prompts.last,
-      contains('already returned an empty changes array'),
+      contains('already failed CREATE materialization'),
     );
     expect(engineer.prompts.last, contains('Manga Bigs'));
+    expect(engineer.prompts.last, contains('lib/main.dart'));
+    expect(gateway.writeCalls, 0);
+    expect(gateway.commitCalls, 0);
+    expect(gateway.pushCalls, 0);
+  });
+
+  test('create task recovers when repaired proposal omits required main.dart',
+      () async {
+    final callOrder = <AppAiRole>[];
+    final engineer = _QueueGateway(
+      role: AppAiRole.engineer,
+      callOrder: callOrder,
+      results: <WorkshopInferenceResult>[
+        _success(
+          '{"explanation":"Add catalog only",'
+          '"changes":[{"path":"lib/catalog.dart","type":"addition",'
+          '"content":"const catalog = <String>[];"}]}',
+        ),
+        _success(
+          '{"explanation":"Still catalog only",'
+          '"changes":[{"path":"lib/catalog.dart","type":"addition",'
+          '"content":"const catalog = <String>[];"}]}',
+        ),
+        _success(
+          '{"explanation":"Materialize required entry point",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}',
+        ),
+      ],
+    );
+    final reviewer = _QueueGateway(
+      role: AppAiRole.reviewer,
+      callOrder: callOrder,
+      results: <WorkshopInferenceResult>[
+        _success(
+          '{"approved":true,"summary":"Review passed","findings":[],"warnings":[]}',
+        ),
+        _success(
+          '{"valid":true,"summary":"Validation passed","checks":["consistent"],"warnings":[]}',
+        ),
+      ],
+    );
+    final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+    final session = WorkspaceSession(
+      request: const WorkshopRequest(
+        id: 'manga-bigs-required-main',
+        title: 'Manga Bigs',
+        instruction:
+            'Create Manga Bigs with categories, detail pages and favorites.',
+        operation: WorkshopOperation.create,
+        targetFiles: <String>['lib/main.dart', 'lib/catalog.dart'],
+        constraints: <String>['Flutter standard components only'],
+      ),
+      gateway: gateway,
+    );
+    await session.initialize();
+
+    final pipeline = WorkshopTaskInferencePipeline(
+      inference: _stageInference(
+        _gateways(
+          engineer: engineer,
+          reviewer: reviewer,
+          callOrder: callOrder,
+        ),
+      ),
+    );
+
+    final result = await pipeline.run(session: session);
+
+    expect(result.readyForApproval, isTrue);
+    expect(engineer.calls, 3);
+    expect(reviewer.calls, 2);
+    expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+    expect(session.workspace.contains('lib/catalog.dart'), isFalse);
+    expect(
+      engineer.prompts.last,
+      contains('already failed CREATE materialization'),
+    );
+    expect(
+      engineer.prompts.last,
+      contains('MUST include one complete non-deletion change'),
+    );
     expect(engineer.prompts.last, contains('lib/main.dart'));
     expect(gateway.writeCalls, 0);
     expect(gateway.commitCalls, 0);
