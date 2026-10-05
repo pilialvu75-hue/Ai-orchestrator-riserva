@@ -70,6 +70,7 @@ class WorkshopModelDescriptor {
     required this.source,
     required this.roles,
     required this.downloadUrl,
+    this.cloudProviderId,
     this.optional = false,
   });
 
@@ -82,9 +83,18 @@ class WorkshopModelDescriptor {
   final AiModelSource source;
   final Set<AppAiRole> roles;
   final String downloadUrl;
+
+  /// Concrete Cloud provider used when [source] is [AiModelSource.cloud].
+  ///
+  /// Local models intentionally leave this null. Keeping provider identity on
+  /// the Workshop descriptor prevents the Cantiere from inheriting the
+  /// Assistant's active Cloud provider.
+  final String? cloudProviderId;
   final bool optional;
 
   bool canServe(AppAiRole role) => roles.contains(role);
+
+  bool get isCloud => source == AiModelSource.cloud;
 
   bool get isWorkshopModel {
     return roles.any(
@@ -217,6 +227,29 @@ abstract final class WorkshopModelCatalogue {
     optional: true,
   );
 
+  /// Optional remote model proven by the Web/Cloud path. It remains opt-in so
+  /// existing Android installs keep their Qwen local assignments and offline
+  /// behavior until the owner explicitly selects Cloud for a Workshop role.
+  static const WorkshopModelDescriptor nvidiaNemotron3Ultra550b =
+      WorkshopModelDescriptor(
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
+    displayName: 'Nemotron 3 Ultra 550B · NVIDIA Cloud',
+    repository: 'NVIDIA NIM',
+    filename: 'remote-nvidia-nemotron-3-ultra-550b-a55b',
+    quantization: 'CLOUD',
+    sizeBytes: 0,
+    source: AiModelSource.cloud,
+    roles: <AppAiRole>{
+      AppAiRole.workshopOrchestrator,
+      AppAiRole.architect,
+      AppAiRole.engineer,
+      AppAiRole.reviewer,
+    },
+    downloadUrl: '',
+    cloudProviderId: 'nvidiaNim',
+    optional: true,
+  );
+
   /// Models shown in the Workshop selector.
   ///
   /// Assistant-only models stay outside this list.
@@ -227,6 +260,7 @@ abstract final class WorkshopModelCatalogue {
     engineer,
     reviewer,
     deepSeekV2Engineer,
+    nvidiaNemotron3Ultra550b,
   ];
 
   /// Complete catalogue including Assistant-owned models.
