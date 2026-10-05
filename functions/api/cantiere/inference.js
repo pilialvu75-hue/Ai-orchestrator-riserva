@@ -10,6 +10,8 @@ const MAX_MESSAGE_CHARS = 12000;
 const MAX_TOTAL_CHARS = 60000;
 const MAX_BODY_CHARS = 100000;
 const MAX_OUTPUT_CHARS = 100000;
+const MAX_ROUTE_ATTEMPTS = 2;
+const MAX_RETRY_DELAY_MS = 2000;
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -118,67 +120,99 @@ function safeIdentity(value) {
   return normalized;
 }
 
+function isTransientStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status <= 504);
+}
+
+function retryDelayMs(response, attempt) {
+  const raw = response.headers.get('retry-after');
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(MAX_RETRY_DELAY_MS, Math.round(seconds * 1000));
+    }
+  }
+  return Math.min(MAX_RETRY_DELAY_MS, 250 * (attempt + 1));
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function callRoute(route, request) {
   const apiKey = request.env[route.apiKeySecret];
   if (!apiKey) return null;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 80000);
-  try {
-    const response = await fetch(route.endpoint, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: route.model,
-        messages: request.messages,
-        max_tokens: request.maxTokens,
-        temperature: request.temperature,
-        top_p: request.topP,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      return { ok: false, status: response.status };
-    }
-
-    let decoded;
+  for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 80000);
     try {
-      decoded = await response.json();
+      const response = await fetch(route.endpoint, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: route.model,
+          messages: request.messages,
+          max_tokens: request.maxTokens,
+          temperature: request.temperature,
+          top_p: request.topP,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        if (
+          attempt + 1 < MAX_ROUTE_ATTEMPTS &&
+          isTransientStatus(response.status)
+        ) {
+          const delay = retryDelayMs(response, attempt);
+          clearTimeout(timer);
+          await sleep(delay);
+          continue;
+        }
+        return { ok: false, status: response.status };
+      }
+
+      let decoded;
+      try {
+        decoded = await response.json();
+      } catch (_) {
+        return { ok: false, status: 502 };
+      }
+
+      const text = decoded?.choices?.[0]?.message?.content;
+      if (
+        typeof text !== 'string' ||
+        !text.trim() ||
+        text.length > MAX_OUTPUT_CHARS
+      ) {
+        return { ok: false, status: 502 };
+      }
+
+      const completionTokens = decoded?.usage?.completion_tokens;
+      return {
+        ok: true,
+        text: text.trim(),
+        model: route.model,
+        routeId: route.id,
+        tokensGenerated:
+          Number.isInteger(completionTokens) && completionTokens >= 0
+            ? completionTokens
+            : 0,
+      };
     } catch (_) {
-      return { ok: false, status: 502 };
+      return { ok: false, status: 503 };
+    } finally {
+      clearTimeout(timer);
     }
-
-    const text = decoded?.choices?.[0]?.message?.content;
-    if (
-      typeof text !== 'string' ||
-      !text.trim() ||
-      text.length > MAX_OUTPUT_CHARS
-    ) {
-      return { ok: false, status: 502 };
-    }
-
-    const completionTokens = decoded?.usage?.completion_tokens;
-    return {
-      ok: true,
-      text: text.trim(),
-      model: route.model,
-      routeId: route.id,
-      tokensGenerated:
-        Number.isInteger(completionTokens) && completionTokens >= 0
-          ? completionTokens
-          : 0,
-    };
-  } catch (_) {
-    return { ok: false, status: 503 };
-  } finally {
-    clearTimeout(timer);
   }
+
+  return { ok: false, status: 502 };
 }
 
 export async function onRequest(context) {
@@ -245,8 +279,6 @@ export async function onRequest(context) {
     maxTokens: Math.round(boundedNumber(body.maxTokens, 1, 4096, 512)),
     temperature: boundedNumber(body.temperature, 0, 1.5, 0.45),
     topP: boundedNumber(body.topP, 0.05, 1, 0.9),
-    // Identity is bounded and remains metadata only. It is deliberately not
-    // appended to the model prompt by this broker.
     identity: {
       requestId: safeIdentity(body.requestId),
       projectId: safeIdentity(body.projectId),

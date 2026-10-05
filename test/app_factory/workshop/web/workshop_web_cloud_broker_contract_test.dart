@@ -25,6 +25,14 @@ void main() {
     expect(inference, contains('Authorization:'));
     expect(inference, contains(r'Bearer ${apiKey}'));
 
+    // Free/hosted providers can transiently throttle or return 5xx. The broker
+    // retries once server-side without exposing secrets or provider details to
+    // the browser, then continues through the configured route fallbacks.
+    expect(inference, contains('MAX_ROUTE_ATTEMPTS = 2'));
+    expect(inference, contains('status === 429'));
+    expect(inference, contains('status >= 500 && status <= 504'));
+    expect(inference, contains("response.headers.get('retry-after')"));
+
     // No concrete provider endpoint, key or model is a browser/source default.
     expect(inference, isNot(contains('api.openai.com')));
     expect(inference, isNot(contains('openrouter.ai')));
