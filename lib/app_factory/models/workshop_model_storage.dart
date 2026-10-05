@@ -29,11 +29,14 @@ class WorkshopModelStorageState {
   final bool isPublic;
   final int? actualBytes;
 
-  bool get isReady => exists && (actualBytes ?? 0) > 0;
+  /// Cloud descriptors are runtime-ready without a local GGUF. Authentication
+  /// and provider health are checked later by CloudRuntimeProvider.
+  bool get isReady => model.isCloud || (exists && (actualBytes ?? 0) > 0);
 
-  bool get needsDownload => !exists;
+  bool get needsDownload => !model.isCloud && !exists;
 
   bool get hasPersistentCopy {
+    if (model.isCloud || publicPath.isEmpty) return false;
     return File(publicPath).existsSync();
   }
 }
@@ -58,11 +61,22 @@ class WorkshopModelStorage {
 
   /// Inspect the physical storage state of one Workshop model.
   ///
-  /// The resolver preserves the application's existing priority:
-  /// private app storage first, persistent public storage second.
+  /// Cloud models deliberately bypass local filesystem resolution. Their
+  /// availability depends on credentials/network and is enforced by the Cloud
+  /// runtime, not by the GGUF download store.
   Future<WorkshopModelStorageState> inspect(
     WorkshopModelDescriptor model,
   ) async {
+    if (model.isCloud) {
+      return WorkshopModelStorageState(
+        model: model,
+        path: '',
+        publicPath: '',
+        exists: false,
+        isPublic: false,
+      );
+    }
+
     final resolution = await _pathResolver.resolveForRead(
       fileName: model.filename,
     );
@@ -118,17 +132,20 @@ class WorkshopModelStorage {
 
   /// Returns the persistent public path used by the existing application.
   ///
-  /// No directory is created here. This is intentionally read-only.
+  /// Cloud models have no local path.
   String publicPathFor(WorkshopModelDescriptor model) {
+    if (model.isCloud) return '';
     return _pathResolver.publicFileByName(model.filename).path;
   }
 
   /// Returns the application's private model path.
   ///
-  /// No directory or file is created here.
+  /// Cloud models have no local path.
   Future<String> privatePathFor(
     WorkshopModelDescriptor model,
   ) async {
+    if (model.isCloud) return '';
+
     final file = await _pathResolver.privateFileByName(
       model.filename,
     );
@@ -138,11 +155,12 @@ class WorkshopModelStorage {
 
   /// Checks whether a persistent exported copy already exists.
   ///
-  /// The public folder survives application uninstall, so this allows the
-  /// Workshop to recognise a model that was exported previously.
+  /// Cloud models are never exported to the GGUF model folder.
   Future<bool> hasPersistentCopy(
     WorkshopModelDescriptor model,
   ) async {
+    if (model.isCloud) return false;
+
     final file = _pathResolver.publicFileByName(
       model.filename,
     );
@@ -163,6 +181,7 @@ class WorkshopModelStorage {
     final result = <WorkshopModelDescriptor>[];
 
     for (final model in WorkshopModelCatalogue.all) {
+      if (model.isCloud) continue;
       final state = await inspect(model);
 
       if (state.isReady) {
@@ -173,11 +192,12 @@ class WorkshopModelStorage {
     return List.unmodifiable(result);
   }
 
-  /// Finds models that are not currently available.
+  /// Finds local models that are not currently available.
   Future<List<WorkshopModelDescriptor>> missingModels() async {
     final result = <WorkshopModelDescriptor>[];
 
     for (final model in WorkshopModelCatalogue.all) {
+      if (model.isCloud) continue;
       final state = await inspect(model);
 
       if (!state.isReady) {

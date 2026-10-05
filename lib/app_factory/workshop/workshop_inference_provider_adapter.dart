@@ -95,6 +95,38 @@ final class WorkshopInferenceProviderAdapter
     }
 
     final workshopModelId = effectiveModelId;
+    final descriptor = WorkshopModelCatalogue.findById(workshopModelId);
+
+    if (descriptor == null) {
+      return Stream<InferenceResponse>.error(
+        StateError(
+          'Workshop model "$workshopModelId" is not present in the catalogue.',
+        ),
+      );
+    }
+
+    if (descriptor.source == AiModelSource.cloud) {
+      final providerId = descriptor.cloudProviderId?.trim();
+      if (providerId == null || providerId.isEmpty) {
+        return Stream<InferenceResponse>.error(
+          StateError(
+            'Cloud Workshop model "$workshopModelId" has no provider binding.',
+          ),
+        );
+      }
+
+      final workshopRequest = request.copyWith(
+        modelId: workshopModelId,
+        routeDirective: InferenceRouteDirective.cloudOnly,
+        cloudProviderId: providerId,
+        // A role assignment is an explicit Cantiere decision. Do not silently
+        // switch provider inside the same structured task; retries/checkpoints
+        // remain owned by the Workshop executor.
+        allowCloudProviderFailover: false,
+      );
+
+      return _inferenceService.stream(workshopRequest);
+    }
 
     final workshopRequest = request.copyWith(
       modelId: workshopModelId,

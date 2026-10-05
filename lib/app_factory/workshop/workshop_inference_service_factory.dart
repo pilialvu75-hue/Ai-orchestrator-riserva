@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
@@ -35,18 +36,23 @@ abstract final class WorkshopInferenceServiceFactory {
     }
 
     final sl = locator ?? GetIt.instance;
+    final descriptor = WorkshopModelCatalogue.findById(normalizedModelId);
+    final isCloudModel = descriptor?.source == AiModelSource.cloud;
 
     return InferenceService(
-      loadSelectedModel: () => resolveInstalledModel(
-        modelId: normalizedModelId,
-        repository: sl<LocalAiRepository>(),
-      ),
+      loadSelectedModel: isCloudModel
+          ? () async => null
+          : () => resolveInstalledModel(
+                modelId: normalizedModelId,
+                repository: sl<LocalAiRepository>(),
+              ),
       // Cantiere owns its runtime decision. The Assistant's persisted
       // Local/Cloud/Hybrid preference must never leak into Workshop inference.
-      // Current Workshop model assignments are local GGUF models, so this
-      // boundary remains local-only until a Cantiere-owned route explicitly
-      // selects remote/cloud inference.
-      loadRuntimeMode: () async => AiRuntimeMode.local,
+      // Local assignments keep the historical llama.cpp route, while an
+      // explicitly selected Cloud descriptor switches only that Workshop role
+      // to the shared CloudRuntimeProvider.
+      loadRuntimeMode: () async =>
+          isCloudModel ? AiRuntimeMode.cloud : AiRuntimeMode.local,
       runtimeProvider: sl<LocalRuntimeProvider>(),
       cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
       sessionManager: sl<RuntimeSessionManager>(),
