@@ -149,10 +149,89 @@ final class WorkshopDynamicProjectPlanner {
       );
     }
 
-    return _decodeForRequest(retry.text,
-        request: request,
-        buildRepair: buildRepair,
-        validationCriteria: validationCriteria);
+    try {
+      return _decodeForRequest(retry.text,
+          request: request,
+          buildRepair: buildRepair,
+          validationCriteria: validationCriteria);
+    } on FormatException {
+      if (cancellationToken?.isCancelled == true) rethrow;
+      if (!buildRepair &&
+          request.operation == WorkshopOperation.create &&
+          _isRecoverableIncompleteProjectJson(retry.text)) {
+        return _recoverCreatePlan(
+          request,
+          validationCriteria: validationCriteria,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  WorkshopDynamicProjectPlan _recoverCreatePlan(
+    WorkshopRequest request, {
+    required List<String> validationCriteria,
+  }) {
+    final explicitCriterion = validationCriteria
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .firstOrNull;
+    final criterion = explicitCriterion == null
+        ? 'The explicit CREATE request and its persisted acceptance criteria are satisfied.'
+        : _excerpt(explicitCriterion, 220);
+
+    final recoveryJson = jsonEncode(<String, Object>{
+      'phases': <Object>[
+        <String, Object>{
+          'id': 'implementation',
+          'title': 'Implementation',
+          'description': 'Implement the persisted CREATE request.',
+          'dependsOn': <String>[],
+        },
+      ],
+      'tasks': <Object>[
+        <String, Object>{
+          'id': 'implement',
+          'phaseId': 'implementation',
+          'title': 'Implement ${_excerpt(request.title, 120)}',
+          'description':
+              'Implement the explicit persisted CREATE request. The complete project goal, requirements, constraints and acceptance criteria remain authoritative.',
+          'dependsOn': <String>[],
+          'affectedPaths': <String>['lib/main.dart'],
+          'validationCriteria': <String>[criterion],
+        },
+      ],
+    });
+
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_PLANNER_RECOVERY] mode=deterministic_create_after_incomplete_retry',
+    );
+
+    return _decodeForRequest(
+      recoveryJson,
+      request: request,
+      buildRepair: false,
+      validationCriteria: validationCriteria,
+    );
+  }
+
+  static bool _isRecoverableIncompleteProjectJson(String raw) {
+    String extracted;
+    try {
+      extracted = WorkshopDynamicProjectPlanDecoder._extractJson(raw);
+    } on FormatException {
+      return false;
+    }
+
+    try {
+      jsonDecode(extracted);
+      return false;
+    } on FormatException {
+      final objectStart = extracted.indexOf('{');
+      if (objectStart < 0) return false;
+      final candidate = extracted.substring(objectStart);
+      return candidate.contains('"phases"') || candidate.contains('"tasks"');
+    }
   }
 
   static void _recordOutput(WorkshopInferenceResult result,
