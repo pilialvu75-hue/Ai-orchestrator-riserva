@@ -40,7 +40,8 @@ final class WorkshopRoleInferenceExecutor {
   }) {
     final gateway = _router.gatewayFor(role);
 
-    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId)) {
+    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId) &&
+        gateway.runtimeType == WorkshopInferenceGateway) {
       return gateway.completeWithFirstTokenTimeout(
         prompt: prompt,
         firstTokenTimeout: _engineerRetryFirstTokenTimeout,
@@ -126,7 +127,8 @@ final class WorkshopRoleInferenceExecutor {
   }) {
     final gateway = _router.gatewayFor(role);
 
-    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId)) {
+    if (_isEngineerRuntimeRetry(role: role, sessionId: sessionId) &&
+        gateway.runtimeType == WorkshopInferenceGateway) {
       return gateway.completeWithIdentityAndFirstTokenTimeout(
         prompt: prompt,
         firstTokenTimeout: _engineerRetryFirstTokenTimeout,
