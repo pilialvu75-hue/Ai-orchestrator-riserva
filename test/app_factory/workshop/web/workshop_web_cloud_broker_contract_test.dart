@@ -25,6 +25,19 @@ void main() {
     expect(inference, contains('Authorization:'));
     expect(inference, contains(r'Bearer ${apiKey}'));
 
+    // NVIDIA/OpenAI-compatible chat endpoints accept at most one optional
+    // leading system message and then alternating user/assistant turns. Browser
+    // history can add another system fragment, so the broker normalizes those
+    // fragments into one leading system message before calling the provider.
+    expect(inference, contains('const systemParts = []'));
+    expect(inference, contains("if (row.role === 'system')"));
+    expect(inference, contains("systemParts.join('\\n\\n')"));
+    expect(inference, contains("messages.push({ role: 'system'"));
+    expect(
+      inference,
+      contains('conversation[index - 1].role === conversation[index].role'),
+    );
+
     // Free/hosted providers can transiently throttle or return 5xx. The broker
     // retries once server-side without exposing secrets or provider details to
     // the browser, then continues through the configured route fallbacks.
@@ -48,5 +61,17 @@ void main() {
     expect(capabilities, contains('capabilities: Object.keys(routes)'));
     expect(capabilities, isNot(contains('apiKey:')));
     expect(capabilities, isNot(contains('endpoint:')));
+  });
+
+  test('Web dictation requests microphone permission and exposes failures', () {
+    final audio = File(
+      'lib/app_factory/workshop/web/workshop_web_browser_audio_web.dart',
+    ).readAsStringSync();
+
+    expect(audio, contains('mediaDevices.getUserMedia'));
+    expect(audio, contains('track.stop()'));
+    expect(audio, contains("'not-allowed' || 'service-not-allowed'"));
+    expect(audio, contains("'network'"));
+    expect(audio, contains("'no-speech'"));
   });
 }
