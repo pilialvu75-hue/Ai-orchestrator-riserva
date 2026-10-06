@@ -34,6 +34,21 @@ function error(code, status) {
   );
 }
 
+function upstreamError(status) {
+  const upstreamStatus =
+    Number.isInteger(status) && status >= 400 && status <= 599 ? status : 502;
+  return jsonResponse(
+    {
+      version: 1,
+      error: {
+        code: 'upstream_unavailable',
+        upstreamStatus,
+      },
+    },
+    upstreamStatus,
+  );
+}
+
 function parseRoutes(env) {
   const raw = env.CANTIERE_CLOUD_ROUTES_JSON;
   if (!raw) return {};
@@ -312,6 +327,7 @@ export async function onRequest(context) {
     },
   };
 
+  let lastFailureStatus = 502;
   for (const route of routes) {
     const result = await callRoute(route, request);
     if (result?.ok) {
@@ -323,7 +339,10 @@ export async function onRequest(context) {
         tokensGenerated: result.tokensGenerated,
       });
     }
+    if (Number.isInteger(result?.status)) {
+      lastFailureStatus = result.status;
+    }
   }
 
-  return error('upstream_unavailable', 502);
+  return upstreamError(lastFailureStatus);
 }
