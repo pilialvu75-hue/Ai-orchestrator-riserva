@@ -1,3 +1,9 @@
+// The project deliberately keeps Flutter 3.22 / Dart 3.4 as its compatibility
+// floor. This Web-only adapter therefore still uses the legacy browser
+// interop libraries that are available across that baseline. Keep the
+// deprecation suppression scoped to this file; native builds never import it.
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+
 import 'dart:html' as html;
 import 'dart:js' as js;
 import 'dart:js_util' as js_util;
