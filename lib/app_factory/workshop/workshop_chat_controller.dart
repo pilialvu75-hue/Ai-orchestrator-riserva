@@ -324,10 +324,6 @@ final class WorkshopChatController extends ChangeNotifier {
     final codeFenceCount = RegExp(r'```').allMatches(text).length;
     if (codeFenceCount.isOdd) return true;
 
-    final saturated =
-        maxTokens > 0 && result.tokensGenerated >= maxTokens - 2;
-    if (saturated) return true;
-
     final upper = text.toUpperCase();
     final body = upper.startsWith('PROPOSAL:')
         ? text.substring('PROPOSAL:'.length).trim()
@@ -335,7 +331,7 @@ final class WorkshopChatController extends ChangeNotifier {
             ? text.substring('CLARIFY:'.length).trim()
             : text;
 
-    if (body.length < 120) return false;
+    if (body.isEmpty) return false;
 
     const terminalChars = <String>{
       '.',
@@ -350,7 +346,23 @@ final class WorkshopChatController extends ChangeNotifier {
       '"',
       "'",
     };
-    return !terminalChars.contains(body.substring(body.length - 1));
+    final hasTerminalPunctuation =
+        terminalChars.contains(body.substring(body.length - 1));
+
+    // Token saturation is only evidence of truncation when the visible answer
+    // also ends like an incomplete sentence. Some hosted providers report the
+    // configured token ceiling even when a semantically complete answer ended
+    // exactly at that boundary. Treating saturation alone as truncation caused
+    // Aivexus Web to discard complete Nemotron replies and show a false error.
+    if (hasTerminalPunctuation) return false;
+
+    final saturated =
+        maxTokens > 0 && result.tokensGenerated >= maxTokens - 2;
+    if (saturated) return true;
+
+    if (body.length < 120) return false;
+
+    return true;
   }
 
   static const String _truncationRetrySystemPrompt =
