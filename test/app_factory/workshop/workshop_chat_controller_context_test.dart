@@ -146,6 +146,38 @@ void main() {
     controller.dispose();
   });
 
+  test(
+      'Workshop accepts a long hosted reply without punctuation when tokens are not saturated',
+      () async {
+    final body = List<String>.filled(
+      32,
+      'Risposta completa del Cantiere con dettagli operativi verificabili',
+    ).join(' ');
+    final provider = _ScriptedReplyProvider(<InferenceResponse>[
+      InferenceResponse.finalChunk(
+        text: 'PROPOSAL: $body',
+        tokensGenerated: 96,
+        model: 'nvidia/nemotron-3-super-120b-a12b',
+      ),
+    ]);
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('app per correre');
+
+    expect(result, isNotNull);
+    expect(result!.content, body);
+    expect(provider.requests, hasLength(1));
+    expect(
+      controller.lastModel,
+      'nvidia/nemotron-3-super-120b-a12b',
+    );
+    expect(controller.lastResponseReadyForApproval, isTrue);
+
+    controller.dispose();
+  });
+
   test('Workshop collector does not duplicate cumulative final snapshot',
       () async {
     final provider = _CumulativeSnapshotProvider();
