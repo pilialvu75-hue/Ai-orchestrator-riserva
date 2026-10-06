@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "operation": "deploy_private",
+  "confirmation": "DEPLOY_PRIVATE_CANTIERE",
+  "environment": "web-private-production",
+  "requestId": "aivexus-web-history-audio-20261006-1042",
+  "reason": "Deploy merged Web history/audio controls and the gated GitOps private deployment path."
+}
