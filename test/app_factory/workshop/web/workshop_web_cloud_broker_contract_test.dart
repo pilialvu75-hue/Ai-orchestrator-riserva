@@ -46,6 +46,13 @@ void main() {
     expect(inference, contains('status >= 500 && status <= 504'));
     expect(inference, contains("response.headers.get('retry-after')"));
 
+    // When every route fails, only the bounded numeric upstream HTTP status is
+    // surfaced. This makes a physical Web test distinguish auth/rate/model
+    // failures without exposing the endpoint, model binding, key or body.
+    expect(inference, contains('function upstreamError(status)'));
+    expect(inference, contains('upstreamStatus'));
+    expect(inference, contains('return upstreamError(lastFailureStatus)'));
+
     // No concrete provider endpoint, key or model is a browser/source default.
     expect(inference, isNot(contains('api.openai.com')));
     expect(inference, isNot(contains('openrouter.ai')));
@@ -73,5 +80,6 @@ void main() {
     expect(audio, contains("'not-allowed' || 'service-not-allowed'"));
     expect(audio, contains("'network'"));
     expect(audio, contains("'no-speech'"));
+    expect(audio, contains('Controlli sito'));
   });
 }
