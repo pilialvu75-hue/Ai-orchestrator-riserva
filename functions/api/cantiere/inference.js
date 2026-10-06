@@ -94,8 +94,10 @@ function validateMessages(value) {
     return null;
   }
 
-  const messages = [];
+  const systemParts = [];
+  const conversation = [];
   let totalChars = 0;
+
   for (const row of value) {
     if (!row || typeof row !== 'object') return null;
     if (!MESSAGE_ROLES.has(row.role)) return null;
@@ -106,10 +108,31 @@ function validateMessages(value) {
     totalChars += content.length;
     if (totalChars > MAX_TOTAL_CHARS) return null;
 
-    messages.push({ role: row.role, content });
+    if (row.role === 'system') {
+      systemParts.push(content);
+      continue;
+    }
+
+    conversation.push({ role: row.role, content });
   }
 
-  if (messages[messages.length - 1].role !== 'user') return null;
+  if (conversation.length < 1) return null;
+  if (conversation[conversation.length - 1].role !== 'user') return null;
+
+  for (let index = 1; index < conversation.length; index += 1) {
+    if (conversation[index - 1].role === conversation[index].role) {
+      return null;
+    }
+  }
+
+  const messages = [];
+  if (systemParts.length > 0) {
+    const mergedSystem = systemParts.join('\n\n');
+    if (mergedSystem.length > MAX_TOTAL_CHARS) return null;
+    messages.push({ role: 'system', content: mergedSystem });
+  }
+  messages.push(...conversation);
+
   return messages;
 }
 
