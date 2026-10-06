@@ -357,6 +357,56 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('retries truncated Cloud Engineer output with compact prompt', () async {
+      RuntimeEventLog.instance.clear();
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'NVIDIA NIM response was incomplete (length).',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Recovered","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'nvidia/nemotron-3-ultra-550b-a55b',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/app.dart': 'old',
+          'lib/unrelated.dart': List<String>.filled(3000, 'x').join(),
+        },
+      );
+      final session = await _session(workspaceGateway);
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.explanation, 'Recovered');
+      expect(proposal.changes.single.path, 'lib/app.dart');
+      expect(session.workspace.read('lib/app.dart'), 'new');
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 512]);
+      expect(engineer.prompts[1].length, lessThan(engineer.prompts[0].length));
+      expect(
+        engineer.systemPrompts.last,
+        contains('incomplete-output failure'),
+      );
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) =>
+              entry.message.contains('attempt=2 reason=incomplete_output'),
+        ),
+        isTrue,
+      );
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     for (final error in <String>[
       'AI_RUNTIME_ERROR|stage=prompt_budget|message=Prompt exceeds the local context capacity.',
       'Prompt exceeds the local context capacity.',
