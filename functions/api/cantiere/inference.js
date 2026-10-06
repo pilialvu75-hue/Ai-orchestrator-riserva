@@ -45,7 +45,7 @@ function upstreamError(status) {
         upstreamStatus,
       },
     },
-    502,
+    upstreamStatus,
   );
 }
 
