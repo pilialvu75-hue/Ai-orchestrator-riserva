@@ -178,6 +178,7 @@ final class WorkshopChatController extends ChangeNotifier {
 
     _lastError = null;
     _lastRuntimeNotice = null;
+    _lastModel = null;
     _lastReplyKind = null;
 
     final userTurn = ChatTurn(
@@ -221,6 +222,7 @@ final class WorkshopChatController extends ChangeNotifier {
         modelId: modelId,
         modelPath: modelPath,
       );
+      _rememberModel(result);
 
       if (_looksTruncated(
         result,
@@ -239,6 +241,7 @@ final class WorkshopChatController extends ChangeNotifier {
           modelId: modelId,
           modelPath: modelPath,
         );
+        _rememberModel(result);
 
         if (_looksTruncated(
           result,
@@ -258,11 +261,6 @@ final class WorkshopChatController extends ChangeNotifier {
               .isNotEmpty) {
         _lastRuntimeNotice =
             result.runtimeNotice;
-      }
-
-      if (result.model != null &&
-          result.model!.trim().isNotEmpty) {
-        _lastModel = result.model;
       }
 
       if (result.hasError) {
@@ -358,11 +356,20 @@ final class WorkshopChatController extends ChangeNotifier {
 
     final saturated =
         maxTokens > 0 && result.tokensGenerated >= maxTokens - 2;
-    if (saturated) return true;
 
-    if (body.length < 120) return false;
+    // Do not infer truncation from text length alone. Hosted models sometimes
+    // omit terminal punctuation even after a normal stop, and the previous
+    // heuristic retried/discarded those valid replies. Without an explicit
+    // provider finish reason, token saturation plus an incomplete-looking end
+    // is the only reliable bounded signal available here.
+    return saturated;
+  }
 
-    return true;
+  void _rememberModel(WorkshopInferenceResult result) {
+    final model = result.model?.trim();
+    if (model != null && model.isNotEmpty) {
+      _lastModel = model;
+    }
   }
 
   static const String _truncationRetrySystemPrompt =
