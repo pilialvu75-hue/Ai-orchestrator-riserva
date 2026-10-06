@@ -44,6 +44,10 @@ final class WorkshopWebBrowserAudio {
       return false;
     }
 
+    if (!await _ensureMicrophonePermission(onError)) {
+      return false;
+    }
+
     try {
       final recognition = js.JsObject(rawConstructor);
       _recognition = recognition;
@@ -52,6 +56,11 @@ final class WorkshopWebBrowserAudio {
       recognition['continuous'] = false;
       recognition['interimResults'] = true;
       recognition['maxAlternatives'] = 1;
+
+      recognition['onstart'] = (dynamic _) {
+        _isListening = true;
+        onStateChanged?.call(true);
+      };
 
       recognition['onresult'] = (dynamic event) {
         final results = _readProperty(event, 'results');
@@ -79,8 +88,8 @@ final class WorkshopWebBrowserAudio {
 
       recognition['onerror'] = (dynamic event) {
         final raw = _readProperty(event, 'error')?.toString().trim();
-        if (raw != null && raw.isNotEmpty && raw != 'no-speech') {
-          onError?.call('Dettatura non disponibile: $raw');
+        if (raw != null && raw.isNotEmpty) {
+          onError?.call(_speechErrorMessage(raw));
         }
       };
 
@@ -91,8 +100,6 @@ final class WorkshopWebBrowserAudio {
       };
 
       recognition.callMethod('start');
-      _isListening = true;
-      onStateChanged?.call(true);
       return true;
     } catch (_) {
       _recognition = null;
@@ -103,6 +110,53 @@ final class WorkshopWebBrowserAudio {
       );
       return false;
     }
+  }
+
+  Future<bool> _ensureMicrophonePermission(
+    void Function(String message)? onError,
+  ) async {
+    try {
+      final mediaDevices = html.window.navigator.mediaDevices;
+      final html.MediaStream stream;
+      if (mediaDevices != null) {
+        stream = await mediaDevices.getUserMedia(<String, Object>{
+          'audio': true,
+          'video': false,
+        });
+      } else {
+        stream = await html.window.navigator.getUserMedia(
+          audio: true,
+          video: false,
+        );
+      }
+
+      for (final track in stream.getTracks()) {
+        track.stop();
+      }
+      return true;
+    } catch (_) {
+      onError?.call(
+        'Permesso microfono non disponibile. Tocca il lucchetto del browser '
+        'e consenti Microfono, poi riprova.',
+      );
+      return false;
+    }
+  }
+
+  static String _speechErrorMessage(String code) {
+    return switch (code) {
+      'not-allowed' || 'service-not-allowed' =>
+        'Il browser non consente la dettatura. Abilita il permesso Microfono e riprova.',
+      'audio-capture' =>
+        'Il browser non riesce ad acquisire audio dal microfono.',
+      'network' =>
+        'Il servizio di dettatura del browser non è raggiungibile. Controlla la connessione e riprova.',
+      'no-speech' =>
+        'Non ho rilevato voce. Tocca di nuovo il microfono e parla dopo l’avvio.',
+      'language-not-supported' =>
+        'La lingua corrente non è supportata dal servizio di dettatura del browser.',
+      _ => 'Dettatura non disponibile: $code',
+    };
   }
 
   Future<void> stopDictation() async {
