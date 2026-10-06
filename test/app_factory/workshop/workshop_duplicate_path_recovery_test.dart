@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
@@ -57,13 +59,16 @@ void main() {
     expect(proposal.explanation, 'Recovered duplicate path');
     expect(engineer.calls, 2);
     expect(engineer.maxTokensValues, <int?>[640, 768]);
+
+    final compactPayload = jsonDecode(
+      engineer.prompts.last.split('\n')[1],
+    ) as Map<String, dynamic>;
     expect(
-      engineer.prompts.last,
-      contains(
-        'Previous Engineer proposal was rejected before review: '
-        'Workshop proposal path "$path" is duplicated.',
-      ),
+      compactPayload['gateFeedback'],
+      'Previous Engineer proposal was rejected before review: '
+      'Workshop proposal path "$path" is duplicated.',
     );
+
     expect(session.workspace.read(path),
         'class FavoritesScreen { const FavoritesScreen(); }');
     expect(session.status, WorkspaceSessionStatus.review);
