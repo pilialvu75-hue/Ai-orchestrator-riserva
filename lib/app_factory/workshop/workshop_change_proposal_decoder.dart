@@ -74,7 +74,8 @@ final class WorkshopChangeProposalDecoder {
 
       if (!seenPaths.add(path)) {
         throw FormatException(
-          'Workshop proposal contains duplicate path: $path',
+          'Workshop proposal path "$path" is duplicated.',
+          path,
         );
       }
 
