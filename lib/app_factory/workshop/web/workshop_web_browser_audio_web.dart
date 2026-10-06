@@ -136,8 +136,8 @@ final class WorkshopWebBrowserAudio {
       return true;
     } catch (_) {
       onError?.call(
-        'Permesso microfono non disponibile. Tocca il lucchetto del browser '
-        'e consenti Microfono, poi riprova.',
+        'Permesso microfono non disponibile. Tocca l’icona Controlli sito '
+        'a sinistra dell’indirizzo, apri Permessi e consenti Microfono, poi riprova.',
       );
       return false;
     }
