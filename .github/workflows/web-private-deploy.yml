@@ -15,6 +15,11 @@ on:
         description: 'For bootstrap type BOOTSTRAP_EMPTY_PAGES; for deploy type DEPLOY_PRIVATE_CANTIERE'
         required: true
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.airlab/deploy/web-private-request.json'
 
 permissions:
   contents: read
@@ -26,7 +31,7 @@ concurrency:
 
 jobs:
   bootstrap-pages:
-    if: ${{ inputs.operation == 'bootstrap_pages' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'bootstrap_pages' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: web-private-production
@@ -106,7 +111,7 @@ jobs:
           echo "Bootstrap complete. Configure Cloudflare Access for production and preview hostnames before running deploy_private."
 
   deploy-private:
-    if: ${{ inputs.operation == 'deploy_private' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy_private') || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: web-private-production
@@ -116,14 +121,38 @@ jobs:
       CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Require explicit private-deploy confirmation
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ inputs.confirmation }}" != "DEPLOY_PRIVATE_CANTIERE" ]]; then
-            echo "Private Web deployment was not explicitly confirmed."
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.confirmation }}" != "DEPLOY_PRIVATE_CANTIERE" ]]; then
+              echo "Private Web deployment was not explicitly confirmed."
+              exit 1
+            fi
+            echo "Manual private-deploy confirmation accepted."
+            exit 0
+          fi
+
+          request_file=".airlab/deploy/web-private-request.json"
+          if [[ ! -f "${request_file}" ]]; then
+            echo "GitOps deploy request is missing."
             exit 1
           fi
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "deploy_private" and
+            .confirmation == "DEPLOY_PRIVATE_CANTIERE" and
+            .environment == "web-private-production" and
+            (.requestId | type == "string" and length > 0)
+          ' "${request_file}" >/dev/null
+
+          echo "Auditable GitOps private-deploy request accepted."
 
       - name: Validate deployment configuration
         shell: bash
@@ -164,9 +193,6 @@ jobs:
 
           verify_access_redirect "https://${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
           verify_access_redirect "https://w2-access-probe.${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
