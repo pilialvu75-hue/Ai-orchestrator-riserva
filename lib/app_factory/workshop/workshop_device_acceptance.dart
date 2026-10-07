@@ -221,6 +221,22 @@ final class WorkshopDeviceAcceptanceReceipt {
       : const <String>[];
 }
 
+abstract final class WorkshopDeviceAcceptanceScope {
+  static WorkshopDeviceAcceptanceReceipt? forProject({
+    required WorkshopDeviceAcceptanceReceipt? receipt,
+    required String? projectId,
+  }) {
+    final normalizedProjectId = projectId?.trim();
+    if (receipt == null ||
+        normalizedProjectId == null ||
+        normalizedProjectId.isEmpty ||
+        receipt.projectId.trim() != normalizedProjectId) {
+      return null;
+    }
+    return receipt;
+  }
+}
+
 abstract final class WorkshopAcceptanceFingerprint {
   static String? sha256Text(String? value) {
     final normalized = value?.trim();
