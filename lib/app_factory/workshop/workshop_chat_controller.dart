@@ -289,6 +289,14 @@ final class WorkshopChatController extends ChangeNotifier {
         return null;
       }
 
+      if (!_hasReplyContractPrefix(result.text)) {
+        _lastError =
+            'Il modello del Cantiere ha restituito una risposta fuori '
+            'protocollo. Riprova.';
+        _removeLastUserTurn();
+        return null;
+      }
+
       final parsed = _parseReply(result.text);
       _lastReplyKind = parsed.kind;
 
@@ -373,6 +381,11 @@ final class WorkshopChatController extends ChangeNotifier {
       'Descrivi solo il piu piccolo MVP richiesto; non dichiarare che sia gia '
       'stato costruito o testato.';
 
+  static bool _hasReplyContractPrefix(String rawText) {
+    final upper = rawText.trim().toUpperCase();
+    return upper.startsWith('CLARIFY:') || upper.startsWith('PROPOSAL:');
+  }
+
   static _WorkshopParsedReply _parseReply(String rawText) {
     final normalized = rawText.trim();
     final upper = normalized.toUpperCase();
@@ -398,14 +411,8 @@ final class WorkshopChatController extends ChangeNotifier {
       );
     }
 
-    // Conservative compatibility fallback for models/builds that do not yet
-    // obey the explicit reply prefix. A response ending as a direct question
-    // is not safe to treat as an owner-approvable production proposal.
-    return _WorkshopParsedReply(
-      kind: normalized.endsWith('?')
-          ? WorkshopChatReplyKind.clarification
-          : WorkshopChatReplyKind.proposal,
-      content: normalized,
+    throw const FormatException(
+      'Workshop conversational reply must start with CLARIFY: or PROPOSAL:.',
     );
   }
 
