@@ -294,6 +294,8 @@ final class WorkshopProposalReviewRunner {
     bool compact = false,
   }) {
     final request = session.context.request;
+    final isBuildRepair =
+        request.instruction.trimLeft().startsWith('BUILD REPAIR ATTEMPT:');
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
 
@@ -329,6 +331,7 @@ final class WorkshopProposalReviewRunner {
       'requestId': request.id,
       'title': request.title,
       'instruction': request.instruction,
+      'buildRepair': isBuildRepair,
       'implementationPlan': boundedPlan,
       'targetFiles': request.targetFiles,
       'targetFilesPolicy': request.targetFiles.isEmpty
@@ -357,7 +360,12 @@ from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
 itself a rejection. The builder supplies the baseline Flutter scaffold and
 pubspec.yaml. Require configuration changes only for explicit configuration
-work or added dependencies/assets. Reject if the supplied evidence cannot
+work or added dependencies/assets. When buildRepair is true, judge the staged
+edit against the cited build failure and preserved product behavior. Removing
+an unused import, dead code, or another analyzer-triggering artifact is not a
+regression merely because that source text existed before. If rejecting an
+import removal, identify the concrete symbol or explicit required behavior that
+the after-content can no longer satisfy. Reject if the supplied evidence cannot
 establish correctness; never assume omitted content is safe.
 
 Workshop input JSON:
@@ -414,6 +422,15 @@ CONTRACT PRECEDENCE:
    explicitly changes dependencies, assets, package metadata, SDK constraints,
    or other project configuration, or when staged source imports a third-party
    package that requires a declaration.
+5. BUILD REPAIR SEMANTICS: when buildRepair is true, this task exists to repair
+   the concrete formatter/analyzer/test/build failure carried in the explicit
+   instruction. Judge semantic behavior and compile/analyzer correctness, not
+   textual preservation of the previous source. Removing an unused import,
+   dead code, or another analyzer-triggering artifact is not a regression by
+   itself. If rejecting an import removal, identify the concrete symbol still
+   needed by the after-content or the explicit required product behavior that
+   would be lost. Never require keeping a source line solely because it existed
+   before the repair.
 
 If implementationPlan conflicts with the explicit instruction, judge the staged
 change against the explicit task and constraints. The context field is project
