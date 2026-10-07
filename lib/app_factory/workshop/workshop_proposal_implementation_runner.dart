@@ -637,6 +637,8 @@ requested. Do not review, approve or apply.
     final message = error.message.toString();
     return message == 'Workshop proposal field "explanation" is required.' ||
         message == 'Workshop proposal field "explanation" must be text.' ||
+        message == 'Workshop proposal field "path" is required.' ||
+        message == 'Workshop proposal field "path" must be text.' ||
         message == 'Workshop proposal must contain at least one file change.' ||
         message.startsWith('Workshop proposal path "') ||
         message ==
