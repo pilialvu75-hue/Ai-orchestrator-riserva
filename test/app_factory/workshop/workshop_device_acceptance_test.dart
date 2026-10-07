@@ -216,6 +216,63 @@ void main() {
     expect(restored.toPrettyJson(), isNot(contains('/data/user/')));
   });
 
+  test('acceptance receipt fallback is scoped to the current project', () {
+    final prior = WorkshopDeviceAcceptanceReceipt(
+      recordedAtUtc: DateTime.utc(2026, 10, 7),
+      status: WorkshopDeviceAcceptanceStatus.failed,
+      failureStage: WorkshopDeviceAcceptanceFailureStage.review,
+      hostVersion: '1.0.12+3039',
+      hostCommitSha: List<String>.filled(40, 'a').join(),
+      platform: 'android',
+      projectId: 'project:manga-bigs',
+      requestId: 'request:manga-bigs',
+      modelAssignments: const <String, String>{
+        'engineer': 'qwen2_5_3b_instruct',
+        'reviewer': 'qwen2_5_3b_instruct',
+      },
+      promptSha256: List<String>.filled(64, 'b').join(),
+      completedTasks: 0,
+      totalTasks: 1,
+      executionStatus: 'succeeded',
+      reviewApproved: false,
+      reviewSummary: 'old Manga Bigs review',
+      reviewFindings: const <String>['old finding'],
+      reviewWarnings: const <String>[],
+      stagedDiffSha256: List<String>.filled(64, 'c').join(),
+      validationValid: null,
+      buildStatus: null,
+      formatPassed: null,
+      analysisPassed: null,
+      testsPassed: null,
+      artifactSha256: null,
+      installAttempted: false,
+      installerOpened: false,
+      generatedAppOpened: null,
+    );
+
+    expect(
+      WorkshopDeviceAcceptanceScope.forProject(
+        receipt: prior,
+        projectId: 'project:manga-bigs',
+      ),
+      same(prior),
+    );
+    expect(
+      WorkshopDeviceAcceptanceScope.forProject(
+        receipt: prior,
+        projectId: 'project:lista-spesa-lite',
+      ),
+      isNull,
+    );
+    expect(
+      WorkshopDeviceAcceptanceScope.forProject(
+        receipt: prior,
+        projectId: null,
+      ),
+      isNull,
+    );
+  });
+
   test('prompt fingerprint is stable without exposing prompt text', () {
     final first = WorkshopAcceptanceFingerprint.sha256Text(
       'Create a counter app.',
