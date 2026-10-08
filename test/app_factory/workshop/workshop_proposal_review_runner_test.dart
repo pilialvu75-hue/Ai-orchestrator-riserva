@@ -445,6 +445,45 @@ void main() {
       expect(reviewer.calls, 1);
     });
 
+    test('build repair review judges behavior instead of source-line preservation',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":true,"summary":"Repair is behavior-preserving","findings":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'reviewer-model',
+        ),
+      );
+      final session = await _buildRepairReviewSession();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.approved, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.calls, 1);
+      expect(reviewer.lastPrompt, contains('"buildRepair":true'));
+      expect(reviewer.lastPrompt, contains('BUILD REPAIR SEMANTICS'));
+      expect(
+        reviewer.lastPrompt,
+        contains('Removing an unused import'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('Never require keeping a source line solely because it existed'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains("import 'screens/favorites_screen.dart';"),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains("after"),
+      );
+    });
+
     test('failed Reviewer inference leaves staged workspace in review',
         () async {
       final reviewer = _StaticGateway(
@@ -515,6 +554,39 @@ Future<WorkspaceSession> _reviewSession() async {
 
   await session.initialize();
   session.workspace.write(path: 'lib/app.dart', content: 'new');
+  session.beginReview();
+  return session;
+}
+
+Future<WorkspaceSession> _buildRepairReviewSession() async {
+  final gateway = _RecordingWorkspaceGateway(
+    files: <String, String>{
+      'lib/main.dart':
+          "import 'screens/favorites_screen.dart';\nvoid main() {}\n",
+    },
+  );
+  final session = WorkspaceSession(
+    request: const WorkshopRequest(
+      id: 'review-build-repair-request',
+      title: 'Manga Bigs — build repair 1',
+      instruction: 'BUILD REPAIR ATTEMPT: 1\n'
+          'FAILED BUILD METADATA:\n'
+          'errors: local_analyze_failed\n'
+          'Remove the unused import while preserving product behavior.',
+      constraints: <String>[
+        'Do not disable formatter, analyzer, tests, validation or review.',
+        'Prefer the smallest safe project-code change.',
+      ],
+      targetFiles: <String>['lib/main.dart'],
+    ),
+    gateway: gateway,
+  );
+
+  await session.initialize();
+  session.workspace.write(
+    path: 'lib/main.dart',
+    content: 'void main() {}\n',
+  );
   session.beginReview();
   return session;
 }
