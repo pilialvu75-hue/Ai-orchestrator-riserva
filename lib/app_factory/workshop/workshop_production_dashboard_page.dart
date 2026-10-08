@@ -617,10 +617,51 @@ class _WorkshopProductionDashboardPageState
     });
 
     try {
-      final restored = await recovery.restoreProject(
-        dashboardController,
-        projectId: selectedProjectId,
-      );
+      var restored = false;
+      try {
+        restored = await recovery.restoreProject(
+          dashboardController,
+          projectId: selectedProjectId,
+        );
+      } on WorkshopLegacyModelBindingRequired catch (binding) {
+        if (!mounted) return;
+        final models = binding.currentAssignments
+            .map(
+              (assignment) =>
+                  '${assignment.role.id}: ${assignment.modelId}',
+            )
+            .join('\n');
+        final bindCurrent = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Conferma modelli del progetto'),
+            content: Text(
+              'Questo progetto è stato salvato prima del binding dei modelli. '
+              'Per evitare cambi di modello silenziosi, conferma una sola volta '
+              'la configurazione corrente:\n\n$models',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Annulla'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Usa questi modelli'),
+              ),
+            ],
+          ),
+        );
+        if (bindCurrent != true || !mounted) {
+          return;
+        }
+        restored = await recovery.restoreProject(
+          dashboardController,
+          projectId: selectedProjectId,
+          bindLegacyAssignments: true,
+        );
+      }
+
       if (!restored) {
         throw StateError('Il progetto selezionato non è più disponibile.');
       }
