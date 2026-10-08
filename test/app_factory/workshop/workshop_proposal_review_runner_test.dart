@@ -175,6 +175,78 @@ void main() {
       );
     });
 
+    test('critical-memory Reviewer retry waits for recovery before retrying',
+        () async {
+      var recoveryCalls = 0;
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(text: ''),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+            errorMessage:
+                'AI_RUNTIME_ERROR|stage=critical_memory|message=pressure',
+          ),
+          WorkshopInferenceResult(
+            text:
+                '{"approved":true,"summary":"Recovered after memory pressure","findings":[],"warnings":[]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _reviewSession();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+        memoryRecoveryWaiter: (token) async {
+          recoveryCalls += 1;
+          expect(token?.isCancelled ?? false, isFalse);
+          return true;
+        },
+      ).run(session: session);
+
+      expect(verdict.approved, isTrue);
+      expect(recoveryCalls, 1);
+      expect(reviewer.calls, 2);
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) =>
+              entry.tag == 'WORKSHOP_REVIEW_RETRY' &&
+              entry.message.contains('reason=critical_memory_recovered'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('critical-memory Reviewer does not retry while pressure stays critical',
+        () async {
+      var recoveryCalls = 0;
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '',
+          terminalState: InferenceTerminalState.failed,
+          errorMessage:
+              'AI_RUNTIME_ERROR|stage=critical_memory|message=pressure',
+        ),
+      );
+      final session = await _reviewSession();
+
+      await expectLater(
+        WorkshopProposalReviewRunner(
+          inference: _stageInference(_gateways(reviewer)),
+          memoryRecoveryWaiter: (token) async {
+            recoveryCalls += 1;
+            return false;
+          },
+        ).run(session: session),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(recoveryCalls, 1);
+      expect(reviewer.calls, 1);
+      expect(session.status, WorkspaceSessionStatus.review);
+    });
+
     for (final invalid in <String>[
       '{\n "', // The +2979 screenshot's unterminated-string error shape.
       '{"approved":"true","summary":"wrong boolean"}',
