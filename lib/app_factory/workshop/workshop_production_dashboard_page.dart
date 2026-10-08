@@ -392,6 +392,10 @@ class _WorkshopProductionDashboardPageState
 
       setState(() {
         _buildResult = null;
+        _acceptanceReceipt = null;
+        _installAttempted = false;
+        _installerOpened = false;
+        _apkInstallationVerificationPassed = null;
         _error = null;
       });
 
@@ -925,6 +929,10 @@ class _WorkshopProductionDashboardPageState
     required bool? generatedAppOpened,
   }) async {
     final dashboard = widget.bundle.dashboardController.state;
+    final priorAcceptance = WorkshopDeviceAcceptanceScope.forProject(
+      receipt: _acceptanceReceipt,
+      projectId: dashboard.projectId,
+    );
     final execution = widget.executionController.state;
     final inference = _currentInferenceResult;
     final build = _buildResult;
@@ -971,19 +979,19 @@ class _WorkshopProductionDashboardPageState
       reviewApproved:
           inference?.review.approved ?? (completedProject ? true : null),
       reviewSummary:
-          inference?.review.summary.trim() ?? _acceptanceReceipt?.reviewSummary,
+          inference?.review.summary.trim() ?? priorAcceptance?.reviewSummary,
       reviewFindings: List<String>.unmodifiable(
         inference?.review.findings ??
-            _acceptanceReceipt?.reviewFindings ??
+            priorAcceptance?.reviewFindings ??
             const <String>[],
       ),
       reviewWarnings: List<String>.unmodifiable(
         inference?.review.warnings ??
-            _acceptanceReceipt?.reviewWarnings ??
+            priorAcceptance?.reviewWarnings ??
             const <String>[],
       ),
       stagedDiffSha256: inference == null
-          ? _acceptanceReceipt?.stagedDiffSha256
+          ? priorAcceptance?.stagedDiffSha256
           : WorkshopAcceptanceFingerprint.sha256Text(
               inference.proposal.changes
                   .map(
