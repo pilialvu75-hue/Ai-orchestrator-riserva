@@ -211,6 +211,87 @@ void main() {
       expect(realGateway.deleteCalls, 0);
     });
 
+    test(
+        'Reviewer revision recovers after repeated empty CREATE proposal',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(_proposalJson),
+          _success(
+            '{"summary":"No change","explanation":"Nothing to change",'
+            '"changes":[],"validationNotes":[],"warnings":[]}',
+          ),
+          _success(
+            '{"summary":"Still empty","explanation":"No files emitted",'
+            '"changes":[],"validationNotes":[],"warnings":[]}',
+          ),
+          _success(_repairedProposalJson),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(_rejectedReviewJson),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
+        ],
+      );
+      final realGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'pipeline-create-revision-empty',
+          title: 'Create app',
+          instruction: 'Create the requested app safely',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/app.dart'],
+          constraints: <String>['No regressions'],
+        ),
+        gateway: realGateway,
+      );
+      await session.initialize();
+
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(
+          _gateways(
+            engineer: engineer,
+            reviewer: reviewer,
+            callOrder: callOrder,
+          ),
+        ),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isTrue);
+      expect(result.review.approved, isTrue);
+      expect(result.validation?.valid, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.workspace.read('lib/app.dart'), 'repaired');
+      expect(engineer.calls, 4);
+      expect(
+        engineer.prompts.last,
+        contains('Engineer already failed CREATE materialization'),
+      );
+      expect(
+        callOrder,
+        <AppAiRole>[
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.engineer,
+          AppAiRole.engineer,
+          AppAiRole.engineer,
+          AppAiRole.reviewer,
+          AppAiRole.reviewer,
+        ],
+      );
+      expect(realGateway.writeCalls, 0);
+      expect(realGateway.deleteCalls, 0);
+    });
+
     test('third Reviewer rejection remains authoritative and blocked',
         () async {
       final callOrder = <AppAiRole>[];
