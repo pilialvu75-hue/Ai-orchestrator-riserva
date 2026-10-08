@@ -50,7 +50,7 @@ final class _CapturingProvider implements RuntimeInferenceProvider {
     lastRequest = request;
 
     yield InferenceResponse.finalChunk(
-      text: 'risposta Cantiere',
+      text: 'PROPOSAL: risposta Cantiere',
       tokensGenerated: 2,
       model: 'fake-workshop',
     );
