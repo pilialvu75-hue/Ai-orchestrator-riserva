@@ -426,7 +426,7 @@ final class _CapturingProvider implements RuntimeInferenceProvider {
     requests.add(request);
 
     yield InferenceResponse.finalChunk(
-      text: 'Proposta pronta per approvazione.',
+      text: 'PROPOSAL: Proposta pronta per approvazione.',
       tokensGenerated: 4,
       model: 'fake-workshop',
     );
