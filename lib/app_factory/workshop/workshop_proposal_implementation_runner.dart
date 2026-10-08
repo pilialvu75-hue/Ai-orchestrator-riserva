@@ -672,7 +672,9 @@ requested. Do not review, approve or apply.
       return false;
     }
 
-    if (_isCriticalMemoryError(result) || _isPromptBudgetError(result)) {
+    if (_isCriticalMemoryError(result) ||
+        _isPromptBudgetError(result) ||
+        _isRetryableIncompleteCloudOutput(result)) {
       return true;
     }
 
@@ -692,9 +694,24 @@ requested. Do not review, approve or apply.
         error.contains('prompt exceeds the local context capacity');
   }
 
+  static bool _isRetryableIncompleteCloudOutput(
+    WorkshopInferenceResult result,
+  ) {
+    final error = (result.errorMessage ?? '').toLowerCase();
+    if (!error.contains('response was incomplete')) {
+      return false;
+    }
+
+    return error.contains('(length)') ||
+        error.contains('(max_tokens)') ||
+        error.contains('(max_output_tokens)') ||
+        error.contains('(max_tokens_reached)');
+  }
+
   static String _retryReason(WorkshopInferenceResult result) {
     if (_isPromptBudgetError(result)) return 'prompt_budget';
     if (_isCriticalMemoryError(result)) return 'memory_pressure';
+    if (_isRetryableIncompleteCloudOutput(result)) return 'incomplete_output';
     return 'runtime';
   }
 
@@ -724,11 +741,12 @@ requested. Do not review, approve or apply.
       'repository directly.';
 
   static const String _retrySystemPrompt =
-      'You are the Cantiere Engineer retrying after a local runtime or prompt-budget failure. '
-      'Use only the compact bounded input. Make the smallest valid change that '
-      'satisfies the explicit task contract; use the Architect plan only as '
-      'bounded implementation guidance. Return only the requested JSON object. '
-      'Do not review, approve, apply, or use Assistant state.';
+      'You are the Cantiere Engineer retrying after a runtime, prompt-budget, '
+      'or incomplete-output failure. Use only the compact bounded input. Make '
+      'the smallest valid change that satisfies the explicit task contract; '
+      'use the Architect plan only as bounded implementation guidance. Return '
+      'only the requested JSON object. Do not review, approve, apply, or use '
+      'Assistant state.';
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
