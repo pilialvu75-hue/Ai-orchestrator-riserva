@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_background_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
@@ -40,10 +41,50 @@ final class WorkshopSavedProjectSummary {
   final String? activeTaskId;
 }
 
+final class WorkshopLegacyModelBindingRequired implements Exception {
+  const WorkshopLegacyModelBindingRequired({
+    required this.projectId,
+    required this.currentAssignments,
+  });
+
+  final String projectId;
+  final List<WorkshopModelAssignment> currentAssignments;
+
+  @override
+  String toString() =>
+      'Il progetto salvato non contiene ancora un binding dei modelli. '
+      'Conferma esplicitamente i modelli correnti prima di riprenderlo.';
+}
+
+final class WorkshopModelAssignmentMismatch implements Exception {
+  const WorkshopModelAssignmentMismatch({
+    required this.projectId,
+    required this.expected,
+    required this.current,
+  });
+
+  final String projectId;
+  final List<WorkshopModelAssignment> expected;
+  final List<WorkshopModelAssignment> current;
+
+  static String _summary(List<WorkshopModelAssignment> assignments) =>
+      assignments
+          .map((assignment) => '${assignment.role.id}=${assignment.modelId}')
+          .join(', ');
+
+  @override
+  String toString() =>
+      'I modelli correnti del Cantiere non coincidono con quelli salvati '
+      'per questo progetto. Salvati: ${_summary(expected)}. '
+      'Correnti: ${_summary(current)}.';
+}
+
 final class WorkshopProductionRecoveryCoordinator {
   WorkshopProductionRecoveryCoordinator({
     required WorkshopCheckpointStore checkpointStore,
-  }) : _checkpointStore = checkpointStore;
+    List<WorkshopModelAssignment> Function()? modelAssignmentsProvider,
+  })  : _checkpointStore = checkpointStore,
+        _modelAssignmentsProvider = modelAssignmentsProvider;
 
   static const String _legacyJobId = 'workshop-production:active:v1';
   static const String _projectJobPrefix = 'workshop-production:project:v2:';
@@ -52,6 +93,7 @@ final class WorkshopProductionRecoveryCoordinator {
   static const String _draftPayloadPrefix = 'workshop-production-draft-v1:';
 
   final WorkshopCheckpointStore _checkpointStore;
+  final List<WorkshopModelAssignment> Function()? _modelAssignmentsProvider;
 
   WorkshopDashboardController? _controller;
   void Function()? _listener;
@@ -123,6 +165,7 @@ final class WorkshopProductionRecoveryCoordinator {
   Future<bool> restoreProject(
     WorkshopDashboardController controller, {
     required String projectId,
+    bool bindLegacyAssignments = false,
   }) async {
     final normalizedProjectId = projectId.trim();
     if (normalizedProjectId.isEmpty) {
@@ -154,6 +197,26 @@ final class WorkshopProductionRecoveryCoordinator {
       if (snapshot.plan.id != normalizedProjectId ||
           snapshot.plan.status == WorkshopProjectStatus.cancelled) {
         continue;
+      }
+
+      final currentAssignments = _currentModelAssignments();
+      final savedAssignments = snapshot.modelAssignments;
+      if (savedAssignments != null &&
+          currentAssignments != null &&
+          !_sameAssignments(savedAssignments, currentAssignments)) {
+        throw WorkshopModelAssignmentMismatch(
+          projectId: normalizedProjectId,
+          expected: savedAssignments,
+          current: currentAssignments,
+        );
+      }
+      if (savedAssignments == null &&
+          currentAssignments != null &&
+          !bindLegacyAssignments) {
+        throw WorkshopLegacyModelBindingRequired(
+          projectId: normalizedProjectId,
+          currentAssignments: currentAssignments,
+        );
       }
 
       await controller.restoreProduction(
@@ -209,7 +272,12 @@ final class WorkshopProductionRecoveryCoordinator {
     _controller = controller;
 
     final listener = () {
-      _queueSnapshot(_WorkshopProductionSnapshot.capture(controller));
+      _queueSnapshot(
+        _WorkshopProductionSnapshot.capture(
+          controller,
+          modelAssignments: _currentModelAssignments(),
+        ),
+      );
     };
 
     _listener = listener;
@@ -229,7 +297,12 @@ final class WorkshopProductionRecoveryCoordinator {
     _listener = null;
 
     if (flushCurrent && controller != null) {
-      _queueSnapshot(_WorkshopProductionSnapshot.capture(controller));
+      _queueSnapshot(
+        _WorkshopProductionSnapshot.capture(
+          controller,
+          modelAssignments: _currentModelAssignments(),
+        ),
+      );
     }
 
     await _writeTail;
@@ -237,7 +310,10 @@ final class WorkshopProductionRecoveryCoordinator {
 
   /// Persists the latest authoritative production state immediately.
   Future<void> saveCurrent(WorkshopDashboardController controller) async {
-    final snapshot = _WorkshopProductionSnapshot.capture(controller);
+    final snapshot = _WorkshopProductionSnapshot.capture(
+      controller,
+      modelAssignments: _currentModelAssignments(),
+    );
 
     await _runSerializedPersistence(() => _persistSnapshot(snapshot));
   }
@@ -384,6 +460,33 @@ final class WorkshopProductionRecoveryCoordinator {
     }();
   }
 
+  List<WorkshopModelAssignment>? _currentModelAssignments() {
+    final assignments = _modelAssignmentsProvider?.call();
+    if (assignments == null || !WorkshopModelAssignments.isValid(assignments)) {
+      return null;
+    }
+    return List<WorkshopModelAssignment>.unmodifiable(assignments);
+  }
+
+  static bool _sameAssignments(
+    List<WorkshopModelAssignment> left,
+    List<WorkshopModelAssignment> right,
+  ) {
+    if (left.length != right.length) return false;
+    for (final role in WorkshopModelAssignments.workshopRoles) {
+      final leftModel = WorkshopModelAssignments.modelIdFor(
+        role,
+        assignments: left,
+      );
+      final rightModel = WorkshopModelAssignments.modelIdFor(
+        role,
+        assignments: right,
+      );
+      if (leftModel != rightModel) return false;
+    }
+    return true;
+  }
+
   Future<void> _persistSnapshot(_WorkshopProductionSnapshot? snapshot) async {
     // A neutral Cantiere view is not a request to delete parked projects.
     if (snapshot == null) {
@@ -453,6 +556,7 @@ final class _WorkshopProductionSnapshot {
     required this.stage,
     this.activeTaskId,
     this.projectApproval,
+    this.modelAssignments,
   });
 
   final WorkshopRequest request;
@@ -460,10 +564,12 @@ final class _WorkshopProductionSnapshot {
   final WorkshopStage? stage;
   final String? activeTaskId;
   final WorkshopProjectApprovalEvidence? projectApproval;
+  final List<WorkshopModelAssignment>? modelAssignments;
 
   static _WorkshopProductionSnapshot? capture(
-    WorkshopDashboardController controller,
-  ) {
+    WorkshopDashboardController controller, {
+    List<WorkshopModelAssignment>? modelAssignments,
+  }) {
     final state = controller.state;
     final requestId = state.requestId?.trim();
 
@@ -489,16 +595,22 @@ final class _WorkshopProductionSnapshot {
       stage: state.stage ?? controller.engine.stageOf(requestId),
       activeTaskId: state.activeTaskId,
       projectApproval: state.projectApproval,
+      modelAssignments: modelAssignments == null
+          ? null
+          : List<WorkshopModelAssignment>.unmodifiable(modelAssignments),
     );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'version': 1,
+    'version': modelAssignments == null ? 1 : 2,
     'request': _encodeRequest(request),
     'plan': _encodePlan(plan),
     'stage': stage?.name,
     'activeTaskId': activeTaskId,
     'projectApproval': projectApproval?.toJson(),
+    if (modelAssignments != null)
+      'modelAssignments':
+          modelAssignments!.map((assignment) => assignment.toJson()).toList(),
   };
 
   static _WorkshopProductionSnapshot decode(
@@ -523,7 +635,8 @@ final class _WorkshopProductionSnapshot {
 
     final root = Map<String, dynamic>.from(decoded);
 
-    if (root['version'] != 1 ||
+    final version = root['version'];
+    if ((version != 1 && version != 2) ||
         root['request'] is! Map ||
         root['plan'] is! Map) {
       throw const FormatException(
@@ -545,6 +658,10 @@ final class _WorkshopProductionSnapshot {
 
     final activeTaskId = _nullableString(root['activeTaskId']);
     final projectApproval = _decodeProjectApproval(root['projectApproval']);
+    final modelAssignments = _decodeModelAssignments(
+      root['modelAssignments'],
+      requiredForVersion: version == 2,
+    );
 
     if (projectApproval != null &&
         projectApproval.projectId.trim() != plan.id.trim()) {
@@ -566,7 +683,46 @@ final class _WorkshopProductionSnapshot {
       stage: _nullableEnumByName(WorkshopStage.values, root['stage']),
       activeTaskId: activeTaskId,
       projectApproval: projectApproval,
+      modelAssignments: modelAssignments,
     );
+  }
+
+  static List<WorkshopModelAssignment>? _decodeModelAssignments(
+    Object? raw, {
+    required bool requiredForVersion,
+  }) {
+    if (raw == null) {
+      if (requiredForVersion) {
+        throw const FormatException(
+          'Workshop production recovery model assignments are missing.',
+        );
+      }
+      return null;
+    }
+    if (raw is! List) {
+      throw const FormatException(
+        'Workshop production recovery model assignments are invalid.',
+      );
+    }
+    final assignments = <WorkshopModelAssignment>[];
+    for (final item in raw) {
+      if (item is! Map) {
+        throw const FormatException(
+          'Workshop production recovery model assignment is invalid.',
+        );
+      }
+      assignments.add(
+        WorkshopModelAssignment.fromJson(
+          Map<String, dynamic>.from(item),
+        ),
+      );
+    }
+    if (!WorkshopModelAssignments.isValid(assignments)) {
+      throw const FormatException(
+        'Workshop production recovery model assignments are incomplete.',
+      );
+    }
+    return List<WorkshopModelAssignment>.unmodifiable(assignments);
   }
 
   static WorkshopProjectApprovalEvidence? _decodeProjectApproval(Object? raw) {
