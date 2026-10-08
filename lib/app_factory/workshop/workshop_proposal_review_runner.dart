@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projecti
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 
 /// Runs the Cantiere Reviewer against the current staged VirtualWorkspace.
 ///
@@ -25,14 +26,20 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 ///
 /// No real workspace write, commit, push or Pull Request is performed here.
 final class WorkshopProposalReviewRunner {
-  const WorkshopProposalReviewRunner({
+  WorkshopProposalReviewRunner({
     required WorkshopStageRoleInference inference,
     WorkshopProposalReviewGate gate = const WorkshopProposalReviewGate(),
+    Future<bool> Function(CancellationToken? cancellationToken)?
+        memoryRecoveryWaiter,
   })  : _inference = inference,
-        _gate = gate;
+        _gate = gate,
+        _memoryRecoveryWaiter =
+            memoryRecoveryWaiter ?? _waitForRuntimeMemoryRecovery;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalReviewGate _gate;
+  final Future<bool> Function(CancellationToken? cancellationToken)
+      _memoryRecoveryWaiter;
 
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
@@ -194,6 +201,32 @@ final class WorkshopProposalReviewRunner {
         if (cancellationToken?.isCancelled == true) rethrow;
         retryReason = 'malformed_output';
       }
+    }
+
+    if (_isCriticalMemoryFailure(result)) {
+      retryReason = 'critical_memory';
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_MEMORY_RECOVERY] '
+        'batch=${batchIndex + 1}/$batchCount action=wait',
+      );
+      final recoveredMemory =
+          await _memoryRecoveryWaiter(cancellationToken);
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_MEMORY_RECOVERY] '
+        'batch=${batchIndex + 1}/$batchCount '
+        'action=${recoveredMemory ? 'resume' : 'stop'}',
+      );
+      if (!recoveredMemory) {
+        return _decodeBatchResult(
+          result: result,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
+          fileCount: batch.length,
+          coverage: coverage,
+          cancellationToken: cancellationToken,
+        );
+      }
+      retryReason = 'critical_memory_recovered';
     }
 
     RuntimeEventLog.instance.emit(
@@ -503,6 +536,22 @@ Do not return markdown fences or any text outside the JSON object.
       hash = (hash * 0x01000193) & 0xffffffff;
     }
     return hash.toRadixString(16).padLeft(8, '0');
+  }
+
+  static bool _isCriticalMemoryFailure(
+    WorkshopInferenceResult result,
+  ) {
+    final error = (result.errorMessage ?? '').toLowerCase();
+    return error.contains('stage=critical_memory') ||
+        error.contains('reason=critical_memory');
+  }
+
+  static Future<bool> _waitForRuntimeMemoryRecovery(
+    CancellationToken? cancellationToken,
+  ) {
+    return ResourceMonitor.instance.waitForNonCritical(
+      isCancelled: () => cancellationToken?.isCancelled == true,
+    );
   }
 
   static bool _shouldRetryReviewer(

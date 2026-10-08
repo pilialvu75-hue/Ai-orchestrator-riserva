@@ -204,6 +204,44 @@ class ResourceMonitor extends ChangeNotifier {
       : _pending ??= _takeSample().whenComplete(() {
           _pending = null;
         });
+
+  /// Waits for Android memory pressure to become genuinely non-critical.
+  ///
+  /// A running-critical trim callback is intentionally respected, but Android
+  /// telemetry keeps the most recent trim level for a short bounded window.
+  /// Callers that retry immediately after unloading a model can therefore see
+  /// a stale critical signal even when free RAM has already recovered.
+  ///
+  /// This helper never treats an unavailable sample as healthy and remains
+  /// bounded/cancellable so runtime gates still fail closed.
+  Future<bool> waitForNonCritical({
+    Duration timeout = const Duration(seconds: 12),
+    Duration pollInterval = const Duration(seconds: 1),
+    bool Function()? isCancelled,
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (!_disposed) {
+      if (isCancelled?.call() == true) {
+        return false;
+      }
+
+      final reading = await sample();
+      if (reading != null && !reading.critical) {
+        return true;
+      }
+
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) {
+        return false;
+      }
+
+      final delay = remaining < pollInterval ? remaining : pollInterval;
+      if (delay > Duration.zero) {
+        await Future<void>.delayed(delay);
+      }
+    }
+    return false;
+  }
   Future<ResourceSample?> _takeSample() async {
     ResourceSample? reading;
     try {
