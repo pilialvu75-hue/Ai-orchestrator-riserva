@@ -79,6 +79,31 @@ void main() {
     );
   }
 
+  test('device clock context reaches local inference and preserves instructions',
+      () async {
+    InferenceRequest? captured;
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: validModel,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        captured = request;
+        yield InferenceResponse.finalChunk(text: 'ok', tokensGenerated: 1);
+      }),
+      cloudRuntimeProvider: buildCloudProvider(),
+    );
+    await service.stream(const InferenceRequest(
+      sessionId: 'clock-local',
+      prompt: 'Che giorno e oggi?',
+      systemPrompt: 'Keep the answer concise.',
+    )).drain<void>();
+    expect(captured, isNotNull);
+    expect(captured!.systemPrompt, contains('Keep the answer concise.'));
+    expect(captured!.systemPrompt, contains('Device system time (local):'));
+    expect(captured!.systemPrompt, contains('UTC offset:'));
+    expect(captured!.prompt, 'Che giorno e oggi?');
+  });
+
   group('InferenceService routing', () {
     test(
         'Workshop settings survive gateway, role adapter and local model resolution',
