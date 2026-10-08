@@ -124,10 +124,10 @@ final class WorkshopProposalImplementationRunner {
       );
 
       final structuralFeedback = <String>[
-        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
-          revisionFeedback.trim(),
         'Previous Engineer proposal was rejected before review: '
             '${error.message}',
+        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
+          revisionFeedback.trim(),
       ].join(' | ');
 
       final recovered = await _inference.complete(
@@ -251,10 +251,10 @@ final class WorkshopProposalImplementationRunner {
       );
 
       final structuralFeedback = <String>[
-        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
-          revisionFeedback.trim(),
         'Previous Engineer proposal was rejected before review: '
             '${error.message}',
+        if (revisionFeedback != null && revisionFeedback.trim().isNotEmpty)
+          revisionFeedback.trim(),
       ].join(' | ');
 
       final recovered = await _inference.completeWithIdentity(
