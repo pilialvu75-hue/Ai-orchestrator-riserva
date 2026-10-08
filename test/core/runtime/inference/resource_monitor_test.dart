@@ -271,6 +271,58 @@ void main() {
       monitor.dispose();
     },
   );
+  test('waitForNonCritical ignores sticky critical samples until recovery',
+      () async {
+    var call = 0;
+    final monitor = ResourceMonitor(
+      sampler: () async {
+        call += 1;
+        if (call < 3) {
+          return <Object?, Object?>{
+            'availableBytes': 3 << 30,
+            'thresholdBytes': 408944640,
+            'trimLevel': 15,
+          };
+        }
+        return <Object?, Object?>{
+          'availableBytes': 3 << 30,
+          'thresholdBytes': 408944640,
+          'trimLevel': 0,
+        };
+      },
+      logger: (_) {},
+    );
+
+    final recovered = await monitor.waitForNonCritical(
+      timeout: const Duration(milliseconds: 100),
+      pollInterval: const Duration(milliseconds: 1),
+    );
+
+    expect(recovered, isTrue);
+    expect(call, 3);
+    monitor.dispose();
+  });
+
+  test('waitForNonCritical fails closed when pressure never recovers',
+      () async {
+    final monitor = ResourceMonitor(
+      sampler: () async => <Object?, Object?>{
+        'availableBytes': 3 << 30,
+        'thresholdBytes': 408944640,
+        'trimLevel': 15,
+      },
+      logger: (_) {},
+    );
+
+    final recovered = await monitor.waitForNonCritical(
+      timeout: const Duration(milliseconds: 5),
+      pollInterval: const Duration(milliseconds: 1),
+    );
+
+    expect(recovered, isFalse);
+    monitor.dispose();
+  });
+
   testWidgets('panel release preserves inference sampling lease', (
     tester,
   ) async {
