@@ -356,8 +356,8 @@ final class WorkshopTaskInferencePipeline {
       );
       return runOnce(
         <String>[
-          feedback,
           _emptyCreateRecoveryFeedback(session.context.request),
+          feedback,
         ].join(' '),
       );
     }
