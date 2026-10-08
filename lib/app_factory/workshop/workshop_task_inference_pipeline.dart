@@ -314,27 +314,53 @@ final class WorkshopTaskInferencePipeline {
     required int attempt,
     required bool isOffline,
     CancellationToken? cancellationToken,
-  }) {
-    if (resumeContext != null) {
-      return _implementationRunner.runWithResumeContext(
+  }) async {
+    Future<WorkshopChangeProposal> runOnce(String revisionFeedback) {
+      if (resumeContext != null) {
+        return _implementationRunner.runWithResumeContext(
+          session: session,
+          resumeContext: resumeContext,
+          preflight: preflight,
+          revisionFeedback: revisionFeedback,
+          revisionAttempt: attempt,
+          isOffline: isOffline,
+          cancellationToken: cancellationToken,
+        );
+      }
+
+      return _implementationRunner.run(
         session: session,
-        resumeContext: resumeContext,
         preflight: preflight,
-        revisionFeedback: feedback,
+        revisionFeedback: revisionFeedback,
         revisionAttempt: attempt,
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
     }
 
-    return _implementationRunner.run(
-      session: session,
-      preflight: preflight,
-      revisionFeedback: feedback,
-      revisionAttempt: attempt,
-      isOffline: isOffline,
-      cancellationToken: cancellationToken,
-    );
+    try {
+      return await runOnce(feedback);
+    } on FormatException catch (error) {
+      if (!_shouldRetryRepeatedEmptyCreate(
+        session: session,
+        error: error,
+        cancellationToken: cancellationToken,
+      )) {
+        rethrow;
+      }
+
+      _emitEmptyCreateRecovery(
+        session.context.request,
+        phase: 'revision',
+        attempt: attempt,
+      );
+      return runOnce(
+        <String>[
+          feedback,
+          _emptyCreateRecoveryFeedback(session.context.request),
+        ].join(' '),
+      );
+    }
   }
 
   static bool _shouldRetryRepeatedEmptyCreate({
@@ -368,9 +394,15 @@ final class WorkshopTaskInferencePipeline {
         'changes array, or a proposal that omits the required entry point.';
   }
 
-  static void _emitEmptyCreateRecovery(WorkshopRequest request) {
+  static void _emitEmptyCreateRecovery(
+    WorkshopRequest request, {
+    String phase = 'initial',
+    int? attempt,
+  }) {
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_EMPTY_CREATE_RECOVERY] request=${request.id} '
+      'phase=$phase '
+      'attempt=${attempt ?? 0} '
       'targets=${request.targetFiles.length}',
     );
   }
