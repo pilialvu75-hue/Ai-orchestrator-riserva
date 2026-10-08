@@ -79,6 +79,34 @@ void main() {
     controller.dispose();
   });
 
+  test('Workshop rejects unprefixed prose instead of promoting it to proposal',
+      () async {
+    final provider = _SingleReplyProvider(
+      'Apri Android Studio e compila manualmente il progetto.',
+    );
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+
+    final result = await controller.send('crea Lista Spesa Lite');
+
+    expect(result, isNull);
+    expect(controller.lastResponseReadyForApproval, isFalse);
+    expect(controller.lastReplyKind, isNull);
+    expect(controller.hasError, isTrue);
+    expect(controller.lastError, contains('fuori protocollo'));
+    expect(
+      controller.messages.where((turn) => turn.role == ChatRole.assistant),
+      isEmpty,
+    );
+    expect(
+      controller.messages.where((turn) => turn.role == ChatRole.user),
+      isEmpty,
+    );
+
+    controller.dispose();
+  });
+
   test('Workshop clarification is not marked ready for approval',
       () async {
     final provider = _SingleReplyProvider(
@@ -217,7 +245,7 @@ final class _CumulativeSnapshotProvider implements RuntimeInferenceProvider {
     required CancellationToken cancellationToken,
   }) async* {
     yield InferenceResponse.token(
-      text: 'Hello ',
+      text: 'PROPOSAL: Hello ',
       model: 'fake-workshop',
     );
     yield InferenceResponse.token(
@@ -225,7 +253,7 @@ final class _CumulativeSnapshotProvider implements RuntimeInferenceProvider {
       model: 'fake-workshop',
     );
     yield InferenceResponse.finalChunk(
-      text: 'Hello world',
+      text: 'PROPOSAL: Hello world',
       tokensGenerated: 2,
       model: 'fake-workshop',
     );
@@ -243,7 +271,7 @@ final class _CapturingProvider implements RuntimeInferenceProvider {
     requests.add(request);
 
     yield InferenceResponse.finalChunk(
-      text: 'risposta Cantiere',
+      text: 'PROPOSAL: risposta Cantiere',
       tokensGenerated: 2,
       model: 'fake-workshop',
     );
