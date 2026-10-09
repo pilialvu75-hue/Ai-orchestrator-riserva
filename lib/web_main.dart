@@ -7,6 +7,8 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_browser_au
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_conversation_storage.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_projects_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_shell.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:flutter/material.dart';
@@ -14,9 +16,7 @@ import 'package:flutter/material.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final conversationStorage = await WorkshopWebConversationStorage.open();
-  final restoredConversation = await conversationStorage.load();
-  final browserAudio = WorkshopWebBrowserAudio();
+  final projectStorage = await WorkshopWebProjectStorage.open();
   final cloudBroker = WorkshopWebCloudBrokerClient();
   final chatController = WorkshopChatController(
     inferenceGateway: WorkshopInferenceGateway(
@@ -27,21 +27,12 @@ Future<void> main() async {
     sessionId: 'workshop-web',
   );
 
-  if (restoredConversation.isNotEmpty) {
-    chatController.addSystemMessage(
-      _restoredConversationContext(restoredConversation),
-      excludeFromContext: false,
-    );
-  }
-
   runApp(
     WorkshopWebApp(
       checkpointStore: WorkshopWebCheckpointStorage.open(),
       cloudHealth: cloudBroker.health(),
       chatController: chatController,
-      conversationStorage: conversationStorage,
-      restoredConversation: restoredConversation,
-      browserAudio: browserAudio,
+      projectStorage: projectStorage,
     ),
   );
 }
@@ -74,17 +65,13 @@ class WorkshopWebApp extends StatelessWidget {
     required this.checkpointStore,
     required this.cloudHealth,
     required this.chatController,
-    required this.conversationStorage,
-    required this.restoredConversation,
-    required this.browserAudio,
+    required this.projectStorage,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
   final WorkshopChatController chatController;
-  final WorkshopWebConversationStorage conversationStorage;
-  final List<ChatTurn> restoredConversation;
-  final WorkshopWebBrowserAudio browserAudio;
+  final WorkshopWebProjectStorage projectStorage;
 
   @override
   Widget build(BuildContext context) {
@@ -106,9 +93,7 @@ class WorkshopWebApp extends StatelessWidget {
         checkpointStore: checkpointStore,
         cloudHealth: cloudHealth,
         chatController: chatController,
-        conversationStorage: conversationStorage,
-        restoredConversation: restoredConversation,
-        browserAudio: browserAudio,
+        projectStorage: projectStorage,
       ),
     );
   }
@@ -120,17 +105,13 @@ class WorkshopWebHome extends StatefulWidget {
     required this.checkpointStore,
     required this.cloudHealth,
     required this.chatController,
-    required this.conversationStorage,
-    required this.restoredConversation,
-    required this.browserAudio,
+    required this.projectStorage,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
   final WorkshopChatController chatController;
-  final WorkshopWebConversationStorage conversationStorage;
-  final List<ChatTurn> restoredConversation;
-  final WorkshopWebBrowserAudio browserAudio;
+  final WorkshopWebProjectStorage projectStorage;
 
   @override
   State<WorkshopWebHome> createState() => _WorkshopWebHomeState();
@@ -149,11 +130,9 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
             checkpointStore: widget.checkpointStore,
             cloudHealth: widget.cloudHealth,
           ),
-          WorkshopWebChatPage(
+          WorkshopWebProjectsPage(
             controller: widget.chatController,
-            conversationStorage: widget.conversationStorage,
-            restoredConversation: widget.restoredConversation,
-            browserAudio: widget.browserAudio,
+            storage: widget.projectStorage,
           ),
         ],
       ),
