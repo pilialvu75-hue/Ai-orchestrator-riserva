@@ -108,9 +108,13 @@ final class WorkshopWebProject {
       return null;
     }
 
-    final status = WorkshopWebProjectStatus.values
-        .where((value) => value.name == statusName)
-        .firstOrNull;
+    WorkshopWebProjectStatus? status;
+    for (final candidate in WorkshopWebProjectStatus.values) {
+      if (candidate.name == statusName) {
+        status = candidate;
+        break;
+      }
+    }
     if (status == null) return null;
 
     return WorkshopWebProject(
