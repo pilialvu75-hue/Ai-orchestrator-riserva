@@ -58,7 +58,11 @@ class InferenceService {
 
   TokenStream stream(InferenceRequest request) async* {
     final now = DateTime.now();
-    final localTime = now.toIso8601String();
+    // Minute precision avoids defeating cloud response caching on every call.
+    // A new minute produces a fresh cache identity for relative-time queries.
+    final localTime = DateTime(
+      now.year, now.month, now.day, now.hour, now.minute,
+    ).toIso8601String();
     final utcOffset = now.timeZoneOffset;
     final sign = utcOffset.isNegative ? '-' : '+';
     final offset = utcOffset.abs();
@@ -73,7 +77,7 @@ class InferenceService {
     final isolatedRequest = request.copyWith(
       systemPrompt: priorSystemPrompt == null || priorSystemPrompt.isEmpty
           ? temporalContext
-          : '$priorSystemPrompt\\n\\n$temporalContext',
+          : '$priorSystemPrompt\n\n$temporalContext',
     );
     _log(
       '[SYSTEM_TIME_CONTEXT] session=${isolatedRequest.sessionId} '
