@@ -123,7 +123,7 @@ final class _WorkshopWebProjectsPageState
 
     final now = DateTime.now().toUtc();
     var project = WorkshopWebProject(
-      id: 'web-project:\${now.microsecondsSinceEpoch}',
+      id: 'web-project:${now.microsecondsSinceEpoch}',
       title: title,
       goal: goal,
       platforms: List<String>.unmodifiable(platforms),
@@ -145,7 +145,7 @@ final class _WorkshopWebProjectsPageState
     widget.controller.clearConversation();
     final prompt = '''
 Titolo progetto: $title
-Piattaforme richieste: \${platforms.join(', ')}
+Piattaforme richieste: ${platforms.join(', ')}
 Cosa deve fare: $goal
 
 Prepara esclusivamente la proposta del progetto. Non iniziare la creazione,
@@ -201,7 +201,7 @@ proposta breve, concreta e approvabile.
       builder: (dialogContext) => AlertDialog(
         title: const Text('Approva progetto'),
         content: Text(
-          'Approvi la proposta di “\${project.title}”? '
+          'Approvi la proposta di “${project.title}”? '
           'Nessuna creazione parte prima di questa conferma.',
         ),
         actions: <Widget>[
@@ -353,12 +353,12 @@ proposta breve, concreta e approvabile.
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                '\${project.platforms.join(' · ')} · \${_statusLabel(project.status)}',
+                '${project.platforms.join(' · ')} · ${_statusLabel(project.status)}',
               ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: project.progress),
               const SizedBox(height: 5),
-              Text('$percent% · \${project.currentPhase}'),
+              Text('$percent% · ${project.currentPhase}'),
             ],
           ),
         ),
