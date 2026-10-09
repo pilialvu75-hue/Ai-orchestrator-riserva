@@ -3,17 +3,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('repeated notices expire once and leave the composer usable',
-      (tester) async {
+  testWidgets('repeated notices expire once and leave the composer usable', (
+    tester,
+  ) async {
     final presenter = RuntimeNoticePresenter();
     addTearDown(presenter.dispose);
     late BuildContext context;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: Builder(builder: (value) {
-        context = value;
-        return const TextField();
-      })),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (value) {
+              context = value;
+              return const TextField();
+            },
+          ),
+        ),
+      ),
+    );
     const error = 'Generazione fermata per pressione sulla memoria.';
     presenter.update(context, error);
     await tester.pumpAndSettle();
@@ -35,22 +42,32 @@ void main() {
     expect(find.text(error), findsNothing);
   });
 
-  testWidgets('settings action cannot keep a runtime error permanently open',
-      (tester) async {
+  testWidgets('settings action cannot keep a runtime error permanently open', (
+    tester,
+  ) async {
     final presenter = RuntimeNoticePresenter();
     addTearDown(presenter.dispose);
     late BuildContext context;
-    await tester.pumpWidget(MaterialApp(
-      home: MediaQuery(
-        data: const MediaQueryData(accessibleNavigation: true),
-        child: Scaffold(body: Builder(builder: (value) {
-          context = value;
-          return const TextField();
-        })),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(accessibleNavigation: true),
+          child: Scaffold(
+            body: Builder(
+              builder: (value) {
+                context = value;
+                return const TextField();
+              },
+            ),
+          ),
+        ),
       ),
-    ));
-    presenter.update(context, 'Memory error',
-        action: SnackBarAction(label: 'Settings', onPressed: () {}));
+    );
+    presenter.update(
+      context,
+      'Memory error',
+      action: SnackBarAction(label: 'Settings', onPressed: () {}),
+    );
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
@@ -61,12 +78,18 @@ void main() {
     final presenter = RuntimeNoticePresenter();
     addTearDown(presenter.dispose);
     late BuildContext context;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: Builder(builder: (value) {
-        context = value;
-        return const TextField();
-      })),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (value) {
+              context = value;
+              return const TextField();
+            },
+          ),
+        ),
+      ),
+    );
     presenter.update(context, 'Previous error');
     await tester.pumpAndSettle();
     presenter.update(context, null);

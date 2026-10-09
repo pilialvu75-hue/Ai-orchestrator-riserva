@@ -10,11 +10,7 @@ class RuntimeNoticePresenter {
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _active;
   Timer? _expiry;
 
-  void update(
-    BuildContext context,
-    String? message, {
-    SnackBarAction? action,
-  }) {
+  void update(BuildContext context, String? message, {SnackBarAction? action}) {
     final normalized = message?.trim();
     final next = normalized == null || normalized.isEmpty ? null : normalized;
     if (next == _lastMessage) return;
