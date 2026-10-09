@@ -538,6 +538,25 @@ void main() {
       expect(reviewer.calls, 1);
       expect(reviewer.lastPrompt, contains('"buildRepair":true'));
       expect(reviewer.lastPrompt, contains('BUILD REPAIR SEMANTICS'));
+      expect(reviewer.lastPrompt, contains('EVIDENCE TRANSPORT RULE'));
+      expect(
+        reviewer.lastPrompt,
+        contains('"contentSemantics":"source_text"'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('"sourceLanguage":"dart"'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('"before":"import \'screens/favorites_screen.dart\';\\nvoid main() {}\\n"'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('"after":"void main() {}\\n"'),
+      );
+      expect(reviewer.maxTokensSeen, <int?>[256]);
+      expect(reviewer.lastPrompt!.length, lessThan(6500));
       expect(
         reviewer.lastPrompt,
         contains('Removing an unused import'),
