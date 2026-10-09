@@ -46,6 +46,16 @@ void main() {
     expect(inference, contains('status >= 500 && status <= 504'));
     expect(inference, contains("response.headers.get('retry-after')"));
 
+    // NVIDIA hosted endpoints may return HTTP 202 while the invocation is
+    // still pending. The broker must keep that request identity server-side
+    // and poll the provider status endpoint instead of misclassifying the
+    // pending response as an empty/malformed HTTP 502.
+    expect(inference, contains('MAX_PENDING_POLLS = 20'));
+    expect(inference, contains("response.status !== 202"));
+    expect(inference, contains("response.headers.get('nvcf-reqid')"));
+    expect(inference, contains('/v1/status/'));
+    expect(inference, contains('resolvePendingResponse'));
+
     // When every route fails, only the bounded numeric upstream HTTP status is
     // surfaced. This makes a physical Web test distinguish auth/rate/model
     // failures without exposing the endpoint, model binding, key or body.
