@@ -864,6 +864,63 @@ void main() {
       expect(workspaceGateway.deleteCalls, 0);
     });
 
+    test('build repair retries no-op proposal before Reviewer', () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"No-op repair","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Material repair","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() { print(\\\"fixed\\\"); }"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/main.dart': 'void main() {}'},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'build-repair-noop',
+          title: 'Lista Spesa Lite — build repair 1',
+          instruction:
+              'BUILD REPAIR ATTEMPT: 1\nRepair the failing generated app.',
+          operation: WorkshopOperation.fix,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(proposal.explanation, 'Material repair');
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(
+        engineer.prompts.last,
+        contains('Workshop proposal produced no staged workspace changes'),
+      );
+      expect(
+        engineer.systemPrompts.last,
+        contains('rewriting identical content is invalid'),
+      );
+      expect(
+        session.workspace.read('lib/main.dart'),
+        'void main() { print("fixed"); }',
+      );
+      expect(session.hasChanges, isTrue);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('retries Engineer proposal with no file changes', () async {
       final engineer = _StaticGateway(
         results: <WorkshopInferenceResult>[
