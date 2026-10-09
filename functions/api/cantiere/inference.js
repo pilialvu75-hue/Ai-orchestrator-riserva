@@ -243,7 +243,7 @@ async function callRoute(route, request) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     try {
-      const response = await fetch(route.endpoint, {
+      let response = await fetch(route.endpoint, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
