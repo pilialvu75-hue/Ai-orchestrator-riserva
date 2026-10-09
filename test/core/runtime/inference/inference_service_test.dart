@@ -99,6 +99,8 @@ void main() {
     )).drain<void>();
     expect(captured, isNotNull);
     expect(captured!.systemPrompt, contains('Keep the answer concise.'));
+    expect(captured!.systemPrompt,
+        contains('Keep the answer concise.\n\nDevice system time'));
     expect(captured!.systemPrompt, contains('Device system time (local):'));
     expect(captured!.systemPrompt, contains('UTC offset:'));
     expect(captured!.prompt, 'Che giorno e oggi?');
