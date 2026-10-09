@@ -12,6 +12,8 @@ const MAX_BODY_CHARS = 100000;
 const MAX_OUTPUT_CHARS = 100000;
 const MAX_ROUTE_ATTEMPTS = 2;
 const MAX_RETRY_DELAY_MS = 2000;
+const MAX_PENDING_POLLS = 20;
+const PENDING_POLL_DELAY_MS = 1000;
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -177,6 +179,62 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function pendingRequestId(response) {
+  const headerId = response.headers.get('nvcf-reqid');
+  if (headerId && headerId.trim()) return headerId.trim();
+
+  try {
+    const decoded = await response.json();
+    const bodyId =
+      typeof decoded?.requestId === 'string' ? decoded.requestId.trim() : '';
+    return bodyId || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function resolvePendingResponse({
+  response,
+  route,
+  apiKey,
+}) {
+  if (response.status !== 202) return response;
+
+  const requestId = await pendingRequestId(response);
+  if (!requestId || !/^[0-9a-f-]{8,64}$/i.test(requestId)) {
+    return null;
+  }
+
+  const statusUrl = new URL(
+    `/v1/status/${encodeURIComponent(requestId)}`,
+    route.endpoint,
+  ).toString();
+
+  for (let poll = 0; poll < MAX_PENDING_POLLS; poll += 1) {
+    await sleep(PENDING_POLL_DELAY_MS);
+
+    let polled;
+    try {
+      polled = await fetch(statusUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+    } catch (_) {
+      return null;
+    }
+
+    if (polled.status === 202) {
+      continue;
+    }
+    return polled;
+  }
+
+  return null;
+}
+
 async function callRoute(route, request) {
   const apiKey = request.env[route.apiKeySecret];
   if (!apiKey) return null;
@@ -185,7 +243,7 @@ async function callRoute(route, request) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     try {
-      const response = await fetch(route.endpoint, {
+      let response = await fetch(route.endpoint, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
@@ -202,6 +260,16 @@ async function callRoute(route, request) {
         }),
         signal: controller.signal,
       });
+
+      const resolvedResponse = await resolvePendingResponse({
+        response,
+        route,
+        apiKey,
+      });
+      if (resolvedResponse == null) {
+        return { ok: false, status: 503 };
+      }
+      response = resolvedResponse;
 
       if (!response.ok) {
         if (
