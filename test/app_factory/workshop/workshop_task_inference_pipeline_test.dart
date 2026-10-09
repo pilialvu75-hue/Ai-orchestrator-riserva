@@ -292,6 +292,95 @@ void main() {
       expect(realGateway.deleteCalls, 0);
     });
 
+    test(
+        'long Reviewer feedback cannot hide required main.dart recovery',
+        () async {
+      final callOrder = <AppAiRole>[];
+      final longFinding =
+          List<String>.filled(90, 'verbose reviewer finding').join(' ');
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(
+            '{"summary":"Initial","explanation":"Create entry point",'
+            '"changes":[{"path":"lib/main.dart","type":"addition",'
+            '"content":"void main() {}"}],"validationNotes":[],"warnings":[]}',
+          ),
+          _success(
+            '{"summary":"Catalog","explanation":"Catalog only",'
+            '"changes":[{"path":"lib/catalog.dart","type":"addition",'
+            '"content":"const items = <String>[];"}],'
+            '"validationNotes":[],"warnings":[]}',
+          ),
+          _success(
+            '{"summary":"Still catalog","explanation":"Still catalog only",'
+            '"changes":[{"path":"lib/catalog.dart","type":"addition",'
+            '"content":"const items = <String>[];"}],'
+            '"validationNotes":[],"warnings":[]}',
+          ),
+          _success(
+            '{"summary":"Repair","explanation":"Materialize required entry",'
+            '"changes":[{"path":"lib/main.dart","type":"addition",'
+            '"content":"void main() { print(\\\"ready\\\"); }"}],'
+            '"validationNotes":[],"warnings":[]}',
+          ),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: callOrder,
+        results: <WorkshopInferenceResult>[
+          _success(
+            '{"approved":false,"summary":"Needs correction",'
+            '"findings":["$longFinding"],"warnings":[]}',
+          ),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
+        ],
+      );
+      final realGateway =
+          _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'pipeline-create-long-review-required-main',
+          title: 'Lista Spesa Lite',
+          instruction: 'Create the requested Flutter app safely',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart', 'lib/catalog.dart'],
+          constraints: <String>['No regressions'],
+        ),
+        gateway: realGateway,
+      );
+      await session.initialize();
+
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(
+          _gateways(
+            engineer: engineer,
+            reviewer: reviewer,
+            callOrder: callOrder,
+          ),
+        ),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isTrue);
+      expect(result.review.approved, isTrue);
+      expect(result.validation?.valid, isTrue);
+      expect(engineer.calls, 4);
+      expect(
+        engineer.prompts.last,
+        contains('Engineer already failed CREATE materialization'),
+      );
+      expect(engineer.prompts.last, contains('lib/main.dart'));
+      expect(
+        session.workspace.read('lib/main.dart'),
+        'void main() { print("ready"); }',
+      );
+      expect(realGateway.writeCalls, 0);
+      expect(realGateway.deleteCalls, 0);
+    });
+
     test('third Reviewer rejection remains authoritative and blocked',
         () async {
       final callOrder = <AppAiRole>[];

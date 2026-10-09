@@ -654,6 +654,58 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test(
+        'structural retry keeps required main target ahead of long gate feedback',
+        () async {
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Catalog only","changes":[{"path":"lib/catalog.dart","type":"addition","content":"const items = <String>[];"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+          const WorkshopInferenceResult(
+            text:
+                '{"explanation":"Materialize entry point","changes":[{"path":"lib/main.dart","type":"addition","content":"void main() {}"}]}',
+            terminalState: InferenceTerminalState.success,
+            model: 'engineer-model',
+          ),
+        ],
+      );
+      final workspaceGateway =
+          _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'long-review-required-main',
+          title: 'Lista Spesa Lite',
+          instruction: 'Create the requested Flutter app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart', 'lib/catalog.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        revisionFeedback: List<String>.filled(120, 'Reviewer feedback').join(' '),
+        revisionAttempt: 1,
+      );
+
+      expect(proposal.changes.single.path, 'lib/main.dart');
+      expect(engineer.calls, 2);
+      expect(
+        engineer.prompts.last,
+        contains('Workshop create proposal must materialize required target'),
+      );
+      expect(engineer.prompts.last, contains('lib/main.dart'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('recovers omitted explanation from summary without retry', () async {
       final engineer = _StaticGateway(
         result: const WorkshopInferenceResult(
