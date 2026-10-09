@@ -170,6 +170,52 @@ void main() {
     );
   });
 
+  test('exports only closed HTTP 429 receipt fields', () {
+    final line = publicLogProjection(
+      '$time [CLOUD_HTTP_FAILURE] provider=mistral status=429 '
+      'model_class=small retry_after_s=7 limit_hint=rps',
+    );
+    expect(
+      jsonDecode(line!),
+      <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'CLOUD_HTTP_FAILURE',
+        'provider': 'mistral',
+        'http_status': 429,
+        'model_class': 'small',
+        'retry_after_s': 7,
+        'limit_hint': 'rps',
+      },
+    );
+  });
+
+  test('HTTP error projection fails closed on injected or invalid fields', () {
+    const safe = '[CLOUD_HTTP_FAILURE] provider=mistral status=429 '
+        'model_class=large4 retry_after_s=none limit_hint=quota';
+    expect(publicLogProjection('$time $safe response=private'), isNull);
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_HTTP_FAILURE] provider=mistral status=429 '
+        'model_class=private-model retry_after_s=none limit_hint=quota',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_HTTP_FAILURE] provider=mistral status=200 '
+        'model_class=small retry_after_s=none limit_hint=unknown',
+      ),
+      isNull,
+    );
+    expect(
+      publicLogProjection(
+        '$time [CLOUD_HTTP_FAILURE] provider=mistral status=429 '
+        'model_class=small retry_after_s=99999 limit_hint=unknown',
+      ),
+      isNull,
+    );
+  });
+
   test('exports only the generic label for custom Cloud providers', () {
     final line = publicLogProjection(
       '$time [CLOUD_ROUTING] task=reasoning cost=freeTier provider=custom '
