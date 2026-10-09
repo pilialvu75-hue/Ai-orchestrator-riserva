@@ -90,6 +90,45 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.ready);
     });
 
+    test('rejects non-empty proposal that produces no staged diff',
+        () async {
+      final gateway = _RecordingGateway(
+        files: <String, String>{'lib/main.dart': 'void main() {}'},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'request-noop',
+          title: 'Build repair',
+          instruction: 'Repair the existing app.',
+          operation: WorkshopOperation.fix,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+
+      expect(
+        () => const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText:
+              '{"explanation":"No-op repair","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() {}"}]}',
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('no staged workspace changes'),
+          ),
+        ),
+      );
+
+      expect(session.hasChanges, isFalse);
+      expect(session.status, WorkspaceSessionStatus.ready);
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(gateway.writeCalls, 0);
+      expect(gateway.deleteCalls, 0);
+    });
+
     test('create task cannot omit a required missing lib/main.dart target',
         () async {
       final gateway = _RecordingGateway(files: <String, String>{});
