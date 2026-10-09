@@ -640,6 +640,7 @@ requested. Do not review, approve or apply.
         message == 'Workshop proposal field "path" is required.' ||
         message == 'Workshop proposal field "path" must be text.' ||
         message == 'Workshop proposal must contain at least one file change.' ||
+        message == 'Workshop proposal produced no staged workspace changes.' ||
         message.startsWith('Workshop proposal path "') ||
         message ==
             'Workshop create proposal must materialize required target '
@@ -750,11 +751,14 @@ requested. Do not review, approve or apply.
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
-      'response was incomplete, invalid JSON, or omitted a required proposal '
-      'field. Use only the compact bounded input and satisfy the core required '
-      'behavior from the explicit task contract, using the Architect plan only '
-      'as bounded implementation guidance. Return one complete JSON object with '
-      'a non-empty string field "explanation" and a non-empty "changes" array. '
+      'response was incomplete, invalid JSON, omitted a required proposal '
+      'field, or produced no material workspace diff. Use only the compact '
+      'bounded input and satisfy the core required behavior from the explicit '
+      'task contract, using the Architect plan only as bounded implementation '
+      'guidance. Return one complete JSON object with a non-empty string field '
+      '"explanation" and a non-empty "changes" array. At least one proposed '
+      'change must alter the current workspace content; rewriting identical '
+      'content is invalid. '
       'Produce the smallest complete compilable change, preferably one concise '
       'file when possible. The compact input targetFiles are a hard allowlist: '
       'never invent a path outside them. If the rejected proposal used an '
