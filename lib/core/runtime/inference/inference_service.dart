@@ -57,7 +57,32 @@ class InferenceService {
   }
 
   TokenStream stream(InferenceRequest request) async* {
-    final isolatedRequest = request.copyWith();
+    final now = DateTime.now();
+    // Minute precision avoids defeating cloud response caching on every call.
+    // A new minute produces a fresh cache identity for relative-time queries.
+    final localTime = DateTime(
+      now.year, now.month, now.day, now.hour, now.minute,
+    ).toIso8601String();
+    final utcOffset = now.timeZoneOffset;
+    final sign = utcOffset.isNegative ? '-' : '+';
+    final offset = utcOffset.abs();
+    final offsetText = '$sign${offset.inHours.toString().padLeft(2, '0')}:${(offset.inMinutes % 60).toString().padLeft(2, '0')}';
+    final temporalContext =
+        'Device system time (local): $localTime; UTC offset: $offsetText; '
+        'timezone label: ${now.timeZoneName}. '
+        'This is the current device clock, not independently verified. '
+        'Use it to interpret relative dates; verify external facts with '
+        'reliable current sources when available.';
+    final priorSystemPrompt = request.systemPrompt?.trim();
+    final isolatedRequest = request.copyWith(
+      systemPrompt: priorSystemPrompt == null || priorSystemPrompt.isEmpty
+          ? temporalContext
+          : '$priorSystemPrompt\n\n$temporalContext',
+    );
+    _log(
+      '[SYSTEM_TIME_CONTEXT] session=${isolatedRequest.sessionId} '
+      'injected=true utc_offset=$offsetText source=device_clock',
+    );
 
     _log('[INFERENCE_BEGIN] session=${isolatedRequest.sessionId}');
     _log(
