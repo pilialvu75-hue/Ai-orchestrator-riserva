@@ -36,6 +36,18 @@ final class WorkshopProposalWorkspaceStager {
       proposal: proposal,
     );
 
+    final alreadyHasStagedChanges = session.hasChanges;
+    if (proposal.isNotEmpty &&
+        !alreadyHasStagedChanges &&
+        !_materializesWorkspaceChange(
+          session: session,
+          proposal: proposal,
+        )) {
+      throw const FormatException(
+        'Workshop proposal produced no staged workspace changes.',
+      );
+    }
+
     _applier.applyProposal(
       session: session,
       proposal: proposal,
@@ -46,6 +58,29 @@ final class WorkshopProposalWorkspaceStager {
     }
 
     return proposal;
+  }
+
+  static bool _materializesWorkspaceChange({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+  }) {
+    for (final change in proposal.changes) {
+      final path = change.path.trim();
+      if (change.isDeletion) {
+        if (session.workspace.contains(path)) {
+          return true;
+        }
+        continue;
+      }
+
+      if (change.isAddition || change.isModification) {
+        final next = change.afterContent;
+        if (next != null && session.workspace.read(path) != next) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   static void _validateTaskScope({
