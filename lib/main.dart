@@ -58,8 +58,9 @@ void _emitForensicException(
   }
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final windows7SafeAutostart = args.contains('--windows7-safe-autostart');
 
   // ── Crash log persistence ──────────────────────────────────────────────────
   // Must be awaited before anything else: every RuntimeEventLog.emit() call
@@ -69,7 +70,9 @@ Future<void> main() async {
   // be inspected on the next launch via Debug Lab → "Mostra log crash".
   await RuntimeEventLog.instance.initPersistence();
   unawaited(recordAndroidProcessExitHistory());
-  unawaited(GitHubDiagnostics.instance.initialize());
+  if (!windows7SafeAutostart) {
+    unawaited(GitHubDiagnostics.instance.initialize());
+  }
 
   // ── Global exception handlers ─────────────────────────────────────────────
   // All three handlers capture exceptions into RuntimeEventLog so that
@@ -119,7 +122,7 @@ Future<void> main() async {
 
   await runZonedGuarded(
     () async {
-      runApp(const StartupApp());
+      runApp(StartupApp(windows7SafeAutostart: windows7SafeAutostart));
     },
     (Object error, StackTrace stackTrace) {
       _emitForensicException(error, stackTrace, source: 'runZonedGuarded');
@@ -128,7 +131,9 @@ Future<void> main() async {
 }
 
 class StartupApp extends StatefulWidget {
-  const StartupApp({super.key});
+  const StartupApp({super.key, required this.windows7SafeAutostart});
+
+  final bool windows7SafeAutostart;
 
   @override
   State<StartupApp> createState() => _StartupAppState();
@@ -178,7 +183,7 @@ class _StartupAppState extends State<StartupApp> {
           transitionBuilder: (child, animation) =>
               FadeTransition(opacity: animation, child: child),
           child: _transitionController.isReady
-              ? const AppRoot(key: ValueKey('ready'))
+              ? AppRoot(key: const ValueKey('ready'), windows7SafeAutostart: widget.windows7SafeAutostart)
               : MaterialApp(
                   key: const ValueKey('startup'),
                   debugShowCheckedModeBanner: false,
@@ -255,7 +260,9 @@ class _StartupErrorScreen extends StatelessWidget {
 }
 
 class AppRoot extends StatelessWidget {
-  const AppRoot({super.key});
+  const AppRoot({super.key, required this.windows7SafeAutostart});
+
+  final bool windows7SafeAutostart;
 
   @override
   Widget build(BuildContext context) {
@@ -267,8 +274,12 @@ class AppRoot extends StatelessWidget {
         BlocProvider<ProjectMemoryBloc>(
             create: (_) => di.sl<ProjectMemoryBloc>()),
         BlocProvider<ModelDownloadBloc>(
-            create: (_) => di.sl<ModelDownloadBloc>()
-              ..add(const LoadAvailableModels())),
+          create: (_) {
+            final bloc = di.sl<ModelDownloadBloc>();
+            if (!windows7SafeAutostart) bloc.add(const LoadAvailableModels());
+            return bloc;
+          },
+        ),
       ],
       child: ListenableBuilder(
         listenable: languageService,
@@ -303,7 +314,7 @@ class AppRoot extends StatelessWidget {
             ),
             home: AppLegalInitializer(
               eulaService: di.sl<EulaService>(),
-              child: const AppShellRouter(),
+              child: AppShellRouter(enableStartupServices: !windows7SafeAutostart),
             ),
           );
         },

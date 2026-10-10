@@ -15,6 +15,8 @@ import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
+import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
 import 'package:ai_orchestrator/app/desktop/desktop_workspace_scope.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
@@ -31,13 +33,30 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_ha
 import 'package:ai_orchestrator/app_factory/workshop/workshop_validated_proposal_snapshot.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
+void _appendWindowsSafeStartupBreadcrumb(String message) {
+  try {
+    if (!Platform.isWindows) return;
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData == null || localAppData.isEmpty) return;
+    final directory = Directory('$localAppData\\\\AI-Orchestrator\\\\Diagnostics');
+    directory.createSync(recursive: true);
+    File('${directory.path}\\\\AI-Orchestrator-dart-startup.log').writeAsStringSync(
+      '${DateTime.now().toIso8601String()} $message\\r\\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (_) {}
+}
+
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     this.openWorkshopOnStart = false,
+    this.enableStartupServices = true,
   });
 
   final bool openWorkshopOnStart;
+  final bool enableStartupServices;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -63,11 +82,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _updateManager = di.sl<UpdateManager>();
     _runtimeDiagnostics = di.sl<LocalRuntimeDiagnosticsService>();
-    _updateManager.state.addListener(_onUpdateStateChanged);
-    unawaited(_updateManager.startBackgroundChecks(
-      interval: AppConstants.updateCheckInterval,
-    ));
-    unawaited(_runtimeDiagnostics.validateOnStartup());
+    if (widget.enableStartupServices) {
+      _updateManager.state.addListener(_onUpdateStateChanged);
+      unawaited(_updateManager.startBackgroundChecks(
+        interval: AppConstants.updateCheckInterval,
+      ));
+      unawaited(_runtimeDiagnostics.validateOnStartup());
+    } else {
+      _appendWindowsSafeStartupBreadcrumb('D40 AppShell update/runtime auto-starts deferred');
+    }
     if (widget.openWorkshopOnStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -192,9 +215,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _updateManager.state.removeListener(_onUpdateStateChanged);
+    if (widget.enableStartupServices) {
+      _updateManager.state.removeListener(_onUpdateStateChanged);
+    }
     unawaited(_disposeWorkshopSession());
     super.dispose();
+  }
+
+  Future<void> _runWin7StoredParseProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D80 stored model parse begin');
+    try {
+      await di.sl<ModelDownloadService>().diagnosticParseStoredModelEntries();
+      _appendWindowsSafeStartupBreadcrumb('D81 stored model parse returned');
+    } catch (error) {
+      _appendWindowsSafeStartupBreadcrumb('D8E stored model parse error: $error');
+    }
+  }
+
+  Future<void> _runWin7StoredRefreshProbe() async {
+    _appendWindowsSafeStartupBreadcrumb('D90 stored model refresh begin');
+    try {
+      await di.sl<ModelDownloadService>().diagnosticRefreshStoredModelEntries();
+      _appendWindowsSafeStartupBreadcrumb('D91 stored model refresh returned');
+    } catch (error) {
+      _appendWindowsSafeStartupBreadcrumb('D9E stored model refresh error: $error');
+    }
+  }
+
+  void _runWin7FullModelProbe() {
+    _appendWindowsSafeStartupBreadcrumb('DA0 full model load begin');
+    context.read<ModelDownloadBloc>().add(const LoadAvailableModels());
   }
 
   void _openSettings(BuildContext context) {
@@ -430,6 +480,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (!widget.enableStartupServices) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Windows 7 — diagnostica post-0E', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      const Text('Base main aggiornata. Auto-start sospesi; prova un solo stadio alla volta.'),
+                      const SizedBox(height: 10),
+                      OutlinedButton(onPressed: _runWin7StoredParseProbe, child: const Text('0F · Leggi modelli salvati')),
+                      OutlinedButton(onPressed: _runWin7StoredRefreshProbe, child: const Text('0G · Verifica modelli salvati')),
+                      OutlinedButton(onPressed: _runWin7FullModelProbe, child: const Text('1 · Test modelli completo')),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             Text('Assistente', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             FilledButton.icon(
