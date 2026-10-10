@@ -353,6 +353,134 @@ void main() {
       expect(responses.last.errorMessage, contains('rate limit'));
     });
 
+    test('Mistral 429 uses structured Retry-After and blocks immediate retry',
+        () async {
+      var calls = 0;
+      final provider = CloudRuntimeProvider(
+        sendQuery: (_, __) async {
+          calls++;
+          throw const CloudFailure(
+            'raw provider response must not appear in UI',
+            kind: CloudFailureKind.rateLimit,
+            statusCode: 429,
+            retryable: true,
+            retryAfter: Duration(seconds: 7),
+          );
+        },
+        supportedProviders: () => const <String>['mistral'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'Mistral',
+        automaticUseAllowed: (_) => true,
+      );
+      const request = InferenceRequest(
+        sessionId: 'mistral-rate-limit',
+        prompt: 'hello',
+        routeDirective: InferenceRouteDirective.cloudOnly,
+        cloudProviderId: 'mistral',
+        allowCloudProviderFailover: false,
+      );
+
+      final before = DateTime.now();
+      final responses = await provider
+          .streamInference(
+            request: request,
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+      expect(calls, 1);
+      expect(responses.last.isError, isTrue);
+      expect(responses.last.errorMessage, contains('rate limit'));
+      expect(responses.last.errorMessage, contains('HTTP 429'));
+      expect(
+        responses.last.errorMessage,
+        isNot(contains('raw provider response')),
+      );
+
+      final status = provider.providerStatuses.single;
+      expect(status.state, CloudProviderOperationalState.rateLimited);
+      expect(status.retryAt, isNotNull);
+      expect(
+        status.retryAt!.difference(before).inSeconds,
+        inInclusiveRange(6, 8),
+      );
+      expect(status.lastError, isNot(contains('raw provider response')));
+
+      final repeated = await provider
+          .streamInference(
+            request: request,
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+      expect(calls, 1, reason: 'cooldown must prevent another API request');
+      expect(repeated.single.isError, isTrue);
+    });
+
+    test('Mistral HTTP 429 classified as quota uses quota cooldown', () async {
+      final provider = CloudRuntimeProvider(
+        sendQuery: (_, __) async => throw const CloudFailure(
+          'HTTP 429 quota for secret=do-not-leak',
+          kind: CloudFailureKind.quota,
+          statusCode: 429,
+          retryable: true,
+        ),
+        supportedProviders: () => const <String>['mistral'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'Mistral',
+        automaticUseAllowed: (_) => true,
+      );
+
+      final responses = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'mistral-quota',
+              prompt: 'hello',
+              routeDirective: InferenceRouteDirective.cloudOnly,
+              cloudProviderId: 'mistral',
+              allowCloudProviderFailover: false,
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+      final status = provider.providerStatuses.single;
+      expect(status.state, CloudProviderOperationalState.quotaExhausted);
+      expect(status.retryAt, isNotNull);
+      expect(status.retryAt!.isAfter(
+        DateTime.now().add(const Duration(minutes: 14)),
+      ), isTrue);
+      expect(responses.last.errorMessage, contains('quota unavailable'));
+      expect(responses.last.errorMessage, isNot(contains('secret=')));
+      expect(status.lastError, contains('HTTP 429'));
+      expect(status.lastError, isNot(contains('secret=')));
+    });
+
+    test('legacy 429 quota text does not become an ordinary rate limit',
+        () async {
+      final provider = CloudRuntimeProvider(
+        sendQuery: (_, __) async =>
+            throw const ServerFailure('HTTP 429 quota exhausted'),
+        supportedProviders: () => const <String>['mistral'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'Mistral',
+        automaticUseAllowed: (_) => true,
+      );
+      await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'mistral-legacy-quota',
+              prompt: 'hello',
+              routeDirective: InferenceRouteDirective.cloudOnly,
+              cloudProviderId: 'mistral',
+              allowCloudProviderFailover: false,
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+      expect(
+        provider.providerStatuses.single.state,
+        CloudProviderOperationalState.quotaExhausted,
+      );
+    });
+
     test('unconfigured provider reports authRequired without exposing secrets', () {
       final provider = CloudRuntimeProvider(
         sendQuery: (_, __) async => throw StateError('not called'),

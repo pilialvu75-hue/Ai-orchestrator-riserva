@@ -4,9 +4,9 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Emits a deliberately small, closed diagnostic vocabulary for Cloud routing.
 ///
-/// No prompt, response, model, credential, endpoint, session identifier or
-/// custom-provider identifier is ever written by this helper. Public export can
-/// therefore validate the complete event instead of trying to redact free text.
+/// No prompt, raw response, model identifier, credential, endpoint, session
+/// identifier or custom-provider identifier is ever written by this helper.
+/// Only a fixed model class and categorized HTTP metadata may be exported.
 final class CloudRoutingDiagnostics {
   CloudRoutingDiagnostics._();
 
@@ -50,6 +50,63 @@ final class CloudRoutingDiagnostics {
       taskType: taskType,
       decision: 'failure',
       reason: _failureReason(failure),
+    );
+  }
+
+  /// A strictly closed receipt for a real HTTP error, not an internal
+  /// cooldown/preflight denial. Never emits responseBody or modelId directly.
+  static void httpFailure({
+    required String providerId,
+    required String? modelId,
+    required int statusCode,
+    required Duration? retryAfter,
+    required String responseBody,
+  }) {
+    final provider = _safeProvider(providerId);
+    final status =
+        statusCode >= 400 && statusCode <= 599 ? '$statusCode' : 'none';
+    final modelClass = providerId.trim() == 'mistral'
+        ? switch (modelId?.trim().toLowerCase()) {
+            'mistral-small-latest' => 'small',
+            'mistral-large-4' => 'large4',
+            _ => 'other',
+          }
+        : 'other';
+    final retrySeconds = retryAfter?.inSeconds;
+    final retry = retrySeconds != null &&
+            retrySeconds >= 0 &&
+            retrySeconds <= 86400
+        ? '$retrySeconds'
+        : 'none';
+
+    // Error text is *only* examined for closed, non-identifying categories.
+    // A hint is not authoritative; 'unknown' is safer than guessing.
+    final body = responseBody.toLowerCase();
+    final hint = body.contains('requests per second') ||
+            body.contains('request per second') ||
+            body.contains('rps')
+        ? 'rps'
+        : body.contains('tokens per minute') ||
+                body.contains('token per minute') ||
+                body.contains('tpm')
+            ? 'tpm'
+            : body.contains('requests per minute') || body.contains('rpm')
+                ? 'rpm'
+                : body.contains('monthly') || body.contains('per month')
+                    ? 'monthly'
+                    : body.contains('quota') ||
+                            body.contains('credit') ||
+                            body.contains('insufficient') ||
+                            body.contains('budget')
+                        ? 'quota'
+                        : body.contains('free tier') ||
+                                body.contains('subscription tier')
+                            ? 'tier'
+                            : 'unknown';
+
+    RuntimeEventLog.instance.emit(
+      '[CLOUD_HTTP_FAILURE] provider=$provider status=$status '
+      'model_class=$modelClass retry_after_s=$retry limit_hint=$hint',
     );
   }
 

@@ -173,6 +173,13 @@ class AiRepositoryImpl implements AiRepository {
       _logFailure(requested, request.taskType, failure);
       return Left(failure);
     } on CloudHttpException catch (e) {
+      CloudRoutingDiagnostics.httpFailure(
+        providerId: requested,
+        modelId: request.modelId,
+        statusCode: e.statusCode,
+        retryAfter: e.retryAfter,
+        responseBody: e.message,
+      );
       final failure = _mapHttpFailure(e, requested);
       _logFailure(requested, request.taskType, failure);
       return Left(failure);

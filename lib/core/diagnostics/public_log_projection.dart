@@ -55,6 +55,7 @@ String? publicLogProjection(String line) {
     'TOKEN_STREAM',
     'FINAL_RESPONSE',
     'CLOUD_ROUTING',
+    'CLOUD_HTTP_FAILURE',
     'ASSISTANT_WEB_ENRICH',
     'ANDROID_PROCESS_EXIT_HISTORY',
     'FORENSIC_UNCAUGHT_DART_EXCEPTION',
@@ -140,6 +141,30 @@ String? publicLogProjection(String line) {
       'provider': routing[3]!,
       'decision': routing[4]!,
       'reason': routing[5]!,
+    });
+  }
+
+  // HTTP receipts are a closed numeric/enum projection. No raw model, body,
+  // headers, token, credential, endpoint, session or free-form error is exported.
+  if (event == 'CLOUD_HTTP_FAILURE') {
+    final match = RegExp(
+      r'^provider=(openAi|gemini|claude|grok|copilot|groq|nvidiaNim|mistral|openRouter|custom) '
+      r'status=(4[0-9]{2}|5[0-9]{2}|none) '
+      r'model_class=(small|large4|other) '
+      r'retry_after_s=(none|[0-9]{1,5}) '
+      r'limit_hint=(rps|rpm|tpm|monthly|quota|tier|unknown)$',
+    ).firstMatch(rest);
+    if (match == null) return null;
+    final retry = match[4] == 'none' ? null : int.tryParse(match[4]!);
+    if (retry != null && retry > 86400) return null;
+    return jsonEncode(<String, Object?>{
+      'time': timestamp[1]!,
+      'event': 'CLOUD_HTTP_FAILURE',
+      'provider': match[1]!,
+      'http_status': match[2] == 'none' ? null : int.parse(match[2]!),
+      'model_class': match[3]!,
+      'retry_after_s': retry,
+      'limit_hint': match[5]!,
     });
   }
 

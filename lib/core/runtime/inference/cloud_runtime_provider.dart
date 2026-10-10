@@ -353,7 +353,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       } catch (error) {
         stopwatch.stop();
         final mapped = _mapError(error, provider);
-        _markFailure(provider, mapped, stopwatch.elapsedMilliseconds);
+        _markFailure(provider, error, mapped, stopwatch.elapsedMilliseconds);
         lastError = mapped;
 
         if (!optimized.allowCloudProviderFailover) {
@@ -694,7 +694,12 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     state.recordLatency(latencyMs);
   }
 
-  void _markFailure(String provider, String message, int latencyMs) {
+  void _markFailure(
+    String provider,
+    Object failure,
+    String message,
+    int latencyMs,
+  ) {
     final normalized = message.toLowerCase();
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     state.totalRequests++;
@@ -704,14 +709,36 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     state.recordLatency(latencyMs);
 
     final now = DateTime.now();
-    if (normalized.contains('rate limit') || normalized.contains('429')) {
-      state.rateLimitedUntil = now.add(_rateLimitBackoff);
-      return;
+    if (failure is CloudFailure) {
+      // HTTP metadata is structured at repository level. Preserve its
+      // classification and Retry-After here instead of parsing the UI message
+      // (a quota failure can also have HTTP status 429).
+      final retryAfter = failure.retryAfter;
+      final delay = retryAfter != null && retryAfter > Duration.zero
+          ? retryAfter
+          : null;
+      switch (failure.kind) {
+        case CloudFailureKind.rateLimit:
+          state.rateLimitedUntil = now.add(delay ?? _rateLimitBackoff);
+          return;
+        case CloudFailureKind.quota:
+          state.quotaBlockedUntil = now.add(delay ?? _quotaBackoff);
+          return;
+        default:
+          break;
+      }
     }
+
+    // Compatibility for older providers still returning unstructured errors.
+    // A quota response may include HTTP 429: quota takes precedence.
     if (normalized.contains('quota') ||
         normalized.contains('credit') ||
         normalized.contains('insufficient')) {
       state.quotaBlockedUntil = now.add(_quotaBackoff);
+      return;
+    }
+    if (normalized.contains('rate limit') || normalized.contains('429')) {
+      state.rateLimitedUntil = now.add(_rateLimitBackoff);
       return;
     }
     if (normalized.contains('network') ||
@@ -834,6 +861,21 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String _mapError(Object error, String provider) {
+    // Keep quota and rate-limit semantics even when both use HTTP 429.
+    // Only format known fields: never show raw provider payloads or secrets.
+    if (error is CloudFailure) {
+      final httpStatus = error.statusCode == null
+          ? ''
+          : ' (HTTP ${error.statusCode})';
+      switch (error.kind) {
+        case CloudFailureKind.quota:
+          return '${_providerDisplayName(provider)} quota unavailable$httpStatus.';
+        case CloudFailureKind.rateLimit:
+          return '${_providerDisplayName(provider)} rate limit reached$httpStatus.';
+        default:
+          break;
+      }
+    }
     final rawMessage = error is Failure ? error.message : error.toString();
     final normalized = rawMessage.toLowerCase();
     if (normalized.trim().isEmpty) {
@@ -849,13 +891,13 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         normalized.contains('authentication')) {
       return '${_providerDisplayName(provider)} authentication failed.';
     }
-    if (normalized.contains('429') || normalized.contains('rate limit')) {
-      return '${_providerDisplayName(provider)} rate limit reached.';
-    }
     if (normalized.contains('quota') ||
         normalized.contains('credit') ||
         normalized.contains('insufficient')) {
       return '${_providerDisplayName(provider)} quota unavailable.';
+    }
+    if (normalized.contains('429') || normalized.contains('rate limit')) {
+      return '${_providerDisplayName(provider)} rate limit reached.';
     }
     if (normalized.contains('socketexception') ||
         normalized.contains('network') ||
