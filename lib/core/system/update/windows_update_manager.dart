@@ -29,12 +29,15 @@ class WindowsUpdateManager extends UpdateManager {
     required AndroidIntentHandler intentHandler,
     required String currentVersion,
     WindowsUpdateInstallerPort? windowsInstaller,
+    Future<Directory> Function()? temporaryDirectoryProvider,
     Dio? dio,
   })  : _windowsComparator = comparator,
         _windowsPreferences = preferences,
         _windowsCurrentVersion =
             comparator.normalize(currentVersion) ?? currentVersion,
         _windowsInstaller = windowsInstaller ?? WindowsUpdateInstaller(dio: dio),
+        _temporaryDirectoryProvider =
+            temporaryDirectoryProvider ?? getTemporaryDirectory,
         super(
           updateChecker: updateChecker,
           comparator: comparator,
@@ -55,6 +58,7 @@ class WindowsUpdateManager extends UpdateManager {
   final VersionComparator _windowsComparator;
   final SharedPreferences _windowsPreferences;
   final WindowsUpdateInstallerPort _windowsInstaller;
+  final Future<Directory> Function() _temporaryDirectoryProvider;
   final String _windowsCurrentVersion;
 
   Timer? _windowsPeriodicTimer;
@@ -161,7 +165,7 @@ class WindowsUpdateManager extends UpdateManager {
     );
 
     try {
-      final root = await getTemporaryDirectory();
+      final root = await _temporaryDirectoryProvider();
       final versionKey = _sanitizeVersionForPath(manifest.version);
       final directory = Directory(
         p.join(
