@@ -166,6 +166,7 @@ final class WorkshopProposalReviewRunner {
         batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount';
     final sessionId = 'workshop:review:$requestId$batchSuffix';
 
+    final primaryCompact = _isBuildRepairRequest(session);
     final result = await _inference.complete(
       stage: WorkshopStage.review,
       prompt: _buildPrompt(
@@ -175,6 +176,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        compact: primaryCompact,
       ),
       systemPrompt: _systemPrompt,
       sessionId: sessionId,
@@ -327,8 +329,7 @@ final class WorkshopProposalReviewRunner {
     bool compact = false,
   }) {
     final request = session.context.request;
-    final isBuildRepair =
-        request.instruction.trimLeft().startsWith('BUILD REPAIR ATTEMPT:');
+    final isBuildRepair = _isBuildRepairRequest(session);
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
 
@@ -338,6 +339,8 @@ final class WorkshopProposalReviewRunner {
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
+          'contentSemantics': 'source_text',
+          'sourceLanguage': _sourceLanguageForPath(change.path),
           'before': _boundedNullable(original[change.path], fileChars),
           'after': _boundedNullable(current[change.path], fileChars),
         },
@@ -386,6 +389,13 @@ final class WorkshopProposalReviewRunner {
 Review only the current staged batch. Check correctness, regressions, unsafe or
 incomplete edits. Review every reviewBatch.paths entry against the unchanged
 coverageManifest; other batches are not approved by this verdict.
+EVIDENCE TRANSPORT RULE:
+Workshop input JSON is only a transport envelope. For each change, "before" and
+"after" are JSON string values carrying source-file text. JSON braces, field
+names, quotes and escape sequences belonging to the envelope are NOT part of
+the source file. Judge the decoded "after" source text itself; never reject a
+change merely because source evidence is serialized inside JSON.
+
 The explicit instruction and constraints are authoritative, including literal
 UI strings, labels, titles, units and symbols. Architect implementationPlan is
 guidance only: do not add future features, tests or documentation requirements
@@ -425,6 +435,13 @@ reviewed.
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
 targetFiles and constraints.
+
+EVIDENCE TRANSPORT RULE:
+Workshop input JSON is only a transport envelope. For each change, "before" and
+"after" are JSON string values carrying source-file text. JSON braces, field
+names, quotes and escape sequences belonging to the envelope are NOT part of
+the source file. Judge the decoded "after" source text itself; never reject a
+change merely because source evidence is serialized inside JSON.
 
 CONTRACT PRECEDENCE:
 1. The explicit task instruction and explicit constraints are authoritative.
@@ -538,6 +555,26 @@ Do not return markdown fences or any text outside the JSON object.
     return hash.toRadixString(16).padLeft(8, '0');
   }
 
+  static bool _isBuildRepairRequest(WorkspaceSession session) {
+    return session.context.request.instruction
+        .trimLeft()
+        .startsWith('BUILD REPAIR ATTEMPT:');
+  }
+
+  static String _sourceLanguageForPath(String path) {
+    final normalized = path.toLowerCase();
+    if (normalized.endsWith('.dart')) return 'dart';
+    if (normalized.endsWith('.yaml') || normalized.endsWith('.yml')) {
+      return 'yaml';
+    }
+    if (normalized.endsWith('.json')) return 'json';
+    if (normalized.endsWith('.kt') || normalized.endsWith('.kts')) {
+      return 'kotlin';
+    }
+    if (normalized.endsWith('.gradle')) return 'gradle';
+    return 'text';
+  }
+
   static bool _isCriticalMemoryFailure(
     WorkshopInferenceResult result,
   ) {
@@ -597,15 +634,18 @@ Do not return markdown fences or any text outside the JSON object.
 
   static const String _systemPrompt =
       'You are the Reviewer brain of the Cantiere. Review only the supplied '
-      'Workshop request and staged workspace diff. Do not use or assume '
-      'Assistant chat memory or configuration. Return the required JSON '
-      'verdict only.';
+      'Workshop request and staged workspace diff. Workshop input JSON is a '
+      'transport envelope; before/after values carry source text and the JSON '
+      'wrapper is not file content. Do not use or assume Assistant chat memory '
+      'or configuration. Return the required JSON verdict only.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Reviewer retrying after a runtime or invalid-verdict failure. '
-      'Use only the compact bounded task and diff supplied. Decide only whether '
-      'this current increment is correct and safe. Return the required JSON '
-      'verdict only; do not use project-wide future requirements.';
+      'Use only the compact bounded task and diff supplied. Workshop input JSON '
+      'is a transport envelope; before/after values carry source text and the '
+      'JSON wrapper is not file content. Decide only whether this current '
+      'increment is correct and safe. Return the required JSON verdict only; '
+      'do not use project-wide future requirements.';
 }
 
 final class _WorkshopReviewCoverageManifest {
