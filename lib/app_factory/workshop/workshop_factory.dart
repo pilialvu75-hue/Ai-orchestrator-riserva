@@ -13,6 +13,9 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_service_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_transport.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_canary_coordinator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_inference_runner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_research_library_handoff.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
@@ -116,6 +119,33 @@ final class WorkshopFactory {
     return WorkshopResearchLibraryHandoff(
       submissionService: WorkshopLibrarySubmissionService(
         submitBundle: transport.submit,
+      ),
+    );
+  }
+
+  /// Crea il coordinator production per il canarino Library Evolution.
+  ///
+  /// Riusa la pipeline multi-ruolo autorevole del Cantiere e il transport
+  /// GitHub esistente verso la Module Library. Non crea runtime, modelli,
+  /// storage o percorsi di apply paralleli.
+  static WorkshopLibraryEvolutionCanaryCoordinator
+      createLibraryEvolutionCanaryCoordinator({
+    InferenceService? inferenceService,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    WorkshopLibraryGitHubCredentialStore? credentialStore,
+  }) {
+    final pipeline = WorkshopMultiRolePipelineFactory.createTaskPipeline(
+      inferenceService: inferenceService,
+      assignments: assignments,
+    );
+
+    return WorkshopLibraryEvolutionCanaryCoordinator(
+      inferenceRunner: WorkshopLibraryEvolutionInferenceRunner(
+        pipeline: pipeline,
+      ),
+      libraryHandoff: createResearchLibraryHandoff(
+        credentialStore: credentialStore,
       ),
     );
   }
