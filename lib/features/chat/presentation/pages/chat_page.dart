@@ -2,6 +2,8 @@
 
 import 'dart:async';
 
+import 'package:ai_orchestrator/presentation/chat/controllers/runtime_notice_presenter.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
@@ -919,6 +921,8 @@ class _ChatBody
 
 class _ChatBodyState
     extends State<_ChatBody> {
+  final _runtimeNoticePresenter = RuntimeNoticePresenter();
+
   static const String _automaticCloudProviderMenuValue = '__automatic__';
 
   final DebugLabController
@@ -979,6 +983,7 @@ class _ChatBodyState
 
   @override
   void dispose() {
+    _runtimeNoticePresenter.dispose();
     _debugLabController
         .removeListener(
       _handleDebugLabVisibilityChanged,
@@ -1458,42 +1463,17 @@ class _ChatBodyState
           state,
         );
 
-        if (runtimeMessage != null &&
-            runtimeMessage
-                .trim()
-                .isNotEmpty) {
-          final l10n =
-              context.l10n;
-
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(
-            SnackBar(
-              content:
-                  Text(runtimeMessage),
-              backgroundColor:
-                  Theme.of(context)
-                      .colorScheme
-                      .error,
-              action:
-                  (state is ChatLoaded &&
-                          state
-                              .suggestOpeningSettings)
-                      ? SnackBarAction(
-                          label:
-                              l10n.t(
-                            'settings',
-                          ),
-                          textColor:
-                              Colors.white,
-                          onPressed:
-                              widget
-                                  .onSettings,
-                        )
-                      : null,
-            ),
-          );
-        }
+        _runtimeNoticePresenter.update(
+          context,
+          runtimeMessage,
+          action: state is ChatLoaded && state.suggestOpeningSettings
+              ? SnackBarAction(
+                  label: context.l10n.t('settings'),
+                  textColor: Colors.white,
+                  onPressed: widget.onSettings,
+                )
+              : null,
+        );
       },
       builder:
           (context, state) {
