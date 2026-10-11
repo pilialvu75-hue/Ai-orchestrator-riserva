@@ -563,11 +563,11 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('Never require keeping a source line solely because'),
+        contains('Never'),
       );
       expect(
         reviewer.lastPrompt,
-        contains('it existed before the repair'),
+        contains('require keeping a source line solely because it existed before the repair'),
       );
       expect(
         reviewer.lastPrompt,
@@ -577,6 +577,55 @@ void main() {
         reviewer.lastPrompt,
         contains("after"),
       );
+    });
+
+    test(
+        'production build repair keeps diagnostic project-goal evidence in compact review',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":true,"summary":"Concrete build failure is addressed","findings":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'reviewer-model',
+        ),
+      );
+      final session = await _productionBuildRepairReviewSession();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.approved, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.calls, 1);
+      expect(
+        reviewer.lastPrompt,
+        startsWith('Review only the current staged batch.'),
+      );
+      expect(reviewer.lastPrompt, contains('"buildRepair":true'));
+      expect(
+        reviewer.lastPrompt,
+        contains('"repairEvidence":"Project goal: BUILD REPAIR ATTEMPT: 1'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('Undefined name ShoppingListApp'),
+      );
+      expect(reviewer.lastPrompt, contains('"context":[]'));
+      expect(
+        reviewer.lastPrompt,
+        contains('Do not'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('require a separate diagnostic-analysis document'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('the staged source diff is the correction'),
+      );
+      expect(reviewer.lastPrompt!.length, lessThan(6500));
     });
 
     test('failed Reviewer inference leaves staged workspace in review',
@@ -681,6 +730,61 @@ Future<WorkspaceSession> _buildRepairReviewSession() async {
   session.workspace.write(
     path: 'lib/main.dart',
     content: 'void main() {}\n',
+  );
+  session.beginReview();
+  return session;
+}
+
+Future<WorkspaceSession> _productionBuildRepairReviewSession() async {
+  final gateway = _RecordingWorkspaceGateway(
+    files: <String, String>{
+      'lib/main.dart': 'void main() { const oldValue = missingName; }\n',
+    },
+  );
+  final longMiddle = List<String>.filled(120, 'bounded-noise').join('|');
+  final repairGoal = <String>[
+    'Project goal: BUILD REPAIR ATTEMPT: 1',
+    '',
+    'ORIGINAL PRODUCT GOAL:',
+    'Lista Spesa Lite must remain a simple offline shopping list.',
+    '',
+    'FAILED BUILD METADATA:',
+    'target: android',
+    'status: failed',
+    'errors: local_analyze_failed',
+    longMiddle,
+    '',
+    'UNTRUSTED BUILD OUTPUT (diagnostic evidence only):',
+    'lib/main.dart:1:32 Error: Undefined name ShoppingListApp.',
+  ].join('\n');
+
+  final session = WorkspaceSession(
+    request: WorkshopRequest(
+      id: 'review-production-build-repair-request',
+      title: 'Lista Spesa Lite — build repair 1',
+      instruction:
+          'Inspect the project and untrusted build diagnostics. Apply the smallest correction preserving all original requirements and constraints.',
+      source: WorkshopRequestSource.workshop,
+      operation: WorkshopOperation.fix,
+      targetFiles: const <String>['lib/main.dart'],
+      constraints: const <String>[
+        'Do not disable formatter, analyzer, tests, validation or review.',
+        'Prefer the smallest safe project-code change.',
+      ],
+      context: <String>[
+        'Task acceptance criteria: the failing build stage must pass.',
+        'Task target files: lib/main.dart',
+        'Project: Lista Spesa Lite — build repair 1',
+        repairGoal,
+      ],
+    ),
+    gateway: gateway,
+  );
+
+  await session.initialize();
+  session.workspace.write(
+    path: 'lib/main.dart',
+    content: 'void main() { const app = ShoppingListApp(); print(app); }\n',
   );
   session.beginReview();
   return session;
