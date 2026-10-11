@@ -1,40 +1,84 @@
-// Keep the existing Dart 3.4 browser compatibility floor.
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
-import 'dart:html' as html;
-import 'dart:indexed_db' as idb;
+import 'dart:async';
+import 'dart:js_interop';
 import 'dart:typed_data';
 
-import '../domains/shared/aivexus_attachment_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_attachment_store.dart';
+
+@JS('indexedDB')
+external _Factory? get _indexedDB;
+
+extension type _Factory(JSObject _) implements JSObject {
+  external _Request open(String name, int version);
+}
+
+extension type _Request(JSObject _) implements JSObject {
+  external JSAny? get result;
+  external set onsuccess(JSFunction callback);
+  external set onerror(JSFunction callback);
+  external set onupgradeneeded(JSFunction callback);
+}
+
+extension type _Database(JSObject _) implements JSObject {
+  external JSObject createObjectStore(String name);
+  external _Transaction transaction(String store, String mode);
+  external set onversionchange(JSFunction callback);
+  external void close();
+}
+
+extension type _Transaction(JSObject _) implements JSObject {
+  external _ObjectStore objectStore(String name);
+  external set oncomplete(JSFunction callback);
+  external set onerror(JSFunction callback);
+  external set onabort(JSFunction callback);
+}
+
+extension type _ObjectStore(JSObject _) implements JSObject {
+  @JS('get')
+  external _Request read(String key);
+  external _Request add(JSUint8Array bytes, String key);
+}
+
+Future<JSAny?> _result(_Request request) {
+  final result = Completer<JSAny?>();
+  request.onsuccess = ((JSAny? _) {
+    if (!result.isCompleted) result.complete(request.result);
+  }).toJS;
+  request.onerror = ((JSAny? _) {
+    if (!result.isCompleted)
+      result.completeError(
+        StateError('Operazione allegati IndexedDB non riuscita.'),
+      );
+  }).toJS;
+  return result.future;
+}
 
 abstract final class WorkshopWebAttachmentStorage {
   static Future<AivexusAttachmentStore> open() async {
-    final factory = html.window.indexedDB;
+    final factory = _indexedDB;
     if (factory == null) throw UnsupportedError('IndexedDB non disponibile.');
-    final database = await factory.open(
-      'aivexus.attachments.v1',
-      version: 1,
-      onUpgradeNeeded: (event) {
-        final database = (event.target as idb.Request).result as idb.Database;
-        database.createObjectStore('blobs');
-      },
-    );
-    database.onVersionChange.listen((_) => database.close());
+    final request = factory.open('aivexus.attachments.v1', 1);
+    request.onupgradeneeded = ((JSAny? _) {
+      (request.result as _Database).createObjectStore('blobs');
+    }).toJS;
+    final database = (await _result(request)) as _Database;
+    database.onversionchange = ((JSAny? _) {
+      database.close();
+    }).toJS;
     return AivexusAttachmentStore(_IndexedDbBlobs(database));
   }
 }
 
 final class _IndexedDbBlobs implements AivexusBlobStorage {
   _IndexedDbBlobs(this.database);
-  final idb.Database database;
+  final _Database database;
 
   @override
   Future<void> putIfAbsent(String digest, Uint8List bytes) async {
     final transaction = database.transaction('blobs', 'readwrite');
     final store = transaction.objectStore('blobs');
-    // The read and conditional insert share one serialized transaction.
     await _complete(transaction, () async {
-      if (await store.getObject(digest) == null) {
-        await store.add(Uint8List.fromList(bytes), digest);
+      if (await _result(store.read(digest)) == null) {
+        await _result(store.add(Uint8List.fromList(bytes).toJS, digest));
       }
     });
   }
@@ -42,34 +86,40 @@ final class _IndexedDbBlobs implements AivexusBlobStorage {
   @override
   Future<Uint8List?> read(String digest) async {
     final transaction = database.transaction('blobs', 'readonly');
-    Object? value;
+    JSAny? value;
     await _complete(transaction, () async {
-      value = await transaction.objectStore('blobs').getObject(digest);
+      value = await _result(transaction.objectStore('blobs').read(digest));
     });
     if (value == null) return null;
-    if (value is ByteBuffer) return Uint8List.view(value! as ByteBuffer);
-    if (value is List) return Uint8List.fromList((value! as List).cast<int>());
-    throw StateError('Formato allegato persistito non valido.');
+    return Uint8List.fromList((value as JSUint8Array).toDart);
   }
 
   Future<void> _complete(
-    idb.Transaction transaction,
+    _Transaction transaction,
     Future<void> Function() action,
   ) async {
-    // Attach an error handler immediately, including when a request fails first.
+    // Observe the transaction before issuing requests, including aborts that
+    // arrive after an individual request has already failed.
+    final completed = Completer<void>();
     Object? transactionError;
-    final completed = transaction.completed.then<void>(
-      (_) {},
-      onError: (Object error) {
-        transactionError = error;
-      },
-    );
+    transaction.oncomplete = ((JSAny? _) {
+      if (!completed.isCompleted) completed.complete();
+    }).toJS;
+    void failed(JSAny? _) {
+      transactionError = StateError(
+        'Transazione allegati non riuscita: controlla lo spazio disponibile.',
+      );
+      if (!completed.isCompleted) completed.complete();
+    }
+
+    transaction.onerror = failed.toJS;
+    transaction.onabort = failed.toJS;
     try {
       await action();
-      await completed;
+      await completed.future;
       if (transactionError != null) throw transactionError!;
     } catch (_) {
-      await completed;
+      await completed.future;
       rethrow;
     }
   }

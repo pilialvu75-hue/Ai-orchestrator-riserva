@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
 
-import '../domains/shared/aivexus_project_extension.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
 
 final class WorkshopWebProjectsPage extends StatefulWidget {
   const WorkshopWebProjectsPage({

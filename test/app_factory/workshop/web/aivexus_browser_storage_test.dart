@@ -1,12 +1,8 @@
 @TestOn('browser')
 library;
 
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:async';
-import 'dart:html' as html;
-import 'dart:js' as js;
 import 'dart:js_interop';
-import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_attachment_storage.dart';
@@ -15,6 +11,43 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'aivexus_test_fixtures.dart';
+
+@JS('document')
+external _Document get _document;
+@JS('localStorage')
+external _Storage get _localStorage;
+
+extension type _Storage(JSObject _) implements JSObject {
+  external String? getItem(String key);
+}
+
+extension type _Document(JSObject _) implements JSObject {
+  external _Frame createElement(String name);
+  external _Element get body;
+}
+
+extension type _Element(JSObject _) implements JSObject {
+  external JSObject appendChild(JSObject child);
+}
+
+extension type _Frame(JSObject _) implements JSObject {
+  external set src(String value);
+  external set onload(JSFunction callback);
+  external _Window get contentWindow;
+  external void remove();
+}
+
+extension type _Window(JSObject _) implements JSObject {
+  external _Navigator get navigator;
+}
+
+extension type _Navigator(JSObject _) implements JSObject {
+  external _Locks get locks;
+}
+
+extension type _Locks(JSObject _) implements JSObject {
+  external JSPromise<JSAny?> request(String name, JSFunction callback);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -28,28 +61,27 @@ void main() {
   test(
     'project write waits for a lock held by another browser context',
     () async {
-      final frame = html.IFrameElement()..src = 'about:blank';
-      final loaded = frame.onLoad.first;
-      html.document.body!.append(frame);
+      final frame = _document.createElement('iframe');
+      final loaded = Completer<void>();
+      frame.onload = ((JSAny? _) {
+        if (!loaded.isCompleted) loaded.complete();
+      }).toJS;
+      frame.src = 'about:blank';
+      _document.body.appendChild(frame);
       addTearDown(frame.remove);
-      await loaded;
-      final navigator = js_util.getProperty<Object>(
-        frame.contentWindow!,
-        'navigator',
-      );
-      final locks = js_util.getProperty<Object>(navigator, 'locks');
+      await loaded.future;
       final acquired = Completer<void>();
       final release = Completer<JSAny?>();
       addTearDown(() {
         if (!release.isCompleted) release.complete(null);
       });
-      final blocked = js_util.callMethod<Object>(locks, 'request', [
+      final blocked = frame.contentWindow.navigator.locks.request(
         'workshop.web.projects.v1',
-        js.allowInterop((Object? _) {
+        ((JSAny? _) {
           acquired.complete();
           return release.future.toJS;
-        }),
-      ]);
+        }).toJS,
+      );
       await acquired.future;
       final store = await WorkshopWebProjectStorage.open();
       var saved = false;
@@ -63,14 +95,13 @@ void main() {
         reason: 'A local-only mutex cannot protect another context',
       );
       release.complete(null);
-      await js_util.promiseToFuture<Object?>(blocked);
+      await blocked.toDart;
       await writing;
       expect(saved, true);
       expect(
-        html.window.localStorage.keys.any(
-          (key) => key.contains('workshop.web.projects.v1'),
-        ),
-        true,
+        _localStorage.getItem('flutter.workshop.web.projects.v1') ??
+            _localStorage.getItem('workshop.web.projects.v1'),
+        isNotNull,
       );
       final second = await WorkshopWebProjectStorage.open();
       final previous = (await second.loadAll()).single;

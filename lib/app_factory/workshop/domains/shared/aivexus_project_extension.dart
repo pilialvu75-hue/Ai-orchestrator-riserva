@@ -34,7 +34,7 @@ final class AivexusProjectExtension {
 
   factory AivexusProjectExtension.validated(Map<String, Object?> value) {
     final extension = AivexusProjectExtension.read(value);
-    if (extension.isReadOnly) throw FormatException(extension.readOnlyReason);
+    if (extension.isReadOnly) throw FormatException(extension.readOnlyReason!);
     return extension;
   }
 

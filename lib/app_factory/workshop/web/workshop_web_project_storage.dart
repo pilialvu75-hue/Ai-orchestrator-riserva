@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../domains/shared/aivexus_project_extension.dart';
-import '../domains/shared/aivexus_resource_exchange.dart';
-import 'workshop_web_storage_lock.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_resource_exchange.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_storage_lock.dart';
 
 enum WorkshopWebProjectStatus {
   draft,

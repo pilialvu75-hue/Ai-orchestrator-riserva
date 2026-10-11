@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-import 'aivexus_project_extension.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
 
 /// Persisted request/result hooks for Cantiere jobs, not a second job runner.
 final class AivexusResourceExchange {

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
-import 'aivexus_project_extension.dart';
+import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
 
 /// Binary storage is independent of project JSON and of any CAD/game runner.
 abstract interface class AivexusBlobStorage {
