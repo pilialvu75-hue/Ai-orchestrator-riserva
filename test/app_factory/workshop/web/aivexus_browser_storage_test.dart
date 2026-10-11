@@ -68,7 +68,7 @@ void main() {
       }).toJS;
       frame.src = 'about:blank';
       _document.body.appendChild(frame);
-      addTearDown(frame.remove);
+      addTearDown(() => frame.remove());
       await loaded.future;
       final acquired = Completer<void>();
       final release = Completer<JSAny?>();
