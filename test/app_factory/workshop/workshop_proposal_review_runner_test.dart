@@ -549,11 +549,11 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('"before":"import \'screens/favorites_screen.dart\';\\nvoid main() {}\\n"'),
+        contains('"before":"import \'screens/favorites_screen.dart\';\\nvoid main() {}"'),
       );
       expect(
         reviewer.lastPrompt,
-        contains('"after":"void main() {}\\n"'),
+        contains('"after":"void main() {}"'),
       );
       expect(reviewer.maxTokensSeen, <int?>[256]);
       expect(reviewer.lastPrompt!.length, lessThan(6500));
