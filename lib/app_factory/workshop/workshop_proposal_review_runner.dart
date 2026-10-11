@@ -409,7 +409,8 @@ BUILD REPAIR SEMANTICS:
 When buildRepair is true, judge the staged edit against the cited build failure
 and preserved product behavior. Removing an unused import, dead code, or
 another analyzer-triggering artifact is not a regression merely because that
-source text existed before. If rejecting an import removal, identify the
+source text existed before. Never require keeping a source line solely because
+it existed before the repair. If rejecting an import removal, identify the
 concrete symbol or explicit required behavior that the after-content can no
 longer satisfy. Reject if the supplied evidence cannot establish correctness;
 never assume omitted content is safe.
