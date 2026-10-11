@@ -52,13 +52,24 @@ void main() {
         await tester.tap(find.text('Modifica progetto'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField).first, 'Revised title');
-        await tester.ensureVisible(find.byType(TextField).last);
-        await tester.pumpAndSettle();
-        await tester.enterText(
-          find.byType(TextField).last,
-          'Revised requirements',
+        final goalField = find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField &&
+              widget.decoration?.labelText == 'Cosa deve fare?',
         );
-        await tester.ensureVisible(find.text('Prepara proposta'));
+        await tester.scrollUntilVisible(
+          goalField,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.enterText(goalField, 'Revised requirements');
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('Prepara proposta'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Prepara proposta'));
         await tester.pumpAndSettle();
