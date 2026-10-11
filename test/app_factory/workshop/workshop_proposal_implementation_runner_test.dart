@@ -654,6 +654,51 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('gate revision starts directly with compact Engineer prompt',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"explanation":"Repair accepted","changes":[{"path":"lib/app.dart","type":"modification","content":"repaired"}]}',
+          terminalState: InferenceTerminalState.success,
+          model: 'engineer-model',
+        ),
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{
+          'lib/app.dart': 'old',
+          'lib/unrelated.dart': 'unrelated' * 2000,
+        },
+      );
+      final session = await _session(workspaceGateway);
+
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(
+        session: session,
+        revisionFeedback:
+            'Reviewer rejected the staged proposal. Fix the concrete issue.',
+        revisionAttempt: 2,
+      );
+
+      expect(proposal.explanation, 'Repair accepted');
+      expect(engineer.calls, 1);
+      expect(engineer.maxTokensValues, <int?>[640]);
+      expect(
+        engineer.prompts.single,
+        startsWith('Implement the task from this compact Cantiere input:'),
+      );
+      expect(
+        engineer.prompts.single,
+        contains('"gateFeedback":"Reviewer rejected the staged proposal. Fix the concrete issue."'),
+      );
+      expect(engineer.prompts.single, isNot(contains('"workspaceManifest"')));
+      expect(engineer.prompts.single.length, lessThan(5000));
+      expect(session.workspace.read('lib/app.dart'), 'repaired');
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test(
         'structural retry keeps required main target ahead of long gate feedback',
         () async {
