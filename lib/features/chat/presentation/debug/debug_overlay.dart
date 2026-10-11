@@ -1752,6 +1752,7 @@ class _DebugOverlayState
           'switch_partner=${model.switchPartnerModelId ?? 'none'} '
           'pressure=${model.worstPressure}',
         )
+        ..writeln(model.switchDetails)
         ..writeln();
     }
 

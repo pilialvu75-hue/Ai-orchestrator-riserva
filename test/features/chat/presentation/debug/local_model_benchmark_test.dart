@@ -5,6 +5,68 @@ import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_ben
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('partner guard failure is attributed without running return probe', () async {
+    var returned = false;
+    final probe = await LocalModelSwitchProbeResult.run(
+      partner: () async => throw StateError('model_guard: starcoder2_3b'),
+      recovery: () async { returned = true; return true; },
+    );
+    expect(probe.failureStage, 'switch_partner');
+    expect(probe.error, contains('starcoder2_3b'));
+    expect(probe.passed, isNull);
+    expect(returned, isFalse);
+    final result = LocalModelStabilityModelResult(
+      modelId: 'gemma_2b_it', catalogModelId: 'gemma-catalog',
+      displayName: 'Gemma', consecutiveSamples: const [],
+      sessionReuseConfirmed: true, cancellationConfirmed: true,
+      cancellationRecoveryPassed: true, switchRecoveryPassed: probe.passed,
+      switchPartnerModelId: 'starcoder2_3b',
+      switchPartnerCatalogModelId: 'starcoder-catalog', switchProbe: probe,
+    );
+    expect(result.cancellationRecoveryPassed, isTrue);
+    expect(result.probeSetComplete, isFalse);
+    final report = LocalModelStabilityReport(
+      createdAt: DateTime(2026), models: [result],
+    ).toPlainText();
+    expect(report, contains('catalog=gemma-catalog'));
+    expect(report, contains('switch_partner_catalog=starcoder-catalog'));
+    expect(report, contains('switch_failure_stage=switch_partner'));
+  });
+
+  test('return failure retains successful partner outcome', () async {
+    final probe = await LocalModelSwitchProbeResult.run(
+      partner: () async => true,
+      recovery: () async => throw StateError('return failed'),
+    );
+    expect(probe.partnerPassed, isTrue);
+    expect(probe.failureStage, 'switch_return');
+    expect(probe.passed, isNull);
+  });
+
+  test('wrong partner answer still runs return and records both outcomes', () async {
+    final probe = await LocalModelSwitchProbeResult.run(
+      partner: () async => false, recovery: () async => true,
+    );
+    expect(probe.partnerPassed, isFalse);
+    expect(probe.recoveryPassed, isTrue);
+    expect(probe.passed, isFalse);
+    expect(probe.error, isNull);
+  });
+
+  test('critical memory abort propagates at either switch stage', () async {
+    for (final failPartner in [true, false]) {
+      await expectLater(LocalModelSwitchProbeResult.run(
+        partner: () async {
+          if (failPartner) {
+            throw const LocalModelBenchmarkCriticalResourceException('critical');
+          }
+          return true;
+        },
+        recovery: () async => throw const LocalModelBenchmarkCriticalResourceException('critical'),
+      ), throwsA(isA<LocalModelBenchmarkCriticalResourceException>()));
+    }
+  });
+
   test('orchestrator benchmark keeps Phi and Nemotron defaults', () {
     expect(
       LocalModelBenchmarkRunner.defaultOrchestratorTargetModelIds,
