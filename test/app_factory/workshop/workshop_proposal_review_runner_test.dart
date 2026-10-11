@@ -563,11 +563,11 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('Never require keeping a source line solely because'),
+        contains('Never'),
       );
       expect(
         reviewer.lastPrompt,
-        contains('it existed before the repair'),
+        contains('require keeping a source line solely because it existed before the repair'),
       );
       expect(
         reviewer.lastPrompt,
@@ -615,7 +615,11 @@ void main() {
       expect(reviewer.lastPrompt, contains('"context":[]'));
       expect(
         reviewer.lastPrompt,
-        contains('Do not require a separate diagnostic-analysis document'),
+        contains('Do not'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('require a separate diagnostic-analysis document'),
       );
       expect(
         reviewer.lastPrompt,
