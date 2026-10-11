@@ -229,6 +229,20 @@ void main() {
       <int?>[640],
     );
     expect(
+      provider.requests.single.prompt,
+      startsWith('Implement the task from this compact Cantiere input:'),
+    );
+    expect(
+      provider.requests.single.prompt,
+      contains(
+        '"gateFeedback":"Reviewer requested a complete bounded implementation."',
+      ),
+    );
+    expect(
+      provider.requests.single.prompt,
+      isNot(contains('"workspaceManifest"')),
+    );
+    expect(
       provider.requests
           .every((request) => request.executionId == 'execution-schema'),
       isTrue,

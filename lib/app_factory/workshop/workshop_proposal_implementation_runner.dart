@@ -64,12 +64,14 @@ final class WorkshopProposalImplementationRunner {
     final sessionId =
         'workshop:implementation:${session.context.request.id}$revisionSuffix';
 
+    final compactPrimary = revisionAttempt > 0;
     var result = await _inference.complete(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
         session,
         preflight: preflight,
         revisionFeedback: revisionFeedback,
+        compact: compactPrimary,
       ),
       systemPrompt: _systemPrompt,
       sessionId: sessionId,
@@ -175,6 +177,7 @@ final class WorkshopProposalImplementationRunner {
 
     final revisionSuffix =
         revisionAttempt > 0 ? ':revision-$revisionAttempt' : '';
+    final compactPrimary = revisionAttempt > 0;
     var result = await _inference.completeWithIdentity(
       stage: WorkshopStage.implementation,
       prompt: _buildPrompt(
@@ -182,6 +185,7 @@ final class WorkshopProposalImplementationRunner {
         preflight: preflight,
         resumeContext: resumeContext,
         revisionFeedback: revisionFeedback,
+        compact: compactPrimary,
       ),
       systemPrompt: _systemPrompt,
       sessionId: '${resumeContext.sessionId}$revisionSuffix',
