@@ -166,6 +166,7 @@ final class WorkshopProposalReviewRunner {
         batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount';
     final sessionId = 'workshop:review:$requestId$batchSuffix';
 
+    final primaryCompact = _isBuildRepairRequest(session);
     final result = await _inference.complete(
       stage: WorkshopStage.review,
       prompt: _buildPrompt(
@@ -175,6 +176,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        compact: primaryCompact,
       ),
       systemPrompt: _systemPrompt,
       sessionId: sessionId,
@@ -327,8 +329,7 @@ final class WorkshopProposalReviewRunner {
     bool compact = false,
   }) {
     final request = session.context.request;
-    final isBuildRepair =
-        request.instruction.trimLeft().startsWith('BUILD REPAIR ATTEMPT:');
+    final isBuildRepair = _isBuildRepairRequest(session);
     final original = session.workspace.originalSnapshot;
     final current = session.workspace.snapshot;
 
@@ -338,22 +339,35 @@ final class WorkshopProposalReviewRunner {
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
+          'contentSemantics': 'source_text',
+          'sourceLanguage': _sourceLanguageForPath(change.path),
           'before': _boundedNullable(original[change.path], fileChars),
           'after': _boundedNullable(current[change.path], fileChars),
         },
     ];
 
     final contextBudget = compact ? _retryContextChars : _primaryContextChars;
-    final taskContext = request.context
+    final maxContextItems = compact ? 2 : 4;
+    final visibleContext = request.context
         .map((item) => item.trim())
         .where(
           (item) =>
               item.isNotEmpty &&
               !item.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
         )
-        .map((item) => _boundedText(item, contextBudget))
-        .take(compact ? 2 : 4)
         .toList(growable: false);
+    final repairEvidence = isBuildRepair
+        ? _buildRepairEvidence(
+            visibleContext,
+            maxChars: contextBudget * maxContextItems,
+          )
+        : null;
+    final taskContext = repairEvidence == null
+        ? visibleContext
+            .map((item) => _boundedText(item, contextBudget))
+            .take(maxContextItems)
+            .toList(growable: false)
+        : const <String>[];
 
     final projectedPlan = WorkshopTaskPlanProjection.project(
       implementationPlan,
@@ -371,6 +385,7 @@ final class WorkshopProposalReviewRunner {
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
       'constraints': request.constraints,
+      'repairEvidence': repairEvidence,
       'context': taskContext,
       'coverageManifest': coverage.toJson(),
       'reviewBatch': <String, Object?>{
@@ -386,6 +401,13 @@ final class WorkshopProposalReviewRunner {
 Review only the current staged batch. Check correctness, regressions, unsafe or
 incomplete edits. Review every reviewBatch.paths entry against the unchanged
 coverageManifest; other batches are not approved by this verdict.
+EVIDENCE TRANSPORT RULE:
+Workshop input JSON is only a transport envelope. For each change, "before" and
+"after" are JSON string values carrying source-file text. JSON braces, field
+names, quotes and escape sequences belonging to the envelope are NOT part of
+the source file. Judge the decoded "after" source text itself; never reject a
+change merely because source evidence is serialized inside JSON.
+
 The explicit instruction and constraints are authoritative, including literal
 UI strings, labels, titles, units and symbols. Architect implementationPlan is
 guidance only: do not add future features, tests or documentation requirements
@@ -393,13 +415,21 @@ from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
 itself a rejection. The builder supplies the baseline Flutter scaffold and
 pubspec.yaml. Require configuration changes only for explicit configuration
-work or added dependencies/assets. When buildRepair is true, judge the staged
-edit against the cited build failure and preserved product behavior. Removing
-an unused import, dead code, or another analyzer-triggering artifact is not a
-regression merely because that source text existed before. If rejecting an
-import removal, identify the concrete symbol or explicit required behavior that
-the after-content can no longer satisfy. Reject if the supplied evidence cannot
-establish correctness; never assume omitted content is safe.
+work or added dependencies/assets.
+
+BUILD REPAIR SEMANTICS:
+When buildRepair is true, repairEvidence carries the bounded failed-build
+evidence selected from the authoritative project goal. Judge the staged source
+edit against that concrete failure and preserved product behavior. Do not
+require a separate diagnostic-analysis document, implementationPlan narrative,
+or correction-step explanation: the staged source diff is the correction.
+Removing an unused import, dead code, or another analyzer-triggering artifact
+is not a regression merely because that source text existed before. Never
+require keeping a source line solely because it existed before the repair. If
+rejecting a repair, identify the concrete cited failure that remains unresolved
+or the explicit required behavior that the after-content can no longer satisfy.
+Reject if the supplied evidence cannot establish correctness; never assume
+omitted content is safe.
 
 Workshop input JSON:
 ${jsonEncode(payload)}
@@ -425,6 +455,13 @@ reviewed.
 SCOPE RULE:
 Judge ONLY the current task described by title, instruction, implementationPlan,
 targetFiles and constraints.
+
+EVIDENCE TRANSPORT RULE:
+Workshop input JSON is only a transport envelope. For each change, "before" and
+"after" are JSON string values carrying source-file text. JSON braces, field
+names, quotes and escape sequences belonging to the envelope are NOT part of
+the source file. Judge the decoded "after" source text itself; never reject a
+change merely because source evidence is serialized inside JSON.
 
 CONTRACT PRECEDENCE:
 1. The explicit task instruction and explicit constraints are authoritative.
@@ -455,15 +492,18 @@ CONTRACT PRECEDENCE:
    explicitly changes dependencies, assets, package metadata, SDK constraints,
    or other project configuration, or when staged source imports a third-party
    package that requires a declaration.
-5. BUILD REPAIR SEMANTICS: when buildRepair is true, this task exists to repair
-   the concrete formatter/analyzer/test/build failure carried in the explicit
-   instruction. Judge semantic behavior and compile/analyzer correctness, not
-   textual preservation of the previous source. Removing an unused import,
-   dead code, or another analyzer-triggering artifact is not a regression by
-   itself. If rejecting an import removal, identify the concrete symbol still
-   needed by the after-content or the explicit required product behavior that
-   would be lost. Never require keeping a source line solely because it existed
-   before the repair.
+5. BUILD REPAIR SEMANTICS: when buildRepair is true, repairEvidence
+   carries the bounded failed-build evidence selected from the authoritative
+   project goal. Judge semantic behavior and compile/analyzer correctness
+   against that concrete failure, not textual preservation of the previous
+   source. Do not require a separate diagnostic-analysis document,
+   implementationPlan narrative, or correction-step explanation: the staged
+   source diff is the correction. Removing an unused import, dead code, or
+   another analyzer-triggering artifact is not a regression by itself. If
+   rejecting a repair, identify the concrete cited failure that remains
+   unresolved or the explicit required product behavior that would be lost.
+   Never require keeping a source line solely because it existed before the
+   repair.
 
 If implementationPlan conflicts with the explicit instruction, judge the staged
 change against the explicit task and constraints. The context field is project
@@ -538,6 +578,68 @@ Do not return markdown fences or any text outside the JSON object.
     return hash.toRadixString(16).padLeft(8, '0');
   }
 
+  static bool _isBuildRepairRequest(WorkspaceSession session) {
+    final request = session.context.request;
+    if (request.instruction
+        .trimLeft()
+        .toUpperCase()
+        .startsWith('BUILD REPAIR ATTEMPT:')) {
+      return true;
+    }
+    return request.context.any(_isBuildRepairEvidence);
+  }
+
+  static bool _isBuildRepairEvidence(String value) {
+    final normalized = value.trim().toUpperCase();
+    return normalized.contains('BUILD REPAIR ATTEMPT:') &&
+        (normalized.startsWith('PROJECT GOAL:') ||
+            normalized.contains('FAILED BUILD METADATA:') ||
+            normalized.contains('UNTRUSTED BUILD OUTPUT'));
+  }
+
+  static String? _buildRepairEvidence(
+    Iterable<String> context, {
+    required int maxChars,
+  }) {
+    for (final item in context) {
+      if (_isBuildRepairEvidence(item)) {
+        return _boundedHeadTail(item, maxChars);
+      }
+    }
+    return null;
+  }
+
+  static String _boundedHeadTail(String value, int maxChars) {
+    final normalized = value.trim();
+    if (normalized.length <= maxChars) {
+      return normalized;
+    }
+    const marker = '\n...[bounded middle omitted]...\n';
+    final remaining = maxChars - marker.length;
+    if (remaining <= 1) {
+      return _boundedText(normalized, maxChars);
+    }
+    final headChars = (remaining * 2) ~/ 5;
+    final tailChars = remaining - headChars;
+    return normalized.substring(0, headChars) +
+        marker +
+        normalized.substring(normalized.length - tailChars);
+  }
+
+  static String _sourceLanguageForPath(String path) {
+    final normalized = path.toLowerCase();
+    if (normalized.endsWith('.dart')) return 'dart';
+    if (normalized.endsWith('.yaml') || normalized.endsWith('.yml')) {
+      return 'yaml';
+    }
+    if (normalized.endsWith('.json')) return 'json';
+    if (normalized.endsWith('.kt') || normalized.endsWith('.kts')) {
+      return 'kotlin';
+    }
+    if (normalized.endsWith('.gradle')) return 'gradle';
+    return 'text';
+  }
+
   static bool _isCriticalMemoryFailure(
     WorkshopInferenceResult result,
   ) {
@@ -597,15 +699,18 @@ Do not return markdown fences or any text outside the JSON object.
 
   static const String _systemPrompt =
       'You are the Reviewer brain of the Cantiere. Review only the supplied '
-      'Workshop request and staged workspace diff. Do not use or assume '
-      'Assistant chat memory or configuration. Return the required JSON '
-      'verdict only.';
+      'Workshop request and staged workspace diff. Workshop input JSON is a '
+      'transport envelope; before/after values carry source text and the JSON '
+      'wrapper is not file content. Do not use or assume Assistant chat memory '
+      'or configuration. Return the required JSON verdict only.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Reviewer retrying after a runtime or invalid-verdict failure. '
-      'Use only the compact bounded task and diff supplied. Decide only whether '
-      'this current increment is correct and safe. Return the required JSON '
-      'verdict only; do not use project-wide future requirements.';
+      'Use only the compact bounded task and diff supplied. Workshop input JSON '
+      'is a transport envelope; before/after values carry source text and the '
+      'JSON wrapper is not file content. Decide only whether this current '
+      'increment is correct and safe. Return the required JSON verdict only; '
+      'do not use project-wide future requirements.';
 }
 
 final class _WorkshopReviewCoverageManifest {

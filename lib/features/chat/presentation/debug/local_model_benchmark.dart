@@ -365,6 +365,50 @@ class LocalModelBenchmarkReport {
   }
 }
 
+/// Keeps a failed partner probe separate from the original model's results.
+class LocalModelSwitchProbeResult {
+  const LocalModelSwitchProbeResult({
+    this.partnerPassed,
+    this.recoveryPassed,
+    this.failureStage,
+    this.error,
+  });
+
+  final bool? partnerPassed;
+  final bool? recoveryPassed;
+  final String? failureStage;
+  final String? error;
+
+  bool? get passed => partnerPassed == null || recoveryPassed == null
+      ? null
+      : partnerPassed! && recoveryPassed!;
+
+  static Future<LocalModelSwitchProbeResult> run({
+    required Future<bool> Function() partner,
+    required Future<bool> Function() recovery,
+  }) async {
+    bool? partnerPassed;
+    var stage = 'switch_partner';
+    try {
+      partnerPassed = await partner();
+      stage = 'switch_return';
+      final recoveryPassed = await recovery();
+      return LocalModelSwitchProbeResult(
+        partnerPassed: partnerPassed,
+        recoveryPassed: recoveryPassed,
+      );
+    } on LocalModelBenchmarkCriticalResourceException {
+      rethrow;
+    } catch (error) {
+      return LocalModelSwitchProbeResult(
+        partnerPassed: partnerPassed,
+        failureStage: stage,
+        error: error.toString(),
+      );
+    }
+  }
+}
+
 class LocalModelStabilityModelResult {
   const LocalModelStabilityModelResult({
     required this.modelId,
@@ -376,6 +420,8 @@ class LocalModelStabilityModelResult {
     required this.cancellationRecoveryPassed,
     required this.switchRecoveryPassed,
     required this.switchPartnerModelId,
+    this.switchPartnerCatalogModelId,
+    this.switchProbe,
   });
 
   final String modelId;
@@ -387,6 +433,16 @@ class LocalModelStabilityModelResult {
   final bool? cancellationRecoveryPassed;
   final bool? switchRecoveryPassed;
   final String? switchPartnerModelId;
+  final String? switchPartnerCatalogModelId;
+  final LocalModelSwitchProbeResult? switchProbe;
+
+  String get switchDetails =>
+      'catalog=$catalogModelId '
+      'switch_partner_catalog=${switchPartnerCatalogModelId ?? "unknown"} '
+      'partner_passed=${switchProbe?.partnerPassed} '
+      'return_passed=${switchProbe?.recoveryPassed} '
+      'switch_failure_stage=${switchProbe?.failureStage ?? "none"} '
+      'switch_error=${switchProbe?.error ?? "none"}';
 
   int get consecutivePassed => consecutiveSamples
       .where(
@@ -456,6 +512,7 @@ class LocalModelStabilityReport {
           'switch_partner=${model.switchPartnerModelId ?? 'none'} '
           'pressure=${model.worstPressure}',
         )
+        ..writeln(model.switchDetails)
         ..writeln();
     }
 
@@ -2027,24 +2084,25 @@ class LocalModelBenchmarkRunner {
           onProgress?.call(
             '${model.displayName} switch -> ${partner.displayName}',
           );
-          final partnerSwitch = await _runCase(
-            model: partner,
-            benchmarkCase: stabilitySwitchCase,
+          final switchProbe = await LocalModelSwitchProbeResult.run(
+            partner: () async {
+              final result = await _runCase(
+                model: partner,
+                benchmarkCase: stabilitySwitchCase,
+              );
+              return result.maxScore > 0 && result.score == result.maxScore;
+            },
+            recovery: () async {
+              await Future<void>.delayed(_betweenCases);
+              onProgress?.call('${model.displayName} switch recovery');
+              final result = await _runCase(
+                model: model,
+                benchmarkCase: stabilityRecoveryCase,
+              );
+              return result.maxScore > 0 && result.score == result.maxScore;
+            },
           );
-          final partnerSwitchPassed =
-              partnerSwitch.maxScore > 0 &&
-              partnerSwitch.score == partnerSwitch.maxScore;
-
-          await Future<void>.delayed(_betweenCases);
-          onProgress?.call('${model.displayName} switch recovery');
-          final switchRecovery = await _runCase(
-            model: model,
-            benchmarkCase: stabilityRecoveryCase,
-          );
-          final switchRecoveryPassed =
-              partnerSwitchPassed &&
-              switchRecovery.maxScore > 0 &&
-              switchRecovery.score == switchRecovery.maxScore;
+          final switchRecoveryPassed = switchProbe.passed;
 
           final modelResult = LocalModelStabilityModelResult(
             modelId: model.effectiveRuntimeModelId,
@@ -2057,6 +2115,8 @@ class LocalModelBenchmarkRunner {
             cancellationRecoveryPassed: cancellationRecoveryPassed,
             switchRecoveryPassed: switchRecoveryPassed,
             switchPartnerModelId: partner.effectiveRuntimeModelId,
+            switchPartnerCatalogModelId: partner.id,
+            switchProbe: switchProbe,
           );
           modelResults.add(modelResult);
 
@@ -2070,7 +2130,8 @@ class LocalModelBenchmarkRunner {
             'cancel_recovery=$cancellationRecoveryPassed '
             'switch_recovery=$switchRecoveryPassed '
             'partner=${partner.effectiveRuntimeModelId} '
-            'pressure=${modelResult.worstPressure}',
+            'pressure=${modelResult.worstPressure} '
+            '${modelResult.switchDetails}',
           );
         } on LocalModelBenchmarkCriticalResourceException {
           rethrow;
