@@ -9,6 +9,9 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_attachment
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Exercise the real Web implementation already pinned by shared_preferences.
+// ignore: depend_on_referenced_packages
+import 'package:shared_preferences_web/shared_preferences_web.dart';
 
 import 'aivexus_test_fixtures.dart';
 
@@ -51,9 +54,15 @@ extension type _Locks(JSObject _) implements JSObject {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // flutter test does not execute the application's generated plugin registrant.
+  SharedPreferencesPlugin.registerWith(null);
   setUp(() async {
     // Real browser plugin, deliberately no SharedPreferences mock.
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = await SharedPreferences.getInstance().timeout(
+      const Duration(seconds: 5),
+      onTimeout: () =>
+          throw StateError('Real Web preferences did not initialize'),
+    );
     await preferences.remove('workshop.web.projects.v1');
     await preferences.remove(WorkshopWebProjectStorage.backupKey);
   });
@@ -69,7 +78,7 @@ void main() {
       frame.src = 'about:blank';
       _document.body.appendChild(frame);
       addTearDown(() => frame.remove());
-      await loaded.future;
+      await loaded.future.timeout(const Duration(seconds: 5));
       final acquired = Completer<void>();
       final release = Completer<JSAny?>();
       addTearDown(() {
@@ -82,7 +91,7 @@ void main() {
           return release.future.toJS;
         }).toJS,
       );
-      await acquired.future;
+      await acquired.future.timeout(const Duration(seconds: 5));
       final store = await WorkshopWebProjectStorage.open();
       var saved = false;
       final writing = store
