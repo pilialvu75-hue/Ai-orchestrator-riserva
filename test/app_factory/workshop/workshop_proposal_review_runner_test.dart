@@ -563,7 +563,11 @@ void main() {
       );
       expect(
         reviewer.lastPrompt,
-        contains('Never require keeping a source line solely because it existed'),
+        contains('Never require keeping a source line solely because'),
+      );
+      expect(
+        reviewer.lastPrompt,
+        contains('it existed before the repair'),
       );
       expect(
         reviewer.lastPrompt,
