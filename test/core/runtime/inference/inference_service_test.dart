@@ -103,6 +103,12 @@ void main() {
         contains('Keep the answer concise.\n\nDevice system time'));
     expect(captured!.systemPrompt, contains('Device system time (local):'));
     expect(captured!.systemPrompt, contains('UTC offset:'));
+    expect(captured!.systemPrompt,
+        contains('answer directly using this device clock'));
+    expect(captured!.systemPrompt,
+        contains('Do not claim that the current time is unavailable'));
+    expect(captured!.systemPrompt,
+        contains('placeholder for the time'));
     expect(captured!.prompt, 'Che giorno e oggi?');
   });
 
