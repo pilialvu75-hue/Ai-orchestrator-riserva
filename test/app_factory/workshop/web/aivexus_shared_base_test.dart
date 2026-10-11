@@ -271,6 +271,11 @@ void main() {
       },
     );
     await expectLater(store.saveResourceExchange(wrong), throwsStateError);
+    final mislabeled = accepted.transition(
+      'produced',
+      producedResult: {...aivexusResult('producer'), 'mimeType': 'model/stl'},
+    );
+    await expectLater(store.saveResourceExchange(mislabeled), throwsStateError);
     final produced = await store.saveResourceExchange(
       accepted.transition(
         'produced',
@@ -294,6 +299,25 @@ void main() {
       throwsStateError,
     );
   });
+
+  test(
+    'an artifact reference cannot be reassigned to different output bytes',
+    () {
+      final data =
+          Map<String, Object?>.from(
+              AivexusProjectExtension.draft(AivexusProjectKind.cad).toJson()!
+                  as Map,
+            )
+            ..['artifacts'] = [
+              aivexusArtifact(),
+              {...aivexusArtifact(), 'sha256': List.filled(64, 'b').join()},
+            ];
+      expect(
+        () => AivexusProjectExtension.validated(data),
+        throwsFormatException,
+      );
+    },
+  );
 }
 
 final class _CorruptBlobs implements AivexusBlobStorage {

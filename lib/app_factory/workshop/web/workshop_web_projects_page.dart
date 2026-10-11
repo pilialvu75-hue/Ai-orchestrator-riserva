@@ -155,11 +155,20 @@ final class _WorkshopWebProjectsPageState
     }
 
     final now = DateTime.now().toUtc();
+    final editing = _editingProject;
+    final requirementsChanged =
+        editing != null &&
+        (editing.goal != goal ||
+            aivexusCanonicalJson(editing.platforms.toList()..sort()) !=
+                aivexusCanonicalJson(platforms));
     var project =
-        _editingProject?.copyWith(
+        editing?.copyWith(
           title: title,
           goal: goal,
           platforms: platforms,
+          extension: editing.extension?.revise(
+            externalRequirementsChanged: requirementsChanged,
+          ),
           status: WorkshopWebProjectStatus.draft,
           progress: 0.05,
           currentPhase: 'Analisi richiesta',

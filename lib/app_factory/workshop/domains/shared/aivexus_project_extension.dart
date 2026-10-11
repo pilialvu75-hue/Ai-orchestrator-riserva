@@ -106,6 +106,7 @@ final class AivexusProjectExtension {
     Map<String, Object?>? domainSpec,
     List<Map<String, Object?>>? inputs,
     List<String>? requestedOutputs,
+    bool externalRequirementsChanged = false,
   }) {
     if (isReadOnly) throw StateError(readOnlyReason!);
     final data = _data;
@@ -115,7 +116,9 @@ final class AivexusProjectExtension {
       if (inputs != null) 'inputs': inputs,
       if (requestedOutputs != null) 'requestedOutputs': requestedOutputs,
     };
-    if (aivexusCanonicalJson(next) == aivexusCanonicalJson(data)) return this;
+    if (!externalRequirementsChanged &&
+        aivexusCanonicalJson(next) == aivexusCanonicalJson(data))
+      return this;
     next['specRevision'] = specRevision! + 1;
     return AivexusProjectExtension.validated(next);
   }
@@ -142,6 +145,7 @@ final class AivexusProjectExtension {
       validateAivexusInput(raw);
     }
     aivexusRequire(root['artifacts'] is List, 'artifacts');
+    final artifactRefs = <String>{};
     for (final raw in root['artifacts'] as List) {
       final artifact = aivexusObject(raw, const [
         'ref',
@@ -159,6 +163,10 @@ final class AivexusProjectExtension {
       for (final key in ['ref', 'name', 'format', 'mimeType']) {
         _text(artifact[key]);
       }
+      aivexusRequire(
+        artifactRefs.add(artifact['ref'] as String),
+        'Artifact refs must identify one immutable output',
+      );
       _choice(artifact['role'], const [
         'source',
         'cad',

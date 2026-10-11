@@ -276,6 +276,9 @@ final class WorkshopWebProjectStorage {
     }
     if (previous?.extension != null) {
       final oldExtension = previous!.extension!;
+      if (project.extension == null) {
+        throw StateError('L’estensione esistente deve essere conservata.');
+      }
       final nextExtension = project.extension!;
       final before = Map<String, Object?>.from(oldExtension.toJson()! as Map)
         ..remove('artifacts')
@@ -394,7 +397,13 @@ final class WorkshopWebProjectStorage {
             (artifact as Map)['ref'] == produced['artifactRef'] &&
             artifact['sha256'] == produced['sha256'] &&
             artifact['sizeBytes'] == produced['sizeBytes'] &&
-            artifact['sourceSpecRevision'] == produced['producerSpecRevision'],
+            artifact['sourceSpecRevision'] ==
+                produced['producerSpecRevision'] &&
+            artifact['role'] == produced['role'] &&
+            artifact['format'] == produced['format'] &&
+            artifact['mimeType'] == produced['mimeType'] &&
+            aivexusCanonicalJson(artifact['generator']) ==
+                aivexusCanonicalJson(produced['generator']),
       )) {
         throw StateError(
           'Il risultato non corrisponde a un artefatto persistito.',
