@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
 
+import '../domains/shared/aivexus_project_extension.dart';
+
 final class WorkshopWebProjectsPage extends StatefulWidget {
   const WorkshopWebProjectsPage({
     super.key,
@@ -34,6 +36,8 @@ final class _WorkshopWebProjectsPageState
 
   List<WorkshopWebProject> _projects = const <WorkshopWebProject>[];
   WorkshopWebProject? _selectedProject;
+  WorkshopWebProject? _editingProject;
+  String? _loadError;
   final Set<String> _selectedPlatforms = <String>{};
   bool _loading = true;
   bool _showNewProject = false;
@@ -69,11 +73,22 @@ final class _WorkshopWebProjectsPageState
   }
 
   Future<void> _reload() async {
-    final projects = await widget.storage.loadAll();
+    List<WorkshopWebProject> projects;
+    try {
+      projects = await widget.storage.loadAll();
+    } catch (error) {
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _loadError = error.toString();
+        });
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _projects = projects;
       _loading = false;
+      _loadError = null;
       final selectedId = _selectedProject?.id;
       if (selectedId != null) {
         _selectedProject = _projectById(projects, selectedId);
@@ -81,17 +96,22 @@ final class _WorkshopWebProjectsPageState
     });
   }
 
-  Future<void> _persist(WorkshopWebProject project) async {
-    final next = <WorkshopWebProject>[
-      project,
-      ..._projects.where((item) => item.id != project.id),
-    ];
-    await widget.storage.save(next);
+  Future<WorkshopWebProject> _persist(WorkshopWebProject project) async {
+    final saved = await widget.storage.saveProject(project);
+    final next = await widget.storage.loadAll();
+    if (mounted)
+      setState(() {
+        _projects = next;
+        _selectedProject = saved;
+      });
+    return saved;
+  }
+
+  void _storageError(Object error) {
     if (!mounted) return;
-    setState(() {
-      _projects = next;
-      _selectedProject = project;
-    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Salvataggio non completato: $error')),
+    );
   }
 
   void _startNewProject() {
@@ -99,6 +119,7 @@ final class _WorkshopWebProjectsPageState
     _titleController.clear();
     _goalController.clear();
     _selectedPlatforms.clear();
+    _editingProject = null;
     setState(() {
       _selectedProject = null;
       _showNewProject = true;
@@ -106,6 +127,18 @@ final class _WorkshopWebProjectsPageState
   }
 
   Future<void> _prepareProposal() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _prepareAndPersistProposal();
+    } catch (error) {
+      _storageError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _prepareAndPersistProposal() async {
     final title = _titleController.text.trim();
     final goal = _goalController.text.trim();
     final platforms = _selectedPlatforms.toList()..sort();
@@ -122,28 +155,41 @@ final class _WorkshopWebProjectsPageState
     }
 
     final now = DateTime.now().toUtc();
-    var project = WorkshopWebProject(
-      id: 'web-project:${now.microsecondsSinceEpoch}',
-      title: title,
-      goal: goal,
-      platforms: List<String>.unmodifiable(platforms),
-      status: WorkshopWebProjectStatus.draft,
-      progress: 0.05,
-      currentPhase: 'Analisi richiesta',
-      currentItem: 'Preparazione proposta',
-      createdAt: now,
-      updatedAt: now,
-    );
-    await _persist(project);
+    var project =
+        _editingProject?.copyWith(
+          title: title,
+          goal: goal,
+          platforms: platforms,
+          status: WorkshopWebProjectStatus.draft,
+          progress: 0.05,
+          currentPhase: 'Analisi richiesta',
+          currentItem: 'Preparazione proposta',
+          clearError: true,
+          clearProposal: true,
+        ) ??
+        WorkshopWebProject(
+          id: 'web-project:${now.microsecondsSinceEpoch}',
+          title: title,
+          goal: goal,
+          platforms: List<String>.unmodifiable(platforms),
+          status: WorkshopWebProjectStatus.draft,
+          progress: 0.05,
+          currentPhase: 'Analisi richiesta',
+          currentItem: 'Preparazione proposta',
+          createdAt: now,
+          updatedAt: now,
+        );
+    project = await _persist(project);
+    _editingProject = project;
     if (!mounted) return;
 
     setState(() {
-      _busy = true;
       _showNewProject = false;
     });
 
     widget.controller.clearConversation();
-    final prompt = '''
+    final prompt =
+        '''
 Titolo progetto: $title
 Piattaforme richieste: ${platforms.join(', ')}
 Cosa deve fare: $goal
@@ -162,7 +208,8 @@ proposta breve, concreta e approvabile.
         status: WorkshopWebProjectStatus.blocked,
         currentPhase: 'Analisi non completata',
         currentItem: 'Inferenza Cloud / AUTO',
-        error: widget.controller.lastError ??
+        error:
+            widget.controller.lastError ??
             'Il Cantiere non ha restituito una proposta.',
       );
     } else if (widget.controller.lastResponseReadyForApproval) {
@@ -185,13 +232,15 @@ proposta breve, concreta e approvabile.
       );
     }
 
-    await _persist(project);
-    if (mounted) setState(() => _busy = false);
+    _editingProject = await _persist(project);
   }
 
   Future<void> _approveProject() async {
     final project = _selectedProject;
     if (project == null ||
+        _busy ||
+        project.isReadOnly ||
+        project.projectKind != AivexusProjectKind.software ||
         project.status != WorkshopWebProjectStatus.proposalReady) {
       return;
     }
@@ -218,20 +267,29 @@ proposta breve, concreta e approvabile.
     );
     if (confirmed != true || !mounted) return;
 
-    await _persist(
-      project.copyWith(
-        status: WorkshopWebProjectStatus.approved,
-        progress: 0.15,
-        currentPhase: 'Progetto approvato',
-        currentItem: 'Pronto per avvio creazione',
-        clearError: true,
-      ),
-    );
+    try {
+      await _persist(
+        project.copyWith(
+          status: WorkshopWebProjectStatus.approved,
+          progress: 0.15,
+          currentPhase: 'Progetto approvato',
+          currentItem: 'Pronto per avvio creazione',
+          clearError: true,
+        ),
+      );
+    } catch (error) {
+      _storageError(error);
+    }
   }
 
   void _editProject() {
     final project = _selectedProject;
-    if (project == null) return;
+    if (project == null ||
+        _busy ||
+        project.isReadOnly ||
+        project.projectKind != AivexusProjectKind.software)
+      return;
+    _editingProject = project;
     _titleController.text = project.title;
     _goalController.text = project.goal;
     _selectedPlatforms
@@ -249,6 +307,24 @@ proposta breve, concreta e approvabile.
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_loadError!),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _reload,
+                child: const Text('Riprova lettura'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (_showNewProject) return _buildNewProject();
     if (_selectedProject != null) return _buildProjectDetail(_selectedProject!);
     return _buildProjectList();
@@ -256,10 +332,14 @@ proposta breve, concreta e approvabile.
 
   Widget _buildProjectList() {
     final active = _projects
-        .where((project) => project.status != WorkshopWebProjectStatus.completed)
+        .where(
+          (project) => project.status != WorkshopWebProjectStatus.completed,
+        )
         .toList(growable: false);
     final completed = _projects
-        .where((project) => project.status == WorkshopWebProjectStatus.completed)
+        .where(
+          (project) => project.status == WorkshopWebProjectStatus.completed,
+        )
         .toList(growable: false);
 
     return SafeArea(
@@ -438,7 +518,8 @@ proposta breve, concreta e approvabile.
                 maxLines: 10,
                 decoration: const InputDecoration(
                   labelText: 'Cosa deve fare?',
-                  hintText: 'Descrivi il comportamento e il risultato desiderato.',
+                  hintText:
+                      'Descrivi il comportamento e il risultato desiderato.',
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
                 ),
@@ -482,7 +563,9 @@ proposta breve, concreta e approvabile.
               Row(
                 children: <Widget>[
                   IconButton(
-                    onPressed: () => setState(() => _selectedProject = null),
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() => _selectedProject = null),
                     icon: const Icon(Icons.arrow_back),
                   ),
                   const SizedBox(width: 8),
@@ -560,23 +643,40 @@ proposta breve, concreta e approvabile.
                 ),
               ],
               const SizedBox(height: 18),
-              if (project.status == WorkshopWebProjectStatus.proposalReady)
+              if (project.isReadOnly ||
+                  project.projectKind != AivexusProjectKind.software)
+                const Card(
+                  child: ListTile(
+                    leading: Icon(Icons.lock_outline),
+                    title: Text('Progetto in sola lettura'),
+                    subtitle: Text(
+                      'I dati sono conservati. Per modificarli serve uno Studio compatibile.',
+                    ),
+                  ),
+                ),
+              if (!project.isReadOnly &&
+                  project.projectKind == AivexusProjectKind.software &&
+                  project.status == WorkshopWebProjectStatus.proposalReady)
                 FilledButton.icon(
-                  onPressed: _approveProject,
+                  onPressed: _busy ? null : _approveProject,
                   icon: const Icon(Icons.check_circle_outline),
                   label: const Text('Approva progetto'),
                 ),
-              if (project.status == WorkshopWebProjectStatus.proposalReady ||
-                  project.status == WorkshopWebProjectStatus.draft ||
-                  project.status == WorkshopWebProjectStatus.blocked) ...<Widget>[
+              if (!project.isReadOnly &&
+                  project.projectKind == AivexusProjectKind.software &&
+                  (project.status == WorkshopWebProjectStatus.proposalReady ||
+                      project.status == WorkshopWebProjectStatus.draft ||
+                      project.status ==
+                          WorkshopWebProjectStatus.blocked)) ...<Widget>[
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: _editProject,
+                  onPressed: _busy ? null : _editProject,
                   icon: const Icon(Icons.edit_outlined),
                   label: const Text('Modifica progetto'),
                 ),
               ],
-              if (project.status == WorkshopWebProjectStatus.approved) ...<Widget>[
+              if (project.status ==
+                  WorkshopWebProjectStatus.approved) ...<Widget>[
                 const SizedBox(height: 8),
                 const Card(
                   child: ListTile(
@@ -605,10 +705,7 @@ proposta breve, concreta e approvabile.
         children: <Widget>[
           SizedBox(
             width: 82,
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white54),
-            ),
+            child: Text(label, style: const TextStyle(color: Colors.white54)),
           ),
           Expanded(child: Text(value)),
         ],
@@ -638,10 +735,7 @@ final class _EmptyProjectCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Text(
-          text,
-          style: const TextStyle(color: Colors.white54),
-        ),
+        child: Text(text, style: const TextStyle(color: Colors.white54)),
       ),
     );
   }

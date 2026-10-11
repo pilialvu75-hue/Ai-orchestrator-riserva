@@ -36,6 +36,11 @@ jobs:
             lib/app_factory/workshop/web/workshop_web_checkpoint_storage.dart \
             lib/app_factory/workshop/web/workshop_web_cloud_broker.dart \
             lib/app_factory/workshop/web/workshop_web_shell.dart \
+            lib/app_factory/workshop/domains/shared/ \
+            lib/app_factory/workshop/web/workshop_web_project_storage.dart \
+            lib/app_factory/workshop/web/workshop_web_projects_page.dart \
+            lib/app_factory/workshop/web/workshop_web_storage_lock_web.dart \
+            lib/app_factory/workshop/web/workshop_web_attachment_storage_web.dart \
             test/app_factory/workshop/web/workshop_web_shell_test.dart \
             test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart \
             test/app_factory/workshop/web/workshop_web_cloud_broker_test.dart \
@@ -48,6 +53,7 @@ jobs:
         run: |
           flutter test --platform chrome test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart
           flutter test --platform chrome test/app_factory/workshop/web/workshop_web_cloud_broker_test.dart
+          flutter test --platform chrome test/app_factory/workshop/web/aivexus_browser_storage_test.dart
 
       - name: Validate Cloudflare Function module syntax
         shell: bash
