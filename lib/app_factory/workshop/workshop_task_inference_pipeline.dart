@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
@@ -112,6 +113,17 @@ final class WorkshopTaskInferencePipeline {
     CancellationToken? cancellationToken,
     void Function(WorkshopStage stage)? onStage,
   }) async {
+    if (session.status == WorkspaceSessionStatus.review ||
+        session.status == WorkspaceSessionStatus.validation) {
+      return _resumeStagedGateState(
+        session: session,
+        preflight: preflight,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+        onStage: onStage,
+      );
+    }
+
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
     onStage?.call(WorkshopStage.implementation);
@@ -204,6 +216,91 @@ final class WorkshopTaskInferencePipeline {
         cancellationToken: cancellationToken,
       );
     }
+  }
+
+  /// Resumes the authoritative gate reached by a previous attempt after
+  /// Engineer output was already staged into the VirtualWorkspace.
+  ///
+  /// The pre-Engineer baseline is not durably available on this recovery path,
+  /// so a gate rejection remains authoritative: do not guess a baseline and
+  /// do not auto-launch a revision that could discard staged/certified work.
+  Future<WorkshopTaskInferenceResult> _resumeStagedGateState({
+    required WorkspaceSession session,
+    WorkshopPreflightInferenceResult? preflight,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
+  }) async {
+    final proposal = _proposalFromCurrentDiff(session);
+    final implementationPlan = preflight?.architecture?.text;
+
+    late final WorkshopReviewVerdict review;
+    if (session.status == WorkspaceSessionStatus.review) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_RESUME] request=${session.context.request.id} '
+        'phase=review files=${proposal.changes.length}',
+      );
+      onStage?.call(WorkshopStage.review);
+      review = await _reviewRunner.run(
+        session: session,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+      if (!review.approved) {
+        return WorkshopTaskInferenceResult(
+          proposal: proposal,
+          review: review,
+        );
+      }
+    } else {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_RESUME] request=${session.context.request.id} '
+        'phase=validation files=${proposal.changes.length}',
+      );
+      review = const WorkshopReviewVerdict(
+        approved: true,
+        summary:
+            'Review approval preserved by WorkspaceSession validation state.',
+      );
+    }
+
+    onStage?.call(WorkshopStage.validation);
+    final validation = await _validationRunner.run(
+      session: session,
+      implementationPlan: implementationPlan,
+      isOffline: isOffline,
+      cancellationToken: cancellationToken,
+    );
+
+    return WorkshopTaskInferenceResult(
+      proposal: proposal,
+      review: review,
+      validation: validation,
+    );
+  }
+
+  static WorkshopChangeProposal _proposalFromCurrentDiff(
+    WorkspaceSession session,
+  ) {
+    final diff = WorkspaceDiff.compare(
+      before: session.workspace.originalSnapshot,
+      after: session.workspace.snapshot,
+    );
+    if (diff.isEmpty) {
+      throw StateError(
+        'Workshop gate resume requires staged workspace changes.',
+      );
+    }
+
+    return WorkshopChangeProposal(
+      requestId: session.context.request.id,
+      explanation: 'Recovered staged proposal for gate-only retry.',
+      changes: List<WorkspaceFileChange>.unmodifiable(diff.changes),
+      validationNotes: const <String>[
+        'Proposal reconstructed from authoritative VirtualWorkspace diff.',
+      ],
+    );
   }
 
   Future<WorkshopTaskInferenceResult> _reviewAndValidate({
