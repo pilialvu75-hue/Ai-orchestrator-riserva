@@ -81,8 +81,9 @@ void main() {
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
 
-        await tester.ensureVisible(
+        await tester.scrollUntilVisible(
           find.text(testCase.button),
+          200,
           scrollable: find.byType(Scrollable).first,
         );
         await tester.tap(find.text(testCase.button));
