@@ -20,6 +20,8 @@ void main() {
     String proposedAfter = "import 'star.dart';\nvoid main() {}\n",
     bool reviewApproved = false,
     WorkshopValidationVerdict? validation,
+    Map<String, String> before = original,
+    Map<String, String> after = staged,
   }) {
     return WorkshopTaskInferenceResult(
       proposal: WorkshopChangeProposal(
@@ -40,20 +42,18 @@ void main() {
         findings: const <String>['Unresolved source import'],
       ),
       validation: validation,
+      gateEvidenceBaseline: Map<String, String>.unmodifiable(before),
+      gateEvidenceStaged: Map<String, String>.unmodifiable(after),
     );
   }
 
   String evidence(
     WorkshopTaskInferenceResult result, {
     String taskRequestId = 'task-1',
-    Map<String, String> originalSnapshot = original,
-    Map<String, String> stagedSnapshot = staged,
   }) =>
       WorkshopGateEvidenceExport.encode(
         projectId: 'project-1',
         taskRequestId: taskRequestId,
-        originalSnapshot: originalSnapshot,
-        stagedSnapshot: stagedSnapshot,
         result: result,
       );
 
@@ -83,6 +83,39 @@ void main() {
         as Map<String, dynamic>;
     expect(file['after'], "import 'star.dart';\nvoid main() {}\n");
     expect(text, isNot(contains('invented transport body')));
+  });
+
+  test('Library reuse staged before Engineer is never included in export', () {
+    final text = evidence(rejected(
+      before: const <String, String>{
+        'lib/main.dart': 'after Library reuse, before Engineer',
+      },
+      after: const <String, String>{
+        'lib/main.dart': "import 'star.dart';\\nvoid main() {}\\n",
+      },
+    ));
+    final data = jsonDecode(text) as Map<String, dynamic>;
+    final files = data['changes'] as List<dynamic>;
+    expect(files, hasLength(1));
+    final file = files.single as Map<String, dynamic>;
+    expect(file['before'], 'after Library reuse, before Engineer');
+    expect(text, isNot(contains('lib/reuse.dart')));
+  });
+
+  test('fails closed if evidence carries a path not owned by proposal', () {
+    expect(
+      () => evidence(rejected(
+        before: const <String, String>{
+          'lib/main.dart': 'before',
+          'lib/reuse.dart': 'unrelated',
+        },
+        after: const <String, String>{
+          'lib/main.dart': 'after',
+          'lib/reuse.dart': 'unrelated',
+        },
+      )),
+      throwsStateError,
+    );
   });
 
   test('rejects stale task identity instead of copying unrelated source', () {
@@ -119,13 +152,14 @@ void main() {
   test('fails closed for oversized code instead of silently truncating', () {
     expect(
       () => evidence(
-        rejected(),
-        stagedSnapshot: <String, String>{
+        rejected(
+          after: <String, String>{
           'lib/main.dart': List<String>.filled(
             WorkshopGateEvidenceExport.maxExportChars + 1,
             'a',
           ).join(),
         },
+        ),
       ),
       throwsStateError,
     );
@@ -133,7 +167,7 @@ void main() {
 
   test('fails closed when rejected proposal has no staged changes', () {
     expect(
-      () => evidence(rejected(), stagedSnapshot: original),
+      () => evidence(rejected(after: original)),
       throwsStateError,
     );
   });
