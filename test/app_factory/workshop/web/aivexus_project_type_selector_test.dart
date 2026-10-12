@@ -118,6 +118,86 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'editing software locks project kind and preserves the existing identity',
+    (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final storage = await WorkshopWebProjectStorage.open();
+      final createdAt = DateTime.utc(2026, 10, 12, 10);
+      final original = await storage.saveProject(
+        WorkshopWebProject(
+          id: 'software-existing',
+          title: 'App esistente',
+          goal: 'Obiettivo iniziale',
+          platforms: const <String>['Web'],
+          status: WorkshopWebProjectStatus.proposalReady,
+          progress: 0.10,
+          currentPhase: 'Proposta pronta',
+          currentItem: 'Attende approvazione del proprietario',
+          createdAt: createdAt,
+          updatedAt: createdAt,
+          extension: AivexusProjectExtension.draft(
+            AivexusProjectKind.software,
+          ),
+        ),
+      );
+      final provider = _CountingProvider();
+      final controller = WorkshopChatController(
+        inferenceGateway: WorkshopInferenceGateway(provider: provider),
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: WorkshopWebProjectsPage(
+              controller: controller,
+              storage: storage,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('App esistente'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Modifica progetto'));
+      await tester.tap(find.text('Modifica progetto'));
+      await tester.pumpAndSettle();
+
+      final selector = tester.widget<SegmentedButton<AivexusProjectKind>>(
+        find.byType(SegmentedButton<AivexusProjectKind>),
+      );
+      expect(selector.selected, <AivexusProjectKind>{AivexusProjectKind.software});
+      expect(selector.onSelectionChanged, isNull);
+
+      final goal = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Cosa deve fare?',
+      );
+      await tester.enterText(goal, 'Obiettivo aggiornato');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Prepara proposta'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Prepara proposta'));
+      await tester.pumpAndSettle();
+
+      final projects = await storage.loadAll();
+      expect(projects, hasLength(1));
+      expect(projects.single.id, original.id);
+      expect(projects.single.createdAt, original.createdAt);
+      expect(projects.single.projectKind, AivexusProjectKind.software);
+      expect(projects.single.goal, 'Obiettivo aggiornato');
+      expect(provider.calls, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 final class _CountingProvider implements RuntimeInferenceProvider {
