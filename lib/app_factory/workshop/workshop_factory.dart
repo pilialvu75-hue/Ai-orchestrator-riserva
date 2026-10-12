@@ -13,6 +13,9 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_service_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_transport.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_canary_coordinator.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_evolution_inference_runner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_multi_role_pipeline_factory.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_submission_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_research_library_handoff.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
@@ -116,6 +119,28 @@ final class WorkshopFactory {
     return WorkshopResearchLibraryHandoff(
       submissionService: WorkshopLibrarySubmissionService(
         submitBundle: transport.submit,
+      ),
+    );
+  }
+
+  /// Compone il canarino Library Evolution con la pipeline Workshop esistente.
+  /// L'inferenza rimane isolata e si arresta prima di ogni apply reale.
+  static WorkshopLibraryEvolutionCanaryCoordinator
+      createLibraryEvolutionCanaryCoordinator({
+    InferenceService? inferenceService,
+    List<WorkshopModelAssignment> assignments =
+        WorkshopModelAssignments.defaults,
+    WorkshopLibraryGitHubCredentialStore? credentialStore,
+  }) {
+    return WorkshopLibraryEvolutionCanaryCoordinator(
+      inferenceRunner: WorkshopLibraryEvolutionInferenceRunner(
+        pipeline: WorkshopMultiRolePipelineFactory.createTaskPipeline(
+          inferenceService: inferenceService,
+          assignments: assignments,
+        ),
+      ),
+      libraryHandoff: createResearchLibraryHandoff(
+        credentialStore: credentialStore,
       ),
     );
   }
