@@ -177,6 +177,12 @@ void main() {
             widget is TextField &&
             widget.decoration?.labelText == 'Cosa deve fare?',
       );
+      await tester.scrollUntilVisible(
+        goal,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       await tester.enterText(goal, 'Obiettivo aggiornato');
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
