@@ -116,6 +116,46 @@ void main() {
       expect(gateways[AppAiRole.engineer]!.calls, 0);
     });
 
+    test('oversized first Reviewer prompt starts compact without extra retry',
+        () async {
+      RuntimeEventLog.instance.clear();
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":false,"summary":"Unresolved star.dart import","findings":["Missing source file"],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _oversizedReviewSession();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.approved, isFalse);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(reviewer.calls, 1);
+      expect(reviewer.maxTokensSeen, <int?>[256]);
+      expect(reviewer.promptsSeen.single,
+          contains('Review only the current staged batch'));
+      expect(reviewer.promptsSeen.single,
+          contains('EVIDENCE TRANSPORT RULE'));
+      expect(reviewer.promptsSeen.single,
+          contains('"path":"lib/a.dart"'));
+      expect(
+        RuntimeEventLog.instance.entries.where(
+          (entry) => entry.tag == 'WORKSHOP_REVIEW_PROMPT',
+        ).map((entry) => entry.message).toList(),
+        everyElement(contains('compact=true')),
+      );
+      expect(
+        RuntimeEventLog.instance.entries.where(
+          (entry) => entry.tag == 'WORKSHOP_REVIEW_RETRY',
+        ),
+        isEmpty,
+      );
+    });
+
     test('retries one transient Reviewer runtime failure with compact bounds',
         () async {
       final reviewer = _StaticGateway(
@@ -676,6 +716,39 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
     AppAiRole.engineer: _StaticGateway(result: idleResult),
     AppAiRole.reviewer: reviewer,
   };
+}
+
+Future<WorkspaceSession> _oversizedReviewSession() async {
+  final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+    'lib/a.dart': 'old-a',
+    'lib/b.dart': 'old-b',
+  });
+  final session = WorkspaceSession(
+    request: const WorkshopRequest(
+      id: 'oversized-review-request',
+      title: 'Two-file UI revision',
+      instruction: 'Keep the same behavior and check for missing imports.',
+      constraints: <String>['No unresolved imports'],
+    ),
+    gateway: gateway,
+  );
+  await session.initialize();
+  session.workspace.write(
+    path: 'lib/a.dart',
+    content: List<String>.filled(
+      210,
+      "import 'star.dart'; // unresolved import under review",
+    ).join('\n'),
+  );
+  session.workspace.write(
+    path: 'lib/b.dart',
+    content: List<String>.filled(
+      210,
+      'void main() { print("unchanged behavior"); }',
+    ).join('\n'),
+  );
+  session.beginReview();
+  return session;
 }
 
 Future<WorkspaceSession> _reviewSession() async {
