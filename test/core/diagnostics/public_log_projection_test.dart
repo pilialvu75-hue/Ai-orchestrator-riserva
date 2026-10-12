@@ -752,7 +752,7 @@ void main() {
       }
     });
 
-    test('unknown, oversized and sensitive fields fail closed', () {
+    test('unknown and sensitive variants preserve only event identity', () {
       const invalid = <String>[
         '[STALL] reason=private generated_tokens=3 elapsed_ms=40 '
             'since_last_token_ms=3 session=private',
@@ -779,7 +779,27 @@ void main() {
         '[TERMINAL_STATE] state=success generated_tokens=NaN elapsed_ms=20',
       ];
       for (final value in invalid) {
-        expect(publicLogProjection('$time $value'), isNull);
+        final row = jsonDecode(publicLogProjection('$time $value')!)
+            as Map<String, dynamic>;
+        expect(row.keys, containsAllInOrder(<String>['time', 'event']));
+        expect(row, hasLength(2));
+        expect(row.values.join(' '), isNot(contains('private')));
+        expect(row.values.join(' '), isNot(contains('secret')));
+      }
+    });
+
+    test('existing unhandled terminal producers retain event-only telemetry', () {
+      const variants = <String>[
+        '[TERMINAL_STATE] state=modelMissing reason=missing_path_or_id',
+        '[TERMINAL_STATE] state=ffiMissing reason=library_load_failed',
+        '[TERMINAL_STATE] state=timedOut reason=first_token_timeout '
+            'scope=verification elapsed_ms=90000',
+      ];
+      for (final value in variants) {
+        expect(jsonDecode(publicLogProjection('$time $value')!), <String, dynamic>{
+          'time': '2026-09-06T02:57:18.238076',
+          'event': 'TERMINAL_STATE',
+        });
       }
     });
   });
