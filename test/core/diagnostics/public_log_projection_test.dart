@@ -661,4 +661,126 @@ void main() {
         '$time [VOICE_ENGINE] [TTS_FAIL] reason=private-secret');
     expect(private, isNot(contains('private-secret')));
   });
+
+  group('Diagnostics #114 stall and terminal public projection', () {
+    test('first token receipt strips private session from duplicated tags', () {
+      final line = publicLogProjection(
+        '$time [STALL] [STALL] reason=first_token_timeout elapsed_ms=90321 '
+        'no_token_produced=true session=private-identifier',
+      );
+      expect(jsonDecode(line!), {
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'STALL',
+        'reason': 'first_token_timeout',
+        'elapsed_ms': 90321,
+        'no_token_produced': true,
+      });
+      expect(line, isNot(contains('private-identifier')));
+    });
+
+    test('no-progress receipt retains token count and both durations', () {
+      final line = publicLogProjection(
+        '$time [STALL] reason=no_progress_timeout generated_tokens=3 '
+        'elapsed_ms=94000 since_last_token_ms=35000 session=secret',
+      );
+      final row = jsonDecode(line!) as Map<String, dynamic>;
+      expect(row['reason'], 'no_progress_timeout');
+      expect(row['generated_tokens'], 3);
+      expect(row['elapsed_ms'], 94000);
+      expect(row['since_last_token_ms'], 35000);
+      expect(row.containsKey('complete'), isFalse);
+      expect(line, isNot(contains('secret')));
+    });
+
+    test('polling stall has a bounded idle count', () {
+      final row = jsonDecode(publicLogProjection(
+        '$time [STALL] reason=poll_loop_watchdog idle_polls=30 '
+        'generated_tokens=2 elapsed_ms=60000 session=private',
+      )!) as Map<String, dynamic>;
+      expect(row['idle_polls'], 30);
+      expect(row['generated_tokens'], 2);
+      expect(row.containsKey('session'), isFalse);
+    });
+
+    test('terminal formats retain only actual producer evidence', () {
+      final cases = <String, Map<String, dynamic>>{
+        'state=stalled reason=first_token_timeout elapsed_ms=91000 '
+            'no_token_produced=true': {
+          'state': 'stalled', 'reason': 'first_token_timeout',
+          'elapsed_ms': 91000, 'no_token_produced': true,
+        },
+        'state=stalled reason=no_progress_timeout generated_tokens=3 '
+            'elapsed_ms=94000 since_last_token_ms=35000': {
+          'state': 'stalled', 'reason': 'no_progress_timeout',
+          'generated_tokens': 3, 'elapsed_ms': 94000,
+          'since_last_token_ms': 35000,
+        },
+        'state=stalled reason=poll_loop_watchdog idle_polls=8 '
+            'generated_tokens=2 elapsed_ms=40000': {
+          'state': 'stalled', 'reason': 'poll_loop_watchdog',
+          'idle_polls': 8, 'generated_tokens': 2, 'elapsed_ms': 40000,
+        },
+        'state=success generated_tokens=12 elapsed_ms=3000': {
+          'state': 'success', 'generated_tokens': 12, 'elapsed_ms': 3000,
+        },
+        'state=cancelled generated_tokens=2 elapsed_ms=5000': {
+          'state': 'cancelled', 'generated_tokens': 2, 'elapsed_ms': 5000,
+        },
+        'state=failed reason=repeated_token_loop generated_tokens=4 '
+            'elapsed_ms=9000': {
+          'state': 'failed', 'reason': 'repeated_token_loop',
+          'generated_tokens': 4, 'elapsed_ms': 9000,
+        },
+      };
+      for (final entry in cases.entries) {
+        final row = jsonDecode(publicLogProjection(
+          '$time [TERMINAL_STATE] [TERMINAL_STATE] ' + entry.key,
+        )!) as Map<String, dynamic>;
+        expect(row['event'], 'TERMINAL_STATE');
+        for (final field in entry.value.entries) {
+          expect(row[field.key], field.value);
+        }
+        expect(row.containsKey('complete'), isFalse);
+      }
+    });
+
+    test('historical event-only records never fabricate telemetry', () {
+      for (final event in ['STALL', 'TERMINAL_STATE']) {
+        expect(jsonDecode(publicLogProjection('$time [$event]')!), {
+          'time': '2026-09-06T02:57:18.238076', 'event': event,
+        });
+      }
+    });
+
+    test('unknown, oversized and sensitive fields fail closed', () {
+      const invalid = <String>[
+        '[STALL] reason=private generated_tokens=3 elapsed_ms=40 '
+            'since_last_token_ms=3 session=private',
+        '[STALL] reason=no_progress_timeout generated_tokens=-1 '
+            'elapsed_ms=40 since_last_token_ms=3 session=private',
+        '[STALL] reason=no_progress_timeout generated_tokens=999999999999 '
+            'elapsed_ms=40 since_last_token_ms=3 session=private',
+        '[STALL] reason=no_progress_timeout generated_tokens=3 '
+            'elapsed_ms=40 since_last_token_ms=3 session=private '
+            'response=secret',
+        '[STALL] reason=first_token_timeout elapsed_ms=30 '
+            'no_token_produced=false session=private',
+        '[STALL] reason=first_token_timeout elapsed_ms=30 '
+            'no_token_produced=true session=private prompt=secret',
+        '[TERMINAL_STATE] state=stalled reason=no_progress_timeout '
+            'generated_tokens=3 elapsed_ms=40 since_last_token_ms=3 '
+            'path=/private',
+        '[TERMINAL_STATE] state=success generated_tokens=4 elapsed_ms=20 '
+            'response=secret',
+        '[TERMINAL_STATE] state=native_error generated_tokens=1 '
+            'elapsed_ms=30 error=secret',
+        '[TERMINAL_STATE] state=failed reason=token_decode_exception '
+            'generated_tokens=2 error=private',
+        '[TERMINAL_STATE] state=success generated_tokens=NaN elapsed_ms=20',
+      ];
+      for (final value in invalid) {
+        expect(publicLogProjection('$time $value'), isNull);
+      }
+    });
+  });
 }
