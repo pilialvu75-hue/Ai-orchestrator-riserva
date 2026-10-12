@@ -35,3 +35,20 @@ actual runtime whenever claiming such evidence.
 Cantiere's shared attachment store and ResourceExchange integration remain
 outside this domain-only PR. Do not put local sample hashes in shared project
 state without storing and verifying the corresponding immutable bytes.
+
+
+## Fail-closed local receipts
+
+`validate_plate.py` now records `status=PASS` only after all five
+geometric/format checks succeed. A failed STEP round-trip, STL/3MF mesh or
+3MF-unit check returns `status=FAIL`, preserves per-check diagnostic errors
+and **emits an empty `artifacts` list**. The CLI exits with a failure code.
+The Python suite tests both successful SHA-256 receipts and corrupt-STL
+rejection. UNKNOWN Fusion/print/Cantiere/Diagnostics checks remain UNKNOWN.
+
+These are **local-only** receipts (`notCanonicalEvidence=true`), not
+immutable Cantiere artifact references. The output bytes must first be
+stored and verified through the authorized Cantiere attachment interface;
+only then may the shared ProjectExtension/ResourceExchange record
+`ref`, revision and provenance. Never treat an unpersisted local file
+path or its SHA-256 as proof that downstream consumers can retrieve it.
