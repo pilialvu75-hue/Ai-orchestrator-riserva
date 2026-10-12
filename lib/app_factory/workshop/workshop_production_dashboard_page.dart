@@ -1083,8 +1083,6 @@ class _WorkshopProductionDashboardPageState
       final evidence = WorkshopGateEvidenceExport.encode(
         projectId: handle.plan.id,
         taskRequestId: handle.session.context.request.id,
-        originalSnapshot: handle.session.workspace.originalSnapshot,
-        stagedSnapshot: handle.session.workspace.snapshot,
         result: result,
       );
       await Clipboard.setData(ClipboardData(text: evidence));
