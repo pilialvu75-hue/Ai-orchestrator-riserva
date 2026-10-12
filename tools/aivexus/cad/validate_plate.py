@@ -86,13 +86,16 @@ def validate(spec_path, exports_path, receipt_path):
     capture("stl_mesh", lambda: check_mesh(exports_path / "plate.stl", spec))
     capture("3mf_units", lambda: check_3mf_units(exports_path / "plate.3mf"))
     capture("3mf_mesh", lambda: check_mesh(exports_path / "plate.3mf", spec))
+    # Fail closed: a failed round-trip, mesh or unit check must never publish
+    # a seemingly valid output manifest. Diagnostics may retain the failure.
+    all_valid = all(check["result"] == "PASS" for check in checks)
     artifacts = []
     roles = {"STEP": ("step", "cad", "brep", "model/step"),
              "STL": ("stl", "mesh", "mesh", "model/stl"),
              "3MF": ("3mf", "mesh", "mesh", "model/3mf")}
     for fmt, (ext, role, geo, mime) in roles.items():
         path = exports_path / ("plate." + ext)
-        if path.is_file():
+        if all_valid and path.is_file():
             artifacts.append({"name": path.name, "role": role, "format": fmt,
                               "mimeType": mime, "sizeBytes": path.stat().st_size,
                               "sha256": digest(path),
@@ -103,6 +106,7 @@ def validate(spec_path, exports_path, receipt_path):
     for name in ("fusion_target_open", "physical_print", "cantiere_runner", "remote_diagnostics"):
         checks.append({"check": name, "result": "UNKNOWN", "reason": "Not executed here"})
     result = {"receiptType": "CAD1_LOCAL_GEOMETRY_ONLY",
+              "status": "PASS" if all_valid else "FAIL",
               "notCanonicalEvidence": True, "specRevision": spec["specRevision"],
               "inputSha256": digest(spec_path), "artifacts": artifacts,
               "checks": checks, "runtimeIntegration": "NOT_IMPLEMENTED"}
