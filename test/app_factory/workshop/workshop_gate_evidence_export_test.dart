@@ -10,9 +10,14 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validatio
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
 void main() {
+  const original = <String, String>{'lib/main.dart': 'void main() {}\n'};
+  const staged = <String, String>{
+    'lib/main.dart': "import 'star.dart';\nvoid main() {}\n",
+  };
+
   WorkshopTaskInferenceResult rejected({
     String requestId = 'task-1',
-    String after = "import 'star.dart';\nvoid main() {}\n",
+    String proposedAfter = "import 'star.dart';\nvoid main() {}\n",
     bool reviewApproved = false,
     WorkshopValidationVerdict? validation,
   }) {
@@ -25,7 +30,7 @@ void main() {
             path: 'lib/main.dart',
             type: WorkspaceChangeType.modification,
             beforeContent: 'void main() {}\n',
-            afterContent: after,
+            afterContent: proposedAfter,
           ),
         ],
       ),
@@ -38,14 +43,25 @@ void main() {
     );
   }
 
-  test('exports exact rejected code locally with scoped task identity', () {
-    final evidence = WorkshopGateEvidenceExport.encode(
-      projectId: 'project-1',
-      taskRequestId: 'task-1',
-      result: rejected(),
-    );
-    final data = jsonDecode(evidence) as Map<String, dynamic>;
+  String evidence(
+    WorkshopTaskInferenceResult result, {
+    String taskRequestId = 'task-1',
+    Map<String, String> originalSnapshot = original,
+    Map<String, String> stagedSnapshot = staged,
+  }) =>
+      WorkshopGateEvidenceExport.encode(
+        projectId: 'project-1',
+        taskRequestId: taskRequestId,
+        originalSnapshot: originalSnapshot,
+        stagedSnapshot: stagedSnapshot,
+        result: result,
+      );
+
+  test('exports exact rejected staged source with scoped task identity', () {
+    final text = evidence(rejected());
+    final data = jsonDecode(text) as Map<String, dynamic>;
     expect(data['schemaVersion'], 1);
+    expect(data['source'], 'staged_virtual_workspace');
     expect(data['failureGate'], 'review');
     expect(data['reviewApproved'], false);
     expect(data['projectId'], 'project-1');
@@ -57,36 +73,35 @@ void main() {
     expect(file['type'], 'modification');
     expect(file['before'], 'void main() {}\n');
     expect(file['after'], "import 'star.dart';\nvoid main() {}\n");
-    expect(evidence, isNot(contains('promptSha256')));
+    expect(text, isNot(contains('promptSha256')));
+  });
+
+  test('uses staged workspace rather than untrusted Engineer proposal body', () {
+    final text = evidence(rejected(proposedAfter: 'invented transport body'));
+    final data = jsonDecode(text) as Map<String, dynamic>;
+    final file = (data['changes'] as List<dynamic>).single
+        as Map<String, dynamic>;
+    expect(file['after'], "import 'star.dart';\nvoid main() {}\n");
+    expect(text, isNot(contains('invented transport body')));
   });
 
   test('rejects stale task identity instead of copying unrelated source', () {
     expect(
-      () => WorkshopGateEvidenceExport.encode(
-        projectId: 'project-1',
-        taskRequestId: 'different-task',
-        result: rejected(),
-      ),
+      () => evidence(rejected(), taskRequestId: 'different-task'),
       throwsStateError,
     );
   });
 
   test('does not offer rejected-gate export for accepted verdicts', () {
     expect(
-      () => WorkshopGateEvidenceExport.encode(
-        projectId: 'project-1',
-        taskRequestId: 'task-1',
-        result: rejected(reviewApproved: true),
-      ),
+      () => evidence(rejected(reviewApproved: true)),
       throwsStateError,
     );
   });
 
   test('permits explicit evidence for rejected validation, not approval', () {
-    final text = WorkshopGateEvidenceExport.encode(
-      projectId: 'project-1',
-      taskRequestId: 'task-1',
-      result: rejected(
+    final text = evidence(
+      rejected(
         reviewApproved: true,
         validation: const WorkshopValidationVerdict(
           valid: false,
@@ -103,16 +118,22 @@ void main() {
 
   test('fails closed for oversized code instead of silently truncating', () {
     expect(
-      () => WorkshopGateEvidenceExport.encode(
-        projectId: 'project-1',
-        taskRequestId: 'task-1',
-        result: rejected(
-          after: List<String>.filled(
+      () => evidence(
+        rejected(),
+        stagedSnapshot: <String, String>{
+          'lib/main.dart': List<String>.filled(
             WorkshopGateEvidenceExport.maxExportChars + 1,
             'a',
           ).join(),
-        ),
+        },
       ),
+      throwsStateError,
+    );
+  });
+
+  test('fails closed when rejected proposal has no staged changes', () {
+    expect(
+      () => evidence(rejected(), stagedSnapshot: original),
       throwsStateError,
     );
   });
