@@ -549,6 +549,109 @@ String? publicLogProjection(String line) {
     });
   }
 
+  // Project exact Android producer grammars; no session, errors or text escape.
+  // Missing fields in legacy event-only records are never fabricated.
+  if (event == 'STALL' || event == 'TERMINAL_STATE') {
+    final safe = <String, Object>{'time': timestamp[1]!, 'event': event};
+    if (rest.isEmpty) return jsonEncode(safe);
+    if (event == 'STALL') {
+      final first = RegExp(
+        r'^reason=first_token_timeout elapsed_ms=(\d{1,9}) '
+        r'no_token_produced=true session=[A-Za-z0-9._:-]{1,120}$',
+      ).firstMatch(rest);
+      if (first != null) {
+        return jsonEncode({...safe, 'reason': 'first_token_timeout',
+          'elapsed_ms': int.parse(first[1]!), 'no_token_produced': true});
+      }
+      final idle = RegExp(
+        r'^reason=no_progress_timeout generated_tokens=(\d{1,9}) '
+        r'elapsed_ms=(\d{1,9}) since_last_token_ms=(\d{1,9}) '
+        r'session=[A-Za-z0-9._:-]{1,120}$',
+      ).firstMatch(rest);
+      if (idle != null) {
+        return jsonEncode({...safe, 'reason': 'no_progress_timeout',
+          'generated_tokens': int.parse(idle[1]!),
+          'elapsed_ms': int.parse(idle[2]!),
+          'since_last_token_ms': int.parse(idle[3]!)});
+      }
+      final polling = RegExp(
+        r'^reason=poll_loop_watchdog idle_polls=(\d{1,6}) '
+        r'generated_tokens=(\d{1,9}) elapsed_ms=(\d{1,9}) '
+        r'session=[A-Za-z0-9._:-]{1,120}$',
+      ).firstMatch(rest);
+      if (polling != null) {
+        return jsonEncode({...safe, 'reason': 'poll_loop_watchdog',
+          'idle_polls': int.parse(polling[1]!),
+          'generated_tokens': int.parse(polling[2]!),
+          'elapsed_ms': int.parse(polling[3]!)});
+      }
+      // Preserve the pre-#835 privacy-safe compatibility signal for
+      // producer variants not covered by the enriched grammar. The payload is
+      // discarded completely; no unknown field escapes.
+      return jsonEncode(safe);
+    }
+
+    final first = RegExp(
+      r'^state=stalled reason=first_token_timeout '
+      r'elapsed_ms=(\d{1,9}) no_token_produced=true$',
+    ).firstMatch(rest);
+    if (first != null) {
+      return jsonEncode({...safe, 'state': 'stalled',
+        'reason': 'first_token_timeout', 'elapsed_ms': int.parse(first[1]!),
+        'no_token_produced': true});
+    }
+    final idle = RegExp(
+      r'^state=stalled reason=no_progress_timeout '
+      r'generated_tokens=(\d{1,9}) elapsed_ms=(\d{1,9}) '
+      r'since_last_token_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (idle != null) {
+      return jsonEncode({...safe, 'state': 'stalled',
+        'reason': 'no_progress_timeout',
+        'generated_tokens': int.parse(idle[1]!),
+        'elapsed_ms': int.parse(idle[2]!),
+        'since_last_token_ms': int.parse(idle[3]!)});
+    }
+    final polling = RegExp(
+      r'^state=stalled reason=poll_loop_watchdog '
+      r'idle_polls=(\d{1,6}) generated_tokens=(\d{1,9}) '
+      r'elapsed_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (polling != null) {
+      return jsonEncode({...safe, 'state': 'stalled',
+        'reason': 'poll_loop_watchdog',
+        'idle_polls': int.parse(polling[1]!),
+        'generated_tokens': int.parse(polling[2]!),
+        'elapsed_ms': int.parse(polling[3]!)});
+    }
+    // Only success means completion. Nonzero tokens in a stall do not prove
+    // there was a usable partial response.
+    final end = RegExp(
+      r'^state=(success|cancelled) generated_tokens=(\d{1,9}) '
+      r'elapsed_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (end != null) {
+      return jsonEncode({...safe, 'state': end[1]!,
+        'generated_tokens': int.parse(end[2]!),
+        'elapsed_ms': int.parse(end[3]!)});
+    }
+    final failed = RegExp(
+      r'^state=failed reason=repeated_token_loop '
+      r'generated_tokens=(\d{1,9}) elapsed_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (failed != null) {
+      return jsonEncode({...safe, 'state': 'failed',
+        'reason': 'repeated_token_loop',
+        'generated_tokens': int.parse(failed[1]!),
+        'elapsed_ms': int.parse(failed[2]!)});
+    }
+    // Preserve the historical event-only signal for existing terminal
+    // producers that are not enriched above. Unknown/free-form payloads,
+    // including error text, paths, prompts, responses and identifiers, are
+    // discarded completely.
+    return jsonEncode(safe);
+  }
+
   if (event == 'FIRST_TOKEN_DEADLINE_EXTENDED') {
     final m = RegExp(
       r'^session=[A-Za-z0-9._:-]{1,120} '
