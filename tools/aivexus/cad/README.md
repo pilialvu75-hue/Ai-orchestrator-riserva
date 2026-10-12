@@ -15,3 +15,23 @@ Generate a new receipt from the actual files each time. STEP exports contain a c
 Only local build, file geometry and export validation can be claimed by this fixture. Real Fusion opening, physical printing, Cantiere runner integration, browser/device behavior and remote Diagnostics require independent evidence. Absent a CAD runner, surface capability unavailable with a recoverable project draft. A successful local fixture is not a deployed Studio 3D.
 
 Bounded source under tools/aivexus/cad and lib/app_factory/workshop/domains/cad only. Shared Aivexus ProjectExtension, attachment store, ResourceExchange, project hub and workflow files are Cantiere-owned.
+
+
+## Test coverage and evidence boundary
+
+The local Python test suite includes real STEP/STL/3MF round trips for
+specification revisions 1 (4 mm) and 2 (5 mm), plus an intentionally damaged
+STL that **must** fail mesh validation. Run the Python tests in a separately
+provisioned CAD toolchain:
+
+    python -m unittest discover -p test_cad1.py -v
+
+The existing six GitHub Flutter/platform workflows do **not** install and
+execute this Python/CadQuery test suite. Their PASS is not evidence of
+CadQuery export correctness, of binary artifact persistence, or of a connected
+runner. Record the toolchain version and generated output SHA-256 from the
+actual runtime whenever claiming such evidence.
+
+Cantiere's shared attachment store and ResourceExchange integration remain
+outside this domain-only PR. Do not put local sample hashes in shared project
+state without storing and verifying the corresponding immutable bytes.
