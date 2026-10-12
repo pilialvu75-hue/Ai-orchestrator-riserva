@@ -46,12 +46,23 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) async {
-    if (_runtimeMode() != AiRuntimeMode.cloud ||
-        !AssistantWebSearchPolicy.shouldSearch(userPrompt)) {
+    if (_runtimeMode() != AiRuntimeMode.cloud) {
       return _delegate.sendMessage(
         sessionId: sessionId,
         userPrompt: userPrompt,
         systemPrompt: systemPrompt,
+        attachments: attachments,
+        onPartialResponse: onPartialResponse,
+        onRuntimeNotice: onRuntimeNotice,
+      );
+    }
+
+    final temporalSystemPrompt = _withSystemTime(systemPrompt);
+    if (!AssistantWebSearchPolicy.shouldSearch(userPrompt)) {
+      return _delegate.sendMessage(
+        sessionId: sessionId,
+        userPrompt: userPrompt,
+        systemPrompt: temporalSystemPrompt,
         attachments: attachments,
         onPartialResponse: onPartialResponse,
         onRuntimeNotice: onRuntimeNotice,
@@ -73,7 +84,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
 
       if (result.success && result.output.trim().isNotEmpty) {
         enrichedSystemPrompt = _mergeSystemPrompt(
-          systemPrompt,
+          temporalSystemPrompt,
           result.output,
         );
         RuntimeEventLog.instance.emit(
@@ -103,11 +114,37 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
     return _delegate.sendMessage(
       sessionId: sessionId,
       userPrompt: userPrompt,
-      systemPrompt: enrichedSystemPrompt ?? systemPrompt,
+      systemPrompt: enrichedSystemPrompt ?? temporalSystemPrompt,
       attachments: attachments,
       onPartialResponse: onPartialResponse,
       onRuntimeNotice: onRuntimeNotice,
     );
+  }
+
+  String _withSystemTime(String? base) {
+    final now = DateTime.now();
+    final utc = now.toUtc();
+    final offset = now.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final minutes = offset.inMinutes.abs();
+    final hoursPart = (minutes ~/ 60).toString().padLeft(2, '0');
+    final minutesPart = (minutes % 60).toString().padLeft(2, '0');
+    final zone = '$sign$hoursPart:$minutesPart';
+    RuntimeEventLog.instance.emit(
+      '[SYSTEM_TIME_CONTEXT] mode=cloud injected=true source=device_clock '
+      'utc_offset=$zone',
+    );
+    return <String>[
+      'SYSTEM TIME CONTEXT (device clock; refreshes every request): '
+          'local=${now.toIso8601String()}, '
+          'utc=${utc.toIso8601String()}, '
+          'timezone_name=${now.timeZoneName}, utc_offset=$zone. '
+          'Use this as the current date and time for temporal reasoning. '
+          'Compare publication and event dates to this clock; do not treat '
+          'events earlier than today as future events. Device time may be '
+          'incorrect; verify consequential current facts using reliable sources.',
+      if (base != null && base.trim().isNotEmpty) base.trim(),
+    ].join('\n\n');
   }
 
   String _mergeSystemPrompt(
