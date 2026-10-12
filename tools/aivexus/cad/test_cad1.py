@@ -14,7 +14,7 @@ import unittest
 import cadquery as cq
 
 from parametric_plate import export_part, make_part, read_parameters, expected_volume
-from validate_plate import check_brep, check_mesh, check_3mf_units
+from validate_plate import check_brep, check_mesh, check_3mf_units, validate
 
 EXAMPLE = json.loads(
     (Path(__file__).parent / "fixtures" / "plate_spec.json").read_text(
@@ -100,6 +100,45 @@ class Cad1Tests(unittest.TestCase):
             paths["STL"].write_bytes(b"corrupted mesh payload")
             with self.assertRaises(Exception):
                 check_mesh(paths["STL"], EXAMPLE)
+
+
+    def test_receipt_contains_only_verified_output_hashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            spec_path = directory / "extension.json"
+            spec_path.write_text(json.dumps(EXAMPLE), encoding="utf-8")
+            paths = export_part(make_part(EXAMPLE), directory)
+            result = validate(spec_path, directory, directory / "report.json")
+            self.assertEqual(result["status"], "PASS")
+            self.assertTrue(result["notCanonicalEvidence"])
+            self.assertEqual(len(result["artifacts"]), 3)
+            for artifact in result["artifacts"]:
+                path = paths[artifact["format"]]
+                self.assertEqual(
+                    artifact["sha256"],
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+                self.assertEqual(artifact["sourceSpecRevision"], 1)
+
+    def test_receipt_never_publishes_corrupted_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            spec_path = directory / "extension.json"
+            spec_path.write_text(json.dumps(EXAMPLE), encoding="utf-8")
+            paths = export_part(make_part(EXAMPLE), directory)
+            paths["STL"].write_bytes(b"corrupt payload")
+            report_path = directory / "report.json"
+            result = validate(spec_path, directory, report_path)
+            self.assertEqual(result["status"], "FAIL")
+            self.assertEqual(result["artifacts"], [])
+            self.assertTrue(
+                any(c["check"] == "stl_mesh" and c["result"] == "FAIL"
+                    for c in result["checks"])
+            )
+            self.assertEqual(
+                json.loads(report_path.read_text(encoding="utf-8"))["artifacts"],
+                [],
+            )
 
 
 if __name__ == "__main__":
