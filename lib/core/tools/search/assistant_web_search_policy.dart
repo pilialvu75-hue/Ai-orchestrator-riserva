@@ -205,6 +205,7 @@ abstract final class AssistantWebSearchPolicy {
   static bool _timeSensitiveIntent(String value) {
     const alwaysDynamic = <String>[
       'meteo',
+      'tempo fa',
       'weather',
       'météo',
       'notizie',
