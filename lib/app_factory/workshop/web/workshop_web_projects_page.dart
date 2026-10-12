@@ -39,6 +39,7 @@ final class _WorkshopWebProjectsPageState
   WorkshopWebProject? _editingProject;
   String? _loadError;
   final Set<String> _selectedPlatforms = <String>{};
+  AivexusProjectKind _newProjectKind = AivexusProjectKind.software;
   bool _loading = true;
   bool _showNewProject = false;
   bool _busy = false;
@@ -119,6 +120,7 @@ final class _WorkshopWebProjectsPageState
     _titleController.clear();
     _goalController.clear();
     _selectedPlatforms.clear();
+    _newProjectKind = AivexusProjectKind.software;
     _editingProject = null;
     setState(() {
       _selectedProject = null;
@@ -126,11 +128,65 @@ final class _WorkshopWebProjectsPageState
     });
   }
 
+  Future<void> _submitNewProject() async {
+    if (_newProjectKind == AivexusProjectKind.software) {
+      await _prepareProposal();
+      return;
+    }
+    await _createDomainDraft();
+  }
+
   Future<void> _prepareProposal() async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await _prepareAndPersistProposal();
+    } catch (error) {
+      _storageError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _createDomainDraft() async {
+    if (_busy) return;
+    final title = _titleController.text.trim();
+    final goal = _goalController.text.trim();
+    final kind = _newProjectKind;
+    if (title.isEmpty || goal.isEmpty || kind == AivexusProjectKind.software) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Inserisci titolo e descrizione del progetto.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      final now = DateTime.now().toUtc();
+      final project = WorkshopWebProject(
+        id: 'web-project:${now.microsecondsSinceEpoch}',
+        title: title,
+        goal: goal,
+        platforms: kind == AivexusProjectKind.game
+            ? const <String>['Web']
+            : const <String>[],
+        status: WorkshopWebProjectStatus.draft,
+        progress: 0,
+        currentPhase: _projectKindLabel(kind),
+        currentItem: 'Bozza salvata · runner non ancora collegato',
+        createdAt: now,
+        updatedAt: now,
+        extension: AivexusProjectExtension.draft(kind),
+      );
+      await _persist(project);
+      widget.controller.clearConversation();
+      if (mounted) {
+        setState(() {
+          _showNewProject = false;
+        });
+      }
     } catch (error) {
       _storageError(error);
     } finally {
@@ -187,6 +243,9 @@ final class _WorkshopWebProjectsPageState
           currentItem: 'Preparazione proposta',
           createdAt: now,
           updatedAt: now,
+          extension: AivexusProjectExtension.draft(
+            AivexusProjectKind.software,
+          ),
         );
     project = await _persist(project);
     _editingProject = project;
@@ -299,6 +358,7 @@ proposta breve, concreta e approvabile.
         project.projectKind != AivexusProjectKind.software)
       return;
     _editingProject = project;
+    _newProjectKind = AivexusProjectKind.software;
     _titleController.text = project.title;
     _goalController.text = project.goal;
     _selectedPlatforms
@@ -430,7 +490,7 @@ proposta breve, concreta e approvabile.
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         contentPadding: const EdgeInsets.all(16),
-        leading: const Icon(Icons.folder_outlined),
+        leading: Icon(_projectKindIcon(project.projectKind)),
         title: Text(
           project.title,
           maxLines: 2,
@@ -442,7 +502,9 @@ proposta breve, concreta e approvabile.
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                '${project.platforms.join(' · ')} · ${_statusLabel(project.status)}',
+                '${_projectKindLabel(project.projectKind)}'
+                '${project.platforms.isEmpty ? '' : ' · ${project.platforms.join(' · ')}'}'
+                ' · ${_statusLabel(project.status)}',
               ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: project.progress),
@@ -491,67 +553,125 @@ proposta breve, concreta e approvabile.
               ),
               const SizedBox(height: 18),
               Text(
-                'Piattaforme',
+                'Tipo progetto',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              const SizedBox(height: 6),
-              Card(
-                child: Column(
-                  children: _platformOptions
-                      .map(
-                        (platform) => CheckboxListTile(
-                          value: _selectedPlatforms.contains(platform),
-                          title: Text(platform),
-                          controlAffinity: ListTileControlAffinity.leading,
-                          onChanged: _busy
-                              ? null
-                              : (selected) {
-                                  setState(() {
-                                    if (selected == true) {
-                                      _selectedPlatforms.add(platform);
-                                    } else {
-                                      _selectedPlatforms.remove(platform);
-                                    }
-                                  });
-                                },
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
+              const SizedBox(height: 8),
+              SegmentedButton<AivexusProjectKind>(
+                segments: const <ButtonSegment<AivexusProjectKind>>[
+                  ButtonSegment<AivexusProjectKind>(
+                    value: AivexusProjectKind.software,
+                    icon: Icon(Icons.apps_outlined),
+                    label: Text('App'),
+                  ),
+                  ButtonSegment<AivexusProjectKind>(
+                    value: AivexusProjectKind.cad,
+                    icon: Icon(Icons.view_in_ar_outlined),
+                    label: Text('3D'),
+                  ),
+                  ButtonSegment<AivexusProjectKind>(
+                    value: AivexusProjectKind.game,
+                    icon: Icon(Icons.sports_esports_outlined),
+                    label: Text('Game'),
+                  ),
+                ],
+                selected: <AivexusProjectKind>{_newProjectKind},
+                onSelectionChanged: _busy || _editingProject != null
+                    ? null
+                    : (selection) {
+                        setState(() {
+                          _newProjectKind = selection.single;
+                          _selectedPlatforms.clear();
+                        });
+                      },
               ),
+              const SizedBox(height: 8),
+              Text(
+                _projectKindDescription(_newProjectKind),
+                style: const TextStyle(color: Colors.white60, height: 1.35),
+              ),
+              if (_newProjectKind == AivexusProjectKind.software) ...<Widget>[
+                const SizedBox(height: 18),
+                Text(
+                  'Piattaforme',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Card(
+                  child: Column(
+                    children: _platformOptions
+                        .map(
+                          (platform) => CheckboxListTile(
+                            value: _selectedPlatforms.contains(platform),
+                            title: Text(platform),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            onChanged: _busy
+                                ? null
+                                : (selected) {
+                                    setState(() {
+                                      if (selected == true) {
+                                        _selectedPlatforms.add(platform);
+                                      } else {
+                                        _selectedPlatforms.remove(platform);
+                                      }
+                                    });
+                                  },
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               TextField(
                 controller: _goalController,
                 enabled: !_busy,
                 minLines: 5,
                 maxLines: 10,
-                decoration: const InputDecoration(
-                  labelText: 'Cosa deve fare?',
-                  hintText:
-                      'Descrivi il comportamento e il risultato desiderato.',
+                decoration: InputDecoration(
+                  labelText: _newProjectKind == AivexusProjectKind.software
+                      ? 'Cosa deve fare?'
+                      : _newProjectKind == AivexusProjectKind.cad
+                          ? 'Descrivi il modello 3D'
+                          : 'Descrivi il gioco',
+                  hintText: _newProjectKind == AivexusProjectKind.software
+                      ? 'Descrivi il comportamento e il risultato desiderato.'
+                      : _newProjectKind == AivexusProjectKind.cad
+                          ? 'Descrivi forma, misure e risultato desiderato.'
+                          : 'Descrivi regole, obiettivo e controlli desiderati.',
                   alignLabelWithHint: true,
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 18),
               FilledButton.icon(
-                onPressed: _busy ? null : _prepareProposal,
+                onPressed: _busy ? null : _submitNewProject,
                 icon: _busy
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.auto_awesome_outlined),
+                    : Icon(_projectKindIcon(_newProjectKind)),
                 label: Text(
-                  _busy ? 'Preparazione in corso…' : 'Prepara proposta',
+                  _busy
+                      ? 'Salvataggio in corso…'
+                      : _newProjectKind == AivexusProjectKind.software
+                          ? 'Prepara proposta'
+                          : _newProjectKind == AivexusProjectKind.cad
+                              ? 'Crea bozza Stampa 3D'
+                              : 'Crea bozza Videogioco',
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'La creazione non parte da questo pulsante. '
-                'Prima vedrai la proposta e dovrai approvarla esplicitamente.',
-                style: TextStyle(color: Colors.white54, height: 1.4),
+              Text(
+                _newProjectKind == AivexusProjectKind.software
+                    ? 'La creazione non parte da questo pulsante. Prima vedrai '
+                        'la proposta e dovrai approvarla esplicitamente.'
+                    : 'La bozza viene salvata nello stesso elenco progetti. '
+                        'Il runner specializzato non è ancora collegato e '
+                        'nessuna generazione viene simulata.',
+                style: const TextStyle(color: Colors.white54, height: 1.4),
               ),
             ],
           ),
@@ -591,7 +711,10 @@ proposta breve, concreta e approvabile.
               ),
               const SizedBox(height: 8),
               Text(
-                project.platforms.join(' · '),
+                _projectKindLabel(project.projectKind) +
+                    (project.platforms.isEmpty
+                        ? ''
+                        : ' · ${project.platforms.join(' · ')}'),
                 style: const TextStyle(color: Colors.white60),
               ),
               const SizedBox(height: 22),
@@ -608,6 +731,7 @@ proposta breve, concreta e approvabile.
                 ],
               ),
               const SizedBox(height: 12),
+              _infoRow('Tipo', _projectKindLabel(project.projectKind)),
               _infoRow('Fase', project.currentPhase),
               _infoRow('Elemento', project.currentItem),
               _infoRow('Stato', _statusLabel(project.status)),
@@ -652,14 +776,28 @@ proposta breve, concreta e approvabile.
                 ),
               ],
               const SizedBox(height: 18),
-              if (project.isReadOnly ||
-                  project.projectKind != AivexusProjectKind.software)
+              if (project.isReadOnly)
                 const Card(
                   child: ListTile(
                     leading: Icon(Icons.lock_outline),
                     title: Text('Progetto in sola lettura'),
                     subtitle: Text(
-                      'I dati sono conservati. Per modificarli serve uno Studio compatibile.',
+                      'I dati sono conservati, ma questa versione non riconosce '
+                      'l’estensione del progetto.',
+                    ),
+                  ),
+                ),
+              if (!project.isReadOnly &&
+                  project.projectKind != AivexusProjectKind.software)
+                Card(
+                  child: ListTile(
+                    leading: Icon(_projectKindIcon(project.projectKind)),
+                    title: Text(
+                      '${_projectKindLabel(project.projectKind)} · bozza salvata',
+                    ),
+                    subtitle: const Text(
+                      'Il percorso condiviso è attivo, ma il runner specializzato '
+                      'non è ancora collegato. Nessuna generazione viene simulata.',
                     ),
                   ),
                 ),
@@ -705,6 +843,29 @@ proposta breve, concreta e approvabile.
       ),
     );
   }
+
+  static String _projectKindLabel(AivexusProjectKind? kind) => switch (kind) {
+    AivexusProjectKind.software => 'App / Software',
+    AivexusProjectKind.cad => 'Stampa 3D',
+    AivexusProjectKind.game => 'Videogiochi',
+    null => 'Tipo non supportato',
+  };
+
+  static String _projectKindDescription(AivexusProjectKind kind) => switch (kind) {
+    AivexusProjectKind.software =>
+      'App e software seguono il flusso proposta → approvazione del Cantiere.',
+    AivexusProjectKind.cad =>
+      'Stampa 3D salva una bozza CAD nello stesso progetto; il runner 3D arriverà nello Studio dedicato.',
+    AivexusProjectKind.game =>
+      'Videogiochi salva una bozza GameSpec nello stesso progetto; il runner gioco arriverà nello Studio dedicato.',
+  };
+
+  static IconData _projectKindIcon(AivexusProjectKind? kind) => switch (kind) {
+    AivexusProjectKind.software => Icons.apps_outlined,
+    AivexusProjectKind.cad => Icons.view_in_ar_outlined,
+    AivexusProjectKind.game => Icons.sports_esports_outlined,
+    null => Icons.help_outline,
+  };
 
   Widget _infoRow(String label, String value) {
     return Padding(
