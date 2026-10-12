@@ -585,7 +585,10 @@ String? publicLogProjection(String line) {
           'generated_tokens': int.parse(polling[2]!),
           'elapsed_ms': int.parse(polling[3]!)});
       }
-      return null;
+      // Preserve the pre-#835 privacy-safe compatibility signal for
+      // producer variants not covered by the enriched grammar. The payload is
+      // discarded completely; no unknown field escapes.
+      return jsonEncode(safe);
     }
 
     final first = RegExp(
@@ -642,8 +645,11 @@ String? publicLogProjection(String line) {
         'generated_tokens': int.parse(failed[1]!),
         'elapsed_ms': int.parse(failed[2]!)});
     }
-    // Producers with free-form error=$message are not public-safe.
-    return null;
+    // Preserve the historical event-only signal for existing terminal
+    // producers that are not enriched above. Unknown/free-form payloads,
+    // including error text, paths, prompts, responses and identifiers, are
+    // discarded completely.
+    return jsonEncode(safe);
   }
 
   if (event == 'FIRST_TOKEN_DEADLINE_EXTENDED') {
