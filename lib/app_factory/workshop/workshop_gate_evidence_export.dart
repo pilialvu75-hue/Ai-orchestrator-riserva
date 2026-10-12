@@ -14,8 +14,6 @@ abstract final class WorkshopGateEvidenceExport {
   static String encode({
     required String projectId,
     required String taskRequestId,
-    required Map<String, String> originalSnapshot,
-    required Map<String, String> stagedSnapshot,
     required WorkshopTaskInferenceResult result,
   }) {
     if (projectId.trim().isEmpty ||
@@ -30,12 +28,22 @@ abstract final class WorkshopGateEvidenceExport {
     }
     // The actual staged workspace is the source of truth for Review, not the
     // model's potentially stale/tampered proposal transport envelope.
-    final changes = WorkspaceDiff.compare(
-      before: originalSnapshot,
-      after: stagedSnapshot,
-    ).changes;
-    if (changes.isEmpty) {
-      throw StateError('The rejected proposal has no file changes to export.');
+    final before = result.gateEvidenceBaseline;
+    final after = result.gateEvidenceStaged;
+    if (before == null || after == null) {
+      throw StateError('Rejected gate source snapshot is not available.');
+    }
+    final expectedPaths = result.proposal.affectedPaths.toSet();
+    if (expectedPaths.isEmpty ||
+        {...before.keys, ...after.keys}.difference(expectedPaths).isNotEmpty) {
+      throw StateError('Rejected gate evidence contains unrelated file paths.');
+    }
+    final changes = WorkspaceDiff.compare(before: before, after: after).changes;
+    if (changes.isEmpty ||
+        changes.map((change) => change.path).toSet().length !=
+            expectedPaths.length ||
+        !expectedPaths.containsAll(changes.map((change) => change.path))) {
+      throw StateError('Rejected gate source evidence has incomplete coverage.');
     }
 
     final payload = <String, Object?>{
