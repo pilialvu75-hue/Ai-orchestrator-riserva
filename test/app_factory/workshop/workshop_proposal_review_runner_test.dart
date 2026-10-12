@@ -156,6 +156,40 @@ void main() {
       );
     });
 
+    test('long mandatory Reviewer constraints fail closed before inference',
+        () async {
+      RuntimeEventLog.instance.clear();
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"approved":true,"summary":"unchecked"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _longMandatoryReviewSession();
+      await expectLater(
+        WorkshopProposalReviewRunner(
+          inference: _stageInference(_gateways(reviewer)),
+        ).run(session: session),
+        throwsA(isA<StateError>().having(
+          (error) => error.toString(),
+          'error',
+          contains('bounded context size'),
+        )),
+      );
+      expect(reviewer.calls, 0);
+      expect(reviewer.promptsSeen, isEmpty);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.hasChanges, isTrue);
+      expect(session.isApplyApproved, isFalse);
+      expect(
+        RuntimeEventLog.instance.entries.any(
+          (entry) => entry.tag == 'WORKSHOP_REVIEW_PROMPT_OVERSIZE' &&
+              entry.message.contains('compact=true'),
+        ),
+        isTrue,
+      );
+    });
+
     test('retries one transient Reviewer runtime failure with compact bounds',
         () async {
       final reviewer = _StaticGateway(
@@ -716,6 +750,30 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
     AppAiRole.engineer: _StaticGateway(result: idleResult),
     AppAiRole.reviewer: reviewer,
   };
+}
+
+Future<WorkspaceSession> _longMandatoryReviewSession() async {
+  final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+    'lib/main.dart': 'void main() {}',
+  });
+  final session = WorkspaceSession(
+    request: WorkshopRequest(
+      id: 'long-review-request',
+      title: 'Long but mandatory requirements',
+      instruction: 'Preserve all required behaviors without omission.',
+      constraints: List<String>.generate(
+        200,
+        (index) =>
+            'Mandatory constraint $index: preserve exact required behavior.',
+      ),
+      targetFiles: const <String>['lib/main.dart'],
+    ),
+    gateway: gateway,
+  );
+  await session.initialize();
+  session.workspace.write(path: 'lib/main.dart', content: 'void main() { print("ok"); }');
+  session.beginReview();
+  return session;
 }
 
 Future<WorkspaceSession> _oversizedReviewSession() async {
