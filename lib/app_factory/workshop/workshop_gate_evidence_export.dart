@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
 /// Explicit, local-only export of the rejected staged proposal.
@@ -12,6 +14,8 @@ abstract final class WorkshopGateEvidenceExport {
   static String encode({
     required String projectId,
     required String taskRequestId,
+    required Map<String, String> originalSnapshot,
+    required Map<String, String> stagedSnapshot,
     required WorkshopTaskInferenceResult result,
   }) {
     if (projectId.trim().isEmpty ||
@@ -24,8 +28,12 @@ abstract final class WorkshopGateEvidenceExport {
     if (!reviewRejected && !validationRejected) {
       throw StateError('Gate evidence is available only for rejected gates.');
     }
-    final changes = result.proposal.changes.toList(growable: false)
-      ..sort((left, right) => left.path.compareTo(right.path));
+    // The actual staged workspace is the source of truth for Review, not the
+    // model's potentially stale/tampered proposal transport envelope.
+    final changes = WorkspaceDiff.compare(
+      before: originalSnapshot,
+      after: stagedSnapshot,
+    ).changes;
     if (changes.isEmpty) {
       throw StateError('The rejected proposal has no file changes to export.');
     }
@@ -34,6 +42,7 @@ abstract final class WorkshopGateEvidenceExport {
       'schemaVersion': 1,
       'projectId': projectId,
       'taskRequestId': taskRequestId,
+      'source': 'staged_virtual_workspace',
       'failureGate': reviewRejected ? 'review' : 'validation',
       'reviewApproved': result.review.approved,
       'reviewSummary': result.review.summary,
