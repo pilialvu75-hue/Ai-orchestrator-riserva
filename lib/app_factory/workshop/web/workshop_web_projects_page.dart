@@ -358,6 +358,7 @@ proposta breve, concreta e approvabile.
         project.projectKind != AivexusProjectKind.software)
       return;
     _editingProject = project;
+    _newProjectKind = AivexusProjectKind.software;
     _titleController.text = project.title;
     _goalController.text = project.goal;
     _selectedPlatforms
@@ -575,7 +576,7 @@ proposta breve, concreta e approvabile.
                   ),
                 ],
                 selected: <AivexusProjectKind>{_newProjectKind},
-                onSelectionChanged: _busy
+                onSelectionChanged: _busy || _editingProject != null
                     ? null
                     : (selection) {
                         setState(() {
