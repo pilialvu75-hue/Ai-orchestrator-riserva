@@ -1231,7 +1231,9 @@ class _WorkshopProductionDashboardPageState
               if (result != null &&
                   (!result.review.approved || result.validation?.valid == false)) ...<Widget>[
                 OutlinedButton.icon(
-                  onPressed: productionBusy ? null : _copyGateEvidence,
+                  onPressed: (_mutationBusy || execution.isRunning)
+                      ? null
+                      : _copyGateEvidence,
                   icon: const Icon(Icons.code_outlined),
                   label: const Text('Copia evidenze del gate (codice)'),
                 ),
