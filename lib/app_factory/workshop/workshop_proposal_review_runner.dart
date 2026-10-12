@@ -190,7 +190,7 @@ final class WorkshopProposalReviewRunner {
         isBuildRepair || fullPrompt!.length > _maxFullPromptChars;
     final result = await _inference.complete(
       stage: WorkshopStage.review,
-      prompt: _buildPrompt(
+      prompt: _boundedPrompt(
         session,
         implementationPlan: implementationPlan,
         batch: batch,
@@ -264,7 +264,7 @@ final class WorkshopProposalReviewRunner {
     // invalid response is terminal; no approval or partial JSON is invented.
     final recovered = await _inference.completeWithFirstTokenTimeout(
       stage: WorkshopStage.review,
-      prompt: _buildPrompt(
+      prompt: _boundedPrompt(
         session,
         implementationPlan: implementationPlan,
         batch: batch,
@@ -338,6 +338,49 @@ final class WorkshopProposalReviewRunner {
     );
 
     return verdict;
+  }
+
+  /// Fail closed before local inference if even the compact representation
+  /// exceeds the observed safe size. No source is logged or silently dropped.
+  String _boundedPrompt(
+    WorkspaceSession session, {
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    required _WorkshopReviewCoverageManifest coverage,
+    String? implementationPlan,
+    required bool compact,
+  }) {
+    final candidate = _buildPrompt(
+      session,
+      implementationPlan: implementationPlan,
+      batch: batch,
+      batchIndex: batchIndex,
+      batchCount: batchCount,
+      coverage: coverage,
+      compact: compact,
+      emitMetrics: false,
+    );
+    if (candidate.length > _maxFullPromptChars) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_PROMPT_OVERSIZE] '
+        'compact=$compact batch=${batchIndex + 1}/$batchCount '
+        'chars=${candidate.length} max=$_maxFullPromptChars',
+      );
+      throw StateError(
+        'Workshop Reviewer prompt exceeds the bounded context size; '
+        'review was not started.',
+      );
+    }
+    return _buildPrompt(
+      session,
+      implementationPlan: implementationPlan,
+      batch: batch,
+      batchIndex: batchIndex,
+      batchCount: batchCount,
+      coverage: coverage,
+      compact: compact,
+    );
   }
 
   String _buildPrompt(
