@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
@@ -162,6 +164,91 @@ void main() {
 
       expect(session.hasChanges, isFalse);
       expect(session.status, WorkspaceSessionStatus.ready);
+    });
+
+    test('rejects +3140 JVM import in Dart before staging or review',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'physical-3140-mixed-source',
+          title: 'Flutter Android star color on tap',
+          instruction: 'Build a star with black background.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      final payload = jsonEncode(<String, Object?>{
+        'explanation': 'Wrong cross-language import',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content':
+                "import 'com.example.myapp.MyStarView' as star;\\nvoid main() {}",
+          },
+        ],
+      });
+
+      expect(
+        () => const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: payload,
+        ),
+        throwsA(isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('Android/JVM class directly'),
+        )),
+      );
+      expect(session.status, WorkspaceSessionStatus.ready);
+      expect(session.hasChanges, isFalse);
+      expect(session.workspace.contains('lib/main.dart'), isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('keeps legal Flutter imports and native platform files permitted',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'legal-flutter-source',
+          title: 'Flutter app with native platform integration',
+          instruction: 'Add a Flutter entry point and platform channel.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      final payload = jsonEncode(<String, Object?>{
+        'explanation': 'Valid Dart imports with optional native code',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': "import 'package:flutter/material.dart';\\nvoid main() {}",
+          },
+          <String, String>{
+            'path': 'android/app/src/main/kotlin/example/NativeBridge.kt',
+            'type': 'addition',
+            'content': 'class NativeBridge {}',
+          },
+        ],
+      });
+
+      const WorkshopProposalWorkspaceStager().stage(
+        session: session,
+        responseText: payload,
+      );
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.workspace.contains('lib/main.dart'), isTrue);
+      expect(session.workspace.contains(
+        'android/app/src/main/kotlin/example/NativeBridge.kt',
+      ), isTrue);
+      expect(gateway.writeCalls, 0);
     });
 
     test('does not enter review or materialize malformed output', () async {
