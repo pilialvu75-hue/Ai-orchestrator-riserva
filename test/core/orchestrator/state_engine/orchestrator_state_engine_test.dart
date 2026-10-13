@@ -310,6 +310,97 @@ void main() {
     );
 
     testWidgets(
+      'resumes an active session after A to B to A and displays its final reply',
+      (tester) async {
+        const other = ChatMessage(
+          id: 'other', sessionId: 'session-2', role: 'user',
+          content: 'Other conversation', timestamp: 3,
+        );
+        final repository = _PersistingChatRepository([oldQuestion, oldAnswer, other]);
+        late Completer<ChatMessage> reply;
+        repository.onReply = (_) {
+          reply = Completer<ChatMessage>();
+          return reply.future;
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(event);
+        await tester.pump();
+        repository.partial?.call('Partial before switching');
+        engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, [other]);
+        repository.partial?.call('Hidden while viewing B');
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, [other]);
+        // B is not the active send's session, so its refresh remains usable.
+        engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+        await tester.pump();
+        expect(repository.readCount, 3);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        final resumed = engine.state as ChatSending;
+        expect(repository.readCount, 3);
+        expect(resumed.messages.take(2), [oldQuestion, oldAnswer]);
+        expect(resumed.messages[2].content, event.userPrompt);
+        expect(resumed.messages.every((message) => message.sessionId == 'session-1'), isTrue);
+        repository.partial?.call('Resumed partial');
+        await tester.pump();
+        expect((engine.state as ChatSending).messages.last.content, 'Resumed partial');
+        reply.complete(const ChatMessage(
+          id: 'returned-answer', sessionId: 'session-1', role: 'assistant',
+          content: 'Final reply after returning', timestamp: 20,
+        ));
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages.map((message) => message.id), [
+          'old-user', 'old-assistant', 'saved-user-1', 'returned-answer',
+        ]);
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    testWidgets(
+      'a clear invalidates active-session resumption even when viewing another session',
+      (tester) async {
+        const other = ChatMessage(
+          id: 'other', sessionId: 'session-2', role: 'user',
+          content: 'Other conversation', timestamp: 3,
+        );
+        final repository = _PersistingChatRepository([oldQuestion, oldAnswer, other]);
+        late Completer<ChatMessage> reply;
+        late Completer<void> clear;
+        repository.onReply = (_) {
+          reply = Completer<ChatMessage>();
+          return reply.future;
+        };
+        repository.onClear = () {
+          clear = Completer<void>();
+          return clear.future;
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(event);
+        await tester.pump();
+        engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+        await tester.pump();
+        clear.complete();
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, [other]);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, isEmpty);
+        repository.partial?.call('Obsolete after clear');
+        reply.completeError(inferenceError);
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, isEmpty);
+        expect((engine.state as ChatLoaded).runtimeMessage, isNull);
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    testWidgets(
       'ignores callbacks once send failed while recovery read is still pending',
       (tester) async {
         final repository = _PersistingChatRepository([]);

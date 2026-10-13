@@ -41,7 +41,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   List<ChatMessage> _messages = [];
 
-  Object? _activeSend;
+  _ActiveChatSend? _activeSend;
   bool get _sendInFlight => _activeSend != null;
 
   String? _sessionId;
@@ -67,9 +67,15 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) async {
     if (_clearingSessions.contains(event.sessionId)) return;
-    // The active send will reconcile this session when it settles. A refresh
-    // must not replace its optimistic turn with an earlier database snapshot.
-    if (_sendInFlight && _sessionId == event.sessionId) return;
+    // Use send ownership, not the currently displayed session. Returning to a
+    // still-running session resumes its view and eventual reconciliation.
+    final activeSend = _activeSend;
+    if (activeSend != null &&
+        activeSend.sessionId == event.sessionId &&
+        activeSend.resume != null) {
+      activeSend.resume!();
+      return;
+    }
     final revision = _beginHistoryOperation(event.sessionId);
     _log(
       'listener load_messages session=${event.sessionId}',
@@ -237,9 +243,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    final send = Object();
+    final send = _ActiveChatSend(event.sessionId);
     _activeSend = send;
-    final revision = _beginHistoryOperation(event.sessionId);
+    var revision = _beginHistoryOperation(event.sessionId);
 
     try {
       await runInferenceGuarded<void>(
@@ -287,7 +293,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           // Keep one fallback for this turn in the visible history, including
           // attachment identity. Successful reads replace this snapshot with
           // persisted IDs; never append/heuristically match turns by text.
-          _messages = <ChatMessage>[..._messages, optimisticUserMessage];
+          final sendHistory = <ChatMessage>[..._messages, optimisticUserMessage];
+          _messages = sendHistory;
 
           final shouldShowAssistantPlaceholder =
               event.userPrompt.trim().isNotEmpty ||
@@ -309,7 +316,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           var acceptingCallbacks = true;
 
           void emitTransientSendingState() {
-            if (!acceptingCallbacks || !_isCurrent(revision, emit)) return;
+            if (!_isCurrent(revision, emit)) return;
             final shouldRenderAssistantBubble =
                 shouldShowAssistantPlaceholder ||
                     latestPartialContent
@@ -337,6 +344,13 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               ),
             );
           }
+
+          send.resume = () {
+            if (emit.isDone || _sessionId == event.sessionId) return;
+            revision = _beginHistoryOperation(event.sessionId);
+            _messages = sendHistory;
+            emitTransientSendingState();
+          };
 
           emit(
             ChatSending(
@@ -593,6 +607,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     if (!_clearingSessions.add(event.sessionId)) return;
     final revision = _beginHistoryOperation(event.sessionId);
     final send = _activeSend;
+    if (send != null && send.sessionId == event.sessionId) send.resume = null;
     _log(
       '[UI_DEBUG] '
       'action=clear_chat_reset_begin '
@@ -603,10 +618,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       await _chatRepository.clearSession(
         event.sessionId,
       );
+      if (send?.sessionId == event.sessionId && identical(_activeSend, send)) {
+        _activeSend = null;
+      }
       if (!_isCurrent(revision, emit)) return;
 
       _messages = <ChatMessage>[];
-      if (identical(_activeSend, send)) _activeSend = null;
 
       emit(
         const ChatLoaded(
@@ -696,4 +713,11 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
     return super.close();
   }
+}
+
+class _ActiveChatSend {
+  _ActiveChatSend(this.sessionId);
+
+  final String sessionId;
+  void Function()? resume;
 }
