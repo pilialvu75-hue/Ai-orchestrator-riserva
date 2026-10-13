@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_gate_evidence_export.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
@@ -406,6 +409,8 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(realGateway);
+      // Simulate certified Library code already staged before Engineer.
+      session.workspace.write(path: 'lib/reuse.dart', content: 'library reuse');
 
       final result = await WorkshopTaskInferencePipeline(
         inference: _stageInference(
@@ -420,6 +425,19 @@ void main() {
       expect(result.readyForApproval, isFalse);
       expect(result.review.approved, isFalse);
       expect(result.validation, isNull);
+      expect(result.gateEvidenceBaseline, <String, String>{'lib/app.dart': 'old'});
+      expect(result.gateEvidenceStaged, <String, String>{'lib/app.dart': 'repaired'});
+      final report = WorkshopGateEvidenceExport.encode(
+        projectId: 'project-1',
+        taskRequestId: 'pipeline-request',
+        result: result,
+      );
+      final changes = (jsonDecode(report) as Map<String, dynamic>)['changes']
+          as List<dynamic>;
+      expect(changes, hasLength(1));
+      expect((changes.single as Map<String, dynamic>)['before'], 'old');
+      expect((changes.single as Map<String, dynamic>)['after'], 'repaired');
+      expect(report, isNot(contains('lib/reuse.dart')));
       expect(session.status, WorkspaceSessionStatus.blocked);
       expect(engineer.calls, 3);
       expect(reviewer.calls, 3);

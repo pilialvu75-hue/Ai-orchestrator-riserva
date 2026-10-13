@@ -41,6 +41,10 @@ final class WorkshopProposalReviewRunner {
   final Future<bool> Function(CancellationToken? cancellationToken)
       _memoryRecoveryWaiter;
 
+  // Physical +3117: 9,385-char full Reviewer input failed before any token;
+  // the existing 6,601-char compact input ran. This is only a prompt-shape
+  // selection threshold, not a token-budget, model, retry or gate change.
+  static const int _maxFullPromptChars = 7000;
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
   static const Duration _retryFirstTokenTimeout = Duration(seconds: 75);
@@ -166,10 +170,27 @@ final class WorkshopProposalReviewRunner {
         batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount';
     final sessionId = 'workshop:review:$requestId$batchSuffix';
 
-    final primaryCompact = _isBuildRepairRequest(session);
+    // Probe the full representation without emitting an attempted-inference
+    // event. A full prompt known to be oversized starts compact immediately.
+    // The actual one submitted prompt is still logged by _buildPrompt.
+    final isBuildRepair = _isBuildRepairRequest(session);
+    final fullPrompt = isBuildRepair
+        ? null
+        : _buildPrompt(
+            session,
+            implementationPlan: implementationPlan,
+            batch: batch,
+            batchIndex: batchIndex,
+            batchCount: batchCount,
+            coverage: coverage,
+            compact: false,
+            emitMetrics: false,
+          );
+    final primaryCompact =
+        isBuildRepair || fullPrompt!.length > _maxFullPromptChars;
     final result = await _inference.complete(
       stage: WorkshopStage.review,
-      prompt: _buildPrompt(
+      prompt: _boundedPrompt(
         session,
         implementationPlan: implementationPlan,
         batch: batch,
@@ -243,7 +264,7 @@ final class WorkshopProposalReviewRunner {
     // invalid response is terminal; no approval or partial JSON is invented.
     final recovered = await _inference.completeWithFirstTokenTimeout(
       stage: WorkshopStage.review,
-      prompt: _buildPrompt(
+      prompt: _boundedPrompt(
         session,
         implementationPlan: implementationPlan,
         batch: batch,
@@ -319,6 +340,49 @@ final class WorkshopProposalReviewRunner {
     return verdict;
   }
 
+  /// Fail closed before local inference if even the compact representation
+  /// exceeds the observed safe size. No source is logged or silently dropped.
+  String _boundedPrompt(
+    WorkspaceSession session, {
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    required _WorkshopReviewCoverageManifest coverage,
+    String? implementationPlan,
+    required bool compact,
+  }) {
+    final candidate = _buildPrompt(
+      session,
+      implementationPlan: implementationPlan,
+      batch: batch,
+      batchIndex: batchIndex,
+      batchCount: batchCount,
+      coverage: coverage,
+      compact: compact,
+      emitMetrics: false,
+    );
+    if (candidate.length > _maxFullPromptChars) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_PROMPT_OVERSIZE] '
+        'compact=$compact batch=${batchIndex + 1}/$batchCount '
+        'chars=${candidate.length} max=$_maxFullPromptChars',
+      );
+      throw StateError(
+        'Workshop Reviewer prompt exceeds the bounded context size; '
+        'review was not started.',
+      );
+    }
+    return _buildPrompt(
+      session,
+      implementationPlan: implementationPlan,
+      batch: batch,
+      batchIndex: batchIndex,
+      batchCount: batchCount,
+      coverage: coverage,
+      compact: compact,
+    );
+  }
+
   String _buildPrompt(
     WorkspaceSession session, {
     required List<GitWorkspaceFileChange> batch,
@@ -327,6 +391,7 @@ final class WorkshopProposalReviewRunner {
     required _WorkshopReviewCoverageManifest coverage,
     String? implementationPlan,
     bool compact = false,
+    bool emitMetrics = true,
   }) {
     final request = session.context.request;
     final isBuildRepair = _isBuildRepairRequest(session);
@@ -528,13 +593,15 @@ Do not return markdown fences or any text outside the JSON object.
 '''
             .trim();
 
-    RuntimeEventLog.instance.emit(
-      '[WORKSHOP_REVIEW_PROMPT] '
-      'compact=$compact batch=${batchIndex + 1}/$batchCount '
-      'chars=${prompt.length} files=${changes.length} '
-      'coverage=${coverage.fingerprint} '
-      'plan_chars=${boundedPlan?.length ?? 0}',
-    );
+    if (emitMetrics) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_REVIEW_PROMPT] '
+        'compact=$compact batch=${batchIndex + 1}/$batchCount '
+        'chars=${prompt.length} files=${changes.length} '
+        'coverage=${coverage.fingerprint} '
+        'plan_chars=${boundedPlan?.length ?? 0}',
+      );
+    }
     return prompt;
   }
 

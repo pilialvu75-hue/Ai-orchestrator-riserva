@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.da
 import 'package:ai_orchestrator/app_factory/workshop/workshop_conversation_selection.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_device_acceptance.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_gate_evidence_export.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_execution_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_recovery_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_lifecycle_bundle.dart';
@@ -1071,6 +1072,32 @@ class _WorkshopProductionDashboardPageState
     );
   }
 
+  /// Copies the rejected task's real source diff only after an explicit tap.
+  /// Never sends raw source to public Diagnostics or another service.
+  Future<void> _copyGateEvidence() async {
+    final handle = _currentHandle;
+    final result = _currentInferenceResult;
+    if (handle == null || result == null) return;
+
+    try {
+      final evidence = WorkshopGateEvidenceExport.encode(
+        projectId: handle.plan.id,
+        taskRequestId: handle.session.context.request.id,
+        result: result,
+      );
+      await Clipboard.setData(ClipboardData(text: evidence));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Evidenze del gate copiate.')),
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Evidenze non disponibili: $error')),
+      );
+    }
+  }
+
   String? get _activeTaskId =>
       widget.bundle.dashboardController.state.activeTaskId?.trim();
 
@@ -1198,6 +1225,17 @@ class _WorkshopProductionDashboardPageState
                   onPressed: _mutationBusy ? null : _copyDeviceAcceptanceReport,
                   icon: const Icon(Icons.receipt_long_outlined),
                   label: const Text('Copia report accettazione'),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (result != null &&
+                  (!result.review.approved || result.validation?.valid == false)) ...<Widget>[
+                OutlinedButton.icon(
+                  onPressed: (_mutationBusy || execution.isRunning)
+                      ? null
+                      : _copyGateEvidence,
+                  icon: const Icon(Icons.code_outlined),
+                  label: const Text('Copia evidenze del gate (codice)'),
                 ),
                 const SizedBox(height: 8),
               ],

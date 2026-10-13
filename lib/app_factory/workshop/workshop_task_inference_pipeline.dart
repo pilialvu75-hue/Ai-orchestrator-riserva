@@ -22,11 +22,19 @@ final class WorkshopTaskInferenceResult {
     required this.proposal,
     required this.review,
     this.validation,
+    this.gateEvidenceBaseline,
+    this.gateEvidenceStaged,
   });
 
   final WorkshopChangeProposal proposal;
   final WorkshopReviewVerdict review;
   final WorkshopValidationVerdict? validation;
+
+  /// Captured at the rejected gate, scoped only to affected Engineer paths.
+  /// The baseline is after Library reuse but before the initial Engineer
+  /// proposal; the staged snapshot is the exact source judged by the gate.
+  final Map<String, String>? gateEvidenceBaseline;
+  final Map<String, String>? gateEvidenceStaged;
 
   bool get readyForApproval =>
       review.approved && validation?.valid == true;
@@ -232,9 +240,11 @@ final class WorkshopTaskInferencePipeline {
       if (!review.approved) {
         if (repairAttempts >= _maxGateRepairAttempts ||
             cancellationToken?.isCancelled == true) {
-          return WorkshopTaskInferenceResult(
+          return _rejectedGateResult(
+            session: session,
             proposal: currentProposal,
             review: review,
+            baseline: revisionBaseline,
           );
         }
 
@@ -271,13 +281,21 @@ final class WorkshopTaskInferencePipeline {
         cancellationToken: cancellationToken,
       );
 
-      if (validation.valid ||
-          repairAttempts >= _maxGateRepairAttempts ||
-          cancellationToken?.isCancelled == true) {
+      if (validation.valid) {
         return WorkshopTaskInferenceResult(
           proposal: currentProposal,
           review: review,
           validation: validation,
+        );
+      }
+      if (repairAttempts >= _maxGateRepairAttempts ||
+          cancellationToken?.isCancelled == true) {
+        return _rejectedGateResult(
+          session: session,
+          proposal: currentProposal,
+          review: review,
+          validation: validation,
+          baseline: revisionBaseline,
         );
       }
 
@@ -304,6 +322,29 @@ final class WorkshopTaskInferencePipeline {
         cancellationToken: cancellationToken,
       );
     }
+  }
+
+  static WorkshopTaskInferenceResult _rejectedGateResult({
+    required WorkspaceSession session,
+    required WorkshopChangeProposal proposal,
+    required WorkshopReviewVerdict review,
+    WorkshopValidationVerdict? validation,
+    required Map<String, String> baseline,
+  }) {
+    final current = session.workspace.snapshot;
+    final before = <String, String>{};
+    final after = <String, String>{};
+    for (final path in proposal.affectedPaths) {
+      if (baseline.containsKey(path)) before[path] = baseline[path]!;
+      if (current.containsKey(path)) after[path] = current[path]!;
+    }
+    return WorkshopTaskInferenceResult(
+      proposal: proposal,
+      review: review,
+      validation: validation,
+      gateEvidenceBaseline: Map<String, String>.unmodifiable(before),
+      gateEvidenceStaged: Map<String, String>.unmodifiable(after),
+    );
   }
 
   Future<WorkshopChangeProposal> _runRevision({
