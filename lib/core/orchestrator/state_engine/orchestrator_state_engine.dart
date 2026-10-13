@@ -45,7 +45,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   String? _sessionId;
   int _historyRevision = 0;
-  final Map<String, Completer<void>> _clearingSessions = {};
+  final Map<String, Completer<bool>> _clearingSessions = {};
 
   // Every operation that can replace the visible conversation invalidates
   // earlier reads/callbacks. Repository cancellation and deadlines stay owned
@@ -306,10 +306,19 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             // A submitted prompt already left the composer. Keep its snapshot
             // visible and own the send gate while waiting for the clear, so it
             // is neither dropped nor persisted into a deletion in progress.
-            if (pendingClear != null) await pendingClear.future;
+            final clearedBeforeSend = pendingClear != null
+                ? await pendingClear.future
+                : false;
             if (send.invalidatedByClear || emit.isDone) return;
 
             if (originalMessageId != null) {
+              // A fallback has no proven DB identity. Never guess by text or
+              // silently turn its edit into a duplicate appended user turn.
+              if (!clearedBeforeSend && originalMessageId.startsWith('pending-user-')) {
+                throw const DatabaseFailure(
+                  'Saved message identity is unavailable. Reload the conversation before retrying this edit.',
+                );
+              }
               // Editing owns the same send throughout truncation and resubmit.
               // Navigation suppresses emissions, but must not abandon a prompt
               // after its original turn has already been deleted.
@@ -317,6 +326,11 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 event.sessionId, originalMessageId,
               );
               if (send.invalidatedByClear || emit.isDone) return;
+              if (deleted == 0 && !clearedBeforeSend) {
+                throw const DatabaseFailure(
+                  'The original message is no longer available. Reload the conversation before retrying this edit.',
+                );
+              }
               _log(
                 '[EDIT_HISTORY_TRUNCATED] '
                 'session=${event.sessionId} '
@@ -569,7 +583,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) async {
     if (_clearingSessions.containsKey(event.sessionId)) return;
-    final clearing = Completer<void>();
+    final clearing = Completer<bool>();
     _clearingSessions[event.sessionId] = clearing;
     // A background clear invalidates that session's send, not the displayed
     // conversation. Only a visible clear may replace the current view.
@@ -587,10 +601,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       'session=${event.sessionId}',
     );
 
+    var cleared = false;
     try {
       await _chatRepository.clearSession(
         event.sessionId,
       );
+      cleared = true;
       if (send?.sessionId == event.sessionId && identical(_activeSend, send)) {
         _activeSend = null;
       }
@@ -632,7 +648,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       );
     } finally {
       _clearingSessions.remove(event.sessionId);
-      clearing.complete();
+      clearing.complete(cleared);
     }
   }
 

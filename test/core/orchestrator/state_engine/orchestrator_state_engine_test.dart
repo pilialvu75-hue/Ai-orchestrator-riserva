@@ -208,6 +208,84 @@ void main() {
       },
     );
 
+    for (final fromEdit in [false, true]) {
+      testWidgets(
+        'rejects a pending-ID edit without duplicating data and allows retry after reload (edit: $fromEdit)',
+        (tester) async {
+          final repository = _PersistingChatRepository(fromEdit
+              ? [oldQuestion, oldAnswer, editedQuestion, editedAnswer]
+              : []);
+          final engine = OrchestratorStateEngine(chatRepository: repository);
+          engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+          await tester.pump();
+          if (fromEdit) {
+            repository.onDelete = () async => throw StateError('Truncation failed');
+            engine.add(editEvent);
+          } else {
+            repository.failReads = true;
+            repository.onReply = (_) async => throw inferenceError;
+            engine.add(event);
+          }
+          await tester.pump();
+          final fallback = (engine.state as ChatLoaded).messages.last;
+          expect(fallback.id, startsWith('pending-user-'));
+          final before = List<ChatMessage>.of(repository.messages);
+          final sends = repository.sendCount;
+          final deletions = repository.deleteCount;
+          engine.add(EditMessageEvent(
+            sessionId: 'session-1', originalMessageId: fallback.id,
+            newUserPrompt: 'Retry input', attachments: [attachment],
+          ));
+          await tester.pump();
+          final rejected = engine.state as ChatLoaded;
+          expect(rejected.messages.last.content, 'Retry input');
+          expect(rejected.messages.last.attachments, [attachment]);
+          expect(rejected.runtimeMessage, contains('Reload the conversation'));
+          expect(repository.messages, before);
+          expect(repository.sendCount, sends);
+          expect(repository.deleteCount, deletions);
+          repository.failReads = false;
+          repository.onDelete = null;
+          repository.onReply = null;
+          engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+          await tester.pump();
+          final storedId = fromEdit
+              ? editedQuestion.id
+              : (engine.state as ChatLoaded).messages.last.id;
+          engine.add(EditMessageEvent(
+            sessionId: 'session-1', originalMessageId: storedId,
+            newUserPrompt: 'Retry input', attachments: [attachment],
+          ));
+          await tester.pump();
+          final loaded = engine.state as ChatLoaded;
+          expect(repository.sendCount, sends + 1);
+          expect(repository.deleteCount, deletions + 1);
+          expect(loaded.messages.where((m) => m.role == 'user').length, fromEdit ? 2 : 1);
+          expect(loaded.messages.any((m) => m.id == storedId || m.isPending), isFalse);
+          expect(loaded.messages[loaded.messages.length - 2].content, 'Retry input');
+          await tester.runAsync(engine.close);
+        },
+      );
+    }
+
+    testWidgets(
+      'does not append an edit when its persistent target is missing',
+      (tester) async {
+        final repository = _PersistingChatRepository([oldQuestion]);
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(editEvent);
+        await tester.pump();
+        final loaded = engine.state as ChatLoaded;
+        expect(repository.messages, [oldQuestion]);
+        expect(repository.sendCount, 0);
+        expect(loaded.messages.last.content, editEvent.newUserPrompt);
+        expect(loaded.runtimeMessage, contains('Reload the conversation'));
+        await tester.runAsync(engine.close);
+      },
+    );
+
     for (final partial in ['', 'Unfinished answer']) {
       testWidgets(
         'reloads persisted user after inference error (partial: "$partial")',
