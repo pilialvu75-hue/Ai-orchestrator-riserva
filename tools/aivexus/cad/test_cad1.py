@@ -102,6 +102,41 @@ class Cad1Tests(unittest.TestCase):
                 check_mesh(paths["STL"], EXAMPLE)
 
 
+
+    def _assert_shifted_bores_rejected(self, fmt):
+        """Same total volume and box, but holes moved from the CAD source."""
+        with tempfile.TemporaryDirectory() as tmp:
+            changed = copy.deepcopy(EXAMPLE)
+            for hole, center_x in zip(
+                changed["domainSpec"]["parameters"]["holes"], (20, 40)
+            ):
+                hole["centerXMm"] = center_x
+            path = Path(tmp) / ("shifted." + fmt.lower())
+            cq.exporters.export(
+                make_part(changed), str(path), exportType=fmt,
+                tolerance=0.02, angularTolerance=0.05, unit="MM",
+            )
+            with self.assertRaisesRegex(ValueError, "bore center"):
+                check_mesh(path, EXAMPLE)
+
+    def test_shifted_holes_stl_rejected(self):
+        self._assert_shifted_bores_rejected("STL")
+
+    def test_shifted_holes_3mf_rejected(self):
+        self._assert_shifted_bores_rejected("3MF")
+
+    def test_mesh_evidence_covers_three_cross_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            files = export_part(make_part(EXAMPLE), Path(tmp))
+            for fmt in ("STL", "3MF"):
+                proof = check_mesh(files[fmt], EXAMPLE)
+                self.assertEqual(len(proof["holeSections"]), 3)
+                self.assertEqual(
+                    [len(section["boreCentersMm"])
+                     for section in proof["holeSections"]],
+                    [2, 2, 2],
+                )
+
     def test_receipt_contains_only_verified_output_hashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
