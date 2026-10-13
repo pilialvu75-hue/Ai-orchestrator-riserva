@@ -605,7 +605,11 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) async {
     if (!_clearingSessions.add(event.sessionId)) return;
-    final revision = _beginHistoryOperation(event.sessionId);
+    // A background clear invalidates that session's send, not the displayed
+    // conversation. Only a visible clear may replace the current view.
+    final revision = _sessionId == null || _sessionId == event.sessionId
+        ? _beginHistoryOperation(event.sessionId)
+        : null;
     final send = _activeSend;
     if (send != null && send.sessionId == event.sessionId) send.resume = null;
     _log(
@@ -621,7 +625,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       if (send?.sessionId == event.sessionId && identical(_activeSend, send)) {
         _activeSend = null;
       }
-      if (!_isCurrent(revision, emit)) return;
+      if (revision == null || !_isCurrent(revision, emit)) return;
 
       _messages = <ChatMessage>[];
 
@@ -637,7 +641,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         'session=${event.sessionId}',
       );
     } catch (error) {
-      if (!_isCurrent(revision, emit)) return;
+      if (revision == null || !_isCurrent(revision, emit)) return;
       _log(
         '[UI_DEBUG] '
         'action=clear_chat_reset_failed '

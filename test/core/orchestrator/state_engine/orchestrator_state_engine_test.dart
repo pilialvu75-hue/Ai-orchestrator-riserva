@@ -400,6 +400,52 @@ void main() {
       },
     );
 
+    for (final clearFails in [false, true]) {
+      testWidgets(
+        'clearing an active background session preserves the displayed chat (failure: $clearFails)',
+        (tester) async {
+          const other = ChatMessage(
+            id: 'other', sessionId: 'session-2', role: 'user',
+            content: 'Other conversation', timestamp: 3,
+          );
+          final repository = _PersistingChatRepository([other]);
+          late Completer<ChatMessage> reply;
+          late Completer<void> clear;
+          repository.onReply = (_) {
+            reply = Completer<ChatMessage>();
+            return reply.future;
+          };
+          repository.onClear = () {
+            clear = Completer<void>();
+            return clear.future;
+          };
+          final engine = OrchestratorStateEngine(chatRepository: repository);
+          engine.add(event);
+          await tester.pump();
+          engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+          await tester.pump();
+          final displayed = engine.state as ChatLoaded;
+          expect(displayed.messages, [other]);
+          engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+          await tester.pump();
+          expect(engine.state, same(displayed));
+          if (clearFails) {
+            clear.completeError(StateError('Clear failed'));
+          } else {
+            clear.complete();
+          }
+          await tester.pump();
+          expect(engine.state, same(displayed));
+          repository.partial?.call('Obsolete background response');
+          reply.completeError(inferenceError);
+          await tester.pump();
+          expect(engine.state, same(displayed));
+          expect(repository.readCount, 1);
+          await tester.runAsync(engine.close);
+        },
+      );
+    }
+
     testWidgets(
       'ignores callbacks once send failed while recovery read is still pending',
       (tester) async {
