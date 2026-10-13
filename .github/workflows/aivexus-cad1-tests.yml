@@ -1,0 +1,75 @@
+name: Aivexus CAD-1 Domain Tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/aivexus-cad1-tests.yml'
+      - 'tools/aivexus/cad/**'
+      - 'lib/app_factory/workshop/domains/cad/**'
+      - 'test/app_factory/workshop/domains/cad/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aivexus-cad1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cadquery-domain:
+    name: Measured CAD / real STEP STL 3MF
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out PR code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure supported Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tools/aivexus/cad/requirements-ci.txt
+
+      - name: Install isolated domain dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: -r tools/aivexus/cad/requirements-ci.txt
+
+      - name: Run real CAD regression tests
+        run: |
+          python -m unittest discover -s tools/aivexus/cad -p test_cad1.py -v
+
+      - name: Export and validate revision 1
+        run: |
+          mkdir -p "$RUNNER_TEMP/cad1/revision_1"
+          python tools/aivexus/cad/parametric_plate.py tools/aivexus/cad/fixtures/plate_spec.json --out "$RUNNER_TEMP/cad1/revision_1"
+          python tools/aivexus/cad/validate_plate.py tools/aivexus/cad/fixtures/plate_spec.json --exports "$RUNNER_TEMP/cad1/revision_1" --report "$RUNNER_TEMP/cad1/revision_1/receipt.json"
+
+      - name: Export and validate revision 2
+        run: |
+          mkdir -p "$RUNNER_TEMP/cad1/revision_2"
+          python - <<'PY'
+          import copy, json
+          from pathlib import Path
+          src = json.loads(Path("tools/aivexus/cad/fixtures/plate_spec.json").read_text(encoding="utf-8"))
+          rev2 = copy.deepcopy(src)
+          rev2["specRevision"] = 2
+          rev2["domainSpec"]["parameters"]["thicknessMm"] = 5
+          Path("/tmp/aivexus_cad1_revision2.json").write_text(json.dumps(rev2), encoding="utf-8")
+          PY
+          python tools/aivexus/cad/parametric_plate.py /tmp/aivexus_cad1_revision2.json --out "$RUNNER_TEMP/cad1/revision_2"
+          python tools/aivexus/cad/validate_plate.py /tmp/aivexus_cad1_revision2.json --exports "$RUNNER_TEMP/cad1/revision_2" --report "$RUNNER_TEMP/cad1/revision_2/receipt.json"
+
+      - name: Retain local-only CAD validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cad1-export-receipts-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cad1/revision_1/receipt.json
+            ${{ runner.temp }}/cad1/revision_2/receipt.json
+          if-no-files-found: warn
+          retention-days: 14
