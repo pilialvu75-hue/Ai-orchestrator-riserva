@@ -336,7 +336,7 @@ void main() {
       expect(result.affectedPaths, <String>['lib/main.dart']);
       expect(engineer.calls, 2);
       expect(engineer.maxTokensValues, <int?>[640, 768]);
-      expect(engineer.prompts.first, contains('Never import Kotlin/Java'));
+      expect(engineer.prompts.first, contains('Never import JVM class'));
       expect(engineer.prompts.last,
           contains('Android/JVM class directly'));
       expect(engineer.systemPrompts.last,
