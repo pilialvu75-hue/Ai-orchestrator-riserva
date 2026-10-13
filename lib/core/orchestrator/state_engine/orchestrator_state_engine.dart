@@ -41,12 +41,36 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   List<ChatMessage> _messages = [];
 
-  bool _sendInFlight = false;
+  Object? _activeSend;
+  bool get _sendInFlight => _activeSend != null;
+
+  String? _sessionId;
+  int _historyRevision = 0;
+  final Set<String> _clearingSessions = <String>{};
+
+  // Every operation that can replace the visible conversation invalidates
+  // earlier reads/callbacks. Repository cancellation and deadlines stay owned
+  // by the repository/runtime.
+  int _beginHistoryOperation(String sessionId) {
+    if (_sessionId != sessionId) {
+      _sessionId = sessionId;
+      _messages = <ChatMessage>[];
+    }
+    return ++_historyRevision;
+  }
+
+  bool _isCurrent(int revision, Emitter<ChatState> emit) =>
+      revision == _historyRevision && !emit.isDone;
 
   Future<void> _onLoadMessages(
     LoadMessagesEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.contains(event.sessionId)) return;
+    // The active send will reconcile this session when it settles. A refresh
+    // must not replace its optimistic turn with an earlier database snapshot.
+    if (_sendInFlight && _sessionId == event.sessionId) return;
+    final revision = _beginHistoryOperation(event.sessionId);
     _log(
       'listener load_messages session=${event.sessionId}',
     );
@@ -56,6 +80,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     try {
       final messages =
           await _chatRepository.getMessages(event.sessionId);
+      if (!_isCurrent(revision, emit)) return;
 
       _messages =
           List<ChatMessage>.from(messages);
@@ -72,6 +97,16 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
     } catch (error) {
+      if (!_isCurrent(revision, emit)) return;
+      if (_messages.isNotEmpty) {
+        emit(
+          ChatLoaded(
+            messages: List.unmodifiable(_messages),
+            runtimeMessage: _extractErrorMessage(error),
+          ),
+        );
+        return;
+      }
       emit(
         ChatError(
           message: _extractErrorMessage(error),
@@ -90,6 +125,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     EditMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.contains(event.sessionId)) return;
     _log(
       '[EDIT_BEGIN] '
       'session=${event.sessionId} '
@@ -115,12 +151,14 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
+    final revision = _beginHistoryOperation(event.sessionId);
     try {
       final deletedCount =
           await _chatRepository.deleteMessagesFrom(
         event.sessionId,
         event.originalMessageId,
       );
+      if (!_isCurrent(revision, emit)) return;
 
       _log(
         '[EDIT_HISTORY_TRUNCATED] '
@@ -133,6 +171,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           await _chatRepository.getMessages(
         event.sessionId,
       );
+      if (!_isCurrent(revision, emit)) return;
 
       _messages =
           List<ChatMessage>.from(remainingMessages);
@@ -163,6 +202,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
     } catch (error) {
+      if (!_isCurrent(revision, emit)) return;
       _log(
         '[EDIT_ERROR] '
         'session=${event.sessionId} '
@@ -184,6 +224,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     SendMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.contains(event.sessionId)) return;
     if (_sendInFlight) {
       _log(
         '[ENTRY_REENTRANCY_BLOCK] '
@@ -196,7 +237,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    _sendInFlight = true;
+    final send = Object();
+    _activeSend = send;
+    final revision = _beginHistoryOperation(event.sessionId);
 
     try {
       await runInferenceGuarded<void>(
@@ -233,13 +276,18 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
           final optimisticUserMessage =
               ChatMessage(
-            id: 'pending-user-$now',
+            id: 'pending-user-$now-$revision',
             sessionId: event.sessionId,
             role: 'user',
             content: event.userPrompt,
             timestamp: now,
-            attachments: event.attachments,
+            attachments: List.unmodifiable(event.attachments),
           );
+
+          // Keep one fallback for this turn in the visible history, including
+          // attachment identity. Successful reads replace this snapshot with
+          // persisted IDs; never append/heuristically match turns by text.
+          _messages = <ChatMessage>[..._messages, optimisticUserMessage];
 
           final shouldShowAssistantPlaceholder =
               event.userPrompt.trim().isNotEmpty ||
@@ -258,8 +306,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           String? runtimeNotice;
           var pendingAssistantProvider = 'assistant';
           var latestPartialContent = '';
+          var acceptingCallbacks = true;
 
           void emitTransientSendingState() {
+            if (!acceptingCallbacks || !_isCurrent(revision, emit)) return;
             final shouldRenderAssistantBubble =
                 shouldShowAssistantPlaceholder ||
                     latestPartialContent
@@ -272,7 +322,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                     List.unmodifiable(
                   <ChatMessage>[
                     ..._messages,
-                    optimisticUserMessage,
                     if (shouldRenderAssistantBubble)
                       optimisticAssistantMessage
                           .copyWith(
@@ -295,7 +344,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                   List.unmodifiable(
                 <ChatMessage>[
                   ..._messages,
-                  optimisticUserMessage,
                   if (shouldShowAssistantPlaceholder)
                     optimisticAssistantMessage,
                 ],
@@ -311,9 +359,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               sessionId: event.sessionId,
               userPrompt: event.userPrompt,
               systemPrompt: event.systemPrompt,
-              attachments: event.attachments,
+              attachments: optimisticUserMessage.attachments,
               onPartialResponse: (partialText) {
-                if (emit.isDone) {
+                if (!acceptingCallbacks || !_isCurrent(revision, emit)) {
                   return;
                 }
 
@@ -339,6 +387,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 emitTransientSendingState();
               },
               onRuntimeNotice: (notice) {
+                if (!acceptingCallbacks || !_isCurrent(revision, emit)) return;
                 runtimeNotice = notice;
 
                 const cloudProviderPrefix =
@@ -373,12 +422,18 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             // The repository/runtime owns deadlines and cancellation. A UI-only
             // Future.timeout abandons the wait without stopping inference, hides
             // late persisted replies and releases the send gate too early.
-            await sendFuture;
+            try {
+              await sendFuture;
+            } finally {
+              acceptingCallbacks = false;
+            }
+            if (!_isCurrent(revision, emit)) return;
 
             final messages =
                 await _chatRepository.getMessages(
               event.sessionId,
             );
+            if (!_isCurrent(revision, emit)) return;
 
             _messages =
                 List<ChatMessage>.from(messages);
@@ -403,10 +458,32 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               'session=${event.sessionId}',
             );
           } catch (error) {
+            acceptingCallbacks = false;
+            if (!_isCurrent(revision, emit)) return;
             _log(
               'send_message error '
               'session=${event.sessionId}: $error',
             );
+
+            try {
+              final messages = await _chatRepository.getMessages(
+                event.sessionId,
+              );
+              if (!_isCurrent(revision, emit)) return;
+              _messages = List<ChatMessage>.from(messages);
+            } catch (_) {
+              if (!_isCurrent(revision, emit)) return;
+              // Retain the previous turns and this question if storage cannot
+              // be read. The original inference error remains the notice.
+              _log(
+                'message persistence recovery_reload_failed '
+                'session=${event.sessionId}',
+              );
+            }
+
+            // Unpersisted partial assistant text is deliberately discarded on
+            // failure, as is the empty placeholder. Only stored replies can
+            // appear as completed answers in the terminal state.
 
             emit(
               ChatLoaded(
@@ -428,7 +505,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           }
         },
         onError: (error, stackTrace) {
-          if (!emit.isDone) {
+          if (_isCurrent(revision, emit)) {
             emit(
               ChatLoaded(
                 messages:
@@ -452,7 +529,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         },
       );
     } finally {
-      _sendInFlight = false;
+      // A clear may have released this send and a newer request may own the
+      // gate. An obsolete completion must not unlock that newer request.
+      if (identical(_activeSend, send)) _activeSend = null;
     }
   }
 
@@ -472,6 +551,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     RecoverFromStuckUiEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.contains(event.sessionId)) return;
+    if (_sessionId != event.sessionId) return;
     _log(
       '[inference_loop_detected] '
       'session=${event.sessionId} '
@@ -497,6 +578,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     DebugClearChatEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (!_clearingSessions.add(event.sessionId)) return;
+    final revision = _beginHistoryOperation(event.sessionId);
+    final send = _activeSend;
     _log(
       '[UI_DEBUG] '
       'action=clear_chat_reset_begin '
@@ -507,9 +591,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       await _chatRepository.clearSession(
         event.sessionId,
       );
+      if (!_isCurrent(revision, emit)) return;
 
       _messages = <ChatMessage>[];
-      _sendInFlight = false;
+      if (identical(_activeSend, send)) _activeSend = null;
 
       emit(
         const ChatLoaded(
@@ -523,6 +608,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         'session=${event.sessionId}',
       );
     } catch (error) {
+      if (!_isCurrent(revision, emit)) return;
       _log(
         '[UI_DEBUG] '
         'action=clear_chat_reset_failed '
@@ -542,6 +628,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           ),
         ),
       );
+    } finally {
+      _clearingSessions.remove(event.sessionId);
     }
   }
 
