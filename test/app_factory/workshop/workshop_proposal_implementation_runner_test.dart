@@ -286,6 +286,69 @@ void main() {
       expect(workspaceGateway.writeCalls, 0);
     });
 
+    test('repairs a JVM-in-Dart proposal with one existing structural retry',
+        () async {
+      String proposal(String source) => jsonEncode(<String, Object?>{
+            'explanation': 'Implement the Flutter star interaction',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+            ],
+          });
+      final engineer = _StaticGateway(
+        results: <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: proposal(
+              "import 'com.example.myapp.MyStarView' as star;\\nvoid main() {}",
+            ),
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: proposal(
+              "import 'package:flutter/material.dart';\\nvoid main() {}",
+            ),
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final workspaceGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{},
+      );
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'engineer-star-3140',
+          title: 'Star on black',
+          instruction: 'Change the star color when it is tapped.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: workspaceGateway,
+      );
+      await session.initialize();
+
+      final result = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(result.affectedPaths, <String>['lib/main.dart']);
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(engineer.prompts.first, contains('Never import Kotlin/Java'));
+      expect(engineer.prompts.last,
+          contains('Android/JVM class directly'));
+      expect(engineer.systemPrompts.last,
+          contains('Never import Android/JVM classes directly into Dart'));
+      expect(engineer.prompts.last, contains('0xFF000000'));
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.workspace.read('lib/main.dart'),
+          contains("import 'package:flutter/material.dart'"));
+      expect(session.isApplyApproved, isFalse);
+      expect(workspaceGateway.writeCalls, 0);
+    });
+
     test('retries a local Engineer first-token stall with compact prompt',
         () async {
       final engineer = _StaticGateway(
